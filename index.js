@@ -653,6 +653,15 @@ app.get("/debug/whoami", async (req, res) => {
   res.json({ logged_in: true, user });
 });
 
+app.get("/debug/db", async (req, res) => {
+  try {
+    const r = await q("select now() as now");
+    res.json({ ok: true, now: r.rows[0].now });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
 app.get("/", (req, res) => res.send("bcgpt server running (otp + basecamp + mcp)"));
 
 const PORT = process.env.PORT || 3000;
