@@ -447,22 +447,22 @@ app.get("/auth/basecamp/callback", async (req, res) => {
 // -------------------- Status / start endpoint --------------------
 app.get("/startbcgpt", async (req, res) => {
   try {
-    const payload = await buildStartBcPayload(req);
+    const payload = await buildStartBcPayload();
     res.status(payload.ok ? 200 : (payload.status || 500)).json(payload);
   } catch (e) {
+    console.error(e);
     res.status(500).json({
       ok: false,
       connected: Boolean(getToken()?.access_token),
       user: null,
-      reauthUrl: `${req.protocol}://${req.get("host")}/auth/basecamp/start`,
-      logoutUrl: `${req.protocol}://${req.get("host")}/logout`,
+      reauthUrl: `${APP_BASE_URL}/auth/basecamp/start`,
+      logoutUrl: `${APP_BASE_URL}/logout`,
       message: "Server error.",
       hint: "Not you? Login with another account using reauthUrl.",
-      error: e?.message || "unknown"
+      error: e?.message || "unknown",
     });
   }
 });
-
 
 // -------------------- Logout --------------------
 app.post("/logout", (req, res) => {
