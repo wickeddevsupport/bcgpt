@@ -15,6 +15,7 @@ const {
   BASECAMP_CLIENT_SECRET,
   APP_BASE_URL = "https://bcgpt.onrender.com",
 } = process.env;
+const BASECAMP_DEFAULT_ACCOUNT_ID = Number(process.env.BASECAMP_DEFAULT_ACCOUNT_ID || 0);
 
 if (!BASECAMP_CLIENT_ID || !BASECAMP_CLIENT_SECRET) {
   console.warn("Missing BASECAMP_CLIENT_ID or BASECAMP_CLIENT_SECRET");
@@ -181,7 +182,19 @@ app.get("/debug/projects", async (req, res) => {
     }
 
     // Choose the first account (you can later let user choose)
-    const accountId = accounts[0].id;
+    let accountId = accounts[0].id;
+
+if (BASECAMP_DEFAULT_ACCOUNT_ID) {
+  const match = accounts.find(a => Number(a.id) === BASECAMP_DEFAULT_ACCOUNT_ID);
+  if (!match) {
+    return {
+      ok: false,
+      status: 404,
+      error: `Default account ${BASECAMP_DEFAULT_ACCOUNT_ID} not found. Available: ${accounts.map(a => a.id).join(", ")}`
+    };
+  }
+  accountId = match.id;
+}
 
     // Basecamp API base (Basecamp 4 still uses 3.basecampapi.com)
     const projectsUrl = `https://3.basecampapi.com/${accountId}/projects.json`;
@@ -277,7 +290,19 @@ async function fetchProjectsFromBasecamp() {
     return { ok: false, status: 404, error: "No Basecamp accounts found." };
   }
 
-  const accountId = accounts[0].id;
+  let accountId = accounts[0].id;
+
+if (BASECAMP_DEFAULT_ACCOUNT_ID) {
+  const match = accounts.find(a => Number(a.id) === BASECAMP_DEFAULT_ACCOUNT_ID);
+  if (!match) {
+    return {
+      ok: false,
+      status: 404,
+      error: `Default account ${BASECAMP_DEFAULT_ACCOUNT_ID} not found. Available: ${accounts.map(a => a.id).join(", ")}`
+    };
+  }
+  accountId = match.id;
+}
   const projectsUrl = `https://3.basecampapi.com/${accountId}/projects.json`;
 
   const projectsResp = await fetch(projectsUrl, {
