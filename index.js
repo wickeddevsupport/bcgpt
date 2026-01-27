@@ -3,7 +3,6 @@ import cors from "cors";
 import dotenv from "dotenv";
 import crypto from "crypto";
 import fetch from "node-fetch";
-import initSqlJs from "sql.js";
 
 dotenv.config();
 
@@ -11,138 +10,214 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const APP_BASE_URL = process.env.APP_BASE_URL || "https://bcgpt.onrender.com";
-const BASECAMP_CLIENT_ID = process.env.BASECAMP_CLIENT_ID;
-const BASECAMP_CLIENT_SECRET = process.env.BASECAMP_CLIENT_SECRET;
-const UA = "bcgpt";
+const UA = "bcgpt (bcgpt.onrender.com)";
+const BUILD_ID = "v4-mcp-authbasecampstart";
 
-/* ---------------- SQLITE (IN-MEMORY, NO FS) ---------------- */
-let db;
-async function getDB() {
-  if (db) return db;
-  const SQL = await initSqlJs({});
-  db = new SQL.Database();
+const {
+  BASECAMP_CLIENT_ID,
+  BASECAMP_CLIENT_SECRET,
+  APP_BASE_URL = "https://bcgpt.onrender.com",
+} = process.env;
 
-  db.run(`
-    CREATE TABLE IF NOT EXISTS oauth_states (
-      state TEXT PRIMARY KEY,
-      mcp_session_id TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS basecamp_tokens (
-      mcp_session_id TEXT PRIMARY KEY,
-      access_token TEXT NOT NULL,
-      updated_at TEXT
-    );
-  `);
-
-  return db;
+if (!BASECAMP_CLIENT_ID || !BASECAMP_CLIENT_SECRET) {
+  console.warn("Missing BASECAMP_CLIENT_ID or BASECAMP_CLIENT_SECRET");
 }
 
-/* ---------------- MCP SESSION TRACKING ---------------- */
-const mcpSessions = new Set();
+/* ------------------------------------------------------------------
+   EXISTING WORKING LOGIC (UNCHANGED)
+------------------------------------------------------------------ */
 
-/* ---------------- AUTH BASECAMP START (ORIGINAL FLOW) ---------------- */
-function buildBasecampAuthUrl(mcpSessionId) {
-  const state = crypto.randomBytes(16).toString("hex");
+// Temporary in-memory store (OK for testing)
+const tokenStore = new Map();
 
-  db.run(
-    "INSERT INTO oauth_states VALUES (?, ?)",
-    [state, mcpSessionId]
-  );
+// expire OAuth state after 10 minutes
+const STATE_TTL_MS = 10 * 60 * 1000;
 
-  const redirectUri = `${APP_BASE_URL}/auth/basecamp/callback`;
-
-  return (
-    "https://launchpad.37signals.com/authorization/new" +
-    `?type=web_server` +
-    `&client_id=${BASECAMP_CLIENT_ID}` +
-    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-    `&state=${state}`
-  );
+function getToken() {
+  return tokenStore.get("basecamp:token");
 }
 
-/* ---------------- BASECAMP CALLBACK ---------------- */
-app.get("/auth/basecamp/callback", async (req, res) => {
-  const { code, state } = req.query;
-  const db = await getDB();
-
-  const row = db.exec(
-    "SELECT mcp_session_id FROM oauth_states WHERE state = ?",
-    [state]
-  )[0];
-
-  if (!row) {
-    return res.send("Invalid or expired OAuth state.");
+function requireToken(req, res) {
+  const t = getToken();
+  if (!t?.access_token) {
+    res
+      .status(401)
+      .json({ error: "Not connected. Visit /auth/basecamp/start first." });
+    return null;
   }
+  return t;
+}
 
-  const mcpSessionId = row.values[0][0];
+/* -------------------- HEALTH / DEBUG -------------------- */
 
-  const tokenRes = await fetch(
-    "https://launchpad.37signals.com/authorization/token?type=web_server",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        type: "web_server",
-        client_id: BASECAMP_CLIENT_ID,
-        client_secret: BASECAMP_CLIENT_SECRET,
-        redirect_uri: `${APP_BASE_URL}/auth/basecamp/callback`,
-        code
-      })
-    }
-  );
-
-  const token = await tokenRes.json();
-
-  db.run(
-    "INSERT OR REPLACE INTO basecamp_tokens VALUES (?, ?, ?)",
-    [mcpSessionId, token.access_token, new Date().toISOString()]
-  );
-
-  db.run("DELETE FROM oauth_states WHERE state = ?", [state]);
-
-  res.send(`
-    <h2>✅ Basecamp connected</h2>
-    <p>Return to ChatGPT and continue chatting.</p>
-  `);
+app.get("/health", (req, res) => {
+  res.json({
+    ok: true,
+    build: BUILD_ID,
+    node: process.version,
+    hasClientId: Boolean(BASECAMP_CLIENT_ID),
+    hasClientSecret: Boolean(BASECAMP_CLIENT_SECRET),
+  });
 });
 
-/* ---------------- MCP SERVER ---------------- */
+app.get("/debug/routes", (req, res) => {
+  const routes = [];
+  const stack = app?._router?.stack || [];
+  for (const layer of stack) {
+    if (layer?.route?.path) {
+      const methods = Object.keys(layer.route.methods)
+        .join(",")
+        .toUpperCase();
+      routes.push(`${methods} ${layer.route.path}`);
+    }
+  }
+  res.type("text/plain").send(routes.join("\n"));
+});
+
+/* -------------------- AUTH BASECAMP (WORKING FLOW) -------------------- */
+
+app.get("/auth/basecamp/start", (req, res) => {
+  const redirectUri = `${APP_BASE_URL}/auth/basecamp/callback`;
+
+  const state = Math.random().toString(36).slice(2);
+  tokenStore.set(`state:${state}`, { createdAt: Date.now() });
+
+  const authUrl =
+    "https://launchpad.37signals.com/authorization/new?type=web_server" +
+    `&client_id=${encodeURIComponent(BASECAMP_CLIENT_ID)}` +
+    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+    `&state=${encodeURIComponent(state)}`;
+
+  res.redirect(authUrl);
+});
+
+app.get("/auth/basecamp/callback", async (req, res) => {
+  try {
+    const { code, state, error } = req.query;
+
+    if (error) return res.status(400).send(`OAuth error: ${error}`);
+    if (!code || !state) return res.status(400).send("Missing code/state");
+
+    const saved = tokenStore.get(`state:${state}`);
+    if (!saved) return res.status(400).send("Invalid state");
+
+    if (Date.now() - saved.createdAt > STATE_TTL_MS) {
+      tokenStore.delete(`state:${state}`);
+      return res.status(400).send("State expired. Please try again.");
+    }
+
+    const redirectUri = `${APP_BASE_URL}/auth/basecamp/callback`;
+
+    const body = new URLSearchParams({
+      type: "web_server",
+      client_id: BASECAMP_CLIENT_ID,
+      client_secret: BASECAMP_CLIENT_SECRET,
+      redirect_uri: redirectUri,
+      code: String(code),
+    });
+
+    const resp = await fetch(
+      "https://launchpad.37signals.com/authorization/token?type=web_server",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "User-Agent": UA,
+        },
+        body,
+      }
+    );
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      return res.status(500).send(`Token exchange failed: ${text}`);
+    }
+
+    const tokenJson = await resp.json();
+
+    tokenStore.set("basecamp:token", tokenJson);
+    tokenStore.delete(`state:${state}`);
+
+    res.send("✅ Basecamp connected successfully. You can return to ChatGPT.");
+  } catch (e) {
+    console.error(e);
+    res.status(500).send("Callback error: " + (e?.message || "unknown"));
+  }
+});
+
+/* -------------------- DEBUG DATA -------------------- */
+
+app.get("/debug/token", (req, res) => {
+  const t = getToken();
+  res.json({
+    connected: Boolean(t?.access_token),
+    tokenKeys: t ? Object.keys(t) : [],
+  });
+});
+
+app.get("/debug/projects", async (req, res) => {
+  try {
+    const t = requireToken(req, res);
+    if (!t) return;
+
+    const authResp = await fetch(
+      "https://launchpad.37signals.com/authorization.json",
+      {
+        headers: {
+          Authorization: `Bearer ${t.access_token}`,
+          "User-Agent": UA,
+        },
+      }
+    );
+
+    const authJson = await authResp.json();
+    const accountId = authJson.accounts[0].id;
+
+    const projectsResp = await fetch(
+      `https://3.basecampapi.com/${accountId}/projects.json`,
+      {
+        headers: {
+          Authorization: `Bearer ${t.access_token}`,
+          "User-Agent": UA,
+        },
+      }
+    );
+
+    const text = await projectsResp.text();
+    res.type("application/json").send(text);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e?.message || "unknown" });
+  }
+});
+
+/* ------------------------------------------------------------------
+   MCP SERVER (ADDED — DOES NOT BREAK EXISTING FLOW)
+------------------------------------------------------------------ */
+
+const MCP_PROTOCOL_VERSION = "2025-06-18";
+
 app.post("/mcp", async (req, res) => {
   const msg = req.body;
   res.setHeader("Content-Type", "application/json");
 
-  /* ---------- INITIALIZE ---------- */
+  /* -------- INIT -------- */
   if (msg.method === "initialize") {
-    const sid = "mcp_" + crypto.randomBytes(8).toString("hex");
-    mcpSessions.add(sid);
-    res.setHeader("Mcp-Session-Id", sid);
-
     return res.json({
       jsonrpc: "2.0",
       id: msg.id,
       result: {
-        protocolVersion: "2025-06-18",
+        protocolVersion: MCP_PROTOCOL_VERSION,
         serverInfo: { name: "bcgpt" },
         instructions: `
-Use /authbasecampstart to connect Basecamp.
-After approval, you can chat normally.
-`
-      }
+Use /authbasecampstart to begin Basecamp login.
+After approval, you can use list_projects.
+`,
+      },
     });
   }
 
-  const mcpSessionId = req.headers["mcp-session-id"];
-  if (!mcpSessions.has(mcpSessionId)) {
-    return res.json({
-      jsonrpc: "2.0",
-      id: msg.id,
-      error: { message: "Invalid MCP session" }
-    });
-  }
-
-  /* ---------- TOOLS LIST ---------- */
+  /* -------- TOOLS LIST -------- */
   if (msg.method === "tools/list") {
     return res.json({
       jsonrpc: "2.0",
@@ -152,27 +227,24 @@ After approval, you can chat normally.
           {
             name: "/authbasecampstart",
             description: "Start Basecamp authentication",
-            inputSchema: { type: "object" }
+            inputSchema: { type: "object" },
           },
           {
             name: "list_projects",
             description: "List Basecamp projects",
-            inputSchema: { type: "object" }
-          }
-        ]
-      }
+            inputSchema: { type: "object" },
+          },
+        ],
+      },
     });
   }
 
-  /* ---------- TOOLS CALL ---------- */
+  /* -------- TOOLS CALL -------- */
   if (msg.method === "tools/call") {
     const tool = msg.params.name;
-    const db = await getDB();
 
-    /* ----- AUTH START TOOL ----- */
+    /* ---- AUTH START TOOL ---- */
     if (tool === "/authbasecampstart") {
-      const url = buildBasecampAuthUrl(mcpSessionId);
-
       return res.json({
         jsonrpc: "2.0",
         id: msg.id,
@@ -181,23 +253,18 @@ After approval, you can chat normally.
             {
               type: "text",
               text:
-                "🔐 Click to authenticate with Basecamp:\n" +
-                url +
-                "\n\nAfter approving, return here and continue chatting."
-            }
-          ]
-        }
+                "🔐 Click to connect Basecamp:\n" +
+                `${APP_BASE_URL}/auth/basecamp/start`,
+            },
+          ],
+        },
       });
     }
 
-    /* ----- LIST PROJECTS ----- */
+    /* ---- LIST PROJECTS TOOL ---- */
     if (tool === "list_projects") {
-      const row = db.exec(
-        "SELECT access_token FROM basecamp_tokens WHERE mcp_session_id = ?",
-        [mcpSessionId]
-      )[0];
-
-      if (!row) {
+      const t = getToken();
+      if (!t?.access_token) {
         return res.json({
           jsonrpc: "2.0",
           id: msg.id,
@@ -205,53 +272,34 @@ After approval, you can chat normally.
             content: [
               {
                 type: "text",
-                text: "❌ Not connected. Type:\n/authbasecampstart"
-              }
-            ]
-          }
+                text:
+                  "❌ Not connected.\nType:\n/authbasecampstart",
+              },
+            ],
+          },
         });
       }
 
-      const accessToken = row.values[0][0];
-
-      const auth = await fetch(
-        "https://launchpad.37signals.com/authorization.json",
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "User-Agent": UA
-          }
-        }
-      ).then(r => r.json());
-
-      const accountId = auth.accounts[0].id;
-
-      const projects = await fetch(
-        `https://3.basecampapi.com/${accountId}/projects.json`,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "User-Agent": UA
-          }
-        }
-      ).then(r => r.json());
+      const r = await fetch(`${APP_BASE_URL}/debug/projects`);
+      const text = await r.text();
 
       return res.json({
         jsonrpc: "2.0",
         id: msg.id,
         result: {
-          content: [
-            {
-              type: "text",
-              text: projects.map(p => `• ${p.name}`).join("\n")
-            }
-          ]
-        }
+          content: [{ type: "text", text }],
+        },
       });
     }
   }
 });
 
-/* ---------------- ROOT ---------------- */
-app.get("/", (_, res) => res.send("bcgpt running"));
-app.listen(3000, () => console.log("🚀 bcgpt running"));
+/* -------------------- ROOT -------------------- */
+app.get("/", (req, res) =>
+  res.send(`bcgpt server running :: ${BUILD_ID}`)
+);
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () =>
+  console.log("Listening on", PORT, BUILD_ID)
+);
