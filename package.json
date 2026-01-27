@@ -4,7 +4,8 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+  "migrate": "knex migrate:latest --knexfile knexfile.cjs"
   },
   "repository": {
     "type": "git",
@@ -26,7 +27,9 @@
     "dotenv": "^17.2.3",
     "eventsource-parser": "^3.0.6",
     "express": "^5.2.1",
+    "knex": "^3.1.0",
     "node-fetch": "^3.3.2",
-    "pg": "^8.17.2"
+    "pg": "^8.17.2",
+    "sqlite3": "^5.1.7"
   }
 }

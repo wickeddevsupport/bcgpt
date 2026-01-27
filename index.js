@@ -2,9 +2,17 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import crypto from "crypto";
-import { q } from "./db.js";
+import { execSync } from "child_process";
+import { db } from "./db.js";
 
 dotenv.config();
+
+// Run migrations on boot (MVP)
+try {
+  execSync("npx knex migrate:latest --knexfile knexfile.cjs", { stdio: "inherit" });
+} catch (e) {
+  console.error("Migration failed:", e?.message || e);
+}
 
 const app = express();
 app.use(cors());
@@ -20,7 +28,6 @@ const OTP_MAX_ATTEMPTS = Number(process.env.OTP_MAX_ATTEMPTS || 5);
 
 const BASECAMP_CLIENT_ID = process.env.BASECAMP_CLIENT_ID;
 const BASECAMP_CLIENT_SECRET = process.env.BASECAMP_CLIENT_SECRET;
-
 const BASECAMP_DEFAULT_ACCOUNT_ID = Number(process.env.BASECAMP_DEFAULT_ACCOUNT_ID || 0);
 
 if (!BASECAMP_CLIENT_ID || !BASECAMP_CLIENT_SECRET) {
@@ -49,12 +56,12 @@ function htmlPage(title, body) {
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>${title}</title>
   <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;padding:24px;max-width:620px;margin:0 auto;}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;padding:24px;max-width:680px;margin:0 auto;}
     .card{border:1px solid #e6e6e6;border-radius:12px;padding:16px;}
     input,button{font-size:16px;padding:12px;border-radius:10px;border:1px solid #d0d0d0;width:100%;box-sizing:border-box;}
     button{background:#111;color:#fff;border:none;cursor:pointer;margin-top:12px;}
     .muted{color:#666;font-size:13px;margin-top:10px;}
-    code{background:#f5f5f5;padding:4px 8px;border-radius:8px;display:inline-block;}
+    code{background:#f5f5f5;padding:4px 8px;border-radius:8px;display:inline-block;word-break:break-all;}
     a{color:#116AD0;text-decoration:none;}
     hr{border:none;border-top:1px solid #eee;margin:16px 0;}
   </style>
@@ -66,7 +73,7 @@ function htmlPage(title, body) {
 </html>`;
 }
 
-/** Reads Authorization: Bearer <sessionToken> and returns user row or null */
+/** Authorization: Bearer <sessionToken> -> user */
 async function getUserFromBearer(req) {
   const auth = req.headers.authorization || "";
   const m = auth.match(/^Bearer\s+(.+)$/i);
@@ -78,32 +85,15 @@ async function getUserFromBearer(req) {
   const sessionHash = sha256(token);
   const now = new Date();
 
-  const res = await q(
-    `
-    SELECT u.id, u.email, u.name
-    FROM sessions s
-    JOIN users u ON u.id = s.user_id
-    WHERE s.session_hash = $1 AND s.expires_at > $2
-    ORDER BY s.id DESC
-    LIMIT 1
-    `,
-    [sessionHash, now]
-  );
+  const row = await db("sessions")
+    .join("users", "users.id", "sessions.user_id")
+    .select("users.id", "users.email", "users.name")
+    .where("sessions.session_hash", sessionHash)
+    .andWhere("sessions.expires_at", ">", now)
+    .orderBy("sessions.id", "desc")
+    .first();
 
-  return res.rows[0] || null;
-}
-
-function requireUser(req, res) {
-  return getUserFromBearer(req).then((user) => {
-    if (!user) {
-      res.status(401).json({
-        error:
-          "Not logged in. Go to /login, verify OTP, then use Authorization: Bearer <Session Code>.",
-      });
-      return null;
-    }
-    return user;
-  });
+  return row || null;
 }
 
 // -------------------- OTP LOGIN --------------------
@@ -122,28 +112,30 @@ app.get("/login", (req, res) => {
 
 app.post("/login", async (req, res) => {
   try {
-    const emailRaw = String(req.body.email || "").trim().toLowerCase();
-    if (!emailRaw || !emailRaw.includes("@")) {
-      return res.status(400).type("html").send(htmlPage("Login", `<p>Invalid email.</p>`));
+    const email = String(req.body.email || "").trim().toLowerCase();
+    if (!email || !email.includes("@")) {
+      return res.status(400).type("html").send(htmlPage("Login", "<p>Invalid email.</p>"));
     }
 
     const otp = randomDigits(6);
-    const otpHash = sha256(`${emailRaw}:${otp}:${process.env.OTP_SECRET || "devsecret"}`);
+    const otpHash = sha256(`${email}:${otp}:${process.env.OTP_SECRET || "devsecret"}`);
     const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
 
-    await q(`INSERT INTO otps (email, otp_hash, expires_at) VALUES ($1,$2,$3)`, [
-      emailRaw,
-      otpHash,
-      expiresAt,
-    ]);
+    await db("otps").insert({
+      email,
+      otp_hash: otpHash,
+      expires_at: expiresAt,
+      attempts: 0,
+      created_at: new Date(),
+    });
 
-    // MVP: OTP in logs
-    console.log(`[OTP] email=${emailRaw} code=${otp} expires=${expiresAt.toISOString()}`);
+    // MVP delivery = server logs
+    console.log(`[OTP] email=${email} code=${otp} expires=${expiresAt.toISOString()}`);
 
-    res.redirect(`/verify?email=${encodeURIComponent(emailRaw)}`);
+    res.redirect(`/verify?email=${encodeURIComponent(email)}`);
   } catch (e) {
     console.error(e);
-    res.status(500).type("html").send(htmlPage("Login", `<p>Server error.</p>`));
+    res.status(500).type("html").send(htmlPage("Login", "<p>Server error.</p>"));
   }
 });
 
@@ -163,26 +155,21 @@ app.get("/verify", (req, res) => {
 
 app.post("/verify", async (req, res) => {
   try {
-    const emailRaw = String(req.body.email || "").trim().toLowerCase();
+    const email = String(req.body.email || "").trim().toLowerCase();
     const code = String(req.body.code || "").trim();
 
-    if (!emailRaw || !code || code.length !== 6) {
-      return res.status(400).type("html").send(htmlPage("Verify", `<p>Invalid email or code.</p>`));
+    if (!email || !code || code.length !== 6) {
+      return res.status(400).type("html").send(htmlPage("Verify", "<p>Invalid email or code.</p>"));
     }
 
     const now = new Date();
-    const otpRows = await q(
-      `
-      SELECT id, otp_hash, expires_at, attempts
-      FROM otps
-      WHERE email = $1 AND expires_at > $2
-      ORDER BY id DESC
-      LIMIT 1
-      `,
-      [emailRaw, now]
-    );
 
-    const otpRow = otpRows.rows[0];
+    const otpRow = await db("otps")
+      .where({ email })
+      .andWhere("expires_at", ">", now)
+      .orderBy("id", "desc")
+      .first();
+
     if (!otpRow) {
       return res
         .status(400)
@@ -197,36 +184,34 @@ app.post("/verify", async (req, res) => {
         .send(htmlPage("Verify", `<p>Too many attempts. Please <a href="/login">request a new code</a>.</p>`));
     }
 
-    const expectedHash = sha256(`${emailRaw}:${code}:${process.env.OTP_SECRET || "devsecret"}`);
-    if (expectedHash !== otpRow.otp_hash) {
-      await q(`UPDATE otps SET attempts = attempts + 1 WHERE id = $1`, [otpRow.id]);
-      return res.status(400).type("html").send(htmlPage("Verify", `<p>Incorrect code.</p>`));
+    const expected = sha256(`${email}:${code}:${process.env.OTP_SECRET || "devsecret"}`);
+    if (expected !== otpRow.otp_hash) {
+      await db("otps").where({ id: otpRow.id }).update({ attempts: otpRow.attempts + 1 });
+      return res.status(400).type("html").send(htmlPage("Verify", "<p>Incorrect code.</p>"));
     }
 
-    // Upsert user
-    const userRes = await q(
-      `
-      INSERT INTO users (email)
-      VALUES ($1)
-      ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
-      RETURNING id, email, name
-      `,
-      [emailRaw]
-    );
-    const user = userRes.rows[0];
+    // Upsert user (SQLite-friendly)
+    let user = await db("users").where({ email }).first();
+    if (!user) {
+      const id = crypto.randomUUID();
+      await db("users").insert({ id, email, created_at: new Date() });
+      user = await db("users").where({ email }).first();
+    }
 
     // Create session
     const sessionToken = randomToken("bcgpt");
     const sessionHash = sha256(sessionToken);
     const expiresAt = new Date(Date.now() + SESSION_TTL_HOURS * 60 * 60 * 1000);
 
-    await q(`INSERT INTO sessions (user_id, session_hash, expires_at) VALUES ($1,$2,$3)`, [
-      user.id,
-      sessionHash,
-      expiresAt,
-    ]);
+    await db("sessions").insert({
+      user_id: user.id,
+      session_hash: sessionHash,
+      expires_at: expiresAt,
+      created_at: new Date(),
+    });
 
-    await q(`DELETE FROM otps WHERE id = $1`, [otpRow.id]);
+    // One-time use OTP
+    await db("otps").where({ id: otpRow.id }).del();
 
     const connectUrl = `${APP_BASE_URL}/connect/basecamp?session=${encodeURIComponent(sessionToken)}`;
 
@@ -242,53 +227,45 @@ app.post("/verify", async (req, res) => {
     res.type("html").send(htmlPage("Session Ready", body));
   } catch (e) {
     console.error(e);
-    res.status(500).type("html").send(htmlPage("Verify", `<p>Server error.</p>`));
+    res.status(500).type("html").send(htmlPage("Verify", "<p>Server error.</p>"));
   }
 });
 
 // -------------------- BASECAMP PER-USER CONNECT --------------------
 
-/**
- * Starts Basecamp OAuth for the user identified by session token in query param.
- * User opens this link from the "Session Ready" page.
- */
 app.get("/connect/basecamp", async (req, res) => {
   try {
     const sessionToken = String(req.query.session || "").trim();
     if (!sessionToken) return res.status(400).type("html").send(htmlPage("Error", "<p>Missing session.</p>"));
 
-    // Validate session token -> user
     const sessionHash = sha256(sessionToken);
     const now = new Date();
-    const s = await q(
-      `
-      SELECT u.id, u.email
-      FROM sessions s
-      JOIN users u ON u.id = s.user_id
-      WHERE s.session_hash = $1 AND s.expires_at > $2
-      ORDER BY s.id DESC
-      LIMIT 1
-      `,
-      [sessionHash, now]
-    );
 
-    const user = s.rows[0];
-    if (!user) {
-      return res
-        .status(401)
-        .type("html")
-        .send(htmlPage("Error", "<p>Session invalid/expired. Go to /login again.</p>"));
+    const sRow = await db("sessions")
+      .join("users", "users.id", "sessions.user_id")
+      .select("users.id as user_id", "users.email")
+      .where("sessions.session_hash", sessionHash)
+      .andWhere("sessions.expires_at", ">", now)
+      .orderBy("sessions.id", "desc")
+      .first();
+
+    if (!sRow) {
+      return res.status(401).type("html").send(htmlPage("Error", "<p>Session invalid/expired. Go to /login.</p>"));
     }
 
-    // Create oauth state linked to user
+    if (!BASECAMP_CLIENT_ID) {
+      return res.status(500).type("html").send(htmlPage("Error", "<p>Missing BASECAMP_CLIENT_ID.</p>"));
+    }
+
     const state = "st_" + crypto.randomBytes(20).toString("hex");
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-    await q(`INSERT INTO oauth_states (state, user_id, expires_at) VALUES ($1,$2,$3)`, [
+    await db("oauth_states").insert({
       state,
-      user.id,
-      expiresAt,
-    ]);
+      user_id: sRow.user_id,
+      expires_at: expiresAt,
+      created_at: new Date(),
+    });
 
     const redirectUri = `${APP_BASE_URL}/auth/basecamp/callback`;
 
@@ -305,9 +282,6 @@ app.get("/connect/basecamp", async (req, res) => {
   }
 });
 
-/**
- * Basecamp OAuth callback: stores tokens under the user from oauth_states.
- */
 app.get("/auth/basecamp/callback", async (req, res) => {
   try {
     const { code, state, error } = req.query;
@@ -315,17 +289,17 @@ app.get("/auth/basecamp/callback", async (req, res) => {
     if (error) return res.status(400).type("html").send(htmlPage("OAuth error", `<p>${error}</p>`));
     if (!code || !state) return res.status(400).type("html").send(htmlPage("Error", "<p>Missing code/state.</p>"));
 
-    // Resolve state -> user
     const now = new Date();
-    const st = await q(
-      `SELECT user_id, expires_at FROM oauth_states WHERE state = $1 AND expires_at > $2 LIMIT 1`,
-      [String(state), now]
-    );
+    const st = await db("oauth_states")
+      .where({ state: String(state) })
+      .andWhere("expires_at", ">", now)
+      .first();
 
-    const row = st.rows[0];
-    if (!row) return res.status(400).type("html").send(htmlPage("Error", "<p>State invalid/expired.</p>"));
+    if (!st) return res.status(400).type("html").send(htmlPage("Error", "<p>State invalid/expired.</p>"));
 
-    const userId = row.user_id;
+    if (!BASECAMP_CLIENT_SECRET) {
+      return res.status(500).type("html").send(htmlPage("Error", "<p>Missing BASECAMP_CLIENT_SECRET.</p>"));
+    }
 
     const redirectUri = `${APP_BASE_URL}/auth/basecamp/callback`;
 
@@ -356,38 +330,40 @@ app.get("/auth/basecamp/callback", async (req, res) => {
 
     const tokenJson = JSON.parse(text);
 
-    // Store per user in DB
     const accessToken = tokenJson.access_token;
     const refreshToken = tokenJson.refresh_token || null;
-
-    // Some providers return expires_in (seconds). If not present, store null.
     const expiresAt =
-      tokenJson.expires_in
-        ? new Date(Date.now() + Number(tokenJson.expires_in) * 1000)
-        : null;
+      tokenJson.expires_in ? new Date(Date.now() + Number(tokenJson.expires_in) * 1000) : null;
 
-    await q(
-      `
-      INSERT INTO basecamp_tokens (user_id, access_token, refresh_token, expires_at, default_account_id, updated_at)
-      VALUES ($1,$2,$3,$4,$5, now())
-      ON CONFLICT (user_id)
-      DO UPDATE SET access_token=EXCLUDED.access_token, refresh_token=EXCLUDED.refresh_token,
-                    expires_at=EXCLUDED.expires_at, default_account_id=EXCLUDED.default_account_id,
-                    updated_at=now()
-      `,
-      [userId, accessToken, refreshToken, expiresAt, BASECAMP_DEFAULT_ACCOUNT_ID || null]
-    );
+    // Upsert basecamp_tokens row (SQLite: delete/insert or update existing)
+    const existing = await db("basecamp_tokens").where({ user_id: st.user_id }).first();
+    if (existing) {
+      await db("basecamp_tokens")
+        .where({ user_id: st.user_id })
+        .update({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+          expires_at: expiresAt,
+          default_account_id: BASECAMP_DEFAULT_ACCOUNT_ID || null,
+          updated_at: new Date(),
+        });
+    } else {
+      await db("basecamp_tokens").insert({
+        user_id: st.user_id,
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        expires_at: expiresAt,
+        default_account_id: BASECAMP_DEFAULT_ACCOUNT_ID || null,
+        updated_at: new Date(),
+      });
+    }
 
-    // Cleanup state (one-time use)
-    await q(`DELETE FROM oauth_states WHERE state = $1`, [String(state)]);
+    // one-time state
+    await db("oauth_states").where({ state: String(state) }).del();
 
-    res.type("html").send(
-      htmlPage(
-        "Basecamp Connected",
-        `<p>✅ Basecamp connected successfully.</p>
-         <p>Return to ChatGPT and run <b>list projects</b>.</p>`
-      )
-    );
+    res
+      .type("html")
+      .send(htmlPage("Basecamp Connected", `<p>✅ Basecamp connected successfully.</p><p>Return to ChatGPT and run <b>list projects</b>.</p>`));
   } catch (e) {
     console.error(e);
     res.status(500).type("html").send(htmlPage("Error", "<p>Server error.</p>"));
@@ -409,14 +385,14 @@ function checkOrigin(req, res) {
   return true;
 }
 
-const sessions = new Map();
+const mcpSessions = new Map();
 function newMcpSessionId() {
   return "mcp_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 function getMcpSession(req) {
   const sid = req.headers["mcp-session-id"];
   if (!sid) return null;
-  return sessions.get(sid) ? sid : null;
+  return mcpSessions.get(sid) ? sid : null;
 }
 
 const MCP_TOOLS = [
@@ -424,26 +400,21 @@ const MCP_TOOLS = [
     name: "list_projects",
     title: "List Basecamp projects",
     description:
-      "Lists Basecamp projects for the currently logged-in bcgpt user (Authorization: Bearer <Session Code>).",
+      "Lists Basecamp projects for the currently logged-in bcgpt user. Requires Authorization: Bearer <Session Code>.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
 ];
 
 async function fetchProjectsForUser(userId) {
-  const tRes = await q(
-    `SELECT access_token, default_account_id FROM basecamp_tokens WHERE user_id=$1 LIMIT 1`,
-    [userId]
-  );
-  const tRow = tRes.rows[0];
-  if (!tRow?.access_token) {
-    return { ok: false, status: 401, error: "Basecamp not connected for this user." };
+  const tokenRow = await db("basecamp_tokens").where({ user_id: userId }).first();
+  if (!tokenRow?.access_token) {
+    return { ok: false, status: 401, error: "Basecamp not connected for this user. Open /connect/basecamp?session=..." };
   }
 
-  const accessToken = tRow.access_token;
-  const preferredAccountId = Number(tRow.default_account_id || BASECAMP_DEFAULT_ACCOUNT_ID || 0);
+  const accessToken = tokenRow.access_token;
+  const preferredAccountId = Number(tokenRow.default_account_id || BASECAMP_DEFAULT_ACCOUNT_ID || 0);
 
-  // 1) Get accounts
   const authResp = await fetch("https://launchpad.37signals.com/authorization.json", {
     headers: { Authorization: `Bearer ${accessToken}`, "User-Agent": UA },
   });
@@ -482,7 +453,6 @@ async function fetchProjectsForUser(userId) {
   return { ok: true, accountId, projects };
 }
 
-// GET /mcp SSE keepalive (optional)
 app.get("/mcp", (req, res) => {
   if (!checkOrigin(req, res)) return;
   const accept = req.headers.accept || "";
@@ -496,7 +466,6 @@ app.get("/mcp", (req, res) => {
   req.on("close", () => clearInterval(interval));
 });
 
-// POST /mcp JSON-RPC
 app.post("/mcp", async (req, res) => {
   if (!checkOrigin(req, res)) return;
 
@@ -512,11 +481,7 @@ app.post("/mcp", async (req, res) => {
   for (const msg of msgs) {
     try {
       if (!msg || msg.jsonrpc !== "2.0") {
-        responses.push({
-          jsonrpc: "2.0",
-          id: msg?.id ?? null,
-          error: { code: -32600, message: "Invalid Request" },
-        });
+        responses.push({ jsonrpc: "2.0", id: msg?.id ?? null, error: { code: -32600, message: "Invalid Request" } });
         continue;
       }
 
@@ -525,18 +490,14 @@ app.post("/mcp", async (req, res) => {
       if (method !== "initialize") {
         const sid = getMcpSession(req);
         if (!sid) {
-          responses.push({
-            jsonrpc: "2.0",
-            id,
-            error: { code: -32001, message: "Missing or invalid Mcp-Session-Id" },
-          });
+          responses.push({ jsonrpc: "2.0", id, error: { code: -32001, message: "Missing or invalid Mcp-Session-Id" } });
           continue;
         }
       }
 
       if (method === "initialize") {
         const sessionId = newMcpSessionId();
-        sessions.set(sessionId, { createdAt: Date.now() });
+        mcpSessions.set(sessionId, { createdAt: Date.now() });
         res.setHeader("Mcp-Session-Id", sessionId);
 
         responses.push({
@@ -547,7 +508,7 @@ app.post("/mcp", async (req, res) => {
             capabilities: { tools: { listChanged: false } },
             serverInfo: { name: "bcgpt", title: "Basecamp GPT MCP Server", version: "1.0.0" },
             instructions:
-              "Provide Authorization: Bearer <bcgpt_session_code> to access per-user Basecamp data.",
+              "Login flow: 1) /login 2) verify OTP 3) copy Session Code 4) /connect/basecamp?session=... 5) call tools with Authorization: Bearer <Session Code>.",
           },
         });
         continue;
@@ -571,7 +532,6 @@ app.post("/mcp", async (req, res) => {
           continue;
         }
 
-        // IMPORTANT: identify user from Authorization header
         const user = await getUserFromBearer(req);
         if (!user) {
           responses.push({
@@ -583,7 +543,7 @@ app.post("/mcp", async (req, res) => {
                 {
                   type: "text",
                   text:
-                    "Not logged in.\n\n1) Open /login\n2) Verify OTP\n3) Copy Session Code\n4) Use Authorization: Bearer <Session Code>\n5) Open /connect/basecamp?session=<Session Code>",
+                    "Not logged in.\n\n1) Open /login\n2) Verify OTP\n3) Copy Session Code\n4) Open /connect/basecamp?session=<Session Code>\n5) Call tools with Authorization: Bearer <Session Code>",
                 },
               ],
             },
@@ -596,10 +556,7 @@ app.post("/mcp", async (req, res) => {
           responses.push({
             jsonrpc: "2.0",
             id,
-            result: {
-              isError: true,
-              content: [{ type: "text", text: `Failed: (${data.status}) ${String(data.error).slice(0, 1500)}` }],
-            },
+            result: { isError: true, content: [{ type: "text", text: `Failed (${data.status}): ${String(data.error).slice(0, 1500)}` }] },
           });
           continue;
         }
@@ -653,16 +610,17 @@ app.get("/debug/whoami", async (req, res) => {
   res.json({ logged_in: true, user });
 });
 
-app.get("/debug/db", async (req, res) => {
+app.get("/debug/sqlite", async (req, res) => {
   try {
-    const r = await q("select now() as now");
-    res.json({ ok: true, now: r.rows[0].now });
+    const r = await db.raw("select datetime('now') as now");
+    // knex sqlite returns [ { now: '...' } ] in some versions
+    res.json({ ok: true, now: r?.[0]?.now || r });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 });
 
-app.get("/", (req, res) => res.send("bcgpt server running (otp + basecamp + mcp)"));
+app.get("/", (req, res) => res.send("bcgpt server running (sqlite + otp + basecamp + mcp)"));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("Listening on", PORT));
