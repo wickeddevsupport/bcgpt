@@ -3,7 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import crypto from "crypto";
 import fetch from "node-fetch";
-import { db } from "./db.js";
+import { getDB } from "./db.js";
 
 dotenv.config();
 
@@ -16,37 +16,21 @@ const BASECAMP_CLIENT_ID = process.env.BASECAMP_CLIENT_ID;
 const BASECAMP_CLIENT_SECRET = process.env.BASECAMP_CLIENT_SECRET;
 const UA = "bcgpt";
 
-if (!BASECAMP_CLIENT_ID || !BASECAMP_CLIENT_SECRET) {
-  console.warn("⚠️ Missing Basecamp OAuth env vars");
-}
+/* ---------------- MCP SESSION TRACKING ---------------- */
+const mcpSessions = new Set();
 
-/* ----------------- DB INIT (AUTO) ----------------- */
-await db.schema.createTableIfNotExists("basecamp_tokens", (t) => {
-  t.string("mcp_session_id").primary();
-  t.text("access_token").notNullable();
-  t.text("refresh_token");
-  t.timestamp("updated_at").defaultTo(db.fn.now());
-});
-
-await db.schema.createTableIfNotExists("oauth_states", (t) => {
-  t.string("state").primary();
-  t.string("mcp_session_id").notNullable();
-  t.timestamp("created_at").defaultTo(db.fn.now());
-});
-
-/* ----------------- CONNECT BASECAMP ----------------- */
+/* ---------------- CONNECT BASECAMP ---------------- */
 app.get("/connect", async (req, res) => {
   const mcpSessionId = req.query.mcp_session;
-  if (!mcpSessionId) {
-    return res.send("Missing MCP session. Open this link from ChatGPT.");
-  }
+  if (!mcpSessionId) return res.send("Missing MCP session.");
 
-  const state = crypto.randomBytes(20).toString("hex");
+  const db = await getDB();
+  const state = crypto.randomBytes(16).toString("hex");
 
-  await db("oauth_states").insert({
-    state,
-    mcp_session_id: mcpSessionId
-  });
+  db.run(
+    "INSERT INTO oauth_states VALUES (?, ?, ?)",
+    [state, mcpSessionId, new Date().toISOString()]
+  );
 
   const redirectUri = `${APP_BASE_URL}/auth/basecamp/callback`;
 
@@ -60,12 +44,19 @@ app.get("/connect", async (req, res) => {
   res.redirect(url);
 });
 
-/* ----------------- BASECAMP CALLBACK ----------------- */
+/* ---------------- BASECAMP CALLBACK ---------------- */
 app.get("/auth/basecamp/callback", async (req, res) => {
   const { code, state } = req.query;
+  const db = await getDB();
 
-  const row = await db("oauth_states").where({ state }).first();
-  if (!row) return res.send("Invalid or expired state.");
+  const row = db.exec(
+    "SELECT mcp_session_id FROM oauth_states WHERE state = ?",
+    [state]
+  )[0];
+
+  if (!row) return res.send("Invalid OAuth state.");
+
+  const mcpSessionId = row.values[0][0];
 
   const tokenRes = await fetch(
     "https://launchpad.37signals.com/authorization/token?type=web_server",
@@ -84,17 +75,17 @@ app.get("/auth/basecamp/callback", async (req, res) => {
 
   const token = await tokenRes.json();
 
-  await db("basecamp_tokens")
-    .insert({
-      mcp_session_id: row.mcp_session_id,
-      access_token: token.access_token,
-      refresh_token: token.refresh_token || null,
-      updated_at: new Date()
-    })
-    .onConflict("mcp_session_id")
-    .merge();
+  db.run(
+    "INSERT OR REPLACE INTO basecamp_tokens VALUES (?, ?, ?, ?)",
+    [
+      mcpSessionId,
+      token.access_token,
+      token.refresh_token || null,
+      new Date().toISOString()
+    ]
+  );
 
-  await db("oauth_states").where({ state }).del();
+  db.run("DELETE FROM oauth_states WHERE state = ?", [state]);
 
   res.send(`
     <h2>✅ Basecamp connected</h2>
@@ -103,11 +94,7 @@ app.get("/auth/basecamp/callback", async (req, res) => {
   `);
 });
 
-/* ----------------- MCP SERVER ----------------- */
-
-const MCP_PROTOCOL_VERSION = "2025-06-18";
-const mcpSessions = new Set();
-
+/* ---------------- MCP ENDPOINT ---------------- */
 app.post("/mcp", async (req, res) => {
   const msg = req.body;
   res.setHeader("Content-Type", "application/json");
@@ -121,13 +108,10 @@ app.post("/mcp", async (req, res) => {
       jsonrpc: "2.0",
       id: msg.id,
       result: {
-        protocolVersion: MCP_PROTOCOL_VERSION,
+        protocolVersion: "2025-06-18",
         serverInfo: { name: "bcgpt" },
-        capabilities: { tools: {} },
-        instructions: `
-Type "login to basecamp" to connect.
-One click. No tokens. No login codes.
-`
+        instructions:
+          "Type 'login to basecamp', click the link, approve Basecamp, then return and use tools."
       }
     });
   }
@@ -146,23 +130,19 @@ One click. No tokens. No login codes.
       jsonrpc: "2.0",
       id: msg.id,
       result: {
-        tools: [
-          {
-            name: "list_projects",
-            description: "List Basecamp projects",
-            inputSchema: { type: "object" }
-          }
-        ]
+        tools: [{ name: "list_projects", description: "List Basecamp projects" }]
       }
     });
   }
 
   if (msg.method === "tools/call") {
-    const tokenRow = await db("basecamp_tokens")
-      .where({ mcp_session_id: mcpSessionId })
-      .first();
+    const db = await getDB();
+    const row = db.exec(
+      "SELECT access_token FROM basecamp_tokens WHERE mcp_session_id = ?",
+      [mcpSessionId]
+    )[0];
 
-    if (!tokenRow) {
+    if (!row) {
       return res.json({
         jsonrpc: "2.0",
         id: msg.id,
@@ -180,15 +160,17 @@ One click. No tokens. No login codes.
       });
     }
 
+    const accessToken = row.values[0][0];
+
     const auth = await fetch(
       "https://launchpad.37signals.com/authorization.json",
       {
         headers: {
-          Authorization: `Bearer ${tokenRow.access_token}`,
+          Authorization: `Bearer ${accessToken}`,
           "User-Agent": UA
         }
       }
-    ).then((r) => r.json());
+    ).then(r => r.json());
 
     const accountId = auth.accounts[0].id;
 
@@ -196,11 +178,11 @@ One click. No tokens. No login codes.
       `https://3.basecampapi.com/${accountId}/projects.json`,
       {
         headers: {
-          Authorization: `Bearer ${tokenRow.access_token}`,
+          Authorization: `Bearer ${accessToken}`,
           "User-Agent": UA
         }
       }
-    ).then((r) => r.json());
+    ).then(r => r.json());
 
     return res.json({
       jsonrpc: "2.0",
@@ -210,7 +192,7 @@ One click. No tokens. No login codes.
         content: [
           {
             type: "text",
-            text: projects.map((p) => `• ${p.name}`).join("\n")
+            text: projects.map(p => `• ${p.name}`).join("\n")
           }
         ]
       }
@@ -218,7 +200,7 @@ One click. No tokens. No login codes.
   }
 });
 
-/* ----------------- ROOT ----------------- */
-app.get("/", (req, res) => res.send("bcgpt running"));
+/* ---------------- ROOT ---------------- */
+app.get("/", (_, res) => res.send("bcgpt running"));
 
 app.listen(3000, () => console.log("🚀 bcgpt running"));

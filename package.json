@@ -9,9 +9,8 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
-    "knex": "^3.1.0",
-    "better-sqlite3": "^9.6.0",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "sql.js": "^1.9.0"
   },
   "engines": {
     "node": "20.x"
