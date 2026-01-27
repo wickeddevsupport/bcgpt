@@ -286,14 +286,20 @@ async function basecampFetch(path, { method = "GET", headers = {}, body } = {}) 
 }
 
 // -------------------- Minimal /startbcgpt payload --------------------
-async function buildStartBcPayload() {
-  const reauthUrl = `${APP_BASE_URL}/auth/basecamp/start`;
-  const logoutUrl = `${APP_BASE_URL}/logout`;
+async function buildStartBcPayload(req) {
+  // Fallback base URL even if APP_BASE_URL env is missing/wrong
+  const inferredBase =
+    (req.headers["x-forwarded-proto"] ? `${req.headers["x-forwarded-proto"]}://${req.headers.host}` : null) ||
+    `${req.protocol}://${req.get("host")}`;
+
+  const base = APP_BASE_URL && APP_BASE_URL.startsWith("http") ? APP_BASE_URL : inferredBase;
+
+  const reauthUrl = `${base}/auth/basecamp/start`;
+  const logoutUrl = `${base}/logout`;
 
   const t = getToken();
   const connected = Boolean(t?.access_token);
 
-  // Always include reauthUrl
   if (!connected) {
     return {
       ok: true,
@@ -302,15 +308,10 @@ async function buildStartBcPayload() {
       reauthUrl,
       logoutUrl,
       message: "Not connected.",
-      hint: "Not you? Login with another account using reauthUrl.",
-      howTo: [
-        "Open reauthUrl in a browser and sign in.",
-        "Return to ChatGPT and use tools to list projects, create todos, post messages, etc.",
-      ],
+      hint: "Not you? Login with another account using reauthUrl."
     };
   }
 
-  // Force identity fetch to improve detection reliability
   const idAcc = await getIdentityAndAccounts({ force: true });
   if (!idAcc.ok) {
     return {
@@ -322,7 +323,7 @@ async function buildStartBcPayload() {
       message: "Token exists but identity could not be loaded. Re-login if needed.",
       hint: "Not you? Login with another account using reauthUrl.",
       status: idAcc.status || 500,
-      error: idAcc.error || "authorization.json failed",
+      error: idAcc.error || "authorization.json failed"
     };
   }
 
@@ -340,13 +341,10 @@ async function buildStartBcPayload() {
     reauthUrl,
     logoutUrl,
     message: "Connected.",
-    hint: "Not you? Login with another account using reauthUrl.",
-    howTo: [
-      "Use MCP tools to operate Basecamp (projects, to-dos, messages, comments).",
-      "If wrong account: open reauthUrl or call logout.",
-    ],
+    hint: "Not you? Login with another account using reauthUrl."
   };
 }
+
 
 // -------------------- Convenience functions --------------------
 async function listProjects({ accountId } = {}) {
@@ -449,22 +447,22 @@ app.get("/auth/basecamp/callback", async (req, res) => {
 // -------------------- Status / start endpoint --------------------
 app.get("/startbcgpt", async (req, res) => {
   try {
-    const payload = await buildStartBcPayload();
+    const payload = await buildStartBcPayload(req);
     res.status(payload.ok ? 200 : (payload.status || 500)).json(payload);
   } catch (e) {
-    console.error(e);
     res.status(500).json({
       ok: false,
       connected: Boolean(getToken()?.access_token),
       user: null,
-      reauthUrl: `${APP_BASE_URL}/auth/basecamp/start`,
-      logoutUrl: `${APP_BASE_URL}/logout`,
+      reauthUrl: `${req.protocol}://${req.get("host")}/auth/basecamp/start`,
+      logoutUrl: `${req.protocol}://${req.get("host")}/logout`,
       message: "Server error.",
       hint: "Not you? Login with another account using reauthUrl.",
-      error: e?.message || "unknown",
+      error: e?.message || "unknown"
     });
   }
 });
+
 
 // -------------------- Logout --------------------
 app.post("/logout", (req, res) => {
