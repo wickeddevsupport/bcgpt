@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-  "migrate": "knex migrate:latest --knexfile knexfile.cjs"
+    "migrate": "knex migrate:latest --knexfile knexfile.cjs"
   },
   "repository": {
     "type": "git",
@@ -20,16 +20,16 @@
   "homepage": "https://github.com/wickeddevsupport/bcgpt#readme",
   "description": "ChatGPT MCP server for Basecamp integration",
   "engines": {
-    "node": ">=18"
+    "node": "20.xx"
   },
   "dependencies": {
+    "better-sqlite3": "^12.6.2",
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
     "eventsource-parser": "^3.0.6",
     "express": "^5.2.1",
     "knex": "^3.1.0",
     "node-fetch": "^3.3.2",
-    "pg": "^8.17.2",
-    "sqlite3": "^5.1.7"
+    "pg": "^8.17.2"
   }
 }

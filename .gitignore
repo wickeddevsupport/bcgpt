@@ -1,0 +1,45 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# SQLite / local databases
+data/
+*.sqlite
+*.sqlite3
+*.db
+
+# Knex
+.knex/
+migrations/.DS_Store
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+logs/
+*.log
+
+# Build artifacts
+dist/
+build/
+
+# Render / runtime
+.render/
+.cache/
+
+# Temporary files
+tmp/
+temp/

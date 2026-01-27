@@ -1,7 +1,7 @@
 module.exports = {
-  client: "sqlite3",
+  client: "better-sqlite3",
   connection: {
-    filename: process.env.SQLITE_PATH || "./data/bcgpt.sqlite",
+    filename: process.env.SQLITE_PATH || "/var/data/bcgpt.sqlite",
   },
   useNullAsDefault: true,
 };
