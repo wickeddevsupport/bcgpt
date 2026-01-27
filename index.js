@@ -16,12 +16,10 @@ const BASECAMP_CLIENT_ID = process.env.BASECAMP_CLIENT_ID;
 const BASECAMP_CLIENT_SECRET = process.env.BASECAMP_CLIENT_SECRET;
 const UA = "bcgpt";
 
-/* -------------------- SQLITE (IN-MEMORY) -------------------- */
+/* ---------------- SQLITE (IN-MEMORY) ---------------- */
 let db;
-
 async function getDB() {
   if (db) return db;
-
   const SQL = await initSqlJs({});
   db = new SQL.Database();
 
@@ -41,26 +39,20 @@ async function getDB() {
   return db;
 }
 
-/* -------------------- MCP SESSION TRACKING -------------------- */
+/* ---------------- MCP SESSION TRACKING ---------------- */
 const mcpSessions = new Set();
 
-/* -------------------- BASECAMP CONNECT -------------------- */
+/* ---------------- BASECAMP CONNECT ---------------- */
 app.get("/connect", async (req, res) => {
   const mcpSessionId = req.query.mcp_session;
-  if (!mcpSessionId) {
-    return res.send("Missing MCP session. Open this link from ChatGPT.");
-  }
+  if (!mcpSessionId) return res.send("Missing MCP session.");
 
   const db = await getDB();
   const state = crypto.randomBytes(16).toString("hex");
 
-  db.run(
-    "INSERT INTO oauth_states VALUES (?, ?)",
-    [state, mcpSessionId]
-  );
+  db.run("INSERT INTO oauth_states VALUES (?, ?)", [state, mcpSessionId]);
 
   const redirectUri = `${APP_BASE_URL}/auth/basecamp/callback`;
-
   const url =
     "https://launchpad.37signals.com/authorization/new" +
     `?type=web_server` +
@@ -71,7 +63,7 @@ app.get("/connect", async (req, res) => {
   res.redirect(url);
 });
 
-/* -------------------- BASECAMP CALLBACK -------------------- */
+/* ---------------- BASECAMP CALLBACK ---------------- */
 app.get("/auth/basecamp/callback", async (req, res) => {
   const { code, state } = req.query;
   const db = await getDB();
@@ -81,7 +73,7 @@ app.get("/auth/basecamp/callback", async (req, res) => {
     [state]
   )[0];
 
-  if (!row) return res.send("Invalid or expired OAuth state.");
+  if (!row) return res.send("Invalid OAuth state.");
 
   const mcpSessionId = row.values[0][0];
 
@@ -116,7 +108,7 @@ app.get("/auth/basecamp/callback", async (req, res) => {
   `);
 });
 
-/* -------------------- MCP SERVER -------------------- */
+/* ---------------- MCP SERVER ---------------- */
 app.post("/mcp", async (req, res) => {
   const msg = req.body;
   res.setHeader("Content-Type", "application/json");
@@ -133,12 +125,11 @@ app.post("/mcp", async (req, res) => {
       result: {
         protocolVersion: "2025-06-18",
         serverInfo: { name: "bcgpt" },
-        capabilities: { tools: {} },
         instructions: `
-When the user says "login to basecamp", ALWAYS call tool "login_to_basecamp".
-Never respond in plain text for login.
-
-When the user asks for projects, call "list_projects".
+Use commands:
+• /login — connect Basecamp
+• /status — connection status
+• /logout — disconnect
 `
       }
     });
@@ -153,37 +144,31 @@ When the user asks for projects, call "list_projects".
     });
   }
 
-  /* ---------- LIST TOOLS ---------- */
+  /* ---------- TOOL LIST ---------- */
   if (msg.method === "tools/list") {
     return res.json({
       jsonrpc: "2.0",
       id: msg.id,
       result: {
         tools: [
-          {
-            name: "login_to_basecamp",
-            description: "Login or check Basecamp connection status",
-            inputSchema: { type: "object" }
-          },
-          {
-            name: "list_projects",
-            description: "List Basecamp projects",
-            inputSchema: { type: "object" }
-          }
+          { name: "/login", description: "Connect Basecamp" },
+          { name: "/status", description: "Check Basecamp status" },
+          { name: "/logout", description: "Disconnect Basecamp" },
+          { name: "list_projects", description: "List Basecamp projects" }
         ]
       }
     });
   }
 
-  /* ---------- CALL TOOLS ---------- */
+  /* ---------- TOOL CALL ---------- */
   if (msg.method === "tools/call") {
     const tool = msg.params.name;
     const db = await getDB();
 
-    /* ----- LOGIN TOOL ----- */
-    if (tool === "login_to_basecamp") {
+    /* /login */
+    if (tool === "/login") {
       const row = db.exec(
-        "SELECT access_token FROM basecamp_tokens WHERE mcp_session_id = ?",
+        "SELECT 1 FROM basecamp_tokens WHERE mcp_session_id = ?",
         [mcpSessionId]
       )[0];
 
@@ -192,14 +177,7 @@ When the user asks for projects, call "list_projects".
           jsonrpc: "2.0",
           id: msg.id,
           result: {
-            isError: false,
-            content: [
-              {
-                type: "text",
-                text:
-                  "✅ Basecamp is already connected.\n\nYou can now type:\nlist my projects"
-              }
-            ]
+            content: [{ type: "text", text: "✅ Already connected." }]
           }
         });
       }
@@ -208,20 +186,52 @@ When the user asks for projects, call "list_projects".
         jsonrpc: "2.0",
         id: msg.id,
         result: {
-          isError: false,
-          content: [
-            {
-              type: "text",
-              text:
-                "🔐 Click here to connect Basecamp:\n" +
-                `${APP_BASE_URL}/connect?mcp_session=${mcpSessionId}`
-            }
-          ]
+          content: [{
+            type: "text",
+            text: `Click to connect:\n${APP_BASE_URL}/connect?mcp_session=${mcpSessionId}`
+          }]
         }
       });
     }
 
-    /* ----- LIST PROJECTS TOOL ----- */
+    /* /status */
+    if (tool === "/status") {
+      const row = db.exec(
+        "SELECT updated_at FROM basecamp_tokens WHERE mcp_session_id = ?",
+        [mcpSessionId]
+      )[0];
+
+      return res.json({
+        jsonrpc: "2.0",
+        id: msg.id,
+        result: {
+          content: [{
+            type: "text",
+            text: row
+              ? `✅ Connected (since ${row.values[0][0]})`
+              : "❌ Not connected. Type /login"
+          }]
+        }
+      });
+    }
+
+    /* /logout */
+    if (tool === "/logout") {
+      db.run(
+        "DELETE FROM basecamp_tokens WHERE mcp_session_id = ?",
+        [mcpSessionId]
+      );
+
+      return res.json({
+        jsonrpc: "2.0",
+        id: msg.id,
+        result: {
+          content: [{ type: "text", text: "👋 Logged out. Type /login to reconnect." }]
+        }
+      });
+    }
+
+    /* list_projects */
     if (tool === "list_projects") {
       const row = db.exec(
         "SELECT access_token FROM basecamp_tokens WHERE mcp_session_id = ?",
@@ -233,13 +243,7 @@ When the user asks for projects, call "list_projects".
           jsonrpc: "2.0",
           id: msg.id,
           result: {
-            isError: true,
-            content: [
-              {
-                type: "text",
-                text: "❌ Not connected. Type:\nlogin to basecamp"
-              }
-            ]
+            content: [{ type: "text", text: "❌ Not connected. Type /login" }]
           }
         });
       }
@@ -272,20 +276,16 @@ When the user asks for projects, call "list_projects".
         jsonrpc: "2.0",
         id: msg.id,
         result: {
-          isError: false,
-          content: [
-            {
-              type: "text",
-              text: projects.map(p => `• ${p.name}`).join("\n")
-            }
-          ]
+          content: [{
+            type: "text",
+            text: projects.map(p => `• ${p.name}`).join("\n")
+          }]
         }
       });
     }
   }
 });
 
-/* -------------------- ROOT -------------------- */
+/* ---------------- ROOT ---------------- */
 app.get("/", (_, res) => res.send("bcgpt running"));
-
 app.listen(3000, () => console.log("🚀 bcgpt running"));
