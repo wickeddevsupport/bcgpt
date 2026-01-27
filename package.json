@@ -1,9 +1,10 @@
 {
   "name": "bcgpt",
   "version": "1.0.0",
+  "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js"
   },
   "repository": {
     "type": "git",
@@ -16,7 +17,10 @@
     "url": "https://github.com/wickeddevsupport/bcgpt/issues"
   },
   "homepage": "https://github.com/wickeddevsupport/bcgpt#readme",
-  "description": "",
+  "description": "ChatGPT MCP server for Basecamp integration",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
