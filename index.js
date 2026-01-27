@@ -1,12 +1,46 @@
+/**
+ * bcgpt index.js — Basecamp OAuth + MCP Server (Streamable HTTP)
+ * Node >=18, ESM ("type":"module")
+ *
+ * What this server provides:
+ * - OAuth connect flow:
+ *    GET  /auth/basecamp/start
+ *    GET  /auth/basecamp/callback
+ * - Status endpoint for ChatGPT / tools:
+ *    GET  /startbcgpt  (connected + logged-in name + accounts + reauth link)
+ * - Optional debug endpoints:
+ *    GET  /debug/token
+ *    GET  /debug/authorization
+ * - MCP endpoints:
+ *    GET  /mcp (SSE keepalive)
+ *    POST /mcp (JSON-RPC: initialize, tools/list, tools/call)
+ *
+ * MCP Tools include:
+ * - startbcgpt
+ * - list_accounts
+ * - list_projects
+ * - get_project
+ * - list_people
+ * - list_todolists
+ * - list_todos
+ * - create_todo
+ * - complete_todo
+ * - create_comment
+ * - list_message_boards
+ * - create_message
+ * - basecamp_request  <-- "do anything" generic tool (safe allowlist)
+ */
+
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import fetch from "node-fetch";
 
 dotenv.config();
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "2mb" }));
 
 const UA = "bcgpt (bcgpt.onrender.com)";
 
@@ -14,21 +48,34 @@ const {
   BASECAMP_CLIENT_ID,
   BASECAMP_CLIENT_SECRET,
   APP_BASE_URL = "https://bcgpt.onrender.com",
+  BASECAMP_DEFAULT_ACCOUNT_ID = "0",
 } = process.env;
-const BASECAMP_DEFAULT_ACCOUNT_ID = Number(process.env.BASECAMP_DEFAULT_ACCOUNT_ID || 0);
+
+const DEFAULT_ACCOUNT_ID = Number(BASECAMP_DEFAULT_ACCOUNT_ID || 0);
 
 if (!BASECAMP_CLIENT_ID || !BASECAMP_CLIENT_SECRET) {
   console.warn("Missing BASECAMP_CLIENT_ID or BASECAMP_CLIENT_SECRET");
 }
 
-// Temporary in-memory store (OK for testing; later use DB/Redis)
-const tokenStore = new Map();
-
-// expire OAuth state after 10 minutes
+// -------------------- In-memory store (swap to DB/Redis for production) --------------------
+const tokenStore = new Map(); // keys: basecamp:token, basecamp:authorization, state:<...>
 const STATE_TTL_MS = 10 * 60 * 1000;
 
+// -------------------- Helpers: token + authorization cache --------------------
 function getToken() {
   return tokenStore.get("basecamp:token");
+}
+function setToken(tokenJson) {
+  tokenStore.set("basecamp:token", tokenJson);
+}
+function getCachedAuthorization() {
+  return tokenStore.get("basecamp:authorization");
+}
+function setCachedAuthorization(authJson) {
+  tokenStore.set("basecamp:authorization", {
+    cachedAt: Date.now(),
+    data: authJson,
+  });
 }
 
 function requireToken(req, res) {
@@ -40,13 +87,225 @@ function requireToken(req, res) {
   return t;
 }
 
-/**
- * Step A: Redirect user to 37signals authorization page
- */
+// OAuth token objects from 37signals typically include:
+// access_token, refresh_token, expires_in, created_at
+function isTokenExpiredSoon(token, skewSeconds = 60) {
+  if (!token?.expires_in || !token?.created_at) return false; // if unknown, assume ok
+  const now = Math.floor(Date.now() / 1000);
+  const expiresAt = Number(token.created_at) + Number(token.expires_in);
+  return now >= (expiresAt - skewSeconds);
+}
+
+async function refreshAccessTokenIfNeeded() {
+  const t = getToken();
+  if (!t?.access_token) return { ok: false, status: 401, error: "Not connected." };
+
+  // No refresh info -> cannot refresh
+  if (!t.refresh_token || !t.expires_in || !t.created_at) {
+    return { ok: true, token: t, refreshed: false };
+  }
+
+  if (!isTokenExpiredSoon(t)) {
+    return { ok: true, token: t, refreshed: false };
+  }
+
+  // Best-effort refresh using standard OAuth refresh_token grant
+  // (If 37signals changes this, you’ll just re-auth via /auth/basecamp/start)
+  try {
+    const body = new URLSearchParams({
+      type: "refresh_token",
+      refresh_token: String(t.refresh_token),
+      client_id: BASECAMP_CLIENT_ID,
+      client_secret: BASECAMP_CLIENT_SECRET,
+    });
+
+    const resp = await fetch("https://launchpad.37signals.com/authorization/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": UA,
+      },
+      body,
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      return { ok: false, status: resp.status, error: `Refresh failed: ${text}` };
+    }
+
+    const newToken = await resp.json();
+    // keep old refresh_token if server doesn’t send a new one
+    if (!newToken.refresh_token && t.refresh_token) newToken.refresh_token = t.refresh_token;
+    setToken(newToken);
+
+    // invalidate cached authorization (identity/accounts may change)
+    tokenStore.delete("basecamp:authorization");
+
+    return { ok: true, token: newToken, refreshed: true };
+  } catch (e) {
+    return { ok: false, status: 500, error: e?.message || "Refresh error" };
+  }
+}
+
+async function fetchAuthorizationJson({ force = false } = {}) {
+  const cached = getCachedAuthorization();
+  if (!force && cached?.data && Date.now() - cached.cachedAt < 5 * 60 * 1000) {
+    return { ok: true, data: cached.data, cached: true };
+  }
+
+  const tr = await refreshAccessTokenIfNeeded();
+  if (!tr.ok) return tr;
+
+  const t = tr.token;
+  const r = await fetch("https://launchpad.37signals.com/authorization.json", {
+    headers: {
+      Authorization: `Bearer ${t.access_token}`,
+      "User-Agent": UA,
+    },
+  });
+
+  if (!r.ok) {
+    const text = await r.text();
+    return { ok: false, status: r.status, error: text };
+  }
+
+  const authJson = await r.json();
+  setCachedAuthorization(authJson);
+  return { ok: true, data: authJson, cached: false };
+}
+
+function pickAccountId(accounts) {
+  if (!Array.isArray(accounts) || accounts.length === 0) return null;
+  if (DEFAULT_ACCOUNT_ID) {
+    const match = accounts.find((a) => Number(a.id) === DEFAULT_ACCOUNT_ID);
+    if (match) return match.id;
+  }
+  return accounts[0].id;
+}
+
+// -------------------- Safe fetch wrappers --------------------
+const HOSTS = {
+  launchpad: "https://launchpad.37signals.com",
+  basecamp: "https://3.basecampapi.com",
+};
+
+function normalizePath(p) {
+  if (!p) return "/";
+  return p.startsWith("/") ? p : `/${p}`;
+}
+
+async function launchpadFetch(path, { method = "GET", headers = {}, body } = {}) {
+  const tr = await refreshAccessTokenIfNeeded();
+  if (!tr.ok) return { ok: false, status: tr.status, error: tr.error };
+
+  const t = tr.token;
+  const url = HOSTS.launchpad + normalizePath(path);
+
+  const resp = await fetch(url, {
+    method,
+    headers: {
+      Authorization: `Bearer ${t.access_token}`,
+      "User-Agent": UA,
+      ...headers,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  const text = await resp.text();
+  let data = text;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    // leave as text
+  }
+
+  return { ok: resp.ok, status: resp.status, data };
+}
+
+async function basecampFetch(path, { method = "GET", headers = {}, body } = {}) {
+  const tr = await refreshAccessTokenIfNeeded();
+  if (!tr.ok) return { ok: false, status: tr.status, error: tr.error };
+
+  const t = tr.token;
+  const url = HOSTS.basecamp + normalizePath(path);
+
+  const resp = await fetch(url, {
+    method,
+    headers: {
+      Authorization: `Bearer ${t.access_token}`,
+      "User-Agent": UA,
+      ...(body ? { "Content-Type": "application/json" } : {}),
+      ...headers,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  const text = await resp.text();
+  let data = text;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    // leave as text
+  }
+
+  // If unauthorized, attempt one forced authorization refresh (token might be revoked)
+  if (resp.status === 401) {
+    tokenStore.delete("basecamp:authorization");
+  }
+
+  return { ok: resp.ok, status: resp.status, data };
+}
+
+// Convenience: get accounts + identity
+async function getIdentityAndAccounts() {
+  const auth = await fetchAuthorizationJson();
+  if (!auth.ok) return auth;
+
+  const identity = auth.data?.identity || null;
+  const accounts = auth.data?.accounts || [];
+  return { ok: true, identity, accounts };
+}
+
+// Convenience: list projects for chosen account
+async function listProjects({ accountId } = {}) {
+  const idAcc = await getIdentityAndAccounts();
+  if (!idAcc.ok) return idAcc;
+
+  const accounts = idAcc.accounts || [];
+  const chosenAccountId = accountId || pickAccountId(accounts);
+  if (!chosenAccountId) return { ok: false, status: 404, error: "No Basecamp accounts found." };
+
+  const r = await basecampFetch(`/${chosenAccountId}/projects.json`);
+  if (!r.ok) return { ok: false, status: r.status, error: r.data };
+  return { ok: true, accountId: chosenAccountId, projects: r.data };
+}
+
+// Convenience: get project (bucket) details (includes dock)
+async function getProject({ accountId, projectId }) {
+  if (!projectId) return { ok: false, status: 400, error: "projectId is required" };
+
+  const idAcc = await getIdentityAndAccounts();
+  if (!idAcc.ok) return idAcc;
+
+  const chosenAccountId = accountId || pickAccountId(idAcc.accounts || []);
+  if (!chosenAccountId) return { ok: false, status: 404, error: "No Basecamp accounts found." };
+
+  const r = await basecampFetch(`/${chosenAccountId}/projects/${projectId}.json`);
+  if (!r.ok) return { ok: false, status: r.status, error: r.data };
+  return { ok: true, accountId: chosenAccountId, project: r.data };
+}
+
+// Find tool in dock by name/type
+function findDockItem(project, matcher) {
+  const dock = project?.dock || [];
+  return dock.find((d) => matcher(d));
+}
+
+// -------------------- OAuth Routes --------------------
 app.get("/auth/basecamp/start", (req, res) => {
   const redirectUri = `${APP_BASE_URL}/auth/basecamp/callback`;
-
   const state = Math.random().toString(36).slice(2);
+
   tokenStore.set(`state:${state}`, { createdAt: Date.now() });
 
   const authUrl =
@@ -58,9 +317,6 @@ app.get("/auth/basecamp/start", (req, res) => {
   res.redirect(authUrl);
 });
 
-/**
- * Step B: Exchange code for access token
- */
 app.get("/auth/basecamp/callback", async (req, res) => {
   try {
     const { code, state, error } = req.query;
@@ -86,17 +342,14 @@ app.get("/auth/basecamp/callback", async (req, res) => {
       code: String(code),
     });
 
-    const resp = await fetch(
-      "https://launchpad.37signals.com/authorization/token?type=web_server",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "User-Agent": UA,
-        },
-        body,
-      }
-    );
+    const resp = await fetch("https://launchpad.37signals.com/authorization/token?type=web_server", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": UA,
+      },
+      body,
+    });
 
     if (!resp.ok) {
       const text = await resp.text();
@@ -105,11 +358,9 @@ app.get("/auth/basecamp/callback", async (req, res) => {
 
     const tokenJson = await resp.json();
 
-    // Save tokens (single-user demo)
-    tokenStore.set("basecamp:token", tokenJson);
-
-    // cleanup state
+    setToken(tokenJson);
     tokenStore.delete(`state:${state}`);
+    tokenStore.delete("basecamp:authorization");
 
     res.send("✅ Basecamp connected successfully. You can close this tab.");
   } catch (e) {
@@ -118,118 +369,104 @@ app.get("/auth/basecamp/callback", async (req, res) => {
   }
 });
 
-/**
- * Debug: confirm we have a token saved
- */
+// -------------------- /startbcgpt (status + identity + reauth link) --------------------
+app.get("/startbcgpt", async (req, res) => {
+  try {
+    const t = getToken();
+    const connected = Boolean(t?.access_token);
+
+    const reauthUrl = `${APP_BASE_URL}/auth/basecamp/start`;
+
+    if (!connected) {
+      return res.json({
+        ok: true,
+        connected: false,
+        user: null,
+        accounts: [],
+        reauthUrl,
+        message: "Not connected. Visit reauthUrl to authenticate Basecamp.",
+      });
+    }
+
+    const auth = await getIdentityAndAccounts();
+    if (!auth.ok) {
+      return res.status(auth.status || 500).json({
+        ok: false,
+        connected: true,
+        user: null,
+        accounts: [],
+        reauthUrl,
+        error: auth.error || auth.data,
+      });
+    }
+
+    const userName =
+      auth.identity?.name ||
+      auth.identity?.email_address ||
+      auth.identity?.id ||
+      "Unknown";
+
+    return res.json({
+      ok: true,
+      connected: true,
+      user: {
+        name: userName,
+        email: auth.identity?.email_address || null,
+        id: auth.identity?.id || null,
+      },
+      accounts: (auth.accounts || []).map((a) => ({
+        id: a.id,
+        name: a.name,
+        product: a.product,
+        href: a.href,
+        app_href: a.app_href,
+      })),
+      defaultAccountId: DEFAULT_ACCOUNT_ID || null,
+      reauthUrl,
+      message: "Connected. Use MCP tools to read/write Basecamp, or re-auth via reauthUrl.",
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: e?.message || "unknown" });
+  }
+});
+
+// -------------------- Debug endpoints --------------------
 app.get("/debug/token", (req, res) => {
   const t = getToken();
   res.json({
     connected: Boolean(t?.access_token),
     tokenKeys: t ? Object.keys(t) : [],
+    expires: t?.expires_in && t?.created_at
+      ? { created_at: t.created_at, expires_in: t.expires_in }
+      : null,
+    hasRefresh: Boolean(t?.refresh_token),
   });
 });
 
-/**
- * Debug: get authorization info (lists accounts + API endpoints)
- * This is the key step to discover which account IDs the user has access to.
- */
 app.get("/debug/authorization", async (req, res) => {
-  try {
-    const t = requireToken(req, res);
-    if (!t) return;
+  const t = requireToken(req, res);
+  if (!t) return;
 
-    const r = await fetch("https://launchpad.37signals.com/authorization.json", {
-      headers: {
-        Authorization: `Bearer ${t.access_token}`,
-        "User-Agent": UA,
-      },
-    });
+  const auth = await fetchAuthorizationJson({ force: true });
+  if (!auth.ok) return res.status(auth.status || 500).json({ error: auth.error });
 
-    const text = await r.text();
-    res.status(r.status).type("application/json").send(text);
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: e?.message || "unknown" });
-  }
-});
-
-/**
- * Debug: list projects from the first Basecamp account returned by /authorization.json
- */
-app.get("/debug/projects", async (req, res) => {
-  try {
-    const t = requireToken(req, res);
-    if (!t) return;
-
-    // 1) discover accounts
-    const authResp = await fetch("https://launchpad.37signals.com/authorization.json", {
-      headers: {
-        Authorization: `Bearer ${t.access_token}`,
-        "User-Agent": UA,
-      },
-    });
-
-    if (!authResp.ok) {
-      const text = await authResp.text();
-      return res.status(authResp.status).send(text);
-    }
-
-    const authJson = await authResp.json();
-    const accounts = authJson?.accounts || [];
-
-    if (!accounts.length) {
-      return res.status(404).json({ error: "No Basecamp accounts found for this user." });
-    }
-
-    // Choose the first account (you can later let user choose)
-    let accountId = accounts[0].id;
-
-if (BASECAMP_DEFAULT_ACCOUNT_ID) {
-  const match = accounts.find(a => Number(a.id) === BASECAMP_DEFAULT_ACCOUNT_ID);
-  if (!match) {
-    return {
-      ok: false,
-      status: 404,
-      error: `Default account ${BASECAMP_DEFAULT_ACCOUNT_ID} not found. Available: ${accounts.map(a => a.id).join(", ")}`
-    };
-  }
-  accountId = match.id;
-}
-
-    // Basecamp API base (Basecamp 4 still uses 3.basecampapi.com)
-    const projectsUrl = `https://3.basecampapi.com/${accountId}/projects.json`;
-
-    const projectsResp = await fetch(projectsUrl, {
-      headers: {
-        Authorization: `Bearer ${t.access_token}`,
-        "User-Agent": UA,
-      },
-    });
-
-    const text = await projectsResp.text();
-    res.status(projectsResp.status).type("application/json").send(text);
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: e?.message || "unknown" });
-  }
+  res.json(auth.data);
 });
 
 // -------------------- MCP (Streamable HTTP) --------------------
-
 const MCP_PROTOCOL_VERSION = "2025-06-18";
 
 // Allowlist origins to reduce DNS rebinding risk (recommended by MCP transport spec).
-// If Origin header is missing (server-to-server), we allow it.
 const ORIGIN_ALLOWLIST = new Set([
   "https://chatgpt.com",
   "https://chat.openai.com",
-  // optionally allow your own origin if you hit it from a browser:
   "https://bcgpt.onrender.com",
 ]);
 
 function checkOrigin(req, res) {
   const origin = req.headers.origin;
-  if (!origin) return true;
+  if (!origin) return true; // server-to-server
   if (!ORIGIN_ALLOWLIST.has(origin)) {
     res.status(403).json({ error: "Origin not allowed" });
     return false;
@@ -237,97 +474,406 @@ function checkOrigin(req, res) {
   return true;
 }
 
-// Basic session tracking (per MCP transport spec session guidance)
+// Session tracking
 const sessions = new Map(); // sessionId -> { createdAt }
 function newSessionId() {
   return "mcp_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
-function getSession(req) {
+function getSessionId(req) {
   const sid = req.headers["mcp-session-id"];
   if (!sid) return null;
-  return sessions.get(sid) ? sid : null;
+  return sessions.has(sid) ? sid : null;
 }
 
-// Tool definition for MCP tools/list
+// -------------------- MCP Tools --------------------
 const MCP_TOOLS = [
+  {
+    name: "startbcgpt",
+    title: "Get Basecamp connection status",
+    description:
+      "Returns whether Basecamp is connected, logged-in user identity (if available), accounts, and reauth link.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "list_accounts",
+    title: "List Basecamp accounts",
+    description: "Lists Basecamp accounts available to the authenticated user.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true },
+  },
   {
     name: "list_projects",
     title: "List Basecamp projects",
-    description: "Returns the projects you have access to in Basecamp.",
+    description: "Lists projects for an account (default account if omitted).",
     inputSchema: {
       type: "object",
-      properties: {},
+      properties: {
+        accountId: { type: "integer", description: "Basecamp account id (optional)" },
+      },
       additionalProperties: false,
     },
-    // Optional but helpful for safety/UI hints (clients treat as untrusted)
     annotations: { readOnlyHint: true },
+  },
+  {
+    name: "get_project",
+    title: "Get project details",
+    description:
+      "Gets project (bucket) details including dock, which contains IDs for message board, to-dos, etc.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        accountId: { type: "integer" },
+        projectId: { type: "integer" },
+      },
+      required: ["projectId"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "list_people",
+    title: "List people on a project",
+    description: "Lists people for a project (bucket).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "integer" },
+        accountId: { type: "integer" },
+      },
+      required: ["projectId"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "list_todolists",
+    title: "List to-do lists",
+    description: "Lists to-do lists in a project (bucket).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "integer" },
+        accountId: { type: "integer" },
+      },
+      required: ["projectId"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "list_todos",
+    title: "List to-dos in a to-do list",
+    description: "Lists to-dos for a to-do list in a project (bucket).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "integer" },
+        todolistId: { type: "integer" },
+        accountId: { type: "integer" },
+      },
+      required: ["projectId", "todolistId"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "create_todo",
+    title: "Create a to-do",
+    description: "Creates a to-do in a to-do list.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "integer" },
+        todolistId: { type: "integer" },
+        content: { type: "string", description: "To-do text" },
+        description: { type: "string", description: "Optional description" },
+        assigneeId: { type: "integer", description: "Optional Basecamp person id" },
+        dueOn: { type: "string", description: "Optional due date (YYYY-MM-DD)" },
+        notify: { type: "boolean", description: "Notify assignee (optional)" },
+        accountId: { type: "integer" },
+      },
+      required: ["projectId", "todolistId", "content"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "complete_todo",
+    title: "Complete a to-do",
+    description: "Marks a to-do as complete.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "integer" },
+        todoId: { type: "integer" },
+        accountId: { type: "integer" },
+      },
+      required: ["projectId", "todoId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "create_comment",
+    title: "Create a comment",
+    description:
+      "Creates a comment on a recordable (message, todo, etc). You must provide the comments endpoint path from the resource, or infer via recordableId if you already know it. Best practice: supply commentsUrl.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        commentsUrl: { type: "string", description: "Full path like /buckets/{bucket}/recordings/{id}/comments.json" },
+        content: { type: "string" },
+      },
+      required: ["commentsUrl", "content"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "list_message_boards",
+    title: "List message boards (via project dock)",
+    description:
+      "Reads project dock and returns message board id(s) and URL(s).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "integer" },
+        accountId: { type: "integer" },
+      },
+      required: ["projectId"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "create_message",
+    title: "Create a message",
+    description:
+      "Creates a message in a project's message board. If you don't know messageBoardId, call get_project and look in dock for 'message_board'.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "integer" },
+        messageBoardId: { type: "integer" },
+        subject: { type: "string" },
+        content: { type: "string" },
+        status: { type: "string", description: "draft or active", enum: ["draft", "active"] },
+        accountId: { type: "integer" },
+      },
+      required: ["projectId", "messageBoardId", "subject", "content"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "basecamp_request",
+    title: "Generic Basecamp API request (do anything)",
+    description:
+      "Makes an arbitrary request to Launchpad or Basecamp API with a SAFE allowlist. Use this to read/write anything not covered by the convenience tools.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        api: { type: "string", enum: ["basecamp", "launchpad"] },
+        method: { type: "string", enum: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+        path: {
+          type: "string",
+          description:
+            "Path only (no host). Example: /{accountId}/projects.json or /authorization.json",
+        },
+        body: { type: "object", description: "JSON body for POST/PUT/PATCH (optional)" },
+      },
+      required: ["api", "method", "path"],
+      additionalProperties: false,
+    },
   },
 ];
 
-// Helper: fetch Basecamp projects (same logic as your /debug/projects)
-async function fetchProjectsFromBasecamp() {
-  const t = tokenStore.get("basecamp:token");
-  if (!t?.access_token) {
-    return { ok: false, status: 401, error: "Not connected to Basecamp." };
-  }
+// -------------------- MCP Tool Implementations --------------------
+async function tool_startbcgpt() {
+  const t = getToken();
+  const connected = Boolean(t?.access_token);
+  const reauthUrl = `${APP_BASE_URL}/auth/basecamp/start`;
 
-  // 1) authorization.json to get accounts
-  const authResp = await fetch("https://launchpad.37signals.com/authorization.json", {
-    headers: {
-      Authorization: `Bearer ${t.access_token}`,
-      "User-Agent": UA,
-    },
-  });
-
-  if (!authResp.ok) {
-    const text = await authResp.text();
-    return { ok: false, status: authResp.status, error: text };
-  }
-
-  const authJson = await authResp.json();
-  const accounts = authJson?.accounts || [];
-  if (!accounts.length) {
-    return { ok: false, status: 404, error: "No Basecamp accounts found." };
-  }
-
-  let accountId = accounts[0].id;
-
-if (BASECAMP_DEFAULT_ACCOUNT_ID) {
-  const match = accounts.find(a => Number(a.id) === BASECAMP_DEFAULT_ACCOUNT_ID);
-  if (!match) {
+  if (!connected) {
     return {
-      ok: false,
-      status: 404,
-      error: `Default account ${BASECAMP_DEFAULT_ACCOUNT_ID} not found. Available: ${accounts.map(a => a.id).join(", ")}`
+      ok: true,
+      connected: false,
+      user: null,
+      accounts: [],
+      reauthUrl,
     };
   }
-  accountId = match.id;
-}
-  const projectsUrl = `https://3.basecampapi.com/${accountId}/projects.json`;
 
-  const projectsResp = await fetch(projectsUrl, {
-    headers: {
-      Authorization: `Bearer ${t.access_token}`,
-      "User-Agent": UA,
+  const idAcc = await getIdentityAndAccounts();
+  if (!idAcc.ok) return { ok: false, status: idAcc.status, error: idAcc.error };
+
+  const userName =
+    idAcc.identity?.name ||
+    idAcc.identity?.email_address ||
+    idAcc.identity?.id ||
+    "Unknown";
+
+  return {
+    ok: true,
+    connected: true,
+    user: {
+      name: userName,
+      email: idAcc.identity?.email_address || null,
+      id: idAcc.identity?.id || null,
     },
+    accounts: (idAcc.accounts || []).map((a) => ({
+      id: a.id,
+      name: a.name,
+      product: a.product,
+      href: a.href,
+      app_href: a.app_href,
+    })),
+    defaultAccountId: DEFAULT_ACCOUNT_ID || null,
+    reauthUrl,
+  };
+}
+
+async function tool_list_accounts() {
+  const idAcc = await getIdentityAndAccounts();
+  if (!idAcc.ok) return { ok: false, status: idAcc.status, error: idAcc.error };
+  return { ok: true, accounts: idAcc.accounts || [], identity: idAcc.identity || null };
+}
+
+async function tool_list_projects(args) {
+  const data = await listProjects({ accountId: args?.accountId });
+  if (!data.ok) return { ok: false, status: data.status, error: data.error };
+  return data;
+}
+
+async function tool_get_project(args) {
+  const data = await getProject({ accountId: args?.accountId, projectId: args?.projectId });
+  if (!data.ok) return { ok: false, status: data.status, error: data.error };
+  return data;
+}
+
+async function tool_list_people(args) {
+  const { projectId, accountId } = args || {};
+  const proj = await getProject({ accountId, projectId });
+  if (!proj.ok) return { ok: false, status: proj.status, error: proj.error };
+
+  const r = await basecampFetch(`/buckets/${projectId}/people.json`);
+  if (!r.ok) return { ok: false, status: r.status, error: r.data };
+  return { ok: true, projectId, people: r.data };
+}
+
+async function tool_list_todolists(args) {
+  const { projectId } = args || {};
+  const r = await basecampFetch(`/buckets/${projectId}/todolists.json`);
+  if (!r.ok) return { ok: false, status: r.status, error: r.data };
+  return { ok: true, projectId, todolists: r.data };
+}
+
+async function tool_list_todos(args) {
+  const { projectId, todolistId } = args || {};
+  const r = await basecampFetch(`/buckets/${projectId}/todolists/${todolistId}/todos.json`);
+  if (!r.ok) return { ok: false, status: r.status, error: r.data };
+  return { ok: true, projectId, todolistId, todos: r.data };
+}
+
+async function tool_create_todo(args) {
+  const { projectId, todolistId, content, description, assigneeId, dueOn, notify } = args || {};
+  const body = {
+    content,
+    ...(description ? { description } : {}),
+    ...(assigneeId ? { assignee_ids: [assigneeId] } : {}),
+    ...(dueOn ? { due_on: dueOn } : {}),
+    ...(typeof notify === "boolean" ? { notify: notify } : {}),
+  };
+
+  const r = await basecampFetch(`/buckets/${projectId}/todolists/${todolistId}/todos.json`, {
+    method: "POST",
+    body,
   });
 
-  const text = await projectsResp.text();
-  if (!projectsResp.ok) {
-    return { ok: false, status: projectsResp.status, error: text };
-  }
-
-  let projects;
-  try {
-    projects = JSON.parse(text);
-  } catch {
-    projects = text;
-  }
-
-  return { ok: true, accountId, projects };
+  if (!r.ok) return { ok: false, status: r.status, error: r.data };
+  return { ok: true, created: r.data };
 }
 
-// GET /mcp (SSE stream) — optional but supported by Streamable HTTP transport spec :contentReference[oaicite:1]{index=1}
+async function tool_complete_todo(args) {
+  const { projectId, todoId } = args || {};
+  const r = await basecampFetch(`/buckets/${projectId}/todos/${todoId}/completion.json`, {
+    method: "POST",
+    body: {},
+  });
+  if (!r.ok) return { ok: false, status: r.status, error: r.data };
+  return { ok: true, completed: r.data };
+}
+
+async function tool_create_comment(args) {
+  const { commentsUrl, content } = args || {};
+  // commentsUrl is a PATH ONLY; normalize and enforce it begins with /buckets/
+  const p = normalizePath(commentsUrl || "");
+  if (!p.startsWith("/buckets/")) {
+    return { ok: false, status: 400, error: "commentsUrl must be a Basecamp path starting with /buckets/..." };
+  }
+
+  const r = await basecampFetch(p, { method: "POST", body: { content } });
+  if (!r.ok) return { ok: false, status: r.status, error: r.data };
+  return { ok: true, comment: r.data };
+}
+
+async function tool_list_message_boards(args) {
+  const { projectId, accountId } = args || {};
+  const proj = await getProject({ accountId, projectId });
+  if (!proj.ok) return { ok: false, status: proj.status, error: proj.error };
+
+  const boards = (proj.project?.dock || [])
+    .filter((d) => d.name === "message_board" || d.title?.toLowerCase().includes("message board"))
+    .map((d) => ({ id: d.id, title: d.title, name: d.name, url: d.url }));
+
+  return { ok: true, projectId, messageBoards: boards, dock: proj.project?.dock || [] };
+}
+
+async function tool_create_message(args) {
+  const { projectId, messageBoardId, subject, content, status } = args || {};
+  const body = {
+    subject,
+    content,
+    status: status || "active",
+  };
+
+  const r = await basecampFetch(`/buckets/${projectId}/message_boards/${messageBoardId}/messages.json`, {
+    method: "POST",
+    body,
+  });
+
+  if (!r.ok) return { ok: false, status: r.status, error: r.data };
+  return { ok: true, message: r.data };
+}
+
+// Generic “do anything” tool with safe allowlist
+async function tool_basecamp_request(args) {
+  const { api, method, path, body } = args || {};
+  const p = normalizePath(path || "");
+
+  // VERY IMPORTANT: Only allow Launchpad or Basecamp hosts; no full URLs.
+  if (p.includes("://")) {
+    return { ok: false, status: 400, error: "path must be a path only, not a full URL" };
+  }
+
+  // Optional: basic path hardening
+  if (p.includes("..")) {
+    return { ok: false, status: 400, error: "invalid path" };
+  }
+
+  if (api === "launchpad") {
+    const r = await launchpadFetch(p, { method, body });
+    if (!r.ok) return { ok: false, status: r.status, error: r.data };
+    return { ok: true, status: r.status, data: r.data };
+  }
+
+  if (api === "basecamp") {
+    const r = await basecampFetch(p, { method, body });
+    if (!r.ok) return { ok: false, status: r.status, error: r.data };
+    return { ok: true, status: r.status, data: r.data };
+  }
+
+  return { ok: false, status: 400, error: "api must be 'basecamp' or 'launchpad'" };
+}
+
+// -------------------- MCP: SSE endpoint (optional) --------------------
 app.get("/mcp", (req, res) => {
   if (!checkOrigin(req, res)) return;
 
@@ -340,7 +886,6 @@ app.get("/mcp", (req, res) => {
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
 
-  // Keepalive ping (comments are valid in SSE)
   const interval = setInterval(() => {
     res.write(`: ping ${Date.now()}\n\n`);
   }, 25000);
@@ -348,24 +893,17 @@ app.get("/mcp", (req, res) => {
   req.on("close", () => clearInterval(interval));
 });
 
-// POST /mcp — JSON-RPC handler for initialize, tools/list, tools/call :contentReference[oaicite:2]{index=2}
+// -------------------- MCP: JSON-RPC handler --------------------
 app.post("/mcp", async (req, res) => {
   if (!checkOrigin(req, res)) return;
 
-  // MCP transport spec: client sends Accept application/json and/or text/event-stream.
-  // We'll respond with application/json always for simplicity.
   res.setHeader("Content-Type", "application/json; charset=utf-8");
 
   const payload = req.body;
-
-  // Support batch or single JSON-RPC message
   const msgs = Array.isArray(payload) ? payload : [payload];
 
-  // If it's only notifications (no id), return 202 per spec guidance (optional)
   const hasAnyRequestWithId = msgs.some((m) => m && typeof m.id !== "undefined" && m.id !== null);
-  if (!hasAnyRequestWithId) {
-    return res.status(202).end();
-  }
+  if (!hasAnyRequestWithId) return res.status(202).end();
 
   const responses = [];
 
@@ -384,7 +922,7 @@ app.post("/mcp", async (req, res) => {
 
       // Enforce session after initialize
       if (method !== "initialize") {
-        const sid = getSession(req);
+        const sid = getSessionId(req);
         if (!sid) {
           responses.push({
             jsonrpc: "2.0",
@@ -399,7 +937,6 @@ app.post("/mcp", async (req, res) => {
         const sessionId = newSessionId();
         sessions.set(sessionId, { createdAt: Date.now() });
 
-        // Include session header per transport spec session management :contentReference[oaicite:3]{index=3}
         res.setHeader("Mcp-Session-Id", sessionId);
 
         responses.push({
@@ -413,10 +950,10 @@ app.post("/mcp", async (req, res) => {
             serverInfo: {
               name: "bcgpt",
               title: "Basecamp GPT MCP Server",
-              version: "1.0.0",
+              version: "2.0.0",
             },
             instructions:
-              "Use tools/list to see available tools. Use tools/call to execute list_projects.",
+              "Use tools/list to see available tools. Use tools/call to execute actions. Call startbcgpt first to confirm connection & get reauth link.",
           },
         });
         continue;
@@ -428,7 +965,6 @@ app.post("/mcp", async (req, res) => {
           id,
           result: {
             tools: MCP_TOOLS,
-            // nextCursor omitted (no pagination)
           },
         });
         continue;
@@ -438,7 +974,22 @@ app.post("/mcp", async (req, res) => {
         const name = params?.name;
         const args = params?.arguments || {};
 
-        if (name !== "list_projects") {
+        // Dispatch
+        let out;
+        if (name === "startbcgpt") out = await tool_startbcgpt();
+        else if (name === "list_accounts") out = await tool_list_accounts();
+        else if (name === "list_projects") out = await tool_list_projects(args);
+        else if (name === "get_project") out = await tool_get_project(args);
+        else if (name === "list_people") out = await tool_list_people(args);
+        else if (name === "list_todolists") out = await tool_list_todolists(args);
+        else if (name === "list_todos") out = await tool_list_todos(args);
+        else if (name === "create_todo") out = await tool_create_todo(args);
+        else if (name === "complete_todo") out = await tool_complete_todo(args);
+        else if (name === "create_comment") out = await tool_create_comment(args);
+        else if (name === "list_message_boards") out = await tool_list_message_boards(args);
+        else if (name === "create_message") out = await tool_create_message(args);
+        else if (name === "basecamp_request") out = await tool_basecamp_request(args);
+        else {
           responses.push({
             jsonrpc: "2.0",
             id,
@@ -447,64 +998,25 @@ app.post("/mcp", async (req, res) => {
           continue;
         }
 
-        // Validate args (none expected)
-        if (args && Object.keys(args).length > 0) {
-          responses.push({
-            jsonrpc: "2.0",
-            id,
-            error: { code: -32602, message: "list_projects takes no arguments" },
-          });
-          continue;
-        }
+        // MCP tool result formatting
+        const isError = out && out.ok === false;
 
-        const data = await fetchProjectsFromBasecamp();
-        if (!data.ok) {
-          responses.push({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              content: [
-                {
-                  type: "text",
-                  text: `Failed to list projects (${data.status}): ${String(data.error).slice(0, 1500)}`,
-                },
-              ],
-              isError: true,
-            },
-          });
-          continue;
-        }
-
-        // Create a friendly compact summary
-        const projects = Array.isArray(data.projects) ? data.projects : [];
-        const summary = projects
-          .slice(0, 50)
-          .map((p) => `• ${p.name} (id: ${p.id})`)
-          .join("\n");
+        // Trim huge payloads
+        const safeJson = JSON.stringify(out, null, 2);
+        const text = safeJson.length > 12000 ? safeJson.slice(0, 12000) + "\n... (truncated)" : safeJson;
 
         responses.push({
           jsonrpc: "2.0",
           id,
           result: {
-            content: [
-              {
-                type: "text",
-                text:
-                  `Found ${projects.length} project(s) in account ${data.accountId}.\n\n` +
-                  (summary || "(No projects returned.)"),
-              },
-            ],
-            structuredContent: {
-              accountId: data.accountId,
-              projects: projects.map((p) => ({ id: p.id, name: p.name })),
-            },
-            isError: false,
+            content: [{ type: "text", text }],
+            structuredContent: out,
+            isError,
           },
         });
         continue;
       }
 
-      // Any other method
       responses.push({
         jsonrpc: "2.0",
         id,
@@ -519,12 +1031,11 @@ app.post("/mcp", async (req, res) => {
     }
   }
 
-  // If original was single, respond single
   if (!Array.isArray(payload)) return res.status(200).send(JSON.stringify(responses[0]));
   return res.status(200).send(JSON.stringify(responses));
 });
 
-
+// -------------------- Root --------------------
 app.get("/", (req, res) => res.send("bcgpt server running"));
 
 const PORT = process.env.PORT || 3000;
