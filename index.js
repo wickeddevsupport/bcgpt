@@ -2,42 +2,35 @@
  * bcgpt index.js — Basecamp OAuth + MCP Server (Streamable HTTP)
  * Node >=18, ESM ("type":"module")
  *
- * What you get:
- * ✅ OAuth connect flow:
- *    GET  /auth/basecamp/start
- *    GET  /auth/basecamp/callback
+ * Routes:
+ *  - GET  /auth/basecamp/start
+ *  - GET  /auth/basecamp/callback
+ *  - GET  /startbcgpt     (ALWAYS returns reauthUrl; minimal user info)
+ *  - POST /logout         (clears token + cached auth)
+ *  - GET  /logout         (same as POST, but browser friendly)
+ *  - GET  /health
  *
- * ✅ ChatGPT-friendly status route:
- *    GET  /startbcgpt
- *      - ALWAYS returns reauthUrl (even if already logged in)
- *      - returns minimal user info only (name + email) if connected
- *      - includes “Not you? Login with another account.”
+ * MCP:
+ *  - GET  /mcp (SSE keepalive)
+ *  - POST /mcp (JSON-RPC: initialize, tools/list, tools/call)
  *
- * ✅ Logout:
- *    POST /logout  (API)
- *    GET  /logout  (browser)
+ * MCP Tools:
+ *  - startbcgpt (minimal status + reauthUrl)
+ *  - logout
+ *  - list_accounts
+ *  - list_projects
+ *  - get_project
+ *  - list_people
+ *  - list_todolists
+ *  - list_todos
+ *  - create_todo
+ *  - complete_todo
+ *  - create_comment
+ *  - list_message_boards
+ *  - create_message
+ *  - basecamp_request (generic do-anything tool)
  *
- * ✅ MCP server:
- *    GET  /mcp  (SSE keepalive)
- *    POST /mcp  (JSON-RPC: initialize, tools/list, tools/call)
- *
- * ✅ MCP tools (full set):
- *   - startbcgpt (minimal status)
- *   - logout
- *   - list_accounts
- *   - list_projects
- *   - get_project
- *   - list_people
- *   - list_todolists
- *   - list_todos
- *   - create_todo
- *   - complete_todo
- *   - create_comment
- *   - list_message_boards
- *   - create_message
- *   - basecamp_request (generic do-anything tool)
- *
- * Note: token storage is in-memory. For production persistence, swap tokenStore for Redis/DB.
+ * NOTE: token storage is in-memory. For persistence on Render, use Redis/DB.
  */
 
 import express from "express";
@@ -70,20 +63,57 @@ if (!BASECAMP_CLIENT_ID || !BASECAMP_CLIENT_SECRET) {
 const tokenStore = new Map(); // basecamp:token, basecamp:authorization, state:<...>
 const STATE_TTL_MS = 10 * 60 * 1000;
 
+// -------------------- MCP protocol + security + sessions (DECLARE ONCE) --------------------
+const MCP_PROTOCOL_VERSION = "2025-06-18";
+
+// DNS rebinding protection (Origin allowlist)
+const ORIGIN_ALLOWLIST = new Set([
+  "https://chatgpt.com",
+  "https://chat.openai.com",
+  APP_BASE_URL,
+]);
+
+function checkOrigin(req, res) {
+  const origin = req.headers.origin;
+  if (!origin) return true; // server-to-server
+  if (!ORIGIN_ALLOWLIST.has(origin)) {
+    res.status(403).json({ error: "Origin not allowed" });
+    return false;
+  }
+  return true;
+}
+
+// Session tracking
+const sessions = new Map(); // sessionId -> { createdAt }
+
+function newSessionId() {
+  return "mcp_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+function getSessionId(req) {
+  const sid = req.headers["mcp-session-id"];
+  if (!sid) return null;
+  return sessions.has(sid) ? sid : null;
+}
+
 // -------------------- Token + auth cache helpers --------------------
 function getToken() {
   return tokenStore.get("basecamp:token");
 }
+
 function setToken(tokenJson) {
   tokenStore.set("basecamp:token", tokenJson);
 }
+
 function clearAuth() {
   tokenStore.delete("basecamp:token");
   tokenStore.delete("basecamp:authorization");
 }
+
 function getCachedAuthorization() {
   return tokenStore.get("basecamp:authorization");
 }
+
 function setCachedAuthorization(authJson) {
   tokenStore.set("basecamp:authorization", { cachedAt: Date.now(), data: authJson });
 }
@@ -108,7 +138,7 @@ async function refreshAccessTokenIfNeeded() {
     return { ok: true, token: t, refreshed: false };
   }
 
-  // Best-effort refresh
+  // Best-effort refresh (if it fails, user can reauth)
   try {
     const body = new URLSearchParams({
       type: "refresh_token",
@@ -144,7 +174,7 @@ async function refreshAccessTokenIfNeeded() {
 
 async function fetchAuthorizationJson({ force = false } = {}) {
   const cached = getCachedAuthorization();
-  // short cache to keep identity detection fresh
+  // short cache for identity reliability
   if (!force && cached?.data && Date.now() - cached.cachedAt < 60 * 1000) {
     return { ok: true, data: cached.data, cached: true };
   }
@@ -168,6 +198,16 @@ async function fetchAuthorizationJson({ force = false } = {}) {
   const authJson = await r.json();
   setCachedAuthorization(authJson);
   return { ok: true, data: authJson, cached: false };
+}
+
+async function getIdentityAndAccounts({ force = false } = {}) {
+  const auth = await fetchAuthorizationJson({ force });
+  if (!auth.ok) return auth;
+  return {
+    ok: true,
+    identity: auth.data?.identity || null,
+    accounts: auth.data?.accounts || [],
+  };
 }
 
 function pickAccountId(accounts) {
@@ -245,16 +285,6 @@ async function basecampFetch(path, { method = "GET", headers = {}, body } = {}) 
   return { ok: resp.ok, status: resp.status, data };
 }
 
-// -------------------- Identity + Accounts --------------------
-async function getIdentityAndAccounts({ force = false } = {}) {
-  const auth = await fetchAuthorizationJson({ force });
-  if (!auth.ok) return auth;
-
-  const identity = auth.data?.identity || null;
-  const accounts = auth.data?.accounts || [];
-  return { ok: true, identity, accounts };
-}
-
 // -------------------- Minimal /startbcgpt payload --------------------
 async function buildStartBcPayload() {
   const reauthUrl = `${APP_BASE_URL}/auth/basecamp/start`;
@@ -274,8 +304,8 @@ async function buildStartBcPayload() {
       message: "Not connected.",
       hint: "Not you? Login with another account using reauthUrl.",
       howTo: [
-        "1) Open reauthUrl in a browser and sign in to Basecamp.",
-        "2) Come back to ChatGPT and use tools (MCP) to read/write Basecamp.",
+        "Open reauthUrl in a browser and sign in.",
+        "Return to ChatGPT and use tools to list projects, create todos, post messages, etc.",
       ],
     };
   }
@@ -293,10 +323,6 @@ async function buildStartBcPayload() {
       hint: "Not you? Login with another account using reauthUrl.",
       status: idAcc.status || 500,
       error: idAcc.error || "authorization.json failed",
-      howTo: [
-        "1) If this is wrong account, open reauthUrl and sign in again.",
-        "2) Or call logout and then reauth.",
-      ],
     };
   }
 
@@ -317,12 +343,12 @@ async function buildStartBcPayload() {
     hint: "Not you? Login with another account using reauthUrl.",
     howTo: [
       "Use MCP tools to operate Basecamp (projects, to-dos, messages, comments).",
-      "If wrong user: open reauthUrl or call logout first.",
+      "If wrong account: open reauthUrl or call logout.",
     ],
   };
 }
 
-// -------------------- Convenience API functions --------------------
+// -------------------- Convenience functions --------------------
 async function listProjects({ accountId } = {}) {
   const idAcc = await getIdentityAndAccounts();
   if (!idAcc.ok) return idAcc;
@@ -413,16 +439,14 @@ app.get("/auth/basecamp/callback", async (req, res) => {
     tokenStore.delete(`state:${state}`);
     tokenStore.delete("basecamp:authorization");
 
-    res.send(
-      "✅ Basecamp connected. Return to ChatGPT and call /startbcgpt (or the startbcgpt tool)."
-    );
+    res.send("✅ Basecamp connected. Return to ChatGPT and call /startbcgpt.");
   } catch (e) {
     console.error(e);
     res.status(500).send("Callback error: " + (e?.message || "unknown"));
   }
 });
 
-// -------------------- Status endpoint --------------------
+// -------------------- Status / start endpoint --------------------
 app.get("/startbcgpt", async (req, res) => {
   try {
     const payload = await buildStartBcPayload();
@@ -467,9 +491,9 @@ app.get("/", (req, res) => {
       "bcgpt server running",
       "",
       "Quick start:",
-      `1) Open ${APP_BASE_URL}/auth/basecamp/start to authenticate`,
-      `2) Check status: ${APP_BASE_URL}/startbcgpt`,
-      "3) Use MCP tools via /mcp (Custom GPT Action / MCP client).",
+      `1) Authenticate: ${APP_BASE_URL}/auth/basecamp/start`,
+      `2) Status:       ${APP_BASE_URL}/startbcgpt`,
+      `3) MCP:          POST ${APP_BASE_URL}/mcp (initialize -> tools/list -> tools/call)`,
       "",
       "Logout:",
       `- POST ${APP_BASE_URL}/logout`,
@@ -487,37 +511,6 @@ app.get("/health", (req, res) => {
     time: new Date().toISOString(),
   });
 });
-
-// -------------------- MCP (Streamable HTTP) --------------------
-const MCP_PROTOCOL_VERSION = "2025-06-18";
-
-// DNS rebinding protection (Origin allowlist)
-const ORIGIN_ALLOWLIST = new Set([
-  "https://chatgpt.com",
-  "https://chat.openai.com",
-  APP_BASE_URL,
-]);
-
-function checkOrigin(req, res) {
-  const origin = req.headers.origin;
-  if (!origin) return true; // server-to-server
-  if (!ORIGIN_ALLOWLIST.has(origin)) {
-    res.status(403).json({ error: "Origin not allowed" });
-    return false;
-  }
-  return true;
-}
-
-// Session tracking
-const sessions = new Map();
-function newSessionId() {
-  return "mcp_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
-}
-function getSessionId(req) {
-  const sid = req.headers["mcp-session-id"];
-  if (!sid) return null;
-  return sessions.has(sid) ? sid : null;
-}
 
 // -------------------- MCP Tools (FULL SET) --------------------
 const MCP_TOOLS = [
@@ -538,7 +531,7 @@ const MCP_TOOLS = [
   {
     name: "list_accounts",
     title: "List Basecamp accounts",
-    description: "Lists Basecamp accounts available to the authenticated user (needed for accountId).",
+    description: "Lists Basecamp accounts available to the authenticated user (useful for accountId).",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
@@ -571,7 +564,7 @@ const MCP_TOOLS = [
     description: "Lists people for a project (bucket).",
     inputSchema: {
       type: "object",
-      properties: { projectId: { type: "integer" }, accountId: { type: "integer" } },
+      properties: { projectId: { type: "integer" } },
       required: ["projectId"],
       additionalProperties: false,
     },
@@ -638,10 +631,7 @@ const MCP_TOOLS = [
       "Creates a comment on a recordable. Provide commentsUrl path like /buckets/{bucket}/recordings/{id}/comments.json",
     inputSchema: {
       type: "object",
-      properties: {
-        commentsUrl: { type: "string" },
-        content: { type: "string" },
-      },
+      properties: { commentsUrl: { type: "string" }, content: { type: "string" } },
       required: ["commentsUrl", "content"],
       additionalProperties: false,
     },
@@ -713,7 +703,6 @@ async function tool_logout() {
 async function tool_list_accounts() {
   const idAcc = await getIdentityAndAccounts({ force: true });
   if (!idAcc.ok) return { ok: false, status: idAcc.status, error: idAcc.error };
-  // returning full accounts is useful for operations; /startbcgpt remains minimal.
   return { ok: true, accounts: idAcc.accounts || [] };
 }
 
@@ -837,7 +826,7 @@ async function tool_basecamp_request(args) {
   return { ok: false, status: 400, error: "api must be 'basecamp' or 'launchpad'" };
 }
 
-// -------------------- MCP endpoints --------------------
+// -------------------- MCP: SSE endpoint --------------------
 app.get("/mcp", (req, res) => {
   if (!checkOrigin(req, res)) return;
 
@@ -857,6 +846,7 @@ app.get("/mcp", (req, res) => {
   req.on("close", () => clearInterval(interval));
 });
 
+// -------------------- MCP: JSON-RPC handler --------------------
 app.post("/mcp", async (req, res) => {
   if (!checkOrigin(req, res)) return;
 
@@ -873,11 +863,7 @@ app.post("/mcp", async (req, res) => {
   for (const msg of msgs) {
     try {
       if (!msg || msg.jsonrpc !== "2.0") {
-        responses.push({
-          jsonrpc: "2.0",
-          id: msg?.id ?? null,
-          error: { code: -32600, message: "Invalid Request" },
-        });
+        responses.push({ jsonrpc: "2.0", id: msg?.id ?? null, error: { code: -32600, message: "Invalid Request" } });
         continue;
       }
 
@@ -887,11 +873,7 @@ app.post("/mcp", async (req, res) => {
       if (method !== "initialize") {
         const sid = getSessionId(req);
         if (!sid) {
-          responses.push({
-            jsonrpc: "2.0",
-            id,
-            error: { code: -32001, message: "Missing or invalid Mcp-Session-Id" },
-          });
+          responses.push({ jsonrpc: "2.0", id, error: { code: -32001, message: "Missing or invalid Mcp-Session-Id" } });
           continue;
         }
       }
@@ -907,13 +889,23 @@ app.post("/mcp", async (req, res) => {
           result: {
             protocolVersion: MCP_PROTOCOL_VERSION,
             capabilities: { tools: { listChanged: false } },
-            serverInfo: { name: "bcgpt", title: "Basecamp GPT MCP Server", version: "3.0.0" },
+            serverInfo: { name: "bcgpt", title: "Basecamp GPT MCP Server", version: "3.0.1" },
             instructions: [
+              "Start here:",
               "1) Call tool startbcgpt to check login status and get reauthUrl.",
               "2) If not connected: open reauthUrl in browser and authenticate.",
               "3) Use tools/list then tools/call for Basecamp operations.",
-              "Tip: Prefer convenience tools first; fallback to basecamp_request for unsupported actions.",
-              "If wrong user: open reauthUrl (Not you? login with another account) or call logout.",
+              "",
+              "Common flow:",
+              "- list_accounts (if needed) -> list_projects -> get_project",
+              "- list_todolists -> list_todos -> create_todo / complete_todo",
+              "- list_message_boards -> create_message -> create_comment",
+              "",
+              "Fallback:",
+              "- Use basecamp_request for endpoints not covered by tools.",
+              "",
+              "Wrong account?",
+              "- Call logout or open reauthUrl (Not you? login with another account).",
             ].join("\n"),
           },
         });
@@ -978,33 +970,6 @@ app.post("/mcp", async (req, res) => {
   if (!Array.isArray(payload)) return res.status(200).send(JSON.stringify(responses[0]));
   return res.status(200).send(JSON.stringify(responses));
 });
-
-// -------------------- MCP security: origin allowlist + sessions --------------------
-const ORIGIN_ALLOWLIST = new Set([
-  "https://chatgpt.com",
-  "https://chat.openai.com",
-  APP_BASE_URL,
-]);
-
-function checkOrigin(req, res) {
-  const origin = req.headers.origin;
-  if (!origin) return true;
-  if (!ORIGIN_ALLOWLIST.has(origin)) {
-    res.status(403).json({ error: "Origin not allowed" });
-    return false;
-  }
-  return true;
-}
-
-const sessions = new Map();
-function newSessionId() {
-  return "mcp_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
-}
-function getSessionId(req) {
-  const sid = req.headers["mcp-session-id"];
-  if (!sid) return null;
-  return sessions.has(sid) ? sid : null;
-}
 
 // -------------------- Start server --------------------
 const PORT = process.env.PORT || 3000;
