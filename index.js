@@ -41,6 +41,9 @@ import fetch from "node-fetch";
 dotenv.config();
 
 const app = express();
+// Render/Proxies: so req.protocol uses x-forwarded-proto correctly
+app.set("trust proxy", 1);
+
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
@@ -446,23 +449,80 @@ app.get("/auth/basecamp/callback", async (req, res) => {
 
 // -------------------- Status / start endpoint --------------------
 app.get("/startbcgpt", async (req, res) => {
+  // Always provide links, even if other parts fail
+  const inferredBase =
+    (req.headers["x-forwarded-proto"] && req.headers.host
+      ? `${req.headers["x-forwarded-proto"]}://${req.headers.host}`
+      : null) ||
+    `${req.protocol}://${req.get("host")}`;
+
+  const base =
+    typeof APP_BASE_URL === "string" && APP_BASE_URL.startsWith("http")
+      ? APP_BASE_URL
+      : inferredBase;
+
+  const reauthUrl = `${base}/auth/basecamp/start`;
+  const logoutUrl = `${base}/logout`;
+
   try {
-    const payload = await buildStartBcPayload();
-    res.status(payload.ok ? 200 : (payload.status || 500)).json(payload);
+    const t = getToken?.() || null;
+    const connected = Boolean(t?.access_token);
+
+    if (!connected) {
+      return res.status(200).json({
+        ok: true,
+        connected: false,
+        user: null,
+        reauthUrl,
+        logoutUrl,
+        message: "Not connected.",
+        hint: "Not you? Login with another account using reauthUrl."
+      });
+    }
+
+    // Identity fetch must never crash the endpoint
+    let user = null;
+    try {
+      // force=true helps "currently it doesn't detect it"
+      const idAcc = await getIdentityAndAccounts({ force: true });
+      if (idAcc?.ok) {
+        const identity = idAcc.identity || {};
+        const name =
+          identity?.name ||
+          identity?.email_address ||
+          (identity?.id != null ? String(identity.id) : "Unknown");
+        const email = identity?.email_address || null;
+        user = { name, email };
+      }
+    } catch (e) {
+      // swallow identity errors; endpoint still returns reauthUrl
+      user = null;
+    }
+
+    return res.status(200).json({
+      ok: true,
+      connected: true,
+      user,
+      reauthUrl,
+      logoutUrl,
+      message: "Connected.",
+      hint: "Not you? Login with another account using reauthUrl."
+    });
   } catch (e) {
-    console.error(e);
-    res.status(500).json({
+    // Hard safety net: never 500 without reauthUrl
+    return res.status(200).json({
       ok: false,
-      connected: Boolean(getToken()?.access_token),
+      connected: Boolean(getToken?.()?.access_token),
       user: null,
-      reauthUrl: `${APP_BASE_URL}/auth/basecamp/start`,
-      logoutUrl: `${APP_BASE_URL}/logout`,
-      message: "Server error.",
+      reauthUrl,
+      logoutUrl,
+      message: "startbcgpt encountered an internal error but auth may still be valid.",
       hint: "Not you? Login with another account using reauthUrl.",
-      error: e?.message || "unknown",
+      error: e?.message || "unknown"
     });
   }
 });
+
 
 // -------------------- Logout --------------------
 app.post("/logout", (req, res) => {
