@@ -30,42 +30,42 @@ function sleep(ms) {
 }
 
 /**
- * Normalize Basecamp paths:
- * - Ensure leading slash
- * - Ensure account-scoped endpoints include /3/<accountId>/...
- * - Allow passing full URLs as well
+ * Basecamp 3 URL rules (per docs):
+ * - Account-scoped: https://3.basecampapi.com/<account_id>/...
+ * - Bucket-scoped:  https://3.basecampapi.com/buckets/<bucket_id>/...
+ * - No "/3/" prefix anywhere.  (The "/3/" prefix causes 404.)  :contentReference[oaicite:4]{index=4}
  */
 function normalizeBasecampUrl(path, accountId) {
   if (!path) throw new Error("Missing Basecamp path");
+
   // Full URL passthrough
   if (path.startsWith("http://") || path.startsWith("https://")) return path;
 
   let p = path.startsWith("/") ? path : `/${path}`;
 
-  // If already correct: /3/<accountId>/...
-  if (/^\/3\/\d+\//.test(p)) return `${BASECAMP_API}${p}`;
+  // Bucket scoped endpoints stay as-is (already correct)
+  if (p.startsWith("/buckets/")) return `${BASECAMP_API}${p}`;
 
-  // If starts with /<digits>/... it is account-scoped but missing /3
-  // e.g. /123456/projects.json  -> /3/123456/projects.json
-  if (/^\/\d+\//.test(p)) return `${BASECAMP_API}/3${p}`;
+  // If already account-scoped (starts with "/<digits>/"), keep it
+  if (/^\/\d+\//.test(p)) return `${BASECAMP_API}${p}`;
 
-  // If caller used /projects.json etc, that’s ambiguous; require accountId for those
-  // We'll leave it alone, but this is usually a bug.
-  if (accountId && p.startsWith("/projects")) {
-    return `${BASECAMP_API}/3/${accountId}${p}`;
-  }
+  // Otherwise, if we have an accountId, prefix it (account-scoped)
+  // Example: "/projects.json" -> "/<accountId>/projects.json"
+  if (accountId) return `${BASECAMP_API}/${accountId}${p}`;
 
-  // For bucket-scoped endpoints Basecamp uses /buckets/<bucketId>/...
-  // Those are correct as-is (not under /3/<accountId>).
-  // Example: /buckets/999/todolists.json
-  return `${BASECAMP_API}${p}`;
+  // If no accountId and it isn't a bucket path, we can't safely build it
+  // because Basecamp account prefix is required for account-scoped routes.
+  const err = new Error("ACCOUNT_ID_REQUIRED_FOR_PATH");
+  err.code = "ACCOUNT_ID_REQUIRED_FOR_PATH";
+  err.path = p;
+  throw err;
 }
 
 /**
  * Hardened Basecamp fetch:
  * - timeouts
- * - retry/backoff
- * - better errors
+ * - retry/backoff for 429/502/503/504
+ * - returns good error objects
  */
 async function basecampFetch(token, path, opts = {}) {
   const {
@@ -97,36 +97,24 @@ async function basecampFetch(token, path, opts = {}) {
     payload = JSON.stringify(body);
   }
 
-  let attempt = 0;
-  let lastErr = null;
-
-  while (attempt <= retries) {
-    attempt += 1;
-
+  for (let attempt = 0; attempt <= retries; attempt++) {
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const r = await fetch(url, {
-        method,
-        headers,
-        body: payload,
-        signal: controller.signal
-      });
-
+      const r = await fetch(url, { method, headers, body: payload, signal: controller.signal });
       clearTimeout(t);
 
       // Retryable statuses
-      if ([429, 502, 503, 504].includes(r.status) && attempt <= retries) {
+      if ([429, 502, 503, 504].includes(r.status) && attempt < retries) {
         const retryAfter = Number(r.headers.get("retry-after") || "0");
-        const backoff = retryAfter > 0 ? retryAfter * 1000 : 400 * attempt * attempt;
+        const backoff = retryAfter > 0 ? retryAfter * 1000 : 400 * (attempt + 1) ** 2;
         await sleep(backoff);
         continue;
       }
 
-      // Parse JSON if possible (Basecamp usually returns JSON)
-      let data = null;
       const text = await r.text();
+      let data = null;
       try { data = text ? JSON.parse(text) : null; } catch { data = text || null; }
 
       if (!r.ok) {
@@ -141,24 +129,18 @@ async function basecampFetch(token, path, opts = {}) {
       return data;
     } catch (e) {
       clearTimeout(t);
-      lastErr = e;
-
-      // AbortError retry
-      if ((e?.name === "AbortError") && attempt <= retries) {
-        await sleep(250 * attempt);
+      if (e?.name === "AbortError" && attempt < retries) {
+        await sleep(250 * (attempt + 1));
         continue;
       }
-
       throw e;
     }
   }
 
-  throw lastErr || new Error("BASECAMP_REQUEST_FAILED");
+  throw new Error("BASECAMP_REQUEST_FAILED");
 }
 
-/**
- * Launchpad auth
- */
+/* ============ Launchpad auth ============ */
 async function getAuthorization(force = false) {
   if (!TOKEN?.access_token) {
     const err = new Error("NOT_AUTHENTICATED");
@@ -170,14 +152,12 @@ async function getAuthorization(force = false) {
   const r = await fetch("https://launchpad.37signals.com/authorization.json", {
     headers: { Authorization: `Bearer ${TOKEN.access_token}`, "User-Agent": UA }
   });
-
   if (!r.ok) {
     const err = new Error("AUTHORIZATION_FAILED");
     err.code = "AUTHORIZATION_FAILED";
     err.status = r.status;
     throw err;
   }
-
   AUTH_CACHE = await r.json();
   return AUTH_CACHE;
 }
@@ -204,10 +184,6 @@ async function getAccountId() {
   return auth.accounts[0].id;
 }
 
-/**
- * Always returns auth link, never throws outward.
- * Uses snake_case keys to match Actions schema.
- */
 async function startStatus(req) {
   const base = originBase(req);
   const reauth_url = `${base}/auth/basecamp/start`;
@@ -225,14 +201,9 @@ async function startStatus(req) {
 
   try {
     const auth = await getAuthorization(true);
-    const name =
-      auth.identity?.name ||
-      `${auth.identity?.first_name || ""} ${auth.identity?.last_name || ""}`.trim() ||
-      null;
-
     return {
       connected: true,
-      user: { name, email: auth.identity?.email_address || null },
+      user: { name: auth.identity?.name || null, email: auth.identity?.email_address || null },
       reauth_url,
       logout_url,
       message: "Connected. Not you? Use the auth link to re-login."
@@ -248,11 +219,7 @@ async function startStatus(req) {
   }
 }
 
-/**
- * MCP ctx builder (shared by /mcp and /action tools)
- */
 async function buildMcpCtx(req) {
-  // Only resolve auth/accounts if token exists
   const auth = TOKEN?.access_token ? await getAuthorization() : null;
   const accountId = TOKEN?.access_token ? await getAccountId() : null;
 
@@ -262,17 +229,16 @@ async function buildMcpCtx(req) {
     ua: UA,
     authAccounts: auth?.accounts || [],
     startStatus: async () => await startStatus(req),
-    // expose basecampFetch to MCP tools if your mcp.js uses it via ctx
+
+    // Provide Basecamp fetch to MCP tools so they use the corrected URL builder
     basecampFetch: async (path, opts = {}) =>
       basecampFetch(TOKEN, path, { ...opts, ua: UA, accountId })
   };
 }
 
-/**
- * Actions REST -> MCP tools bridge
- */
 async function runTool(op, params, req) {
   const ctx = await buildMcpCtx(req);
+
   const rpc = {
     jsonrpc: "2.0",
     id: `action-${op}`,
@@ -326,8 +292,7 @@ app.get("/auth/basecamp/callback", async (req, res) => {
       })
     });
 
-    const token = await r.json();
-    TOKEN = token;
+    TOKEN = await r.json();
     AUTH_CACHE = null;
 
     res.send("✅ Basecamp connected. Return to ChatGPT and run /startbcgpt.");
@@ -336,9 +301,7 @@ app.get("/auth/basecamp/callback", async (req, res) => {
   }
 });
 
-app.get("/startbcgpt", async (req, res) => {
-  res.json(await startStatus(req));
-});
+app.get("/startbcgpt", async (req, res) => res.json(await startStatus(req)));
 
 app.post("/logout", (req, res) => {
   TOKEN = null;
@@ -347,64 +310,35 @@ app.post("/logout", (req, res) => {
 });
 
 /* ================= Actions ================= */
-/**
- * Must never fail: always gives auth link.
- */
 app.post("/action/startbcgpt", async (req, res) => {
   res.json(await startStatus(req));
 });
 
-/**
- * Generic tool execution endpoint for Actions.
- * NOTE: For read operations, we return 200 with ok:false on predictable errors
- * to avoid "Error talking to connector" UX.
- */
 app.post("/action/:op", async (req, res) => {
   if (req.params.op === "startbcgpt") {
-    return res.status(404).json({ error: "Use /action/startbcgpt" });
+    return res.status(404).json({ ok: false, error: "Use /action/startbcgpt", code: "BAD_ROUTE" });
   }
 
   try {
     const result = await runTool(req.params.op, req.body || {}, req);
     res.json(result);
   } catch (e) {
-    // Return 200 for common tool errors so ChatGPT can render the message nicely
-    const code = e?.code || "SERVER_ERROR";
-    const payload = {
+    // Return 200 for tool errors so ChatGPT doesn't show "connector failed"
+    res.json({
       ok: false,
       error: e?.message || String(e),
-      code,
-      details: e?.details || {
-        url: e?.url || null,
-        status: e?.status || null,
-        data: e?.data || null
-      }
-    };
-
-    // Still use 500 only for unexpected server failures (no code)
-    if (!e?.code) return res.status(500).json(payload);
-    return res.json(payload);
+      code: e?.code || "SERVER_ERROR",
+      details: e?.details || { url: e?.url || null, status: e?.status || null, data: e?.data || null }
+    });
   }
 });
 
-/* ================= Minimal REST helpers (optional) ================= */
-/**
- * These are still handy for manual debugging in browser/Postman.
- * They are fixed to use the correct /3/<accountId>/... paths.
- */
-app.get("/accounts", async (req, res) => {
-  try {
-    const auth = await getAuthorization();
-    res.json(auth.accounts);
-  } catch (e) {
-    res.status(401).json({ error: e.code || "ERROR", message: e.message });
-  }
-});
-
+/* ================= Debug REST (optional) ================= */
 app.get("/projects", async (req, res) => {
   try {
     const accountId = await getAccountId();
-    const data = await basecampFetch(TOKEN, `/${accountId}/projects.json`, { ua: UA, accountId });
+    // Correct per docs: https://3.basecampapi.com/<accountId>/projects.json :contentReference[oaicite:5]{index=5}
+    const data = await basecampFetch(TOKEN, `/${accountId}/projects.json`, { accountId });
     res.json(data);
   } catch (e) {
     res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, url: e.url, data: e.data });
@@ -414,12 +348,8 @@ app.get("/projects", async (req, res) => {
 app.get("/projects/:projectId", async (req, res) => {
   try {
     const accountId = await getAccountId();
-    // Correct Basecamp 3 project endpoint (account-scoped)
-    const data = await basecampFetch(
-      TOKEN,
-      `/3/${accountId}/projects/${req.params.projectId}.json`,
-      { ua: UA, accountId }
-    );
+    // Correct per docs: /<accountId>/projects/<id>.json :contentReference[oaicite:6]{index=6}
+    const data = await basecampFetch(TOKEN, `/${accountId}/projects/${req.params.projectId}.json`, { accountId });
     res.json(data);
   } catch (e) {
     res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, url: e.url, data: e.data });
