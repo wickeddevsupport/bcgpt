@@ -17,7 +17,46 @@ function isoDate(d) {
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
   const t = new Date(s);
   if (!isNaN(t)) return t.toISOString().slice(0,10);
-  return null;
+  
+// In-memory cache to keep reports fast if the user asks repeatedly
+const CACHE = new Map(); // key -> { ts, value }
+const CACHE_TTL_MS = 60 * 1000;
+
+function cacheGet(key) {
+  const v = CACHE.get(key);
+  if (!v) return null;
+  if (Date.now() - v.ts > CACHE_TTL_MS) { CACHE.delete(key); return null; }
+  return v.value;
+}
+function cacheSet(key, value) {
+  CACHE.set(key, { ts: Date.now(), value });
+  return value;
+}
+
+// Simple concurrency limiter
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  const workers = new Array(Math.min(limit, items.length)).fill(0).map(async () => {
+    while (i < items.length) {
+      const idx = i++;
+      out[idx] = await fn(items[idx], idx);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+function todoAssigneeNames(todo, peopleById) {
+  // Basecamp often returns assignees as embedded objects
+  if (Array.isArray(todo.assignees) && todo.assignees.length) {
+    return todo.assignees.map(a => a?.name).filter(Boolean);
+  }
+  const ids = todo.assignee_ids || todo.assignees_ids || todo.assignee_id ? [todo.assignee_id] : [];
+  const list = Array.isArray(todo.assignee_ids) ? todo.assignee_ids : ids;
+  return (list || []).map(id => peopleById.get(String(id)) || String(id));
+}
+return null;
 }
 
 async function listProjects(TOKEN, accountId, ua, { archived=false } = {}) {
@@ -151,6 +190,17 @@ export async function handleMCP(reqBody, ctx) {
             type:"object",
             properties:{ query:{type:"string"} },
             required:["query"],
+            additionalProperties:false
+          }),
+,
+          tool("assignment_report", "For a project: group open todos by assignee (who is assigned to what). Best-effort and optimized to avoid timeouts.", {
+            type:"object",
+            properties:{
+              project:{ type:"string", description:"Project name (fuzzy match)" },
+              max_todos:{ type:"integer", description:"Maximum todos to scan (default 200)" },
+              include_unassigned:{ type:"boolean", description:"Include unassigned bucket (default true)" }
+            },
+            required:["project"],
             additionalProperties:false
           }),
 
@@ -386,7 +436,91 @@ export async function handleMCP(reqBody, ctx) {
       return ok(id, { today, count: overdue.length, overdue });
     }
 
-    if (name === "search_todos") {
+    
+if (name === "assignment_report") {
+  const project = await projectByName(TOKEN, accountId, ua, args.project);
+  const cacheKey = `assign:${accountId}:${project.id}:${args.max_todos || 200}`;
+  const cached = cacheGet(cacheKey);
+  if (cached) return ok(id, { cached: true, ...cached });
+
+  const maxTodos = Math.max(25, Math.min(1000, Number(args.max_todos || 200)));
+  const includeUnassigned = args.include_unassigned !== false;
+
+  // Try to fetch people for name mapping (best-effort)
+  let people = [];
+  try {
+    // This endpoint exists in many Basecamp setups; if not, we gracefully fall back.
+    people = await basecampFetch(TOKEN, `/buckets/${project.id}/people.json`, { ua });
+  } catch {
+    try {
+      people = await basecampFetch(TOKEN, `/projects/${project.id}/people.json`, { ua });
+    } catch {
+      people = [];
+    }
+  }
+  const peopleById = new Map((people || []).map(p => [String(p.id), p.name || p.email_address || String(p.id)]));
+
+  const lists = await listTodoLists(TOKEN, project.id, ua);
+
+  // Fetch todos for each list with limited concurrency to avoid timeouts
+  let scanned = 0;
+  const perList = await mapLimit(lists, 4, async (l) => {
+    if (scanned >= maxTodos) return { list: l, todos: [] };
+    let todos = [];
+    try {
+      todos = await basecampFetch(TOKEN, l.todos_url, { ua });
+    } catch {
+      // fallback to standard path
+      todos = await basecampFetch(TOKEN, `/buckets/${project.id}/todolists/${l.id}/todos.json`, { ua });
+    }
+    // Only open tasks; trim to remaining budget
+    const open = (todos || []).filter(t => !t.completed && !t.completed_at);
+    const budget = Math.max(0, maxTodos - scanned);
+    const slice = open.slice(0, budget);
+    scanned += slice.length;
+    return { list: l, todos: slice };
+  });
+
+  const assignments = new Map(); // name -> [{task, due, list}]
+  const unassigned = [];
+
+  for (const item of perList) {
+    const listName = item.list?.name || item.list?.title || "Todo list";
+    for (const t of (item.todos || [])) {
+      const task = t.content || t.title || t.name || "";
+      const due = isoDate(t.due_on || t.due_at);
+      const names = todoAssigneeNames(t, peopleById);
+      if (names.length) {
+        for (const n of names) {
+          if (!assignments.has(n)) assignments.set(n, []);
+          assignments.get(n).push({ task, due_on: due, todolist: listName });
+        }
+      } else if (includeUnassigned) {
+        unassigned.push({ task, due_on: due, todolist: listName });
+      }
+    }
+  }
+
+  // sort each assignee list by due date then alpha
+  const out = {};
+  for (const [name, arr] of assignments.entries()) {
+    arr.sort((a,b) => (a.due_on || "9999-99-99").localeCompare(b.due_on || "9999-99-99") || a.task.localeCompare(b.task));
+    out[name] = arr;
+  }
+
+  const payload = {
+    project: { id: project.id, name: project.name },
+    scanned_todos: scanned,
+    assignees: Object.keys(out).length,
+    assignments: out,
+    unassigned: includeUnassigned ? unassigned : undefined,
+    note: scanned >= maxTodos ? `Scanned first ${maxTodos} open todos to avoid timeouts. Increase max_todos if needed.` : undefined
+  };
+
+  return ok(id, cacheSet(cacheKey, payload));
+}
+
+if (name === "search_todos") {
       const q = String(args.query || "").toLowerCase().trim();
       const rows = await listAllOpenTodos(TOKEN, accountId, ua);
       const hits = rows.filter(r => r.content.toLowerCase().includes(q));

@@ -1,6 +1,6 @@
 {
-  "name": "bcgpt-full",
-  "version": "1.1.0",
+  "name": "bcgpt-full-v3",
+  "version": "1.2.0",
   "type": "module",
   "scripts": {
     "start": "node index.js"
