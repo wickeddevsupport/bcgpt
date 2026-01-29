@@ -16,6 +16,8 @@ app.use(express.json({ limit: "2mb" }));
 
 const PORT = process.env.PORT || 3000;
 const UA = "bcgpt-full-v2";
+const DEFAULT_ACCOUNT_ID = process.env.BASECAMP_DEFAULT_ACCOUNT_ID || null;
+
 
 let TOKEN = null;
 let AUTH_CACHE = null;
@@ -48,11 +50,23 @@ async function getAuthorization(force = false) {
 
 async function getAccountId() {
   const auth = await getAuthorization();
+
+  if (DEFAULT_ACCOUNT_ID) {
+    const match = (auth.accounts || []).find(a => String(a.id) === String(DEFAULT_ACCOUNT_ID));
+    if (!match) {
+      const err = new Error(`BASECAMP_DEFAULT_ACCOUNT_ID (${DEFAULT_ACCOUNT_ID}) not found in authorized accounts`);
+      err.code = "DEFAULT_ACCOUNT_NOT_FOUND";
+      throw err;
+    }
+    return match.id;
+  }
+
   if (!auth.accounts?.length) {
     const err = new Error("NO_ACCOUNTS");
     err.code = "NO_ACCOUNTS";
     throw err;
   }
+
   return auth.accounts[0].id;
 }
 
