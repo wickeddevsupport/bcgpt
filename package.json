@@ -1,6 +1,6 @@
 {
-  "name": "bcgpt-production",
-  "version": "5.0.0",
+  "name": "bcgpt-full",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "start": "node index.js"

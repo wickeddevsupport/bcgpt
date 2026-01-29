@@ -51,3 +51,10 @@ export function resolveByName(items, name, label = "item") {
   err.label = label;
   throw err;
 }
+
+export function resolveBestEffort(items, name) {
+  const n = normalize(name);
+  if (!n) return null;
+  const scored = (items || []).map(i => ({ i, score: levenshtein(normalize(i.name), n) })).sort((a,b)=>a.score-b.score);
+  return scored[0]?.i || null;
+}
