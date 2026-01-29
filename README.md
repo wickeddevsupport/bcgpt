@@ -1,21 +1,29 @@
+# Basecamp GPT – Production AI Agent
 
-# bcgpt – Full Basecamp Control Plane
+This is a **single-user, production-ready Basecamp AI agent**.
+It turns natural language into real Basecamp actions.
 
-This package contains a **checklist-complete Basecamp backend**:
-- REST API (Tier 0–6)
-- MCP semantic server (fully implemented)
-- OAuth, auth state, fuzzy matching, fail-fast ambiguity
+## What it does
+- `/startbcgpt` → shows user name, email, and re-auth link
+- Read/write **todos, messages, chat, schedule**
+- Global reporting (today, overdue, search)
+- Dock-aware (only uses enabled tools)
+- Raw fallback for 100% Basecamp coverage
 
-## Files
-- index.js — main server
-- mcp.js — MCP semantic tools
-- resolvers.js — fuzzy resolution helpers
-- basecamp.js — Basecamp API wrapper
+## Run
+```bash
+npm install
+cp .env.example .env
+npm start
+```
 
-## Setup
-1. npm install
-2. set env vars:
-   - BASECAMP_CLIENT_ID
-   - BASECAMP_CLIENT_SECRET
-   - APP_BASE_URL
-3. npm start
+Server:
+POST /mcp
+GET  /auth/basecamp/start
+GET  /auth/basecamp/callback
+
+## Philosophy
+- One user
+- One token
+- Zero bullshit
+- Agent always tries
