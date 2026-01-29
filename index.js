@@ -13,16 +13,54 @@ const app = express();
 app.set("trust proxy", 1);
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
-// Add after app.use(express.json())
+// Helper: run a tool by calling the same MCP handler you already trust
+async function runTool(op, params, ctx) {
+  const rpc = {
+    jsonrpc: "2.0",
+    id: "action-" + op,
+    method: "tools/call",
+    params: { name: op, arguments: params || {} },
+  };
+
+  const resp = await handleMCP(rpc, ctx);
+
+  if (resp?.error) {
+    const msg = resp.error?.message || "Tool error";
+    const e = new Error(msg);
+    e.code = resp.error?.code || "TOOL_ERROR";
+    e.details = resp.error;
+    throw e;
+  }
+
+  return resp?.result;
+}
+
+function buildCtx(req) {
+  const authLink = `${process.env.APP_BASE_URL}/auth/basecamp/start`;
+  return {
+    token: TOKEN,
+    identity: IDENTITY,
+    account: ACCOUNT,
+    authLink,
+    // include anything else your handleMCP expects
+    ua: "bcgpt (bcgpt.onrender.com)"
+  };
+}
+
+
 app.post("/action/:op", async (req, res) => {
   const op = req.params.op;
-  // call into the same implementation your MCP uses:
-  // e.g. runTool(op, req.body)
+
   try {
-    const result = await runTool(op, req.body); // implement runTool using your existing tool handlers
+    const ctx = buildCtx(req); // whatever you already use for MCP context
+    const result = await runTool(op, req.body || {}, ctx);
     res.json(result);
   } catch (e) {
-    res.status(500).json({ error: String(e?.message || e) });
+    res.status(500).json({
+      error: e?.message || String(e),
+      code: e?.code || "SERVER_ERROR",
+      details: e?.details || null,
+    });
   }
 });
 
