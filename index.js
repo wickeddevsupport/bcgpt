@@ -62,8 +62,26 @@ function buildCtx(req) {
   };
 }
 
+app.post("/action/startbcgpt", async (req, res) => {
+  try {
+    // IMPORTANT: do NOT require TOKEN here
+    const status = await startStatus(req); // this must always return reauth_url
+    res.json(status);
+  } catch (e) {
+    // Still return something useful
+    res.json({
+      connected: false,
+      user: null,
+      reauth_url: `${process.env.APP_BASE_URL}/auth/basecamp/start`,
+      error: String(e?.message || e)
+    });
+  }
+});
+
+
 
 app.post("/action/:op", async (req, res) => {
+  if (req.params.op === "startbcgpt") return;
   try {
     const result = await runTool(req.params.op, req.body || {}, req);
     res.json(result);
