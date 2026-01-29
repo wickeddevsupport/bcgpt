@@ -14,26 +14,41 @@ app.set("trust proxy", 1);
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 // Helper: run a tool by calling the same MCP handler you already trust
-async function runTool(op, params, ctx) {
+// ===== Actions wrapper (REST -> MCP tools/call) =====
+
+async function runTool(op, params, req) {
+  // Build the same ctx shape your /mcp route uses
+  const auth = await getAuthorization();
+  const accountId = await getAccountId();
+
+  const ctx = {
+    TOKEN,
+    accountId,
+    ua: UA,
+    authAccounts: auth.accounts || [],
+    startStatus: async () => await startStatus(req),
+  };
+
+  // Call the same tool implementation used by MCP
   const rpc = {
     jsonrpc: "2.0",
-    id: "action-" + op,
+    id: `action-${op}`,
     method: "tools/call",
     params: { name: op, arguments: params || {} },
   };
 
-  const resp = await handleMCP(rpc, ctx);
+  const out = await handleMCP(rpc, ctx);
 
-  if (resp?.error) {
-    const msg = resp.error?.message || "Tool error";
-    const e = new Error(msg);
-    e.code = resp.error?.code || "TOOL_ERROR";
-    e.details = resp.error;
-    throw e;
+  if (out?.error) {
+    const err = new Error(out.error.message || "Tool error");
+    err.code = out.error.code || "TOOL_ERROR";
+    err.details = out.error;
+    throw err;
   }
 
-  return resp?.result;
+  return out?.result;
 }
+
 
 function buildCtx(req) {
   const authLink = `${process.env.APP_BASE_URL}/auth/basecamp/start`;
@@ -49,17 +64,14 @@ function buildCtx(req) {
 
 
 app.post("/action/:op", async (req, res) => {
-  const op = req.params.op;
-
   try {
-    const ctx = buildCtx(req); // whatever you already use for MCP context
-    const result = await runTool(op, req.body || {}, ctx);
+    const result = await runTool(req.params.op, req.body || {}, req);
     res.json(result);
   } catch (e) {
     res.status(500).json({
-      error: e?.message || String(e),
-      code: e?.code || "SERVER_ERROR",
-      details: e?.details || null,
+      error: e.message || String(e),
+      code: e.code || "SERVER_ERROR",
+      details: e.details || null,
     });
   }
 });
