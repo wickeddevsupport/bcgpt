@@ -1,13 +1,16 @@
 import fetch from "node-fetch";
 
-const UA_DEFAULT = "bcgpt";
 const LAUNCHPAD_AUTH_URL = "https://launchpad.37signals.com/authorization.json";
+const UA_DEFAULT = "bcgpt";
 
-// Cache base URL per access token (single-user app → simple cache is fine)
-let BASE_URL_CACHE = null;     // e.g. "https://3.basecampapi.com"
-let AUTHZ_CACHE = null;        // parsed authorization.json
+/* =========================
+   Internal caches (safe for single-user app)
+========================= */
+let AUTHZ_CACHE = null;
 let AUTHZ_CACHE_AT = 0;
-const AUTHZ_TTL_MS = 60 * 1000; // 1 minute is enough
+let BASE_URL_CACHE = null;
+
+const AUTHZ_TTL_MS = 60 * 1000; // 1 min
 
 function ensureAuth(TOKEN) {
   if (!TOKEN?.access_token) {
@@ -21,32 +24,31 @@ function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-/**
- * Basecamp docs flow:
- * 1) OAuth token
- * 2) GET https://launchpad.37signals.com/authorization.json
- * 3) Use accounts[].href to find the correct Basecamp API host + account id. 
- */
+/* =========================
+   Load authorization.json
+========================= */
 async function loadAuthorization(TOKEN, ua, force = false) {
   ensureAuth(TOKEN);
 
   const now = Date.now();
-  if (!force && AUTHZ_CACHE && (now - AUTHZ_CACHE_AT) < AUTHZ_TTL_MS) return AUTHZ_CACHE;
+  if (!force && AUTHZ_CACHE && now - AUTHZ_CACHE_AT < AUTHZ_TTL_MS) {
+    return AUTHZ_CACHE;
+  }
 
   const r = await fetch(LAUNCHPAD_AUTH_URL, {
     headers: {
       Authorization: `Bearer ${TOKEN.access_token}`,
       "User-Agent": ua || UA_DEFAULT,
-      Accept: "application/json",
-    },
+      Accept: "application/json"
+    }
   });
 
   if (!r.ok) {
-    const text = await r.text().catch(() => "");
+    const text = await r.text().catch(() => null);
     const err = new Error(`AUTHORIZATION_FAILED (${r.status})`);
     err.code = "AUTHORIZATION_FAILED";
     err.status = r.status;
-    err.data = text || null;
+    err.data = text;
     throw err;
   }
 
@@ -55,55 +57,47 @@ async function loadAuthorization(TOKEN, ua, force = false) {
   return AUTHZ_CACHE;
 }
 
-/**
- * Determine Basecamp API base URL from authorization.json accounts[].href
- * - Prefer the account matching BASECAMP_DEFAULT_ACCOUNT_ID if set
- * - Otherwise prefer href that points at 3.basecampapi.com
- * - Fallback to first account href host
- */
+/* =========================
+   Resolve Basecamp API base URL
+   STRICTLY using BASECAMP_DEFAULT_ACCOUNT_ID
+========================= */
 async function getBasecampBaseUrl(TOKEN, ua) {
   if (BASE_URL_CACHE) return BASE_URL_CACHE;
 
-  const authz = await loadAuthorization(TOKEN, ua);
-  const accounts = authz?.accounts || [];
-  if (!accounts.length) {
-    const err = new Error("NO_ACCOUNTS");
-    err.code = "NO_ACCOUNTS";
+  const DEFAULT_ID = process.env.BASECAMP_DEFAULT_ACCOUNT_ID;
+  if (!DEFAULT_ID) {
+    const err = new Error("BASECAMP_DEFAULT_ACCOUNT_ID is not set");
+    err.code = "MISSING_DEFAULT_ACCOUNT_ID";
     throw err;
   }
 
-  const defaultId = process.env.BASECAMP_DEFAULT_ACCOUNT_ID || null;
+  const authz = await loadAuthorization(TOKEN, ua);
+  const accounts = authz?.accounts || [];
 
-  let chosen =
-    (defaultId ? accounts.find(a => String(a.id) === String(defaultId)) : null) ||
-    accounts.find(a => typeof a.href === "string" && a.href.includes("3.basecampapi.com")) ||
-    accounts.find(a => typeof a.href === "string") ||
-    accounts[0];
-
-  // account.href is like "https://3.basecampapi.com/999999999"
-  // We only want protocol+host: "https://3.basecampapi.com"
-  const href = String(chosen?.href || "https://3.basecampapi.com");
-  let u;
-  try {
-    u = new URL(href);
-  } catch {
-    // very defensive fallback
-    BASE_URL_CACHE = "https://3.basecampapi.com";
-    return BASE_URL_CACHE;
+  const account = accounts.find(a => String(a.id) === String(DEFAULT_ID));
+  if (!account) {
+    const err = new Error(`Default account ${DEFAULT_ID} not found in authorization.json`);
+    err.code = "DEFAULT_ACCOUNT_NOT_FOUND";
+    err.accounts = accounts.map(a => a.id);
+    throw err;
   }
 
+  if (!account.href) {
+    const err = new Error(`Account ${DEFAULT_ID} has no href`);
+    err.code = "ACCOUNT_HREF_MISSING";
+    throw err;
+  }
+
+  // href example: https://3.basecampapi.com/123456789
+  const u = new URL(account.href);
   BASE_URL_CACHE = `${u.protocol}//${u.host}`;
   return BASE_URL_CACHE;
 }
 
-/**
- * Normalize a Basecamp path into a full URL.
- * Rules (Basecamp 3 API):
- * - account-scoped: /<accountId>/projects.json etc
- * - bucket-scoped:  /buckets/<bucketId>/...
- * - allow full URLs passthrough
- */
-async function toBasecampUrl(TOKEN, path, { ua, accountId } = {}) {
+/* =========================
+   Build full Basecamp URL
+========================= */
+async function toBasecampUrl(TOKEN, path, { ua, accountId }) {
   const baseUrl = await getBasecampBaseUrl(TOKEN, ua);
 
   if (!path) throw new Error("Missing Basecamp path");
@@ -113,13 +107,17 @@ async function toBasecampUrl(TOKEN, path, { ua, accountId } = {}) {
 
   let p = path.startsWith("/") ? path : `/${path}`;
 
-  // Bucket endpoints are already correct as /buckets/...
-  if (p.startsWith("/buckets/")) return `${baseUrl}${p}`;
+  // Bucket endpoints are already absolute to API host
+  if (p.startsWith("/buckets/")) {
+    return `${baseUrl}${p}`;
+  }
 
-  // If already account-scoped /<digits>/..., keep as-is
-  if (/^\/\d+\//.test(p)) return `${baseUrl}${p}`;
+  // Already account-scoped
+  if (/^\/\d+\//.test(p)) {
+    return `${baseUrl}${p}`;
+  }
 
-  // If caller passed "/projects.json" style, prefix with accountId (required)
+  // Otherwise require accountId
   if (!accountId) {
     const err = new Error("ACCOUNT_ID_REQUIRED_FOR_PATH");
     err.code = "ACCOUNT_ID_REQUIRED_FOR_PATH";
@@ -130,12 +128,9 @@ async function toBasecampUrl(TOKEN, path, { ua, accountId } = {}) {
   return `${baseUrl}/${accountId}${p}`;
 }
 
-/**
- * Exported fetch helper used by the rest of your app.
- * - Handles base URL correctly (from authorization.json)
- * - Retries on 429/502/503/504
- * - Provides useful error detail: url/status/data
- */
+/* =========================
+   Main exported fetch helper
+========================= */
 export async function basecampFetch(
   TOKEN,
   path,
@@ -143,9 +138,9 @@ export async function basecampFetch(
     method = "GET",
     body,
     ua = UA_DEFAULT,
-    accountId = null,
+    accountId = process.env.BASECAMP_DEFAULT_ACCOUNT_ID,
     timeoutMs = 15000,
-    retries = 2,
+    retries = 2
   } = {}
 ) {
   ensureAuth(TOKEN);
@@ -155,7 +150,7 @@ export async function basecampFetch(
   const headers = {
     Authorization: `Bearer ${TOKEN.access_token}`,
     "User-Agent": ua,
-    Accept: "application/json",
+    Accept: "application/json"
   };
 
   let payload;
@@ -173,12 +168,11 @@ export async function basecampFetch(
         method,
         headers,
         body: payload,
-        signal: controller.signal,
+        signal: controller.signal
       });
 
       clearTimeout(timer);
 
-      // Retryable statuses
       if ([429, 502, 503, 504].includes(r.status) && attempt < retries) {
         const retryAfter = Number(r.headers.get("retry-after") || "0");
         const backoff = retryAfter > 0 ? retryAfter * 1000 : 400 * (attempt + 1) ** 2;
@@ -191,7 +185,7 @@ export async function basecampFetch(
       try {
         data = text ? JSON.parse(text) : null;
       } catch {
-        data = text || null;
+        data = text;
       }
 
       if (!r.ok) {
@@ -208,7 +202,6 @@ export async function basecampFetch(
     } catch (e) {
       clearTimeout(timer);
 
-      // Retry on timeouts
       if (e?.name === "AbortError" && attempt < retries) {
         await sleep(250 * (attempt + 1));
         continue;
@@ -223,11 +216,11 @@ export async function basecampFetch(
   throw err;
 }
 
-/**
- * Optional: clear caches (useful after /logout)
- */
+/* =========================
+   Optional: reset caches on logout
+========================= */
 export function resetBasecampCaches() {
-  BASE_URL_CACHE = null;
   AUTHZ_CACHE = null;
   AUTHZ_CACHE_AT = 0;
+  BASE_URL_CACHE = null;
 }
