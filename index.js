@@ -3,7 +3,6 @@ import cors from "cors";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
 
-import { basecampFetch } from "./basecamp.js";
 import { handleMCP } from "./mcp.js";
 
 dotenv.config();
@@ -14,23 +13,151 @@ app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
 const PORT = process.env.PORT || 3000;
-const UA = "bcgpt-full-v2";
+const UA = "bcgpt-full-v3";
+const BASECAMP_API = "https://3.basecampapi.com";
 const DEFAULT_ACCOUNT_ID = process.env.BASECAMP_DEFAULT_ACCOUNT_ID || null;
 
-/**
- * Single-user memory
- */
-let TOKEN = null;       // { access_token, ... }
-let AUTH_CACHE = null;  // authorization.json cache
+let TOKEN = null;       // single-user token
+let AUTH_CACHE = null;  // cached authorization.json
 
 function originBase(req) {
   const inferred = `${req.protocol}://${req.get("host")}`;
   return process.env.APP_BASE_URL || inferred;
 }
 
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
 /**
- * Authorization object from Launchpad
- * https://launchpad.37signals.com/authorization.json
+ * Normalize Basecamp paths:
+ * - Ensure leading slash
+ * - Ensure account-scoped endpoints include /3/<accountId>/...
+ * - Allow passing full URLs as well
+ */
+function normalizeBasecampUrl(path, accountId) {
+  if (!path) throw new Error("Missing Basecamp path");
+  // Full URL passthrough
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+
+  let p = path.startsWith("/") ? path : `/${path}`;
+
+  // If already correct: /3/<accountId>/...
+  if (/^\/3\/\d+\//.test(p)) return `${BASECAMP_API}${p}`;
+
+  // If starts with /<digits>/... it is account-scoped but missing /3
+  // e.g. /123456/projects.json  -> /3/123456/projects.json
+  if (/^\/\d+\//.test(p)) return `${BASECAMP_API}/3${p}`;
+
+  // If caller used /projects.json etc, that’s ambiguous; require accountId for those
+  // We'll leave it alone, but this is usually a bug.
+  if (accountId && p.startsWith("/projects")) {
+    return `${BASECAMP_API}/3/${accountId}${p}`;
+  }
+
+  // For bucket-scoped endpoints Basecamp uses /buckets/<bucketId>/...
+  // Those are correct as-is (not under /3/<accountId>).
+  // Example: /buckets/999/todolists.json
+  return `${BASECAMP_API}${p}`;
+}
+
+/**
+ * Hardened Basecamp fetch:
+ * - timeouts
+ * - retry/backoff
+ * - better errors
+ */
+async function basecampFetch(token, path, opts = {}) {
+  const {
+    method = "GET",
+    body = undefined,
+    ua = UA,
+    accountId = null,
+    timeoutMs = 15000,
+    retries = 2
+  } = opts;
+
+  if (!token?.access_token) {
+    const err = new Error("NOT_AUTHENTICATED");
+    err.code = "NOT_AUTHENTICATED";
+    throw err;
+  }
+
+  const url = normalizeBasecampUrl(path, accountId);
+
+  const headers = {
+    "User-Agent": ua,
+    "Authorization": `Bearer ${token.access_token}`,
+    "Accept": "application/json"
+  };
+
+  let payload = undefined;
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    payload = JSON.stringify(body);
+  }
+
+  let attempt = 0;
+  let lastErr = null;
+
+  while (attempt <= retries) {
+    attempt += 1;
+
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const r = await fetch(url, {
+        method,
+        headers,
+        body: payload,
+        signal: controller.signal
+      });
+
+      clearTimeout(t);
+
+      // Retryable statuses
+      if ([429, 502, 503, 504].includes(r.status) && attempt <= retries) {
+        const retryAfter = Number(r.headers.get("retry-after") || "0");
+        const backoff = retryAfter > 0 ? retryAfter * 1000 : 400 * attempt * attempt;
+        await sleep(backoff);
+        continue;
+      }
+
+      // Parse JSON if possible (Basecamp usually returns JSON)
+      let data = null;
+      const text = await r.text();
+      try { data = text ? JSON.parse(text) : null; } catch { data = text || null; }
+
+      if (!r.ok) {
+        const err = new Error(`Basecamp API error (${r.status})`);
+        err.code = "BASECAMP_API_ERROR";
+        err.status = r.status;
+        err.data = data;
+        err.url = url;
+        throw err;
+      }
+
+      return data;
+    } catch (e) {
+      clearTimeout(t);
+      lastErr = e;
+
+      // AbortError retry
+      if ((e?.name === "AbortError") && attempt <= retries) {
+        await sleep(250 * attempt);
+        continue;
+      }
+
+      throw e;
+    }
+  }
+
+  throw lastErr || new Error("BASECAMP_REQUEST_FAILED");
+}
+
+/**
+ * Launchpad auth
  */
 async function getAuthorization(force = false) {
   if (!TOKEN?.access_token) {
@@ -59,13 +186,9 @@ async function getAccountId() {
   const auth = await getAuthorization();
 
   if (DEFAULT_ACCOUNT_ID) {
-    const match = (auth.accounts || []).find(
-      a => String(a.id) === String(DEFAULT_ACCOUNT_ID)
-    );
+    const match = (auth.accounts || []).find(a => String(a.id) === String(DEFAULT_ACCOUNT_ID));
     if (!match) {
-      const err = new Error(
-        `BASECAMP_DEFAULT_ACCOUNT_ID (${DEFAULT_ACCOUNT_ID}) not found in authorized accounts`
-      );
+      const err = new Error(`BASECAMP_DEFAULT_ACCOUNT_ID (${DEFAULT_ACCOUNT_ID}) not found in authorized accounts`);
       err.code = "DEFAULT_ACCOUNT_NOT_FOUND";
       throw err;
     }
@@ -82,10 +205,8 @@ async function getAccountId() {
 }
 
 /**
- * /startbcgpt output should ALWAYS return an auth link,
- * even when not authenticated.
- *
- * IMPORTANT: use snake_case keys for Actions consistency.
+ * Always returns auth link, never throws outward.
+ * Uses snake_case keys to match Actions schema.
  */
 async function startStatus(req) {
   const base = originBase(req);
@@ -116,8 +237,7 @@ async function startStatus(req) {
       logout_url,
       message: "Connected. Not you? Use the auth link to re-login."
     };
-  } catch (e) {
-    // Token exists but identity fetch failed (expired/invalid)
+  } catch {
     return {
       connected: false,
       user: null,
@@ -129,9 +249,10 @@ async function startStatus(req) {
 }
 
 /**
- * Build ctx object for handleMCP, identical for /mcp and /action routes.
+ * MCP ctx builder (shared by /mcp and /action tools)
  */
 async function buildMcpCtx(req) {
+  // Only resolve auth/accounts if token exists
   const auth = TOKEN?.access_token ? await getAuthorization() : null;
   const accountId = TOKEN?.access_token ? await getAccountId() : null;
 
@@ -140,16 +261,18 @@ async function buildMcpCtx(req) {
     accountId,
     ua: UA,
     authAccounts: auth?.accounts || [],
-    startStatus: async () => await startStatus(req)
+    startStatus: async () => await startStatus(req),
+    // expose basecampFetch to MCP tools if your mcp.js uses it via ctx
+    basecampFetch: async (path, opts = {}) =>
+      basecampFetch(TOKEN, path, { ...opts, ua: UA, accountId })
   };
 }
 
 /**
- * REST -> MCP Tools bridge for Actions
+ * Actions REST -> MCP tools bridge
  */
 async function runTool(op, params, req) {
   const ctx = await buildMcpCtx(req);
-
   const rpc = {
     jsonrpc: "2.0",
     id: `action-${op}`,
@@ -169,9 +292,10 @@ async function runTool(op, params, req) {
   return out?.result;
 }
 
-/* ================= Tier 0 ================= */
-app.get("/health", (req, res) => res.json({ ok: true }));
+/* ================= Health ================= */
+app.get("/health", (req, res) => res.json({ ok: true, build: UA }));
 
+/* ================= OAuth ================= */
 app.get("/auth/basecamp/start", (req, res) => {
   const base = originBase(req);
   const redirectUri = `${base}/auth/basecamp/callback`;
@@ -222,22 +346,21 @@ app.post("/logout", (req, res) => {
   res.json({ ok: true, connected: false, message: "Logged out." });
 });
 
-/* ================= Actions endpoints ================= */
+/* ================= Actions ================= */
 /**
- * startbcgpt must never throw NOT_AUTHENTICATED.
- * Always return reauth_url.
+ * Must never fail: always gives auth link.
  */
 app.post("/action/startbcgpt", async (req, res) => {
   res.json(await startStatus(req));
 });
 
 /**
- * Generic action executor:
- * POST /action/<operationId>
+ * Generic tool execution endpoint for Actions.
+ * NOTE: For read operations, we return 200 with ok:false on predictable errors
+ * to avoid "Error talking to connector" UX.
  */
 app.post("/action/:op", async (req, res) => {
   if (req.params.op === "startbcgpt") {
-    // handled above; never hang
     return res.status(404).json({ error: "Use /action/startbcgpt" });
   }
 
@@ -245,15 +368,30 @@ app.post("/action/:op", async (req, res) => {
     const result = await runTool(req.params.op, req.body || {}, req);
     res.json(result);
   } catch (e) {
-    res.status(500).json({
+    // Return 200 for common tool errors so ChatGPT can render the message nicely
+    const code = e?.code || "SERVER_ERROR";
+    const payload = {
+      ok: false,
       error: e?.message || String(e),
-      code: e?.code || "SERVER_ERROR",
-      details: e?.details || null
-    });
+      code,
+      details: e?.details || {
+        url: e?.url || null,
+        status: e?.status || null,
+        data: e?.data || null
+      }
+    };
+
+    // Still use 500 only for unexpected server failures (no code)
+    if (!e?.code) return res.status(500).json(payload);
+    return res.json(payload);
   }
 });
 
-/* ================= Tier 1 ================= */
+/* ================= Minimal REST helpers (optional) ================= */
+/**
+ * These are still handy for manual debugging in browser/Postman.
+ * They are fixed to use the correct /3/<accountId>/... paths.
+ */
 app.get("/accounts", async (req, res) => {
   try {
     const auth = await getAuthorization();
@@ -266,352 +404,25 @@ app.get("/accounts", async (req, res) => {
 app.get("/projects", async (req, res) => {
   try {
     const accountId = await getAccountId();
-    const data = await basecampFetch(TOKEN, `/${accountId}/projects.json`, { ua: UA });
+    const data = await basecampFetch(TOKEN, `/${accountId}/projects.json`, { ua: UA, accountId });
     res.json(data);
   } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
+    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, url: e.url, data: e.data });
   }
 });
 
 app.get("/projects/:projectId", async (req, res) => {
   try {
     const accountId = await getAccountId();
-    const data = await basecampFetch(TOKEN, `/projects/${req.params.projectId}.json`, { ua: UA });
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-app.get("/projects/:projectId/people", async (req, res) => {
-  try {
-    const data = await basecampFetch(TOKEN, `/buckets/${req.params.projectId}/people.json`, { ua: UA });
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-/* ================= Tier 2 ================= */
-app.get("/projects/:projectId/todolists", async (req, res) => {
-  try {
-    const data = await basecampFetch(TOKEN, `/buckets/${req.params.projectId}/todolists.json`, { ua: UA });
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-app.get("/projects/:projectId/todolists/:todolistId", async (req, res) => {
-  try {
+    // Correct Basecamp 3 project endpoint (account-scoped)
     const data = await basecampFetch(
       TOKEN,
-      `/buckets/${req.params.projectId}/todolists/${req.params.todolistId}.json`,
-      { ua: UA }
+      `/3/${accountId}/projects/${req.params.projectId}.json`,
+      { ua: UA, accountId }
     );
     res.json(data);
   } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-app.get("/projects/:projectId/todolists/:todolistId/todos", async (req, res) => {
-  try {
-    const data = await basecampFetch(
-      TOKEN,
-      `/buckets/${req.params.projectId}/todolists/${req.params.todolistId}/todos.json`,
-      { ua: UA }
-    );
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-app.post("/projects/:projectId/todolists/:todolistId/todos", async (req, res) => {
-  try {
-    const data = await basecampFetch(
-      TOKEN,
-      `/buckets/${req.params.projectId}/todolists/${req.params.todolistId}/todos.json`,
-      { method: "POST", body: req.body, ua: UA }
-    );
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-app.put("/projects/:projectId/todos/:todoId", async (req, res) => {
-  try {
-    const data = await basecampFetch(
-      TOKEN,
-      `/buckets/${req.params.projectId}/todos/${req.params.todoId}.json`,
-      { method: "PUT", body: req.body, ua: UA }
-    );
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-app.post("/projects/:projectId/todos/:todoId/complete", async (req, res) => {
-  try {
-    const data = await basecampFetch(
-      TOKEN,
-      `/buckets/${req.params.projectId}/todos/${req.params.todoId}/completion.json`,
-      { method: "POST", ua: UA }
-    );
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-app.delete("/projects/:projectId/todos/:todoId/complete", async (req, res) => {
-  try {
-    const data = await basecampFetch(
-      TOKEN,
-      `/buckets/${req.params.projectId}/todos/${req.params.todoId}/completion.json`,
-      { method: "DELETE", ua: UA }
-    );
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-app.delete("/projects/:projectId/todos/:todoId", async (req, res) => {
-  try {
-    const data = await basecampFetch(
-      TOKEN,
-      `/buckets/${req.params.projectId}/todos/${req.params.todoId}.json`,
-      { method: "DELETE", ua: UA }
-    );
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-/* ================= Tier 3 ================= */
-app.get("/projects/:projectId/message_boards", async (req, res) => {
-  try {
-    const data = await basecampFetch(TOKEN, `/buckets/${req.params.projectId}/message_boards.json`, { ua: UA });
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-app.get("/projects/:projectId/message_boards/:boardId/messages", async (req, res) => {
-  try {
-    const data = await basecampFetch(
-      TOKEN,
-      `/buckets/${req.params.projectId}/message_boards/${req.params.boardId}/messages.json`,
-      { ua: UA }
-    );
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-app.post("/projects/:projectId/message_boards/:boardId/messages", async (req, res) => {
-  try {
-    const data = await basecampFetch(
-      TOKEN,
-      `/buckets/${req.params.projectId}/message_boards/${req.params.boardId}/messages.json`,
-      { method: "POST", body: req.body, ua: UA }
-    );
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-app.put("/projects/:projectId/messages/:messageId", async (req, res) => {
-  try {
-    const data = await basecampFetch(
-      TOKEN,
-      `/buckets/${req.params.projectId}/messages/${req.params.messageId}.json`,
-      { method: "PUT", body: req.body, ua: UA }
-    );
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-app.delete("/projects/:projectId/messages/:messageId", async (req, res) => {
-  try {
-    const data = await basecampFetch(
-      TOKEN,
-      `/buckets/${req.params.projectId}/messages/${req.params.messageId}.json`,
-      { method: "DELETE", ua: UA }
-    );
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-/* ================= Tier 4 ================= */
-app.get("/projects/:projectId/recordings/:recordingId/comments", async (req, res) => {
-  try {
-    const data = await basecampFetch(
-      TOKEN,
-      `/buckets/${req.params.projectId}/recordings/${req.params.recordingId}/comments.json`,
-      { ua: UA }
-    );
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-app.post("/projects/:projectId/recordings/:recordingId/comments", async (req, res) => {
-  try {
-    const data = await basecampFetch(
-      TOKEN,
-      `/buckets/${req.params.projectId}/recordings/${req.params.recordingId}/comments.json`,
-      { method: "POST", body: req.body, ua: UA }
-    );
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-app.put("/projects/:projectId/comments/:commentId", async (req, res) => {
-  try {
-    const data = await basecampFetch(
-      TOKEN,
-      `/buckets/${req.params.projectId}/comments/${req.params.commentId}.json`,
-      { method: "PUT", body: req.body, ua: UA }
-    );
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-app.delete("/projects/:projectId/comments/:commentId", async (req, res) => {
-  try {
-    const data = await basecampFetch(
-      TOKEN,
-      `/buckets/${req.params.projectId}/comments/${req.params.commentId}.json`,
-      { method: "DELETE", ua: UA }
-    );
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-/* ================= Tier 5 ================= */
-app.get("/projects/:projectId/documents", async (req, res) => {
-  try {
-    const data = await basecampFetch(TOKEN, `/buckets/${req.params.projectId}/documents.json`, { ua: UA });
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-app.get("/projects/:projectId/documents/:documentId", async (req, res) => {
-  try {
-    const data = await basecampFetch(
-      TOKEN,
-      `/buckets/${req.params.projectId}/documents/${req.params.documentId}.json`,
-      { ua: UA }
-    );
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-app.post("/projects/:projectId/documents", async (req, res) => {
-  try {
-    const data = await basecampFetch(
-      TOKEN,
-      `/buckets/${req.params.projectId}/documents.json`,
-      { method: "POST", body: req.body, ua: UA }
-    );
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-app.put("/projects/:projectId/documents/:documentId", async (req, res) => {
-  try {
-    const data = await basecampFetch(
-      TOKEN,
-      `/buckets/${req.params.projectId}/documents/${req.params.documentId}.json`,
-      { method: "PUT", body: req.body, ua: UA }
-    );
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-app.delete("/projects/:projectId/documents/:documentId", async (req, res) => {
-  try {
-    const data = await basecampFetch(
-      TOKEN,
-      `/buckets/${req.params.projectId}/documents/${req.params.documentId}.json`,
-      { method: "DELETE", ua: UA }
-    );
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-app.get("/projects/:projectId/attachments", async (req, res) => {
-  try {
-    const data = await basecampFetch(TOKEN, `/buckets/${req.params.projectId}/attachments.json`, { ua: UA });
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-/* ================= Tier 6 ================= */
-app.get("/projects/:projectId/campfires", async (req, res) => {
-  try {
-    const data = await basecampFetch(TOKEN, `/buckets/${req.params.projectId}/campfires.json`, { ua: UA });
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-app.get("/projects/:projectId/campfires/:campfireId/messages", async (req, res) => {
-  try {
-    const data = await basecampFetch(
-      TOKEN,
-      `/buckets/${req.params.projectId}/campfires/${req.params.campfireId}/lines.json`,
-      { ua: UA }
-    );
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
-  }
-});
-
-app.post("/projects/:projectId/campfires/:campfireId/messages", async (req, res) => {
-  try {
-    const data = await basecampFetch(
-      TOKEN,
-      `/buckets/${req.params.projectId}/campfires/${req.params.campfireId}/lines.json`,
-      { method: "POST", body: req.body, ua: UA }
-    );
-    res.json(data);
-  } catch (e) {
-    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, data: e.data });
+    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, url: e.url, data: e.data });
   }
 });
 
@@ -630,4 +441,4 @@ app.post("/mcp", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`bcgpt-full-v2 running on ${PORT}`));
+app.listen(PORT, () => console.log(`${UA} running on ${PORT}`));
