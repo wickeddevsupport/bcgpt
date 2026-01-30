@@ -9,8 +9,7 @@ function fail(id, error) { return { jsonrpc: "2.0", id, error }; }
 
 // ---------- Tool schema helpers ----------
 function tool(name, description, inputSchema) { return { name, description, inputSchema }; }
-function noProps() { return { type: "object", properties: {
-      confirm_debug: { type: "boolean", const: true },}, additionalProperties: false }; }
+function noProps() { return { type: "object", properties: {}, additionalProperties: false }; }
 
 // ---------- Tiny in-memory cache ----------
 const CACHE = new Map(); // key -> { ts, value }
@@ -174,6 +173,7 @@ async function listAllOpenTodos(ctx, { archivedProjects = false, maxProjects = 5
             content: todoText(t),
             due_on: isoDate(t.due_on || t.due_at),
             url: t.app_url || t.url || null,
+            raw: t,
           });
         }
       }
@@ -202,6 +202,7 @@ async function assignmentReport(ctx, projectName, { maxTodos = 250 } = {}) {
         todoId: t.id,
         content: todoText(t),
         due_on: isoDate(t.due_on || t.due_at),
+        raw: t,
       });
       if (open.length >= maxTodos) break;
     }
@@ -325,28 +326,24 @@ export async function handleMCP(reqBody, ctx) {
           tool("list_accounts", "List Basecamp accounts available to the authenticated user.", noProps()),
           tool("list_projects", "List projects (supports archived).", {
             type: "object",
-            properties: {
-      confirm_debug: { type: "boolean", const: true }, archived: { type: "boolean" } },
+            properties: { archived: { type: "boolean" } },
             additionalProperties: false
           }),
           tool("find_project", "Resolve a project by name (fuzzy).", {
             type: "object",
-            properties: {
-      confirm_debug: { type: "boolean", const: true }, name: { type: "string" } },
+            properties: { name: { type: "string" } },
             required: ["name"],
             additionalProperties: false
           }),
 
           tool("daily_report", "Across projects: totals + per-project breakdown + due today + overdue (open only).", {
             type: "object",
-            properties: {
-      confirm_debug: { type: "boolean", const: true }, date: { type: "string", description: "YYYY-MM-DD (defaults today)" } },
+            properties: { date: { type: "string", description: "YYYY-MM-DD (defaults today)" } },
             additionalProperties: false
           }),
           tool("list_todos_due", "Across projects: list open todos due on date; optionally include overdue.", {
             type: "object",
             properties: {
-      confirm_debug: { type: "boolean", const: true },
               date: { type: "string", description: "YYYY-MM-DD (defaults today)" },
               include_overdue: { type: "boolean" }
             },
@@ -354,23 +351,20 @@ export async function handleMCP(reqBody, ctx) {
           }),
           tool("search_todos", "Search open todos across all projects by keyword.", {
             type: "object",
-            properties: {
-      confirm_debug: { type: "boolean", const: true }, query: { type: "string" } },
+            properties: { query: { type: "string" } },
             required: ["query"],
             additionalProperties: false
           }),
           tool("assignment_report", "Group open todos by assignee within a project (optimized).", {
             type: "object",
-            properties: {
-      confirm_debug: { type: "boolean", const: true }, project: { type: "string" }, max_todos: { type: "integer" } },
+            properties: { project: { type: "string" }, max_todos: { type: "integer" } },
             required: ["project"],
             additionalProperties: false
           }),
 
           tool("list_todos_for_project", "List todolists + todos for a project by name.", {
             type: "object",
-            properties: {
-      confirm_debug: { type: "boolean", const: true }, project: { type: "string" } },
+            properties: { project: { type: "string" } },
             required: ["project"],
             additionalProperties: false
           }),
@@ -379,7 +373,6 @@ export async function handleMCP(reqBody, ctx) {
           tool("create_todo", "Create a to-do in a project; optionally specify todolist and due date.", {
             type: "object",
             properties: {
-      confirm_debug: { type: "boolean", const: true },
               project: { type: "string" },
               todolist: { type: "string", nullable: true },
               task: { type: "string" },
@@ -393,8 +386,7 @@ export async function handleMCP(reqBody, ctx) {
 
           tool("complete_task_by_name", "Complete a todo in a project by fuzzy-matching its content.", {
             type: "object",
-            properties: {
-      confirm_debug: { type: "boolean", const: true }, project: { type: "string" }, task: { type: "string" } },
+            properties: { project: { type: "string" }, task: { type: "string" } },
             required: ["project", "task"],
             additionalProperties: false
           }),
@@ -402,29 +394,25 @@ export async function handleMCP(reqBody, ctx) {
           // Card tables
           tool("list_card_tables", "List card tables (kanban boards) for a project.", {
             type: "object",
-            properties: {
-      confirm_debug: { type: "boolean", const: true }, project: { type: "string" } },
+            properties: { project: { type: "string" } },
             required: ["project"],
             additionalProperties: false
           }),
           tool("list_card_table_columns", "List columns for a card table.", {
             type: "object",
-            properties: {
-      confirm_debug: { type: "boolean", const: true }, project: { type: "string" }, card_table_id: { type: "integer" } },
+            properties: { project: { type: "string" }, card_table_id: { type: "integer" } },
             required: ["project", "card_table_id"],
             additionalProperties: false
           }),
           tool("list_card_table_cards", "List cards for a card table.", {
             type: "object",
-            properties: {
-      confirm_debug: { type: "boolean", const: true }, project: { type: "string" }, card_table_id: { type: "integer" } },
+            properties: { project: { type: "string" }, card_table_id: { type: "integer" } },
             required: ["project", "card_table_id"],
             additionalProperties: false
           }),
           tool("create_card", "Create a card in a card table.", {
             type: "object",
             properties: {
-      confirm_debug: { type: "boolean", const: true },
               project: { type: "string" },
               card_table_id: { type: "integer" },
               title: { type: "string" },
@@ -438,7 +426,6 @@ export async function handleMCP(reqBody, ctx) {
           tool("move_card", "Move/update a card (column/position).", {
             type: "object",
             properties: {
-      confirm_debug: { type: "boolean", const: true },
               project: { type: "string" },
               card_id: { type: "integer" },
               column_id: { type: "integer", nullable: true },
@@ -451,35 +438,21 @@ export async function handleMCP(reqBody, ctx) {
           // Hill charts
           tool("get_hill_chart", "Fetch the hill chart for a project (if enabled).", {
             type: "object",
-            properties: {
-      confirm_debug: { type: "boolean", const: true }, project: { type: "string" } },
+            properties: { project: { type: "string" } },
             required: ["project"],
             additionalProperties: false
           }),
 
           // Raw escape hatch
-          tool(
-            "basecamp_request",
-            "Raw Basecamp API call (last resort). Many Basecamp list endpoints are paginated (e.g., /projects.json). If you need ALL results, set paginate=true so the server follows Link rel=next pages. Prefer the purpose-built tools when available.",
-            {
+          tool("basecamp_request", "Raw Basecamp API call. Provide full URL or a /path.", {
             type: "object",
-            properties: {
-              confirm_debug: { type: "boolean", const: true },
-              path: { type: "string" },
-              method: { type: "string" },
-              body: { type: "object" },
-              paginate: { type: "boolean", description: "If true (recommended for list endpoints), follow Basecamp pagination via Link headers." },
-              max_pages: { type: "integer", minimum: 1, maximum: 50, description: "Safety cap for pagination." },
-              compact: { type: "boolean", description: "If true, trims very large list items (e.g., removes dock from projects) to reduce gibberish/oversized output." }
-            },
+            properties: { path: { type: "string" }, method: { type: "string" }, body: { type: "object" } },
             required: ["path"],
             additionalProperties: false
           }),
-          tool("debug_basecamp_raw",
-  "DEBUG ONLY. Returns raw Basecamp API responses. Never use for user-facing queries.", "Alias of basecamp_request for backward compatibility.", {
+          tool("basecamp_raw", "Alias of basecamp_request for backward compatibility.", {
             type: "object",
-            properties: {
-      confirm_debug: { type: "boolean", const: true }, path: { type: "string" }, method: { type: "string" }, body: { type: "object" } },
+            properties: { path: { type: "string" }, method: { type: "string" }, body: { type: "object" } },
             required: ["path"],
             additionalProperties: false
           })
@@ -697,32 +670,31 @@ export async function handleMCP(reqBody, ctx) {
 
     // Raw
     if (name === "basecamp_request" || name === "basecamp_raw") {
-      if (name === "basecamp_request" && args?.confirm_debug !== true) {
-        return fail(id, { code: "CONFIRM_REQUIRED", message: "Set confirm_debug=true to use basecamp_request." });
-      }
+      const method = String(args.method || "GET").toUpperCase();
+      let path = String(args.path || "");
+      const body = args.body;
+      const paginate = args.paginate !== false; // default true
 
-      const method = (args?.method || "GET").toUpperCase();
-      // basecamp_raw is commonly picked by ChatGPT; paginate by default for GET list endpoints
-      const paginate =
-        name === "basecamp_raw" ? (args?.paginate !== false) : args?.paginate === true;
-      const maxPages = Number.isFinite(args?.max_pages) ? Math.max(1, args.max_pages) : 25;
-      const maxItems = Number.isFinite(args?.max_items) ? Math.max(1, args.max_items) : 2000;
+      // Convenience: people often call `/projects` but Basecamp's endpoint is `/projects.json`.
+      if (path === "/projects") path = "/projects.json";
 
-      let data;
-      if (method === "GET" && paginate && !args?.body) {
-        // Follow Link: rel="next" pages (Basecamp pagination)
-        data = await basecampFetchAll(ctx, args.path, { method, maxPages, maxItems });
-      } else {
-        data = await api(ctx, args.path, { method, body: args.body });
-      }
+      // If this is a GET to a list-y endpoint and pagination is enabled, fetch all pages.
+      // (Basecamp uses Link headers; basecampFetchAll handles that.)
+      const isLikelyListEndpoint =
+        method === "GET" &&
+        (path === "/projects.json" ||
+          path.endsWith("/card_table.json") ||
+          path.endsWith("/buckets.json") ||
+          path.endsWith("/todolists.json") ||
+          path.endsWith("/todos.json") ||
+          path.endsWith("/people.json") ||
+          path.endsWith("/message_boards.json") ||
+          path.endsWith("/messages.json") ||
+          path.endsWith("/recordings.json"));
 
-      // Optional compacting to prevent noisy/nested fields (e.g., dock output)
-      if (args?.compact === true && Array.isArray(data)) {
-        const path = String(args?.path || "");
-        if (path.includes("/projects")) {
-          data = data.map(pick(["id", "name", "status", "archived", "updated_at", "app_url"]));
-        }
-      }
+      const data = isLikelyListEndpoint && paginate
+        ? await apiAll(ctx, path)
+        : await api(ctx, path, { method, body });
 
       return ok(id, data);
     }

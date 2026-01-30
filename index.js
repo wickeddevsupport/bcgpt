@@ -16,7 +16,9 @@ app.use(express.json({ limit: "2mb" }));
 const PORT = process.env.PORT || 3000;
 const UA = "bcgpt-full-v3";
 const BASECAMP_API = "https://3.basecampapi.com";
-const DEFAULT_ACCOUNT_ID = process.env.BASECAMP_DEFAULT_ACCOUNT_ID || null;
+// Support both env var names (people commonly set BASECAMP_ACCOUNT_ID).
+const DEFAULT_ACCOUNT_ID =
+  process.env.BASECAMP_DEFAULT_ACCOUNT_ID || process.env.BASECAMP_ACCOUNT_ID || null;
 
 let TOKEN = null;      // single-user token
 let AUTH_CACHE = null; // cached authorization.json
@@ -289,14 +291,13 @@ async function getAccountId() {
 
   if (DEFAULT_ACCOUNT_ID) {
     const match = (auth.accounts || []).find((a) => String(a.id) === String(DEFAULT_ACCOUNT_ID));
-    if (!match) {
-      const err = new Error(
-        `BASECAMP_DEFAULT_ACCOUNT_ID (${DEFAULT_ACCOUNT_ID}) not found in authorized accounts`
-      );
-      err.code = "DEFAULT_ACCOUNT_NOT_FOUND";
-      throw err;
-    }
-    return match.id;
+    if (match) return match.id;
+
+    // Don't hard-fail: fall back to the first authorized account.
+    // This avoids "Missing accountId" errors if Render env vars are misnamed or stale.
+    console.warn(
+      `Default account id (${DEFAULT_ACCOUNT_ID}) not found in authorized accounts; falling back to first account.`
+    );
   }
 
   if (!auth.accounts?.length) {
@@ -345,7 +346,9 @@ async function startStatus(req) {
 
 async function buildMcpCtx(req) {
   const auth = TOKEN?.access_token ? await getAuthorization() : null;
-  const accountId = TOKEN?.access_token ? await getAccountId() : null;
+  // Resolve once, but be defensive: some tokens/accounts occasionally return
+  // an empty `accounts` array; when that happens, we re-resolve on demand.
+  const accountId = TOKEN?.access_token ? await getAccountId().catch(() => null) : null;
 
   return {
     TOKEN,
@@ -355,19 +358,23 @@ async function buildMcpCtx(req) {
     startStatus: async () => await startStatus(req),
 
     // ✅ Provide both single-request AND auto-paginated versions to MCP
-    basecampFetch: async (path, opts = {}) =>
-      basecampFetch(TOKEN, path, { ...opts, ua: UA, accountId, paginate: false }),
+    basecampFetch: async (path, opts = {}) => {
+      const aid = accountId ?? (TOKEN?.access_token ? await getAccountId() : null);
+      return basecampFetch(TOKEN, path, { ...opts, ua: UA, accountId: aid, paginate: false });
+    },
 
-    basecampFetchAll: async (path, opts = {}) =>
-      basecampFetch(TOKEN, path, {
+    basecampFetchAll: async (path, opts = {}) => {
+      const aid = accountId ?? (TOKEN?.access_token ? await getAccountId() : null);
+      return basecampFetch(TOKEN, path, {
         ...opts,
         ua: UA,
-        accountId,
+        accountId: aid,
         paginate: true,
         // allow overrides, but keep sane defaults to avoid 429s
         maxPages: opts.maxPages ?? 50,
         pageDelayMs: opts.pageDelayMs ?? 150,
-      }),
+      });
+    },
   };
 }
 
