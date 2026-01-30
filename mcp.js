@@ -898,19 +898,26 @@ async function listComments(ctx, projectId, recordingId) {
 
   // Try direct lookup first as a RECORDING (uses resolver with caching)
   let recordingJson;
-  let commentsUrl;
-  let commentsCount;
+  let commentsUrl = null;
+  let commentsCount = null;
   
   try {
     const recordingResult = await resolver.getCommentsUrl(recordingId, "recording");
-    if (recordingResult) {
+    if (recordingResult && recordingResult.url) {
       commentsUrl = recordingResult.url;
-      commentsCount = recordingResult.commentsCount;
+      commentsCount = typeof recordingResult.commentsCount === 'number' ? recordingResult.commentsCount : null;
       meta.resolvedType = "recording";
       
-      // Verify it exists
-      recordingJson = await resolver.fetchResource(`/buckets/${projectId}/recordings/${recordingId}.json`, `recording:${recordingId}`);
-      meta.matchedTitle = recordingJson?.title || recordingJson?.content || null;
+      // Verify it exists (this may still 404 for non-recording IDs)
+      try {
+        recordingJson = await resolver.fetchResource(`/buckets/${projectId}/recordings/${recordingId}.json`, `recording:${recordingId}`);
+        meta.matchedTitle = recordingJson?.title || recordingJson?.content || null;
+      } catch (verifyErr) {
+        console.debug(`[DockLinkResolver] Failed to fetch recording: ${verifyErr?.message}`);
+        // Clear commentsUrl to avoid using an invalid path
+        commentsUrl = null;
+        commentsCount = null;
+      }
     }
   } catch (e) {
     // If not found as recording, try as a TODO (todos also have comments!)
