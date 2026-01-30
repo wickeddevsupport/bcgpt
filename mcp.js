@@ -56,15 +56,25 @@ function todoText(t) {
 
 // ---------- Basecamp wrappers (use ctx if provided) ----------
 function api(ctx, pathOrUrl, opts = {}) {
-  const fn = typeof ctx?.basecampFetch === "function" ? ctx.basecampFetch : basecampFetch;
-  console.log(`[api] Using ${typeof ctx?.basecampFetch === "function" ? "ctx" : "direct"} basecampFetch for:`, pathOrUrl);
-  return fn(ctx.TOKEN, pathOrUrl, { ...opts, accountId: ctx.accountId, ua: ctx.ua });
+  // If ctx has basecampFetch function, use it directly (already has TOKEN and accountId baked in)
+  if (typeof ctx?.basecampFetch === "function") {
+    console.log(`[api] Using ctx.basecampFetch for:`, pathOrUrl);
+    return ctx.basecampFetch(pathOrUrl, opts);
+  }
+  // Otherwise use the standalone function (requires TOKEN)
+  console.log(`[api] Using standalone basecampFetch for:`, pathOrUrl);
+  return basecampFetch(ctx.TOKEN, pathOrUrl, { ...opts, accountId: ctx.accountId, ua: ctx.ua });
 }
 
 function apiAll(ctx, pathOrUrl, opts = {}) {
-  const fn = typeof ctx?.basecampFetchAll === "function" ? ctx.basecampFetchAll : basecampFetchAll;
-  console.log(`[apiAll] Using ${typeof ctx?.basecampFetchAll === "function" ? "ctx" : "direct"} basecampFetchAll for:`, pathOrUrl);
-  return fn(ctx.TOKEN, pathOrUrl, { ...opts, accountId: ctx.accountId, ua: ctx.ua });
+  // If ctx has basecampFetchAll function, use it directly (already has TOKEN and accountId baked in)
+  if (typeof ctx?.basecampFetchAll === "function") {
+    console.log(`[apiAll] Using ctx.basecampFetchAll for:`, pathOrUrl);
+    return ctx.basecampFetchAll(pathOrUrl, opts);
+  }
+  // Otherwise use the standalone function (requires TOKEN)
+  console.log(`[apiAll] Using standalone basecampFetchAll for:`, pathOrUrl);
+  return basecampFetchAll(ctx.TOKEN, pathOrUrl, { ...opts, accountId: ctx.accountId, ua: ctx.ua });
 }
 
 // ---------- Projects ----------

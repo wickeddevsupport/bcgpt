@@ -23,6 +23,9 @@ const UA = "bcgpt-full-v3";
 const BASECAMP_API = "https://3.basecampapi.com";
 const DEFAULT_ACCOUNT_ID = process.env.BASECAMP_DEFAULT_ACCOUNT_ID || null;
 
+// Log the account ID being used on startup
+console.log(`[Startup] DEFAULT_ACCOUNT_ID from env: ${DEFAULT_ACCOUNT_ID}`);
+
 let TOKEN = null;      // single-user token
 let AUTH_CACHE = null; // cached authorization.json
 
@@ -69,7 +72,19 @@ function normalizeBasecampUrl(path, accountId) {
     throw err;
   }
 
-  return `${BASECAMP_API}/${accountId}${p}`;
+  // Ensure accountId is a number, not an object
+  const aid = String(accountId).trim();
+  if (aid === "[object Object]" || !aid || isNaN(aid)) {
+    console.error(`[normalizeBasecampUrl] Invalid accountId: ${JSON.stringify(accountId)} (type: ${typeof accountId})`);
+    const err = new Error("INVALID_ACCOUNT_ID");
+    err.code = "INVALID_ACCOUNT_ID";
+    err.accountId = accountId;
+    throw err;
+  }
+
+  const finalUrl = `${BASECAMP_API}/${aid}${p}`;
+  console.log(`[normalizeBasecampUrl] path=${p}, accountId=${aid} => ${finalUrl}`);
+  return finalUrl;
 }
 
 function parseLinkHeader(link) {
@@ -241,14 +256,17 @@ async function getAccountId() {
   const auth = await getAuthorization();
 
   if (DEFAULT_ACCOUNT_ID) {
+    console.log(`[getAccountId] Using DEFAULT_ACCOUNT_ID: ${DEFAULT_ACCOUNT_ID}`);
     const match = (auth.accounts || []).find((a) => String(a.id) === String(DEFAULT_ACCOUNT_ID));
     if (!match) {
+      console.error(`[getAccountId] DEFAULT_ACCOUNT_ID not found. Available accounts:`, auth.accounts?.map(a => a.id));
       const err = new Error(
         `BASECAMP_DEFAULT_ACCOUNT_ID (${DEFAULT_ACCOUNT_ID}) not found in authorized accounts`
       );
       err.code = "DEFAULT_ACCOUNT_NOT_FOUND";
       throw err;
     }
+    console.log(`[getAccountId] Matched account: ${match.id}`);
     return match.id;
   }
 
@@ -258,6 +276,7 @@ async function getAccountId() {
     throw err;
   }
 
+  console.log(`[getAccountId] Using first account: ${auth.accounts[0].id}`);
   return auth.accounts[0].id;
 }
 
@@ -299,6 +318,8 @@ async function startStatus(req) {
 async function buildMcpCtx(req) {
   const auth = TOKEN?.access_token ? await getAuthorization() : null;
   const accountId = TOKEN?.access_token ? await getAccountId() : null;
+  
+  console.log(`[buildMcpCtx] accountId retrieved: ${accountId} (type: ${typeof accountId})`);
 
   return {
     TOKEN,
