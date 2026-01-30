@@ -44,7 +44,8 @@ function normalizeBasecampUrl(path, accountId) {
   let p = path.startsWith("/") ? path : `/${path}`;
 
   // Bucket scoped endpoints stay as-is (already correct)
-  if (p.startsWith("/buckets/")) return `${BASECAMP_API}${p}`;
+  if (accountId) return `${BASECAMP_API}/${accountId}${p}`;
+
 
   // If already account-scoped (starts with "/<digits>/"), keep it
   if (/^\/\d+\//.test(p)) return `${BASECAMP_API}${p}`;
