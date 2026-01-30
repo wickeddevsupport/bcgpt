@@ -950,10 +950,12 @@ async function listVaults(ctx, projectId) {
 // Official Basecamp search endpoint: GET /search.json
 // Query params: q (required), type, bucket_id, creator_id, file_type, exclude_chat, page, per_page
 async function searchRecordings(ctx, query, { bucket_id = null, type = null } = {}) {
-  if (!query) throw new Error("Search query is required");
+  // Coerce query to string and validate — prevents TypeError when non-strings (e.g., numeric ids) are passed
+  const rawQuery = (typeof query === 'string' ? query : String(query || '')).trim();
+  if (!rawQuery) throw new Error("Search query is required");
   
   // Build the search endpoint with proper query parameters
-  let path = `/search.json?q=${encodeURIComponent(query.trim())}`;
+  let path = `/search.json?q=${encodeURIComponent(rawQuery)}`;
   
   // Add optional filters
   if (bucket_id) path += `&bucket_id=${encodeURIComponent(bucket_id)}`;
@@ -969,7 +971,7 @@ async function searchRecordings(ctx, query, { bucket_id = null, type = null } = 
   const results = await apiAll(ctx, path);
   const arr = Array.isArray(results) ? results : [];
   
-  console.log(`[searchRecordings] Found ${arr.length} results for query: "${query}"`);
+  console.log(`[searchRecordings] Found ${arr.length} results for query: "${rawQuery}"`);
   
   return arr.map((r) => ({
     id: r.id,
