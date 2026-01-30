@@ -26,15 +26,16 @@ function isoDate(d) {
 }
 
 /* =========================
-   Cache (in-memory)
+   In-memory caches & state
+   (single-user is OK)
 ========================= */
 const CACHE = new Map(); // key -> { ts, value }
 const CACHE_TTL_MS = 60 * 1000;
 
-function cacheGet(key) {
+function cacheGet(key, ttl = CACHE_TTL_MS) {
   const v = CACHE.get(key);
   if (!v) return null;
-  if (Date.now() - v.ts > CACHE_TTL_MS) { CACHE.delete(key); return null; }
+  if (Date.now() - v.ts > ttl) { CACHE.delete(key); return null; }
   return v.value;
 }
 function cacheSet(key, value) {
@@ -42,8 +43,24 @@ function cacheSet(key, value) {
   return value;
 }
 
+// Search checkpoints so "continue" resumes
+const SEARCH_STATE = new Map(); // key -> { projectIndex, results, scanned, ts }
+const SEARCH_TTL_MS = 10 * 60 * 1000;
+
+function searchStateGet(key) {
+  const s = SEARCH_STATE.get(key);
+  if (!s) return null;
+  if (Date.now() - s.ts > SEARCH_TTL_MS) { SEARCH_STATE.delete(key); return null; }
+  return s;
+}
+function searchStateSet(key, state) {
+  state.ts = Date.now();
+  SEARCH_STATE.set(key, state);
+  return state;
+}
+
 /* =========================
-   Concurrency limiter
+   Simple concurrency limiter
 ========================= */
 async function mapLimit(items, limit, fn) {
   const out = new Array(items.length);
@@ -59,7 +76,7 @@ async function mapLimit(items, limit, fn) {
 }
 
 /* =========================
-   Basecamp helpers
+   Basecamp helper utilities
 ========================= */
 function todoText(t) {
   return (t?.content || t?.title || t?.name || "").trim();
@@ -73,8 +90,8 @@ function todoAssigneeNames(todo, peopleById) {
   return (ids || []).map(id => peopleById.get(String(id)) || String(id));
 }
 
-function findDockToolUrl(dock, wantedNames) {
-  const want = Array.isArray(wantedNames) ? wantedNames : [wantedNames];
+function findDockToolUrl(dock, names) {
+  const want = Array.isArray(names) ? names : [names];
   const enabled = (dock || []).filter(d => d && d.enabled);
   for (const n of want) {
     const hit = enabled.find(d => d.name === n);
@@ -83,12 +100,17 @@ function findDockToolUrl(dock, wantedNames) {
   return null;
 }
 
+/* =========================
+   Basecamp API wrappers
+   IMPORTANT: always pass {accountId}
+========================= */
 async function listProjects(TOKEN, accountId, ua, { archived = false } = {}) {
   const qs = archived ? "?status=archived" : "";
   return await basecampFetch(TOKEN, `/${accountId}/projects.json${qs}`, { ua, accountId });
 }
 
 async function getProject(TOKEN, accountId, projectId, ua) {
+  // projectId is bucket id in Basecamp 3
   return await basecampFetch(TOKEN, `/${accountId}/projects/${projectId}.json`, { ua, accountId });
 }
 
@@ -97,23 +119,22 @@ async function projectByName(TOKEN, accountId, name, ua, opts = {}) {
   return resolveByName(projects, name, "project");
 }
 
-/**
- * To-dos discovery (dock-aware)
- * We do NOT assume /buckets/:id/todolists.json is valid for every project.
- */
+// Dock-aware todoset discovery
 async function getTodosetUrl(TOKEN, accountId, projectId, ua) {
+  const cacheKey = `dock:${accountId}:${projectId}`;
+  const cached = cacheGet(cacheKey, 30 * 60 * 1000); // 30 min
+  if (cached) return cached;
+
   const project = await getProject(TOKEN, accountId, projectId, ua);
   const dock = project?.dock || [];
-
-  // Most Basecamp setups expose To-dos as "todoset" in dock.
-  return (
-    findDockToolUrl(dock, ["todoset", "todos"])
-  );
+  const url = findDockToolUrl(dock, ["todoset", "todos"]) || null;
+  cacheSet(cacheKey, url);
+  return url;
 }
 
 async function listTodoLists(TOKEN, accountId, projectId, ua) {
   const todosetUrl = await getTodosetUrl(TOKEN, accountId, projectId, ua);
-  if (!todosetUrl) return []; // To-dos not enabled -> skip
+  if (!todosetUrl) return []; // To-dos not enabled
 
   const todoset = await basecampFetch(TOKEN, todosetUrl, { ua, accountId });
 
@@ -131,7 +152,6 @@ async function listTodosForList(TOKEN, accountId, projectId, list, ua) {
   if (list?.todos_url) {
     return await basecampFetch(TOKEN, list.todos_url, { ua, accountId });
   }
-  // Fallback (some payloads may not include todos_url)
   return await basecampFetch(
     TOKEN,
     `/buckets/${projectId}/todolists/${list.id}/todos.json`,
@@ -143,7 +163,8 @@ async function listTodosForProject(TOKEN, accountId, projectId, ua) {
   const lists = await listTodoLists(TOKEN, accountId, projectId, ua);
   if (!lists.length) return [];
 
-  const groups = await mapLimit(lists, 4, async (l) => {
+  // Low concurrency to avoid 429
+  const groups = await mapLimit(lists, 2, async (l) => {
     let todos = [];
     try {
       todos = await listTodosForList(TOKEN, accountId, projectId, l, ua);
@@ -156,20 +177,29 @@ async function listTodosForProject(TOKEN, accountId, projectId, ua) {
   return groups;
 }
 
-/**
- * Global scan across projects:
- * - Dock-aware
- * - Skips projects that don’t have To-dos enabled
- * - Caches briefly to speed repeated questions
- */
-async function listAllTodos(TOKEN, accountId, ua, { includeCompleted = false, includeArchivedProjects = false } = {}) {
-  const cacheKey = `todos:${accountId}:${includeCompleted ? 1 : 0}:${includeArchivedProjects ? 1 : 0}`;
-  const cached = cacheGet(cacheKey);
+// Global scan with cache + safe concurrency
+async function listAllTodos(
+  TOKEN,
+  accountId,
+  ua,
+  {
+    includeCompleted = false,
+    includeArchivedProjects = false,
+    maxProjects = 40,   // safety default to avoid huge scans
+    maxTodos = 800      // safety default
+  } = {}
+) {
+  const cacheKey = `alltodos:${accountId}:${includeCompleted ? 1 : 0}:${includeArchivedProjects ? 1 : 0}:${maxProjects}:${maxTodos}`;
+  const cached = cacheGet(cacheKey, 60 * 1000);
   if (cached) return cached;
 
   const projects = await listProjects(TOKEN, accountId, ua, { archived: !!includeArchivedProjects });
+  const slice = projects.slice(0, Math.max(1, Math.min(projects.length, maxProjects)));
 
-  const perProject = await mapLimit(projects, 3, async (p) => {
+  let todosSeen = 0;
+
+  const perProject = await mapLimit(slice, 1, async (p) => {
+    if (todosSeen >= maxTodos) return [];
     const groups = await listTodosForProject(TOKEN, accountId, p.id, ua);
     if (!groups.length) return [];
 
@@ -187,21 +217,24 @@ async function listAllTodos(TOKEN, accountId, ua, { includeCompleted = false, in
           todoId: t.id,
           content: todoText(t),
           due_on: isoDate(t.due_on || t.due_at),
-          completed: completed,
+          completed,
           completed_at: t.completed_at || null,
           raw: t
         });
+
+        todosSeen++;
+        if (todosSeen >= maxTodos) break;
       }
+      if (todosSeen >= maxTodos) break;
     }
     return rows;
   });
 
-  const flat = perProject.flat();
-  return cacheSet(cacheKey, flat);
+  return cacheSet(cacheKey, perProject.flat());
 }
 
 /* =========================
-   Direct Todo Fetch (by URL)
+   Direct todo fetch by URL
 ========================= */
 function parseTodoFromUrl(url) {
   const s = String(url || "");
@@ -237,7 +270,79 @@ async function getTodoDirect(TOKEN, accountId, ua, args) {
 }
 
 /* =========================
-   MCP Handler
+   Chunked search (checkpointed)
+========================= */
+async function searchTodosChunked(args, ctx) {
+  const q = String(args.query || "").toLowerCase().trim();
+  if (!q) return { ok: false, code: "BAD_REQUEST", error: "Missing query" };
+
+  const batchSize = Math.max(3, Math.min(25, Number(args.batch_size || 10)));
+  const cont = !!args.continue;
+
+  const key = `q:${q}`;
+  let state = searchStateGet(key);
+
+  if (!cont || !state) {
+    state = {
+      projectIndex: 0,
+      results: [],
+      scanned: { projects: 0, lists: 0, todos: 0 }
+    };
+  }
+
+  const projects = await listProjects(ctx.TOKEN, ctx.accountId, ctx.ua, { archived: false });
+  const start = state.projectIndex;
+  const end = Math.min(projects.length, start + batchSize);
+  const batch = projects.slice(start, end);
+
+  for (const p of batch) {
+    const groups = await listTodosForProject(ctx.TOKEN, ctx.accountId, p.id, ctx.ua);
+    state.scanned.projects += 1;
+
+    for (const g of groups) {
+      state.scanned.lists += 1;
+      for (const t of (g.todos || [])) {
+        state.scanned.todos += 1;
+
+        const text = todoText(t).toLowerCase();
+        const desc = String(t?.description || "").toLowerCase();
+
+        if (text.includes(q) || desc.includes(q)) {
+          state.results.push({
+            project: p.name,
+            projectId: p.id,
+            todolist: g.todolist,
+            todoId: t.id,
+            content: todoText(t),
+            due_on: isoDate(t.due_on || t.due_at),
+            url: `https://3.basecamp.com/${ctx.accountId}/buckets/${p.id}/todos/${t.id}`
+          });
+        }
+      }
+    }
+  }
+
+  state.projectIndex = end;
+  searchStateSet(key, state);
+
+  const done = end >= projects.length;
+
+  return {
+    ok: true,
+    query: args.query,
+    batch: { start, end, batch_size: batchSize },
+    progress: { scanned: state.scanned, totalProjects: projects.length },
+    total_matches: state.results.length,
+    results: state.results.slice(0, 50),
+    done,
+    next_hint: done
+      ? "Done scanning all active projects."
+      : `Say "continue" to scan the next ${batchSize} projects.`
+  };
+}
+
+/* =========================
+   MCP handler
 ========================= */
 export async function handleMCP(reqBody, ctx) {
   const { id, method, params } = reqBody || {};
@@ -245,14 +350,14 @@ export async function handleMCP(reqBody, ctx) {
 
   try {
     if (method === "initialize") {
-      return ok(id, { name: "bcgpt", version: "3.3", sessionId: crypto.randomUUID() });
+      return ok(id, { name: "bcgpt", version: "4.0", sessionId: crypto.randomUUID() });
     }
 
     if (method === "tools/list") {
       return ok(id, {
         tools: [
-          tool("startbcgpt", "Show connection status, user (name/email), plus re-auth and logout links.", noProps()),
-          tool("whoami", "Return Basecamp account id and available accounts.", noProps()),
+          tool("startbcgpt", "Show connection status + re-auth link.", noProps()),
+          tool("whoami", "Return account id and available accounts.", noProps()),
 
           tool("list_projects", "List projects (optionally include archived).", {
             type: "object",
@@ -265,42 +370,51 @@ export async function handleMCP(reqBody, ctx) {
           tool("get_todo", "Fetch a to-do directly by Basecamp URL or by bucket_id + todo_id.", {
             type: "object",
             properties: {
-              url: { type: "string", description: "Basecamp web URL like https://3.basecamp.com/<acct>/buckets/<bucket>/todos/<todo>" },
+              url: { type: "string" },
               bucket_id: { type: "integer" },
               todo_id: { type: "integer" }
             },
             additionalProperties: false
           }),
 
-          tool("search_todos", "Search todos across projects by keyword. Supports include_completed and include_archived.", {
+          tool("search_todos_chunked", "Search todos across projects in batches to avoid rate limits. Use continue=true to resume.", {
             type: "object",
             properties: {
               query: { type: "string" },
-              include_completed: { type: "boolean", description: "Search completed todos too (default false)" },
-              include_archived_projects: { type: "boolean", description: "Include archived projects (default false)" }
+              batch_size: { type: "integer", description: "Projects per batch (default 10, max 25)" },
+              continue: { type: "boolean", description: "Resume the previous scan for this query" }
             },
             required: ["query"],
             additionalProperties: false
           }),
 
-          tool("daily_report", "Across all projects: due today + overdue + per-project counts.", {
+          tool("search_todos", "Quick search with safe scan limits (caps projects/todos).", {
             type: "object",
             properties: {
-              date: { type: "string", description: "YYYY-MM-DD (default: today)" }
+              query: { type: "string" },
+              include_completed: { type: "boolean" },
+              include_archived_projects: { type: "boolean" }
+            },
+            required: ["query"],
+            additionalProperties: false
+          }),
+
+          tool("daily_report", "Due today + overdue counts across a safe scan set.", {
+            type: "object",
+            properties: { date: { type: "string" } },
+            additionalProperties: false
+          }),
+
+          tool("list_todos_due", "List todos due on date; include_overdue pulls overdue too.", {
+            type: "object",
+            properties: {
+              date: { type: "string" },
+              include_overdue: { type: "boolean" }
             },
             additionalProperties: false
           }),
 
-          tool("list_todos_due", "Across all projects: list todos due on date; optionally include overdue.", {
-            type: "object",
-            properties: {
-              date: { type: "string", description: "YYYY-MM-DD (default: today)" },
-              include_overdue: { type: "boolean", description: "Include overdue items too (default false)" }
-            },
-            additionalProperties: false
-          }),
-
-          tool("list_todos_for_project", "List todolists + todos for a project by name.", {
+          tool("list_todos_for_project", "List todolists + todos for a project (by name).", {
             type: "object",
             properties: { project: { type: "string" } },
             required: ["project"],
@@ -314,30 +428,27 @@ export async function handleMCP(reqBody, ctx) {
               todolist: { type: "string" },
               task: { type: "string" },
               description: { type: "string" },
-              due_on: { type: "string", description: "YYYY-MM-DD" }
+              due_on: { type: "string" }
             },
             required: ["project", "task"],
             additionalProperties: false
           }),
 
-          tool("update_task_naturally", "Update a todo in a project by fuzzy-matching task name.", {
+          tool("update_task_naturally", "Update a todo in a project by fuzzy task name.", {
             type: "object",
             properties: {
               project: { type: "string" },
               task: { type: "string" },
               new_task: { type: "string" },
-              due_on: { type: "string", description: "YYYY-MM-DD" }
+              due_on: { type: "string" }
             },
             required: ["project", "task"],
             additionalProperties: false
           }),
 
-          tool("complete_task_by_name", "Complete a todo in a project by fuzzy-matching task name.", {
+          tool("complete_task_by_name", "Complete a todo in a project by fuzzy task name.", {
             type: "object",
-            properties: {
-              project: { type: "string" },
-              task: { type: "string" }
-            },
+            properties: { project: { type: "string" }, task: { type: "string" } },
             required: ["project", "task"],
             additionalProperties: false
           }),
@@ -373,38 +484,45 @@ export async function handleMCP(reqBody, ctx) {
     const { name, arguments: args = {} } = params || {};
     if (!name) return fail(id, { code: "BAD_REQUEST", message: "Missing tool name" });
 
-    // startbcgpt must ALWAYS work without auth
-    if (name === "startbcgpt") {
-      return ok(id, await startStatus());
-    }
-
+    // Must work without auth
+    if (name === "startbcgpt") return ok(id, await startStatus());
     if (name === "whoami") {
-      return ok(id, {
-        connected: !!TOKEN?.access_token,
-        accountId: accountId || null,
-        accounts: authAccounts || []
-      });
+      return ok(id, { connected: !!TOKEN?.access_token, accountId: accountId || null, accounts: authAccounts || [] });
     }
 
-    // everything else requires auth
+    // Everything else requires auth
     if (!TOKEN?.access_token) {
       return fail(id, { code: "NOT_AUTHENTICATED", message: "Not connected. Run /startbcgpt to get the auth link." });
     }
     if (!accountId) {
-      return fail(id, { code: "NO_ACCOUNT_ID", message: "Connected but accountId missing. Check BASECAMP_DEFAULT_ACCOUNT_ID or authorization accounts." });
+      return fail(id, { code: "NO_ACCOUNT_ID", message: "Connected but accountId missing. Check BASECAMP_DEFAULT_ACCOUNT_ID." });
     }
 
-    /* =========================
-       Tool routing
-    ========================= */
+    // Route
     if (name === "list_projects") {
       const projects = await listProjects(TOKEN, accountId, ua, { archived: !!args.archived });
       return ok(id, projects);
     }
 
     if (name === "get_todo") {
-      const out = await getTodoDirect(TOKEN, accountId, ua, args);
-      return ok(id, out);
+      return ok(id, await getTodoDirect(TOKEN, accountId, ua, args));
+    }
+
+    if (name === "search_todos_chunked") {
+      return ok(id, await searchTodosChunked(args, { TOKEN, accountId, ua }));
+    }
+
+    if (name === "search_todos") {
+      const q = String(args.query || "").toLowerCase().trim();
+      const rows = await listAllTodos(TOKEN, accountId, ua, {
+        includeCompleted: !!args.include_completed,
+        includeArchivedProjects: !!args.include_archived_projects,
+        maxProjects: 25,
+        maxTodos: 500
+      });
+      const hits = rows.filter(r => (r.content || "").toLowerCase().includes(q));
+      hits.sort((a, b) => (a.due_on || "9999-99-99").localeCompare(b.due_on || "9999-99-99") || (a.project || "").localeCompare(b.project || ""));
+      return ok(id, { query: args.query, count: hits.length, todos: hits.slice(0, 50), note: "Safe scan limits applied. Use search_todos_chunked for deeper scanning." });
     }
 
     if (name === "list_todos_for_project") {
@@ -416,7 +534,7 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "create_task_naturally") {
       const project = await projectByName(TOKEN, accountId, args.project, ua);
       const lists = await listTodoLists(TOKEN, accountId, project.id, ua);
-      if (!lists.length) return fail(id, { code: "NO_TODOLISTS", message: "No todolists found (To-dos may not be enabled for this project)." });
+      if (!lists.length) return fail(id, { code: "NO_TODOLISTS", message: "No todolists found (To-dos might not be enabled for this project)." });
 
       let target = lists[0];
       if (args.todolist) {
@@ -473,36 +591,9 @@ export async function handleMCP(reqBody, ctx) {
       return ok(id, { message: "Task completed", project: { id: project.id, name: project.name }, todoId: match.id, task: match.name });
     }
 
-    if (name === "search_todos") {
-      const q = String(args.query || "").toLowerCase().trim();
-      const includeCompleted = !!args.include_completed;
-      const includeArchived = !!args.include_archived_projects;
-
-      const rows = await listAllTodos(TOKEN, accountId, ua, {
-        includeCompleted,
-        includeArchivedProjects: includeArchived
-      });
-
-      const hits = rows.filter(r => r.content.toLowerCase().includes(q));
-
-      hits.sort((a, b) =>
-        (a.due_on || "9999-99-99").localeCompare(b.due_on || "9999-99-99") ||
-        (a.project || "").localeCompare(b.project || "") ||
-        (a.content || "").localeCompare(b.content || "")
-      );
-
-      return ok(id, {
-        query: args.query,
-        include_completed: includeCompleted,
-        include_archived_projects: includeArchived,
-        count: hits.length,
-        todos: hits
-      });
-    }
-
     if (name === "daily_report") {
       const date = isoDate(args.date) || new Date().toISOString().slice(0, 10);
-      const rows = await listAllTodos(TOKEN, accountId, ua, { includeCompleted: false, includeArchivedProjects: false });
+      const rows = await listAllTodos(TOKEN, accountId, ua, { includeCompleted: false, includeArchivedProjects: false, maxProjects: 30, maxTodos: 800 });
 
       const dueToday = rows.filter(r => r.due_on === date);
       const overdue = rows.filter(r => r.due_on && r.due_on < date);
@@ -515,12 +606,7 @@ export async function handleMCP(reqBody, ctx) {
         if (r.due_on && r.due_on < date) perProject[r.project].overdue += 1;
       }
 
-      const perProjectArr = Object.values(perProject).sort(
-        (a, b) =>
-          (b.overdue - a.overdue) ||
-          (b.dueToday - a.dueToday) ||
-          (a.project || "").localeCompare(b.project || "")
-      );
+      const perProjectArr = Object.values(perProject).sort((a, b) => (b.overdue - a.overdue) || (b.dueToday - a.dueToday) || (a.project || "").localeCompare(b.project || ""));
 
       return ok(id, {
         date,
@@ -531,8 +617,9 @@ export async function handleMCP(reqBody, ctx) {
           overdue: overdue.length
         },
         perProject: perProjectArr,
-        dueToday,
-        overdue
+        dueToday: dueToday.slice(0, 50),
+        overdue: overdue.slice(0, 50),
+        note: "Report uses safe scan limits. Use search_todos_chunked for deeper scanning."
       });
     }
 
@@ -540,32 +627,31 @@ export async function handleMCP(reqBody, ctx) {
       const date = isoDate(args.date) || new Date().toISOString().slice(0, 10);
       const includeOverdue = !!args.include_overdue;
 
-      const rows = await listAllTodos(TOKEN, accountId, ua, { includeCompleted: false, includeArchivedProjects: false });
+      const rows = await listAllTodos(TOKEN, accountId, ua, { includeCompleted: false, includeArchivedProjects: false, maxProjects: 30, maxTodos: 900 });
 
       const todos = rows
         .filter(r => r.due_on === date || (includeOverdue && r.due_on && r.due_on < date))
         .map(r => ({ ...r, overdue: r.due_on && r.due_on < date }));
 
-      todos.sort(
-        (a, b) =>
-          (a.overdue === b.overdue ? 0 : (a.overdue ? -1 : 1)) ||
-          (a.due_on || "9999-99-99").localeCompare(b.due_on || "9999-99-99") ||
-          (a.project || "").localeCompare(b.project || "") ||
-          (a.content || "").localeCompare(b.content || "")
+      todos.sort((a, b) =>
+        (a.overdue === b.overdue ? 0 : (a.overdue ? -1 : 1)) ||
+        (a.due_on || "9999-99-99").localeCompare(b.due_on || "9999-99-99") ||
+        (a.project || "").localeCompare(b.project || "") ||
+        (a.content || "").localeCompare(b.content || "")
       );
 
-      return ok(id, { date, count: todos.length, todos });
+      return ok(id, { date, count: todos.length, todos: todos.slice(0, 100), note: "Safe scan limits applied." });
     }
 
     if (name === "basecamp_request" || name === "basecamp_raw") {
       let p = String(args.path || "").trim();
       if (!p) return fail(id, { code: "BAD_REQUEST", message: "Missing path" });
 
-      // Helpful normalizations
+      // Normalize common mistakes
       if (p === "/projects") p = "/projects.json";
 
       const data = await basecampFetch(TOKEN, p, {
-        method: args.method || "GET",
+        method: (args.method || "GET").toUpperCase(),
         body: args.body,
         ua,
         accountId
@@ -586,12 +672,7 @@ export async function handleMCP(reqBody, ctx) {
       return fail(id, { code: "NOT_AUTHENTICATED", message: "Not connected. Run /startbcgpt to get the auth link." });
     }
     if (e?.code === "BASECAMP_API_ERROR") {
-      return fail(id, {
-        code: "BASECAMP_API_ERROR",
-        message: `Basecamp API error (${e.status})`,
-        url: e.url || null,
-        data: e.data || null
-      });
+      return fail(id, { code: "BASECAMP_API_ERROR", message: `Basecamp API error (${e.status})`, url: e.url || null, data: e.data || null });
     }
     return fail(id, { code: "INTERNAL_ERROR", message: e?.message || "Unknown error" });
   }
