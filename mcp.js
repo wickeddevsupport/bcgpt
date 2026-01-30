@@ -66,21 +66,32 @@ function apiAll(ctx, pathOrUrl, opts = {}) {
 }
 
 // ---------- Projects ----------
-async function listProjects(ctx, { archived = false } = {}) {
-  const qs = archived ? "?status=archived" : "";
-  // Fetch all pages, but return a compact shape to avoid tool output limits.
-  const projects = await apiAll(ctx, `/projects.json${qs}`);
+async function listProjects(ctx, { archived = false, compact = true, limit } = {}) {
+  const qs = new URLSearchParams();
+  if (archived) qs.set("status", "archived");
+  // Ask for larger pages and always start at page=1 so Link headers behave consistently.
+  qs.set("per_page", "100");
+  qs.set("page", "1");
 
-  return (projects || []).map((p) => ({
-    id: p.id,
-    name: p.name,
-    status: p.status,
-    // useful but small
-    created_at: p.created_at,
-    updated_at: p.updated_at,
-    app_url: p.app_url,
-    url: p.url,
-  }));
+  const data = await apiAll(ctx, `/projects.json?${qs.toString()}`);
+  const projects = Array.isArray(data) ? data : [];
+
+  let out = projects;
+  if (compact) {
+    out = projects.map((p) => ({
+      id: p.id,
+      name: p.name,
+      status: p.status,
+      created_at: p.created_at,
+      updated_at: p.updated_at,
+      app_url: p.app_url,
+    }));
+  }
+
+  if (limit && Number.isFinite(Number(limit))) {
+    out = out.slice(0, Math.max(0, Number(limit)));
+  }
+  return out;
 }
 
 async function projectByName(ctx, name, { archived = false } = {}) {
@@ -307,6 +318,98 @@ async function getHillChartFromDock(ctx, projectId) {
   return null;
 }
 
+// ---------- Messages / Docs / Schedule (dock-driven) ----------
+async function listMessageBoards(ctx, projectId) {
+  const dock = await getDock(ctx, projectId);
+  const mb = dockFind(dock, ["message_board", "message_boards"]);
+  if (!mb?.url) throw new Error("This project does not expose a message board dock item.");
+  // Typically returns an array of message boards.
+  const boards = await apiAll(ctx, mb.url);
+  return (Array.isArray(boards) ? boards : []).map((b) => ({
+    id: b.id,
+    title: b.title,
+    status: b.status,
+    app_url: b.app_url,
+    messages_url: b.messages_url,
+  }));
+}
+
+async function listMessages(ctx, projectId, { board_id, board_title, limit } = {}) {
+  const boards = await listMessageBoards(ctx, projectId);
+  let board = null;
+  if (board_id) board = boards.find((b) => String(b.id) === String(board_id));
+  if (!board && board_title) {
+    const q = board_title.toLowerCase();
+    board = boards.find((b) => (b.title || "").toLowerCase().includes(q)) || null;
+  }
+  if (!board) {
+    // default to first board if present
+    board = boards[0] || null;
+  }
+  if (!board?.messages_url) {
+    throw new Error("No message board/messages_url found. Provide board_id or board_title.");
+  }
+  const msgs = await apiAll(ctx, board.messages_url);
+  const arr = Array.isArray(msgs) ? msgs : [];
+  const mapped = arr.map((m) => ({
+    id: m.id,
+    subject: m.subject,
+    status: m.status,
+    created_at: m.created_at,
+    updated_at: m.updated_at,
+    app_url: m.app_url,
+    url: m.url,
+  }));
+  if (limit != null) return mapped.slice(0, Math.max(0, Number(limit) || 0));
+  return mapped;
+}
+
+async function listDocuments(ctx, projectId, { limit } = {}) {
+  const dock = await getDock(ctx, projectId);
+  const vault = dockFind(dock, ["vault", "documents"]);
+  if (!vault?.url) throw new Error("This project does not expose a vault/documents dock item.");
+  const vaultObj = await api(ctx, vault.url);
+  // Many vault payloads include a documents_url.
+  const docsUrl = vaultObj?.documents_url || vaultObj?.documents?.url || vaultObj?.documents;
+  if (!docsUrl) throw new Error("Could not locate documents_url on vault payload.");
+  const docs = await apiAll(ctx, docsUrl);
+  const arr = Array.isArray(docs) ? docs : [];
+  const mapped = arr.map((d) => ({
+    id: d.id,
+    title: d.title,
+    kind: d.kind,
+    created_at: d.created_at,
+    updated_at: d.updated_at,
+    app_url: d.app_url,
+    url: d.url,
+  }));
+  if (limit != null) return mapped.slice(0, Math.max(0, Number(limit) || 0));
+  return mapped;
+}
+
+async function listScheduleEntries(ctx, projectId, { limit } = {}) {
+  const dock = await getDock(ctx, projectId);
+  const schedule = dockFind(dock, ["schedule", "schedules"]);
+  if (!schedule?.url) throw new Error("This project does not expose a schedule dock item.");
+  const schedObj = await api(ctx, schedule.url);
+  const entriesUrl = schedObj?.entries_url || schedObj?.entries?.url || schedObj?.entries;
+  if (!entriesUrl) throw new Error("Could not locate entries_url on schedule payload.");
+  const entries = await apiAll(ctx, entriesUrl);
+  const arr = Array.isArray(entries) ? entries : [];
+  const mapped = arr.map((e) => ({
+    id: e.id,
+    summary: e.summary,
+    starts_at: e.starts_at,
+    ends_at: e.ends_at,
+    created_at: e.created_at,
+    updated_at: e.updated_at,
+    app_url: e.app_url,
+    url: e.url,
+  }));
+  if (limit != null) return mapped.slice(0, Math.max(0, Number(limit) || 0));
+  return mapped;
+}
+
 // ---------- MCP handler ----------
 export async function handleMCP(reqBody, ctx) {
   const { id, method, params } = reqBody || {};
@@ -440,6 +543,38 @@ export async function handleMCP(reqBody, ctx) {
             type: "object",
             properties: { project: { type: "string" } },
             required: ["project"],
+            additionalProperties: false
+          }),
+
+          // Messages / Docs / Schedule (dock-driven)
+          tool("list_message_boards", "List message boards for a project.", {
+            type: "object",
+            properties: { project: { type: "string" } },
+            required: ["project"],
+            additionalProperties: false
+          }),
+          tool("list_messages", "List messages in a message board. If message_board_id omitted, uses the first board.", {
+            type: "object",
+            properties: { project: { type: "string" }, message_board_id: { type: "integer", nullable: true } },
+            required: ["project"],
+            additionalProperties: false
+          }),
+          tool("list_documents", "List documents/files in the project vault.", {
+            type: "object",
+            properties: { project: { type: "string" } },
+            required: ["project"],
+            additionalProperties: false
+          }),
+          tool("list_schedule_entries", "List schedule entries for a project (date range optional).", {
+            type: "object",
+            properties: { project: { type: "string" }, start: { type: "string", nullable: true }, end: { type: "string", nullable: true } },
+            required: ["project"],
+            additionalProperties: false
+          }),
+          tool("search_project", "Search within a project (dock-driven search if enabled).", {
+            type: "object",
+            properties: { project: { type: "string" }, query: { type: "string" } },
+            required: ["project", "query"],
             additionalProperties: false
           }),
 
@@ -668,34 +803,42 @@ export async function handleMCP(reqBody, ctx) {
       return ok(id, { project: { id: p.id, name: p.name }, hill_chart: hill });
     }
 
+    // Messages / Docs / Schedule (dock-driven)
+    if (name === "list_message_boards") {
+      const p = await projectByName(ctx, args.project);
+      const boards = await listMessageBoards(ctx, p.id);
+      return ok(id, { project: { id: p.id, name: p.name }, message_boards: boards });
+    }
+
+    if (name === "list_messages") {
+      const p = await projectByName(ctx, args.project);
+      const boards = await listMessageBoards(ctx, p.id);
+      const board = resolveByName(boards, args.board, "message board");
+      const msgs = await listMessagesForBoard(ctx, board);
+      return ok(id, { project: { id: p.id, name: p.name }, board: { id: board.id, name: board.name }, messages: msgs });
+    }
+
+    if (name === "list_documents") {
+      const p = await projectByName(ctx, args.project);
+      const docs = await listDocuments(ctx, p.id);
+      return ok(id, { project: { id: p.id, name: p.name }, documents: docs });
+    }
+
+    if (name === "list_schedule_entries") {
+      const p = await projectByName(ctx, args.project);
+      const entries = await listScheduleEntries(ctx, p.id, { from: args.from, to: args.to });
+      return ok(id, { project: { id: p.id, name: p.name }, schedule_entries: entries });
+    }
+
+    if (name === "search_project") {
+      const p = await projectByName(ctx, args.project);
+      const results = await searchProject(ctx, p.id, { query: args.query });
+      return ok(id, { project: { id: p.id, name: p.name }, query: args.query, results });
+    }
+
     // Raw
     if (name === "basecamp_request" || name === "basecamp_raw") {
-      const method = String(args.method || "GET").toUpperCase();
-      let path = String(args.path || "");
-      const body = args.body;
-      const paginate = args.paginate !== false; // default true
-
-      // Convenience: people often call `/projects` but Basecamp's endpoint is `/projects.json`.
-      if (path === "/projects") path = "/projects.json";
-
-      // If this is a GET to a list-y endpoint and pagination is enabled, fetch all pages.
-      // (Basecamp uses Link headers; basecampFetchAll handles that.)
-      const isLikelyListEndpoint =
-        method === "GET" &&
-        (path === "/projects.json" ||
-          path.endsWith("/card_table.json") ||
-          path.endsWith("/buckets.json") ||
-          path.endsWith("/todolists.json") ||
-          path.endsWith("/todos.json") ||
-          path.endsWith("/people.json") ||
-          path.endsWith("/message_boards.json") ||
-          path.endsWith("/messages.json") ||
-          path.endsWith("/recordings.json"));
-
-      const data = isLikelyListEndpoint && paginate
-        ? await apiAll(ctx, path)
-        : await api(ctx, path, { method, body });
-
+      const data = await api(ctx, args.path, { method: args.method || "GET", body: args.body });
       return ok(id, data);
     }
 

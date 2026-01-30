@@ -16,9 +16,7 @@ app.use(express.json({ limit: "2mb" }));
 const PORT = process.env.PORT || 3000;
 const UA = "bcgpt-full-v3";
 const BASECAMP_API = "https://3.basecampapi.com";
-// Support both env var names (people commonly set BASECAMP_ACCOUNT_ID).
-const DEFAULT_ACCOUNT_ID =
-  process.env.BASECAMP_DEFAULT_ACCOUNT_ID || process.env.BASECAMP_ACCOUNT_ID || null;
+const DEFAULT_ACCOUNT_ID = process.env.BASECAMP_DEFAULT_ACCOUNT_ID || null;
 
 let TOKEN = null;      // single-user token
 let AUTH_CACHE = null; // cached authorization.json
@@ -69,50 +67,15 @@ function normalizeBasecampUrl(path, accountId) {
   return `${BASECAMP_API}/${accountId}${p}`;
 }
 
-function setQueryParam(u, key, value) {
-  const url = new URL(u);
-  url.searchParams.set(key, String(value));
-  return url.toString();
-}
-
-function getQueryParam(u, key) {
-  try {
-    const url = new URL(u);
-    return url.searchParams.get(key);
-  } catch {
-    return null;
-  }
-}
-
 function parseLinkHeader(link) {
-  // Robust RFC5988-ish Link parser (order-insensitive params)
-  // Handles: <url>; rel="next"; title="Next", <url>; title="..."; rel=next
+  // Minimal Link parser: <url>; rel="next"
   if (!link) return {};
   const out = {};
-  const parts = String(link).split(",").map((s) => s.trim()).filter(Boolean);
-
+  const parts = String(link).split(",").map((s) => s.trim());
   for (const part of parts) {
-    const urlMatch = part.match(/<([^>]+)>/);
-    if (!urlMatch) continue;
-    const url = urlMatch[1];
-
-    const params = {};
-    const paramChunks = part.split(";").slice(1).map((s) => s.trim()).filter(Boolean);
-    for (const chunk of paramChunks) {
-      const eq = chunk.indexOf("=");
-      if (eq === -1) continue;
-      const k = chunk.slice(0, eq).trim().toLowerCase();
-      let v = chunk.slice(eq + 1).trim();
-      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
-        v = v.slice(1, -1);
-      }
-      params[k] = v;
-    }
-
-    const rel = params["rel"];
-    if (rel) out[rel] = url;
+    const m = part.match(/<([^>]+)>\s*;\s*rel="([^"]+)"/i);
+    if (m) out[m[2]] = m[1];
   }
-
   return out;
 }
 
@@ -225,12 +188,6 @@ async function basecampFetch(token, path, opts = {}) {
   }
 
   // Pagination: aggregate pages when response is an array
-  // Try to increase page size where supported to reduce number of requests.
-  const PER_PAGE = 100;
-  if (!/\bper_page=\d+\b/i.test(url)) {
-    url = setQueryParam(url, "per_page", PER_PAGE);
-  }
-
   const aggregated = [];
   let page = 0;
 
@@ -242,18 +199,7 @@ async function basecampFetch(token, path, opts = {}) {
 
     const link = respHeaders?.get?.("link") || null;
     const { next } = parseLinkHeader(link);
-    if (next) {
-      url = next;
-    } else {
-      // Fallback: some endpoints omit Link headers. Use page=1..N until we see a short/empty page.
-      const curPage = Number(getQueryParam(url, "page") || String(page + 1));
-      const lastCount = Array.isArray(data) ? data.length : 0;
-      if (lastCount >= PER_PAGE) {
-        url = setQueryParam(url, "page", curPage + 1);
-      } else {
-        url = null;
-      }
-    }
+    url = next || null;
 
     page++;
     if (url) await sleep(pageDelayMs);
@@ -291,13 +237,14 @@ async function getAccountId() {
 
   if (DEFAULT_ACCOUNT_ID) {
     const match = (auth.accounts || []).find((a) => String(a.id) === String(DEFAULT_ACCOUNT_ID));
-    if (match) return match.id;
-
-    // Don't hard-fail: fall back to the first authorized account.
-    // This avoids "Missing accountId" errors if Render env vars are misnamed or stale.
-    console.warn(
-      `Default account id (${DEFAULT_ACCOUNT_ID}) not found in authorized accounts; falling back to first account.`
-    );
+    if (!match) {
+      const err = new Error(
+        `BASECAMP_DEFAULT_ACCOUNT_ID (${DEFAULT_ACCOUNT_ID}) not found in authorized accounts`
+      );
+      err.code = "DEFAULT_ACCOUNT_NOT_FOUND";
+      throw err;
+    }
+    return match.id;
   }
 
   if (!auth.accounts?.length) {
@@ -346,9 +293,7 @@ async function startStatus(req) {
 
 async function buildMcpCtx(req) {
   const auth = TOKEN?.access_token ? await getAuthorization() : null;
-  // Resolve once, but be defensive: some tokens/accounts occasionally return
-  // an empty `accounts` array; when that happens, we re-resolve on demand.
-  const accountId = TOKEN?.access_token ? await getAccountId().catch(() => null) : null;
+  const accountId = TOKEN?.access_token ? await getAccountId() : null;
 
   return {
     TOKEN,
@@ -358,23 +303,19 @@ async function buildMcpCtx(req) {
     startStatus: async () => await startStatus(req),
 
     // ✅ Provide both single-request AND auto-paginated versions to MCP
-    basecampFetch: async (path, opts = {}) => {
-      const aid = accountId ?? (TOKEN?.access_token ? await getAccountId() : null);
-      return basecampFetch(TOKEN, path, { ...opts, ua: UA, accountId: aid, paginate: false });
-    },
+    basecampFetch: async (path, opts = {}) =>
+      basecampFetch(TOKEN, path, { ...opts, ua: UA, accountId, paginate: false }),
 
-    basecampFetchAll: async (path, opts = {}) => {
-      const aid = accountId ?? (TOKEN?.access_token ? await getAccountId() : null);
-      return basecampFetch(TOKEN, path, {
+    basecampFetchAll: async (path, opts = {}) =>
+      basecampFetch(TOKEN, path, {
         ...opts,
         ua: UA,
-        accountId: aid,
+        accountId,
         paginate: true,
         // allow overrides, but keep sane defaults to avoid 429s
         maxPages: opts.maxPages ?? 50,
         pageDelayMs: opts.pageDelayMs ?? 150,
-      });
-    },
+      }),
   };
 }
 
