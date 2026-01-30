@@ -5,6 +5,12 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ...existing code...
+
+// Place these after app is initialized
+
+// (Move these lines to after 'const app = express();' and all middleware)
+
 // Serve the dev.html homepage
 app.get("/dev", (req, res) => {
   res.sendFile(path.join(__dirname, "dev.html"));
