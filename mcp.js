@@ -7,50 +7,10 @@ import { resolveByName, resolveBestEffort } from "./resolvers.js";
 function ok(id, result) { return { jsonrpc: "2.0", id, result }; }
 function fail(id, error) { return { jsonrpc: "2.0", id, error }; }
 
-
-// ---------- Output safety ----------
-function limitArray(arr, n) {
-  if (!Array.isArray(arr)) return arr;
-  return arr.slice(0, Math.max(0, n));
-}
-
-function truncateString(s, max = 500) {
-  if (typeof s !== "string") return s;
-  return s.length > max ? s.slice(0, max) + "…" : s;
-}
-
-// Rough token/size guard: keep JSON under maxBytes by trimming biggest arrays.
-function enforceMaxBytes(obj, { maxBytes = 80_000 } = {}) {
-  try {
-    let json = JSON.stringify(obj);
-    if (json.length <= maxBytes) return obj;
-
-    // Trim common array fields
-    const clone = JSON.parse(json);
-    const candidates = ["projects", "todos", "groups", "dueToday", "overdue", "items", "cards", "columns", "lists"];
-    for (const k of candidates) {
-      if (Array.isArray(clone?.[k]) && clone[k].length > 50) {
-        clone[k] = clone[k].slice(0, 50);
-      }
-    }
-    json = JSON.stringify(clone);
-    if (json.length <= maxBytes) return clone;
-
-    // As a last resort, drop large arrays entirely
-    for (const k of candidates) {
-      if (Array.isArray(clone?.[k]) && clone[k].length > 0) {
-        clone[k] = clone[k].slice(0, 10);
-      }
-    }
-    return clone;
-  } catch {
-    return obj;
-  }
-}
-
 // ---------- Tool schema helpers ----------
 function tool(name, description, inputSchema) { return { name, description, inputSchema }; }
-function noProps() { return { type: "object", properties: {}, additionalProperties: false }; }
+function noProps() { return { type: "object", properties: {
+      confirm_debug: { type: "boolean", const: true },}, additionalProperties: false }; }
 
 // ---------- Tiny in-memory cache ----------
 const CACHE = new Map(); // key -> { ts, value }
@@ -107,32 +67,21 @@ function apiAll(ctx, pathOrUrl, opts = {}) {
 }
 
 // ---------- Projects ----------
-async function listProjects(ctx, { archived = false, compact = true, limit } = {}) {
-  const qs = new URLSearchParams();
-  if (archived) qs.set("status", "archived");
-  // Ask for larger pages and always start at page=1 so Link headers behave consistently.
-  qs.set("per_page", "100");
-  qs.set("page", "1");
+async function listProjects(ctx, { archived = false } = {}) {
+  const qs = archived ? "?status=archived" : "";
+  // Fetch all pages, but return a compact shape to avoid tool output limits.
+  const projects = await apiAll(ctx, `/projects.json${qs}`);
 
-  const data = await apiAll(ctx, `/projects.json?${qs.toString()}`);
-  const projects = Array.isArray(data) ? data : [];
-
-  let out = projects;
-  if (compact) {
-    out = projects.map((p) => ({
-      id: p.id,
-      name: p.name,
-      status: p.status,
-      created_at: p.created_at,
-      updated_at: p.updated_at,
-      app_url: p.app_url,
-    }));
-  }
-
-  if (limit && Number.isFinite(Number(limit))) {
-    out = out.slice(0, Math.max(0, Number(limit)));
-  }
-  return out;
+  return (projects || []).map((p) => ({
+    id: p.id,
+    name: p.name,
+    status: p.status,
+    // useful but small
+    created_at: p.created_at,
+    updated_at: p.updated_at,
+    app_url: p.app_url,
+    url: p.url,
+  }));
 }
 
 async function projectByName(ctx, name, { archived = false } = {}) {
@@ -190,34 +139,14 @@ async function listTodosForList(ctx, projectId, todolist) {
   return apiAll(ctx, `/buckets/${projectId}/todolists/${todolist.id}/todos.json`);
 }
 
-
-async function listTodosForProject(ctx, projectId, { includeCompleted = false, maxTodosPerList = 250 } = {}) {
+async function listTodosForProject(ctx, projectId) {
   const lists = await listTodoLists(ctx, projectId);
   const groups = await mapLimit(lists || [], 2, async (l) => {
     const todos = await listTodosForList(ctx, projectId, l);
-
-    const shaped = [];
-    for (const t of todos || []) {
-      const completed = !!(t.completed || t.completed_at);
-      if (!includeCompleted && completed) continue;
-      shaped.push({
-        id: t.id,
-        content: todoText(t),
-        description: t.description || null,
-        due_on: isoDate(t.due_on || t.due_at),
-        completed: completed,
-        completed_at: t.completed_at || null,
-        assignees: Array.isArray(t.assignees) ? t.assignees.map(a => ({ id: a.id, name: a.name })) : null,
-        url: t.app_url || t.url || null,
-      });
-      if (shaped.length >= maxTodosPerList) break;
-    }
-
-    return { todolistId: l.id, todolist: l.name, todos: shaped };
+    return { todolistId: l.id, todolist: l.name, todos };
   });
   return groups;
 }
-
 
 async function listAllOpenTodos(ctx, { archivedProjects = false, maxProjects = 500 } = {}) {
   const cacheKey = `openTodos:${ctx.accountId}:${archivedProjects}:${maxProjects}`;
@@ -245,7 +174,6 @@ async function listAllOpenTodos(ctx, { archivedProjects = false, maxProjects = 5
             content: todoText(t),
             due_on: isoDate(t.due_on || t.due_at),
             url: t.app_url || t.url || null,
-
           });
         }
       }
@@ -274,7 +202,6 @@ async function assignmentReport(ctx, projectName, { maxTodos = 250 } = {}) {
         todoId: t.id,
         content: todoText(t),
         due_on: isoDate(t.due_on || t.due_at),
-
       });
       if (open.length >= maxTodos) break;
     }
@@ -379,98 +306,6 @@ async function getHillChartFromDock(ctx, projectId) {
   return null;
 }
 
-// ---------- Messages / Docs / Schedule (dock-driven) ----------
-async function listMessageBoards(ctx, projectId) {
-  const dock = await getDock(ctx, projectId);
-  const mb = dockFind(dock, ["message_board", "message_boards"]);
-  if (!mb?.url) throw new Error("This project does not expose a message board dock item.");
-  // Typically returns an array of message boards.
-  const boards = await apiAll(ctx, mb.url);
-  return (Array.isArray(boards) ? boards : []).map((b) => ({
-    id: b.id,
-    title: b.title,
-    status: b.status,
-    app_url: b.app_url,
-    messages_url: b.messages_url,
-  }));
-}
-
-async function listMessages(ctx, projectId, { board_id, board_title, limit } = {}) {
-  const boards = await listMessageBoards(ctx, projectId);
-  let board = null;
-  if (board_id) board = boards.find((b) => String(b.id) === String(board_id));
-  if (!board && board_title) {
-    const q = board_title.toLowerCase();
-    board = boards.find((b) => (b.title || "").toLowerCase().includes(q)) || null;
-  }
-  if (!board) {
-    // default to first board if present
-    board = boards[0] || null;
-  }
-  if (!board?.messages_url) {
-    throw new Error("No message board/messages_url found. Provide board_id or board_title.");
-  }
-  const msgs = await apiAll(ctx, board.messages_url);
-  const arr = Array.isArray(msgs) ? msgs : [];
-  const mapped = arr.map((m) => ({
-    id: m.id,
-    subject: m.subject,
-    status: m.status,
-    created_at: m.created_at,
-    updated_at: m.updated_at,
-    app_url: m.app_url,
-    url: m.url,
-  }));
-  if (limit != null) return mapped.slice(0, Math.max(0, Number(limit) || 0));
-  return mapped;
-}
-
-async function listDocuments(ctx, projectId, { limit } = {}) {
-  const dock = await getDock(ctx, projectId);
-  const vault = dockFind(dock, ["vault", "documents"]);
-  if (!vault?.url) throw new Error("This project does not expose a vault/documents dock item.");
-  const vaultObj = await api(ctx, vault.url);
-  // Many vault payloads include a documents_url.
-  const docsUrl = vaultObj?.documents_url || vaultObj?.documents?.url || vaultObj?.documents;
-  if (!docsUrl) throw new Error("Could not locate documents_url on vault payload.");
-  const docs = await apiAll(ctx, docsUrl);
-  const arr = Array.isArray(docs) ? docs : [];
-  const mapped = arr.map((d) => ({
-    id: d.id,
-    title: d.title,
-    kind: d.kind,
-    created_at: d.created_at,
-    updated_at: d.updated_at,
-    app_url: d.app_url,
-    url: d.url,
-  }));
-  if (limit != null) return mapped.slice(0, Math.max(0, Number(limit) || 0));
-  return mapped;
-}
-
-async function listScheduleEntries(ctx, projectId, { limit } = {}) {
-  const dock = await getDock(ctx, projectId);
-  const schedule = dockFind(dock, ["schedule", "schedules"]);
-  if (!schedule?.url) throw new Error("This project does not expose a schedule dock item.");
-  const schedObj = await api(ctx, schedule.url);
-  const entriesUrl = schedObj?.entries_url || schedObj?.entries?.url || schedObj?.entries;
-  if (!entriesUrl) throw new Error("Could not locate entries_url on schedule payload.");
-  const entries = await apiAll(ctx, entriesUrl);
-  const arr = Array.isArray(entries) ? entries : [];
-  const mapped = arr.map((e) => ({
-    id: e.id,
-    summary: e.summary,
-    starts_at: e.starts_at,
-    ends_at: e.ends_at,
-    created_at: e.created_at,
-    updated_at: e.updated_at,
-    app_url: e.app_url,
-    url: e.url,
-  }));
-  if (limit != null) return mapped.slice(0, Math.max(0, Number(limit) || 0));
-  return mapped;
-}
-
 // ---------- MCP handler ----------
 export async function handleMCP(reqBody, ctx) {
   const { id, method, params } = reqBody || {};
@@ -490,24 +325,28 @@ export async function handleMCP(reqBody, ctx) {
           tool("list_accounts", "List Basecamp accounts available to the authenticated user.", noProps()),
           tool("list_projects", "List projects (supports archived).", {
             type: "object",
-            properties: { archived: { type: "boolean" } },
+            properties: {
+      confirm_debug: { type: "boolean", const: true }, archived: { type: "boolean" } },
             additionalProperties: false
           }),
           tool("find_project", "Resolve a project by name (fuzzy).", {
             type: "object",
-            properties: { name: { type: "string" } },
+            properties: {
+      confirm_debug: { type: "boolean", const: true }, name: { type: "string" } },
             required: ["name"],
             additionalProperties: false
           }),
 
           tool("daily_report", "Across projects: totals + per-project breakdown + due today + overdue (open only).", {
             type: "object",
-            properties: { date: { type: "string", description: "YYYY-MM-DD (defaults today)" } },
+            properties: {
+      confirm_debug: { type: "boolean", const: true }, date: { type: "string", description: "YYYY-MM-DD (defaults today)" } },
             additionalProperties: false
           }),
           tool("list_todos_due", "Across projects: list open todos due on date; optionally include overdue.", {
             type: "object",
             properties: {
+      confirm_debug: { type: "boolean", const: true },
               date: { type: "string", description: "YYYY-MM-DD (defaults today)" },
               include_overdue: { type: "boolean" }
             },
@@ -515,20 +354,23 @@ export async function handleMCP(reqBody, ctx) {
           }),
           tool("search_todos", "Search open todos across all projects by keyword.", {
             type: "object",
-            properties: { query: { type: "string" } },
+            properties: {
+      confirm_debug: { type: "boolean", const: true }, query: { type: "string" } },
             required: ["query"],
             additionalProperties: false
           }),
           tool("assignment_report", "Group open todos by assignee within a project (optimized).", {
             type: "object",
-            properties: { project: { type: "string" }, max_todos: { type: "integer" } },
+            properties: {
+      confirm_debug: { type: "boolean", const: true }, project: { type: "string" }, max_todos: { type: "integer" } },
             required: ["project"],
             additionalProperties: false
           }),
 
           tool("list_todos_for_project", "List todolists + todos for a project by name.", {
             type: "object",
-            properties: { project: { type: "string" } },
+            properties: {
+      confirm_debug: { type: "boolean", const: true }, project: { type: "string" } },
             required: ["project"],
             additionalProperties: false
           }),
@@ -537,6 +379,7 @@ export async function handleMCP(reqBody, ctx) {
           tool("create_todo", "Create a to-do in a project; optionally specify todolist and due date.", {
             type: "object",
             properties: {
+      confirm_debug: { type: "boolean", const: true },
               project: { type: "string" },
               todolist: { type: "string", nullable: true },
               task: { type: "string" },
@@ -550,7 +393,8 @@ export async function handleMCP(reqBody, ctx) {
 
           tool("complete_task_by_name", "Complete a todo in a project by fuzzy-matching its content.", {
             type: "object",
-            properties: { project: { type: "string" }, task: { type: "string" } },
+            properties: {
+      confirm_debug: { type: "boolean", const: true }, project: { type: "string" }, task: { type: "string" } },
             required: ["project", "task"],
             additionalProperties: false
           }),
@@ -558,25 +402,29 @@ export async function handleMCP(reqBody, ctx) {
           // Card tables
           tool("list_card_tables", "List card tables (kanban boards) for a project.", {
             type: "object",
-            properties: { project: { type: "string" } },
+            properties: {
+      confirm_debug: { type: "boolean", const: true }, project: { type: "string" } },
             required: ["project"],
             additionalProperties: false
           }),
           tool("list_card_table_columns", "List columns for a card table.", {
             type: "object",
-            properties: { project: { type: "string" }, card_table_id: { type: "integer" } },
+            properties: {
+      confirm_debug: { type: "boolean", const: true }, project: { type: "string" }, card_table_id: { type: "integer" } },
             required: ["project", "card_table_id"],
             additionalProperties: false
           }),
           tool("list_card_table_cards", "List cards for a card table.", {
             type: "object",
-            properties: { project: { type: "string" }, card_table_id: { type: "integer" } },
+            properties: {
+      confirm_debug: { type: "boolean", const: true }, project: { type: "string" }, card_table_id: { type: "integer" } },
             required: ["project", "card_table_id"],
             additionalProperties: false
           }),
           tool("create_card", "Create a card in a card table.", {
             type: "object",
             properties: {
+      confirm_debug: { type: "boolean", const: true },
               project: { type: "string" },
               card_table_id: { type: "integer" },
               title: { type: "string" },
@@ -590,6 +438,7 @@ export async function handleMCP(reqBody, ctx) {
           tool("move_card", "Move/update a card (column/position).", {
             type: "object",
             properties: {
+      confirm_debug: { type: "boolean", const: true },
               project: { type: "string" },
               card_id: { type: "integer" },
               column_id: { type: "integer", nullable: true },
@@ -602,53 +451,25 @@ export async function handleMCP(reqBody, ctx) {
           // Hill charts
           tool("get_hill_chart", "Fetch the hill chart for a project (if enabled).", {
             type: "object",
-            properties: { project: { type: "string" } },
+            properties: {
+      confirm_debug: { type: "boolean", const: true }, project: { type: "string" } },
             required: ["project"],
-            additionalProperties: false
-          }),
-
-          // Messages / Docs / Schedule (dock-driven)
-          tool("list_message_boards", "List message boards for a project.", {
-            type: "object",
-            properties: { project: { type: "string" } },
-            required: ["project"],
-            additionalProperties: false
-          }),
-          tool("list_messages", "List messages in a message board. If message_board_id omitted, uses the first board.", {
-            type: "object",
-            properties: { project: { type: "string" }, message_board_id: { type: "integer", nullable: true } },
-            required: ["project"],
-            additionalProperties: false
-          }),
-          tool("list_documents", "List documents/files in the project vault.", {
-            type: "object",
-            properties: { project: { type: "string" } },
-            required: ["project"],
-            additionalProperties: false
-          }),
-          tool("list_schedule_entries", "List schedule entries for a project (date range optional).", {
-            type: "object",
-            properties: { project: { type: "string" }, start: { type: "string", nullable: true }, end: { type: "string", nullable: true } },
-            required: ["project"],
-            additionalProperties: false
-          }),
-          tool("search_project", "Search within a project (dock-driven search if enabled).", {
-            type: "object",
-            properties: { project: { type: "string" }, query: { type: "string" } },
-            required: ["project", "query"],
             additionalProperties: false
           }),
 
           // Raw escape hatch
           tool("basecamp_request", "Raw Basecamp API call. Provide full URL or a /path.", {
             type: "object",
-            properties: { path: { type: "string" }, method: { type: "string" }, body: { type: "object" } },
+            properties: {
+      confirm_debug: { type: "boolean", const: true }, path: { type: "string" }, method: { type: "string" }, body: { type: "object" } },
             required: ["path"],
             additionalProperties: false
           }),
-          tool("basecamp_raw", "Alias of basecamp_request for backward compatibility.", {
+          tool("debug_basecamp_raw",
+  "DEBUG ONLY. Returns raw Basecamp API responses. Never use for user-facing queries.", "Alias of basecamp_request for backward compatibility.", {
             type: "object",
-            properties: { path: { type: "string" }, method: { type: "string" }, body: { type: "object" } },
+            properties: {
+      confirm_debug: { type: "boolean", const: true }, path: { type: "string" }, method: { type: "string" }, body: { type: "object" } },
             required: ["path"],
             additionalProperties: false
           })
@@ -694,7 +515,7 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "list_todos_for_project") {
       const p = await projectByName(ctx, args.project);
       const groups = await listTodosForProject(ctx, p.id);
-      return ok(id, enforceMaxBytes({ project: { id: p.id, name: p.name }, groups }));
+      return ok(id, { project: { id: p.id, name: p.name }, groups });
     }
 
     if (name === "daily_report") {
@@ -716,7 +537,7 @@ export async function handleMCP(reqBody, ctx) {
         (a, b) => (b.overdue - a.overdue) || (b.dueToday - a.dueToday) || (a.project || "").localeCompare(b.project || "")
       );
 
-      return ok(id, enforceMaxBytes({
+      return ok(id, {
         date,
         totals: {
           projects: new Set(rows.map((r) => r.projectId)).size,
@@ -726,7 +547,7 @@ export async function handleMCP(reqBody, ctx) {
         perProject: perProjectArr,
         dueToday,
         overdue
-      }));
+      });
     }
 
     if (name === "list_todos_due") {
@@ -745,12 +566,12 @@ export async function handleMCP(reqBody, ctx) {
           (a.project || "").localeCompare(b.project || "")
       );
 
-return ok(id, enforceMaxBytes({ date, count: todos.length, todos }));
+      return ok(id, { date, count: todos.length, todos });
     }
 
     if (name === "search_todos") {
       const q = String(args.query || "").trim().toLowerCase();
-      if (!q) return ok(id, enforceMaxBytes({ query: "", count: 0, todos: [] }));
+      if (!q) return ok(id, { query: "", count: 0, todos: [] });
 
       const cacheKey = `search:${ctx.accountId}:${q}`;
       const cached = cacheGet(cacheKey);
@@ -862,39 +683,6 @@ return ok(id, enforceMaxBytes({ date, count: todos.length, todos }));
       const hill = await getHillChartFromDock(ctx, p.id);
       if (!hill) return fail(id, { code: "TOOL_NOT_ENABLED", message: "Hill chart not enabled for this project (or not accessible)." });
       return ok(id, { project: { id: p.id, name: p.name }, hill_chart: hill });
-    }
-
-    // Messages / Docs / Schedule (dock-driven)
-    if (name === "list_message_boards") {
-      const p = await projectByName(ctx, args.project);
-      const boards = await listMessageBoards(ctx, p.id);
-      return ok(id, { project: { id: p.id, name: p.name }, message_boards: boards });
-    }
-
-    if (name === "list_messages") {
-      const p = await projectByName(ctx, args.project);
-      const boards = await listMessageBoards(ctx, p.id);
-      const board = resolveByName(boards, args.board, "message board");
-      const msgs = await listMessagesForBoard(ctx, board);
-      return ok(id, { project: { id: p.id, name: p.name }, board: { id: board.id, name: board.name }, messages: msgs });
-    }
-
-    if (name === "list_documents") {
-      const p = await projectByName(ctx, args.project);
-      const docs = await listDocuments(ctx, p.id);
-      return ok(id, { project: { id: p.id, name: p.name }, documents: docs });
-    }
-
-    if (name === "list_schedule_entries") {
-      const p = await projectByName(ctx, args.project);
-      const entries = await listScheduleEntries(ctx, p.id, { from: args.from, to: args.to });
-      return ok(id, { project: { id: p.id, name: p.name }, schedule_entries: entries });
-    }
-
-    if (name === "search_project") {
-      const p = await projectByName(ctx, args.project);
-      const results = await searchProject(ctx, p.id, { query: args.query });
-      return ok(id, { project: { id: p.id, name: p.name }, query: args.query, results });
     }
 
     // Raw

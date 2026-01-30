@@ -31,43 +31,6 @@ function parseLinkHeader(link) {
   return out;
 }
 
-function toRelativePath(urlOrPath, accountId) {
-  // Convert absolute Link URLs into the relative path used by basecampFetch.
-  if (!urlOrPath) return urlOrPath;
-  if (!urlOrPath.startsWith("http")) return urlOrPath;
-
-  try {
-    const u = new URL(urlOrPath);
-    // Expected: https://3.basecampapi.com/{accountId}/.../something.json
-    const prefix = `/${accountId}`;
-    const path = u.pathname.startsWith(prefix) ? u.pathname.slice(prefix.length) : u.pathname;
-    return path + (u.search || "");
-  } catch {
-    return urlOrPath;
-  }
-}
-
-function getParamInt(urlOrPath, key) {
-  try {
-    const base = urlOrPath.startsWith("http") ? undefined : "https://example.invalid";
-    const u = new URL(urlOrPath, base);
-    const v = u.searchParams.get(key);
-    if (v == null) return null;
-    const n = parseInt(v, 10);
-    return Number.isFinite(n) ? n : null;
-  } catch {
-    return null;
-  }
-}
-
-function setParam(urlOrPath, key, value) {
-  const base = urlOrPath.startsWith("http") ? undefined : "https://example.invalid";
-  const u = new URL(urlOrPath, base);
-  u.searchParams.set(key, String(value));
-  if (base) return u.pathname + (u.search || "");
-  return u.toString();
-}
-
 function normalizeUrl(raw, accountId) {
   const s = String(raw || "").trim();
   if (!s) {
@@ -220,15 +183,7 @@ export async function basecampFetchAll(
   const all = [];
   let pages = 0;
 
-  // Encourage deterministic pagination. Many Basecamp collection endpoints
-  // default to 15 items/page. Adding per_page + page=1 typically reduces
-  // requests and makes it more likely the API returns a Link: rel="next" header.
-  const perPage = getParamInt(url, "per_page") ?? 100;
-  url = setParam(url, "per_page", perPage);
-  if (getParamInt(url, "page") == null) url = setParam(url, "page", 1);
-
   while (url && pages < maxPages) {
-    const requestUrl = url;
     const httpHeaders = {
       Authorization: `Bearer ${TOKEN?.access_token}`,
       "User-Agent": ua,
@@ -276,16 +231,7 @@ export async function basecampFetchAll(
 
         const link = res.headers.get("link");
         const { next } = parseLinkHeader(link);
-        if (next) {
-          // Basecamp returns absolute URLs here; keep absolute for fetch.
-          url = next;
-        } else if (perPage && Array.isArray(data) && data.length === perPage) {
-          // Fallback: some responses may omit Link even when more pages exist.
-          const cur = getParamInt(requestUrl, "page") ?? 1;
-          url = setParam(requestUrl, "page", cur + 1);
-        } else {
-          url = null;
-        }
+        url = next || null;
 
         pages++;
         if (url) await sleep(pageDelayMs);
