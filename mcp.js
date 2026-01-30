@@ -407,6 +407,17 @@ export async function handleMCP(reqBody, ctx) {
             required: ["path"],
             additionalProperties: false,
           }),
+          tool("basecamp_raw", "Raw Basecamp API call (alias of basecamp_request for backward compatibility). Provide full URL or a /path.", {
+            type: "object",
+            properties: {
+              path: { type: "string" },
+              method: { type: "string" },
+              body: { type: "object" }
+            },
+            required: ["path"],
+            additionalProperties: false
+          }),
+
         ],
       });
     }
@@ -609,10 +620,12 @@ export async function handleMCP(reqBody, ctx) {
     }
 
     // ---- Raw fallback ----
-    if (name === "basecamp_request") {
+    if (name === "basecamp_request" || name === "basecamp_raw") {
       const data = await api(ctx, args.path, { method: args.method || "GET", body: args.body });
       return ok(id, data);
     }
+
+    
 
     return fail(id, { code: "UNKNOWN_TOOL", message: "Unknown tool name" });
   } catch (e) {
