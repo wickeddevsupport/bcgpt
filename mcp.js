@@ -242,9 +242,8 @@ async function getDock(ctx, projectId) {
 
 // ---------- Todos (stable paths first) ----------
 async function listTodoLists(ctx, projectId) {
-  // ✅ CORRECT: Every project has exactly ONE todoset (found via dock).
-  // Then we get todolists FROM that todoset.
-  // Pattern: GET /buckets/{projectId}/todosets/{todosetId}/todolists.json
+  // ✅ CORRECT: Every project has exactly ONE todoset (found via dock) and we get
+  // todolists from that todoset: GET /buckets/{projectId}/todosets/{todosetId}/todolists.json
   
   try {
     const dock = await getDock(ctx, projectId);
@@ -264,7 +263,52 @@ async function listTodoLists(ctx, projectId) {
     const todosetId = todosDock.id;
     const endpoint = `/buckets/${projectId}/todosets/${todosetId}/todolists.json`;
     console.log(`[listTodoLists] Using endpoint: ${endpoint}`);
-    return apiAll(ctx, endpoint);
+
+    try {
+      return await apiAll(ctx, endpoint);
+    } catch (e) {
+      // If the primary endpoint is 404/403, collect diagnostics and try fallbacks
+      if (e?.code === 'BASECAMP_API_ERROR' && (e.status === 404 || e.status === 403)) {
+        console.warn(`[listTodoLists] Primary todolists endpoint returned ${e.status} for project ${projectId}. Collecting diagnostics and trying fallbacks.`);
+        console.debug(`[listTodoLists] Dock contents: ${JSON.stringify(dock)}`);
+        console.debug(`[listTodoLists] Todos dock entry: ${JSON.stringify(todosDock)}`);
+
+        // Fallback 1: list todosets for the project to verify the todoset id
+        try {
+          const todosets = await apiAll(ctx, `/buckets/${projectId}/todosets.json`);
+          console.log(`[listTodoLists] Found ${Array.isArray(todosets) ? todosets.length : 0} todosets for project ${projectId}`);
+          if (Array.isArray(todosets) && todosets.length) {
+            // Try to find a matching entry by id or name
+            const match = todosets.find(ts => String(ts.id) === String(todosetId) || ts.name === todosDock.name || ts.name === (todosDock.title || null));
+            if (match) {
+              const altEndpoint = `/buckets/${projectId}/todosets/${match.id}/todolists.json`;
+              console.log(`[listTodoLists] Trying alternative todoset id ${match.id} via ${altEndpoint}`);
+              try {
+                return await apiAll(ctx, altEndpoint);
+              } catch (inner) {
+                console.warn(`[listTodoLists] Alternative todoset id ${match.id} also failed with status ${inner?.status}`);
+              }
+            }
+          }
+        } catch (e2) {
+          console.warn(`[listTodoLists] Could not enumerate todosets: ${e2?.message}`);
+        }
+
+        // Fallback 2: try top-level todolists endpoint (some accounts expose a simpler endpoint)
+        try {
+          const alt = `/buckets/${projectId}/todolists.json`;
+          console.log(`[listTodoLists] Trying alternate endpoint: ${alt}`);
+          return await apiAll(ctx, alt);
+        } catch (e3) {
+          console.warn(`[listTodoLists] Alternate todolists endpoint failed: ${e3?.message}`);
+        }
+
+        // Final fallback — treat as empty (no todos feature / inaccessible)
+        console.log(`[listTodoLists] No todolists available for project ${projectId}; returning empty list`);
+        return [];
+      }
+      throw e;
+    }
   } catch (e) {
     if (e.code === "BASECAMP_API_ERROR" && e.status === 404) {
       console.log(`[listTodoLists] 404 for project ${projectId} - no todos feature or empty`);
