@@ -174,6 +174,12 @@ async function listTodoLists(ctx, projectId) {
   try {
     return apiAll(ctx, `/buckets/${projectId}/todolists.json`);
   } catch (e) {
+    // 404 means no todos feature, return empty array
+    if (e.code === "BASECAMP_API_ERROR" && e.status === 404) {
+      console.log(`[listTodoLists] 404 for project ${projectId} - returning empty array`);
+      return [];
+    }
+
     // ✅ Fallback: try to derive a todoset url/id from dock (some accounts differ)
     try {
       const dock = await getDock(ctx, projectId);
@@ -186,7 +192,11 @@ async function listTodoLists(ctx, projectId) {
       if (todosDock?.id) {
         return apiAll(ctx, `/buckets/${projectId}/todosets/${todosDock.id}/todolists.json`);
       }
-    } catch {
+    } catch (fallbackErr) {
+      // 404 in fallback also means no todos
+      if (fallbackErr.code === "BASECAMP_API_ERROR" && fallbackErr.status === 404) {
+        return [];
+      }
       // ignore and throw original below
     }
     throw e;
