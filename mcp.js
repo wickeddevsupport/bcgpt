@@ -66,30 +66,58 @@ function apiAll(ctx, pathOrUrl, opts = {}) {
 }
 
 // ---------- Projects ----------
-async function listProjects(ctx, { archived = false, compact = true, limit } = {}) {
+// Utility: chunk an array into arrays of max size n
+function chunkArray(arr, n) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += n) {
+    out.push(arr.slice(i, i + n));
+  }
+  return out;
+}
+
+// Utility: create a concise JSON summary for a project
+function projectSummary(p) {
+  return {
+    id: p.id,
+    name: p.name,
+    status: p.status,
+    created_at: p.created_at,
+    updated_at: p.updated_at,
+    app_url: p.app_url,
+    // Only include a summary of dock items, not the full raw dock
+    dock: Array.isArray(p.dock)
+      ? p.dock.filter(d => d && d.enabled !== false).map(d => ({
+          name: d.name,
+          enabled: d.enabled !== false,
+          url: d.url || null,
+        }))
+      : [],
+  };
+}
+
+// List all projects, paginated and aggregated, with meaningful JSON output
+async function listProjects(ctx, { archived = false, compact = true, limit, chunkSize = 100 } = {}) {
   const qs = new URLSearchParams();
   if (archived) qs.set("status", "archived");
-  // Ask for larger pages and always start at page=1 so Link headers behave consistently.
   qs.set("per_page", "100");
   qs.set("page", "1");
 
+  // Fetch all pages (apiAll already paginates)
   const data = await apiAll(ctx, `/projects.json?${qs.toString()}`);
   const projects = Array.isArray(data) ? data : [];
 
   let out = projects;
   if (compact) {
-    out = projects.map((p) => ({
-      id: p.id,
-      name: p.name,
-      status: p.status,
-      created_at: p.created_at,
-      updated_at: p.updated_at,
-      app_url: p.app_url,
-    }));
+    out = projects.map(projectSummary);
   }
 
   if (limit && Number.isFinite(Number(limit))) {
     out = out.slice(0, Math.max(0, Number(limit)));
+  }
+
+  // Chunk output if too large (for ChatGPT or API limits)
+  if (chunkSize && out.length > chunkSize) {
+    return chunkArray(out, chunkSize);
   }
   return out;
 }
@@ -621,13 +649,16 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "list_accounts") return ok(id, authAccounts || []);
 
     if (name === "list_projects") {
-      const projects = await listProjects(ctx, { archived: !!args.archived });
+      // Use new listProjects with chunking and concise JSON
+      const chunkSize = 100; // can be tuned or made configurable
+      const projects = await listProjects(ctx, { archived: !!args.archived, compact: true, chunkSize });
       return ok(id, projects);
     }
 
     if (name === "find_project") {
       const p = await projectByName(ctx, args.name);
-      return ok(id, p);
+      // Return concise summary, not raw
+      return ok(id, projectSummary(p));
     }
 
     if (name === "list_todos_for_project") {
