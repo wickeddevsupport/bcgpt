@@ -29,6 +29,16 @@ console.log(`[Startup] DEFAULT_ACCOUNT_ID from env: ${DEFAULT_ACCOUNT_ID}`);
 let TOKEN = null;      // single-user token
 let AUTH_CACHE = null; // cached authorization.json
 
+// Try to load TOKEN from environment on startup
+if (process.env.BASECAMP_TOKEN) {
+  try {
+    TOKEN = JSON.parse(process.env.BASECAMP_TOKEN);
+    console.log(`[Startup] Loaded TOKEN from BASECAMP_TOKEN env var`);
+  } catch (e) {
+    console.error(`[Startup] Failed to parse BASECAMP_TOKEN from env:`, e.message);
+  }
+}
+
 function originBase(req) {
   const inferred = `${req.protocol}://${req.get("host")}`;
   return process.env.APP_BASE_URL || inferred;
