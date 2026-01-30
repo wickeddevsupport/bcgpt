@@ -67,50 +67,15 @@ function normalizeBasecampUrl(path, accountId) {
   return `${BASECAMP_API}/${accountId}${p}`;
 }
 
-function setQueryParam(u, key, value) {
-  const url = new URL(u);
-  url.searchParams.set(key, String(value));
-  return url.toString();
-}
-
-function getQueryParam(u, key) {
-  try {
-    const url = new URL(u);
-    return url.searchParams.get(key);
-  } catch {
-    return null;
-  }
-}
-
 function parseLinkHeader(link) {
-  // Robust RFC5988-ish Link parser (order-insensitive params)
-  // Handles: <url>; rel="next"; title="Next", <url>; title="..."; rel=next
+  // Minimal Link parser: <url>; rel="next"
   if (!link) return {};
   const out = {};
-  const parts = String(link).split(",").map((s) => s.trim()).filter(Boolean);
-
+  const parts = String(link).split(",").map((s) => s.trim());
   for (const part of parts) {
-    const urlMatch = part.match(/<([^>]+)>/);
-    if (!urlMatch) continue;
-    const url = urlMatch[1];
-
-    const params = {};
-    const paramChunks = part.split(";").slice(1).map((s) => s.trim()).filter(Boolean);
-    for (const chunk of paramChunks) {
-      const eq = chunk.indexOf("=");
-      if (eq === -1) continue;
-      const k = chunk.slice(0, eq).trim().toLowerCase();
-      let v = chunk.slice(eq + 1).trim();
-      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
-        v = v.slice(1, -1);
-      }
-      params[k] = v;
-    }
-
-    const rel = params["rel"];
-    if (rel) out[rel] = url;
+    const m = part.match(/<([^>]+)>\s*;\s*rel="([^"]+)"/i);
+    if (m) out[m[2]] = m[1];
   }
-
   return out;
 }
 
@@ -223,12 +188,6 @@ async function basecampFetch(token, path, opts = {}) {
   }
 
   // Pagination: aggregate pages when response is an array
-  // Try to increase page size where supported to reduce number of requests.
-  const PER_PAGE = 100;
-  if (!/\bper_page=\d+\b/i.test(url)) {
-    url = setQueryParam(url, "per_page", PER_PAGE);
-  }
-
   const aggregated = [];
   let page = 0;
 
@@ -240,18 +199,7 @@ async function basecampFetch(token, path, opts = {}) {
 
     const link = respHeaders?.get?.("link") || null;
     const { next } = parseLinkHeader(link);
-    if (next) {
-      url = next;
-    } else {
-      // Fallback: some endpoints omit Link headers. Use page=1..N until we see a short/empty page.
-      const curPage = Number(getQueryParam(url, "page") || String(page + 1));
-      const lastCount = Array.isArray(data) ? data.length : 0;
-      if (lastCount >= PER_PAGE) {
-        url = setQueryParam(url, "page", curPage + 1);
-      } else {
-        url = null;
-      }
-    }
+    url = next || null;
 
     page++;
     if (url) await sleep(pageDelayMs);
