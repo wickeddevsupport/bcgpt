@@ -79,6 +79,17 @@ function parseLinkHeader(link) {
   return out;
 }
 
+function withPage(url, pageNum) {
+  try {
+    const u = new URL(url);
+    u.searchParams.set("page", String(pageNum));
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
+
 /**
  * Hardened Basecamp fetch:
  * - timeout
@@ -192,14 +203,21 @@ async function basecampFetch(token, path, opts = {}) {
   let page = 0;
 
   while (url && page < maxPages) {
+    const requestUrl = url;
     const { data, headers: respHeaders } = await doOne(url);
 
     if (Array.isArray(data)) aggregated.push(...data);
     else return data; // Not an array => stop pagination and return as-is.
 
-    const link = respHeaders?.get?.("link") || null;
+    const link = (respHeaders?.get?.("link") || respHeaders?.get?.("Link")) || null;
     const { next } = parseLinkHeader(link);
     url = next || null;
+
+    // Fallback pagination: if no Link header is provided but we received a full page,
+    // try explicit ?page=N (Basecamp defaults to 15 per page).
+    if (!url && Array.isArray(data) && data.length === 15) {
+      url = withPage(requestUrl, page + 2);
+    }
 
     page++;
     if (url) await sleep(pageDelayMs);

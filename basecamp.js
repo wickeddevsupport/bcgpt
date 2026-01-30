@@ -31,6 +31,16 @@ function parseLinkHeader(link) {
   return out;
 }
 
+function withPage(url, pageNum) {
+  try {
+    const u = new URL(url);
+    u.searchParams.set("page", String(pageNum));
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
 function normalizeUrl(raw, accountId) {
   const s = String(raw || "").trim();
   if (!s) {
@@ -229,9 +239,14 @@ export async function basecampFetchAll(
 
         all.push(...data);
 
-        const link = res.headers.get("link");
+        const link = res.headers.get("link") || res.headers.get("Link");
         const { next } = parseLinkHeader(link);
         url = next || null;
+
+        // Fallback if Link header is missing: if we got a full page, try ?page=N
+        if (!url && Array.isArray(data) && data.length === 15) {
+          url = withPage(res.url, pages + 2);
+        }
 
         pages++;
         if (url) await sleep(pageDelayMs);
