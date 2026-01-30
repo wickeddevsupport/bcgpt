@@ -3,16 +3,16 @@
  * Provides helper functions for common scenarios
  */
 
-const { RequestContext } = require('./intelligent-executor.js');
-const { QueryParser } = require('./query-parser.js');
-const { ResultEnricher } = require('./result-enricher.js');
-const {
+import { RequestContext } from './intelligent-executor.js';
+import { QueryParser } from './query-parser.js';
+import { ResultEnricher } from './result-enricher.js';
+import {
   SearchEnrichExecutor,
   AssignmentExecutor,
   TimelineExecutor,
   PersonFinderExecutor,
   StatusFilterExecutor
-} = require('./pattern-executors.js');
+} from './pattern-executors.js';
 
 /**
  * Initialize intelligent chaining for a request
@@ -245,7 +245,7 @@ async function executeSequential(tasks) {
  *    NEW: return await intelligent.executePersonFinder(ctx, projectId, personName);
  */
 
-module.exports = {
+export {
   // Context management
   initializeIntelligentContext,
   analyzeQuery,

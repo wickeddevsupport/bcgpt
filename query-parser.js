@@ -243,7 +243,4 @@ class QueryParser {
   }
 }
 
-module.exports = {
-  QueryAnalysis,
-  QueryParser
-};
+export { QueryAnalysis, QueryParser };

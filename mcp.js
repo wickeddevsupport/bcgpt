@@ -57,8 +57,8 @@ import { resolveByName, resolveBestEffort } from "./resolvers.js";
 import { indexSearchItem } from "./db.js";
 
 // Intelligent chaining modules
-const { RequestContext } = require('./intelligent-executor.js');
-const intelligent = require('./intelligent-integration.js');
+import { RequestContext } from './intelligent-executor.js';
+import * as intelligent from './intelligent-integration.js';
 
 // ---------- JSON-RPC helpers ----------
 function ok(id, result) { return { jsonrpc: "2.0", id, result }; }

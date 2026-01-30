@@ -3,6 +3,8 @@
  * Optimizes repeated lookups and reduces API calls
  */
 
+import { api } from './basecamp.js';
+
 class CacheStore {
   constructor() {
     this.stores = new Map();
@@ -136,8 +138,6 @@ class CacheManager {
   async initializeGlobal(apiCtx) {
     if (this.isPreloaded) return; // Only preload once per session
     
-    const { api } = require('./basecamp.js');
-    
     try {
       // Load people - typically needed by most queries
       const people = await api(apiCtx, '/people.json');
@@ -267,9 +267,4 @@ function getCacheManager() {
   return cacheManager;
 }
 
-module.exports = {
-  CacheStore,
-  RequestCache,
-  CacheManager,
-  getCacheManager
-};
+export { CacheStore, RequestCache, CacheManager, getCacheManager };

@@ -282,7 +282,4 @@ class IntelligentExecutor {
   }
 }
 
-module.exports = {
-  RequestContext,
-  IntelligentExecutor
-};
+export { RequestContext, IntelligentExecutor };

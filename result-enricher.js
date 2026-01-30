@@ -231,6 +231,4 @@ class ResultEnricher {
   }
 }
 
-module.exports = {
-  ResultEnricher
-};
+export { ResultEnricher };
