@@ -349,26 +349,49 @@ async function searchProject(ctx, projectId, { query } = {}) {
   }
 
   try {
-    // Try the Basecamp search endpoint
-    const results = await apiAll(ctx, `/projects/${projectId}/search.json`, {
-      body: { query: query.trim() },
-    });
-    return results || [];
-  } catch {
-    // Fallback: search todos, messages, documents manually
+    // Use account-level search endpoint with bucket_id filter
+    // GET /search.json?q=<query>&bucket_id=<projectId>&per_page=100&page=1
+    let path = `/search.json?q=${encodeURIComponent(query.trim())}&bucket_id=${projectId}&per_page=100&page=1`;
+    
+    console.log(`[searchProject] Searching project ${projectId} with endpoint: ${path}`);
+    
+    // apiAll will automatically follow all pages and aggregate results
+    const results = await apiAll(ctx, path);
+    const arr = Array.isArray(results) ? results : [];
+    
+    console.log(`[searchProject] Found ${arr.length} results in project`);
+    
+    return arr.map((r) => ({
+      type: r.type,
+      title: r.title,
+      plain_text_content: r.plain_text_content,
+      url: r.url,
+      app_url: r.app_url,
+      created_at: r.created_at,
+      updated_at: r.updated_at,
+    }));
+  } catch (e) {
+    console.error(`[searchProject] Error searching project ${projectId}:`, e.message);
+    
+    // Fallback: search todos, messages, documents manually if API search fails
     const results = [];
     
     try {
-      const todos = await listAllOpenTodos(ctx, { maxProjects: 1 });
-      const matchingTodos = todos.filter(t => 
-        t.content?.toLowerCase().includes(query.toLowerCase())
-      );
-      results.push(...matchingTodos.map(t => ({
-        type: "todo",
-        title: t.content,
-        url: t.url,
-        project: t.project,
-      })));
+      const todos = await listTodosForProject(ctx, projectId);
+      if (todos) {
+        for (const group of todos) {
+          for (const t of group.todos || []) {
+            if ((t.content || "").toLowerCase().includes(query.toLowerCase())) {
+              results.push({
+                type: "todo",
+                title: t.content,
+                url: t.url,
+                app_url: t.app_url,
+              });
+            }
+          }
+        }
+      }
     } catch {
       // ignore
     }
@@ -830,22 +853,41 @@ async function listVaults(ctx, projectId) {
 }
 
 // ========== SEARCH ACROSS RECORDINGS ==========
-async function searchRecordings(ctx, query, { bucket = null } = {}) {
+// Official Basecamp search endpoint: GET /search.json
+// Query params: q (required), type, bucket_id, creator_id, file_type, exclude_chat, page, per_page
+async function searchRecordings(ctx, query, { bucket_id = null, type = null } = {}) {
   if (!query) throw new Error("Search query is required");
-  let path = `/projects/search.json?query=${encodeURIComponent(query)}`;
-  if (bucket) path += `&bucket=${encodeURIComponent(bucket)}`;
   
+  // Build the search endpoint with proper query parameters
+  let path = `/search.json?q=${encodeURIComponent(query.trim())}`;
+  
+  // Add optional filters
+  if (bucket_id) path += `&bucket_id=${encodeURIComponent(bucket_id)}`;
+  if (type) path += `&type=${encodeURIComponent(type)}`;
+  
+  // Pagination: per_page and page will be added by apiAll/basecampFetchAll
+  // Force pagination with per_page=100, page=1
+  path += `&per_page=100&page=1`;
+  
+  console.log(`[searchRecordings] Searching with endpoint: ${path}`);
+  
+  // apiAll will automatically follow pagination and aggregate all pages
   const results = await apiAll(ctx, path);
   const arr = Array.isArray(results) ? results : [];
+  
+  console.log(`[searchRecordings] Found ${arr.length} results for query: "${query}"`);
+  
   return arr.map((r) => ({
     id: r.id,
     type: r.type,
     title: r.title,
-    excerpt: r.excerpt,
+    plain_text_content: r.plain_text_content,
     created_at: r.created_at,
+    updated_at: r.updated_at,
     bucket: r.bucket?.name,
     bucket_id: r.bucket?.id,
     app_url: r.app_url,
+    url: r.url,
   }));
 }
 
@@ -1235,24 +1277,57 @@ export async function handleMCP(reqBody, ctx) {
     }
 
     if (name === "search_todos") {
-      const q = String(args.query || "").trim().toLowerCase();
+      const q = String(args.query || "").trim();
       if (!q) return ok(id, { query: "", count: 0, todos: [] });
 
       const cacheKey = `search:${ctx.accountId}:${q}`;
       const cached = cacheGet(cacheKey);
       if (cached) return ok(id, { cached: true, ...cached });
 
-      // Uses cached openTodos list (60s TTL) to avoid rescanning under throttling
-      const rows = await listAllOpenTodos(ctx);
-      const hits = rows.filter((r) => (r.content || "").toLowerCase().includes(q));
+      try {
+        // Use the official Basecamp search API with type=Todo filter
+        // This searches ALL projects and all pages
+        const results = await searchRecordings(ctx, q, { type: "Todo" });
+        
+        // Convert search results to todo format
+        const todos = results.map((r) => ({
+          id: r.id,
+          title: r.title,
+          content: r.title,
+          plain_text_content: r.plain_text_content,
+          type: "Todo",
+          bucket: r.bucket,
+          bucket_id: r.bucket_id,
+          app_url: r.app_url,
+          url: r.url,
+          created_at: r.created_at,
+          updated_at: r.updated_at,
+        }));
+        
+        const response = cacheSet(cacheKey, { query: args.query, count: todos.length, todos });
+        return ok(id, { ...response, source: "api" });
+      } catch (e) {
+        console.error(`[search_todos] API search failed, falling back to local search:`, e.message);
+        
+        // Fallback: search locally in cached open todos
+        try {
+          const rows = await listAllOpenTodos(ctx);
+          const qLower = q.toLowerCase();
+          const hits = rows.filter((r) => (r.content || "").toLowerCase().includes(qLower));
 
-      hits.sort(
-        (a, b) =>
-          (a.due_on || "9999-99-99").localeCompare(b.due_on || "9999-99-99") ||
-          (a.project || "").localeCompare(b.project || "")
-      );
+          hits.sort(
+            (a, b) =>
+              (a.due_on || "9999-99-99").localeCompare(b.due_on || "9999-99-99") ||
+              (a.project || "").localeCompare(b.project || "")
+          );
 
-      return ok(id, cacheSet(cacheKey, { query: args.query, count: hits.length, todos: hits }));
+          const response = cacheSet(cacheKey, { query: args.query, count: hits.length, todos: hits });
+          return ok(id, { ...response, source: "fallback" });
+        } catch (fallbackErr) {
+          console.error(`[search_todos] Fallback search also failed:`, fallbackErr.message);
+          return ok(id, { query: args.query, count: 0, todos: [], error: fallbackErr.message });
+        }
+      }
     }
 
     if (name === "assignment_report") {
@@ -1472,6 +1547,12 @@ export async function handleMCP(reqBody, ctx) {
     }
 
     // ===== NEW SEARCH ENDPOINTS =====
+    if (name === "search_project") {
+      const p = await projectByName(ctx, args.project);
+      const results = await searchProject(ctx, p.id, { query: args.query });
+      return ok(id, { project: { id: p.id, name: p.name }, query: args.query, results, count: results.length });
+    }
+
     if (name === "search_recordings") {
       const results = await searchRecordings(ctx, args.query, { bucket: args.bucket });
       return ok(id, { query: args.query, results, count: results.length });
