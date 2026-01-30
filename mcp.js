@@ -69,22 +69,8 @@ function todoAssigneeNames(todo, peopleById) {
   if (Array.isArray(todo.assignees) && todo.assignees.length) {
     return todo.assignees.map(a => a?.name).filter(Boolean);
   }
-  const list = Array.isArray(todo.assignee_ids) ? todo.assignee_ids : [];
-  return (list || []).map(id => peopleById.get(String(id)) || String(id));
-}
-
-async function listProjects(TOKEN, accountId, ua, { archived = false } = {}) {
-  const qs = archived ? "?status=archived" : "";
-  return await basecampFetch(TOKEN, `/${accountId}/projects.json${qs}`, { ua, accountId });
-}
-
-async function projectByName(TOKEN, accountId, name, ua, opts = {}) {
-  const projects = await listProjects(TOKEN, accountId, ua, opts);
-  return resolveByName(projects, name, "project");
-}
-
-async function getProject(TOKEN, accountId, projectId, ua) {
-  return await basecampFetch(TOKEN, `/${accountId}/projects/${projectId}.json`, { ua, accountId });
+  const ids = Array.isArray(todo.assignee_ids) ? todo.assignee_ids : [];
+  return (ids || []).map(id => peopleById.get(String(id)) || String(id));
 }
 
 function findDockToolUrl(dock, wantedNames) {
@@ -97,18 +83,29 @@ function findDockToolUrl(dock, wantedNames) {
   return null;
 }
 
+async function listProjects(TOKEN, accountId, ua, { archived = false } = {}) {
+  const qs = archived ? "?status=archived" : "";
+  return await basecampFetch(TOKEN, `/${accountId}/projects.json${qs}`, { ua, accountId });
+}
+
+async function getProject(TOKEN, accountId, projectId, ua) {
+  return await basecampFetch(TOKEN, `/${accountId}/projects/${projectId}.json`, { ua, accountId });
+}
+
+async function projectByName(TOKEN, accountId, name, ua, opts = {}) {
+  const projects = await listProjects(TOKEN, accountId, ua, opts);
+  return resolveByName(projects, name, "project");
+}
+
 /**
- * ✅ Correct To-dos discovery:
- * - get project
- * - find todos tool in dock (usually "todoset")
- * - GET tool url -> read todolists_url
+ * To-dos discovery (dock-aware)
+ * We do NOT assume /buckets/:id/todolists.json is valid for every project.
  */
 async function getTodosetUrl(TOKEN, accountId, projectId, ua) {
   const project = await getProject(TOKEN, accountId, projectId, ua);
   const dock = project?.dock || [];
 
-  // Basecamp commonly uses "todoset" for the To-dos tool.
-  // Some setups may also show "todos".
+  // Most Basecamp setups expose To-dos as "todoset" in dock.
   return (
     findDockToolUrl(dock, ["todoset", "todos"])
   );
@@ -131,25 +128,26 @@ async function listTodoLists(TOKEN, accountId, projectId, ua) {
 }
 
 async function listTodosForList(TOKEN, accountId, projectId, list, ua) {
-  // Prefer server-provided todos_url
   if (list?.todos_url) {
     return await basecampFetch(TOKEN, list.todos_url, { ua, accountId });
   }
-  // Fallback only if needed
-  return await basecampFetch(TOKEN, `/buckets/${projectId}/todolists/${list.id}/todos.json`, { ua, accountId });
+  // Fallback (some payloads may not include todos_url)
+  return await basecampFetch(
+    TOKEN,
+    `/buckets/${projectId}/todolists/${list.id}/todos.json`,
+    { ua, accountId }
+  );
 }
 
 async function listTodosForProject(TOKEN, accountId, projectId, ua) {
   const lists = await listTodoLists(TOKEN, accountId, projectId, ua);
   if (!lists.length) return [];
 
-  // limited concurrency to avoid timeouts
   const groups = await mapLimit(lists, 4, async (l) => {
     let todos = [];
     try {
       todos = await listTodosForList(TOKEN, accountId, projectId, l, ua);
     } catch {
-      // If one list fails, skip it
       todos = [];
     }
     return { todolistId: l.id, todolist: l.name, todos };
@@ -159,19 +157,19 @@ async function listTodosForProject(TOKEN, accountId, projectId, ua) {
 }
 
 /**
- * Global scan: open todos across all projects
- * - uses dock-aware discovery
- * - skips projects without todos enabled
+ * Global scan across projects:
+ * - Dock-aware
+ * - Skips projects that don’t have To-dos enabled
+ * - Caches briefly to speed repeated questions
  */
-async function listAllOpenTodos(TOKEN, accountId, ua) {
-  const cacheKey = `openTodos:${accountId}`;
+async function listAllTodos(TOKEN, accountId, ua, { includeCompleted = false, includeArchivedProjects = false } = {}) {
+  const cacheKey = `todos:${accountId}:${includeCompleted ? 1 : 0}:${includeArchivedProjects ? 1 : 0}`;
   const cached = cacheGet(cacheKey);
   if (cached) return cached;
 
-  const projects = await listProjects(TOKEN, accountId, ua, { archived: false });
+  const projects = await listProjects(TOKEN, accountId, ua, { archived: !!includeArchivedProjects });
 
   const perProject = await mapLimit(projects, 3, async (p) => {
-    // If To-dos isn't enabled, this returns []
     const groups = await listTodosForProject(TOKEN, accountId, p.id, ua);
     if (!groups.length) return [];
 
@@ -179,7 +177,7 @@ async function listAllOpenTodos(TOKEN, accountId, ua) {
     for (const g of groups) {
       for (const t of (g.todos || [])) {
         const completed = !!(t.completed || t.completed_at);
-        if (completed) continue;
+        if (!includeCompleted && completed) continue;
 
         rows.push({
           project: p.name,
@@ -189,6 +187,8 @@ async function listAllOpenTodos(TOKEN, accountId, ua) {
           todoId: t.id,
           content: todoText(t),
           due_on: isoDate(t.due_on || t.due_at),
+          completed: completed,
+          completed_at: t.completed_at || null,
           raw: t
         });
       }
@@ -201,331 +201,102 @@ async function listAllOpenTodos(TOKEN, accountId, ua) {
 }
 
 /* =========================
-   Tool implementations
+   Direct Todo Fetch (by URL)
 ========================= */
-async function t_startbcgpt(ctx) {
-  return await ctx.startStatus();
+function parseTodoFromUrl(url) {
+  const s = String(url || "");
+  const m = s.match(/\/buckets\/(\d+)\/todos\/(\d+)/);
+  if (!m) return null;
+  return { bucket_id: Number(m[1]), todo_id: Number(m[2]) };
 }
 
-async function t_whoami(ctx) {
-  return {
-    accountId: ctx.accountId || null,
-    accounts: ctx.authAccounts || [],
-    message: ctx.accountId ? "Connected." : "Connected, but accountId missing."
-  };
-}
+async function getTodoDirect(TOKEN, accountId, ua, args) {
+  let bucketId = args.bucket_id ? Number(args.bucket_id) : null;
+  let todoId = args.todo_id ? Number(args.todo_id) : null;
 
-async function t_list_projects(args, ctx) {
-  return await listProjects(ctx.TOKEN, ctx.accountId, ctx.ua, { archived: !!args.archived });
-}
-
-async function t_get_project_by_name(args, ctx) {
-  return await projectByName(ctx.TOKEN, ctx.accountId, args.name, ctx.ua);
-}
-
-async function t_list_todos_for_project(args, ctx) {
-  const project = await projectByName(ctx.TOKEN, ctx.accountId, args.project, ctx.ua);
-  const groups = await listTodosForProject(ctx.TOKEN, ctx.accountId, project.id, ctx.ua);
-  return { project: { id: project.id, name: project.name }, groups };
-}
-
-async function t_create_task_naturally(args, ctx) {
-  const project = await projectByName(ctx.TOKEN, ctx.accountId, args.project, ctx.ua);
-  const lists = await listTodoLists(ctx.TOKEN, ctx.accountId, project.id, ctx.ua);
-  if (!lists.length) throw Object.assign(new Error("No todolists found (To-dos may not be enabled)."), { code: "NO_TODOLISTS" });
-
-  let target = lists[0];
-  if (args.todolist) {
-    const m = resolveByName(lists.map(l => ({ id: l.id, name: l.name })), args.todolist, "todolist");
-    target = lists.find(l => l.id === m.id) || lists[0];
+  if (args.url) {
+    const parsed = parseTodoFromUrl(args.url);
+    if (!parsed) {
+      return { ok: false, code: "BAD_URL", error: "Could not parse bucket/todo from URL." };
+    }
+    bucketId = parsed.bucket_id;
+    todoId = parsed.todo_id;
   }
 
-  const body = { content: args.task };
-  if (args.description) body.description = args.description;
-  if (args.due_on) body.due_on = args.due_on;
+  if (!bucketId || !todoId) {
+    return { ok: false, code: "MISSING_PARAMS", error: "Provide url OR (bucket_id and todo_id)." };
+  }
 
   const todo = await basecampFetch(
-    ctx.TOKEN,
-    `/buckets/${project.id}/todolists/${target.id}/todos.json`,
-    { method: "POST", body, ua: ctx.ua, accountId: ctx.accountId }
+    TOKEN,
+    `/buckets/${bucketId}/todos/${todoId}.json`,
+    { ua, accountId }
   );
 
-  return {
-    message: "Task created",
-    project: { id: project.id, name: project.name },
-    todolist: { id: target.id, name: target.name },
-    todo
-  };
-}
-
-async function t_update_task_naturally(args, ctx) {
-  const project = await projectByName(ctx.TOKEN, ctx.accountId, args.project, ctx.ua);
-  const groups = await listTodosForProject(ctx.TOKEN, ctx.accountId, project.id, ctx.ua);
-  const all = groups.flatMap(g => (g.todos || []).map(t => ({ id: t.id, name: todoText(t), raw: t })));
-
-  const match = resolveBestEffort(all, args.task) || resolveByName(all, args.task, "todo");
-
-  const patch = {};
-  if (args.new_task) patch.content = args.new_task;
-  if (args.due_on) patch.due_on = args.due_on;
-
-  const updated = await basecampFetch(
-    ctx.TOKEN,
-    `/buckets/${project.id}/todos/${match.id}.json`,
-    { method: "PUT", body: patch, ua: ctx.ua, accountId: ctx.accountId }
-  );
-
-  return { message: "Task updated", project: { id: project.id, name: project.name }, todo: updated };
-}
-
-async function t_complete_task_by_name(args, ctx) {
-  const project = await projectByName(ctx.TOKEN, ctx.accountId, args.project, ctx.ua);
-  const groups = await listTodosForProject(ctx.TOKEN, ctx.accountId, project.id, ctx.ua);
-  const all = groups.flatMap(g => (g.todos || []).map(t => ({ id: t.id, name: todoText(t) })));
-
-  const match = resolveBestEffort(all, args.task) || resolveByName(all, args.task, "todo");
-
-  await basecampFetch(ctx.TOKEN, `/buckets/${project.id}/todos/${match.id}/completion.json`, {
-    method: "POST",
-    ua: ctx.ua,
-    accountId: ctx.accountId
-  });
-
-  return { message: "Task completed", project: { id: project.id, name: project.name }, todoId: match.id, task: match.name };
-}
-
-async function t_daily_report(args, ctx) {
-  const date = isoDate(args.date) || new Date().toISOString().slice(0, 10);
-  const rows = await listAllOpenTodos(ctx.TOKEN, ctx.accountId, ctx.ua);
-
-  const dueToday = rows.filter(r => r.due_on === date);
-  const overdue = rows.filter(r => r.due_on && r.due_on < date);
-
-  const perProject = {};
-  for (const r of rows) {
-    perProject[r.project] ||= { project: r.project, projectId: r.projectId, openTodos: 0, dueToday: 0, overdue: 0 };
-    perProject[r.project].openTodos += 1;
-    if (r.due_on === date) perProject[r.project].dueToday += 1;
-    if (r.due_on && r.due_on < date) perProject[r.project].overdue += 1;
-  }
-
-  const perProjectArr = Object.values(perProject).sort(
-    (a, b) =>
-      (b.overdue - a.overdue) ||
-      (b.dueToday - a.dueToday) ||
-      (a.project || "").localeCompare(b.project || "")
-  );
-
-  return {
-    date,
-    totals: {
-      projectsWithTodos: perProjectArr.length,
-      openTodos: rows.length,
-      dueToday: dueToday.length,
-      overdue: overdue.length
-    },
-    perProject: perProjectArr,
-    dueToday,
-    overdue
-  };
-}
-
-async function t_list_todos_due(args, ctx) {
-  const date = isoDate(args.date) || new Date().toISOString().slice(0, 10);
-  const includeOverdue = !!args.include_overdue;
-
-  const rows = await listAllOpenTodos(ctx.TOKEN, ctx.accountId, ctx.ua);
-  const todos = rows
-    .filter(r => r.due_on === date || (includeOverdue && r.due_on && r.due_on < date))
-    .map(r => ({ ...r, overdue: r.due_on && r.due_on < date }));
-
-  todos.sort(
-    (a, b) =>
-      (a.overdue === b.overdue ? 0 : (a.overdue ? -1 : 1)) ||
-      (a.due_on || "9999-99-99").localeCompare(b.due_on || "9999-99-99") ||
-      (a.project || "").localeCompare(b.project || "")
-  );
-
-  return { date, count: todos.length, todos };
-}
-
-async function t_search_todos(args, ctx) {
-  const q = String(args.query || "").toLowerCase().trim();
-  const rows = await listAllOpenTodos(ctx.TOKEN, ctx.accountId, ctx.ua);
-  const hits = rows.filter(r => r.content.toLowerCase().includes(q));
-
-  hits.sort(
-    (a, b) =>
-      (a.due_on || "9999-99-99").localeCompare(b.due_on || "9999-99-99") ||
-      (a.project || "").localeCompare(b.project || "")
-  );
-
-  return { query: args.query, count: hits.length, todos: hits };
-}
-
-async function t_assignment_report(args, ctx) {
-  const project = await projectByName(ctx.TOKEN, ctx.accountId, args.project, ctx.ua);
-
-  const cacheKey = `assign:${ctx.accountId}:${project.id}:${args.max_todos || 200}`;
-  const cached = cacheGet(cacheKey);
-  if (cached) return { cached: true, ...cached };
-
-  const maxTodos = Math.max(25, Math.min(1000, Number(args.max_todos || 200)));
-  const includeUnassigned = args.include_unassigned !== false;
-
-  // best-effort people
-  let people = [];
-  try {
-    people = await basecampFetch(ctx.TOKEN, `/buckets/${project.id}/people.json`, { ua: ctx.ua, accountId: ctx.accountId });
-  } catch {
-    people = [];
-  }
-  const peopleById = new Map((people || []).map(p => [String(p.id), p.name || p.email_address || String(p.id)]));
-
-  const lists = await listTodoLists(ctx.TOKEN, ctx.accountId, project.id, ctx.ua);
-
-  let scanned = 0;
-  const perList = await mapLimit(lists, 4, async (l) => {
-    if (scanned >= maxTodos) return { list: l, todos: [] };
-
-    let todos = [];
-    try {
-      todos = await listTodosForList(ctx.TOKEN, ctx.accountId, project.id, l, ctx.ua);
-    } catch {
-      todos = [];
-    }
-
-    const open = (todos || []).filter(t => !t.completed && !t.completed_at);
-    const budget = Math.max(0, maxTodos - scanned);
-    const slice = open.slice(0, budget);
-    scanned += slice.length;
-
-    return { list: l, todos: slice };
-  });
-
-  const assignments = new Map();
-  const unassigned = [];
-
-  for (const item of perList) {
-    const listName = item.list?.name || item.list?.title || "Todo list";
-    for (const t of (item.todos || [])) {
-      const task = todoText(t);
-      const due = isoDate(t.due_on || t.due_at);
-      const names = todoAssigneeNames(t, peopleById);
-
-      if (names.length) {
-        for (const n of names) {
-          if (!assignments.has(n)) assignments.set(n, []);
-          assignments.get(n).push({ task, due_on: due, todolist: listName });
-        }
-      } else if (includeUnassigned) {
-        unassigned.push({ task, due_on: due, todolist: listName });
-      }
-    }
-  }
-
-  const out = {};
-  for (const [name, arr] of assignments.entries()) {
-    arr.sort(
-      (a, b) =>
-        (a.due_on || "9999-99-99").localeCompare(b.due_on || "9999-99-99") ||
-        a.task.localeCompare(b.task)
-    );
-    out[name] = arr;
-  }
-
-  const payload = {
-    project: { id: project.id, name: project.name },
-    scanned_todos: scanned,
-    assignees: Object.keys(out).length,
-    assignments: out,
-    unassigned: includeUnassigned ? unassigned : undefined,
-    note: scanned >= maxTodos ? `Scanned first ${maxTodos} open todos to avoid timeouts.` : undefined
-  };
-
-  return cacheSet(cacheKey, payload);
-}
-
-/**
- * Raw fallback: full Basecamp coverage.
- * NOTE: Basecamp is .json-heavy; we normalize common shortcut "/projects" -> "/projects.json"
- */
-async function t_basecamp_request(args, ctx) {
-  let p = String(args.path || "").trim();
-  if (!p) throw Object.assign(new Error("Missing path"), { code: "BAD_REQUEST" });
-
-  if (p === "/projects") p = "/projects.json";
-
-  const method = String(args.method || "GET").toUpperCase();
-  const data = await basecampFetch(ctx.TOKEN, p, {
-    method,
-    body: args.body,
-    ua: ctx.ua,
-    accountId: ctx.accountId
-  });
-
-  return { ok: true, request: { method, path: p }, data };
+  return { ok: true, bucket_id: bucketId, todo_id: todoId, todo };
 }
 
 /* =========================
-   MCP entry point
+   MCP Handler
 ========================= */
 export async function handleMCP(reqBody, ctx) {
   const { id, method, params } = reqBody || {};
   const { TOKEN, accountId, ua, startStatus, authAccounts } = ctx;
 
-  const safeCtx = { TOKEN, accountId, ua, startStatus, authAccounts };
-
   try {
     if (method === "initialize") {
-      return ok(id, { name: "bcgpt", version: "3.2", sessionId: crypto.randomUUID() });
+      return ok(id, { name: "bcgpt", version: "3.3", sessionId: crypto.randomUUID() });
     }
 
     if (method === "tools/list") {
       return ok(id, {
         tools: [
-          tool("startbcgpt", "Show connection status + re-auth + logout links.", noProps()),
-          tool("whoami", "Return Basecamp accountId and available accounts.", noProps()),
+          tool("startbcgpt", "Show connection status, user (name/email), plus re-auth and logout links.", noProps()),
+          tool("whoami", "Return Basecamp account id and available accounts.", noProps()),
 
-          tool("list_projects", "List projects in the current account.", {
-            type: "object",
-            properties: { archived: { type: "boolean" } },
-            additionalProperties: false
-          }),
-          tool("get_project_by_name", "Resolve a project by name (fuzzy).", {
-            type: "object",
-            properties: { name: { type: "string" } },
-            required: ["name"],
-            additionalProperties: false
-          }),
-
-          tool("daily_report", "Across projects: due today + overdue + per-project counts (skips projects without To-dos).", {
-            type: "object",
-            properties: { date: { type: "string", description: "YYYY-MM-DD (default today)" } },
-            additionalProperties: false
-          }),
-          tool("list_todos_due", "Across projects: open todos due on date; optionally include overdue.", {
+          tool("list_projects", "List projects (optionally include archived).", {
             type: "object",
             properties: {
-              date: { type: "string", description: "YYYY-MM-DD (default today)" },
-              include_overdue: { type: "boolean" }
+              archived: { type: "boolean", description: "Include archived projects (default false)" }
             },
             additionalProperties: false
           }),
-          tool("search_todos", "Across projects: search open todos by keyword.", {
+
+          tool("get_todo", "Fetch a to-do directly by Basecamp URL or by bucket_id + todo_id.", {
             type: "object",
-            properties: { query: { type: "string" } },
+            properties: {
+              url: { type: "string", description: "Basecamp web URL like https://3.basecamp.com/<acct>/buckets/<bucket>/todos/<todo>" },
+              bucket_id: { type: "integer" },
+              todo_id: { type: "integer" }
+            },
+            additionalProperties: false
+          }),
+
+          tool("search_todos", "Search todos across projects by keyword. Supports include_completed and include_archived.", {
+            type: "object",
+            properties: {
+              query: { type: "string" },
+              include_completed: { type: "boolean", description: "Search completed todos too (default false)" },
+              include_archived_projects: { type: "boolean", description: "Include archived projects (default false)" }
+            },
             required: ["query"],
             additionalProperties: false
           }),
-          tool("assignment_report", "For a project: group open todos by assignee.", {
+
+          tool("daily_report", "Across all projects: due today + overdue + per-project counts.", {
             type: "object",
             properties: {
-              project: { type: "string" },
-              max_todos: { type: "integer", description: "Default 200" },
-              include_unassigned: { type: "boolean", description: "Default true" }
+              date: { type: "string", description: "YYYY-MM-DD (default: today)" }
             },
-            required: ["project"],
+            additionalProperties: false
+          }),
+
+          tool("list_todos_due", "Across all projects: list todos due on date; optionally include overdue.", {
+            type: "object",
+            properties: {
+              date: { type: "string", description: "YYYY-MM-DD (default: today)" },
+              include_overdue: { type: "boolean", description: "Include overdue items too (default false)" }
+            },
             additionalProperties: false
           }),
 
@@ -535,7 +306,8 @@ export async function handleMCP(reqBody, ctx) {
             required: ["project"],
             additionalProperties: false
           }),
-          tool("create_task_naturally", "Create a todo in a project.", {
+
+          tool("create_task_naturally", "Create a todo in a project; optional todolist and due date.", {
             type: "object",
             properties: {
               project: { type: "string" },
@@ -547,6 +319,7 @@ export async function handleMCP(reqBody, ctx) {
             required: ["project", "task"],
             additionalProperties: false
           }),
+
           tool("update_task_naturally", "Update a todo in a project by fuzzy-matching task name.", {
             type: "object",
             properties: {
@@ -558,22 +331,34 @@ export async function handleMCP(reqBody, ctx) {
             required: ["project", "task"],
             additionalProperties: false
           }),
+
           tool("complete_task_by_name", "Complete a todo in a project by fuzzy-matching task name.", {
             type: "object",
-            properties: { project: { type: "string" }, task: { type: "string" } },
+            properties: {
+              project: { type: "string" },
+              task: { type: "string" }
+            },
             required: ["project", "task"],
             additionalProperties: false
           }),
 
-          tool("basecamp_request", "Raw Basecamp API call (full coverage).", {
+          tool("basecamp_request", "Raw Basecamp API call. Provide /path or full https URL.", {
             type: "object",
-            properties: { path: { type: "string" }, method: { type: "string" }, body: { type: "object" } },
+            properties: {
+              path: { type: "string" },
+              method: { type: "string" },
+              body: { type: "object" }
+            },
             required: ["path"],
             additionalProperties: false
           }),
           tool("basecamp_raw", "Alias of basecamp_request.", {
             type: "object",
-            properties: { path: { type: "string" }, method: { type: "string" }, body: { type: "object" } },
+            properties: {
+              path: { type: "string" },
+              method: { type: "string" },
+              body: { type: "object" }
+            },
             required: ["path"],
             additionalProperties: false
           })
@@ -588,41 +373,208 @@ export async function handleMCP(reqBody, ctx) {
     const { name, arguments: args = {} } = params || {};
     if (!name) return fail(id, { code: "BAD_REQUEST", message: "Missing tool name" });
 
-    // startbcgpt must always work
-    if (name === "startbcgpt") return ok(id, await t_startbcgpt(safeCtx));
-    if (name === "whoami") return ok(id, await t_whoami(safeCtx));
+    // startbcgpt must ALWAYS work without auth
+    if (name === "startbcgpt") {
+      return ok(id, await startStatus());
+    }
 
-    // auth guard
+    if (name === "whoami") {
+      return ok(id, {
+        connected: !!TOKEN?.access_token,
+        accountId: accountId || null,
+        accounts: authAccounts || []
+      });
+    }
+
+    // everything else requires auth
     if (!TOKEN?.access_token) {
       return fail(id, { code: "NOT_AUTHENTICATED", message: "Not connected. Run /startbcgpt to get the auth link." });
     }
     if (!accountId) {
-      return fail(id, { code: "NO_ACCOUNT", message: "Connected, but no Basecamp accountId resolved." });
+      return fail(id, { code: "NO_ACCOUNT_ID", message: "Connected but accountId missing. Check BASECAMP_DEFAULT_ACCOUNT_ID or authorization accounts." });
     }
 
-    const tools = {
-      list_projects: () => t_list_projects(args, safeCtx),
-      get_project_by_name: () => t_get_project_by_name(args, safeCtx),
+    /* =========================
+       Tool routing
+    ========================= */
+    if (name === "list_projects") {
+      const projects = await listProjects(TOKEN, accountId, ua, { archived: !!args.archived });
+      return ok(id, projects);
+    }
 
-      daily_report: () => t_daily_report(args, safeCtx),
-      list_todos_due: () => t_list_todos_due(args, safeCtx),
-      search_todos: () => t_search_todos(args, safeCtx),
-      assignment_report: () => t_assignment_report(args, safeCtx),
+    if (name === "get_todo") {
+      const out = await getTodoDirect(TOKEN, accountId, ua, args);
+      return ok(id, out);
+    }
 
-      list_todos_for_project: () => t_list_todos_for_project(args, safeCtx),
-      create_task_naturally: () => t_create_task_naturally(args, safeCtx),
-      update_task_naturally: () => t_update_task_naturally(args, safeCtx),
-      complete_task_by_name: () => t_complete_task_by_name(args, safeCtx),
+    if (name === "list_todos_for_project") {
+      const project = await projectByName(TOKEN, accountId, args.project, ua);
+      const groups = await listTodosForProject(TOKEN, accountId, project.id, ua);
+      return ok(id, { project: { id: project.id, name: project.name }, groups });
+    }
 
-      basecamp_request: () => t_basecamp_request(args, safeCtx),
-      basecamp_raw: () => t_basecamp_request(args, safeCtx) // alias
-    };
+    if (name === "create_task_naturally") {
+      const project = await projectByName(TOKEN, accountId, args.project, ua);
+      const lists = await listTodoLists(TOKEN, accountId, project.id, ua);
+      if (!lists.length) return fail(id, { code: "NO_TODOLISTS", message: "No todolists found (To-dos may not be enabled for this project)." });
 
-    const fn = tools[name];
-    if (!fn) return fail(id, { code: "UNKNOWN_TOOL", message: "Unknown tool name" });
+      let target = lists[0];
+      if (args.todolist) {
+        const m = resolveByName(lists.map(l => ({ id: l.id, name: l.name })), args.todolist, "todolist");
+        target = lists.find(l => l.id === m.id) || lists[0];
+      }
 
-    const result = await fn();
-    return ok(id, result);
+      const body = { content: args.task };
+      if (args.description) body.description = args.description;
+      if (args.due_on) body.due_on = args.due_on;
+
+      const todo = await basecampFetch(
+        TOKEN,
+        `/buckets/${project.id}/todolists/${target.id}/todos.json`,
+        { method: "POST", body, ua, accountId }
+      );
+
+      return ok(id, { message: "Task created", project: { id: project.id, name: project.name }, todolist: { id: target.id, name: target.name }, todo });
+    }
+
+    if (name === "update_task_naturally") {
+      const project = await projectByName(TOKEN, accountId, args.project, ua);
+      const groups = await listTodosForProject(TOKEN, accountId, project.id, ua);
+      const all = groups.flatMap(g => (g.todos || []).map(t => ({ id: t.id, name: todoText(t), raw: t })));
+
+      const match = resolveBestEffort(all, args.task) || resolveByName(all, args.task, "todo");
+
+      const patch = {};
+      if (args.new_task) patch.content = args.new_task;
+      if (args.due_on) patch.due_on = args.due_on;
+
+      const updated = await basecampFetch(
+        TOKEN,
+        `/buckets/${project.id}/todos/${match.id}.json`,
+        { method: "PUT", body: patch, ua, accountId }
+      );
+
+      return ok(id, { message: "Task updated", project: { id: project.id, name: project.name }, todo: updated });
+    }
+
+    if (name === "complete_task_by_name") {
+      const project = await projectByName(TOKEN, accountId, args.project, ua);
+      const groups = await listTodosForProject(TOKEN, accountId, project.id, ua);
+      const all = groups.flatMap(g => (g.todos || []).map(t => ({ id: t.id, name: todoText(t) })));
+
+      const match = resolveBestEffort(all, args.task) || resolveByName(all, args.task, "todo");
+
+      await basecampFetch(
+        TOKEN,
+        `/buckets/${project.id}/todos/${match.id}/completion.json`,
+        { method: "POST", ua, accountId }
+      );
+
+      return ok(id, { message: "Task completed", project: { id: project.id, name: project.name }, todoId: match.id, task: match.name });
+    }
+
+    if (name === "search_todos") {
+      const q = String(args.query || "").toLowerCase().trim();
+      const includeCompleted = !!args.include_completed;
+      const includeArchived = !!args.include_archived_projects;
+
+      const rows = await listAllTodos(TOKEN, accountId, ua, {
+        includeCompleted,
+        includeArchivedProjects: includeArchived
+      });
+
+      const hits = rows.filter(r => r.content.toLowerCase().includes(q));
+
+      hits.sort((a, b) =>
+        (a.due_on || "9999-99-99").localeCompare(b.due_on || "9999-99-99") ||
+        (a.project || "").localeCompare(b.project || "") ||
+        (a.content || "").localeCompare(b.content || "")
+      );
+
+      return ok(id, {
+        query: args.query,
+        include_completed: includeCompleted,
+        include_archived_projects: includeArchived,
+        count: hits.length,
+        todos: hits
+      });
+    }
+
+    if (name === "daily_report") {
+      const date = isoDate(args.date) || new Date().toISOString().slice(0, 10);
+      const rows = await listAllTodos(TOKEN, accountId, ua, { includeCompleted: false, includeArchivedProjects: false });
+
+      const dueToday = rows.filter(r => r.due_on === date);
+      const overdue = rows.filter(r => r.due_on && r.due_on < date);
+
+      const perProject = {};
+      for (const r of rows) {
+        perProject[r.project] ||= { project: r.project, projectId: r.projectId, openTodos: 0, dueToday: 0, overdue: 0 };
+        perProject[r.project].openTodos += 1;
+        if (r.due_on === date) perProject[r.project].dueToday += 1;
+        if (r.due_on && r.due_on < date) perProject[r.project].overdue += 1;
+      }
+
+      const perProjectArr = Object.values(perProject).sort(
+        (a, b) =>
+          (b.overdue - a.overdue) ||
+          (b.dueToday - a.dueToday) ||
+          (a.project || "").localeCompare(b.project || "")
+      );
+
+      return ok(id, {
+        date,
+        totals: {
+          projectsWithTodos: perProjectArr.length,
+          openTodos: rows.length,
+          dueToday: dueToday.length,
+          overdue: overdue.length
+        },
+        perProject: perProjectArr,
+        dueToday,
+        overdue
+      });
+    }
+
+    if (name === "list_todos_due") {
+      const date = isoDate(args.date) || new Date().toISOString().slice(0, 10);
+      const includeOverdue = !!args.include_overdue;
+
+      const rows = await listAllTodos(TOKEN, accountId, ua, { includeCompleted: false, includeArchivedProjects: false });
+
+      const todos = rows
+        .filter(r => r.due_on === date || (includeOverdue && r.due_on && r.due_on < date))
+        .map(r => ({ ...r, overdue: r.due_on && r.due_on < date }));
+
+      todos.sort(
+        (a, b) =>
+          (a.overdue === b.overdue ? 0 : (a.overdue ? -1 : 1)) ||
+          (a.due_on || "9999-99-99").localeCompare(b.due_on || "9999-99-99") ||
+          (a.project || "").localeCompare(b.project || "") ||
+          (a.content || "").localeCompare(b.content || "")
+      );
+
+      return ok(id, { date, count: todos.length, todos });
+    }
+
+    if (name === "basecamp_request" || name === "basecamp_raw") {
+      let p = String(args.path || "").trim();
+      if (!p) return fail(id, { code: "BAD_REQUEST", message: "Missing path" });
+
+      // Helpful normalizations
+      if (p === "/projects") p = "/projects.json";
+
+      const data = await basecampFetch(TOKEN, p, {
+        method: args.method || "GET",
+        body: args.body,
+        ua,
+        accountId
+      });
+
+      return ok(id, { ok: true, request: { path: p, method: (args.method || "GET").toUpperCase() }, data });
+    }
+
+    return fail(id, { code: "UNKNOWN_TOOL", message: "Unknown tool name" });
   } catch (e) {
     if (e?.code === "AMBIGUOUS_MATCH") {
       return fail(id, { code: "AMBIGUOUS_MATCH", message: `Ambiguous ${e.label}. Please choose one.`, options: e.options });
