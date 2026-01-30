@@ -740,21 +740,54 @@ async function listProjectPeople(ctx, projectId) {
 
 // ========== COMMENTS ENDPOINTS ==========
 async function listComments(ctx, projectId, recordingId) {
-  // Defensive: ensure the recording exists before trying to list comments
+  // Returns: { comments: [...], _meta: { originalRecordingId, usedRecordingId, autoResolved, matchedTitle } }
+  const meta = { originalRecordingId: recordingId, usedRecordingId: recordingId, autoResolved: false, matchedTitle: null };
+
+  // If recordingId is falsy, try to search by name
+  if (!recordingId) {
+    // Nothing provided — return empty and metadata
+    return { comments: [], _meta: { ...meta, autoResolved: false } };
+  }
+
+  // Try direct lookup first
   try {
     await api(ctx, `/buckets/${projectId}/recordings/${recordingId}.json`);
   } catch (e) {
-    // Convert 404 into a clearer error for callers
+    // If not found, try fuzzy-searching recordings in this project by title/content
     if (e && e.message && e.message.includes('404')) {
-      throw new Error(`RECORDING_NOT_FOUND: Recording ${recordingId} not found or inaccessible in project ${projectId}`);
+      try {
+        console.log(`[listComments] Recording ${recordingId} not found by id — attempting search by name in project ${projectId}`);
+        const results = await searchRecordings(ctx, recordingId, { bucket_id: projectId });
+        const arr = Array.isArray(results) ? results : [];
+        if (arr.length) {
+          // Choose best effort match by title/content
+          const candidates = arr.map((r) => ({ id: r.id, name: r.title || r.content || "" }));
+          const best = resolveBestEffort(candidates, recordingId) || candidates[0];
+          meta.usedRecordingId = best.id;
+          meta.autoResolved = true;
+          meta.matchedTitle = best.name;
+          recordingId = best.id;
+          console.log(`[listComments] Auto-resolved recording to id=${best.id} title="${best.name}"`);
+        } else {
+          throw new Error(`RECORDING_NOT_FOUND: Recording ${recordingId} not found or inaccessible in project ${projectId}`);
+        }
+      } catch (searchErr) {
+        // Propagate a structured error
+        if (searchErr && searchErr.message && searchErr.message.includes('RECORDING_NOT_FOUND')) {
+          throw searchErr;
+        }
+        throw searchErr;
+      }
+    } else {
+      throw e;
     }
-    throw e;
   }
 
+  // Now fetch comments (graceful if comments endpoint not available)
   try {
     const comments = await apiAll(ctx, `/buckets/${projectId}/recordings/${recordingId}/comments.json`);
     const arr = Array.isArray(comments) ? comments : [];
-    return arr.map((c) => ({
+    const mapped = arr.map((c) => ({
       id: c.id,
       created_at: c.created_at,
       updated_at: c.updated_at,
@@ -765,10 +798,11 @@ async function listComments(ctx, projectId, recordingId) {
       visible_to_clients: c.visible_to_clients,
       app_url: c.app_url,
     }));
+    return { comments: mapped, _meta: meta };
   } catch (e) {
     if (e && e.message && e.message.includes('404')) {
       console.warn(`[listComments] Comments endpoint returned 404 for recording ${recordingId} in project ${projectId}`);
-      return [];
+      return { comments: [], _meta: meta };
     }
     throw e;
   }
@@ -1693,8 +1727,9 @@ export async function handleMCP(reqBody, ctx) {
     // ===== NEW COMMENTS ENDPOINTS =====
     if (name === "list_comments") {
       const p = await projectByName(ctx, args.project);
-      const comments = await listComments(ctx, p.id, args.recording_id);
-      return ok(id, { project: { id: p.id, name: p.name }, recording_id: args.recording_id, comments, count: comments.length });
+      const result = await listComments(ctx, p.id, args.recording_id);
+      const comments = result.comments || [];
+      return ok(id, { project: { id: p.id, name: p.name }, recording_id: args.recording_id, comments, count: comments.length, _meta: result._meta });
     }
 
     if (name === "get_comment") {
