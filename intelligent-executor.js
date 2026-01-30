@@ -94,7 +94,6 @@ class RequestContext {
    * Wrapper around API calls for tracking
    */
   async _apiCall(path, options = {}) {
-    const { api } = require('./basecamp.js');
     this.metrics.apiCallsMade++;
     this.callHistory.push({ path, timestamp: Date.now(), ...options });
     return api(this.apiCtx, path, options);
