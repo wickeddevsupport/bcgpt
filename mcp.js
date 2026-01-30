@@ -1246,60 +1246,159 @@ export async function handleMCP(reqBody, ctx) {
     }
 
     if (name === "list_todos_for_project") {
-      const p = await projectByName(ctx, args.project);
-      const groups = await listTodosForProject(ctx, p.id);
-      return ok(id, { project: { id: p.id, name: p.name }, groups });
+      try {
+        const p = await projectByName(ctx, args.project);
+        const groups = await listTodosForProject(ctx, p.id);
+        
+        // INTELLIGENT CHAINING: Enrich todos with person/project details
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `list todos for ${p.name}`);
+        const enricher = intelligent.createEnricher(ctx_intel);
+        
+        const enrichedGroups = await Promise.all(
+          (groups || []).map(async (group) => ({
+            ...group,
+            todos: await Promise.all(
+              (group.todos || []).map(t => enricher.enrich(t, {
+                getPerson: (id) => ctx_intel.getPerson(id),
+                getProject: (id) => ctx_intel.getProject(id)
+              }))
+            )
+          }))
+        );
+        
+        return ok(id, { 
+          project: { id: p.id, name: p.name }, 
+          groups: enrichedGroups,
+          metrics: ctx_intel.getMetrics()
+        });
+      } catch (e) {
+        console.error(`[list_todos_for_project] Error:`, e.message);
+        // Fallback to non-enriched list
+        try {
+          const p = await projectByName(ctx, args.project);
+          const groups = await listTodosForProject(ctx, p.id);
+          return ok(id, { project: { id: p.id, name: p.name }, groups, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "LIST_TODOS_FOR_PROJECT_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     if (name === "daily_report") {
-      const date = isoDate(args.date) || new Date().toISOString().slice(0, 10);
-      const rows = await listAllOpenTodos(ctx);
+      try {
+        const date = isoDate(args.date) || new Date().toISOString().slice(0, 10);
 
-      const dueToday = rows.filter((r) => r.due_on === date);
-      const overdue = rows.filter((r) => r.due_on && r.due_on < date);
+        // INTELLIGENT CHAINING: Load todos and enrich in parallel
+        // Automatically fetches project names, assignee details, and formats results
+        const result = await intelligent.executeDailyReport(ctx, date);
 
-      const perProject = {};
-      for (const r of rows) {
-        perProject[r.project] ||= { project: r.project, projectId: r.projectId, openTodos: 0, dueToday: 0, overdue: 0 };
-        perProject[r.project].openTodos += 1;
-        if (r.due_on === date) perProject[r.project].dueToday += 1;
-        if (r.due_on && r.due_on < date) perProject[r.project].overdue += 1;
+        return ok(id, {
+          date,
+          totals: result.totals,
+          perProject: result.perProject,
+          dueToday: result.dueToday,
+          overdue: result.overdue,
+          metrics: result._metadata
+        });
+      } catch (e) {
+        console.error(`[daily_report] Error:`, e.message);
+        // Fallback to original implementation
+        try {
+          const date = isoDate(args.date) || new Date().toISOString().slice(0, 10);
+          const rows = await listAllOpenTodos(ctx);
+
+          const dueToday = rows.filter((r) => r.due_on === date);
+          const overdue = rows.filter((r) => r.due_on && r.due_on < date);
+
+          const perProject = {};
+          for (const r of rows) {
+            perProject[r.project] ||= { project: r.project, projectId: r.projectId, openTodos: 0, dueToday: 0, overdue: 0 };
+            perProject[r.project].openTodos += 1;
+            if (r.due_on === date) perProject[r.project].dueToday += 1;
+            if (r.due_on && r.due_on < date) perProject[r.project].overdue += 1;
+          }
+
+          const perProjectArr = Object.values(perProject).sort(
+            (a, b) => (b.overdue - a.overdue) || (b.dueToday - a.dueToday) || (a.project || "").localeCompare(b.project || "")
+          );
+
+          return ok(id, {
+            date,
+            totals: {
+              projects: new Set(rows.map((r) => r.projectId)).size,
+              dueToday: dueToday.length,
+              overdue: overdue.length
+            },
+            perProject: perProjectArr,
+            dueToday,
+            overdue,
+            fallback: true
+          });
+        } catch (fbErr) {
+          return fail(id, { code: "DAILY_REPORT_ERROR", message: fbErr.message });
+        }
       }
-
-      const perProjectArr = Object.values(perProject).sort(
-        (a, b) => (b.overdue - a.overdue) || (b.dueToday - a.dueToday) || (a.project || "").localeCompare(b.project || "")
-      );
-
-      return ok(id, {
-        date,
-        totals: {
-          projects: new Set(rows.map((r) => r.projectId)).size,
-          dueToday: dueToday.length,
-          overdue: overdue.length
-        },
-        perProject: perProjectArr,
-        dueToday,
-        overdue
-      });
     }
 
     if (name === "list_todos_due") {
-      const date = isoDate(args.date) || new Date().toISOString().slice(0, 10);
-      const includeOverdue = !!args.include_overdue;
+      try {
+        const date = isoDate(args.date) || new Date().toISOString().slice(0, 10);
+        const days = Number(args.days || 0);
+        const includeOverdue = !!args.include_overdue;
 
-      const rows = await listAllOpenTodos(ctx);
-      const todos = rows
-        .filter((r) => r.due_on === date || (includeOverdue && r.due_on && r.due_on < date))
-        .map((r) => ({ ...r, overdue: !!(r.due_on && r.due_on < date) }));
+        let endDate = date;
+        if (days > 0) {
+          // Calculate end date if range specified
+          const endDateObj = new Date(date);
+          endDateObj.setDate(endDateObj.getDate() + days);
+          endDate = endDateObj.toISOString().split('T')[0];
+        }
 
-      todos.sort(
-        (a, b) =>
-          (a.overdue === b.overdue ? 0 : a.overdue ? -1 : 1) ||
-          (a.due_on || "9999-99-99").localeCompare(b.due_on || "9999-99-99") ||
-          (a.project || "").localeCompare(b.project || "")
-      );
+        // INTELLIGENT CHAINING: Use TimelineExecutor for intelligent filtering
+        // Automatically filters by date range, enriches with person/project details
+        const p = await projectByName(ctx, args.project || "[current]");
+        const result = await intelligent.executeTimeline(ctx, p.id, date, endDate);
 
-      return ok(id, { date, count: todos.length, todos });
+        // Format results with overdue indicator
+        const formattedTodos = result.todos.map(group => ({
+          ...group,
+          todos: (group.todos || []).map(t => ({
+            ...t,
+            overdue: !!(t.due_on && t.due_on < date)
+          }))
+        }));
+
+        return ok(id, {
+          project: p.name,
+          date_range: { start: date, end: endDate },
+          count: result.count,
+          todos: formattedTodos,
+          metrics: result._metadata
+        });
+      } catch (e) {
+        console.error(`[list_todos_due] Error:`, e.message);
+        // Fallback to original implementation
+        try {
+          const date = isoDate(args.date) || new Date().toISOString().slice(0, 10);
+          const includeOverdue = !!args.include_overdue;
+
+          const rows = await listAllOpenTodos(ctx);
+          const todos = rows
+            .filter((r) => r.due_on === date || (includeOverdue && r.due_on && r.due_on < date))
+            .map((r) => ({ ...r, overdue: !!(r.due_on && r.due_on < date) }));
+
+          todos.sort(
+            (a, b) =>
+              (a.overdue === b.overdue ? 0 : a.overdue ? -1 : 1) ||
+              (a.due_on || "9999-99-99").localeCompare(b.due_on || "9999-99-99") ||
+              (a.project || "").localeCompare(b.project || "")
+          );
+
+          return ok(id, { date, count: todos.length, todos, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "LIST_TODOS_DUE_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     if (name === "search_todos") {
@@ -1376,38 +1475,57 @@ export async function handleMCP(reqBody, ctx) {
     }
 
     if (name === "create_todo") {
-      const p = await projectByName(ctx, args.project);
+      try {
+        const p = await projectByName(ctx, args.project);
 
-      const lists = await listTodoLists(ctx, p.id);
-      if (!lists?.length) return fail(id, { code: "NO_TODOLISTS", message: "No to-do lists found in that project." });
+        const lists = await listTodoLists(ctx, p.id);
+        if (!lists?.length) return fail(id, { code: "NO_TODOLISTS", message: "No to-do lists found in that project." });
 
-      let target = lists[0];
-      if (args.todolist) {
-        const m = resolveByName(lists.map((l) => ({ id: l.id, name: l.name })), args.todolist, "todolist");
-        target = lists.find((l) => l.id === m.id) || lists[0];
+        let target = lists[0];
+        if (args.todolist) {
+          const m = resolveByName(lists.map((l) => ({ id: l.id, name: l.name })), args.todolist, "todolist");
+          target = lists.find((l) => l.id === m.id) || lists[0];
+        }
+
+        const taskText = String(args.task || args.content || "").trim();
+        if (!taskText) return fail(id, { code: "BAD_REQUEST", message: "Missing task/content." });
+
+        const body = { content: taskText };
+        if (args.description) body.description = args.description;
+        if (args.due_on) body.due_on = args.due_on;
+        if (args.assignee_ids && Array.isArray(args.assignee_ids)) body.assignee_ids = args.assignee_ids;
+
+        let created;
+        if (target.todos_url) {
+          created = await api(ctx, target.todos_url, { method: "POST", body });
+        } else {
+          created = await api(ctx, `/buckets/${p.id}/todolists/${target.id}/todos.json`, { method: "POST", body });
+        }
+
+        // INTELLIGENT CHAINING: Enrich created todo with person/project details
+        let enrichedTodo = created;
+        try {
+          const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `created todo`);
+          const enricher = intelligent.createEnricher(ctx_intel);
+          enrichedTodo = await enricher.enrich(created, {
+            getPerson: (id) => ctx_intel.getPerson(id),
+            getProject: (id) => ctx_intel.getProject(id)
+          });
+        } catch (enrichErr) {
+          console.warn(`[create_todo] Enrichment failed, returning raw todo:`, enrichErr.message);
+          // Return raw created todo if enrichment fails
+        }
+
+        return ok(id, {
+          message: "Todo created",
+          project: { id: p.id, name: p.name },
+          todolist: { id: target.id, name: target.name },
+          todo: enrichedTodo
+        });
+      } catch (e) {
+        console.error(`[create_todo] Error:`, e.message);
+        return fail(id, { code: "CREATE_TODO_ERROR", message: e.message });
       }
-
-      const taskText = String(args.task || args.content || "").trim();
-      if (!taskText) return fail(id, { code: "BAD_REQUEST", message: "Missing task/content." });
-
-      const body = { content: taskText };
-      if (args.description) body.description = args.description;
-      if (args.due_on) body.due_on = args.due_on;
-      if (args.assignee_ids && Array.isArray(args.assignee_ids)) body.assignee_ids = args.assignee_ids;
-
-      let created;
-      if (target.todos_url) {
-        created = await api(ctx, target.todos_url, { method: "POST", body });
-      } else {
-        created = await api(ctx, `/buckets/${p.id}/todolists/${target.id}/todos.json`, { method: "POST", body });
-      }
-
-      return ok(id, {
-        message: "Todo created",
-        project: { id: p.id, name: p.name },
-        todolist: { id: target.id, name: target.name },
-        todo: created
-      });
     }
 
     if (name === "complete_task_by_name") {
@@ -1493,9 +1611,42 @@ export async function handleMCP(reqBody, ctx) {
     }
 
     if (name === "search_project") {
-      const p = await projectByName(ctx, args.project);
-      const results = await searchProject(ctx, p.id, { query: args.query });
-      return ok(id, { project: { id: p.id, name: p.name }, query: args.query, results });
+      try {
+        const p = await projectByName(ctx, args.project);
+        const results = await searchProject(ctx, p.id, { query: args.query });
+        
+        // INTELLIGENT CHAINING: Enrich search results with person/project details
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, args.query);
+        const enricher = intelligent.createEnricher(ctx_intel);
+        
+        let enrichedResults = results;
+        if (Array.isArray(results)) {
+          enrichedResults = await Promise.all(
+            results.map(r => enricher.enrich(r, {
+              getPerson: (id) => ctx_intel.getPerson(id),
+              getProject: (id) => ctx_intel.getProject(id)
+            }))
+          );
+        }
+        
+        return ok(id, { 
+          project: { id: p.id, name: p.name }, 
+          query: args.query, 
+          results: enrichedResults,
+          count: enrichedResults.length,
+          metrics: ctx_intel.getMetrics()
+        });
+      } catch (e) {
+        console.error(`[search_project] Error:`, e.message);
+        // Fallback to non-enriched search
+        try {
+          const p = await projectByName(ctx, args.project);
+          const results = await searchProject(ctx, p.id, { query: args.query });
+          return ok(id, { project: { id: p.id, name: p.name }, query: args.query, results, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "SEARCH_PROJECT_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     // ===== NEW PEOPLE ENDPOINTS =====

@@ -70,6 +70,80 @@ async function executeTimeline(apiCtx, projectId, startDate, endDate) {
 }
 
 /**
+ * Execute daily report with intelligent aggregation
+ * Loads all todos and organizes by project with enrichment
+ */
+async function executeDailyReport(apiCtx, date) {
+  // Initialize context for caching and enrichment
+  const ctx = new RequestContext(apiCtx, `daily report for ${date}`);
+  await ctx.preloadEssentials();
+
+  try {
+    // Load all open todos (this will be cached)
+    const rows = await apiCtx.listAllOpenTodos();
+
+    // Enrich with person and project details
+    const enricher = createEnricher(ctx);
+    const enrichedTodos = await Promise.all(
+      rows.map(async (todo) => {
+        return enricher.enrich(todo, {
+          getPerson: (id) => ctx.getPerson(id),
+          getProject: (id) => ctx.getProject(id)
+        });
+      })
+    );
+
+    // Filter by date
+    const dueToday = enrichedTodos.filter((r) => r.due_on === date);
+    const overdue = enrichedTodos.filter((r) => r.due_on && r.due_on < date);
+
+    // Aggregate per project
+    const perProject = {};
+    for (const todo of enrichedTodos) {
+      const projectId = todo.projectId || todo.project_id;
+      const projectName = todo.project_name || todo.project || "Unknown";
+      
+      if (!perProject[projectId]) {
+        perProject[projectId] = {
+          projectId,
+          project: projectName,
+          openTodos: 0,
+          dueToday: 0,
+          overdue: 0
+        };
+      }
+
+      perProject[projectId].openTodos += 1;
+      if (todo.due_on === date) perProject[projectId].dueToday += 1;
+      if (todo.due_on && todo.due_on < date) perProject[projectId].overdue += 1;
+    }
+
+    const perProjectArr = Object.values(perProject).sort(
+      (a, b) =>
+        (b.overdue - a.overdue) ||
+        (b.dueToday - a.dueToday) ||
+        (a.project || "").localeCompare(b.project || "")
+    );
+
+    return {
+      date,
+      totals: {
+        projects: Object.keys(perProject).length,
+        dueToday: dueToday.length,
+        overdue: overdue.length
+      },
+      perProject: perProjectArr,
+      dueToday: dueToday.map(t => ({ id: t.id, title: t.title, project: t.project, assignee: t.assignee })),
+      overdue: overdue.map(t => ({ id: t.id, title: t.title, project: t.project, assignee: t.assignee, due_on: t.due_on })),
+      _metadata: ctx.getMetrics()
+    };
+  } catch (error) {
+    console.error(`[executeDailyReport] Error:`, error.message);
+    throw error;
+  }
+}
+
+/**
  * Find all todos for a person
  */
 async function executePersonFinder(apiCtx, projectId, personName) {
@@ -181,6 +255,7 @@ module.exports = {
   executeIntelligentSearch,
   executeAssignmentReport,
   executeTimeline,
+  executeDailyReport,
   executePersonFinder,
   executeStatusFilter,
 
