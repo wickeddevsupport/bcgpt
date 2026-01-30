@@ -552,6 +552,335 @@
         }
       }
     },
+    "/action/list_all_people": {
+      "post": {
+        "summary": "List all people in the Basecamp account",
+        "operationId": "list_all_people",
+        "responses": {
+          "200": { "description": "Array of people with email, title, role information" }
+        }
+      }
+    },
+    "/action/get_person": {
+      "post": {
+        "summary": "Get detailed profile of a specific person",
+        "operationId": "get_person",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "person_id": { "type": "integer", "description": "The person's ID" }
+                },
+                "required": ["person_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Person profile with bio, location, timezone" }
+        }
+      }
+    },
+    "/action/get_my_profile": {
+      "post": {
+        "summary": "Get the current authenticated user's profile",
+        "operationId": "get_my_profile",
+        "responses": {
+          "200": { "description": "Current user profile" }
+        }
+      }
+    },
+    "/action/list_project_people": {
+      "post": {
+        "summary": "List all people on a specific project",
+        "operationId": "list_project_people",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": { "type": "string", "description": "Project name (fuzzy match)" }
+                },
+                "required": ["project"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "People on the project" }
+        }
+      }
+    },
+    "/action/list_comments": {
+      "post": {
+        "summary": "List comments on a specific recording (message, document, todo, etc)",
+        "operationId": "list_comments",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": { "type": "string", "description": "Project name" },
+                  "recording_id": { "type": "integer", "description": "ID of the recording (message, document, todo, etc)" }
+                },
+                "required": ["project", "recording_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Array of comments" }
+        }
+      }
+    },
+    "/action/get_comment": {
+      "post": {
+        "summary": "Get a specific comment by ID",
+        "operationId": "get_comment",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": { "type": "string" },
+                  "comment_id": { "type": "integer" }
+                },
+                "required": ["project", "comment_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Comment details" }
+        }
+      }
+    },
+    "/action/create_comment": {
+      "post": {
+        "summary": "Create a comment on a recording",
+        "operationId": "create_comment",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": { "type": "string" },
+                  "recording_id": { "type": "integer" },
+                  "content": { "type": "string", "description": "HTML content of the comment" }
+                },
+                "required": ["project", "recording_id", "content"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Comment created" }
+        }
+      }
+    },
+    "/action/list_uploads": {
+      "post": {
+        "summary": "List files/uploads in a project's vault",
+        "operationId": "list_uploads",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": { "type": "string" },
+                  "vault_id": { "type": "integer", "description": "Vault ID (optional, uses default if omitted)" }
+                },
+                "required": ["project"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Array of files with download URLs" }
+        }
+      }
+    },
+    "/action/get_upload": {
+      "post": {
+        "summary": "Get details of a specific file/upload",
+        "operationId": "get_upload",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": { "type": "string" },
+                  "upload_id": { "type": "integer" }
+                },
+                "required": ["project", "upload_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "File details including download URL" }
+        }
+      }
+    },
+    "/action/get_recordings": {
+      "post": {
+        "summary": "Query all recordings across projects by type",
+        "operationId": "get_recordings",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "type": { "type": "string", "description": "Recording type: Todo, Message, Document, Upload, Kanban::Card, etc" },
+                  "bucket": { "type": "string", "description": "Project ID(s) to filter (optional)" },
+                  "status": { "type": "string", "description": "active, archived, or trashed (default: active)" }
+                },
+                "required": ["type"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Array of recordings" }
+        }
+      }
+    },
+    "/action/trash_recording": {
+      "post": {
+        "summary": "Move a recording to trash",
+        "operationId": "trash_recording",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": { "type": "string" },
+                  "recording_id": { "type": "integer" }
+                },
+                "required": ["project", "recording_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": { "description": "Recording trashed" }
+        }
+      }
+    },
+    "/action/archive_recording": {
+      "post": {
+        "summary": "Archive a recording",
+        "operationId": "archive_recording",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": { "type": "string" },
+                  "recording_id": { "type": "integer" }
+                },
+                "required": ["project", "recording_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": { "description": "Recording archived" }
+        }
+      }
+    },
+    "/action/unarchive_recording": {
+      "post": {
+        "summary": "Unarchive a recording",
+        "operationId": "unarchive_recording",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": { "type": "string" },
+                  "recording_id": { "type": "integer" }
+                },
+                "required": ["project", "recording_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": { "description": "Recording unarchived" }
+        }
+      }
+    },
+    "/action/list_vaults": {
+      "post": {
+        "summary": "List document storage vaults for a project",
+        "operationId": "list_vaults",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": { "type": "string" }
+                },
+                "required": ["project"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Array of vaults" }
+        }
+      }
+    },
+    "/action/search_recordings": {
+      "post": {
+        "summary": "Search all recordings across projects by title/content",
+        "operationId": "search_recordings",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": { "type": "string" },
+                  "bucket": { "type": "string", "description": "Optional project ID to filter" }
+                },
+                "required": ["query"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Search results" }
+        }
+      }
+    },
     "/action/basecamp_raw": {
       "post": {
         "summary": "Make a raw Basecamp API call",
