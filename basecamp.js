@@ -23,9 +23,9 @@ function sleep(ms) {
 function parseLinkHeader(link) {
   if (!link) return {};
   const out = {};
-  const parts = link.split(",").map((s) => s.trim());
+  const parts = String(link).split(",").map((s) => s.trim());
   for (const part of parts) {
-    const m = part.match(/<([^>]+)>\s*;\s*rel="([^"]+)"/i);
+    const m = part.match(/<([^>]+)>\s*;\s*rel="?([^";]+)"?/i);
     if (m) out[m[2]] = m[1];
   }
   return out;
