@@ -31,16 +31,16 @@ class RequestContext {
    * Runs once per request, then all data cached locally
    */
   async preloadEssentials(options = {}) {
-    const { loadPeople = true, loadProjects = true } = options;
+    const { loadPeople = false, loadProjects = false } = options;
     
     try {
-      // Parallel load of core data
+      // Parallel load of core data (disabled by default to avoid auth issues)
       const loads = [];
       
       if (loadPeople) {
         loads.push(
           this._loadPeople().catch(e => {
-            console.warn(`[RequestContext] Failed to preload people:`, e.message);
+            console.warn(`[RequestContext] Failed to preload people: ${e.message}`);
             return [];
           })
         );
@@ -49,20 +49,19 @@ class RequestContext {
       if (loadProjects) {
         loads.push(
           this._loadProjects().catch(e => {
-            console.warn(`[RequestContext] Failed to preload projects:`, e.message);
+            console.warn(`[RequestContext] Failed to preload projects: ${e.message}`);
             return [];
           })
         );
       }
+
+      if (loads.length) {
+        await Promise.all(loads);
+      }
       
-      await Promise.all(loads);
-      
-      console.log(`[RequestContext] Preload complete:`, {
-        people: Object.keys(this.cache.people).length,
-        projects: Object.keys(this.cache.projects).length
-      });
+      console.log(`[RequestContext] Preload complete: { people: ${Object.keys(this.cache.people).length}, projects: ${Object.keys(this.cache.projects).length} }`);
     } catch (e) {
-      console.error(`[RequestContext] Preload error:`, e.message);
+      console.error(`[RequestContext] Preload error: ${e.message}`);
     }
   }
 
