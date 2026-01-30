@@ -745,12 +745,12 @@ export async function handleMCP(reqBody, ctx) {
           (a.project || "").localeCompare(b.project || "")
       );
 
-      return ok(id, enforceMaxBytes({ date, count: todos.length, todos });
+return ok(id, enforceMaxBytes({ date, count: todos.length, todos }));
     }
 
     if (name === "search_todos") {
       const q = String(args.query || "").trim().toLowerCase();
-      if (!q) return ok(id, enforceMaxBytes({ query: "", count: 0, todos: [] });
+      if (!q) return ok(id, enforceMaxBytes({ query: "", count: 0, todos: [] }));
 
       const cacheKey = `search:${ctx.accountId}:${q}`;
       const cached = cacheGet(cacheKey);
@@ -806,7 +806,7 @@ export async function handleMCP(reqBody, ctx) {
         project: { id: p.id, name: p.name },
         todolist: { id: target.id, name: target.name },
         todo: created
-      }));
+      });
     }
 
     if (name === "complete_task_by_name") {
