@@ -66,7 +66,6 @@ function todoText(t) {
 }
 
 function todoAssigneeNames(todo, peopleById) {
-  // Basecamp often returns assignees embedded
   if (Array.isArray(todo.assignees) && todo.assignees.length) {
     return todo.assignees.map(a => a?.name).filter(Boolean);
   }
@@ -75,7 +74,6 @@ function todoAssigneeNames(todo, peopleById) {
 }
 
 async function listProjects(TOKEN, accountId, ua, { archived = false } = {}) {
-  // Basecamp expects .json
   const qs = archived ? "?status=archived" : "";
   return await basecampFetch(TOKEN, `/${accountId}/projects.json${qs}`, { ua, accountId });
 }
@@ -86,48 +84,84 @@ async function projectByName(TOKEN, accountId, name, ua, opts = {}) {
 }
 
 async function getProject(TOKEN, accountId, projectId, ua) {
-  // Must include .json
   return await basecampFetch(TOKEN, `/${accountId}/projects/${projectId}.json`, { ua, accountId });
 }
 
-async function getDock(TOKEN, accountId, projectId, ua) {
-  const p = await getProject(TOKEN, accountId, projectId, ua);
-  return p?.dock || [];
-}
-
-function dockFind(dock, names) {
-  const list = Array.isArray(names) ? names : [names];
-  for (const n of list) {
-    const hit = (dock || []).find(d => d.name === n && d.enabled);
-    if (hit) return hit;
+function findDockToolUrl(dock, wantedNames) {
+  const want = Array.isArray(wantedNames) ? wantedNames : [wantedNames];
+  const enabled = (dock || []).filter(d => d && d.enabled);
+  for (const n of want) {
+    const hit = enabled.find(d => d.name === n);
+    if (hit?.url) return hit.url;
   }
   return null;
 }
 
-async function listTodoLists(TOKEN, projectId, ua) {
-  return await basecampFetch(TOKEN, `/buckets/${projectId}/todolists.json`, { ua });
+/**
+ * ✅ Correct To-dos discovery:
+ * - get project
+ * - find todos tool in dock (usually "todoset")
+ * - GET tool url -> read todolists_url
+ */
+async function getTodosetUrl(TOKEN, accountId, projectId, ua) {
+  const project = await getProject(TOKEN, accountId, projectId, ua);
+  const dock = project?.dock || [];
+
+  // Basecamp commonly uses "todoset" for the To-dos tool.
+  // Some setups may also show "todos".
+  return (
+    findDockToolUrl(dock, ["todoset", "todos"])
+  );
 }
 
-async function listTodosForList(TOKEN, projectId, list, ua) {
-  // Prefer todos_url if present
+async function listTodoLists(TOKEN, accountId, projectId, ua) {
+  const todosetUrl = await getTodosetUrl(TOKEN, accountId, projectId, ua);
+  if (!todosetUrl) return []; // To-dos not enabled -> skip
+
+  const todoset = await basecampFetch(TOKEN, todosetUrl, { ua, accountId });
+
+  const listUrl =
+    todoset?.todolists_url ||
+    todoset?.lists_url ||
+    todoset?.todolists?.url ||
+    null;
+
+  if (!listUrl) return [];
+  return await basecampFetch(TOKEN, listUrl, { ua, accountId });
+}
+
+async function listTodosForList(TOKEN, accountId, projectId, list, ua) {
+  // Prefer server-provided todos_url
   if (list?.todos_url) {
-    return await basecampFetch(TOKEN, list.todos_url, { ua });
+    return await basecampFetch(TOKEN, list.todos_url, { ua, accountId });
   }
-  return await basecampFetch(TOKEN, `/buckets/${projectId}/todolists/${list.id}/todos.json`, { ua });
+  // Fallback only if needed
+  return await basecampFetch(TOKEN, `/buckets/${projectId}/todolists/${list.id}/todos.json`, { ua, accountId });
 }
 
-async function listTodosForProject(TOKEN, projectId, ua) {
-  const lists = await listTodoLists(TOKEN, projectId, ua);
+async function listTodosForProject(TOKEN, accountId, projectId, ua) {
+  const lists = await listTodoLists(TOKEN, accountId, projectId, ua);
+  if (!lists.length) return [];
+
+  // limited concurrency to avoid timeouts
   const groups = await mapLimit(lists, 4, async (l) => {
-    const todos = await listTodosForList(TOKEN, projectId, l, ua);
+    let todos = [];
+    try {
+      todos = await listTodosForList(TOKEN, accountId, projectId, l, ua);
+    } catch {
+      // If one list fails, skip it
+      todos = [];
+    }
     return { todolistId: l.id, todolist: l.name, todos };
   });
+
   return groups;
 }
 
 /**
  * Global scan: open todos across all projects
- * - Uses concurrency to reduce timeouts
+ * - uses dock-aware discovery
+ * - skips projects without todos enabled
  */
 async function listAllOpenTodos(TOKEN, accountId, ua) {
   const cacheKey = `openTodos:${accountId}`;
@@ -137,12 +171,16 @@ async function listAllOpenTodos(TOKEN, accountId, ua) {
   const projects = await listProjects(TOKEN, accountId, ua, { archived: false });
 
   const perProject = await mapLimit(projects, 3, async (p) => {
-    const groups = await listTodosForProject(TOKEN, p.id, ua);
+    // If To-dos isn't enabled, this returns []
+    const groups = await listTodosForProject(TOKEN, accountId, p.id, ua);
+    if (!groups.length) return [];
+
     const rows = [];
     for (const g of groups) {
       for (const t of (g.todos || [])) {
         const completed = !!(t.completed || t.completed_at);
         if (completed) continue;
+
         rows.push({
           project: p.name,
           projectId: p.id,
@@ -163,23 +201,18 @@ async function listAllOpenTodos(TOKEN, accountId, ua) {
 }
 
 /* =========================
-   Tool Implementations
+   Tool implementations
 ========================= */
 async function t_startbcgpt(ctx) {
   return await ctx.startStatus();
 }
 
 async function t_whoami(ctx) {
-  // return what we can
   return {
     accountId: ctx.accountId || null,
     accounts: ctx.authAccounts || [],
-    message: ctx.accountId ? "Connected." : "Connected, but no accountId resolved."
+    message: ctx.accountId ? "Connected." : "Connected, but accountId missing."
   };
-}
-
-async function t_list_accounts(ctx) {
-  return ctx.authAccounts || [];
 }
 
 async function t_list_projects(args, ctx) {
@@ -190,20 +223,16 @@ async function t_get_project_by_name(args, ctx) {
   return await projectByName(ctx.TOKEN, ctx.accountId, args.name, ctx.ua);
 }
 
-async function t_get_project_dock(args, ctx) {
-  return await getDock(ctx.TOKEN, ctx.accountId, Number(args.project_id), ctx.ua);
-}
-
 async function t_list_todos_for_project(args, ctx) {
   const project = await projectByName(ctx.TOKEN, ctx.accountId, args.project, ctx.ua);
-  const groups = await listTodosForProject(ctx.TOKEN, project.id, ctx.ua);
+  const groups = await listTodosForProject(ctx.TOKEN, ctx.accountId, project.id, ctx.ua);
   return { project: { id: project.id, name: project.name }, groups };
 }
 
 async function t_create_task_naturally(args, ctx) {
   const project = await projectByName(ctx.TOKEN, ctx.accountId, args.project, ctx.ua);
-  const lists = await listTodoLists(ctx.TOKEN, project.id, ctx.ua);
-  if (!lists.length) throw Object.assign(new Error("No todolists found"), { code: "NO_TODOLISTS" });
+  const lists = await listTodoLists(ctx.TOKEN, ctx.accountId, project.id, ctx.ua);
+  if (!lists.length) throw Object.assign(new Error("No todolists found (To-dos may not be enabled)."), { code: "NO_TODOLISTS" });
 
   let target = lists[0];
   if (args.todolist) {
@@ -218,7 +247,7 @@ async function t_create_task_naturally(args, ctx) {
   const todo = await basecampFetch(
     ctx.TOKEN,
     `/buckets/${project.id}/todolists/${target.id}/todos.json`,
-    { method: "POST", body, ua: ctx.ua }
+    { method: "POST", body, ua: ctx.ua, accountId: ctx.accountId }
   );
 
   return {
@@ -231,7 +260,7 @@ async function t_create_task_naturally(args, ctx) {
 
 async function t_update_task_naturally(args, ctx) {
   const project = await projectByName(ctx.TOKEN, ctx.accountId, args.project, ctx.ua);
-  const groups = await listTodosForProject(ctx.TOKEN, project.id, ctx.ua);
+  const groups = await listTodosForProject(ctx.TOKEN, ctx.accountId, project.id, ctx.ua);
   const all = groups.flatMap(g => (g.todos || []).map(t => ({ id: t.id, name: todoText(t), raw: t })));
 
   const match = resolveBestEffort(all, args.task) || resolveByName(all, args.task, "todo");
@@ -243,7 +272,7 @@ async function t_update_task_naturally(args, ctx) {
   const updated = await basecampFetch(
     ctx.TOKEN,
     `/buckets/${project.id}/todos/${match.id}.json`,
-    { method: "PUT", body: patch, ua: ctx.ua }
+    { method: "PUT", body: patch, ua: ctx.ua, accountId: ctx.accountId }
   );
 
   return { message: "Task updated", project: { id: project.id, name: project.name }, todo: updated };
@@ -251,14 +280,15 @@ async function t_update_task_naturally(args, ctx) {
 
 async function t_complete_task_by_name(args, ctx) {
   const project = await projectByName(ctx.TOKEN, ctx.accountId, args.project, ctx.ua);
-  const groups = await listTodosForProject(ctx.TOKEN, project.id, ctx.ua);
+  const groups = await listTodosForProject(ctx.TOKEN, ctx.accountId, project.id, ctx.ua);
   const all = groups.flatMap(g => (g.todos || []).map(t => ({ id: t.id, name: todoText(t) })));
 
   const match = resolveBestEffort(all, args.task) || resolveByName(all, args.task, "todo");
 
   await basecampFetch(ctx.TOKEN, `/buckets/${project.id}/todos/${match.id}/completion.json`, {
     method: "POST",
-    ua: ctx.ua
+    ua: ctx.ua,
+    accountId: ctx.accountId
   });
 
   return { message: "Task completed", project: { id: project.id, name: project.name }, todoId: match.id, task: match.name };
@@ -289,7 +319,7 @@ async function t_daily_report(args, ctx) {
   return {
     date,
     totals: {
-      projects: new Set(rows.map(r => r.projectId)).size,
+      projectsWithTodos: perProjectArr.length,
       openTodos: rows.length,
       dueToday: dueToday.length,
       overdue: overdue.length
@@ -319,20 +349,6 @@ async function t_list_todos_due(args, ctx) {
   return { date, count: todos.length, todos };
 }
 
-async function t_summarize_overdue_tasks(_args, ctx) {
-  const today = new Date().toISOString().slice(0, 10);
-  const rows = await listAllOpenTodos(ctx.TOKEN, ctx.accountId, ctx.ua);
-  const overdue = rows.filter(r => r.due_on && r.due_on < today);
-
-  overdue.sort(
-    (a, b) =>
-      (a.due_on || "9999-99-99").localeCompare(b.due_on || "9999-99-99") ||
-      (a.project || "").localeCompare(b.project || "")
-  );
-
-  return { today, count: overdue.length, overdue };
-}
-
 async function t_search_todos(args, ctx) {
   const q = String(args.query || "").toLowerCase().trim();
   const rows = await listAllOpenTodos(ctx.TOKEN, ctx.accountId, ctx.ua);
@@ -357,24 +373,29 @@ async function t_assignment_report(args, ctx) {
   const maxTodos = Math.max(25, Math.min(1000, Number(args.max_todos || 200)));
   const includeUnassigned = args.include_unassigned !== false;
 
-  // Best-effort people map
+  // best-effort people
   let people = [];
   try {
-    people = await basecampFetch(ctx.TOKEN, `/buckets/${project.id}/people.json`, { ua: ctx.ua });
+    people = await basecampFetch(ctx.TOKEN, `/buckets/${project.id}/people.json`, { ua: ctx.ua, accountId: ctx.accountId });
   } catch {
     people = [];
   }
   const peopleById = new Map((people || []).map(p => [String(p.id), p.name || p.email_address || String(p.id)]));
 
-  const lists = await listTodoLists(ctx.TOKEN, project.id, ctx.ua);
+  const lists = await listTodoLists(ctx.TOKEN, ctx.accountId, project.id, ctx.ua);
 
   let scanned = 0;
   const perList = await mapLimit(lists, 4, async (l) => {
     if (scanned >= maxTodos) return { list: l, todos: [] };
 
-    const todos = await listTodosForList(ctx.TOKEN, project.id, l, ctx.ua);
-    const open = (todos || []).filter(t => !t.completed && !t.completed_at);
+    let todos = [];
+    try {
+      todos = await listTodosForList(ctx.TOKEN, ctx.accountId, project.id, l, ctx.ua);
+    } catch {
+      todos = [];
+    }
 
+    const open = (todos || []).filter(t => !t.completed && !t.completed_at);
     const budget = Math.max(0, maxTodos - scanned);
     const slice = open.slice(0, budget);
     scanned += slice.length;
@@ -419,26 +440,30 @@ async function t_assignment_report(args, ctx) {
     assignees: Object.keys(out).length,
     assignments: out,
     unassigned: includeUnassigned ? unassigned : undefined,
-    note: scanned >= maxTodos ? `Scanned first ${maxTodos} open todos to avoid timeouts. Increase max_todos if needed.` : undefined
+    note: scanned >= maxTodos ? `Scanned first ${maxTodos} open todos to avoid timeouts.` : undefined
   };
 
   return cacheSet(cacheKey, payload);
 }
 
 /**
- * Raw call tool — full coverage
- * IMPORTANT: Basecamp wants .json for most resources.
- * We also provide basecamp_raw alias to match your Actions call.
+ * Raw fallback: full Basecamp coverage.
+ * NOTE: Basecamp is .json-heavy; we normalize common shortcut "/projects" -> "/projects.json"
  */
 async function t_basecamp_request(args, ctx) {
   let p = String(args.path || "").trim();
   if (!p) throw Object.assign(new Error("Missing path"), { code: "BAD_REQUEST" });
 
-  // convenience: "/projects" -> "/projects.json"
   if (p === "/projects") p = "/projects.json";
 
   const method = String(args.method || "GET").toUpperCase();
-  const data = await basecampFetch(ctx.TOKEN, p, { method, body: args.body, ua: ctx.ua, accountId: ctx.accountId });
+  const data = await basecampFetch(ctx.TOKEN, p, {
+    method,
+    body: args.body,
+    ua: ctx.ua,
+    accountId: ctx.accountId
+  });
+
   return { ok: true, request: { method, path: p }, data };
 }
 
@@ -453,17 +478,16 @@ export async function handleMCP(reqBody, ctx) {
 
   try {
     if (method === "initialize") {
-      return ok(id, { name: "bcgpt", version: "3.1", sessionId: crypto.randomUUID() });
+      return ok(id, { name: "bcgpt", version: "3.2", sessionId: crypto.randomUUID() });
     }
 
     if (method === "tools/list") {
       return ok(id, {
         tools: [
-          tool("startbcgpt", "Show connection status + re-auth and logout links.", noProps()),
-          tool("whoami", "Return current Basecamp account id and available accounts.", noProps()),
+          tool("startbcgpt", "Show connection status + re-auth + logout links.", noProps()),
+          tool("whoami", "Return Basecamp accountId and available accounts.", noProps()),
 
-          tool("list_accounts", "List Basecamp accounts available to the authenticated user.", noProps()),
-          tool("list_projects", "List projects (optionally include archived).", {
+          tool("list_projects", "List projects in the current account.", {
             type: "object",
             properties: { archived: { type: "boolean" } },
             additionalProperties: false
@@ -474,19 +498,13 @@ export async function handleMCP(reqBody, ctx) {
             required: ["name"],
             additionalProperties: false
           }),
-          tool("get_project_dock", "Get a project's dock tools.", {
-            type: "object",
-            properties: { project_id: { type: "integer" } },
-            required: ["project_id"],
-            additionalProperties: false
-          }),
 
-          tool("daily_report", "Across all projects: due today + overdue + per-project counts.", {
+          tool("daily_report", "Across projects: due today + overdue + per-project counts (skips projects without To-dos).", {
             type: "object",
             properties: { date: { type: "string", description: "YYYY-MM-DD (default today)" } },
             additionalProperties: false
           }),
-          tool("list_todos_due", "Across all projects: open todos due on date; optionally include overdue.", {
+          tool("list_todos_due", "Across projects: open todos due on date; optionally include overdue.", {
             type: "object",
             properties: {
               date: { type: "string", description: "YYYY-MM-DD (default today)" },
@@ -494,14 +512,12 @@ export async function handleMCP(reqBody, ctx) {
             },
             additionalProperties: false
           }),
-          tool("summarize_overdue_tasks", "Across all projects: overdue open todos.", noProps()),
-          tool("search_todos", "Across all projects: search open todos by keyword.", {
+          tool("search_todos", "Across projects: search open todos by keyword.", {
             type: "object",
             properties: { query: { type: "string" } },
             required: ["query"],
             additionalProperties: false
           }),
-
           tool("assignment_report", "For a project: group open todos by assignee.", {
             type: "object",
             properties: {
@@ -555,7 +571,6 @@ export async function handleMCP(reqBody, ctx) {
             required: ["path"],
             additionalProperties: false
           }),
-          // ✅ alias so your Actions call "basecamp_raw" works
           tool("basecamp_raw", "Alias of basecamp_request.", {
             type: "object",
             properties: { path: { type: "string" }, method: { type: "string" }, body: { type: "object" } },
@@ -585,23 +600,19 @@ export async function handleMCP(reqBody, ctx) {
       return fail(id, { code: "NO_ACCOUNT", message: "Connected, but no Basecamp accountId resolved." });
     }
 
-    // tool dispatch
     const tools = {
-      list_accounts: () => t_list_accounts(safeCtx),
       list_projects: () => t_list_projects(args, safeCtx),
       get_project_by_name: () => t_get_project_by_name(args, safeCtx),
-      get_project_dock: () => t_get_project_dock(args, safeCtx),
+
+      daily_report: () => t_daily_report(args, safeCtx),
+      list_todos_due: () => t_list_todos_due(args, safeCtx),
+      search_todos: () => t_search_todos(args, safeCtx),
+      assignment_report: () => t_assignment_report(args, safeCtx),
 
       list_todos_for_project: () => t_list_todos_for_project(args, safeCtx),
       create_task_naturally: () => t_create_task_naturally(args, safeCtx),
       update_task_naturally: () => t_update_task_naturally(args, safeCtx),
       complete_task_by_name: () => t_complete_task_by_name(args, safeCtx),
-
-      daily_report: () => t_daily_report(args, safeCtx),
-      list_todos_due: () => t_list_todos_due(args, safeCtx),
-      summarize_overdue_tasks: () => t_summarize_overdue_tasks(args, safeCtx),
-      search_todos: () => t_search_todos(args, safeCtx),
-      assignment_report: () => t_assignment_report(args, safeCtx),
 
       basecamp_request: () => t_basecamp_request(args, safeCtx),
       basecamp_raw: () => t_basecamp_request(args, safeCtx) // alias
@@ -613,7 +624,6 @@ export async function handleMCP(reqBody, ctx) {
     const result = await fn();
     return ok(id, result);
   } catch (e) {
-    // keep your resolver errors
     if (e?.code === "AMBIGUOUS_MATCH") {
       return fail(id, { code: "AMBIGUOUS_MATCH", message: `Ambiguous ${e.label}. Please choose one.`, options: e.options });
     }
