@@ -246,6 +246,41 @@ async function listAllOpenTodos(ctx, { archivedProjects = false, maxProjects = 5
   return cacheSet(cacheKey, perProject.flat());
 }
 
+// ---------- Search within a project ----------
+async function searchProject(ctx, projectId, { query } = {}) {
+  if (!query || !query.trim()) {
+    return [];
+  }
+
+  try {
+    // Try the Basecamp search endpoint
+    const results = await apiAll(ctx, `/projects/${projectId}/search.json`, {
+      body: { query: query.trim() },
+    });
+    return results || [];
+  } catch {
+    // Fallback: search todos, messages, documents manually
+    const results = [];
+    
+    try {
+      const todos = await listAllOpenTodos(ctx, { maxProjects: 1 });
+      const matchingTodos = todos.filter(t => 
+        t.content?.toLowerCase().includes(query.toLowerCase())
+      );
+      results.push(...matchingTodos.map(t => ({
+        type: "todo",
+        title: t.content,
+        url: t.url,
+        project: t.project,
+      })));
+    } catch {
+      // ignore
+    }
+    
+    return results;
+  }
+}
+
 // ---------- Assignment report (schema expects this) ----------
 async function assignmentReport(ctx, projectName, { maxTodos = 250 } = {}) {
   const p = await projectByName(ctx, projectName);
