@@ -499,16 +499,19 @@ async function listCardTableCards(ctx, projectId, cardTableId) {
 async function createCard(ctx, projectId, cardTableId, { title, content, column_id, due_on } = {}) {
   const body = { title };
   if (content) body.content = content;
-  if (column_id) body.column_id = column_id;
   if (due_on) body.due_on = due_on;
-  return api(ctx, `/buckets/${projectId}/card_tables/${cardTableId}/cards.json`, { method: "POST", body });
+  // Note: column_id is the list/column to create the card in
+  // If column_id not provided, user must specify via handler
+  if (!column_id) throw new Error("column_id (list/column ID) is required to create a card");
+  return api(ctx, `/buckets/${projectId}/card_tables/lists/${column_id}/cards.json`, { method: "POST", body });
 }
 
 async function moveCard(ctx, projectId, cardId, { column_id, position } = {}) {
   const body = {};
   if (column_id) body.column_id = column_id;
   if (position != null) body.position = position;
-  return api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}.json`, { method: "PUT", body });
+  // Move endpoint: POST /buckets/{id}/card_tables/cards/{id}/moves.json
+  return api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}/moves.json`, { method: "POST", body });
 }
 
 // ---------- Hill Charts ----------
