@@ -740,19 +740,38 @@ async function listProjectPeople(ctx, projectId) {
 
 // ========== COMMENTS ENDPOINTS ==========
 async function listComments(ctx, projectId, recordingId) {
-  const comments = await apiAll(ctx, `/buckets/${projectId}/recordings/${recordingId}/comments.json`);
-  const arr = Array.isArray(comments) ? comments : [];
-  return arr.map((c) => ({
-    id: c.id,
-    created_at: c.created_at,
-    updated_at: c.updated_at,
-    content: c.content,
-    creator: c.creator?.name,
-    creator_id: c.creator?.id,
-    status: c.status,
-    visible_to_clients: c.visible_to_clients,
-    app_url: c.app_url,
-  }));
+  // Defensive: ensure the recording exists before trying to list comments
+  try {
+    await api(ctx, `/buckets/${projectId}/recordings/${recordingId}.json`);
+  } catch (e) {
+    // Convert 404 into a clearer error for callers
+    if (e && e.message && e.message.includes('404')) {
+      throw new Error(`RECORDING_NOT_FOUND: Recording ${recordingId} not found or inaccessible in project ${projectId}`);
+    }
+    throw e;
+  }
+
+  try {
+    const comments = await apiAll(ctx, `/buckets/${projectId}/recordings/${recordingId}/comments.json`);
+    const arr = Array.isArray(comments) ? comments : [];
+    return arr.map((c) => ({
+      id: c.id,
+      created_at: c.created_at,
+      updated_at: c.updated_at,
+      content: c.content,
+      creator: c.creator?.name,
+      creator_id: c.creator?.id,
+      status: c.status,
+      visible_to_clients: c.visible_to_clients,
+      app_url: c.app_url,
+    }));
+  } catch (e) {
+    if (e && e.message && e.message.includes('404')) {
+      console.warn(`[listComments] Comments endpoint returned 404 for recording ${recordingId} in project ${projectId}`);
+      return [];
+    }
+    throw e;
+  }
 }
 
 async function getComment(ctx, projectId, commentId) {
