@@ -7,47 +7,6 @@ import { resolveByName, resolveBestEffort } from "./resolvers.js";
 function ok(id, result) { return { jsonrpc: "2.0", id, result }; }
 function fail(id, error) { return { jsonrpc: "2.0", id, error }; }
 
-
-// ---------- Output safety ----------
-function limitArray(arr, n) {
-  if (!Array.isArray(arr)) return arr;
-  return arr.slice(0, Math.max(0, n));
-}
-
-function truncateString(s, max = 500) {
-  if (typeof s !== "string") return s;
-  return s.length > max ? s.slice(0, max) + "…" : s;
-}
-
-// Rough token/size guard: keep JSON under maxBytes by trimming biggest arrays.
-function enforceMaxBytes(obj, { maxBytes = 80_000 } = {}) {
-  try {
-    let json = JSON.stringify(obj);
-    if (json.length <= maxBytes) return obj;
-
-    // Trim common array fields
-    const clone = JSON.parse(json);
-    const candidates = ["projects", "todos", "groups", "dueToday", "overdue", "items", "cards", "columns", "lists"];
-    for (const k of candidates) {
-      if (Array.isArray(clone?.[k]) && clone[k].length > 50) {
-        clone[k] = clone[k].slice(0, 50);
-      }
-    }
-    json = JSON.stringify(clone);
-    if (json.length <= maxBytes) return clone;
-
-    // As a last resort, drop large arrays entirely
-    for (const k of candidates) {
-      if (Array.isArray(clone?.[k]) && clone[k].length > 0) {
-        clone[k] = clone[k].slice(0, 10);
-      }
-    }
-    return clone;
-  } catch {
-    return obj;
-  }
-}
-
 // ---------- Tool schema helpers ----------
 function tool(name, description, inputSchema) { return { name, description, inputSchema }; }
 function noProps() { return { type: "object", properties: {}, additionalProperties: false }; }
@@ -190,34 +149,14 @@ async function listTodosForList(ctx, projectId, todolist) {
   return apiAll(ctx, `/buckets/${projectId}/todolists/${todolist.id}/todos.json`);
 }
 
-
-async function listTodosForProject(ctx, projectId, { includeCompleted = false, maxTodosPerList = 250 } = {}) {
+async function listTodosForProject(ctx, projectId) {
   const lists = await listTodoLists(ctx, projectId);
   const groups = await mapLimit(lists || [], 2, async (l) => {
     const todos = await listTodosForList(ctx, projectId, l);
-
-    const shaped = [];
-    for (const t of todos || []) {
-      const completed = !!(t.completed || t.completed_at);
-      if (!includeCompleted && completed) continue;
-      shaped.push({
-        id: t.id,
-        content: todoText(t),
-        description: t.description || null,
-        due_on: isoDate(t.due_on || t.due_at),
-        completed: completed,
-        completed_at: t.completed_at || null,
-        assignees: Array.isArray(t.assignees) ? t.assignees.map(a => ({ id: a.id, name: a.name })) : null,
-        url: t.app_url || t.url || null,
-      });
-      if (shaped.length >= maxTodosPerList) break;
-    }
-
-    return { todolistId: l.id, todolist: l.name, todos: shaped };
+    return { todolistId: l.id, todolist: l.name, todos };
   });
   return groups;
 }
-
 
 async function listAllOpenTodos(ctx, { archivedProjects = false, maxProjects = 500 } = {}) {
   const cacheKey = `openTodos:${ctx.accountId}:${archivedProjects}:${maxProjects}`;
@@ -245,7 +184,7 @@ async function listAllOpenTodos(ctx, { archivedProjects = false, maxProjects = 5
             content: todoText(t),
             due_on: isoDate(t.due_on || t.due_at),
             url: t.app_url || t.url || null,
-
+            raw: t,
           });
         }
       }
@@ -274,7 +213,7 @@ async function assignmentReport(ctx, projectName, { maxTodos = 250 } = {}) {
         todoId: t.id,
         content: todoText(t),
         due_on: isoDate(t.due_on || t.due_at),
-
+        raw: t,
       });
       if (open.length >= maxTodos) break;
     }
@@ -694,7 +633,7 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "list_todos_for_project") {
       const p = await projectByName(ctx, args.project);
       const groups = await listTodosForProject(ctx, p.id);
-      return ok(id, enforceMaxBytes({ project: { id: p.id, name: p.name }, groups }));
+      return ok(id, { project: { id: p.id, name: p.name }, groups });
     }
 
     if (name === "daily_report") {
@@ -716,7 +655,7 @@ export async function handleMCP(reqBody, ctx) {
         (a, b) => (b.overdue - a.overdue) || (b.dueToday - a.dueToday) || (a.project || "").localeCompare(b.project || "")
       );
 
-      return ok(id, enforceMaxBytes({
+      return ok(id, {
         date,
         totals: {
           projects: new Set(rows.map((r) => r.projectId)).size,
@@ -726,7 +665,7 @@ export async function handleMCP(reqBody, ctx) {
         perProject: perProjectArr,
         dueToday,
         overdue
-      }));
+      });
     }
 
     if (name === "list_todos_due") {
@@ -745,12 +684,12 @@ export async function handleMCP(reqBody, ctx) {
           (a.project || "").localeCompare(b.project || "")
       );
 
-      return ok(id, enforceMaxBytes({ date, count: todos.length, todos });
+      return ok(id, { date, count: todos.length, todos });
     }
 
     if (name === "search_todos") {
       const q = String(args.query || "").trim().toLowerCase();
-      if (!q) return ok(id, enforceMaxBytes({ query: "", count: 0, todos: [] });
+      if (!q) return ok(id, { query: "", count: 0, todos: [] });
 
       const cacheKey = `search:${ctx.accountId}:${q}`;
       const cached = cacheGet(cacheKey);
@@ -806,7 +745,7 @@ export async function handleMCP(reqBody, ctx) {
         project: { id: p.id, name: p.name },
         todolist: { id: target.id, name: target.name },
         todo: created
-      }));
+      });
     }
 
     if (name === "complete_task_by_name") {

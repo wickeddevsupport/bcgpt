@@ -79,30 +79,7 @@ function parseLinkHeader(link) {
   return out;
 }
 
-
-function getParamInt(urlOrPath, key) {
-  try {
-    const base = /^https?:\/\//i.test(urlOrPath) ? undefined : "https://example.invalid";
-    const u = new URL(urlOrPath, base);
-    const v = u.searchParams.get(key);
-    if (v == null) return null;
-    const n = parseInt(v, 10);
-    return Number.isFinite(n) ? n : null;
-  } catch {
-    return null;
-  }
-}
-
-function setParam(urlOrPath, key, value) {
-  const base = /^https?:\/\//i.test(urlOrPath) ? undefined : "https://example.invalid";
-  const u = new URL(urlOrPath, base);
-  u.searchParams.set(key, String(value));
-  if (base) return u.pathname + (u.search || "");
-  return u.toString();
-}
-
-
-/****
+/**
  * Hardened Basecamp fetch:
  * - timeout
  * - retry/backoff for 429/502/503/504 (respects Retry-After)
@@ -210,44 +187,25 @@ async function basecampFetch(token, path, opts = {}) {
     return data;
   }
 
-  
-// Pagination: aggregate pages when response is an array
-// Many Basecamp collection endpoints default to 15/page and sometimes omit Link headers.
-// We force per_page and page=1, follow Link rel="next" when present, and fall back to page++ when Link is missing.
-const aggregated = [];
+  // Pagination: aggregate pages when response is an array
+  const aggregated = [];
+  let page = 0;
 
-// Encourage deterministic pagination.
-const perPage = getParamInt(url, "per_page") ?? 100;
-url = setParam(url, "per_page", perPage);
-if (getParamInt(url, "page") == null) url = setParam(url, "page", 1);
+  while (url && page < maxPages) {
+    const { data, headers: respHeaders } = await doOne(url);
 
-let page = 0;
-while (url && page < maxPages) {
-  const requestUrl = url;
-  const { data, headers: respHeaders } = await doOne(url);
+    if (Array.isArray(data)) aggregated.push(...data);
+    else return data; // Not an array => stop pagination and return as-is.
 
-  if (Array.isArray(data)) aggregated.push(...data);
-  else return data; // Not an array => stop pagination and return as-is.
+    const link = respHeaders?.get?.("link") || null;
+    const { next } = parseLinkHeader(link);
+    url = next || null;
 
-  const link = respHeaders?.get?.("link") || null;
-  const { next } = parseLinkHeader(link);
-
-  if (next) {
-    url = next;
-  } else if (perPage && Array.isArray(data) && data.length === perPage) {
-    const cur = getParamInt(requestUrl, "page") ?? 1;
-    url = setParam(requestUrl, "page", cur + 1);
-  } else {
-    url = null;
+    page++;
+    if (url) await sleep(pageDelayMs);
   }
 
-  page++;
-  if (url) await sleep(pageDelayMs);
-}
-
-return aggregated;
-
-
+  return aggregated;
 }
 
 /* ============ Launchpad auth ============ */
