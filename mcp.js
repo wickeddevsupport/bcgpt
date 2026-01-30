@@ -335,6 +335,24 @@ async function listTodosForProject(ctx, projectId) {
   return groups;
 }
 
+/**
+ * Helper: find a todo by ID within a project
+ * Searches across all todolists in the todoset
+ */
+async function findTodoInProject(ctx, projectId, todoId) {
+  const lists = await listTodoLists(ctx, projectId);
+  for (const l of lists || []) {
+    try {
+      const todos = await listTodosForList(ctx, projectId, l);
+      const found = (todos || []).find(t => String(t.id) === String(todoId));
+      if (found) return found;
+    } catch (e) {
+      console.debug(`[findTodoInProject] Error searching list ${l.id}: ${e.message}`);
+    }
+  }
+  return null;
+}
+
 async function listAllOpenTodos(ctx, { archivedProjects = false, maxProjects = 500 } = {}) {
   const cacheKey = `openTodos:${ctx.accountId}:${archivedProjects}:${maxProjects}`;
   const cached = cacheGet(cacheKey);
@@ -792,8 +810,9 @@ async function listComments(ctx, projectId, recordingId) {
       console.log(`[listComments] ID ${recordingId} not found as recording — checking if it's a todo ID`);
       
       try {
+        // First try direct fetch
         const todoJson = await api(ctx, `/buckets/${projectId}/todos/${recordingId}.json`);
-        console.log(`[listComments] Found ID ${recordingId} as a todo — fetching its comments`);
+        console.log(`[listComments] Found ID ${recordingId} as a todo via direct fetch — fetching its comments`);
         meta.resolvedType = "todo";
         meta.usedRecordingId = recordingId;
         meta.matchedTitle = todoJson?.title || null;
@@ -803,32 +822,47 @@ async function listComments(ctx, projectId, recordingId) {
         commentsCount = typeof todoJson?.comments_count === 'number' ? todoJson.comments_count : null;
         recordingJson = todoJson;
       } catch (todoErr) {
-        // Not a recording or a todo — try fuzzy search by ID
-        console.log(`[listComments] ID ${recordingId} is neither a recording nor a todo — attempting search`);
+        // Not found via direct fetch — search across todolists
+        console.log(`[listComments] ID ${recordingId} not found via direct fetch — searching across todolists in project`);
         
         try {
-          const results = await searchRecordings(ctx, recordingId, { bucket_id: projectId });
-          const arr = Array.isArray(results) ? results : [];
-          if (arr.length) {
-            // Choose best effort match by title/content
-            const candidates = arr.map((r) => ({ id: r.id, name: r.title || r.content || "", raw: r }));
-            const best = resolveBestEffort(candidates, recordingId) || candidates[0];
-            meta.usedRecordingId = best.id;
-            meta.autoResolved = true;
-            meta.matchedTitle = best.name;
-            meta.resolvedType = "recording";
-            recordingId = best.id;
-            recordingJson = best.raw || (await api(ctx, `/buckets/${projectId}/recordings/${best.id}.json`));
-            commentsUrl = recordingJson?.comments_url || `/buckets/${projectId}/recordings/${best.id}/comments.json`;
-            commentsCount = typeof recordingJson?.comments_count === 'number' ? recordingJson.comments_count : null;
-            console.log(`[listComments] Auto-resolved to recording id=${best.id} title="${best.name}"`);
+          const todoJson = await findTodoInProject(ctx, projectId, recordingId);
+          if (todoJson) {
+            console.log(`[listComments] Found ID ${recordingId} as a todo in project ${projectId} — fetching its comments`);
+            meta.resolvedType = "todo";
+            meta.usedRecordingId = recordingId;
+            meta.matchedTitle = todoJson?.title || null;
+            
+            commentsUrl = todoJson?.comments_url || `/buckets/${projectId}/todos/${recordingId}/comments.json`;
+            commentsCount = typeof todoJson?.comments_count === 'number' ? todoJson.comments_count : null;
+            recordingJson = todoJson;
           } else {
-            console.warn(`[listComments] ID ${recordingId} not found as recording, todo, or search result in project ${projectId}`);
-            return { comments: [], _meta: { ...meta, error: "NOT_FOUND", message: `Recording or todo with ID ${recordingId} not found in project ${projectId}` } };
+            // Not a recording or a todo — try fuzzy search by ID
+            console.log(`[listComments] ID ${recordingId} not found as recording or todo — attempting search`);
+            
+            const results = await searchRecordings(ctx, recordingId, { bucket_id: projectId });
+            const arr = Array.isArray(results) ? results : [];
+            if (arr.length) {
+              // Choose best effort match by title/content
+              const candidates = arr.map((r) => ({ id: r.id, name: r.title || r.content || "", raw: r }));
+              const best = resolveBestEffort(candidates, recordingId) || candidates[0];
+              meta.usedRecordingId = best.id;
+              meta.autoResolved = true;
+              meta.matchedTitle = best.name;
+              meta.resolvedType = "recording";
+              recordingId = best.id;
+              recordingJson = best.raw || (await api(ctx, `/buckets/${projectId}/recordings/${best.id}.json`));
+              commentsUrl = recordingJson?.comments_url || `/buckets/${projectId}/recordings/${best.id}/comments.json`;
+              commentsCount = typeof recordingJson?.comments_count === 'number' ? recordingJson.comments_count : null;
+              console.log(`[listComments] Auto-resolved to recording id=${best.id} title="${best.name}"`);
+            } else {
+              console.warn(`[listComments] ID ${recordingId} not found as recording, todo, or search result in project ${projectId}`);
+              return { comments: [], _meta: { ...meta, error: "NOT_FOUND", message: `Recording or todo with ID ${recordingId} not found in project ${projectId}` } };
+            }
           }
         } catch (searchErr) {
-          console.warn(`[listComments] Search failed: ${searchErr?.message}`);
-          return { comments: [], _meta: { ...meta, error: "SEARCH_FAILED", message: `Could not search for ID ${recordingId}` } };
+          console.warn(`[listComments] Search/lookup failed: ${searchErr?.message}`);
+          return { comments: [], _meta: { ...meta, error: "LOOKUP_FAILED", message: `Could not locate ID ${recordingId}` } };
         }
       }
     } else {
@@ -1307,6 +1341,14 @@ export async function handleMCP(reqBody, ctx) {
             additionalProperties: false
           }),
 
+          // Diagnostic: inspect project structure and available API links
+          tool("get_project_structure", "Inspect a project's dock and available API endpoints (for diagnostics).", {
+            type: "object",
+            properties: { project: { type: "string" } },
+            required: ["project"],
+            additionalProperties: false
+          }),
+
           // Raw escape hatch
           tool("basecamp_request", "Raw Basecamp API call. Provide full URL or a /path.", {
             type: "object",
@@ -1351,6 +1393,32 @@ export async function handleMCP(reqBody, ctx) {
     }
 
     if (name === "list_accounts") return ok(id, authAccounts || []);
+
+    if (name === "get_project_structure") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const dock = await getDock(ctx, p.id);
+        
+        // Return structured dock info with all available links
+        const dockInfo = (dock || []).map(d => ({
+          id: d.id,
+          title: d.title,
+          name: d.name,
+          enabled: d.enabled,
+          position: d.position,
+          url: d.url,
+          app_url: d.app_url,
+        }));
+        
+        return ok(id, {
+          project: { id: p.id, name: p.name },
+          dock: dockInfo,
+          description: "Dock contains links to all features. Use the 'url' field to construct API calls. Follow links from each resource to get comments_url, todos_url, etc."
+        });
+      } catch (e) {
+        return fail(id, { code: "GET_STRUCTURE_ERROR", message: e.message });
+      }
+    }
 
     if (name === "list_projects") {
       // Return all projects as a flat array (no chunking for MCP)
