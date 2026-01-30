@@ -68,7 +68,8 @@ function normalizeBasecampUrl(path, accountId) {
 }
 
 function parseLinkHeader(link) {
-  // Minimal Link parser: <url>; rel="next"
+  // Minimal Link parser:
+  // Supports both: rel="next" and rel=next
   if (!link) return {};
   const out = {};
   const parts = String(link).split(",").map((s) => s.trim());
@@ -78,17 +79,6 @@ function parseLinkHeader(link) {
   }
   return out;
 }
-
-function withPage(url, pageNum) {
-  try {
-    const u = new URL(url);
-    u.searchParams.set("page", String(pageNum));
-    return u.toString();
-  } catch {
-    return url;
-  }
-}
-
 
 /**
  * Hardened Basecamp fetch:
@@ -200,24 +190,35 @@ async function basecampFetch(token, path, opts = {}) {
 
   // Pagination: aggregate pages when response is an array
   const aggregated = [];
+  let pageSizeGuess = null;
   let page = 0;
 
   while (url && page < maxPages) {
-    const requestUrl = url;
     const { data, headers: respHeaders } = await doOne(url);
 
     if (Array.isArray(data)) aggregated.push(...data);
     else return data; // Not an array => stop pagination and return as-is.
 
-    const link = (respHeaders?.get?.("link") || respHeaders?.get?.("Link")) || null;
-    const { next } = parseLinkHeader(link);
-    url = next || null;
+    const link = respHeaders?.get?.("link") || respHeaders?.get?.("Link") || null;
+const { next } = parseLinkHeader(link);
 
-    // Fallback pagination: if no Link header is provided but we received a full page,
-    // try explicit ?page=N (Basecamp defaults to 15 per page).
-    if (!url && Array.isArray(data) && data.length === 15) {
-      url = withPage(requestUrl, page + 2);
-    }
+// Fallback pagination when Link header is missing/stripped:
+// Basecamp often returns 15 items per page by default.
+if (pageSizeGuess === null) pageSizeGuess = Array.isArray(data) ? data.length : null;
+
+let nextUrl = next || null;
+if (!nextUrl && pageSizeGuess && Array.isArray(data) && data.length === pageSizeGuess) {
+  try {
+    const u = new URL(url);
+    const curPage = Number(u.searchParams.get("page") || "1");
+    u.searchParams.set("page", String(curPage + 1));
+    nextUrl = u.toString();
+  } catch {
+    // ignore
+  }
+}
+
+url = nextUrl;
 
     page++;
     if (url) await sleep(pageDelayMs);
