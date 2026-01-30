@@ -1,4 +1,56 @@
 // mcp.js
+// ============================================================================
+// BCGPT - Fully Intelligent Basecamp MCP Server
+// ============================================================================
+// Basecamp 3 API Reference: https://github.com/basecamp/bc3-api
+//
+// CORE API ENDPOINTS USED:
+// ├─ PROJECTS
+// │  ├─ GET  /projects.json                              List all projects
+// │  ├─ GET  /projects/{id}.json                         Get project details
+// │
+// ├─ TODOS (core - always use todolists, NOT todosets)
+// │  ├─ GET  /buckets/{id}/todolists.json               List todo lists in project
+// │  ├─ GET  /buckets/{id}/todolists/{id}/todos.json    List todos in a list
+// │  ├─ GET  /buckets/{id}/todos/{id}.json              Get specific todo
+// │  ├─ POST /buckets/{id}/todolists.json               Create todo list
+// │  ├─ POST /buckets/{id}/todolists/{id}/todos.json    Create todo
+// │  ├─ POST /buckets/{id}/todos/{id}/completion.json   Mark todo done
+// │
+// ├─ CARD TABLES (Kanban)
+// │  ├─ GET  /buckets/{id}/card_tables.json             List card tables
+// │  ├─ GET  /buckets/{id}/card_tables/{id}/columns.json List columns
+// │  ├─ GET  /buckets/{id}/card_tables/{id}/cards.json  List cards
+// │  ├─ POST /buckets/{id}/card_tables/{id}/cards.json  Create card
+// │  ├─ PUT  /buckets/{id}/card_tables/cards/{id}.json  Move/update card
+// │
+// ├─ MESSAGES (dock-driven)
+// │  ├─ GET  {dock.url}                                 Get message board list
+// │  ├─ GET  {board.messages_url}                       Get messages
+// │
+// ├─ DOCUMENTS/VAULT (dock-driven)
+// │  ├─ GET  {dock.url}                                 Get vault
+// │  ├─ GET  {vault.documents_url}                      Get documents
+// │
+// ├─ SCHEDULE (dock-driven)
+// │  ├─ GET  {dock.url}                                 Get schedule
+// │  ├─ GET  {schedule.entries_url}                     Get entries
+// │
+// ├─ SEARCH
+// │  ├─ POST /projects/{id}/search.json                 Search within project
+// │
+// └─ HILL CHART (dock-driven)
+//    └─ GET  /buckets/{id}/hill_charts/{id}.json        Get hill chart
+//
+// IMPORTANT NOTES:
+// - projectId IS the bucketId - they're the same in Basecamp 3
+// - Dock is the project's UI configuration (what features are enabled)
+// - Todolists are the primary interface, NOT todosets (legacy)
+// - Most endpoints require accountId which is determined from auth
+// - Pagination: Uses Link headers (RFC 5988), not per_page parameter alone
+// - Rate limit: 429 with Retry-After header, handle gracefully
+// ============================================================================
+
 import crypto from "crypto";
 import { basecampFetch, basecampFetchAll } from "./basecamp.js";
 import { resolveByName, resolveBestEffort } from "./resolvers.js";
@@ -185,15 +237,14 @@ async function listTodoLists(ctx, projectId) {
       const dock = await getDock(ctx, projectId);
       const todosDock = dockFind(dock, ["todoset", "todos", "todo_set"]);
       if (todosDock?.url) {
-        // todosDock.url usually ends in .json; derive lists
-        const base = String(todosDock.url).replace(/\.json$/i, "");
-        return apiAll(ctx, `${base}/todolists.json`);
+        // todosDock.url is usually the URL directly, use it as-is
+        return apiAll(ctx, todosDock.url);
       }
-      if (todosDock?.id) {
-        return apiAll(ctx, `/buckets/${projectId}/todosets/${todosDock.id}/todolists.json`);
-      }
+      // Note: In Basecamp 3 API, todosets are mostly deprecated in favor of todolists.json
+      // If we get here, the dock had a reference but no URL - this is rare
     } catch (fallbackErr) {
-      // 404 in fallback also means no todos
+      // Fallback also failed - log but don't throw yet
+      console.log(`[listTodoLists] Fallback failed:`, fallbackErr.code);
       if (fallbackErr.code === "BASECAMP_API_ERROR" && fallbackErr.status === 404) {
         return [];
       }
