@@ -54,6 +54,7 @@
 import crypto from "crypto";
 import { basecampFetch, basecampFetchAll } from "./basecamp.js";
 import { resolveByName, resolveBestEffort } from "./resolvers.js";
+import { indexSearchItem } from "./db.js";
 
 // ---------- JSON-RPC helpers ----------
 function ok(id, result) { return { jsonrpc: "2.0", id, result }; }
@@ -174,6 +175,21 @@ async function listProjects(ctx, { archived = false, compact = true, limit, chun
     data = [];
   }
 
+  // Index projects in search database
+  try {
+    for (const p of data) {
+      indexSearchItem("project", p.id, {
+        title: p.name,
+        content: p.description || "",
+        url: p.app_url || p.url,
+        created_at: p.created_at,
+        updated_at: p.updated_at,
+      });
+    }
+  } catch (e) {
+    console.error("[listProjects] Error indexing projects:", e.message);
+  }
+
   let out = data;
   if (compact) {
     out = data.map(projectSummary);
@@ -263,6 +279,24 @@ async function listTodosForProject(ctx, projectId) {
   const lists = await listTodoLists(ctx, projectId);
   const groups = await mapLimit(lists || [], 2, async (l) => {
     const todos = await listTodosForList(ctx, projectId, l);
+    
+    // Index todos in search database
+    try {
+      for (const t of todos || []) {
+        if (!t.completed && !t.completed_at) { // Only index incomplete todos
+          indexSearchItem("todo", t.id, {
+            title: todoText(t),
+            content: t.description || "",
+            url: t.app_url || t.url,
+            created_at: t.created_at,
+            updated_at: t.updated_at,
+          });
+        }
+      }
+    } catch (e) {
+      console.error(`[listTodosForProject] Error indexing todos in list ${l.id}:`, e.message);
+    }
+    
     return { todolistId: l.id, todolist: l.name, todos };
   });
   return groups;
@@ -496,6 +530,22 @@ async function listMessages(ctx, projectId, { board_id, board_title, limit } = {
   }
   const msgs = await apiAll(ctx, board.messages_url);
   const arr = Array.isArray(msgs) ? msgs : [];
+  
+  // Index messages in search database
+  try {
+    for (const m of arr) {
+      indexSearchItem("message", m.id, {
+        title: m.subject,
+        content: m.content || "",
+        url: m.app_url || m.url,
+        created_at: m.created_at,
+        updated_at: m.updated_at,
+      });
+    }
+  } catch (e) {
+    console.error(`[listMessages] Error indexing messages:`, e.message);
+  }
+  
   const mapped = arr.map((m) => ({
     id: m.id,
     subject: m.subject,
@@ -519,6 +569,22 @@ async function listDocuments(ctx, projectId, { limit } = {}) {
   if (!docsUrl) throw new Error("Could not locate documents_url on vault payload.");
   const docs = await apiAll(ctx, docsUrl);
   const arr = Array.isArray(docs) ? docs : [];
+  
+  // Index documents in search database
+  try {
+    for (const d of arr) {
+      indexSearchItem("document", d.id, {
+        title: d.title,
+        content: d.description || "",
+        url: d.app_url || d.url,
+        created_at: d.created_at,
+        updated_at: d.updated_at,
+      });
+    }
+  } catch (e) {
+    console.error(`[listDocuments] Error indexing documents:`, e.message);
+  }
+  
   const mapped = arr.map((d) => ({
     id: d.id,
     title: d.title,
@@ -553,6 +619,232 @@ async function listScheduleEntries(ctx, projectId, { limit } = {}) {
   }));
   if (limit != null) return mapped.slice(0, Math.max(0, Number(limit) || 0));
   return mapped;
+}
+
+// ========== PEOPLE ENDPOINTS ==========
+async function listAllPeople(ctx) {
+  const people = await apiAll(ctx, `/people.json`);
+  const arr = Array.isArray(people) ? people : [];
+  return arr.map((p) => ({
+    id: p.id,
+    name: p.name,
+    email: p.email_address,
+    title: p.title,
+    admin: p.admin,
+    owner: p.owner,
+    client: p.client,
+    employee: p.employee,
+    avatar_url: p.avatar_url,
+    app_url: p.app_url,
+  }));
+}
+
+async function getPerson(ctx, personId) {
+  const p = await api(ctx, `/people/${personId}.json`);
+  return {
+    id: p.id,
+    name: p.name,
+    email: p.email_address,
+    title: p.title,
+    bio: p.bio,
+    location: p.location,
+    admin: p.admin,
+    owner: p.owner,
+    client: p.client,
+    employee: p.employee,
+    time_zone: p.time_zone,
+    avatar_url: p.avatar_url,
+    created_at: p.created_at,
+    updated_at: p.updated_at,
+    app_url: p.app_url,
+  };
+}
+
+async function getMyProfile(ctx) {
+  const p = await api(ctx, `/my/profile.json`);
+  return {
+    id: p.id,
+    name: p.name,
+    email: p.email_address,
+    title: p.title,
+    bio: p.bio,
+    location: p.location,
+    avatar_url: p.avatar_url,
+    time_zone: p.time_zone,
+    admin: p.admin,
+    owner: p.owner,
+  };
+}
+
+async function listProjectPeople(ctx, projectId) {
+  const people = await apiAll(ctx, `/projects/${projectId}/people.json`);
+  const arr = Array.isArray(people) ? people : [];
+  return arr.map((p) => ({
+    id: p.id,
+    name: p.name,
+    email: p.email_address,
+    title: p.title,
+    avatar_url: p.avatar_url,
+    app_url: p.app_url,
+  }));
+}
+
+// ========== COMMENTS ENDPOINTS ==========
+async function listComments(ctx, projectId, recordingId) {
+  const comments = await apiAll(ctx, `/buckets/${projectId}/recordings/${recordingId}/comments.json`);
+  const arr = Array.isArray(comments) ? comments : [];
+  return arr.map((c) => ({
+    id: c.id,
+    created_at: c.created_at,
+    updated_at: c.updated_at,
+    content: c.content,
+    creator: c.creator?.name,
+    creator_id: c.creator?.id,
+    status: c.status,
+    visible_to_clients: c.visible_to_clients,
+    app_url: c.app_url,
+  }));
+}
+
+async function getComment(ctx, projectId, commentId) {
+  const c = await api(ctx, `/buckets/${projectId}/comments/${commentId}.json`);
+  return {
+    id: c.id,
+    created_at: c.created_at,
+    updated_at: c.updated_at,
+    content: c.content,
+    creator: c.creator?.name,
+    creator_id: c.creator?.id,
+    status: c.status,
+    visible_to_clients: c.visible_to_clients,
+    parent: c.parent,
+    app_url: c.app_url,
+  };
+}
+
+async function createComment(ctx, projectId, recordingId, content) {
+  const c = await api(ctx, `/buckets/${projectId}/recordings/${recordingId}/comments.json`, {
+    method: "POST",
+    body: { content },
+  });
+  return {
+    id: c.id,
+    created_at: c.created_at,
+    content: c.content,
+    creator: c.creator?.name,
+    creator_id: c.creator?.id,
+    app_url: c.app_url,
+  };
+}
+
+// ========== UPLOADS/FILES ENDPOINTS ==========
+async function listUploads(ctx, projectId, vaultId) {
+  const uploads = await apiAll(ctx, `/buckets/${projectId}/vaults/${vaultId}/uploads.json`);
+  const arr = Array.isArray(uploads) ? uploads : [];
+  return arr.map((u) => ({
+    id: u.id,
+    title: u.title,
+    filename: u.filename,
+    byte_size: u.byte_size,
+    content_type: u.content_type,
+    created_at: u.created_at,
+    creator: u.creator?.name,
+    creator_id: u.creator?.id,
+    download_url: u.download_url,
+    description: u.description,
+    status: u.status,
+    app_url: u.app_url,
+  }));
+}
+
+async function getUpload(ctx, projectId, uploadId) {
+  const u = await api(ctx, `/buckets/${projectId}/uploads/${uploadId}.json`);
+  return {
+    id: u.id,
+    title: u.title,
+    filename: u.filename,
+    byte_size: u.byte_size,
+    content_type: u.content_type,
+    created_at: u.created_at,
+    updated_at: u.updated_at,
+    creator: u.creator?.name,
+    creator_id: u.creator?.id,
+    download_url: u.download_url,
+    description: u.description,
+    status: u.status,
+    app_url: u.app_url,
+  };
+}
+
+// ========== RECORDINGS ENDPOINTS ==========
+async function getRecordings(ctx, type, { bucket = null, status = "active", sort = "created_at", direction = "desc" } = {}) {
+  if (!type) throw new Error("Recording type is required (e.g., Todo, Message, Document, Upload)");
+  let path = `/projects/recordings.json?type=${encodeURIComponent(type)}&status=${encodeURIComponent(status)}&sort=${encodeURIComponent(sort)}&direction=${encodeURIComponent(direction)}`;
+  if (bucket) path += `&bucket=${encodeURIComponent(bucket)}`;
+  
+  const recordings = await apiAll(ctx, path);
+  const arr = Array.isArray(recordings) ? recordings : [];
+  return arr.map((r) => ({
+    id: r.id,
+    type: r.type,
+    title: r.title,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+    status: r.status,
+    bucket: r.bucket?.name,
+    bucket_id: r.bucket?.id,
+    creator: r.creator?.name,
+    creator_id: r.creator?.id,
+    app_url: r.app_url,
+  }));
+}
+
+async function trashRecording(ctx, projectId, recordingId) {
+  await api(ctx, `/buckets/${projectId}/recordings/${recordingId}/status/trashed.json`, { method: "PUT" });
+  return { message: "Recording trashed", recording_id: recordingId };
+}
+
+async function archiveRecording(ctx, projectId, recordingId) {
+  await api(ctx, `/buckets/${projectId}/recordings/${recordingId}/status/archived.json`, { method: "PUT" });
+  return { message: "Recording archived", recording_id: recordingId };
+}
+
+async function unarchiveRecording(ctx, projectId, recordingId) {
+  await api(ctx, `/buckets/${projectId}/recordings/${recordingId}/status/active.json`, { method: "PUT" });
+  return { message: "Recording unarchived", recording_id: recordingId };
+}
+
+// ========== VAULTS/DOCUMENT STORAGE ==========
+async function listVaults(ctx, projectId) {
+  const vault = await api(ctx, `/buckets/${projectId}/vault.json`);
+  return vault ? [{
+    id: vault.id,
+    name: vault.name,
+    title: vault.title,
+    position: vault.position,
+    app_url: vault.app_url,
+    entries_url: vault.entries_url,
+  }] : [];
+}
+
+// ========== SEARCH ACROSS RECORDINGS ==========
+async function searchRecordings(ctx, query, { bucket = null } = {}) {
+  if (!query) throw new Error("Search query is required");
+  let path = `/projects/search.json?query=${encodeURIComponent(query)}`;
+  if (bucket) path += `&bucket=${encodeURIComponent(bucket)}`;
+  
+  const results = await apiAll(ctx, path);
+  const arr = Array.isArray(results) ? results : [];
+  return arr.map((r) => ({
+    id: r.id,
+    type: r.type,
+    title: r.title,
+    excerpt: r.excerpt,
+    created_at: r.created_at,
+    bucket: r.bucket?.name,
+    bucket_id: r.bucket?.id,
+    app_url: r.app_url,
+  }));
 }
 
 // ---------- MCP handler ----------
@@ -720,6 +1012,109 @@ export async function handleMCP(reqBody, ctx) {
             type: "object",
             properties: { project: { type: "string" }, query: { type: "string" } },
             required: ["project", "query"],
+            additionalProperties: false
+          }),
+
+          // People endpoints
+          tool("list_all_people", "List all people visible in the Basecamp account.", noProps()),
+          tool("get_person", "Get profile of a specific person by ID.", {
+            type: "object",
+            properties: { person_id: { type: "integer" } },
+            required: ["person_id"],
+            additionalProperties: false
+          }),
+          tool("get_my_profile", "Get current authenticated user's profile.", noProps()),
+          tool("list_project_people", "List all people on a project.", {
+            type: "object",
+            properties: { project: { type: "string" } },
+            required: ["project"],
+            additionalProperties: false
+          }),
+
+          // Comments endpoints
+          tool("list_comments", "List comments on a recording (message, document, todo, etc).", {
+            type: "object",
+            properties: { project: { type: "string" }, recording_id: { type: "integer" } },
+            required: ["project", "recording_id"],
+            additionalProperties: false
+          }),
+          tool("get_comment", "Get a specific comment by ID.", {
+            type: "object",
+            properties: { project: { type: "string" }, comment_id: { type: "integer" } },
+            required: ["project", "comment_id"],
+            additionalProperties: false
+          }),
+          tool("create_comment", "Create a comment on a recording.", {
+            type: "object",
+            properties: { 
+              project: { type: "string" }, 
+              recording_id: { type: "integer" },
+              content: { type: "string", description: "HTML content of comment" }
+            },
+            required: ["project", "recording_id", "content"],
+            additionalProperties: false
+          }),
+
+          // Uploads/Files endpoints
+          tool("list_uploads", "List files/uploads in a project vault.", {
+            type: "object",
+            properties: { project: { type: "string" }, vault_id: { type: "integer", nullable: true } },
+            required: ["project"],
+            additionalProperties: false
+          }),
+          tool("get_upload", "Get details of a specific file/upload.", {
+            type: "object",
+            properties: { project: { type: "string" }, upload_id: { type: "integer" } },
+            required: ["project", "upload_id"],
+            additionalProperties: false
+          }),
+
+          // Recordings management (trash/archive/unarchive)
+          tool("get_recordings", "Query all recordings across projects by type (Todo, Message, Document, Upload, etc).", {
+            type: "object",
+            properties: { 
+              type: { type: "string", description: "Recording type: Todo, Message, Document, Upload, Kanban::Card, etc" },
+              bucket: { type: "string", nullable: true, description: "Project ID(s) to filter" },
+              status: { type: "string", nullable: true, description: "active, archived, or trashed" }
+            },
+            required: ["type"],
+            additionalProperties: false
+          }),
+          tool("trash_recording", "Move a recording to trash.", {
+            type: "object",
+            properties: { project: { type: "string" }, recording_id: { type: "integer" } },
+            required: ["project", "recording_id"],
+            additionalProperties: false
+          }),
+          tool("archive_recording", "Archive a recording.", {
+            type: "object",
+            properties: { project: { type: "string" }, recording_id: { type: "integer" } },
+            required: ["project", "recording_id"],
+            additionalProperties: false
+          }),
+          tool("unarchive_recording", "Unarchive a recording.", {
+            type: "object",
+            properties: { project: { type: "string" }, recording_id: { type: "integer" } },
+            required: ["project", "recording_id"],
+            additionalProperties: false
+          }),
+
+          // Vault/Document storage
+          tool("list_vaults", "List document storage vaults for a project.", {
+            type: "object",
+            properties: { project: { type: "string" } },
+            required: ["project"],
+            additionalProperties: false
+          }),
+
+          // Global search
+          tool("search_recordings", "Search all recordings across projects by title/content.", {
+            type: "object",
+            properties: { 
+              query: { type: "string" },
+              bucket: { type: "string", nullable: true, description: "Optional project ID to filter" }
+            },
+            required: ["query"],
             additionalProperties: false
           }),
 
@@ -984,6 +1379,100 @@ export async function handleMCP(reqBody, ctx) {
       const p = await projectByName(ctx, args.project);
       const results = await searchProject(ctx, p.id, { query: args.query });
       return ok(id, { project: { id: p.id, name: p.name }, query: args.query, results });
+    }
+
+    // ===== NEW PEOPLE ENDPOINTS =====
+    if (name === "list_all_people") {
+      const people = await listAllPeople(ctx);
+      return ok(id, { people, count: people.length });
+    }
+
+    if (name === "get_person") {
+      const person = await getPerson(ctx, args.person_id);
+      return ok(id, person);
+    }
+
+    if (name === "get_my_profile") {
+      const profile = await getMyProfile(ctx);
+      return ok(id, profile);
+    }
+
+    if (name === "list_project_people") {
+      const p = await projectByName(ctx, args.project);
+      const people = await listProjectPeople(ctx, p.id);
+      return ok(id, { project: { id: p.id, name: p.name }, people, count: people.length });
+    }
+
+    // ===== NEW COMMENTS ENDPOINTS =====
+    if (name === "list_comments") {
+      const p = await projectByName(ctx, args.project);
+      const comments = await listComments(ctx, p.id, args.recording_id);
+      return ok(id, { project: { id: p.id, name: p.name }, recording_id: args.recording_id, comments, count: comments.length });
+    }
+
+    if (name === "get_comment") {
+      const p = await projectByName(ctx, args.project);
+      const comment = await getComment(ctx, p.id, args.comment_id);
+      return ok(id, comment);
+    }
+
+    if (name === "create_comment") {
+      const p = await projectByName(ctx, args.project);
+      const comment = await createComment(ctx, p.id, args.recording_id, args.content);
+      return ok(id, { message: "Comment created", project: { id: p.id, name: p.name }, comment });
+    }
+
+    // ===== NEW UPLOADS ENDPOINTS =====
+    if (name === "list_uploads") {
+      const p = await projectByName(ctx, args.project);
+      const vaults = await listVaults(ctx, p.id);
+      const vaultId = args.vault_id || (vaults?.[0]?.id);
+      if (!vaultId) return fail(id, { code: "NO_VAULT", message: "No vault found for this project." });
+      const uploads = await listUploads(ctx, p.id, vaultId);
+      return ok(id, { project: { id: p.id, name: p.name }, vault_id: vaultId, uploads, count: uploads.length });
+    }
+
+    if (name === "get_upload") {
+      const p = await projectByName(ctx, args.project);
+      const upload = await getUpload(ctx, p.id, args.upload_id);
+      return ok(id, upload);
+    }
+
+    // ===== NEW RECORDINGS ENDPOINTS =====
+    if (name === "get_recordings") {
+      const recordings = await getRecordings(ctx, args.type, { bucket: args.bucket, status: args.status });
+      return ok(id, { type: args.type, recordings, count: recordings.length });
+    }
+
+    if (name === "trash_recording") {
+      const p = await projectByName(ctx, args.project);
+      const result = await trashRecording(ctx, p.id, args.recording_id);
+      return ok(id, { ...result, project: { id: p.id, name: p.name } });
+    }
+
+    if (name === "archive_recording") {
+      const p = await projectByName(ctx, args.project);
+      const result = await archiveRecording(ctx, p.id, args.recording_id);
+      return ok(id, { ...result, project: { id: p.id, name: p.name } });
+    }
+
+    if (name === "unarchive_recording") {
+      const p = await projectByName(ctx, args.project);
+      const result = await unarchiveRecording(ctx, p.id, args.recording_id);
+      return ok(id, { ...result, project: { id: p.id, name: p.name } });
+    }
+
+    // ===== NEW VAULT ENDPOINTS =====
+    if (name === "list_vaults") {
+      const p = await projectByName(ctx, args.project);
+      const vaults = await listVaults(ctx, p.id);
+      return ok(id, { project: { id: p.id, name: p.name }, vaults, count: vaults.length });
+    }
+
+    // ===== NEW SEARCH ENDPOINTS =====
+    if (name === "search_recordings") {
+      const results = await searchRecordings(ctx, args.query, { bucket: args.bucket });
+      return ok(id, { query: args.query, results, count: results.length });
     }
 
     // Raw
