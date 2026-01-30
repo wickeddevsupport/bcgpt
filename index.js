@@ -7,6 +7,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 import { handleMCP } from "./mcp.js";
+import { getToken, setToken, clearToken, getAuthCache, setAuthCache } from "./db.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,14 +30,24 @@ console.log(`[Startup] DEFAULT_ACCOUNT_ID from env: ${DEFAULT_ACCOUNT_ID}`);
 let TOKEN = null;      // single-user token
 let AUTH_CACHE = null; // cached authorization.json
 
-// Try to load TOKEN from environment on startup
-if (process.env.BASECAMP_TOKEN) {
+// Load TOKEN from database on startup, fallback to environment
+TOKEN = getToken();
+if (!TOKEN && process.env.BASECAMP_TOKEN) {
   try {
     TOKEN = JSON.parse(process.env.BASECAMP_TOKEN);
-    console.log(`[Startup] Loaded TOKEN from BASECAMP_TOKEN env var`);
+    setToken(TOKEN);
+    console.log(`[Startup] Loaded TOKEN from BASECAMP_TOKEN env var and saved to database`);
   } catch (e) {
     console.error(`[Startup] Failed to parse BASECAMP_TOKEN from env:`, e.message);
   }
+} else if (TOKEN) {
+  console.log(`[Startup] Loaded TOKEN from database`);
+}
+
+// Load AUTH_CACHE from database on startup
+AUTH_CACHE = getAuthCache();
+if (AUTH_CACHE) {
+  console.log(`[Startup] Loaded auth cache from database`);
 }
 
 function originBase(req) {
@@ -259,6 +270,7 @@ async function getAuthorization(force = false) {
   }
 
   AUTH_CACHE = await r.json();
+  setAuthCache(AUTH_CACHE);
   return AUTH_CACHE;
 }
 
@@ -421,6 +433,7 @@ app.get("/auth/basecamp/callback", async (req, res) => {
     });
 
     TOKEN = await r.json();
+    setToken(TOKEN);
     AUTH_CACHE = null;
 
     res.send("✅ Basecamp connected. Return to ChatGPT and run /startbcgpt.");
@@ -433,6 +446,7 @@ app.get("/startbcgpt", async (req, res) => res.json(await startStatus(req)));
 
 app.post("/logout", (req, res) => {
   TOKEN = null;
+  clearToken();
   AUTH_CACHE = null;
   res.json({ ok: true, connected: false, message: "Logged out." });
 });
