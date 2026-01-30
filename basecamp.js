@@ -176,6 +176,7 @@ export async function basecampFetchAll(
     timeoutMs = 30000,
     retries = 3,
     maxPages = 50,
+    maxItems = 5000,
     pageDelayMs = 150,
   } = {}
 ) {
@@ -183,7 +184,7 @@ export async function basecampFetchAll(
   const all = [];
   let pages = 0;
 
-  while (url && pages < maxPages) {
+  while (url && pages < maxPages && all.length < maxItems) {
     const httpHeaders = {
       Authorization: `Bearer ${TOKEN?.access_token}`,
       "User-Agent": ua,
@@ -228,6 +229,10 @@ export async function basecampFetchAll(
         if (!Array.isArray(data)) return data;
 
         all.push(...data);
+        // Stop early if we hit the cap to avoid oversized responses.
+        if (all.length >= maxItems) {
+          url = null;
+        }
 
         const link = res.headers.get("link");
         const { next } = parseLinkHeader(link);

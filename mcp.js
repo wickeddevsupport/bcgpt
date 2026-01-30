@@ -458,10 +458,20 @@ export async function handleMCP(reqBody, ctx) {
           }),
 
           // Raw escape hatch
-          tool("basecamp_request", "Raw Basecamp API call. Provide full URL or a /path.", {
+          tool(
+            "basecamp_request",
+            "Raw Basecamp API call (last resort). Many Basecamp list endpoints are paginated (e.g., /projects.json). If you need ALL results, set paginate=true so the server follows Link rel=next pages. Prefer the purpose-built tools when available.",
+            {
             type: "object",
             properties: {
-      confirm_debug: { type: "boolean", const: true }, path: { type: "string" }, method: { type: "string" }, body: { type: "object" } },
+              confirm_debug: { type: "boolean", const: true },
+              path: { type: "string" },
+              method: { type: "string" },
+              body: { type: "object" },
+              paginate: { type: "boolean", description: "If true (recommended for list endpoints), follow Basecamp pagination via Link headers." },
+              max_pages: { type: "integer", minimum: 1, maximum: 50, description: "Safety cap for pagination." },
+              compact: { type: "boolean", description: "If true, trims very large list items (e.g., removes dock from projects) to reduce gibberish/oversized output." }
+            },
             required: ["path"],
             additionalProperties: false
           }),
@@ -687,7 +697,33 @@ export async function handleMCP(reqBody, ctx) {
 
     // Raw
     if (name === "basecamp_request" || name === "basecamp_raw") {
-      const data = await api(ctx, args.path, { method: args.method || "GET", body: args.body });
+      if (name === "basecamp_request" && args?.confirm_debug !== true) {
+        return fail(id, { code: "CONFIRM_REQUIRED", message: "Set confirm_debug=true to use basecamp_request." });
+      }
+
+      const method = (args?.method || "GET").toUpperCase();
+      // basecamp_raw is commonly picked by ChatGPT; paginate by default for GET list endpoints
+      const paginate =
+        name === "basecamp_raw" ? (args?.paginate !== false) : args?.paginate === true;
+      const maxPages = Number.isFinite(args?.max_pages) ? Math.max(1, args.max_pages) : 25;
+      const maxItems = Number.isFinite(args?.max_items) ? Math.max(1, args.max_items) : 2000;
+
+      let data;
+      if (method === "GET" && paginate && !args?.body) {
+        // Follow Link: rel="next" pages (Basecamp pagination)
+        data = await basecampFetchAll(ctx, args.path, { method, maxPages, maxItems });
+      } else {
+        data = await api(ctx, args.path, { method, body: args.body });
+      }
+
+      // Optional compacting to prevent noisy/nested fields (e.g., dock output)
+      if (args?.compact === true && Array.isArray(data)) {
+        const path = String(args?.path || "");
+        if (path.includes("/projects")) {
+          data = data.map(pick(["id", "name", "status", "archived", "updated_at", "app_url"]));
+        }
+      }
+
       return ok(id, data);
     }
 
