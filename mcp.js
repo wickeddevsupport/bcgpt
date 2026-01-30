@@ -768,12 +768,11 @@ async function listProjectPeople(ctx, projectId) {
 
 // ========== COMMENTS ENDPOINTS ==========
 async function listComments(ctx, projectId, recordingId) {
-  // Returns: { comments: [...], _meta: { originalRecordingId, usedRecordingId, autoResolved, matchedTitle } }
-  const meta = { originalRecordingId: recordingId, usedRecordingId: recordingId, autoResolved: false, matchedTitle: null };
+  // Returns: { comments: [...], _meta: { originalRecordingId, usedRecordingId, autoResolved, matchedTitle, resolvedType } }
+  const meta = { originalRecordingId: recordingId, usedRecordingId: recordingId, autoResolved: false, matchedTitle: null, resolvedType: null };
 
-  // If recordingId is falsy, try to search by name
+  // If recordingId is falsy, return empty
   if (!recordingId) {
-    // Nothing provided — return empty and metadata
     return { comments: [], _meta: { ...meta, autoResolved: false } };
   }
 
@@ -781,32 +780,47 @@ async function listComments(ctx, projectId, recordingId) {
   let recordingJson;
   try {
     recordingJson = await api(ctx, `/buckets/${projectId}/recordings/${recordingId}.json`);
+    meta.resolvedType = "recording";
   } catch (e) {
-    // If not found, try fuzzy-searching recordings in this project by title/content
+    // If not found as recording, the provided ID might actually be a TODO ID
+    // Try to fetch it as a todo and extract the recording from it
     if (e && e.message && e.message.includes('404')) {
+      console.log(`[listComments] Recording ${recordingId} not found by id — checking if it's a todo ID`);
+      
       try {
-        console.log(`[listComments] Recording ${recordingId} not found by id — attempting search by name in project ${projectId}`);
-        const results = await searchRecordings(ctx, recordingId, { bucket_id: projectId });
-        const arr = Array.isArray(results) ? results : [];
-        if (arr.length) {
-          // Choose best effort match by title/content
-          const candidates = arr.map((r) => ({ id: r.id, name: r.title || r.content || "", raw: r }));
-          const best = resolveBestEffort(candidates, recordingId) || candidates[0];
-          meta.usedRecordingId = best.id;
-          meta.autoResolved = true;
-          meta.matchedTitle = best.name;
-          recordingId = best.id;
-          recordingJson = best.raw || (await api(ctx, `/buckets/${projectId}/recordings/${best.id}.json`));
-          console.log(`[listComments] Auto-resolved recording to id=${best.id} title="${best.name}"`);
-        } else {
-          throw new Error(`RECORDING_NOT_FOUND: Recording ${recordingId} not found or inaccessible in project ${projectId}`);
+        // Attempt to fetch as a todo
+        const todoJson = await api(ctx, `/buckets/${projectId}/todos/${recordingId}.json`);
+        console.log(`[listComments] Found ID ${recordingId} as a todo, not a recording. Todos don't have comments. Returning empty.`);
+        meta.resolvedType = "todo";
+        meta.usedRecordingId = recordingId;
+        meta.matchedTitle = todoJson?.title || todoJson?.content || null;
+        return { comments: [], _meta: { ...meta, error: "RECORDING_IS_TODO", message: "The provided ID is a todo, not a recording. Todos don't have comments." } };
+      } catch (todoErr) {
+        // Not a recording or a todo — try fuzzy search by ID
+        console.log(`[listComments] ID ${recordingId} is neither a recording nor a todo — attempting search by name in project ${projectId}`);
+        
+        try {
+          const results = await searchRecordings(ctx, recordingId, { bucket_id: projectId });
+          const arr = Array.isArray(results) ? results : [];
+          if (arr.length) {
+            // Choose best effort match by title/content
+            const candidates = arr.map((r) => ({ id: r.id, name: r.title || r.content || "", raw: r }));
+            const best = resolveBestEffort(candidates, recordingId) || candidates[0];
+            meta.usedRecordingId = best.id;
+            meta.autoResolved = true;
+            meta.matchedTitle = best.name;
+            meta.resolvedType = "recording";
+            recordingId = best.id;
+            recordingJson = best.raw || (await api(ctx, `/buckets/${projectId}/recordings/${best.id}.json`));
+            console.log(`[listComments] Auto-resolved to recording id=${best.id} title="${best.name}"`);
+          } else {
+            console.warn(`[listComments] ID ${recordingId} not found as recording, todo, or search result in project ${projectId}`);
+            return { comments: [], _meta: { ...meta, error: "NOT_FOUND", message: `Recording, todo, or comment with ID ${recordingId} not found in project ${projectId}` } };
+          }
+        } catch (searchErr) {
+          console.warn(`[listComments] Search failed: ${searchErr?.message}`);
+          return { comments: [], _meta: { ...meta, error: "SEARCH_FAILED", message: `Could not search for ID ${recordingId}` } };
         }
-      } catch (searchErr) {
-        // Propagate a structured error
-        if (searchErr && searchErr.message && searchErr.message.includes('RECORDING_NOT_FOUND')) {
-          throw searchErr;
-        }
-        throw searchErr;
       }
     } else {
       throw e;
