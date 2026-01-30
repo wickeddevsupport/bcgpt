@@ -492,8 +492,26 @@ async function listCardTableColumns(ctx, projectId, cardTableId) {
   return apiAll(ctx, `/buckets/${projectId}/card_tables/${cardTableId}/columns.json`);
 }
 
+// Fetch all cards from all columns in a card table
 async function listCardTableCards(ctx, projectId, cardTableId) {
-  return apiAll(ctx, `/buckets/${projectId}/card_tables/${cardTableId}/cards.json`);
+  try {
+    // First get the card table with all its columns (lists)
+    const cardTable = await api(ctx, `/buckets/${projectId}/card_tables/${cardTableId}.json`);
+    if (!cardTable?.lists) return [];
+    
+    // Fetch cards from each column and aggregate
+    const allCards = [];
+    for (const column of cardTable.lists) {
+      if (column.cards_url) {
+        const cards = await apiAll(ctx, column.cards_url);
+        allCards.push(...(Array.isArray(cards) ? cards : []));
+      }
+    }
+    return allCards;
+  } catch (e) {
+    console.error(`[listCardTableCards] Error fetching cards for card table ${cardTableId}:`, e.message);
+    return [];
+  }
 }
 
 async function createCard(ctx, projectId, cardTableId, { title, content, column_id, due_on } = {}) {
@@ -957,7 +975,7 @@ export async function handleMCP(reqBody, ctx) {
           }),
 
           // Schema uses "task". We'll accept task OR content for backward compatibility.
-          tool("create_todo", "Create a to-do in a project; optionally specify todolist and due date.", {
+          tool("create_todo", "Create a to-do in a project; optionally specify todolist, due date, and assignees.", {
             type: "object",
             properties: {
               project: { type: "string" },
@@ -965,7 +983,8 @@ export async function handleMCP(reqBody, ctx) {
               task: { type: "string" },
               content: { type: "string", nullable: true },
               description: { type: "string", nullable: true },
-              due_on: { type: "string", nullable: true }
+              due_on: { type: "string", nullable: true },
+              assignee_ids: { type: "array", items: { type: "integer" }, nullable: true }
             },
             required: ["project", "task"],
             additionalProperties: false
@@ -1357,6 +1376,7 @@ export async function handleMCP(reqBody, ctx) {
       const body = { content: taskText };
       if (args.description) body.description = args.description;
       if (args.due_on) body.due_on = args.due_on;
+      if (args.assignee_ids && Array.isArray(args.assignee_ids)) body.assignee_ids = args.assignee_ids;
 
       let created;
       if (target.todos_url) {
