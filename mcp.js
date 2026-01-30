@@ -56,13 +56,15 @@ function todoText(t) {
 
 // ---------- Basecamp wrappers (use ctx if provided) ----------
 function api(ctx, pathOrUrl, opts = {}) {
-  if (typeof ctx?.basecampFetch === "function") return ctx.basecampFetch(pathOrUrl, opts);
-  return basecampFetch(ctx.TOKEN, pathOrUrl, { ...opts, accountId: ctx.accountId, ua: ctx.ua });
+  const fn = typeof ctx?.basecampFetch === "function" ? ctx.basecampFetch : basecampFetch;
+  console.log(`[api] Using ${typeof ctx?.basecampFetch === "function" ? "ctx" : "direct"} basecampFetch for:`, pathOrUrl);
+  return fn(ctx.TOKEN, pathOrUrl, { ...opts, accountId: ctx.accountId, ua: ctx.ua });
 }
 
 function apiAll(ctx, pathOrUrl, opts = {}) {
-  if (typeof ctx?.basecampFetchAll === "function") return ctx.basecampFetchAll(pathOrUrl, opts);
-  return basecampFetchAll(ctx.TOKEN, pathOrUrl, { ...opts, accountId: ctx.accountId, ua: ctx.ua });
+  const fn = typeof ctx?.basecampFetchAll === "function" ? ctx.basecampFetchAll : basecampFetchAll;
+  console.log(`[apiAll] Using ${typeof ctx?.basecampFetchAll === "function" ? "ctx" : "direct"} basecampFetchAll for:`, pathOrUrl);
+  return fn(ctx.TOKEN, pathOrUrl, { ...opts, accountId: ctx.accountId, ua: ctx.ua });
 }
 
 // ---------- Projects ----------
@@ -96,29 +98,38 @@ function projectSummary(p) {
 }
 
 // List all projects, paginated and aggregated, with meaningful JSON output
-async function listProjects(ctx, { archived = false, compact = true, limit, chunkSize = 100 } = {}) {
+async function listProjects(ctx, { archived = false, compact = true, limit, chunkSize = null } = {}) {
   const qs = new URLSearchParams();
   if (archived) qs.set("status", "archived");
   qs.set("per_page", "100");
   qs.set("page", "1");
 
-  // Fetch all pages (apiAll already paginates)
-  const data = await apiAll(ctx, `/projects.json?${qs.toString()}`);
-  const projects = Array.isArray(data) ? data : [];
+  // Fetch all pages (apiAll already paginates and returns flat array)
+  let data = await apiAll(ctx, `/projects.json?${qs.toString()}`);
+  
+  if (!Array.isArray(data)) {
+    console.error("[listProjects] apiAll did not return array:", typeof data, data);
+    data = [];
+  }
 
-  let out = projects;
+  let out = data;
   if (compact) {
-    out = projects.map(projectSummary);
+    out = data.map(projectSummary);
   }
 
   if (limit && Number.isFinite(Number(limit))) {
     out = out.slice(0, Math.max(0, Number(limit)));
   }
 
-  // Chunk output if too large (for ChatGPT or API limits)
+  // Only chunk if explicitly requested and needed
   if (chunkSize && out.length > chunkSize) {
-    return chunkArray(out, chunkSize);
+    return {
+      _chunked: true,
+      _totalItems: out.length,
+      chunks: chunkArray(out, chunkSize)
+    };
   }
+  
   return out;
 }
 
@@ -630,6 +641,9 @@ export async function handleMCP(reqBody, ctx) {
     const { name, arguments: args = {} } = params || {};
     if (!name) return fail(id, { code: "BAD_REQUEST", message: "Missing tool name" });
 
+    // Debug logging
+    console.log(`[MCP] Tool called: ${name}`, { args, authenticated: !!TOKEN?.access_token, accountId });
+
     // startbcgpt always returns auth link info (even when disconnected)
     if (name === "startbcgpt") return ok(id, await startStatus());
 
@@ -649,10 +663,9 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "list_accounts") return ok(id, authAccounts || []);
 
     if (name === "list_projects") {
-      // Use new listProjects with chunking and concise JSON
-      const chunkSize = 100; // can be tuned or made configurable
-      const projects = await listProjects(ctx, { archived: !!args.archived, compact: true, chunkSize });
-      return ok(id, projects);
+      // Return all projects as a flat array (no chunking for MCP)
+      const projects = await listProjects(ctx, { archived: !!args.archived, compact: true, chunkSize: null });
+      return ok(id, { projects, count: Array.isArray(projects) ? projects.length : 0 });
     }
 
     if (name === "find_project") {
@@ -875,6 +888,8 @@ export async function handleMCP(reqBody, ctx) {
 
     return fail(id, { code: "UNKNOWN_TOOL", message: "Unknown tool name" });
   } catch (e) {
+    console.error(`[MCP] Error in tool call:`, { name: params?.name, error: e.message, code: e?.code, stack: e?.stack });
+    
     if (e?.code === "AMBIGUOUS_MATCH") {
       return fail(id, { code: "AMBIGUOUS_MATCH", message: `Ambiguous ${e.label}. Please choose one.`, options: e.options });
     }

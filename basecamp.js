@@ -243,7 +243,7 @@ export async function basecampFetchAll(
 
       try {
         // Debug: log the URL being fetched
-        if (process?.env?.DEBUG || true) {
+        if (process?.env?.DEBUG) {
           console.log(`[BasecampFetchAll] Fetching page: ${url}`);
         }
         const res = await fetch(url, { method: "GET", headers: httpHeaders, signal: ac.signal });
@@ -251,7 +251,7 @@ export async function basecampFetchAll(
 
         // Debug: log the Link header
         const linkHeader = res.headers.get("link");
-        if (process?.env?.DEBUG || true) {
+        if (process?.env?.DEBUG) {
           console.log(`[BasecampFetchAll] Link header: ${linkHeader}`);
         }
 
@@ -306,7 +306,7 @@ export async function basecampFetchAll(
   }
 
   // Debug: log total items fetched
-  if (process?.env?.DEBUG || true) {
+  if (process?.env?.DEBUG) {
     console.log(`[BasecampFetchAll] Total items fetched: ${all.length}`);
   }
   return all;
