@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>BCGPT Dev Home</title>
+  <style>
+    body { font-family: sans-serif; margin: 2em; background: #f7f7fa; }
+    h1 { color: #2d3a4a; }
+    .section { margin-bottom: 2em; }
+    label { display: block; margin-top: 1em; }
+    input, select, button { margin-top: 0.5em; }
+    pre { background: #222; color: #fff; padding: 1em; border-radius: 6px; overflow-x: auto; }
+    .result { margin-top: 1em; }
+  </style>
+</head>
+<body>
+  <h1>BCGPT Developer Home</h1>
+  <div class="section">
+    <h2>List Projects</h2>
+    <button onclick="callApi('list_projects')">List All Projects</button>
+    <div class="result" id="result-list_projects"></div>
+  </div>
+  <div class="section">
+    <h2>Find Project by Name</h2>
+    <input id="find_name" placeholder="Project name" />
+    <button onclick="callApi('find_project', { name: document.getElementById('find_name').value })">Find Project</button>
+    <div class="result" id="result-find_project"></div>
+  </div>
+  <div class="section">
+    <h2>Raw Basecamp Request</h2>
+    <input id="raw_path" placeholder="/projects.json or full URL" style="width:300px" />
+    <button onclick="callApi('basecamp_raw', { path: document.getElementById('raw_path').value })">Send</button>
+    <div class="result" id="result-basecamp_raw"></div>
+  </div>
+  <script>
+    async function callApi(name, args = {}) {
+      const resultDiv = document.getElementById('result-' + name);
+      resultDiv.innerHTML = 'Loading...';
+      try {
+        const res = await fetch('/dev/api', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, args })
+        });
+        const data = await res.json();
+        resultDiv.innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+      } catch (e) {
+        resultDiv.innerHTML = '<pre>' + e + '</pre>';
+      }
+    }
+  </script>
+</body>
+</html>
