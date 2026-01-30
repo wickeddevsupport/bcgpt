@@ -1,39 +1,15 @@
-// ========== DEV HOMEPAGE FOR LOCAL TESTING ==========
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// ...existing code...
-
-// Place these after app is initialized
-
-// (Move these lines to after 'const app = express();' and all middleware)
-
-// Serve the dev.html homepage
-app.get("/dev", (req, res) => {
-  res.sendFile(path.join(__dirname, "dev.html"));
-});
-
-// API endpoint for dev.html to call backend tools
-app.post("/dev/api", async (req, res) => {
-  try {
-    const { name, args } = req.body || {};
-    if (!name) return res.status(400).json({ error: "Missing tool name" });
-    const result = await runTool(name, args, req);
-    res.json(result);
-  } catch (e) {
-    res.status(500).json({ error: e?.message || String(e), code: e?.code || "SERVER_ERROR", details: e?.details || null });
-  }
-});
 // index.js
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
+import path from "path";
+import { fileURLToPath } from "url";
 
 import { handleMCP } from "./mcp.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
@@ -479,6 +455,22 @@ app.post("/mcp", async (req, res) => {
       id: req.body?.id ?? null,
       error: { code: e.code || "ERROR", message: e.message },
     });
+  }
+});
+
+/* ================= DEV HOMEPAGE FOR LOCAL TESTING ================= */
+app.get("/dev", (req, res) => {
+  res.sendFile(path.join(__dirname, "dev.html"));
+});
+
+app.post("/dev/api", async (req, res) => {
+  try {
+    const { name, args } = req.body || {};
+    if (!name) return res.status(400).json({ error: "Missing tool name" });
+    const result = await runTool(name, args, req);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e?.message || String(e), code: e?.code || "SERVER_ERROR", details: e?.details || null });
   }
 });
 
