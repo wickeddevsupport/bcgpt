@@ -276,8 +276,18 @@ async function listTodoLists(ctx, projectId) {
 }
 
 async function listTodosForList(ctx, projectId, todolist) {
-  if (todolist?.todos_url) return apiAll(ctx, todolist.todos_url);
-  return apiAll(ctx, `/buckets/${projectId}/todolists/${todolist.id}/todos.json`);
+  try {
+    if (todolist?.todos_url) return await apiAll(ctx, todolist.todos_url);
+    return await apiAll(ctx, `/buckets/${projectId}/todolists/${todolist.id}/todos.json`);
+  } catch (e) {
+    // Graceful handling: if the todos endpoint isn't available or the list is inaccessible,
+    // treat it as empty rather than failing the whole project listing.
+    if (e?.code === 'BASECAMP_API_ERROR' && (e.status === 404 || e.status === 403)) {
+      console.warn(`[listTodosForList] Todos inaccessible for list ${todolist?.id} in project ${projectId}: ${e.message}`);
+      return [];
+    }
+    throw e;
+  }
 }
 
 async function listTodosForProject(ctx, projectId) {
