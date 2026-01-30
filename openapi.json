@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "BCGPT - Basecamp Integration API",
-    "description": "Complete Basecamp integration for ChatGPT with projects, todos, schedules, and more",
+    "description": "Complete Basecamp integration for ChatGPT with 30 essential operations plus basecamp_raw for advanced use.",
     "version": "1.0.0"
   },
   "servers": [
@@ -100,7 +100,7 @@
     },
     "/action/find_project": {
       "post": {
-        "summary": "Find a specific project by name",
+        "summary": "Find a project by name",
         "operationId": "find_project",
         "requestBody": {
           "required": true,
@@ -109,7 +109,7 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "name": { "type": "string", "description": "Project name to search for" }
+                  "name": { "type": "string", "description": "Project name (fuzzy match)" }
                 },
                 "required": ["name"]
               }
@@ -123,7 +123,7 @@
     },
     "/action/daily_report": {
       "post": {
-        "summary": "Get daily report of todos",
+        "summary": "Daily report of todos due today",
         "operationId": "daily_report",
         "requestBody": {
           "content": {
@@ -131,14 +131,14 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "date": { "type": "string", "description": "Date in YYYY-MM-DD format (defaults to today)" }
+                  "date": { "type": "string", "description": "YYYY-MM-DD (defaults to today)" }
                 }
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Daily report with due today and overdue todos" }
+          "200": { "description": "Daily summary with due/overdue counts" }
         }
       }
     },
@@ -152,21 +152,21 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "date": { "type": "string", "description": "Date in YYYY-MM-DD format (defaults to today)" },
-                  "include_overdue": { "type": "boolean", "description": "Include overdue items" }
+                  "date": { "type": "string" },
+                  "include_overdue": { "type": "boolean" }
                 }
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "List of todos due on the date" }
+          "200": { "description": "Todos due on date" }
         }
       }
     },
     "/action/search_todos": {
       "post": {
-        "summary": "Search todos across all projects",
+        "summary": "Search todos by keyword across all projects",
         "operationId": "search_todos",
         "requestBody": {
           "required": true,
@@ -174,9 +174,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {
-                  "query": { "type": "string", "description": "Search keyword" }
-                },
+                "properties": { "query": { "type": "string" } },
                 "required": ["query"]
               }
             }
@@ -189,7 +187,7 @@
     },
     "/action/list_todos_for_project": {
       "post": {
-        "summary": "List all todo lists and items in a project",
+        "summary": "List all todos in a project",
         "operationId": "list_todos_for_project",
         "requestBody": {
           "required": true,
@@ -197,22 +195,70 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {
-                  "project": { "type": "string", "description": "Project name or ID" }
-                },
+                "properties": { "project": { "type": "string" } },
                 "required": ["project"]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Todo lists and items" }
+          "200": { "description": "Todos organized by list" }
+        }
+      }
+    },
+    "/action/create_todo": {
+      "post": {
+        "summary": "Create a new todo",
+        "operationId": "create_todo",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": { "type": "string" },
+                  "task": { "type": "string" },
+                  "description": { "type": "string" },
+                  "due_on": { "type": "string" }
+                },
+                "required": ["project", "task"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Todo created" }
+        }
+      }
+    },
+    "/action/complete_task_by_name": {
+      "post": {
+        "summary": "Mark a todo as complete",
+        "operationId": "complete_task_by_name",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": { "type": "string" },
+                  "task": { "type": "string", "description": "Todo content (fuzzy match)" }
+                },
+                "required": ["project", "task"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Todo completed" }
         }
       }
     },
     "/action/assignment_report": {
       "post": {
-        "summary": "Group open todos by assignee in a project",
+        "summary": "Group todos by assignee in a project",
         "operationId": "assignment_report",
         "requestBody": {
           "required": true,
@@ -221,8 +267,8 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "project": { "type": "string", "description": "Project name or ID" },
-                  "max_todos": { "type": "integer", "description": "Maximum todos to return" }
+                  "project": { "type": "string" },
+                  "max_todos": { "type": "integer" }
                 },
                 "required": ["project"]
               }
@@ -234,60 +280,9 @@
         }
       }
     },
-    "/action/create_todo": {
-      "post": {
-        "summary": "Create a new todo in a project",
-        "operationId": "create_todo",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "project": { "type": "string", "description": "Project name or ID" },
-                  "task": { "type": "string", "description": "Todo text/content" },
-                  "todolist": { "type": "string", "description": "Specific todo list to add to (optional)" },
-                  "description": { "type": "string", "description": "Detailed description (optional)" },
-                  "due_on": { "type": "string", "description": "Due date in YYYY-MM-DD format (optional)" }
-                },
-                "required": ["project", "task"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "Created todo details" }
-        }
-      }
-    },
-    "/action/complete_task_by_name": {
-      "post": {
-        "summary": "Mark a todo as complete by name",
-        "operationId": "complete_task_by_name",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "project": { "type": "string", "description": "Project name or ID" },
-                  "task": { "type": "string", "description": "Task name to complete" }
-                },
-                "required": ["project", "task"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "Completion confirmation" }
-        }
-      }
-    },
     "/action/list_card_tables": {
       "post": {
-        "summary": "List kanban boards (card tables) in a project",
+        "summary": "List kanban boards in a project",
         "operationId": "list_card_tables",
         "requestBody": {
           "required": true,
@@ -295,22 +290,20 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {
-                  "project": { "type": "string", "description": "Project name or ID" }
-                },
+                "properties": { "project": { "type": "string" } },
                 "required": ["project"]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "List of card tables" }
+          "200": { "description": "Card tables" }
         }
       }
     },
     "/action/list_card_table_columns": {
       "post": {
-        "summary": "List columns in a card table (kanban board)",
+        "summary": "List columns in a kanban board",
         "operationId": "list_card_table_columns",
         "requestBody": {
           "required": true,
@@ -319,8 +312,8 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "project": { "type": "string", "description": "Project name or ID" },
-                  "card_table_id": { "type": "integer", "description": "Card table ID" }
+                  "project": { "type": "string" },
+                  "card_table_id": { "type": "integer" }
                 },
                 "required": ["project", "card_table_id"]
               }
@@ -328,13 +321,13 @@
           }
         },
         "responses": {
-          "200": { "description": "List of columns" }
+          "200": { "description": "Columns" }
         }
       }
     },
     "/action/list_card_table_cards": {
       "post": {
-        "summary": "List cards in a card table",
+        "summary": "List cards in a kanban board",
         "operationId": "list_card_table_cards",
         "requestBody": {
           "required": true,
@@ -343,8 +336,8 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "project": { "type": "string", "description": "Project name or ID" },
-                  "card_table_id": { "type": "integer", "description": "Card table ID" }
+                  "project": { "type": "string" },
+                  "card_table_id": { "type": "integer" }
                 },
                 "required": ["project", "card_table_id"]
               }
@@ -352,13 +345,13 @@
           }
         },
         "responses": {
-          "200": { "description": "List of cards" }
+          "200": { "description": "Cards" }
         }
       }
     },
     "/action/create_card": {
       "post": {
-        "summary": "Create a new card in a card table",
+        "summary": "Create a new card in a kanban board",
         "operationId": "create_card",
         "requestBody": {
           "required": true,
@@ -367,26 +360,25 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "project": { "type": "string", "description": "Project name or ID" },
-                  "card_table_id": { "type": "integer", "description": "Card table ID" },
-                  "title": { "type": "string", "description": "Card title" },
-                  "content": { "type": "string", "description": "Card description (optional)" },
-                  "column_id": { "type": "integer", "description": "Column ID to add to" },
-                  "due_on": { "type": "string", "description": "Due date (optional)" }
+                  "project": { "type": "string" },
+                  "card_table_id": { "type": "integer" },
+                  "title": { "type": "string" },
+                  "content": { "type": "string" },
+                  "due_on": { "type": "string" }
                 },
-                "required": ["project", "card_table_id", "title", "column_id"]
+                "required": ["project", "card_table_id", "title"]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Created card details" }
+          "201": { "description": "Card created" }
         }
       }
     },
     "/action/move_card": {
       "post": {
-        "summary": "Move a card to a different column",
+        "summary": "Move or update a card's position",
         "operationId": "move_card",
         "requestBody": {
           "required": true,
@@ -395,18 +387,18 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "project": { "type": "string", "description": "Project name or ID" },
-                  "card_id": { "type": "integer", "description": "Card ID" },
-                  "column_id": { "type": "integer", "description": "Target column ID" },
-                  "position": { "type": "integer", "description": "Position in column (optional)" }
+                  "project": { "type": "string" },
+                  "card_id": { "type": "integer" },
+                  "column_id": { "type": "integer" },
+                  "position": { "type": "integer" }
                 },
-                "required": ["project", "card_id", "column_id"]
+                "required": ["project", "card_id"]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Card moved successfully" }
+          "200": { "description": "Card updated" }
         }
       }
     },
@@ -420,9 +412,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {
-                  "project": { "type": "string", "description": "Project name or ID" }
-                },
+                "properties": { "project": { "type": "string" } },
                 "required": ["project"]
               }
             }
@@ -443,22 +433,20 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {
-                  "project": { "type": "string", "description": "Project name or ID" }
-                },
+                "properties": { "project": { "type": "string" } },
                 "required": ["project"]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "List of message boards" }
+          "200": { "description": "Message boards" }
         }
       }
     },
     "/action/list_messages": {
       "post": {
-        "summary": "List messages in a message board",
+        "summary": "List messages in a project's message board",
         "operationId": "list_messages",
         "requestBody": {
           "required": true,
@@ -467,31 +455,8 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "project": { "type": "string", "description": "Project name or ID" },
-                  "board": { "type": "string", "description": "Message board name or ID" }
-                },
-                "required": ["project", "board"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "List of messages" }
-        }
-      }
-    },
-    "/action/list_documents": {
-      "post": {
-        "summary": "List documents and files in a project",
-        "operationId": "list_documents",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "project": { "type": "string", "description": "Project name or ID" }
+                  "project": { "type": "string" },
+                  "message_board_id": { "type": "integer" }
                 },
                 "required": ["project"]
               }
@@ -499,7 +464,52 @@
           }
         },
         "responses": {
-          "200": { "description": "List of documents" }
+          "200": { "description": "Messages" }
+        }
+      }
+    },
+    "/action/list_documents": {
+      "post": {
+        "summary": "List documents/files in a project",
+        "operationId": "list_documents",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": { "project": { "type": "string" } },
+                "required": ["project"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Documents" }
+        }
+      }
+    },
+    "/action/list_uploads": {
+      "post": {
+        "summary": "List file uploads in a project vault",
+        "operationId": "list_uploads",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": { "type": "string" },
+                  "vault_id": { "type": "integer" }
+                },
+                "required": ["project"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Files with download URLs" }
         }
       }
     },
@@ -508,15 +518,14 @@
         "summary": "List schedule entries for a project",
         "operationId": "list_schedule_entries",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "project": { "type": "string", "description": "Project name or ID" },
-                  "from": { "type": "string", "description": "Start date (optional)" },
-                  "to": { "type": "string", "description": "End date (optional)" }
+                  "project": { "type": "string" },
+                  "start": { "type": "string" },
+                  "end": { "type": "string" }
                 },
                 "required": ["project"]
               }
@@ -524,7 +533,7 @@
           }
         },
         "responses": {
-          "200": { "description": "List of schedule entries" }
+          "200": { "description": "Schedule entries" }
         }
       }
     },
@@ -539,8 +548,8 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "project": { "type": "string", "description": "Project name or ID" },
-                  "query": { "type": "string", "description": "Search query" }
+                  "project": { "type": "string" },
+                  "query": { "type": "string" }
                 },
                 "required": ["project", "query"]
               }
@@ -554,71 +563,25 @@
     },
     "/action/list_all_people": {
       "post": {
-        "summary": "List all people in the Basecamp account",
+        "summary": "List all people in the account",
         "operationId": "list_all_people",
         "responses": {
-          "200": { "description": "Array of people with email, title, role information" }
-        }
-      }
-    },
-    "/action/get_person": {
-      "post": {
-        "summary": "Get detailed profile of a specific person",
-        "operationId": "get_person",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "person_id": { "type": "integer", "description": "The person's ID" }
-                },
-                "required": ["person_id"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "Person profile with bio, location, timezone" }
+          "200": { "description": "Array of people" }
         }
       }
     },
     "/action/get_my_profile": {
       "post": {
-        "summary": "Get the current authenticated user's profile",
+        "summary": "Get current user's profile",
         "operationId": "get_my_profile",
         "responses": {
           "200": { "description": "Current user profile" }
         }
       }
     },
-    "/action/list_project_people": {
-      "post": {
-        "summary": "List all people on a specific project",
-        "operationId": "list_project_people",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "project": { "type": "string", "description": "Project name (fuzzy match)" }
-                },
-                "required": ["project"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "People on the project" }
-        }
-      }
-    },
     "/action/list_comments": {
       "post": {
-        "summary": "List comments on a specific recording (message, document, todo, etc)",
+        "summary": "List comments on a recording",
         "operationId": "list_comments",
         "requestBody": {
           "required": true,
@@ -627,8 +590,8 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "project": { "type": "string", "description": "Project name" },
-                  "recording_id": { "type": "integer", "description": "ID of the recording (message, document, todo, etc)" }
+                  "project": { "type": "string" },
+                  "recording_id": { "type": "integer" }
                 },
                 "required": ["project", "recording_id"]
               }
@@ -636,31 +599,7 @@
           }
         },
         "responses": {
-          "200": { "description": "Array of comments" }
-        }
-      }
-    },
-    "/action/get_comment": {
-      "post": {
-        "summary": "Get a specific comment by ID",
-        "operationId": "get_comment",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "project": { "type": "string" },
-                  "comment_id": { "type": "integer" }
-                },
-                "required": ["project", "comment_id"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "Comment details" }
+          "200": { "description": "Comments" }
         }
       }
     },
@@ -677,7 +616,7 @@
                 "properties": {
                   "project": { "type": "string" },
                   "recording_id": { "type": "integer" },
-                  "content": { "type": "string", "description": "HTML content of the comment" }
+                  "content": { "type": "string" }
                 },
                 "required": ["project", "recording_id", "content"]
               }
@@ -689,57 +628,9 @@
         }
       }
     },
-    "/action/list_uploads": {
-      "post": {
-        "summary": "List files/uploads in a project's vault",
-        "operationId": "list_uploads",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "project": { "type": "string" },
-                  "vault_id": { "type": "integer", "description": "Vault ID (optional, uses default if omitted)" }
-                },
-                "required": ["project"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "Array of files with download URLs" }
-        }
-      }
-    },
-    "/action/get_upload": {
-      "post": {
-        "summary": "Get details of a specific file/upload",
-        "operationId": "get_upload",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "project": { "type": "string" },
-                  "upload_id": { "type": "integer" }
-                },
-                "required": ["project", "upload_id"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "File details including download URL" }
-        }
-      }
-    },
     "/action/get_recordings": {
       "post": {
-        "summary": "Query all recordings across projects by type",
+        "summary": "Query recordings by type across projects",
         "operationId": "get_recordings",
         "requestBody": {
           "required": true,
@@ -748,9 +639,9 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "type": { "type": "string", "description": "Recording type: Todo, Message, Document, Upload, Kanban::Card, etc" },
-                  "bucket": { "type": "string", "description": "Project ID(s) to filter (optional)" },
-                  "status": { "type": "string", "description": "active, archived, or trashed (default: active)" }
+                  "type": { "type": "string" },
+                  "bucket": { "type": "string" },
+                  "status": { "type": "string" }
                 },
                 "required": ["type"]
               }
@@ -758,7 +649,7 @@
           }
         },
         "responses": {
-          "200": { "description": "Array of recordings" }
+          "200": { "description": "Recordings" }
         }
       }
     },
@@ -786,80 +677,9 @@
         }
       }
     },
-    "/action/archive_recording": {
-      "post": {
-        "summary": "Archive a recording",
-        "operationId": "archive_recording",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "project": { "type": "string" },
-                  "recording_id": { "type": "integer" }
-                },
-                "required": ["project", "recording_id"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": { "description": "Recording archived" }
-        }
-      }
-    },
-    "/action/unarchive_recording": {
-      "post": {
-        "summary": "Unarchive a recording",
-        "operationId": "unarchive_recording",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "project": { "type": "string" },
-                  "recording_id": { "type": "integer" }
-                },
-                "required": ["project", "recording_id"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": { "description": "Recording unarchived" }
-        }
-      }
-    },
-    "/action/list_vaults": {
-      "post": {
-        "summary": "List document storage vaults for a project",
-        "operationId": "list_vaults",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "project": { "type": "string" }
-                },
-                "required": ["project"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "Array of vaults" }
-        }
-      }
-    },
     "/action/search_recordings": {
       "post": {
-        "summary": "Search all recordings across projects by title/content",
+        "summary": "Global search across all recordings",
         "operationId": "search_recordings",
         "requestBody": {
           "required": true,
@@ -869,7 +689,7 @@
                 "type": "object",
                 "properties": {
                   "query": { "type": "string" },
-                  "bucket": { "type": "string", "description": "Optional project ID to filter" }
+                  "bucket": { "type": "string" }
                 },
                 "required": ["query"]
               }
@@ -883,7 +703,8 @@
     },
     "/action/basecamp_raw": {
       "post": {
-        "summary": "Make a raw Basecamp API call",
+        "summary": "Raw Basecamp API call (escape hatch for advanced use)",
+        "description": "Make a direct Basecamp API call. Use this for operations not listed above like: get_person (by ID), list_project_people, archive/unarchive recordings, get_upload details, list_vaults, or any custom Basecamp 3 API endpoint.",
         "operationId": "basecamp_raw",
         "requestBody": {
           "required": true,
@@ -892,9 +713,9 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "path": { "type": "string", "description": "API path or full URL (e.g., /projects.json)" },
-                  "method": { "type": "string", "description": "HTTP method (GET, POST, PUT, DELETE)", "default": "GET" },
-                  "body": { "type": "object", "description": "Request body for POST/PUT (optional)" }
+                  "path": { "type": "string", "description": "API path (e.g., /projects.json, /people/123.json) or full URL" },
+                  "method": { "type": "string", "description": "HTTP method", "default": "GET" },
+                  "body": { "type": "object", "description": "Request body for POST/PUT" }
                 },
                 "required": ["path"]
               }
