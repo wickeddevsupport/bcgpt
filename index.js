@@ -7,7 +7,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 import { handleMCP } from "./mcp.js";
-import { getToken, setToken, clearToken, getAuthCache, setAuthCache } from "./db.js";
+import { getToken, setToken, clearToken, getAuthCache, setAuthCache, getIndexStats } from "./db.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -525,6 +525,25 @@ app.post("/dev/api", async (req, res) => {
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: e?.message || String(e), code: e?.code || "SERVER_ERROR", details: e?.details || null });
+  }
+});
+
+/* ================= Database Info ================= */
+app.get("/db/info", (req, res) => {
+  try {
+    const token = getToken();
+    const auth = getAuthCache();
+    const indexStats = getIndexStats();
+    res.json({
+      status: "ok",
+      database: {
+        authenticated: !!token?.access_token,
+        auth_cached: !!auth,
+        index_stats: indexStats,
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || String(e) });
   }
 });
 
