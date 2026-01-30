@@ -749,9 +749,10 @@ async function listComments(ctx, projectId, recordingId) {
     return { comments: [], _meta: { ...meta, autoResolved: false } };
   }
 
-  // Try direct lookup first
+  // Try direct lookup first and inspect recording JSON for comments support
+  let recordingJson;
   try {
-    await api(ctx, `/buckets/${projectId}/recordings/${recordingId}.json`);
+    recordingJson = await api(ctx, `/buckets/${projectId}/recordings/${recordingId}.json`);
   } catch (e) {
     // If not found, try fuzzy-searching recordings in this project by title/content
     if (e && e.message && e.message.includes('404')) {
@@ -761,12 +762,13 @@ async function listComments(ctx, projectId, recordingId) {
         const arr = Array.isArray(results) ? results : [];
         if (arr.length) {
           // Choose best effort match by title/content
-          const candidates = arr.map((r) => ({ id: r.id, name: r.title || r.content || "" }));
+          const candidates = arr.map((r) => ({ id: r.id, name: r.title || r.content || "", raw: r }));
           const best = resolveBestEffort(candidates, recordingId) || candidates[0];
           meta.usedRecordingId = best.id;
           meta.autoResolved = true;
           meta.matchedTitle = best.name;
           recordingId = best.id;
+          recordingJson = best.raw || (await api(ctx, `/buckets/${projectId}/recordings/${best.id}.json`));
           console.log(`[listComments] Auto-resolved recording to id=${best.id} title="${best.name}"`);
         } else {
           throw new Error(`RECORDING_NOT_FOUND: Recording ${recordingId} not found or inaccessible in project ${projectId}`);
@@ -783,9 +785,23 @@ async function listComments(ctx, projectId, recordingId) {
     }
   }
 
+  // If we have recording JSON, check for comments support
+  const commentsUrl = recordingJson?.comments_url || recordingJson?.comments_url_raw || `/buckets/${projectId}/recordings/${recordingId}/comments.json`;
+  const commentsCount = typeof recordingJson?.comments_count === 'number' ? recordingJson.comments_count : null;
+
+  if (!commentsUrl && commentsCount === null) {
+    console.warn(`[listComments] Recording ${recordingId} (project ${projectId}) has no comments meta; returning empty result`);
+    return { comments: [], _meta: { ...meta, comments_supported: false } };
+  }
+
+  // If comments_count is zero, avoid calling endpoint (fast path)
+  if (commentsCount === 0) {
+    return { comments: [], _meta: { ...meta, comments_supported: true, comments_count: 0 } };
+  }
+
   // Now fetch comments (graceful if comments endpoint not available)
   try {
-    const comments = await apiAll(ctx, `/buckets/${projectId}/recordings/${recordingId}/comments.json`);
+    const comments = await apiAll(ctx, commentsUrl);
     const arr = Array.isArray(comments) ? comments : [];
     const mapped = arr.map((c) => ({
       id: c.id,
@@ -798,11 +814,11 @@ async function listComments(ctx, projectId, recordingId) {
       visible_to_clients: c.visible_to_clients,
       app_url: c.app_url,
     }));
-    return { comments: mapped, _meta: meta };
+    return { comments: mapped, _meta: { ...meta, comments_supported: true, comments_count: arr.length } };
   } catch (e) {
     if (e && e.message && e.message.includes('404')) {
       console.warn(`[listComments] Comments endpoint returned 404 for recording ${recordingId} in project ${projectId}`);
-      return { comments: [], _meta: meta };
+      return { comments: [], _meta: { ...meta, comments_supported: false } };
     }
     throw e;
   }
