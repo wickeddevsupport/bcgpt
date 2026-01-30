@@ -776,28 +776,35 @@ async function listComments(ctx, projectId, recordingId) {
     return { comments: [], _meta: { ...meta, autoResolved: false } };
   }
 
-  // Try direct lookup first and inspect recording JSON for comments support
+  // Try direct lookup first as a RECORDING
   let recordingJson;
+  let commentsUrl;
+  let commentsCount;
+  
   try {
     recordingJson = await api(ctx, `/buckets/${projectId}/recordings/${recordingId}.json`);
     meta.resolvedType = "recording";
+    commentsUrl = recordingJson?.comments_url || recordingJson?.comments_url_raw || `/buckets/${projectId}/recordings/${recordingId}/comments.json`;
+    commentsCount = typeof recordingJson?.comments_count === 'number' ? recordingJson.comments_count : null;
   } catch (e) {
-    // If not found as recording, the provided ID might actually be a TODO ID
-    // Try to fetch it as a todo and extract the recording from it
+    // If not found as recording, try as a TODO (todos also have comments!)
     if (e && e.message && e.message.includes('404')) {
-      console.log(`[listComments] Recording ${recordingId} not found by id — checking if it's a todo ID`);
+      console.log(`[listComments] ID ${recordingId} not found as recording — checking if it's a todo ID`);
       
       try {
-        // Attempt to fetch as a todo
         const todoJson = await api(ctx, `/buckets/${projectId}/todos/${recordingId}.json`);
-        console.log(`[listComments] Found ID ${recordingId} as a todo, not a recording. Todos don't have comments. Returning empty.`);
+        console.log(`[listComments] Found ID ${recordingId} as a todo — fetching its comments`);
         meta.resolvedType = "todo";
         meta.usedRecordingId = recordingId;
-        meta.matchedTitle = todoJson?.title || todoJson?.content || null;
-        return { comments: [], _meta: { ...meta, error: "RECORDING_IS_TODO", message: "The provided ID is a todo, not a recording. Todos don't have comments." } };
+        meta.matchedTitle = todoJson?.title || null;
+        
+        // Todos have comments_url and comments_count
+        commentsUrl = todoJson?.comments_url || `/buckets/${projectId}/todos/${recordingId}/comments.json`;
+        commentsCount = typeof todoJson?.comments_count === 'number' ? todoJson.comments_count : null;
+        recordingJson = todoJson;
       } catch (todoErr) {
         // Not a recording or a todo — try fuzzy search by ID
-        console.log(`[listComments] ID ${recordingId} is neither a recording nor a todo — attempting search by name in project ${projectId}`);
+        console.log(`[listComments] ID ${recordingId} is neither a recording nor a todo — attempting search`);
         
         try {
           const results = await searchRecordings(ctx, recordingId, { bucket_id: projectId });
@@ -812,10 +819,12 @@ async function listComments(ctx, projectId, recordingId) {
             meta.resolvedType = "recording";
             recordingId = best.id;
             recordingJson = best.raw || (await api(ctx, `/buckets/${projectId}/recordings/${best.id}.json`));
+            commentsUrl = recordingJson?.comments_url || `/buckets/${projectId}/recordings/${best.id}/comments.json`;
+            commentsCount = typeof recordingJson?.comments_count === 'number' ? recordingJson.comments_count : null;
             console.log(`[listComments] Auto-resolved to recording id=${best.id} title="${best.name}"`);
           } else {
             console.warn(`[listComments] ID ${recordingId} not found as recording, todo, or search result in project ${projectId}`);
-            return { comments: [], _meta: { ...meta, error: "NOT_FOUND", message: `Recording, todo, or comment with ID ${recordingId} not found in project ${projectId}` } };
+            return { comments: [], _meta: { ...meta, error: "NOT_FOUND", message: `Recording or todo with ID ${recordingId} not found in project ${projectId}` } };
           }
         } catch (searchErr) {
           console.warn(`[listComments] Search failed: ${searchErr?.message}`);
@@ -827,12 +836,9 @@ async function listComments(ctx, projectId, recordingId) {
     }
   }
 
-  // If we have recording JSON, check for comments support
-  const commentsUrl = recordingJson?.comments_url || recordingJson?.comments_url_raw || `/buckets/${projectId}/recordings/${recordingId}/comments.json`;
-  const commentsCount = typeof recordingJson?.comments_count === 'number' ? recordingJson.comments_count : null;
-
+  // If we have recording/todo JSON but no comments URL, return empty
   if (!commentsUrl && commentsCount === null) {
-    console.warn(`[listComments] Recording ${recordingId} (project ${projectId}) has no comments meta; returning empty result`);
+    console.warn(`[listComments] ${meta.resolvedType || 'unknown'} ${recordingId} (project ${projectId}) has no comments meta; returning empty result`);
     return { comments: [], _meta: { ...meta, comments_supported: false } };
   }
 
@@ -859,7 +865,7 @@ async function listComments(ctx, projectId, recordingId) {
     return { comments: mapped, _meta: { ...meta, comments_supported: true, comments_count: arr.length } };
   } catch (e) {
     if (e && e.message && e.message.includes('404')) {
-      console.warn(`[listComments] Comments endpoint returned 404 for recording ${recordingId} in project ${projectId}`);
+      console.warn(`[listComments] Comments endpoint returned 404 for ${meta.resolvedType || 'recording'} ${recordingId} in project ${projectId}`);
       return { comments: [], _meta: { ...meta, comments_supported: false } };
     }
     throw e;
