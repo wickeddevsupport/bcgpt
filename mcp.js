@@ -230,6 +230,107 @@ function dockFind(dock, names) {
   return null;
 }
 
+/**
+ * DockLinkResolver: Centralized link discovery from dock + resource objects
+ * Strategy: follow Basecamp's HATEOAS links instead of guessing paths
+ * - Dock provides feature URLs (message_board, todoset, vault, etc.)
+ * - Each resource object contains _url fields for related resources
+ * - Falls back to standard paths only when links unavailable
+ */
+class DockLinkResolver {
+  constructor(ctx, projectId) {
+    this.ctx = ctx;
+    this.projectId = projectId;
+    this.dock = null;
+    this.resourceCache = {}; // Cache fetched resources to avoid duplicate API calls
+  }
+
+  // Get or cache the dock
+  async getDock() {
+    if (!this.dock) {
+      const p = await getProject(this.ctx, this.projectId);
+      this.dock = p?.dock || [];
+    }
+    return this.dock;
+  }
+
+  // Get a dock entry by feature name(s)
+  async getDockEntry(names) {
+    const dock = await this.getDock();
+    return dockFind(dock, names);
+  }
+
+  // Fetch and cache a resource by its URL
+  async fetchResource(url, cacheKey = null) {
+    const key = cacheKey || url;
+    if (this.resourceCache[key]) {
+      console.debug(`[DockLinkResolver] Using cached resource for ${key}`);
+      return this.resourceCache[key];
+    }
+    
+    const resource = await api(this.ctx, url);
+    this.resourceCache[key] = resource;
+    return resource;
+  }
+
+  // Get todolists URL by following dock → todoset → todolists_url
+  async getTodolistsUrl() {
+    const todosetEntry = await this.getDockEntry("todoset");
+    if (!todosetEntry?.url) {
+      console.log(`[DockLinkResolver] No todoset in dock for project ${this.projectId}`);
+      return null;
+    }
+
+    try {
+      const todoset = await this.fetchResource(todosetEntry.url, `todoset:${this.projectId}`);
+      const url = todoset?.todolists_url;
+      if (url) {
+        console.log(`[DockLinkResolver] Found todolists_url from todoset: ${url}`);
+        return url;
+      }
+    } catch (e) {
+      console.warn(`[DockLinkResolver] Failed to fetch todoset: ${e.message}`);
+    }
+
+    // Fallback to standard path
+    const fallback = `/buckets/${this.projectId}/todosets/${todosetEntry.id}/todolists.json`;
+    console.log(`[DockLinkResolver] Falling back to standard path: ${fallback}`);
+    return fallback;
+  }
+
+  // Get comments URL from a todo or recording
+  async getCommentsUrl(recordingOrTodoId, type = "recording") {
+    const endpoint = type === "todo" 
+      ? `/buckets/${this.projectId}/todos/${recordingOrTodoId}.json`
+      : `/buckets/${this.projectId}/recordings/${recordingOrTodoId}.json`;
+    
+    try {
+      const resource = await this.fetchResource(endpoint, `${type}:${recordingOrTodoId}`);
+      const url = resource?.comments_url || resource?.comments_url_raw;
+      if (url) {
+        console.log(`[DockLinkResolver] Found comments_url for ${type} ${recordingOrTodoId}: ${url}`);
+        return { url, commentsCount: resource?.comments_count || 0 };
+      }
+    } catch (e) {
+      console.debug(`[DockLinkResolver] Failed to fetch ${type}: ${e.message}`);
+      return null;
+    }
+
+    // Fallback to standard path
+    const fallback = type === "todo"
+      ? `/buckets/${this.projectId}/todos/${recordingOrTodoId}/comments.json`
+      : `/buckets/${this.projectId}/recordings/${recordingOrTodoId}/comments.json`;
+    
+    return { url: fallback, commentsCount: 0 };
+  }
+
+  // Get any resource URL from dock
+  async getDockFeatureUrl(featureNames) {
+    const entry = await this.getDockEntry(featureNames);
+    return entry?.url || null;
+  }
+}
+
 async function getProject(ctx, projectId) {
   // account-scoped
   return api(ctx, `/projects/${projectId}.json`);
@@ -788,47 +889,54 @@ async function listProjectPeople(ctx, projectId) {
 async function listComments(ctx, projectId, recordingId) {
   // Returns: { comments: [...], _meta: { originalRecordingId, usedRecordingId, autoResolved, matchedTitle, resolvedType } }
   const meta = { originalRecordingId: recordingId, usedRecordingId: recordingId, autoResolved: false, matchedTitle: null, resolvedType: null };
+  const resolver = new DockLinkResolver(ctx, projectId);
 
   // If recordingId is falsy, return empty
   if (!recordingId) {
     return { comments: [], _meta: { ...meta, autoResolved: false } };
   }
 
-  // Try direct lookup first as a RECORDING
+  // Try direct lookup first as a RECORDING (uses resolver with caching)
   let recordingJson;
   let commentsUrl;
   let commentsCount;
   
   try {
-    recordingJson = await api(ctx, `/buckets/${projectId}/recordings/${recordingId}.json`);
-    meta.resolvedType = "recording";
-    commentsUrl = recordingJson?.comments_url || recordingJson?.comments_url_raw || `/buckets/${projectId}/recordings/${recordingId}/comments.json`;
-    commentsCount = typeof recordingJson?.comments_count === 'number' ? recordingJson.comments_count : null;
+    const recordingResult = await resolver.getCommentsUrl(recordingId, "recording");
+    if (recordingResult) {
+      commentsUrl = recordingResult.url;
+      commentsCount = recordingResult.commentsCount;
+      meta.resolvedType = "recording";
+      
+      // Verify it exists
+      recordingJson = await resolver.fetchResource(`/buckets/${projectId}/recordings/${recordingId}.json`, `recording:${recordingId}`);
+      meta.matchedTitle = recordingJson?.title || recordingJson?.content || null;
+    }
   } catch (e) {
     // If not found as recording, try as a TODO (todos also have comments!)
     if (e && e.message && e.message.includes('404')) {
       console.log(`[listComments] ID ${recordingId} not found as recording — checking if it's a todo ID`);
       
       try {
-        // First try direct fetch
-        const todoJson = await api(ctx, `/buckets/${projectId}/todos/${recordingId}.json`);
-        console.log(`[listComments] Found ID ${recordingId} as a todo via direct fetch — fetching its comments`);
-        meta.resolvedType = "todo";
-        meta.usedRecordingId = recordingId;
-        meta.matchedTitle = todoJson?.title || null;
-        
-        // Todos have comments_url and comments_count
-        commentsUrl = todoJson?.comments_url || `/buckets/${projectId}/todos/${recordingId}/comments.json`;
-        commentsCount = typeof todoJson?.comments_count === 'number' ? todoJson.comments_count : null;
-        recordingJson = todoJson;
+        // Try direct fetch
+        const todoResult = await resolver.getCommentsUrl(recordingId, "todo");
+        if (todoResult) {
+          commentsUrl = todoResult.url;
+          commentsCount = todoResult.commentsCount;
+          meta.resolvedType = "todo";
+          
+          const todoJson = await resolver.fetchResource(`/buckets/${projectId}/todos/${recordingId}.json`, `todo:${recordingId}`);
+          meta.matchedTitle = todoJson?.title || null;
+          recordingJson = todoJson;
+        }
       } catch (todoErr) {
         // Not found via direct fetch — search across todolists
-        console.log(`[listComments] ID ${recordingId} not found via direct fetch — searching across todolists in project`);
+        console.log(`[listComments] ID ${recordingId} not found via direct fetch — searching across todolists`);
         
         try {
           const todoJson = await findTodoInProject(ctx, projectId, recordingId);
           if (todoJson) {
-            console.log(`[listComments] Found ID ${recordingId} as a todo in project ${projectId} — fetching its comments`);
+            console.log(`[listComments] Found ID ${recordingId} as a todo in project — fetching its comments`);
             meta.resolvedType = "todo";
             meta.usedRecordingId = recordingId;
             meta.matchedTitle = todoJson?.title || null;
@@ -838,7 +946,7 @@ async function listComments(ctx, projectId, recordingId) {
             recordingJson = todoJson;
           } else {
             // Not a recording or a todo — try fuzzy search by ID
-            console.log(`[listComments] ID ${recordingId} not found as recording or todo — attempting search`);
+            console.log(`[listComments] ID ${recordingId} not found — attempting search`);
             
             const results = await searchRecordings(ctx, recordingId, { bucket_id: projectId });
             const arr = Array.isArray(results) ? results : [];
@@ -856,12 +964,12 @@ async function listComments(ctx, projectId, recordingId) {
               commentsCount = typeof recordingJson?.comments_count === 'number' ? recordingJson.comments_count : null;
               console.log(`[listComments] Auto-resolved to recording id=${best.id} title="${best.name}"`);
             } else {
-              console.warn(`[listComments] ID ${recordingId} not found as recording, todo, or search result in project ${projectId}`);
+              console.warn(`[listComments] ID ${recordingId} not found as recording, todo, or search result`);
               return { comments: [], _meta: { ...meta, error: "NOT_FOUND", message: `Recording or todo with ID ${recordingId} not found in project ${projectId}` } };
             }
           }
         } catch (searchErr) {
-          console.warn(`[listComments] Search/lookup failed: ${searchErr?.message}`);
+          console.warn(`[listComments] Lookup failed: ${searchErr?.message}`);
           return { comments: [], _meta: { ...meta, error: "LOOKUP_FAILED", message: `Could not locate ID ${recordingId}` } };
         }
       }
@@ -872,7 +980,7 @@ async function listComments(ctx, projectId, recordingId) {
 
   // If we have recording/todo JSON but no comments URL, return empty
   if (!commentsUrl && commentsCount === null) {
-    console.warn(`[listComments] ${meta.resolvedType || 'unknown'} ${recordingId} (project ${projectId}) has no comments meta; returning empty result`);
+    console.warn(`[listComments] ${meta.resolvedType || 'unknown'} ${recordingId} has no comments meta`);
     return { comments: [], _meta: { ...meta, comments_supported: false } };
   }
 
@@ -899,7 +1007,7 @@ async function listComments(ctx, projectId, recordingId) {
     return { comments: mapped, _meta: { ...meta, comments_supported: true, comments_count: arr.length } };
   } catch (e) {
     if (e && e.message && e.message.includes('404')) {
-      console.warn(`[listComments] Comments endpoint returned 404 for ${meta.resolvedType || 'recording'} ${recordingId} in project ${projectId}`);
+      console.warn(`[listComments] Comments endpoint returned 404 for ${meta.resolvedType} ${recordingId}`);
       return { comments: [], _meta: { ...meta, comments_supported: false } };
     }
     throw e;
