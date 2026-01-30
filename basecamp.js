@@ -242,8 +242,18 @@ export async function basecampFetchAll(
       const timer = setTimeout(() => ac.abort(), timeoutMs);
 
       try {
+        // Debug: log the URL being fetched
+        if (process?.env?.DEBUG || true) {
+          console.log(`[BasecampFetchAll] Fetching page: ${url}`);
+        }
         const res = await fetch(url, { method: "GET", headers: httpHeaders, signal: ac.signal });
         clearTimeout(timer);
+
+        // Debug: log the Link header
+        const linkHeader = res.headers.get("link");
+        if (process?.env?.DEBUG || true) {
+          console.log(`[BasecampFetchAll] Link header: ${linkHeader}`);
+        }
 
         if ([429, 502, 503, 504].includes(res.status) && attempt < retries) {
           const retryAfter = Number(res.headers.get("retry-after") || "0");
@@ -274,15 +284,9 @@ export async function basecampFetchAll(
 
         all.push(...data);
 
-        const link = res.headers.get("link");
-        const { next } = parseLinkHeader(link);
+        const { next } = parseLinkHeader(linkHeader);
         if (next) {
-          // Basecamp returns absolute URLs here; keep absolute for fetch.
           url = next;
-        } else if (perPage && Array.isArray(data) && data.length === perPage) {
-          // Fallback: some responses may omit Link even when more pages exist.
-          const cur = getParamInt(requestUrl, "page") ?? 1;
-          url = setParam(requestUrl, "page", cur + 1);
         } else {
           url = null;
         }
@@ -301,5 +305,9 @@ export async function basecampFetchAll(
     }
   }
 
+  // Debug: log total items fetched
+  if (process?.env?.DEBUG || true) {
+    console.log(`[BasecampFetchAll] Total items fetched: ${all.length}`);
+  }
   return all;
 }
