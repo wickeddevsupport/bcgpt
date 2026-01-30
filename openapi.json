@@ -1,0 +1,338 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "BCGPT - Basecamp Integration",
+    "description": "Tools for interacting with Basecamp projects, todos, and more",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://bcgpt.onrender.com",
+      "description": "Production server"
+    }
+  ],
+  "paths": {
+    "/action/list_projects": {
+      "post": {
+        "summary": "List all projects",
+        "description": "Fetch all projects from Basecamp account, paginated and with concise JSON output",
+        "operationId": "list_projects",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "archived": {
+                    "type": "boolean",
+                    "description": "If true, return archived projects instead of active ones"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "List of projects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "projects": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "integer" },
+                          "name": { "type": "string" },
+                          "status": { "type": "string" },
+                          "created_at": { "type": "string" },
+                          "updated_at": { "type": "string" },
+                          "app_url": { "type": "string" },
+                          "dock": { "type": "array" }
+                        }
+                      }
+                    },
+                    "count": {
+                      "type": "integer",
+                      "description": "Total number of projects returned"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/action/find_project": {
+      "post": {
+        "summary": "Find a project by name",
+        "description": "Search for a specific project by name",
+        "operationId": "find_project",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Project name to search for"
+                  }
+                },
+                "required": ["name"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Project details"
+          }
+        }
+      }
+    },
+    "/action/list_todos_for_project": {
+      "post": {
+        "summary": "List todos for a project",
+        "description": "Get all todo lists and items for a specific project",
+        "operationId": "list_todos_for_project",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": {
+                    "type": "string",
+                    "description": "Project name or ID"
+                  }
+                },
+                "required": ["project"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Todo lists and items"
+          }
+        }
+      }
+    },
+    "/action/daily_report": {
+      "post": {
+        "summary": "Get daily report",
+        "description": "Generate a daily report of todos due today and overdue items",
+        "operationId": "daily_report",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Date (YYYY-MM-DD), defaults to today"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Daily report with due items"
+          }
+        }
+      }
+    },
+    "/action/list_todos_due": {
+      "post": {
+        "summary": "List todos due on a specific date",
+        "description": "Get all todos due on a specific date",
+        "operationId": "list_todos_due",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Date to check (YYYY-MM-DD), defaults to today"
+                  },
+                  "include_overdue": {
+                    "type": "boolean",
+                    "description": "Include overdue items"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "List of todos"
+          }
+        }
+      }
+    },
+    "/action/search_todos": {
+      "post": {
+        "summary": "Search todos by text",
+        "description": "Search across all open todos for a specific text",
+        "operationId": "search_todos",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Search query"
+                  }
+                },
+                "required": ["query"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Search results"
+          }
+        }
+      }
+    },
+    "/action/create_todo": {
+      "post": {
+        "summary": "Create a new todo",
+        "description": "Create a new todo item in a project",
+        "operationId": "create_todo",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": {
+                    "type": "string",
+                    "description": "Project name or ID"
+                  },
+                  "task": {
+                    "type": "string",
+                    "description": "Todo text/content"
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "Optional detailed description"
+                  },
+                  "due_on": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Optional due date (YYYY-MM-DD)"
+                  },
+                  "todolist": {
+                    "type": "string",
+                    "description": "Optional specific todo list name"
+                  }
+                },
+                "required": ["project", "task"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created todo details"
+          }
+        }
+      }
+    },
+    "/action/complete_task_by_name": {
+      "post": {
+        "summary": "Complete a todo by name",
+        "description": "Mark a todo as complete by searching for it by name",
+        "operationId": "complete_task_by_name",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": {
+                    "type": "string",
+                    "description": "Project name or ID"
+                  },
+                  "task": {
+                    "type": "string",
+                    "description": "Task name to complete"
+                  }
+                },
+                "required": ["project", "task"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Completion confirmation"
+          }
+        }
+      }
+    },
+    "/action/basecamp_raw": {
+      "post": {
+        "summary": "Raw Basecamp API call",
+        "description": "Make a raw call to any Basecamp API endpoint",
+        "operationId": "basecamp_raw",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "API path or full URL (e.g., '/projects.json')"
+                  },
+                  "method": {
+                    "type": "string",
+                    "description": "HTTP method (GET, POST, PUT, DELETE)",
+                    "default": "GET"
+                  },
+                  "body": {
+                    "type": "object",
+                    "description": "Optional request body for POST/PUT"
+                  }
+                },
+                "required": ["path"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "API response"
+          }
+        }
+      }
+    }
+  }
+}

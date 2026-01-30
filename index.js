@@ -349,6 +349,15 @@ async function runTool(op, params, req) {
 /* ================= Health ================= */
 app.get("/health", (req, res) => res.json({ ok: true, build: UA }));
 
+/* ================= OpenAPI Schema ================= */
+app.get("/.well-known/openapi.json", (req, res) => {
+  res.sendFile(path.join(__dirname, "openapi.json"));
+});
+
+app.get("/openapi.json", (req, res) => {
+  res.sendFile(path.join(__dirname, "openapi.json"));
+});
+
 /* ================= OAuth ================= */
 app.get("/auth/basecamp/start", (req, res) => {
   const base = originBase(req);
