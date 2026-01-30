@@ -3,7 +3,7 @@
  * Orchestrates multiple API calls, maintains context, enriches results
  */
 
-import { api } from './basecamp.js';
+import { basecampFetch as api } from './basecamp.js';
 
 class RequestContext {
   constructor(apiCtx, userQuery = "") {
