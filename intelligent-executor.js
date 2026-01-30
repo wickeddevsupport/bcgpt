@@ -3,6 +3,8 @@
  * Orchestrates multiple API calls, maintains context, enriches results
  */
 
+import { api } from './basecamp.js';
+
 class RequestContext {
   constructor(apiCtx, userQuery = "") {
     this.apiCtx = apiCtx;
