@@ -1,3 +1,4 @@
+// index.js
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -17,8 +18,8 @@ const UA = "bcgpt-full-v3";
 const BASECAMP_API = "https://3.basecampapi.com";
 const DEFAULT_ACCOUNT_ID = process.env.BASECAMP_DEFAULT_ACCOUNT_ID || null;
 
-let TOKEN = null;       // single-user token
-let AUTH_CACHE = null;  // cached authorization.json
+let TOKEN = null;      // single-user token
+let AUTH_CACHE = null; // cached authorization.json
 
 function originBase(req) {
   const inferred = `${req.protocol}://${req.get("host")}`;
@@ -26,47 +27,63 @@ function originBase(req) {
 }
 
 function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 /**
- * Basecamp 3 URL rules (per docs):
+ * Basecamp URL rules:
  * - Account-scoped: https://3.basecampapi.com/<account_id>/...
  * - Bucket-scoped:  https://3.basecampapi.com/buckets/<bucket_id>/...
- * - No "/3/" prefix anywhere.  (The "/3/" prefix causes 404.)  :contentReference[oaicite:4]{index=4}
+ * - Many endpoints return pagination via Link header rel="next".
  */
 function normalizeBasecampUrl(path, accountId) {
-  if (!path) throw new Error("Missing Basecamp path");
+  if (!path) {
+    const err = new Error("Missing Basecamp path");
+    err.code = "BAD_REQUEST";
+    throw err;
+  }
+
+  const raw = String(path).trim();
 
   // Full URL passthrough
-  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+  if (/^https?:\/\//i.test(raw)) return raw;
 
-  let p = path.startsWith("/") ? path : `/${path}`;
+  let p = raw.startsWith("/") ? raw : `/${raw}`;
 
-  // Bucket scoped endpoints stay as-is (already correct)
-  if (accountId) return `${BASECAMP_API}/${accountId}${p}`;
+  // Bucket-scoped endpoints MUST NOT be prefixed with account id
+  if (p.startsWith("/buckets/")) return `${BASECAMP_API}${p}`;
 
-
-  // If already account-scoped (starts with "/<digits>/"), keep it
+  // Already account-scoped (starts with "/<digits>/")
   if (/^\/\d+\//.test(p)) return `${BASECAMP_API}${p}`;
 
-  // Otherwise, if we have an accountId, prefix it (account-scoped)
-  // Example: "/projects.json" -> "/<accountId>/projects.json"
-  if (accountId) return `${BASECAMP_API}/${accountId}${p}`;
+  // Otherwise require accountId (account scoped)
+  if (!accountId) {
+    const err = new Error("ACCOUNT_ID_REQUIRED_FOR_PATH");
+    err.code = "ACCOUNT_ID_REQUIRED_FOR_PATH";
+    err.path = p;
+    throw err;
+  }
 
-  // If no accountId and it isn't a bucket path, we can't safely build it
-  // because Basecamp account prefix is required for account-scoped routes.
-  const err = new Error("ACCOUNT_ID_REQUIRED_FOR_PATH");
-  err.code = "ACCOUNT_ID_REQUIRED_FOR_PATH";
-  err.path = p;
-  throw err;
+  return `${BASECAMP_API}/${accountId}${p}`;
+}
+
+function parseLinkHeader(link) {
+  // Minimal Link parser: <url>; rel="next"
+  if (!link) return {};
+  const out = {};
+  const parts = String(link).split(",").map((s) => s.trim());
+  for (const part of parts) {
+    const m = part.match(/<([^>]+)>\s*;\s*rel="([^"]+)"/i);
+    if (m) out[m[2]] = m[1];
+  }
+  return out;
 }
 
 /**
  * Hardened Basecamp fetch:
- * - timeouts
- * - retry/backoff for 429/502/503/504
- * - returns good error objects
+ * - timeout
+ * - retry/backoff for 429/502/503/504 (respects Retry-After)
+ * - optional pagination aggregation when response is an array
  */
 async function basecampFetch(token, path, opts = {}) {
   const {
@@ -75,7 +92,10 @@ async function basecampFetch(token, path, opts = {}) {
     ua = UA,
     accountId = null,
     timeoutMs = 15000,
-    retries = 2
+    retries = 2,
+    paginate = false,
+    maxPages = 50,
+    pageDelayMs = 150,
   } = opts;
 
   if (!token?.access_token) {
@@ -84,61 +104,108 @@ async function basecampFetch(token, path, opts = {}) {
     throw err;
   }
 
-  const url = normalizeBasecampUrl(path, accountId);
+  const httpMethod = String(method || "GET").toUpperCase();
+  let url = normalizeBasecampUrl(path, accountId);
 
+  // IMPORTANT:
+  // For GET/HEAD with no body: do not send Content-Type or payload.
+  // Some proxies/APIs can behave badly if a GET has a JSON body.
   const headers = {
     "User-Agent": ua,
-    "Authorization": `Bearer ${token.access_token}`,
-    "Accept": "application/json"
+    Authorization: `Bearer ${token.access_token}`,
+    Accept: "application/json",
   };
 
   let payload = undefined;
-  if (body !== undefined) {
+  if (body !== undefined && body !== null && httpMethod !== "GET" && httpMethod !== "HEAD") {
     headers["Content-Type"] = "application/json";
-    payload = JSON.stringify(body);
+    payload = typeof body === "string" ? body : JSON.stringify(body);
   }
 
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), timeoutMs);
+  async function doOne(requestUrl) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), timeoutMs);
 
-    try {
-      const r = await fetch(url, { method, headers, body: payload, signal: controller.signal });
-      clearTimeout(t);
+      try {
+        const r = await fetch(requestUrl, {
+          method: httpMethod,
+          headers,
+          body: payload,
+          signal: controller.signal,
+        });
 
-      // Retryable statuses
-      if ([429, 502, 503, 504].includes(r.status) && attempt < retries) {
-        const retryAfter = Number(r.headers.get("retry-after") || "0");
-        const backoff = retryAfter > 0 ? retryAfter * 1000 : 400 * (attempt + 1) ** 2;
-        await sleep(backoff);
-        continue;
+        clearTimeout(t);
+
+        // Retryable statuses
+        if ([429, 502, 503, 504].includes(r.status) && attempt < retries) {
+          const retryAfter = Number(r.headers.get("retry-after") || "0");
+          const backoff = retryAfter > 0 ? retryAfter * 1000 : 400 * (attempt + 1) ** 2;
+          await sleep(backoff);
+          continue;
+        }
+
+        if (r.status === 204) return { data: null, headers: r.headers };
+
+        const text = await r.text();
+        let data = null;
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch {
+          data = text || null;
+        }
+
+        if (!r.ok) {
+          const err = new Error(`Basecamp API error (${r.status})`);
+          err.code = "BASECAMP_API_ERROR";
+          err.status = r.status;
+          err.data = data;
+          err.url = requestUrl;
+          throw err;
+        }
+
+        return { data, headers: r.headers };
+      } catch (e) {
+        clearTimeout(t);
+        if (e?.name === "AbortError" && attempt < retries) {
+          await sleep(250 * (attempt + 1));
+          continue;
+        }
+        throw e;
       }
-
-      const text = await r.text();
-      let data = null;
-      try { data = text ? JSON.parse(text) : null; } catch { data = text || null; }
-
-      if (!r.ok) {
-        const err = new Error(`Basecamp API error (${r.status})`);
-        err.code = "BASECAMP_API_ERROR";
-        err.status = r.status;
-        err.data = data;
-        err.url = url;
-        throw err;
-      }
-
-      return data;
-    } catch (e) {
-      clearTimeout(t);
-      if (e?.name === "AbortError" && attempt < retries) {
-        await sleep(250 * (attempt + 1));
-        continue;
-      }
-      throw e;
     }
+
+    const err = new Error("BASECAMP_REQUEST_FAILED");
+    err.code = "BASECAMP_REQUEST_FAILED";
+    err.url = requestUrl;
+    throw err;
   }
 
-  throw new Error("BASECAMP_REQUEST_FAILED");
+  // No pagination: single request
+  if (!paginate || httpMethod !== "GET") {
+    const { data } = await doOne(url);
+    return data;
+  }
+
+  // Pagination: aggregate pages when response is an array
+  const aggregated = [];
+  let page = 0;
+
+  while (url && page < maxPages) {
+    const { data, headers: respHeaders } = await doOne(url);
+
+    if (Array.isArray(data)) aggregated.push(...data);
+    else return data; // Not an array => stop pagination and return as-is.
+
+    const link = respHeaders?.get?.("link") || null;
+    const { next } = parseLinkHeader(link);
+    url = next || null;
+
+    page++;
+    if (url) await sleep(pageDelayMs);
+  }
+
+  return aggregated;
 }
 
 /* ============ Launchpad auth ============ */
@@ -151,14 +218,16 @@ async function getAuthorization(force = false) {
   if (AUTH_CACHE && !force) return AUTH_CACHE;
 
   const r = await fetch("https://launchpad.37signals.com/authorization.json", {
-    headers: { Authorization: `Bearer ${TOKEN.access_token}`, "User-Agent": UA }
+    headers: { Authorization: `Bearer ${TOKEN.access_token}`, "User-Agent": UA },
   });
+
   if (!r.ok) {
     const err = new Error("AUTHORIZATION_FAILED");
     err.code = "AUTHORIZATION_FAILED";
     err.status = r.status;
     throw err;
   }
+
   AUTH_CACHE = await r.json();
   return AUTH_CACHE;
 }
@@ -167,9 +236,11 @@ async function getAccountId() {
   const auth = await getAuthorization();
 
   if (DEFAULT_ACCOUNT_ID) {
-    const match = (auth.accounts || []).find(a => String(a.id) === String(DEFAULT_ACCOUNT_ID));
+    const match = (auth.accounts || []).find((a) => String(a.id) === String(DEFAULT_ACCOUNT_ID));
     if (!match) {
-      const err = new Error(`BASECAMP_DEFAULT_ACCOUNT_ID (${DEFAULT_ACCOUNT_ID}) not found in authorized accounts`);
+      const err = new Error(
+        `BASECAMP_DEFAULT_ACCOUNT_ID (${DEFAULT_ACCOUNT_ID}) not found in authorized accounts`
+      );
       err.code = "DEFAULT_ACCOUNT_NOT_FOUND";
       throw err;
     }
@@ -196,7 +267,7 @@ async function startStatus(req) {
       user: null,
       reauth_url,
       logout_url,
-      message: "Not connected. Use the auth link to connect Basecamp."
+      message: "Not connected. Use the auth link to connect Basecamp.",
     };
   }
 
@@ -207,7 +278,7 @@ async function startStatus(req) {
       user: { name: auth.identity?.name || null, email: auth.identity?.email_address || null },
       reauth_url,
       logout_url,
-      message: "Connected. Not you? Use the auth link to re-login."
+      message: "Connected. Not you? Use the auth link to re-login.",
     };
   } catch {
     return {
@@ -215,7 +286,7 @@ async function startStatus(req) {
       user: null,
       reauth_url,
       logout_url,
-      message: "Token exists but authorization could not be loaded. Re-auth required."
+      message: "Token exists but authorization could not be loaded. Re-auth required.",
     };
   }
 }
@@ -231,9 +302,20 @@ async function buildMcpCtx(req) {
     authAccounts: auth?.accounts || [],
     startStatus: async () => await startStatus(req),
 
-    // Provide Basecamp fetch to MCP tools so they use the corrected URL builder
+    // ✅ Provide both single-request AND auto-paginated versions to MCP
     basecampFetch: async (path, opts = {}) =>
-      basecampFetch(TOKEN, path, { ...opts, ua: UA, accountId })
+      basecampFetch(TOKEN, path, { ...opts, ua: UA, accountId, paginate: false }),
+
+    basecampFetchAll: async (path, opts = {}) =>
+      basecampFetch(TOKEN, path, {
+        ...opts,
+        ua: UA,
+        accountId,
+        paginate: true,
+        // allow overrides, but keep sane defaults to avoid 429s
+        maxPages: opts.maxPages ?? 50,
+        pageDelayMs: opts.pageDelayMs ?? 150,
+      }),
   };
 }
 
@@ -244,7 +326,7 @@ async function runTool(op, params, req) {
     jsonrpc: "2.0",
     id: `action-${op}`,
     method: "tools/call",
-    params: { name: op, arguments: params || {} }
+    params: { name: op, arguments: params || {} },
   };
 
   const out = await handleMCP(rpc, ctx);
@@ -289,8 +371,8 @@ app.get("/auth/basecamp/callback", async (req, res) => {
         client_id: process.env.BASECAMP_CLIENT_ID,
         client_secret: process.env.BASECAMP_CLIENT_SECRET,
         redirect_uri: redirectUri,
-        code: req.query.code
-      })
+        code: req.query.code,
+      }),
     });
 
     TOKEN = await r.json();
@@ -329,7 +411,7 @@ app.post("/action/:op", async (req, res) => {
       ok: false,
       error: e?.message || String(e),
       code: e?.code || "SERVER_ERROR",
-      details: e?.details || { url: e?.url || null, status: e?.status || null, data: e?.data || null }
+      details: e?.details || { url: e?.url || null, status: e?.status || null, data: e?.data || null },
     });
   }
 });
@@ -338,8 +420,8 @@ app.post("/action/:op", async (req, res) => {
 app.get("/projects", async (req, res) => {
   try {
     const accountId = await getAccountId();
-    // Correct per docs: https://3.basecampapi.com/<accountId>/projects.json :contentReference[oaicite:5]{index=5}
-    const data = await basecampFetch(TOKEN, `/${accountId}/projects.json`, { accountId });
+    // ✅ paginate true to fetch all pages (fixes the "only 15" issue)
+    const data = await basecampFetch(TOKEN, `/${accountId}/projects.json`, { accountId, paginate: true });
     res.json(data);
   } catch (e) {
     res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message, url: e.url, data: e.data });
@@ -349,7 +431,6 @@ app.get("/projects", async (req, res) => {
 app.get("/projects/:projectId", async (req, res) => {
   try {
     const accountId = await getAccountId();
-    // Correct per docs: /<accountId>/projects/<id>.json :contentReference[oaicite:6]{index=6}
     const data = await basecampFetch(TOKEN, `/${accountId}/projects/${req.params.projectId}.json`, { accountId });
     res.json(data);
   } catch (e) {
@@ -367,7 +448,7 @@ app.post("/mcp", async (req, res) => {
     res.json({
       jsonrpc: "2.0",
       id: req.body?.id ?? null,
-      error: { code: e.code || "ERROR", message: e.message }
+      error: { code: e.code || "ERROR", message: e.message },
     });
   }
 });

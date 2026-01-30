@@ -2,92 +2,63 @@
 import fetch from "node-fetch";
 
 /**
- * Basecamp 4 API helper (same domain as "bc3-api" docs):
- *   All URLs are account-scoped: https://3.basecampapi.com/<account_id>/...
- *   Pagination via RFC5988 Link header (rel="next")
- *   Rate limiting via 429 + Retry-After
+ * Basecamp 3 API helper.
  *
- * This file provides:
- *  - basecampFetch(): single request (with retries/backoff)
- *  - basecampFetchAll(): auto-pagination (follows Link rel="next")
+ * Supports:
+ *  - Full URL: https://3.basecampapi.com/...
+ *  - Account-scoped paths: /<account_id>/projects.json OR /projects.json (auto-prefix)
+ *  - Bucket-scoped paths: /buckets/<bucket_id>/...
+ *
+ * Adds:
+ *  - retries + Retry-After for 429/502/503/504
+ *  - basecampFetchAll(): follows Link rel="next" and aggregates array pages
  */
 
 const BASE = "https://3.basecampapi.com";
 
-// ---- Small global limiter (prevents bursty self-DDOS) ----
-// Docs mention 50 requests / 10s per IP as a common limit. We'll stay under it.
-let lastRequestAt = 0;
-const MIN_GAP_MS = Number(process.env.BC_MIN_GAP_MS || 220); // ~45 req/10s
-
-async function throttle() {
-  const now = Date.now();
-  const wait = Math.max(0, MIN_GAP_MS - (now - lastRequestAt));
-  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-  lastRequestAt = Date.now();
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
-// ---- Link header parsing for pagination ----
-function parseNextLink(linkHeader) {
-  if (!linkHeader) return null;
-  // Example:
-  // Link: <https://3.basecampapi.com/999/buckets/123/messages.json?page=4>; rel="next"
-  const parts = linkHeader.split(",");
-  for (const p of parts) {
-    const m = p.match(/<([^>]+)>\s*;\s*rel="next"/);
-    if (m) return m[1];
+function parseLinkHeader(link) {
+  if (!link) return {};
+  const out = {};
+  const parts = link.split(",").map((s) => s.trim());
+  for (const part of parts) {
+    const m = part.match(/<([^>]+)>\s*;\s*rel="([^"]+)"/i);
+    if (m) out[m[2]] = m[1];
   }
-  return null;
+  return out;
 }
 
-// ---- URL normalization ----
-function normalizeUrl(pathOrUrl, accountId) {
-  if (!pathOrUrl) {
+function normalizeUrl(raw, accountId) {
+  const s = String(raw || "").trim();
+  if (!s) {
     const err = new Error("Missing Basecamp pathOrUrl");
     err.code = "BAD_REQUEST";
     throw err;
   }
 
-  const raw = String(pathOrUrl).trim();
-
   // Full URL passthrough
-  if (/^https?:\/\//i.test(raw)) return raw;
+  if (/^https?:\/\//i.test(s)) return s;
 
-  let p = raw.startsWith("/") ? raw : `/${raw}`;
+  let p = s.startsWith("/") ? s : `/${s}`;
 
-  // If already starts with "/<digits>/" it already has account prefix
+  // Bucket-scoped MUST NOT be prefixed with accountId
+  if (p.startsWith("/buckets/")) return `${BASE}${p}`;
+
+  // Already account-scoped ("/<digits>/...")
   if (/^\/\d+\//.test(p)) return `${BASE}${p}`;
 
-  // Otherwise we MUST prefix accountId (including for /buckets/... paths)
+  // Otherwise require accountId to build account-scoped URL
   if (!accountId) {
-    const err = new Error("ACCOUNT_ID_REQUIRED_FOR_PATH");
-    err.code = "ACCOUNT_ID_REQUIRED_FOR_PATH";
+    const err = new Error("Missing accountId for Basecamp account-scoped path call");
+    err.code = "NO_ACCOUNT_ID";
     err.path = p;
     throw err;
   }
 
-  return `${BASE}/${String(accountId)}${p}`;
-}
-
-function extractRetryAfterSeconds(res, data) {
-  const ra = res.headers.get("retry-after");
-  if (ra && !Number.isNaN(Number(ra))) return Number(ra);
-
-  // Sometimes body contains: "Please wait 1 seconds then retry your request."
-  if (typeof data === "string") {
-    const m = data.match(/wait\s+(\d+)\s+seconds?/i);
-    if (m) return Number(m[1]);
-  }
-  return null;
-}
-
-async function readBody(res) {
-  const text = await res.text();
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
+  return `${BASE}/${accountId}${p}`;
 }
 
 export async function basecampFetch(
@@ -109,8 +80,8 @@ export async function basecampFetch(
     throw err;
   }
 
-  const url = normalizeUrl(pathOrUrl, accountId);
   const httpMethod = String(method || "GET").toUpperCase();
+  const url = normalizeUrl(pathOrUrl, accountId);
 
   const h = {
     Authorization: `Bearer ${TOKEN.access_token}`,
@@ -119,93 +90,162 @@ export async function basecampFetch(
     ...headers,
   };
 
-  let payload;
+  let payload = undefined;
   if (body !== undefined && body !== null && httpMethod !== "GET" && httpMethod !== "HEAD") {
-    h["Content-Type"] = h["Content-Type"] || "application/json; charset=utf-8";
+    h["Content-Type"] = h["Content-Type"] || "application/json";
     payload = typeof body === "string" ? body : JSON.stringify(body);
   }
 
-  let attempt = 0;
-  while (attempt <= retries) {
-    attempt += 1;
-
-    await throttle();
-
+  for (let attempt = 0; attempt <= retries; attempt++) {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), timeoutMs);
 
-    let res;
     try {
-      res = await fetch(url, {
+      const res = await fetch(url, {
         method: httpMethod,
         headers: h,
         body: payload,
         signal: ac.signal,
       });
-    } catch (e) {
+
       clearTimeout(timer);
-      if (attempt <= retries) {
-        // network hiccup — short backoff
-        await new Promise((r) => setTimeout(r, 250 * attempt));
+
+      // Retryable statuses
+      if ([429, 502, 503, 504].includes(res.status) && attempt < retries) {
+        const retryAfter = Number(res.headers.get("retry-after") || "0");
+        const backoff = retryAfter > 0 ? retryAfter * 1000 : 400 * (attempt + 1) ** 2;
+        await sleep(backoff);
         continue;
       }
+
+      if (res.status === 204) return null;
+
+      const text = await res.text();
+      let data = null;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        data = text || null;
+      }
+
+      if (!res.ok) {
+        const err = new Error(`Basecamp API error (${res.status})`);
+        err.code = "BASECAMP_API_ERROR";
+        err.status = res.status;
+        err.url = url;
+        err.data = data;
+        throw err;
+      }
+
+      return data;
+    } catch (e) {
+      clearTimeout(timer);
+      if (e?.name === "AbortError" && attempt < retries) {
+        await sleep(250 * (attempt + 1));
+        continue;
+      }
+      if (e?.code === "BASECAMP_API_ERROR") throw e;
+
       const err = new Error(`BASECAMP_FETCH_FAILED: ${e?.message || e}`);
       err.code = "BASECAMP_FETCH_FAILED";
       err.url = url;
       throw err;
-    } finally {
-      clearTimeout(timer);
     }
-
-    if (res.status === 204) return { data: null, headers: res.headers, status: res.status };
-
-    const data = await readBody(res);
-
-    // Rate limit / transient errors
-    if ([429, 502, 503, 504].includes(res.status) && attempt <= retries) {
-      const raSec = extractRetryAfterSeconds(res, data);
-      const backoffMs =
-        raSec != null ? raSec * 1000 : Math.min(5000, 300 * attempt * attempt);
-      await new Promise((r) => setTimeout(r, backoffMs));
-      continue;
-    }
-
-    if (!res.ok) {
-      const err = new Error(`Basecamp API error (${res.status})`);
-      err.code = "BASECAMP_API_ERROR";
-      err.status = res.status;
-      err.url = url;
-      err.data = data;
-      throw err;
-    }
-
-    return { data, headers: res.headers, status: res.status };
   }
 
   const err = new Error("BASECAMP_REQUEST_FAILED");
   err.code = "BASECAMP_REQUEST_FAILED";
-  err.url = normalizeUrl(pathOrUrl, accountId);
+  err.url = url;
   throw err;
 }
 
+/**
+ * basecampFetchAll()
+ * - GET only
+ * - follows Link rel="next"
+ * - aggregates array pages
+ * - if response isn't an array, returns it as-is
+ */
 export async function basecampFetchAll(
   TOKEN,
   pathOrUrl,
-  opts = {}
+  {
+    ua = "bcgpt",
+    accountId,
+    headers = {},
+    timeoutMs = 30000,
+    retries = 3,
+    maxPages = 50,
+    pageDelayMs = 150,
+  } = {}
 ) {
-  const out = [];
-  let next = pathOrUrl;
+  let url = normalizeUrl(pathOrUrl, accountId);
+  const all = [];
+  let pages = 0;
 
-  while (next) {
-    const { data, headers } = await basecampFetch(TOKEN, next, opts);
+  while (url && pages < maxPages) {
+    const httpHeaders = {
+      Authorization: `Bearer ${TOKEN?.access_token}`,
+      "User-Agent": ua,
+      Accept: "application/json",
+      ...headers,
+    };
 
-    if (Array.isArray(data)) out.push(...data);
-    else if (data && typeof data === "object" && Array.isArray(data.items)) out.push(...data.items);
-    else if (data != null) out.push(data);
+    // Use fetch directly here so we can read Link header.
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), timeoutMs);
 
-    const link = headers?.get?.("link");
-    next = parseNextLink(link);
+      try {
+        const res = await fetch(url, { method: "GET", headers: httpHeaders, signal: ac.signal });
+        clearTimeout(timer);
+
+        if ([429, 502, 503, 504].includes(res.status) && attempt < retries) {
+          const retryAfter = Number(res.headers.get("retry-after") || "0");
+          const backoff = retryAfter > 0 ? retryAfter * 1000 : 400 * (attempt + 1) ** 2;
+          await sleep(backoff);
+          continue;
+        }
+
+        const text = await res.text();
+        let data = null;
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch {
+          data = text || null;
+        }
+
+        if (!res.ok) {
+          const err = new Error(`Basecamp API error (${res.status})`);
+          err.code = "BASECAMP_API_ERROR";
+          err.status = res.status;
+          err.url = url;
+          err.data = data;
+          throw err;
+        }
+
+        // If not an array, don't paginate
+        if (!Array.isArray(data)) return data;
+
+        all.push(...data);
+
+        const link = res.headers.get("link");
+        const { next } = parseLinkHeader(link);
+        url = next || null;
+
+        pages++;
+        if (url) await sleep(pageDelayMs);
+        break; // success break retry loop
+      } catch (e) {
+        clearTimeout(timer);
+        if (e?.name === "AbortError" && attempt < retries) {
+          await sleep(250 * (attempt + 1));
+          continue;
+        }
+        throw e;
+      }
+    }
   }
 
-  return out;
+  return all;
 }
