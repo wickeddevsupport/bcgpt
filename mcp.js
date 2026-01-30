@@ -56,6 +56,10 @@ import { basecampFetch, basecampFetchAll } from "./basecamp.js";
 import { resolveByName, resolveBestEffort } from "./resolvers.js";
 import { indexSearchItem } from "./db.js";
 
+// Intelligent chaining modules
+const { RequestContext } = require('./intelligent-executor.js');
+const intelligent = require('./intelligent-integration.js');
+
 // ---------- JSON-RPC helpers ----------
 function ok(id, result) { return { jsonrpc: "2.0", id, result }; }
 function fail(id, error) { return { jsonrpc: "2.0", id, error }; }
@@ -1307,55 +1311,68 @@ export async function handleMCP(reqBody, ctx) {
       if (cached) return ok(id, { cached: true, ...cached });
 
       try {
-        // Use the official Basecamp search API with type=Todo filter
-        // This searches ALL projects and all pages
-        const results = await searchRecordings(ctx, q, { type: "Todo" });
+        // INTELLIGENT CHAINING: Search with automatic enrichment
+        // Detects assignee_ids and automatically fetches person objects
+        const result = await intelligent.executeIntelligentSearch(ctx, q);
         
-        // Convert search results to todo format
-        const todos = results.map((r) => ({
-          id: r.id,
-          title: r.title,
-          content: r.title,
-          plain_text_content: r.plain_text_content,
-          type: "Todo",
-          bucket: r.bucket,
-          bucket_id: r.bucket_id,
-          app_url: r.app_url,
-          url: r.url,
-          created_at: r.created_at,
-          updated_at: r.updated_at,
-        }));
-        
-        const response = cacheSet(cacheKey, { query: args.query, count: todos.length, todos });
-        return ok(id, { ...response, source: "api" });
+        const response = cacheSet(cacheKey, { 
+          query: args.query, 
+          count: result.count, 
+          todos: result.items 
+        });
+        return ok(id, { ...response, source: "intelligent_api", metrics: result._metadata });
       } catch (e) {
-        console.error(`[search_todos] API search failed, falling back to local search:`, e.message);
+        console.error(`[search_todos] Intelligent search failed:`, e.message);
         
-        // Fallback: search locally in cached open todos
+        // Fallback: Traditional search without enrichment
         try {
-          const rows = await listAllOpenTodos(ctx);
-          const qLower = q.toLowerCase();
-          const hits = rows.filter((r) => (r.content || "").toLowerCase().includes(qLower));
-
-          hits.sort(
-            (a, b) =>
-              (a.due_on || "9999-99-99").localeCompare(b.due_on || "9999-99-99") ||
-              (a.project || "").localeCompare(b.project || "")
-          );
-
-          const response = cacheSet(cacheKey, { query: args.query, count: hits.length, todos: hits });
-          return ok(id, { ...response, source: "fallback" });
+          const results = await searchRecordings(ctx, q, { type: "Todo" });
+          const todos = results.map((r) => ({
+            id: r.id,
+            title: r.title,
+            content: r.title,
+            type: "Todo",
+            bucket: r.bucket,
+            app_url: r.app_url
+          }));
+          const response = cacheSet(cacheKey, { query: args.query, count: todos.length, todos });
+          return ok(id, { ...response, source: "fallback_search" });
         } catch (fallbackErr) {
-          console.error(`[search_todos] Fallback search also failed:`, fallbackErr.message);
+          console.error(`[search_todos] Fallback also failed:`, fallbackErr.message);
           return ok(id, { query: args.query, count: 0, todos: [], error: fallbackErr.message });
         }
       }
     }
 
     if (name === "assignment_report") {
-      const maxTodos = Number(args.max_todos || 250);
-      const result = await assignmentReport(ctx, args.project, { maxTodos });
-      return ok(id, result);
+      try {
+        const maxTodos = Number(args.max_todos || 250);
+        const p = await projectByName(ctx, args.project);
+        
+        // INTELLIGENT CHAINING: Use specialized executor for assignment pattern
+        // Automatically groups by assignee, enriches with person details, aggregates stats
+        const result = await intelligent.executeAssignmentReport(ctx, p.id, maxTodos);
+        
+        return ok(id, {
+          project: p.name,
+          project_id: p.id,
+          by_person: result.by_person,
+          summary: {
+            total_todos: result.total_todos,
+            total_people: result.by_person.length,
+            metrics: result._metadata
+          }
+        });
+      } catch (e) {
+        console.error(`[assignment_report] Error:`, e.message);
+        // Fallback to original implementation
+        try {
+          const result = await assignmentReport(ctx, args.project, { maxTodos: args.max_todos });
+          return ok(id, result);
+        } catch (fbErr) {
+          return fail(id, { code: "ASSIGNMENT_REPORT_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     if (name === "create_todo") {
