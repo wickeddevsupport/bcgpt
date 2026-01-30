@@ -68,8 +68,19 @@ function apiAll(ctx, pathOrUrl, opts = {}) {
 // ---------- Projects ----------
 async function listProjects(ctx, { archived = false } = {}) {
   const qs = archived ? "?status=archived" : "";
-  // pagination-safe
-  return apiAll(ctx, `/projects.json${qs}`);
+  // Fetch all pages, but return a compact shape to avoid tool output limits.
+  const projects = await apiAll(ctx, `/projects.json${qs}`);
+
+  return (projects || []).map((p) => ({
+    id: p.id,
+    name: p.name,
+    status: p.status,
+    // useful but small
+    created_at: p.created_at,
+    updated_at: p.updated_at,
+    app_url: p.app_url,
+    url: p.url,
+  }));
 }
 
 async function projectByName(ctx, name, { archived = false } = {}) {

@@ -23,9 +23,9 @@ function sleep(ms) {
 function parseLinkHeader(link) {
   if (!link) return {};
   const out = {};
-  const parts = String(link).split(",").map((s) => s.trim());
+  const parts = link.split(",").map((s) => s.trim());
   for (const part of parts) {
-    const m = part.match(/<([^>]+)>\s*;\s*rel="?([^";]+)"?/i);
+    const m = part.match(/<([^>]+)>\s*;\s*rel="([^"]+)"/i);
     if (m) out[m[2]] = m[1];
   }
   return out;
@@ -183,8 +183,6 @@ export async function basecampFetchAll(
   const all = [];
   let pages = 0;
 
-  let pageSizeGuess = null;
-
   while (url && pages < maxPages) {
     const httpHeaders = {
       Authorization: `Bearer ${TOKEN?.access_token}`,
@@ -231,24 +229,9 @@ export async function basecampFetchAll(
 
         all.push(...data);
 
-        const link = res.headers.get("link") || res.headers.get("Link");
-const { next } = parseLinkHeader(link);
-
-if (pageSizeGuess === null) pageSizeGuess = Array.isArray(data) ? data.length : null;
-
-let nextUrl = next || null;
-if (!nextUrl && pageSizeGuess && Array.isArray(data) && data.length === pageSizeGuess) {
-  try {
-    const u = new URL(url);
-    const curPage = Number(u.searchParams.get("page") || "1");
-    u.searchParams.set("page", String(curPage + 1));
-    nextUrl = u.toString();
-  } catch {
-    // ignore
-  }
-}
-
-url = nextUrl;
+        const link = res.headers.get("link");
+        const { next } = parseLinkHeader(link);
+        url = next || null;
 
         pages++;
         if (url) await sleep(pageDelayMs);

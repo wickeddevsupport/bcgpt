@@ -67,16 +67,50 @@ function normalizeBasecampUrl(path, accountId) {
   return `${BASECAMP_API}/${accountId}${p}`;
 }
 
+function setQueryParam(u, key, value) {
+  const url = new URL(u);
+  url.searchParams.set(key, String(value));
+  return url.toString();
+}
+
+function getQueryParam(u, key) {
+  try {
+    const url = new URL(u);
+    return url.searchParams.get(key);
+  } catch {
+    return null;
+  }
+}
+
 function parseLinkHeader(link) {
-  // Minimal Link parser:
-  // Supports both: rel="next" and rel=next
+  // Robust RFC5988-ish Link parser (order-insensitive params)
+  // Handles: <url>; rel="next"; title="Next", <url>; title="..."; rel=next
   if (!link) return {};
   const out = {};
-  const parts = String(link).split(",").map((s) => s.trim());
+  const parts = String(link).split(",").map((s) => s.trim()).filter(Boolean);
+
   for (const part of parts) {
-    const m = part.match(/<([^>]+)>\s*;\s*rel="?([^";]+)"?/i);
-    if (m) out[m[2]] = m[1];
+    const urlMatch = part.match(/<([^>]+)>/);
+    if (!urlMatch) continue;
+    const url = urlMatch[1];
+
+    const params = {};
+    const paramChunks = part.split(";").slice(1).map((s) => s.trim()).filter(Boolean);
+    for (const chunk of paramChunks) {
+      const eq = chunk.indexOf("=");
+      if (eq === -1) continue;
+      const k = chunk.slice(0, eq).trim().toLowerCase();
+      let v = chunk.slice(eq + 1).trim();
+      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+        v = v.slice(1, -1);
+      }
+      params[k] = v;
+    }
+
+    const rel = params["rel"];
+    if (rel) out[rel] = url;
   }
+
   return out;
 }
 
@@ -189,8 +223,13 @@ async function basecampFetch(token, path, opts = {}) {
   }
 
   // Pagination: aggregate pages when response is an array
+  // Try to increase page size where supported to reduce number of requests.
+  const PER_PAGE = 100;
+  if (!/\bper_page=\d+\b/i.test(url)) {
+    url = setQueryParam(url, "per_page", PER_PAGE);
+  }
+
   const aggregated = [];
-  let pageSizeGuess = null;
   let page = 0;
 
   while (url && page < maxPages) {
@@ -199,26 +238,20 @@ async function basecampFetch(token, path, opts = {}) {
     if (Array.isArray(data)) aggregated.push(...data);
     else return data; // Not an array => stop pagination and return as-is.
 
-    const link = respHeaders?.get?.("link") || respHeaders?.get?.("Link") || null;
-const { next } = parseLinkHeader(link);
-
-// Fallback pagination when Link header is missing/stripped:
-// Basecamp often returns 15 items per page by default.
-if (pageSizeGuess === null) pageSizeGuess = Array.isArray(data) ? data.length : null;
-
-let nextUrl = next || null;
-if (!nextUrl && pageSizeGuess && Array.isArray(data) && data.length === pageSizeGuess) {
-  try {
-    const u = new URL(url);
-    const curPage = Number(u.searchParams.get("page") || "1");
-    u.searchParams.set("page", String(curPage + 1));
-    nextUrl = u.toString();
-  } catch {
-    // ignore
-  }
-}
-
-url = nextUrl;
+    const link = respHeaders?.get?.("link") || null;
+    const { next } = parseLinkHeader(link);
+    if (next) {
+      url = next;
+    } else {
+      // Fallback: some endpoints omit Link headers. Use page=1..N until we see a short/empty page.
+      const curPage = Number(getQueryParam(url, "page") || String(page + 1));
+      const lastCount = Array.isArray(data) ? data.length : 0;
+      if (lastCount >= PER_PAGE) {
+        url = setQueryParam(url, "page", curPage + 1);
+      } else {
+        url = null;
+      }
+    }
 
     page++;
     if (url) await sleep(pageDelayMs);
