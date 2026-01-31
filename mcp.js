@@ -1924,12 +1924,39 @@ export async function handleMCP(reqBody, ctx) {
 
     // ===== NEW UPLOADS ENDPOINTS =====
     if (name === "list_uploads") {
-      const p = await projectByName(ctx, args.project);
-      const vaults = await listVaults(ctx, p.id);
-      const vaultId = args.vault_id || (vaults?.[0]?.id);
-      if (!vaultId) return fail(id, { code: "NO_VAULT", message: "No vault found for this project." });
-      const uploads = await listUploads(ctx, p.id, vaultId);
-      return ok(id, { project: { id: p.id, name: p.name }, vault_id: vaultId, uploads, count: uploads.length });
+      try {
+        const p = await projectByName(ctx, args.project);
+        const vaults = await listVaults(ctx, p.id);
+        const vaultId = args.vault_id || (vaults?.[0]?.id);
+        if (!vaultId) return fail(id, { code: "NO_VAULT", message: "No vault found for this project." });
+        const uploads = await listUploads(ctx, p.id, vaultId);
+
+        // INTELLIGENT CHAINING: Enrich uploads with person/project details
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `uploads for ${p.name}`);
+        const enricher = intelligent.createEnricher(ctx_intel);
+
+        const enrichedUploads = await Promise.all(
+          uploads.map(u => enricher.enrich({ ...u, bucket: { id: p.id, name: p.name } }, {
+            getPerson: (id) => ctx_intel.getPerson(id),
+            getProject: (id) => ctx_intel.getProject(id)
+          }))
+        );
+
+        return ok(id, { project: { id: p.id, name: p.name }, vault_id: vaultId, uploads: enrichedUploads, count: enrichedUploads.length, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[list_uploads] Error:`, e.message);
+        // Fallback to non-enriched uploads
+        try {
+          const p = await projectByName(ctx, args.project);
+          const vaults = await listVaults(ctx, p.id);
+          const vaultId = args.vault_id || (vaults?.[0]?.id);
+          if (!vaultId) return fail(id, { code: "NO_VAULT", message: "No vault found for this project." });
+          const uploads = await listUploads(ctx, p.id, vaultId);
+          return ok(id, { project: { id: p.id, name: p.name }, vault_id: vaultId, uploads, count: uploads.length, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "LIST_UPLOADS_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     if (name === "get_upload") {
