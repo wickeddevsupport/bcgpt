@@ -999,10 +999,13 @@ async function getRecordings(ctx, type, { bucket = null, status = "active", sort
     created_at: r.created_at,
     updated_at: r.updated_at,
     status: r.status,
-    bucket: r.bucket?.name,
+    bucket: r.bucket,
     bucket_id: r.bucket?.id,
     creator: r.creator?.name,
     creator_id: r.creator?.id,
+    assignee_ids: r.assignee_ids,
+    completed: r.completed,
+    completion: r.completion,
     app_url: r.app_url,
   }));
 }
@@ -1967,8 +1970,31 @@ export async function handleMCP(reqBody, ctx) {
 
     // ===== NEW RECORDINGS ENDPOINTS =====
     if (name === "get_recordings") {
-      const recordings = await getRecordings(ctx, args.type, { bucket: args.bucket, status: args.status });
-      return ok(id, { type: args.type, recordings, count: recordings.length });
+      try {
+        const recordings = await getRecordings(ctx, args.type, { bucket: args.bucket, status: args.status });
+
+        // INTELLIGENT CHAINING: Enrich recordings with person/project details
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `recordings ${args.type || ""}`.trim());
+        const enricher = intelligent.createEnricher(ctx_intel);
+
+        const enrichedRecordings = await Promise.all(
+          recordings.map(r => enricher.enrich(r, {
+            getPerson: (id) => ctx_intel.getPerson(id),
+            getProject: (id) => ctx_intel.getProject(id)
+          }))
+        );
+
+        return ok(id, { type: args.type, recordings: enrichedRecordings, count: enrichedRecordings.length, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[get_recordings] Error:`, e.message);
+        // Fallback to non-enriched recordings
+        try {
+          const recordings = await getRecordings(ctx, args.type, { bucket: args.bucket, status: args.status });
+          return ok(id, { type: args.type, recordings, count: recordings.length, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "GET_RECORDINGS_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     if (name === "trash_recording") {
