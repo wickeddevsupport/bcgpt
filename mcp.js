@@ -1872,10 +1872,42 @@ export async function handleMCP(reqBody, ctx) {
 
     // ===== NEW COMMENTS ENDPOINTS =====
     if (name === "list_comments") {
-      const p = await projectByName(ctx, args.project);
-      const result = await listComments(ctx, p.id, args.recording_id);
-      const comments = result.comments || [];
-      return ok(id, { project: { id: p.id, name: p.name }, recording_id: args.recording_id, comments, count: comments.length, _meta: result._meta });
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await listComments(ctx, p.id, args.recording_id);
+        const comments = result.comments || [];
+
+        // INTELLIGENT CHAINING: Enrich comments with person/project details
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `comments for ${args.recording_id}`);
+        const enricher = intelligent.createEnricher(ctx_intel);
+
+        const enrichedComments = await Promise.all(
+          comments.map(c => enricher.enrich(c, {
+            getPerson: (id) => ctx_intel.getPerson(id),
+            getProject: (id) => ctx_intel.getProject(id)
+          }))
+        );
+
+        return ok(id, {
+          project: { id: p.id, name: p.name },
+          recording_id: args.recording_id,
+          comments: enrichedComments,
+          count: enrichedComments.length,
+          _meta: result._meta,
+          metrics: ctx_intel.getMetrics()
+        });
+      } catch (e) {
+        console.error(`[list_comments] Error:`, e.message);
+        // Fallback to non-enriched comments
+        try {
+          const p = await projectByName(ctx, args.project);
+          const result = await listComments(ctx, p.id, args.recording_id);
+          const comments = result.comments || [];
+          return ok(id, { project: { id: p.id, name: p.name }, recording_id: args.recording_id, comments, count: comments.length, _meta: result._meta, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "LIST_COMMENTS_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     if (name === "get_comment") {
