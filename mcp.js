@@ -412,6 +412,7 @@ async function searchProject(ctx, projectId, { query } = {}) {
     console.log(`[searchProject] Found ${arr.length} results in project`);
     
     return arr.map((r) => ({
+      id: r.id,
       type: r.type,
       title: r.title,
       plain_text_content: r.plain_text_content,
@@ -419,6 +420,12 @@ async function searchProject(ctx, projectId, { query } = {}) {
       app_url: r.app_url,
       created_at: r.created_at,
       updated_at: r.updated_at,
+      bucket: r.bucket,
+      creator_id: r.creator_id,
+      assignee_ids: r.assignee_ids,
+      status: r.status,
+      completed: r.completed,
+      completion: r.completion,
     }));
   } catch (e) {
     console.error(`[searchProject] Error searching project ${projectId}:`, e.message);
@@ -1062,8 +1069,13 @@ async function searchRecordings(ctx, query, { bucket_id = null, type = null } = 
     plain_text_content: r.plain_text_content,
     created_at: r.created_at,
     updated_at: r.updated_at,
-    bucket: r.bucket?.name,
+    bucket: r.bucket,
     bucket_id: r.bucket?.id,
+    creator_id: r.creator?.id,
+    assignee_ids: r.assignee_ids,
+    status: r.status,
+    completed: r.completed,
+    completion: r.completion,
     app_url: r.app_url,
     url: r.url,
   }));
@@ -1926,15 +1938,40 @@ export async function handleMCP(reqBody, ctx) {
     }
 
     // ===== NEW SEARCH ENDPOINTS =====
-    if (name === "search_project") {
-      const p = await projectByName(ctx, args.project);
-      const results = await searchProject(ctx, p.id, { query: args.query });
-      return ok(id, { project: { id: p.id, name: p.name }, query: args.query, results, count: results.length });
-    }
-
     if (name === "search_recordings") {
-      const results = await searchRecordings(ctx, args.query, { bucket: args.bucket });
-      return ok(id, { query: args.query, results, count: results.length });
+      try {
+        const results = await searchRecordings(ctx, args.query, { bucket_id: args.bucket });
+        
+        // INTELLIGENT CHAINING: Enrich search results with person/project details
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, args.query);
+        const enricher = intelligent.createEnricher(ctx_intel);
+        
+        let enrichedResults = results;
+        if (Array.isArray(results)) {
+          enrichedResults = await Promise.all(
+            results.map(r => enricher.enrich(r, {
+              getPerson: (id) => ctx_intel.getPerson(id),
+              getProject: (id) => ctx_intel.getProject(id)
+            }))
+          );
+        }
+        
+        return ok(id, { 
+          query: args.query, 
+          results: enrichedResults, 
+          count: enrichedResults.length,
+          metrics: ctx_intel.getMetrics()
+        });
+      } catch (e) {
+        console.error(`[search_recordings] Error:`, e.message);
+        // Fallback to non-enriched search
+        try {
+          const results = await searchRecordings(ctx, args.query, { bucket_id: args.bucket });
+          return ok(id, { query: args.query, results, count: results.length, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "SEARCH_RECORDINGS_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     // Raw
