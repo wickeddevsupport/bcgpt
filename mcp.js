@@ -335,6 +335,40 @@ async function listTodosForProject(ctx, projectId) {
   return groups;
 }
 
+function normalizeQuery(q) {
+  return String(q || "").trim();
+}
+
+// Update todo details (preserve existing fields unless overridden)
+async function updateTodoDetails(ctx, projectId, todoId, updates = {}) {
+  const current = await api(ctx, `/buckets/${projectId}/todos/${todoId}.json`);
+
+  const body = {
+    content: (updates.content ?? current?.content ?? current?.title ?? "").trim()
+  };
+  if (!body.content) throw new Error("Missing content for todo update.");
+
+  if ("description" in updates) body.description = updates.description;
+  else if (current?.description) body.description = current.description;
+
+  if ("assignee_ids" in updates) body.assignee_ids = updates.assignee_ids;
+  else if (Array.isArray(current?.assignee_ids)) body.assignee_ids = current.assignee_ids;
+
+  if ("completion_subscriber_ids" in updates) body.completion_subscriber_ids = updates.completion_subscriber_ids;
+  else if (Array.isArray(current?.completion_subscriber_ids)) body.completion_subscriber_ids = current.completion_subscriber_ids;
+
+  if ("notify" in updates) body.notify = updates.notify;
+  else if (typeof current?.notify === "boolean") body.notify = current.notify;
+
+  if ("due_on" in updates) body.due_on = updates.due_on;
+  else if (current?.due_on) body.due_on = current.due_on;
+
+  if ("starts_on" in updates) body.starts_on = updates.starts_on;
+  else if (current?.starts_on) body.starts_on = current.starts_on;
+
+  return api(ctx, `/buckets/${projectId}/todos/${todoId}.json`, { method: "PUT", body });
+}
+
 /**
  * Helper: find a todo by ID within a project
  * Searches across all todolists in the todoset
@@ -1144,6 +1178,26 @@ export async function handleMCP(reqBody, ctx) {
             required: ["project"],
             additionalProperties: false
           }),
+          tool("get_person_assignments", "List todos assigned to a specific person within a project.", {
+            type: "object",
+            properties: { project: { type: "string" }, person: { type: "string" } },
+            required: ["project", "person"],
+            additionalProperties: false
+          }),
+          tool("list_assigned_to_me", "List todos assigned to the current user (optionally within a project).", {
+            type: "object",
+            properties: { project: { type: "string", nullable: true } },
+            additionalProperties: false
+          }),
+          tool("smart_action", "Smart router: decide which action to call based on natural language query and context.", {
+            type: "object",
+            properties: { 
+              query: { type: "string" },
+              project: { type: "string", nullable: true }
+            },
+            required: ["query"],
+            additionalProperties: false
+          }),
 
           tool("list_todos_for_project", "List todolists + todos for a project by name.", {
             type: "object",
@@ -1165,6 +1219,22 @@ export async function handleMCP(reqBody, ctx) {
               assignee_ids: { type: "array", items: { type: "integer" }, nullable: true }
             },
             required: ["project", "task"],
+            additionalProperties: false
+          }),
+          tool("update_todo_details", "Update a to-do in a project. Fields omitted are preserved.", {
+            type: "object",
+            properties: {
+              project: { type: "string" },
+              todo_id: { type: "integer" },
+              content: { type: "string", nullable: true },
+              description: { type: "string", nullable: true },
+              assignee_ids: { type: "array", items: { type: "integer" }, nullable: true },
+              completion_subscriber_ids: { type: "array", items: { type: "integer" }, nullable: true },
+              notify: { type: "boolean", nullable: true },
+              due_on: { type: "string", nullable: true },
+              starts_on: { type: "string", nullable: true }
+            },
+            required: ["project", "todo_id"],
             additionalProperties: false
           }),
 
@@ -1682,6 +1752,139 @@ export async function handleMCP(reqBody, ctx) {
       }
     }
 
+    if (name === "get_person_assignments") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const groups = await listTodosForProject(ctx, p.id);
+
+        const ctx_intel = new RequestContext(ctx, `assignments for ${args.person}`);
+        await ctx_intel.preloadEssentials({ loadPeople: true, loadProjects: true });
+        const personInput = normalizeQuery(args.person);
+        let person = null;
+        if (/^\d+$/.test(personInput)) {
+          person = ctx_intel.getPerson(Number(personInput));
+        }
+        if (!person) {
+          person = ctx_intel.findPersonByName(args.person);
+        }
+        if (!person) {
+          const allPeople = await listAllPeople(ctx);
+          const candidates = (allPeople || []).map((p) => ({ id: p.id, name: p.name }));
+          const best = resolveBestEffort(candidates, args.person) || null;
+          if (best) person = allPeople.find(p => p.id === best.id) || null;
+        }
+        if (!person) return ok(id, { error: "Person not found", searched_for: args.person, project: { id: p.id, name: p.name } });
+
+        const todos = groups.flatMap(g => g.todos || []);
+        const assigned = todos.filter(t => Array.isArray(t.assignee_ids) && t.assignee_ids.includes(person.id));
+
+        const enricher = intelligent.createEnricher(ctx_intel);
+        const enriched = await enricher.formatTodoResults(assigned);
+
+        return ok(id, {
+          project: { id: p.id, name: p.name },
+          person: { id: person.id, name: person.name, email: person.email_address },
+          todos: enriched,
+          count: enriched.length,
+          metrics: ctx_intel.getMetrics()
+        });
+      } catch (e) {
+        console.error(`[get_person_assignments] Error:`, e.message);
+        // Fallback: global scan across all open todos
+        try {
+          const ctx_intel = new RequestContext(ctx, `assignments for ${args.person}`);
+          await ctx_intel.preloadEssentials({ loadPeople: true, loadProjects: true });
+
+          const personInput = normalizeQuery(args.person);
+          let person = null;
+          if (/^\d+$/.test(personInput)) {
+            person = ctx_intel.getPerson(Number(personInput));
+          }
+          if (!person) {
+            person = ctx_intel.findPersonByName(args.person);
+          }
+          if (!person) {
+            const allPeople = await listAllPeople(ctx);
+            const candidates = (allPeople || []).map((p) => ({ id: p.id, name: p.name }));
+            const best = resolveBestEffort(candidates, args.person) || null;
+            if (best) person = allPeople.find(p => p.id === best.id) || null;
+          }
+          if (!person) return ok(id, { error: "Person not found", searched_for: args.person });
+
+          const rows = await listAllOpenTodos(ctx);
+          const todos = rows.map(r => r.raw).filter(Boolean);
+          const assigned = todos.filter(t => Array.isArray(t.assignee_ids) && t.assignee_ids.includes(person.id));
+
+          const enricher = intelligent.createEnricher(ctx_intel);
+          const enriched = await enricher.formatTodoResults(assigned);
+
+          return ok(id, {
+            person: { id: person.id, name: person.name, email: person.email_address },
+            todos: enriched,
+            count: enriched.length,
+            fallback: true,
+            metrics: ctx_intel.getMetrics()
+          });
+        } catch (fbErr) {
+          return fail(id, { code: "GET_PERSON_ASSIGNMENTS_ERROR", message: fbErr.message });
+        }
+      }
+    }
+
+    if (name === "list_assigned_to_me") {
+      try {
+        const profile = await getMyProfile(ctx);
+        const ctx_intel = new RequestContext(ctx, `assigned to me`);
+        await ctx_intel.preloadEssentials({ loadPeople: true, loadProjects: true });
+
+        let todos = [];
+        if (args.project) {
+          const p = await projectByName(ctx, args.project);
+          const groups = await listTodosForProject(ctx, p.id);
+          todos = groups.flatMap(g => g.todos || []);
+        } else {
+          const rows = await listAllOpenTodos(ctx);
+          todos = rows.map(r => r.raw).filter(Boolean);
+        }
+
+        const assigned = todos.filter(t => Array.isArray(t.assignee_ids) && t.assignee_ids.includes(profile.id));
+        const enricher = intelligent.createEnricher(ctx_intel);
+        const enriched = await enricher.formatTodoResults(assigned);
+
+        return ok(id, {
+          person: { id: profile.id, name: profile.name, email: profile.email },
+          project: args.project ? { name: args.project } : null,
+          todos: enriched,
+          count: enriched.length,
+          metrics: ctx_intel.getMetrics()
+        });
+      } catch (e) {
+        console.error(`[list_assigned_to_me] Error:`, e.message);
+        // Fallback: global scan across all open todos
+        try {
+          const profile = await getMyProfile(ctx);
+          const ctx_intel = new RequestContext(ctx, `assigned to me fallback`);
+          await ctx_intel.preloadEssentials({ loadPeople: true, loadProjects: true });
+
+          const rows = await listAllOpenTodos(ctx);
+          const todos = rows.map(r => r.raw).filter(Boolean);
+          const assigned = todos.filter(t => Array.isArray(t.assignee_ids) && t.assignee_ids.includes(profile.id));
+          const enricher = intelligent.createEnricher(ctx_intel);
+          const enriched = await enricher.formatTodoResults(assigned);
+
+          return ok(id, {
+            person: { id: profile.id, name: profile.name, email: profile.email },
+            todos: enriched,
+            count: enriched.length,
+            fallback: true,
+            metrics: ctx_intel.getMetrics()
+          });
+        } catch (fbErr) {
+          return fail(id, { code: "LIST_ASSIGNED_TO_ME_ERROR", message: fbErr.message });
+        }
+      }
+    }
+
     if (name === "create_todo") {
       try {
         const p = await projectByName(ctx, args.project);
@@ -1733,6 +1936,114 @@ export async function handleMCP(reqBody, ctx) {
       } catch (e) {
         console.error(`[create_todo] Error:`, e.message);
         return fail(id, { code: "CREATE_TODO_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_todo_details") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const updated = await updateTodoDetails(ctx, p.id, Number(args.todo_id), {
+          content: args.content,
+          description: args.description,
+          assignee_ids: args.assignee_ids,
+          completion_subscriber_ids: args.completion_subscriber_ids,
+          notify: args.notify,
+          due_on: args.due_on,
+          starts_on: args.starts_on
+        });
+
+        const ctx_intel = new RequestContext(ctx, `updated todo`);
+        await ctx_intel.preloadEssentials({ loadPeople: true, loadProjects: true });
+        const enricher = intelligent.createEnricher(ctx_intel);
+        const enriched = await enricher.enrich(updated, {
+          getPerson: (id) => ctx_intel.getPerson(id),
+          getProject: (id) => ctx_intel.getProject(id)
+        });
+
+        return ok(id, { project: { id: p.id, name: p.name }, todo: enriched, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[update_todo_details] Error:`, e.message);
+        // Fallback: return existing todo if update failed
+        try {
+          const p = await projectByName(ctx, args.project);
+          const existing = await api(ctx, `/buckets/${p.id}/todos/${Number(args.todo_id)}.json`);
+          const ctx_intel = new RequestContext(ctx, `updated todo fallback`);
+          await ctx_intel.preloadEssentials({ loadPeople: true, loadProjects: true });
+          const enricher = intelligent.createEnricher(ctx_intel);
+          const enriched = await enricher.enrich(existing, {
+            getPerson: (id) => ctx_intel.getPerson(id),
+            getProject: (id) => ctx_intel.getProject(id)
+          });
+          return ok(id, { project: { id: p.id, name: p.name }, todo: enriched, fallback: true, metrics: ctx_intel.getMetrics() });
+        } catch (fbErr) {
+          return fail(id, { code: "UPDATE_TODO_DETAILS_ERROR", message: fbErr.message });
+        }
+      }
+    }
+
+    if (name === "smart_action") {
+      const query = normalizeQuery(args.query);
+      if (!query) return fail(id, { code: "BAD_REQUEST", message: "Missing query." });
+
+      try {
+        const analysis = intelligent.analyzeQuery(query);
+        const lower = query.toLowerCase();
+
+        // Quick intent rules
+        if (lower.includes("daily report")) {
+          const date = analysis.constraints.dueDate || new Date().toISOString().slice(0, 10);
+          const result = await intelligent.executeDailyReport(ctx, date);
+          return ok(id, { query, action: "daily_report", result });
+        }
+
+        if (lower.includes("assigned to me") || lower.includes("my todos")) {
+          const result = await handleMCP({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "list_assigned_to_me", arguments: { project: args.project } } }, ctx);
+          return ok(id, { query, action: "list_assigned_to_me", result: result?.result ?? result });
+        }
+
+        if (analysis.pattern === "person_finder" && analysis.personNames.length) {
+          const person = analysis.personNames[0];
+          if (args.project) {
+            const result = await handleMCP({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "get_person_assignments", arguments: { project: args.project, person } } }, ctx);
+            return ok(id, { query, action: "get_person_assignments", result: result?.result ?? result });
+          }
+        }
+
+        if (analysis.constraints.dueDate) {
+          if (args.project) {
+            const result = await handleMCP({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "list_todos_due", arguments: { date: analysis.constraints.dueDate, include_overdue: lower.includes("overdue"), project: args.project } } }, ctx);
+            return ok(id, { query, action: "list_todos_due", result: result?.result ?? result });
+          }
+          const rows = await listAllOpenTodos(ctx);
+          const todos = rows.filter(r => r.due_on === analysis.constraints.dueDate).map(r => r.raw).filter(Boolean);
+          return ok(id, { query, action: "list_todos_due_fallback", date: analysis.constraints.dueDate, todos, count: todos.length });
+        }
+
+        if (analysis.pattern === "assignment" && args.project) {
+          const result = await handleMCP({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "assignment_report", arguments: { project: args.project } } }, ctx);
+          return ok(id, { query, action: "assignment_report", result: result?.result ?? result });
+        }
+
+        if (analysis.pattern === "search_enrich" || lower.includes("search") || lower.includes("find")) {
+          if (args.project) {
+            const result = await handleMCP({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "search_project", arguments: { project: args.project, query } } }, ctx);
+            return ok(id, { query, action: "search_project", result: result?.result ?? result });
+          }
+          const result = await handleMCP({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "search_recordings", arguments: { query } } }, ctx);
+          return ok(id, { query, action: "search_recordings", result: result?.result ?? result });
+        }
+
+        // Default: global search
+        const result = await handleMCP({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "search_recordings", arguments: { query } } }, ctx);
+        return ok(id, { query, action: "search_recordings", result: result?.result ?? result });
+      } catch (e) {
+        console.error(`[smart_action] Error:`, e.message);
+        try {
+          const result = await handleMCP({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "search_recordings", arguments: { query } } }, ctx);
+          return ok(id, { query, action: "search_recordings", result: result?.result ?? result, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "SMART_ACTION_ERROR", message: fbErr.message });
+        }
       }
     }
 

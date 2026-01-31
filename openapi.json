@@ -402,24 +402,28 @@
         }
       }
     },
-    "/action/get_hill_chart": {
+    "/action/smart_action": {
       "post": {
-        "summary": "Get the hill chart for a project",
-        "operationId": "get_hill_chart",
+        "summary": "Smart router for natural language queries",
+        "description": "Routes a query to the best action based on context; falls back to global search if needed.",
+        "operationId": "smart_action",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": { "project": { "type": "string" } },
-                "required": ["project"]
+                "properties": {
+                  "query": { "type": "string" },
+                  "project": { "type": "string", "description": "Optional project context" }
+                },
+                "required": ["query"]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Hill chart data" }
+          "200": { "description": "Smart action response" }
         }
       }
     },
