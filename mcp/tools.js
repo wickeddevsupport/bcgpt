@@ -540,7 +540,11 @@ export function getTools() {
 
     tool("search_recordings", "Search all recordings across projects by title/content.", {
       type: "object",
-      properties: { query: { type: "string" }, bucket: { type: "integer", nullable: true } },
+      properties: {
+        query: { type: "string" },
+        bucket: { type: ["integer", "string"], nullable: true },
+        type: { type: "string", nullable: true, description: "Filter by recording type (e.g., comment, message, todo)" }
+      },
       required: ["query"],
       additionalProperties: false
     }),

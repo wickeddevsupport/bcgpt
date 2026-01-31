@@ -693,7 +693,8 @@
                 "type": "object",
                 "properties": {
                   "query": { "type": "string" },
-                  "bucket": { "type": "string" }
+                  "bucket": { "type": "string", "description": "Project (bucket) id or name" },
+                  "type": { "type": "string", "description": "Filter by recording type (e.g., comment, message, todo)" }
                 },
                 "required": ["query"]
               }

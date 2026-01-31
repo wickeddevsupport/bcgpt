@@ -54,7 +54,7 @@
 import crypto from "crypto";
 import { basecampFetch, basecampFetchAll } from "./basecamp.js";
 import { resolveByName, resolveBestEffort } from "./resolvers.js";
-import { indexSearchItem } from "./db.js";
+import { indexSearchItem, searchIndex } from "./db.js";
 import { getTools } from "./mcp/tools.js";
 
 // Intelligent chaining modules
@@ -2532,9 +2532,60 @@ export async function handleMCP(reqBody, ctx) {
       const query = normalizeQuery(args.query);
       if (!query) return fail(id, { code: "BAD_REQUEST", message: "Missing query." });
 
+      const callTool = async (toolName, toolArgs) => {
+        const res = await handleMCP({ jsonrpc: "2.0", id, method: "tools/call", params: { name: toolName, arguments: toolArgs } }, ctx);
+        const payload = res?.result ?? res;
+        if (res?.error || payload?.error) {
+          const err = payload?.error || res?.error;
+          throw toolError(err?.code || "TOOL_ERROR", err?.message || "Tool error", { tool: toolName, data: err });
+        }
+        return payload;
+      };
+
+      const extractSearchQuery = (raw) => {
+        const stop = [
+          "find", "show", "search", "lookup", "first", "latest", "recent", "containing", "with", "about",
+          "comment", "comments", "message", "messages", "todo", "todos", "task", "tasks",
+          "document", "documents", "file", "files", "schedule", "event", "events", "card", "cards"
+        ];
+        const tokens = String(raw || "")
+          .toLowerCase()
+          .replace(/[^a-z0-9\\s]/g, " ")
+          .split(/\\s+/)
+          .filter(Boolean)
+          .filter(t => !stop.includes(t));
+        return tokens.join(" ").trim();
+      };
+
+      const searchLocalIndex = (q, { projectId = null, type = null, limit = 50 } = {}) => {
+        if (!q) return [];
+        const hits = searchIndex(q, { type, projectId, limit, userKey: ctx.userKey });
+        return (hits || []).map((h) => ({
+          id: h.object_id,
+          type: h.type,
+          title: h.title,
+          content: h.content,
+          url: h.url,
+          project_id: h.project_id,
+          updated_at: h.updated_at,
+          source: "db"
+        }));
+      };
+
       try {
         const analysis = intelligent.analyzeQuery(query);
         const lower = query.toLowerCase();
+        const searchQuery = extractSearchQuery(query) || query;
+        const wantsComments = /comment(s)?/.test(lower);
+        const ctx_intel = new RequestContext(ctx, `smart_action: ${query}`);
+        await ctx_intel.preloadEssentials({ loadPeople: true, loadProjects: true });
+
+        let project = null;
+        let dock = null;
+        if (args.project) {
+          project = await projectByName(ctx, args.project);
+          dock = await getDock(ctx, project.id);
+        }
 
         // Quick intent rules
         if (lower.includes("daily report")) {
@@ -2544,22 +2595,22 @@ export async function handleMCP(reqBody, ctx) {
         }
 
         if (lower.includes("assigned to me") || lower.includes("my todos")) {
-          const result = await handleMCP({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "list_assigned_to_me", arguments: { project: args.project } } }, ctx);
-          return ok(id, { query, action: "list_assigned_to_me", result: result?.result ?? result });
+          const result = await callTool("list_assigned_to_me", { project: args.project });
+          return ok(id, { query, action: "list_assigned_to_me", result });
         }
 
         if (analysis.pattern === "person_finder" && analysis.personNames.length) {
           const person = analysis.personNames[0];
           if (args.project) {
-            const result = await handleMCP({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "get_person_assignments", arguments: { project: args.project, person } } }, ctx);
-            return ok(id, { query, action: "get_person_assignments", result: result?.result ?? result });
+            const result = await callTool("get_person_assignments", { project: args.project, person });
+            return ok(id, { query, action: "get_person_assignments", result });
           }
         }
 
         if (analysis.constraints.dueDate) {
           if (args.project) {
-            const result = await handleMCP({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "list_todos_due", arguments: { date: analysis.constraints.dueDate, include_overdue: lower.includes("overdue"), project: args.project } } }, ctx);
-            return ok(id, { query, action: "list_todos_due", result: result?.result ?? result });
+            const result = await callTool("list_todos_due", { date: analysis.constraints.dueDate, include_overdue: lower.includes("overdue"), project: args.project });
+            return ok(id, { query, action: "list_todos_due", result });
           }
           const rows = await listAllOpenTodos(ctx);
           const todos = rows.filter(r => r.due_on === analysis.constraints.dueDate).map(r => r.raw).filter(Boolean);
@@ -2567,27 +2618,46 @@ export async function handleMCP(reqBody, ctx) {
         }
 
         if (analysis.pattern === "assignment" && args.project) {
-          const result = await handleMCP({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "assignment_report", arguments: { project: args.project } } }, ctx);
-          return ok(id, { query, action: "assignment_report", result: result?.result ?? result });
+          const result = await callTool("assignment_report", { project: args.project });
+          return ok(id, { query, action: "assignment_report", result });
         }
 
         if (analysis.pattern === "search_enrich" || lower.includes("search") || lower.includes("find")) {
-          if (args.project) {
-            const result = await handleMCP({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "search_project", arguments: { project: args.project, query } } }, ctx);
-            return ok(id, { query, action: "search_project", result: result?.result ?? result });
+          if (project) {
+            const result = await callTool("search_recordings", { query: searchQuery, bucket: project.id, type: wantsComments ? "comment" : undefined });
+            if ((result?.results || []).length === 0) {
+              const local = searchLocalIndex(searchQuery, { projectId: project.id });
+              if (local.length) {
+                return ok(id, { query, action: "search_index_fallback", project: { id: project.id, name: project.name }, results: local, count: local.length, dock });
+              }
+            }
+            return ok(id, { query, action: "search_recordings", result, project: { id: project.id, name: project.name }, dock });
           }
-          const result = await handleMCP({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "search_recordings", arguments: { query } } }, ctx);
-          return ok(id, { query, action: "search_recordings", result: result?.result ?? result });
+          const result = await callTool("search_recordings", { query: searchQuery, type: wantsComments ? "comment" : undefined });
+          if ((result?.results || []).length === 0) {
+            const local = searchLocalIndex(searchQuery);
+            if (local.length) {
+              return ok(id, { query, action: "search_index_fallback", results: local, count: local.length });
+            }
+          }
+          return ok(id, { query, action: "search_recordings", result });
         }
 
         // Default: global search
-        const result = await handleMCP({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "search_recordings", arguments: { query } } }, ctx);
-        return ok(id, { query, action: "search_recordings", result: result?.result ?? result });
+        const result = await callTool("search_recordings", { query: searchQuery, type: wantsComments ? "comment" : undefined });
+        if ((result?.results || []).length === 0) {
+          const local = searchLocalIndex(searchQuery);
+          if (local.length) {
+            return ok(id, { query, action: "search_index_fallback", results: local, count: local.length });
+          }
+        }
+        return ok(id, { query, action: "search_recordings", result });
       } catch (e) {
         console.error(`[smart_action] Error:`, e.message);
         try {
-          const result = await handleMCP({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "search_recordings", arguments: { query } } }, ctx);
-          return ok(id, { query, action: "search_recordings", result: result?.result ?? result, fallback: true });
+          const safeQuery = extractSearchQuery(query) || query;
+          const result = await callTool("search_recordings", { query: safeQuery });
+          return ok(id, { query, action: "search_recordings", result, fallback: true });
         } catch (fbErr) {
           return fail(id, { code: "SMART_ACTION_ERROR", message: fbErr.message });
         }
@@ -4803,7 +4873,7 @@ export async function handleMCP(reqBody, ctx) {
     // ===== NEW SEARCH ENDPOINTS =====
     if (name === "search_recordings") {
       try {
-        const results = await searchRecordings(ctx, args.query, { bucket_id: args.bucket });
+        const results = await searchRecordings(ctx, args.query, { bucket_id: args.bucket, type: args.type });
         
         // INTELLIGENT CHAINING: Enrich search results with person/project details
         const ctx_intel = await intelligent.initializeIntelligentContext(ctx, args.query);
@@ -4829,7 +4899,7 @@ export async function handleMCP(reqBody, ctx) {
         console.error(`[search_recordings] Error:`, e.message);
         // Fallback to non-enriched search
         try {
-          const results = await searchRecordings(ctx, args.query, { bucket_id: args.bucket });
+          const results = await searchRecordings(ctx, args.query, { bucket_id: args.bucket, type: args.type });
           return ok(id, { query: args.query, results, count: results.length, fallback: true });
         } catch (fbErr) {
           return fail(id, { code: "SEARCH_RECORDINGS_ERROR", message: fbErr.message });
