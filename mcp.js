@@ -1990,9 +1990,30 @@ export async function handleMCP(reqBody, ctx) {
     }
 
     if (name === "get_comment") {
-      const p = await projectByName(ctx, args.project);
-      const comment = await getComment(ctx, p.id, args.comment_id);
-      return ok(id, comment);
+      try {
+        const p = await projectByName(ctx, args.project);
+        const comment = await getComment(ctx, p.id, args.comment_id);
+
+        // INTELLIGENT CHAINING: Enrich comment with person/project details
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `comment ${args.comment_id}`);
+        const enricher = intelligent.createEnricher(ctx_intel);
+        const enrichedComment = await enricher.enrich({ ...comment, bucket: { id: p.id, name: p.name } }, {
+          getPerson: (id) => ctx_intel.getPerson(id),
+          getProject: (id) => ctx_intel.getProject(id)
+        });
+
+        return ok(id, { ...enrichedComment, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[get_comment] Error:`, e.message);
+        // Fallback to non-enriched comment
+        try {
+          const p = await projectByName(ctx, args.project);
+          const comment = await getComment(ctx, p.id, args.comment_id);
+          return ok(id, { ...comment, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "GET_COMMENT_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     if (name === "create_comment") {
@@ -2039,9 +2060,30 @@ export async function handleMCP(reqBody, ctx) {
     }
 
     if (name === "get_upload") {
-      const p = await projectByName(ctx, args.project);
-      const upload = await getUpload(ctx, p.id, args.upload_id);
-      return ok(id, upload);
+      try {
+        const p = await projectByName(ctx, args.project);
+        const upload = await getUpload(ctx, p.id, args.upload_id);
+
+        // INTELLIGENT CHAINING: Enrich upload with person/project details
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `upload ${args.upload_id}`);
+        const enricher = intelligent.createEnricher(ctx_intel);
+        const enrichedUpload = await enricher.enrich({ ...upload, bucket: { id: p.id, name: p.name } }, {
+          getPerson: (id) => ctx_intel.getPerson(id),
+          getProject: (id) => ctx_intel.getProject(id)
+        });
+
+        return ok(id, { ...enrichedUpload, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[get_upload] Error:`, e.message);
+        // Fallback to non-enriched upload
+        try {
+          const p = await projectByName(ctx, args.project);
+          const upload = await getUpload(ctx, p.id, args.upload_id);
+          return ok(id, { ...upload, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "GET_UPLOAD_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     // ===== NEW RECORDINGS ENDPOINTS =====
