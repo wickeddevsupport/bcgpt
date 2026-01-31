@@ -2,9 +2,9 @@
 
 ## Executive Summary
 
-**Status**: ✅ **PHASE 3 COMPLETE**
+**Status**: ✅ **PHASE 3 COMPLETE** | ✅ **PHASE 3.5 COMPLETE**
 
-Expanded intelligent chaining integration from 2 handlers to 7 handlers. All Phase 3 implementations are production-ready, error-handled, and committed to GitHub.
+Expanded intelligent chaining integration from 2 handlers to 7 handlers (Phase 3), and completed Phase 3.5 with missing tools + smart routing + fallbacks. All changes are production-ready, error-handled, and committed to GitHub.
 
 **Commits This Phase**:
 - Commit 1: Phases 1-2 (8 intelligent chaining modules + 2 initial handlers)
@@ -191,14 +191,28 @@ try {
 6. ✅ list_todos_for_project - Todo enrichment
 7. ✅ create_todo - Result enrichment
 
-### Priority Remaining Handlers (Phase 3 Part 2)
+### Phase 3.5 Completion (Missing Tools + Smart Routing)
 
-**Candidates** (ready for next iteration):
-- get_person_assignments - Filter + enrichment
-- list_all_people - Person detail enrichment
-- update_todo_details - Return enriched result
-- get_project_status - Project metadata enrichment
-- list_assigned_to_me - Assignment enrichment
+**Completed**:
+- ✅ get_person_assignments - Intelligent filtering + enrichment + fallback
+- ✅ list_all_people - Enrichment + metrics + fallback
+- ✅ update_todo_details - Preserve fields + enrichment + fallback
+- ✅ list_assigned_to_me - Intelligent filtering + fallback
+- ✅ smart_action - Context-aware routing + global fallback
+
+**Outcome**:
+- Handles missing/unsupported endpoints by scanning cached/open todos when possible
+- Returns reasonable output instead of hard errors
+- Adds a smart router to reduce reliance on a long action list (30-action limit)
+
+## Intelligent Agent Readiness (Pre-Phase 4 Gate)
+
+✅ Query understanding (QueryParser)  
+✅ Multi-step chaining (executors + RequestContext)  
+✅ Enrichment (ResultEnricher)  
+✅ Fallbacks for missing endpoints (Phase 3.5)  
+✅ Smart routing (smart_action)  
+🟡 Advanced resilience (Phase 4: circuit breaker + health metrics still pending)
 
 ## Testing Checklist
 
