@@ -2017,9 +2017,30 @@ export async function handleMCP(reqBody, ctx) {
     }
 
     if (name === "create_comment") {
-      const p = await projectByName(ctx, args.project);
-      const comment = await createComment(ctx, p.id, args.recording_id, args.content);
-      return ok(id, { message: "Comment created", project: { id: p.id, name: p.name }, comment });
+      try {
+        const p = await projectByName(ctx, args.project);
+        const comment = await createComment(ctx, p.id, args.recording_id, args.content);
+
+        // INTELLIGENT CHAINING: Enrich created comment with person/project details
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `created comment`);
+        const enricher = intelligent.createEnricher(ctx_intel);
+        const enrichedComment = await enricher.enrich({ ...comment, bucket: { id: p.id, name: p.name } }, {
+          getPerson: (id) => ctx_intel.getPerson(id),
+          getProject: (id) => ctx_intel.getProject(id)
+        });
+
+        return ok(id, { message: "Comment created", project: { id: p.id, name: p.name }, comment: enrichedComment, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[create_comment] Error:`, e.message);
+        // Fallback to non-enriched comment
+        try {
+          const p = await projectByName(ctx, args.project);
+          const comment = await createComment(ctx, p.id, args.recording_id, args.content);
+          return ok(id, { message: "Comment created", project: { id: p.id, name: p.name }, comment, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "CREATE_COMMENT_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     // ===== NEW UPLOADS ENDPOINTS =====
