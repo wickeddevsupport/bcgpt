@@ -65,6 +65,47 @@ import * as intelligent from './intelligent-integration.js';
 function ok(id, result) { return { jsonrpc: "2.0", id, result }; }
 function fail(id, error) { return { jsonrpc: "2.0", id, error }; }
 
+function toolError(code, message, extra = {}) {
+  const err = new Error(message);
+  err.code = code;
+  Object.assign(err, extra);
+  return err;
+}
+
+function isApiError(e, status = null) {
+  if (!e || e.code !== "BASECAMP_API_ERROR") return false;
+  return status == null ? true : e.status === status;
+}
+
+function toolNoticeResult(id, e, { tool, project, empty }) {
+  if (!e) return null;
+  const code = e.code;
+  if (code !== "TOOL_NOT_ENABLED" && code !== "TOOL_UNAVAILABLE" && code !== "RESOURCE_NOT_FOUND") return null;
+  const notice = {
+    tool: e.tool || tool || null,
+    reason: code,
+    message: e.message,
+    hint: e.hint || null,
+    status: e.status || null,
+  };
+  const payload = { ...(empty || {}), notice };
+  if (project) payload.project = { id: project.id, name: project.name };
+  return ok(id, payload);
+}
+
+function toolFailResult(id, e) {
+  if (!e) return null;
+  const code = e.code;
+  if (code !== "TOOL_NOT_ENABLED" && code !== "TOOL_UNAVAILABLE" && code !== "RESOURCE_NOT_FOUND") return null;
+  return fail(id, {
+    code,
+    message: e.message,
+    tool: e.tool || null,
+    hint: e.hint || null,
+    status: e.status || null,
+  });
+}
+
 // ---------- Tiny in-memory cache ----------
 const CACHE = new Map(); // key -> { ts, value }
 const CACHE_TTL_MS = 60 * 1000;
@@ -226,6 +267,20 @@ function dockFind(dock, names) {
     if (hit) return hit;
   }
   return null;
+}
+
+async function requireDockTool(ctx, projectId, names, toolKey, { allowId = true } = {}) {
+  const dock = await getDock(ctx, projectId);
+  const tool = dockFind(dock, names);
+  if (!tool || (!tool.url && (!allowId || !tool.id))) {
+    throw toolError("TOOL_NOT_ENABLED", `${toolKey} tool is not enabled for this project.`, {
+      tool: toolKey,
+      projectId,
+      hint: "Enable the tool in the project’s Basecamp settings.",
+      status: 404,
+    });
+  }
+  return { dock, tool };
 }
 
 async function getProject(ctx, projectId) {
@@ -592,14 +647,38 @@ async function assignmentReport(ctx, projectName, { maxTodos = 250 } = {}) {
 async function listCardTables(ctx, projectId) {
   try {
     return apiAll(ctx, `/buckets/${projectId}/card_tables.json`);
-  } catch {
-    const dock = await getDock(ctx, projectId);
-    const card = dockFind(dock, ["card_table", "card_tables", "kanban", "kanban_board"]);
-    if (card?.url) {
-      const obj = await api(ctx, card.url);
-      return Array.isArray(obj) ? obj : [obj];
+  } catch (e) {
+    if (!isApiError(e, 404) && !isApiError(e, 403)) throw e;
+    const { tool: card } = await requireDockTool(
+      ctx,
+      projectId,
+      ["card_table", "card_tables", "kanban", "kanban_board"],
+      "card_tables"
+    );
+    try {
+      if (card?.url) {
+        const obj = await api(ctx, card.url);
+        return Array.isArray(obj) ? obj : [obj];
+      }
+      if (card?.id) {
+        const obj = await api(ctx, `/buckets/${projectId}/card_tables/${card.id}.json`);
+        return Array.isArray(obj) ? obj : [obj];
+      }
+      throw toolError("TOOL_UNAVAILABLE", "Card tables tool is enabled but missing a usable URL.", {
+        tool: "card_tables",
+        projectId,
+      });
+    } catch (inner) {
+      if (isApiError(inner, 404) || isApiError(inner, 403)) {
+        throw toolError("TOOL_UNAVAILABLE", "Card tables tool is not accessible for this project.", {
+          tool: "card_tables",
+          projectId,
+          hint: "Enable Card Tables in the project’s tools.",
+          status: inner.status,
+        });
+      }
+      throw inner;
     }
-    return [];
   }
 }
 
@@ -608,8 +687,25 @@ async function getCardTable(ctx, projectId, cardTableId) {
 }
 
 async function listCardTableColumns(ctx, projectId, cardTableId) {
-  const table = await api(ctx, `/buckets/${projectId}/card_tables/${cardTableId}.json`);
-  return Array.isArray(table?.lists) ? table.lists : [];
+  try {
+    const table = await api(ctx, `/buckets/${projectId}/card_tables/${cardTableId}.json`);
+    return Array.isArray(table?.lists) ? table.lists : [];
+  } catch (e) {
+    if (isApiError(e, 404)) {
+      try {
+        await requireDockTool(ctx, projectId, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
+      } catch (dockErr) {
+        throw dockErr;
+      }
+      throw toolError("RESOURCE_NOT_FOUND", `Card table ${cardTableId} not found in this project.`, {
+        tool: "card_tables",
+        projectId,
+        hint: "Call list_card_tables to get valid card table IDs.",
+        status: 404,
+      });
+    }
+    throw e;
+  }
 }
 
 async function getCardTableColumn(ctx, projectId, columnId) {
@@ -656,7 +752,7 @@ async function listCardTableCards(ctx, projectId, cardTableId) {
     // First get the card table with all its columns (lists)
     const cardTable = await api(ctx, `/buckets/${projectId}/card_tables/${cardTableId}.json`);
     if (!cardTable?.lists) return [];
-    
+
     // Fetch cards from each column and aggregate
     const allCards = [];
     for (const column of cardTable.lists) {
@@ -667,6 +763,19 @@ async function listCardTableCards(ctx, projectId, cardTableId) {
     }
     return allCards;
   } catch (e) {
+    if (isApiError(e, 404)) {
+      try {
+        await requireDockTool(ctx, projectId, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
+      } catch (dockErr) {
+        throw dockErr;
+      }
+      throw toolError("RESOURCE_NOT_FOUND", `Card table ${cardTableId} not found in this project.`, {
+        tool: "card_tables",
+        projectId,
+        hint: "Call list_card_tables to get valid card table IDs.",
+        status: 404,
+      });
+    }
     console.error(`[listCardTableCards] Error fetching cards for card table ${cardTableId}:`, e.message);
     return [];
   }
@@ -700,19 +809,24 @@ async function moveCard(ctx, projectId, cardId, { column_id, position } = {}) {
 
 // ---------- Hill Charts ----------
 async function getHillChartFromDock(ctx, projectId) {
-  const dock = await getDock(ctx, projectId);
-  const hill = dockFind(dock, ["hill_chart", "hill_charts"]);
-  if (!hill) return null;
+  const { tool: hill } = await requireDockTool(ctx, projectId, ["hill_chart", "hill_charts"], "hill_charts");
   if (hill.url) return api(ctx, hill.url);
   if (hill.id) return api(ctx, `/buckets/${projectId}/hill_charts/${hill.id}.json`);
-  return null;
+  throw toolError("TOOL_UNAVAILABLE", "Hill chart tool is enabled but missing a usable URL.", {
+    tool: "hill_charts",
+    projectId,
+  });
 }
 
 // ---------- Messages / Docs / Schedule (dock-driven) ----------
 async function listMessageBoards(ctx, projectId) {
-  const dock = await getDock(ctx, projectId);
-  const mb = dockFind(dock, ["message_board", "message_boards"]);
-  if (!mb?.url) throw new Error("This project does not expose a message board dock item.");
+  const { tool: mb } = await requireDockTool(ctx, projectId, ["message_board", "message_boards"], "message_boards");
+  if (!mb?.url) {
+    throw toolError("TOOL_UNAVAILABLE", "Message boards tool is enabled but missing a usable URL.", {
+      tool: "message_boards",
+      projectId,
+    });
+  }
   // Typically returns an array of message boards.
   const boards = await apiAll(ctx, mb.url);
   return (Array.isArray(boards) ? boards : []).map((b) => ({
@@ -790,9 +904,13 @@ async function updateMessage(ctx, projectId, messageId, body) {
 }
 
 async function listDocuments(ctx, projectId, { limit } = {}) {
-  const dock = await getDock(ctx, projectId);
-  const vault = dockFind(dock, ["vault", "documents"]);
-  if (!vault?.url) throw new Error("This project does not expose a vault/documents dock item.");
+  const { tool: vault } = await requireDockTool(ctx, projectId, ["vault", "documents"], "documents");
+  if (!vault?.url) {
+    throw toolError("TOOL_UNAVAILABLE", "Documents tool is enabled but missing a usable URL.", {
+      tool: "documents",
+      projectId,
+    });
+  }
   const vaultObj = await api(ctx, vault.url);
   // Many vault payloads include a documents_url.
   const docsUrl = vaultObj?.documents_url || vaultObj?.documents?.url || vaultObj?.documents;
@@ -845,9 +963,13 @@ async function updateDocument(ctx, projectId, documentId, body) {
 }
 
 async function listScheduleEntries(ctx, projectId, { limit } = {}) {
-  const dock = await getDock(ctx, projectId);
-  const schedule = dockFind(dock, ["schedule", "schedules"]);
-  if (!schedule?.url) throw new Error("This project does not expose a schedule dock item.");
+  const { tool: schedule } = await requireDockTool(ctx, projectId, ["schedule", "schedules"], "schedule");
+  if (!schedule?.url) {
+    throw toolError("TOOL_UNAVAILABLE", "Schedule tool is enabled but missing a usable URL.", {
+      tool: "schedule",
+      projectId,
+    });
+  }
   const schedObj = await api(ctx, schedule.url);
   const entriesUrl = schedObj?.entries_url || schedObj?.entries?.url || schedObj?.entries;
   if (!entriesUrl) throw new Error("Could not locate entries_url on schedule payload.");
@@ -1471,8 +1593,25 @@ async function getClientReply(ctx, projectId, recordingId, replyId) {
 
 // ========== CARD STEPS ==========
 async function listCardSteps(ctx, projectId, cardId) {
-  const card = await api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}.json`);
-  return Array.isArray(card?.steps) ? card.steps : [];
+  try {
+    const card = await api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}.json`);
+    return Array.isArray(card?.steps) ? card.steps : [];
+  } catch (e) {
+    if (isApiError(e, 404)) {
+      try {
+        await requireDockTool(ctx, projectId, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
+      } catch (dockErr) {
+        throw dockErr;
+      }
+      throw toolError("RESOURCE_NOT_FOUND", `Card ${cardId} not found in this project.`, {
+        tool: "card_tables",
+        projectId,
+        hint: "Call list_card_table_cards to get valid card IDs.",
+        status: 404,
+      });
+    }
+    throw e;
+  }
 }
 
 async function createCardStep(ctx, projectId, cardId, body) {
@@ -2485,6 +2624,18 @@ export async function handleMCP(reqBody, ctx) {
         return ok(id, { project: { id: p.id, name: p.name }, card_tables: enrichedTables, count: enrichedTables.length, metrics: ctx_intel.getMetrics() });
       } catch (e) {
         console.error(`[list_card_tables] Error:`, e.message);
+        // Tool disabled / unavailable -> return empty with notice
+        try {
+          const p = await projectByName(ctx, args.project);
+          const notice = toolNoticeResult(id, e, {
+            tool: "card_tables",
+            project: p,
+            empty: { card_tables: [], count: 0 }
+          });
+          if (notice) return notice;
+        } catch {
+          // ignore resolution failures
+        }
         // Fallback to non-enriched card tables
         try {
           const p = await projectByName(ctx, args.project);
@@ -2514,6 +2665,18 @@ export async function handleMCP(reqBody, ctx) {
         return ok(id, { project: { id: p.id, name: p.name }, columns: enrichedCols, count: enrichedCols.length, metrics: ctx_intel.getMetrics() });
       } catch (e) {
         console.error(`[list_card_table_columns] Error:`, e.message);
+        // Tool disabled / table not found -> return empty with notice
+        try {
+          const p = await projectByName(ctx, args.project);
+          const notice = toolNoticeResult(id, e, {
+            tool: "card_tables",
+            project: p,
+            empty: { columns: [], count: 0 }
+          });
+          if (notice) return notice;
+        } catch {
+          // ignore resolution failures
+        }
         // Fallback to non-enriched columns
         try {
           const p = await projectByName(ctx, args.project);
@@ -2544,6 +2707,18 @@ export async function handleMCP(reqBody, ctx) {
         return ok(id, { project: { id: p.id, name: p.name }, cards: enrichedCards, count: enrichedCards.length, metrics: ctx_intel.getMetrics() });
       } catch (e) {
         console.error(`[list_card_table_cards] Error:`, e.message);
+        // Tool disabled / table not found -> return empty with notice
+        try {
+          const p = await projectByName(ctx, args.project);
+          const notice = toolNoticeResult(id, e, {
+            tool: "card_tables",
+            project: p,
+            empty: { cards: [], count: 0 }
+          });
+          if (notice) return notice;
+        } catch {
+          // ignore resolution failures
+        }
         // Fallback to non-enriched cards
         try {
           const p = await projectByName(ctx, args.project);
@@ -2558,6 +2733,7 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "create_card") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
         const card = await createCard(ctx, p.id, Number(args.card_table_id), {
           title: args.title,
           content: args.content,
@@ -2576,9 +2752,12 @@ export async function handleMCP(reqBody, ctx) {
         return ok(id, { message: "Card created", project: { id: p.id, name: p.name }, card: enrichedCard, metrics: ctx_intel.getMetrics() });
       } catch (e) {
         console.error(`[create_card] Error:`, e.message);
+        const known = toolFailResult(id, e);
+        if (known) return known;
         // Fallback to non-enriched card
         try {
           const p = await projectByName(ctx, args.project);
+          await requireDockTool(ctx, p.id, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
           const card = await createCard(ctx, p.id, Number(args.card_table_id), {
             title: args.title,
             content: args.content,
@@ -2595,6 +2774,7 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "move_card") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
         const card = await moveCard(ctx, p.id, Number(args.card_id), { column_id: args.column_id, position: args.position });
 
         // INTELLIGENT CHAINING: Enrich moved card with person/project details
@@ -2608,9 +2788,12 @@ export async function handleMCP(reqBody, ctx) {
         return ok(id, { message: "Card updated", project: { id: p.id, name: p.name }, card: enrichedCard, metrics: ctx_intel.getMetrics() });
       } catch (e) {
         console.error(`[move_card] Error:`, e.message);
+        const known = toolFailResult(id, e);
+        if (known) return known;
         // Fallback to non-enriched card
         try {
           const p = await projectByName(ctx, args.project);
+          await requireDockTool(ctx, p.id, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
           const card = await moveCard(ctx, p.id, Number(args.card_id), { column_id: args.column_id, position: args.position });
           return ok(id, { message: "Card updated", project: { id: p.id, name: p.name }, card, fallback: true });
         } catch (fbErr) {
@@ -2626,6 +2809,17 @@ export async function handleMCP(reqBody, ctx) {
         return ok(id, { project: { id: p.id, name: p.name }, card_id: Number(args.card_id), steps, count: steps.length });
       } catch (e) {
         console.error(`[list_card_steps] Error:`, e.message);
+        try {
+          const p = await projectByName(ctx, args.project);
+          const notice = toolNoticeResult(id, e, {
+            tool: "card_tables",
+            project: p,
+            empty: { steps: [], count: 0, card_id: Number(args.card_id) }
+          });
+          if (notice) return notice;
+        } catch {
+          // ignore resolution failures
+        }
         return ok(id, { steps: [], fallback: true });
       }
     }
@@ -2633,9 +2827,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "create_card_step") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
         const step = await createCardStep(ctx, p.id, Number(args.card_id), args.body || {});
         return ok(id, { message: "Card step created", project: { id: p.id, name: p.name }, step });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "CREATE_CARD_STEP_ERROR", message: e.message });
       }
     }
@@ -2643,9 +2840,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "update_card_step") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
         const step = await updateCardStep(ctx, p.id, Number(args.step_id), args.body || {});
         return ok(id, { message: "Card step updated", project: { id: p.id, name: p.name }, step });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "UPDATE_CARD_STEP_ERROR", message: e.message });
       }
     }
@@ -2653,9 +2853,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "complete_card_step") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
         const result = await completeCardStep(ctx, p.id, Number(args.step_id));
         return ok(id, { project: { id: p.id, name: p.name }, ...result });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "COMPLETE_CARD_STEP_ERROR", message: e.message });
       }
     }
@@ -2663,9 +2866,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "uncomplete_card_step") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
         const result = await uncompleteCardStep(ctx, p.id, Number(args.step_id));
         return ok(id, { project: { id: p.id, name: p.name }, ...result });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "UNCOMPLETE_CARD_STEP_ERROR", message: e.message });
       }
     }
@@ -2673,9 +2879,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "reposition_card_step") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
         const result = await repositionCardStep(ctx, p.id, Number(args.card_id), Number(args.step_id), Number(args.position));
         return ok(id, { project: { id: p.id, name: p.name }, ...result });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "REPOSITION_CARD_STEP_ERROR", message: e.message });
       }
     }
@@ -2685,7 +2894,6 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const hill = await getHillChartFromDock(ctx, p.id);
-        if (!hill) return fail(id, { code: "TOOL_NOT_ENABLED", message: "Hill chart not enabled for this project (or not accessible)." });
 
         // INTELLIGENT CHAINING: Enrich hill chart with project details
         const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `hill chart for ${p.name}`);
@@ -2698,11 +2906,22 @@ export async function handleMCP(reqBody, ctx) {
         return ok(id, { project: { id: p.id, name: p.name }, hill_chart: enrichedHill, metrics: ctx_intel.getMetrics() });
       } catch (e) {
         console.error(`[get_hill_chart] Error:`, e.message);
+        // Tool disabled / unavailable -> return empty with notice
+        try {
+          const p = await projectByName(ctx, args.project);
+          const notice = toolNoticeResult(id, e, {
+            tool: "hill_charts",
+            project: p,
+            empty: { hill_chart: null }
+          });
+          if (notice) return notice;
+        } catch {
+          // ignore resolution failures
+        }
         // Fallback to non-enriched hill chart
         try {
           const p = await projectByName(ctx, args.project);
           const hill = await getHillChartFromDock(ctx, p.id);
-          if (!hill) return fail(id, { code: "TOOL_NOT_ENABLED", message: "Hill chart not enabled for this project (or not accessible)." });
           return ok(id, { project: { id: p.id, name: p.name }, hill_chart: hill, fallback: true });
         } catch (fbErr) {
           return fail(id, { code: "GET_HILL_CHART_ERROR", message: fbErr.message });
@@ -2729,6 +2948,18 @@ export async function handleMCP(reqBody, ctx) {
         return ok(id, { project: { id: p.id, name: p.name }, message_boards: enrichedBoards, count: enrichedBoards.length, metrics: ctx_intel.getMetrics() });
       } catch (e) {
         console.error(`[list_message_boards] Error:`, e.message);
+        // Tool disabled / unavailable -> return empty with notice
+        try {
+          const p = await projectByName(ctx, args.project);
+          const notice = toolNoticeResult(id, e, {
+            tool: "message_boards",
+            project: p,
+            empty: { message_boards: [], count: 0 }
+          });
+          if (notice) return notice;
+        } catch {
+          // ignore resolution failures
+        }
         // Fallback to non-enriched message boards
         try {
           const p = await projectByName(ctx, args.project);
@@ -2759,6 +2990,18 @@ export async function handleMCP(reqBody, ctx) {
         return ok(id, { project: { id: p.id, name: p.name }, messages: enrichedMessages, count: enrichedMessages.length, metrics: ctx_intel.getMetrics() });
       } catch (e) {
         console.error(`[list_messages] Error:`, e.message);
+        // Tool disabled / unavailable -> return empty with notice
+        try {
+          const p = await projectByName(ctx, args.project);
+          const notice = toolNoticeResult(id, e, {
+            tool: "message_boards",
+            project: p,
+            empty: { messages: [], count: 0 }
+          });
+          if (notice) return notice;
+        } catch {
+          // ignore resolution failures
+        }
         // Fallback to non-enriched messages
         try {
           const p = await projectByName(ctx, args.project);
@@ -2793,9 +3036,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "create_message") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["message_board", "message_boards"], "message_boards");
         const message = await createMessage(ctx, p.id, Number(args.message_board_id), args.body || {});
         return ok(id, { message: "Message created", project: { id: p.id, name: p.name }, message });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "CREATE_MESSAGE_ERROR", message: e.message });
       }
     }
@@ -2803,9 +3049,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "update_message") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["message_board", "message_boards"], "message_boards");
         const message = await updateMessage(ctx, p.id, Number(args.message_id), args.body || {});
         return ok(id, { message: "Message updated", project: { id: p.id, name: p.name }, message });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "UPDATE_MESSAGE_ERROR", message: e.message });
       }
     }
@@ -2834,9 +3083,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "create_message_type") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["message_board", "message_boards"], "message_boards");
         const category = await createMessageType(ctx, p.id, args.body || {});
         return ok(id, { message: "Message type created", project: { id: p.id, name: p.name }, message_type: category });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "CREATE_MESSAGE_TYPE_ERROR", message: e.message });
       }
     }
@@ -2844,9 +3096,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "update_message_type") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["message_board", "message_boards"], "message_boards");
         const category = await updateMessageType(ctx, p.id, Number(args.category_id), args.body || {});
         return ok(id, { message: "Message type updated", project: { id: p.id, name: p.name }, message_type: category });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "UPDATE_MESSAGE_TYPE_ERROR", message: e.message });
       }
     }
@@ -2854,9 +3109,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "delete_message_type") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["message_board", "message_boards"], "message_boards");
         const result = await deleteMessageType(ctx, p.id, Number(args.category_id));
         return ok(id, { project: { id: p.id, name: p.name }, ...result });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "DELETE_MESSAGE_TYPE_ERROR", message: e.message });
       }
     }
@@ -2963,6 +3221,18 @@ export async function handleMCP(reqBody, ctx) {
         return ok(id, { project: { id: p.id, name: p.name }, documents: enrichedDocs, count: enrichedDocs.length, metrics: ctx_intel.getMetrics() });
       } catch (e) {
         console.error(`[list_documents] Error:`, e.message);
+        // Tool disabled / unavailable -> return empty with notice
+        try {
+          const p = await projectByName(ctx, args.project);
+          const notice = toolNoticeResult(id, e, {
+            tool: "documents",
+            project: p,
+            empty: { documents: [], count: 0 }
+          });
+          if (notice) return notice;
+        } catch {
+          // ignore resolution failures
+        }
         // Fallback to non-enriched documents
         try {
           const p = await projectByName(ctx, args.project);
@@ -2987,9 +3257,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "create_document") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["vault", "documents"], "documents");
         const doc = await createDocument(ctx, p.id, Number(args.vault_id), args.body || {});
         return ok(id, { message: "Document created", project: { id: p.id, name: p.name }, document: doc });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "CREATE_DOCUMENT_ERROR", message: e.message });
       }
     }
@@ -2997,9 +3270,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "update_document") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["vault", "documents"], "documents");
         const doc = await updateDocument(ctx, p.id, Number(args.document_id), args.body || {});
         return ok(id, { message: "Document updated", project: { id: p.id, name: p.name }, document: doc });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "UPDATE_DOCUMENT_ERROR", message: e.message });
       }
     }
@@ -3074,6 +3350,18 @@ export async function handleMCP(reqBody, ctx) {
         return ok(id, { project: { id: p.id, name: p.name }, schedule_entries: enrichedEntries, count: enrichedEntries.length, metrics: ctx_intel.getMetrics() });
       } catch (e) {
         console.error(`[list_schedule_entries] Error:`, e.message);
+        // Tool disabled / unavailable -> return empty with notice
+        try {
+          const p = await projectByName(ctx, args.project);
+          const notice = toolNoticeResult(id, e, {
+            tool: "schedule",
+            project: p,
+            empty: { schedule_entries: [], count: 0 }
+          });
+          if (notice) return notice;
+        } catch {
+          // ignore resolution failures
+        }
         // Fallback to non-enriched schedule entries
         try {
           const p = await projectByName(ctx, args.project);
@@ -3560,9 +3848,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "create_campfire_line") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["chat", "campfire", "campfires"], "campfire");
         const line = await createCampfireLine(ctx, p.id, Number(args.chat_id), args.body || {});
         return ok(id, { message: "Campfire line created", project: { id: p.id, name: p.name }, line });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "CREATE_CAMPFIRE_LINE_ERROR", message: e.message });
       }
     }
@@ -3570,9 +3861,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "delete_campfire_line") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["chat", "campfire", "campfires"], "campfire");
         const result = await deleteCampfireLine(ctx, p.id, Number(args.chat_id), Number(args.line_id));
         return ok(id, { project: { id: p.id, name: p.name }, ...result });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "DELETE_CAMPFIRE_LINE_ERROR", message: e.message });
       }
     }
@@ -3600,9 +3894,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "create_chatbot") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["chat", "campfire", "campfires"], "campfire");
         const bot = await createChatbot(ctx, p.id, Number(args.chat_id), args.body || {});
         return ok(id, { message: "Chatbot created", project: { id: p.id, name: p.name }, chatbot: bot });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "CREATE_CHATBOT_ERROR", message: e.message });
       }
     }
@@ -3610,9 +3907,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "update_chatbot") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["chat", "campfire", "campfires"], "campfire");
         const bot = await updateChatbot(ctx, p.id, Number(args.chat_id), Number(args.integration_id), args.body || {});
         return ok(id, { message: "Chatbot updated", project: { id: p.id, name: p.name }, chatbot: bot });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "UPDATE_CHATBOT_ERROR", message: e.message });
       }
     }
@@ -3620,9 +3920,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "delete_chatbot") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["chat", "campfire", "campfires"], "campfire");
         const result = await deleteChatbot(ctx, p.id, Number(args.chat_id), Number(args.integration_id));
         return ok(id, { project: { id: p.id, name: p.name }, ...result });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "DELETE_CHATBOT_ERROR", message: e.message });
       }
     }
@@ -3630,9 +3933,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "post_chatbot_line") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["chat", "campfire", "campfires"], "campfire");
         const line = await postChatbotLine(ctx, p.id, Number(args.chat_id), args.integration_key, args.body || {});
         return ok(id, { message: "Chatbot line posted", project: { id: p.id, name: p.name }, line });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "POST_CHATBOT_LINE_ERROR", message: e.message });
       }
     }
@@ -4307,9 +4613,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "update_schedule") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["schedule", "schedules"], "schedule");
         const schedule = await updateSchedule(ctx, p.id, Number(args.schedule_id), args.body || {});
         return ok(id, { message: "Schedule updated", project: { id: p.id, name: p.name }, schedule });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "UPDATE_SCHEDULE_ERROR", message: e.message });
       }
     }
@@ -4327,9 +4636,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "create_schedule_entry") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["schedule", "schedules"], "schedule");
         const entry = await createScheduleEntry(ctx, p.id, Number(args.schedule_id), args.body || {});
         return ok(id, { message: "Schedule entry created", project: { id: p.id, name: p.name }, entry });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "CREATE_SCHEDULE_ENTRY_ERROR", message: e.message });
       }
     }
@@ -4337,9 +4649,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "update_schedule_entry") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["schedule", "schedules"], "schedule");
         const entry = await updateScheduleEntry(ctx, p.id, Number(args.entry_id), args.body || {});
         return ok(id, { message: "Schedule entry updated", project: { id: p.id, name: p.name }, entry });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "UPDATE_SCHEDULE_ENTRY_ERROR", message: e.message });
       }
     }
@@ -4367,9 +4682,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "create_card_table_column") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
         const column = await createCardTableColumn(ctx, p.id, Number(args.card_table_id), args.body || {});
         return ok(id, { message: "Card table column created", project: { id: p.id, name: p.name }, column });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "CREATE_CARD_TABLE_COLUMN_ERROR", message: e.message });
       }
     }
@@ -4377,9 +4695,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "update_card_table_column") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
         const column = await updateCardTableColumn(ctx, p.id, Number(args.column_id), args.body || {});
         return ok(id, { message: "Card table column updated", project: { id: p.id, name: p.name }, column });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "UPDATE_CARD_TABLE_COLUMN_ERROR", message: e.message });
       }
     }
@@ -4387,9 +4708,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "move_card_table_column") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
         const column = await moveCardTableColumn(ctx, p.id, Number(args.card_table_id), args.body || {});
         return ok(id, { message: "Card table column moved", project: { id: p.id, name: p.name }, column });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "MOVE_CARD_TABLE_COLUMN_ERROR", message: e.message });
       }
     }
@@ -4397,9 +4721,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "subscribe_card_table_column") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
         const result = await subscribeCardTableColumn(ctx, p.id, Number(args.column_id));
         return ok(id, { project: { id: p.id, name: p.name }, result });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "SUBSCRIBE_CARD_TABLE_COLUMN_ERROR", message: e.message });
       }
     }
@@ -4407,9 +4734,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "unsubscribe_card_table_column") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
         const result = await unsubscribeCardTableColumn(ctx, p.id, Number(args.column_id));
         return ok(id, { project: { id: p.id, name: p.name }, ...result });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "UNSUBSCRIBE_CARD_TABLE_COLUMN_ERROR", message: e.message });
       }
     }
@@ -4417,9 +4747,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "create_card_table_on_hold") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
         const result = await createCardTableOnHold(ctx, p.id, Number(args.column_id));
         return ok(id, { project: { id: p.id, name: p.name }, result });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "CREATE_CARD_TABLE_ON_HOLD_ERROR", message: e.message });
       }
     }
@@ -4427,9 +4760,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "delete_card_table_on_hold") {
       try {
         const p = await projectByName(ctx, args.project);
+        await requireDockTool(ctx, p.id, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
         const result = await deleteCardTableOnHold(ctx, p.id, Number(args.column_id));
         return ok(id, { project: { id: p.id, name: p.name }, ...result });
       } catch (e) {
+        const known = toolFailResult(id, e);
+        if (known) return known;
         return fail(id, { code: "DELETE_CARD_TABLE_ON_HOLD_ERROR", message: e.message });
       }
     }
