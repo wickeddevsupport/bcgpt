@@ -1749,53 +1749,215 @@ export async function handleMCP(reqBody, ctx) {
 
     // Card tables
     if (name === "list_card_tables") {
-      const p = await projectByName(ctx, args.project);
-      const tables = await listCardTables(ctx, p.id);
-      return ok(id, { project: { id: p.id, name: p.name }, card_tables: tables });
+      try {
+        const p = await projectByName(ctx, args.project);
+        const tables = await listCardTables(ctx, p.id);
+
+        // INTELLIGENT CHAINING: Enrich card tables with person/project details
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `card tables for ${p.name}`);
+        const enricher = intelligent.createEnricher(ctx_intel);
+        const enrichedTables = await Promise.all(
+          (tables || []).map(t => enricher.enrich({ ...t, bucket: { id: p.id, name: p.name } }, {
+            getPerson: (id) => ctx_intel.getPerson(id),
+            getProject: (id) => ctx_intel.getProject(id)
+          }))
+        );
+
+        return ok(id, { project: { id: p.id, name: p.name }, card_tables: enrichedTables, count: enrichedTables.length, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[list_card_tables] Error:`, e.message);
+        // Fallback to non-enriched card tables
+        try {
+          const p = await projectByName(ctx, args.project);
+          const tables = await listCardTables(ctx, p.id);
+          return ok(id, { project: { id: p.id, name: p.name }, card_tables: tables, count: tables.length, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "LIST_CARD_TABLES_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     if (name === "list_card_table_columns") {
-      const p = await projectByName(ctx, args.project);
-      const cols = await listCardTableColumns(ctx, p.id, Number(args.card_table_id));
-      return ok(id, { project: { id: p.id, name: p.name }, columns: cols });
+      try {
+        const p = await projectByName(ctx, args.project);
+        const cols = await listCardTableColumns(ctx, p.id, Number(args.card_table_id));
+
+        // INTELLIGENT CHAINING: Enrich columns with person/project details
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `card table columns ${args.card_table_id}`);
+        const enricher = intelligent.createEnricher(ctx_intel);
+        const enrichedCols = await Promise.all(
+          (cols || []).map(c => enricher.enrich({ ...c, bucket: { id: p.id, name: p.name } }, {
+            getPerson: (id) => ctx_intel.getPerson(id),
+            getProject: (id) => ctx_intel.getProject(id)
+          }))
+        );
+
+        return ok(id, { project: { id: p.id, name: p.name }, columns: enrichedCols, count: enrichedCols.length, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[list_card_table_columns] Error:`, e.message);
+        // Fallback to non-enriched columns
+        try {
+          const p = await projectByName(ctx, args.project);
+          const cols = await listCardTableColumns(ctx, p.id, Number(args.card_table_id));
+          return ok(id, { project: { id: p.id, name: p.name }, columns: cols, count: cols.length, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "LIST_CARD_TABLE_COLUMNS_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     if (name === "list_card_table_cards") {
-      const p = await projectByName(ctx, args.project);
-      const cards = await listCardTableCards(ctx, p.id, Number(args.card_table_id));
-      return ok(id, { project: { id: p.id, name: p.name }, cards });
+      try {
+        const p = await projectByName(ctx, args.project);
+        const cards = await listCardTableCards(ctx, p.id, Number(args.card_table_id));
+
+        // INTELLIGENT CHAINING: Enrich cards with person/project details
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `card table ${args.card_table_id}`);
+        const enricher = intelligent.createEnricher(ctx_intel);
+
+        const enrichedCards = await Promise.all(
+          (cards || []).map(c => enricher.enrich({ ...c, bucket: { id: p.id, name: p.name } }, {
+            getPerson: (id) => ctx_intel.getPerson(id),
+            getProject: (id) => ctx_intel.getProject(id)
+          }))
+        );
+
+        return ok(id, { project: { id: p.id, name: p.name }, cards: enrichedCards, count: enrichedCards.length, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[list_card_table_cards] Error:`, e.message);
+        // Fallback to non-enriched cards
+        try {
+          const p = await projectByName(ctx, args.project);
+          const cards = await listCardTableCards(ctx, p.id, Number(args.card_table_id));
+          return ok(id, { project: { id: p.id, name: p.name }, cards, count: cards.length, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "LIST_CARD_TABLE_CARDS_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     if (name === "create_card") {
-      const p = await projectByName(ctx, args.project);
-      const card = await createCard(ctx, p.id, Number(args.card_table_id), {
-        title: args.title,
-        content: args.content,
-        column_id: args.column_id,
-        due_on: args.due_on
-      });
-      return ok(id, { message: "Card created", project: { id: p.id, name: p.name }, card });
+      try {
+        const p = await projectByName(ctx, args.project);
+        const card = await createCard(ctx, p.id, Number(args.card_table_id), {
+          title: args.title,
+          content: args.content,
+          column_id: args.column_id,
+          due_on: args.due_on
+        });
+
+        // INTELLIGENT CHAINING: Enrich created card with person/project details
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `created card`);
+        const enricher = intelligent.createEnricher(ctx_intel);
+        const enrichedCard = await enricher.enrich({ ...card, bucket: { id: p.id, name: p.name } }, {
+          getPerson: (id) => ctx_intel.getPerson(id),
+          getProject: (id) => ctx_intel.getProject(id)
+        });
+
+        return ok(id, { message: "Card created", project: { id: p.id, name: p.name }, card: enrichedCard, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[create_card] Error:`, e.message);
+        // Fallback to non-enriched card
+        try {
+          const p = await projectByName(ctx, args.project);
+          const card = await createCard(ctx, p.id, Number(args.card_table_id), {
+            title: args.title,
+            content: args.content,
+            column_id: args.column_id,
+            due_on: args.due_on
+          });
+          return ok(id, { message: "Card created", project: { id: p.id, name: p.name }, card, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "CREATE_CARD_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     if (name === "move_card") {
-      const p = await projectByName(ctx, args.project);
-      const card = await moveCard(ctx, p.id, Number(args.card_id), { column_id: args.column_id, position: args.position });
-      return ok(id, { message: "Card updated", project: { id: p.id, name: p.name }, card });
+      try {
+        const p = await projectByName(ctx, args.project);
+        const card = await moveCard(ctx, p.id, Number(args.card_id), { column_id: args.column_id, position: args.position });
+
+        // INTELLIGENT CHAINING: Enrich moved card with person/project details
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `moved card ${args.card_id}`);
+        const enricher = intelligent.createEnricher(ctx_intel);
+        const enrichedCard = await enricher.enrich({ ...card, bucket: { id: p.id, name: p.name } }, {
+          getPerson: (id) => ctx_intel.getPerson(id),
+          getProject: (id) => ctx_intel.getProject(id)
+        });
+
+        return ok(id, { message: "Card updated", project: { id: p.id, name: p.name }, card: enrichedCard, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[move_card] Error:`, e.message);
+        // Fallback to non-enriched card
+        try {
+          const p = await projectByName(ctx, args.project);
+          const card = await moveCard(ctx, p.id, Number(args.card_id), { column_id: args.column_id, position: args.position });
+          return ok(id, { message: "Card updated", project: { id: p.id, name: p.name }, card, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "MOVE_CARD_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     // Hill charts
     if (name === "get_hill_chart") {
-      const p = await projectByName(ctx, args.project);
-      const hill = await getHillChartFromDock(ctx, p.id);
-      if (!hill) return fail(id, { code: "TOOL_NOT_ENABLED", message: "Hill chart not enabled for this project (or not accessible)." });
-      return ok(id, { project: { id: p.id, name: p.name }, hill_chart: hill });
+      try {
+        const p = await projectByName(ctx, args.project);
+        const hill = await getHillChartFromDock(ctx, p.id);
+        if (!hill) return fail(id, { code: "TOOL_NOT_ENABLED", message: "Hill chart not enabled for this project (or not accessible)." });
+
+        // INTELLIGENT CHAINING: Enrich hill chart with project details
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `hill chart for ${p.name}`);
+        const enricher = intelligent.createEnricher(ctx_intel);
+        const enrichedHill = await enricher.enrich({ ...hill, bucket: { id: p.id, name: p.name } }, {
+          getPerson: (id) => ctx_intel.getPerson(id),
+          getProject: (id) => ctx_intel.getProject(id)
+        });
+
+        return ok(id, { project: { id: p.id, name: p.name }, hill_chart: enrichedHill, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[get_hill_chart] Error:`, e.message);
+        // Fallback to non-enriched hill chart
+        try {
+          const p = await projectByName(ctx, args.project);
+          const hill = await getHillChartFromDock(ctx, p.id);
+          if (!hill) return fail(id, { code: "TOOL_NOT_ENABLED", message: "Hill chart not enabled for this project (or not accessible)." });
+          return ok(id, { project: { id: p.id, name: p.name }, hill_chart: hill, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "GET_HILL_CHART_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     // Messages / Docs / Schedule (dock-driven)
     if (name === "list_message_boards") {
-      const p = await projectByName(ctx, args.project);
-      const boards = await listMessageBoards(ctx, p.id);
-      return ok(id, { project: { id: p.id, name: p.name }, message_boards: boards });
+      try {
+        const p = await projectByName(ctx, args.project);
+        const boards = await listMessageBoards(ctx, p.id);
+
+        // INTELLIGENT CHAINING: Enrich message boards with person/project details
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `message boards for ${p.name}`);
+        const enricher = intelligent.createEnricher(ctx_intel);
+        const enrichedBoards = await Promise.all(
+          (boards || []).map(b => enricher.enrich({ ...b, bucket: { id: p.id, name: p.name } }, {
+            getPerson: (id) => ctx_intel.getPerson(id),
+            getProject: (id) => ctx_intel.getProject(id)
+          }))
+        );
+
+        return ok(id, { project: { id: p.id, name: p.name }, message_boards: enrichedBoards, count: enrichedBoards.length, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[list_message_boards] Error:`, e.message);
+        // Fallback to non-enriched message boards
+        try {
+          const p = await projectByName(ctx, args.project);
+          const boards = await listMessageBoards(ctx, p.id);
+          return ok(id, { project: { id: p.id, name: p.name }, message_boards: boards, count: boards.length, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "LIST_MESSAGE_BOARDS_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     if (name === "list_messages") {
@@ -1929,24 +2091,82 @@ export async function handleMCP(reqBody, ctx) {
 
     // ===== NEW PEOPLE ENDPOINTS =====
     if (name === "list_all_people") {
-      const people = await listAllPeople(ctx);
-      return ok(id, { people, count: people.length });
+      try {
+        const people = await listAllPeople(ctx);
+
+        // INTELLIGENT CHAINING: Provide metrics for consistency
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `list all people`);
+        return ok(id, { people, count: people.length, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[list_all_people] Error:`, e.message);
+        try {
+          const people = await listAllPeople(ctx);
+          return ok(id, { people, count: people.length, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "LIST_ALL_PEOPLE_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     if (name === "get_person") {
-      const person = await getPerson(ctx, args.person_id);
-      return ok(id, person);
+      try {
+        const person = await getPerson(ctx, args.person_id);
+
+        // INTELLIGENT CHAINING: Provide metrics for consistency
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `person ${args.person_id}`);
+        return ok(id, { ...person, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[get_person] Error:`, e.message);
+        try {
+          const person = await getPerson(ctx, args.person_id);
+          return ok(id, { ...person, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "GET_PERSON_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     if (name === "get_my_profile") {
-      const profile = await getMyProfile(ctx);
-      return ok(id, profile);
+      try {
+        const profile = await getMyProfile(ctx);
+
+        // INTELLIGENT CHAINING: Provide metrics for consistency
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `my profile`);
+        return ok(id, { ...profile, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[get_my_profile] Error:`, e.message);
+        try {
+          const profile = await getMyProfile(ctx);
+          return ok(id, { ...profile, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "GET_MY_PROFILE_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     if (name === "list_project_people") {
-      const p = await projectByName(ctx, args.project);
-      const people = await listProjectPeople(ctx, p.id);
-      return ok(id, { project: { id: p.id, name: p.name }, people, count: people.length });
+      try {
+        const p = await projectByName(ctx, args.project);
+        const people = await listProjectPeople(ctx, p.id);
+
+        // INTELLIGENT CHAINING: Provide metrics and project context
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `people for ${p.name}`);
+        const enrichedPeople = people.map((person) => ({
+          ...person,
+          bucket: { id: p.id, name: p.name }
+        }));
+
+        return ok(id, { project: { id: p.id, name: p.name }, people: enrichedPeople, count: enrichedPeople.length, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[list_project_people] Error:`, e.message);
+        try {
+          const p = await projectByName(ctx, args.project);
+          const people = await listProjectPeople(ctx, p.id);
+          return ok(id, { project: { id: p.id, name: p.name }, people, count: people.length, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "LIST_PROJECT_PEOPLE_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     // ===== NEW COMMENTS ENDPOINTS =====
@@ -2137,28 +2357,93 @@ export async function handleMCP(reqBody, ctx) {
     }
 
     if (name === "trash_recording") {
-      const p = await projectByName(ctx, args.project);
-      const result = await trashRecording(ctx, p.id, args.recording_id);
-      return ok(id, { ...result, project: { id: p.id, name: p.name } });
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await trashRecording(ctx, p.id, args.recording_id);
+
+        // INTELLIGENT CHAINING: Provide metrics for consistency
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `trash recording ${args.recording_id}`);
+        return ok(id, { ...result, project: { id: p.id, name: p.name }, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[trash_recording] Error:`, e.message);
+        try {
+          const p = await projectByName(ctx, args.project);
+          const result = await trashRecording(ctx, p.id, args.recording_id);
+          return ok(id, { ...result, project: { id: p.id, name: p.name }, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "TRASH_RECORDING_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     if (name === "archive_recording") {
-      const p = await projectByName(ctx, args.project);
-      const result = await archiveRecording(ctx, p.id, args.recording_id);
-      return ok(id, { ...result, project: { id: p.id, name: p.name } });
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await archiveRecording(ctx, p.id, args.recording_id);
+
+        // INTELLIGENT CHAINING: Provide metrics for consistency
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `archive recording ${args.recording_id}`);
+        return ok(id, { ...result, project: { id: p.id, name: p.name }, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[archive_recording] Error:`, e.message);
+        try {
+          const p = await projectByName(ctx, args.project);
+          const result = await archiveRecording(ctx, p.id, args.recording_id);
+          return ok(id, { ...result, project: { id: p.id, name: p.name }, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "ARCHIVE_RECORDING_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     if (name === "unarchive_recording") {
-      const p = await projectByName(ctx, args.project);
-      const result = await unarchiveRecording(ctx, p.id, args.recording_id);
-      return ok(id, { ...result, project: { id: p.id, name: p.name } });
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await unarchiveRecording(ctx, p.id, args.recording_id);
+
+        // INTELLIGENT CHAINING: Provide metrics for consistency
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `unarchive recording ${args.recording_id}`);
+        return ok(id, { ...result, project: { id: p.id, name: p.name }, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[unarchive_recording] Error:`, e.message);
+        try {
+          const p = await projectByName(ctx, args.project);
+          const result = await unarchiveRecording(ctx, p.id, args.recording_id);
+          return ok(id, { ...result, project: { id: p.id, name: p.name }, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "UNARCHIVE_RECORDING_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     // ===== NEW VAULT ENDPOINTS =====
     if (name === "list_vaults") {
-      const p = await projectByName(ctx, args.project);
-      const vaults = await listVaults(ctx, p.id);
-      return ok(id, { project: { id: p.id, name: p.name }, vaults, count: vaults.length });
+      try {
+        const p = await projectByName(ctx, args.project);
+        const vaults = await listVaults(ctx, p.id);
+
+        // INTELLIGENT CHAINING: Enrich vaults with person/project details
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `vaults for ${p.name}`);
+        const enricher = intelligent.createEnricher(ctx_intel);
+        const enrichedVaults = await Promise.all(
+          (vaults || []).map(v => enricher.enrich({ ...v, bucket: { id: p.id, name: p.name } }, {
+            getPerson: (id) => ctx_intel.getPerson(id),
+            getProject: (id) => ctx_intel.getProject(id)
+          }))
+        );
+
+        return ok(id, { project: { id: p.id, name: p.name }, vaults: enrichedVaults, count: enrichedVaults.length, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[list_vaults] Error:`, e.message);
+        // Fallback to non-enriched vaults
+        try {
+          const p = await projectByName(ctx, args.project);
+          const vaults = await listVaults(ctx, p.id);
+          return ok(id, { project: { id: p.id, name: p.name }, vaults, count: vaults.length, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "LIST_VAULTS_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     // ===== NEW SEARCH ENDPOINTS =====
