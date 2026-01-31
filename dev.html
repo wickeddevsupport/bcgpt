@@ -2,52 +2,1038 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>BCGPT Dev Home</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BCGPT Control Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,700&display=swap" rel="stylesheet">
   <style>
-    body { font-family: sans-serif; margin: 2em; background: #f7f7fa; }
-    h1 { color: #2d3a4a; }
-    .section { margin-bottom: 2em; }
-    label { display: block; margin-top: 1em; }
-    input, select, button { margin-top: 0.5em; }
-    pre { background: #222; color: #fff; padding: 1em; border-radius: 6px; overflow-x: auto; }
-    .result { margin-top: 1em; }
+    :root {
+      --bg: #0f1221;
+      --bg-2: #11172a;
+      --card: #171d33;
+      --card-2: #1d2542;
+      --ink: #e8edf7;
+      --muted: #9aa7c7;
+      --accent: #33d6a6;
+      --accent-2: #5aa7ff;
+      --warn: #ffb454;
+      --danger: #ff6b6b;
+      --ring: rgba(51, 214, 166, 0.35);
+      --shadow: 0 20px 40px rgba(0,0,0,0.35);
+      --radius: 16px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: "Space Grotesk", system-ui, -apple-system, sans-serif;
+      color: var(--ink);
+      background: radial-gradient(1200px 800px at 10% -10%, #24304f 0%, rgba(36,48,79,0) 60%),
+                  radial-gradient(900px 600px at 100% 0%, #1b3a5c 0%, rgba(27,58,92,0) 55%),
+                  linear-gradient(180deg, var(--bg), var(--bg-2));
+      overflow: hidden;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      grid-template-rows: 72px 1fr;
+      gap: 16px;
+      height: 100vh;
+      padding: 20px;
+    }
+
+    header {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(23, 29, 51, 0.7);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: var(--radius);
+      padding: 12px 20px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(12px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .logo {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      background: conic-gradient(from 210deg, var(--accent), var(--accent-2), #7b6cff, var(--accent));
+      box-shadow: 0 0 0 4px rgba(255,255,255,0.06);
+    }
+
+    .brand h1 {
+      font-family: "Fraunces", serif;
+      font-size: 22px;
+      margin: 0;
+      letter-spacing: 0.3px;
+    }
+
+    .brand p {
+      margin: 2px 0 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .status-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(51, 214, 166, 0.1);
+      color: var(--accent);
+      border: 1px solid rgba(51, 214, 166, 0.4);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    button, .btn {
+      font-family: inherit;
+      border: none;
+      border-radius: 12px;
+      padding: 10px 14px;
+      cursor: pointer;
+      color: var(--ink);
+      background: linear-gradient(135deg, rgba(90,167,255,0.2), rgba(51,214,166,0.2));
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+      transition: transform 0.2s ease, box-shadow 0.2s ease, border 0.2s ease;
+    }
+
+    button:hover, .btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 12px 26px rgba(0,0,0,0.3);
+      border: 1px solid rgba(255,255,255,0.18);
+    }
+
+    button.secondary { background: rgba(255,255,255,0.06); }
+    button.warn { background: rgba(255,180,84,0.2); border: 1px solid rgba(255,180,84,0.4); }
+    button.danger { background: rgba(255,107,107,0.2); border: 1px solid rgba(255,107,107,0.4); }
+
+    aside {
+      background: rgba(23, 29, 51, 0.85);
+      border-radius: var(--radius);
+      padding: 16px;
+      border: 1px solid rgba(255,255,255,0.06);
+      box-shadow: var(--shadow);
+      overflow: auto;
+    }
+
+    main {
+      background: rgba(23, 29, 51, 0.5);
+      border-radius: var(--radius);
+      padding: 18px;
+      border: 1px solid rgba(255,255,255,0.06);
+      box-shadow: var(--shadow);
+      overflow: auto;
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 16px;
+    }
+
+    .panel {
+      background: var(--card);
+      border-radius: 14px;
+      padding: 16px;
+      border: 1px solid rgba(255,255,255,0.06);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+      animation: fadeUp 0.4s ease both;
+    }
+
+    .panel h2 {
+      margin: 0 0 10px;
+      font-size: 16px;
+      letter-spacing: 0.02em;
+    }
+
+    .panel p {
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .section-title {
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 18px 0 8px;
+    }
+
+    .list { display: grid; gap: 10px; }
+    .list button { width: 100%; text-align: left; background: rgba(255,255,255,0.05); }
+
+    .project-card {
+      padding: 12px;
+      border-radius: 12px;
+      background: var(--card-2);
+      border: 1px solid rgba(255,255,255,0.08);
+      cursor: pointer;
+      transition: transform 0.2s ease, border 0.2s ease;
+    }
+
+    .project-card:hover { transform: translateY(-2px); border-color: rgba(51,214,166,0.5); }
+    .project-card.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--ring); }
+
+    .field {
+      display: grid;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+
+    label { font-size: 12px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+    input, select, textarea {
+      background: rgba(8, 12, 24, 0.8);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: var(--ink);
+      padding: 10px 12px;
+      border-radius: 10px;
+      font-family: inherit;
+      outline: none;
+    }
+
+    input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--ring); }
+    textarea { min-height: 120px; resize: vertical; }
+
+    .actions-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+    }
+
+    .action-card {
+      padding: 12px;
+      border-radius: 12px;
+      background: linear-gradient(160deg, rgba(90,167,255,0.12), rgba(51,214,166,0.08));
+      border: 1px solid rgba(255,255,255,0.08);
+      cursor: pointer;
+    }
+
+    .action-card h3 { margin: 0 0 6px; font-size: 14px; }
+    .action-card span { font-size: 12px; color: var(--muted); }
+
+    .result {
+      background: #0b0f1e;
+      border-radius: 12px;
+      padding: 12px;
+      border: 1px solid rgba(255,255,255,0.08);
+      font-family: "Space Grotesk", monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 360px;
+      overflow: auto;
+    }
+
+    .history-item {
+      padding: 10px;
+      background: rgba(255,255,255,0.04);
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.06);
+      margin-bottom: 8px;
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      background: rgba(255,255,255,0.08);
+      color: var(--muted);
+      margin-right: 6px;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .chip {
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.06);
+      color: var(--ink);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .chip:hover { border-color: var(--accent); }
+
+    .mine-stat {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--muted);
+      padding: 6px 0;
+      border-bottom: 1px dashed rgba(255,255,255,0.08);
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--card-2);
+      padding: 12px 16px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.1);
+      box-shadow: var(--shadow);
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity 0.2s ease, transform 0.2s ease;
+      z-index: 50;
+    }
+
+    .toast.show { opacity: 1; transform: translateY(0); }
+
+    .modal {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(8,10,20,0.7);
+      z-index: 100;
+    }
+
+    .modal.active { display: flex; }
+
+    .modal-card {
+      width: min(520px, 90vw);
+      background: var(--card);
+      padding: 20px;
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 1100px) {
+      .app { grid-template-columns: 1fr; grid-template-rows: 72px auto auto; }
+      main { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
-  <h1>BCGPT Developer Home</h1>
-  <div class="section">
-    <h2>List Projects</h2>
-    <button onclick="callApi('list_projects')">List All Projects</button>
-    <div class="result" id="result-list_projects"></div>
+  <div class="app">
+    <header>
+      <div class="brand">
+        <div class="logo"></div>
+        <div>
+          <h1>BCGPT Control Center</h1>
+          <p>Full-stack action testing with guided flows</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <span class="status-chip" id="statusChip">disconnected</span>
+        <button class="secondary" id="refreshStatus">Refresh Status</button>
+        <button id="connectBtn">Connect</button>
+        <button class="danger" id="logoutBtn">Logout</button>
+      </div>
+    </header>
+
+    <aside>
+      <div class="panel">
+        <h2>Session</h2>
+        <div class="list">
+          <button class="secondary" data-action="startbcgpt">Start Status</button>
+          <button class="secondary" data-action="whoami">Who Am I</button>
+          <button class="secondary" data-action="list_accounts">List Accounts</button>
+        </div>
+      </div>
+
+      <div class="section-title">Data Mine</div>
+      <div class="panel">
+        <p id="mineStatus">Idle. No stats yet.</p>
+        <div class="list">
+          <button id="runMine">Run Data Mine</button>
+          <button class="secondary" id="refreshMine">Refresh Stats</button>
+        </div>
+        <div id="mineStats" style="margin-top: 12px;"></div>
+      </div>
+
+      <div class="section-title">Projects</div>
+      <div class="panel">
+        <button id="loadProjects">Load Projects</button>
+        <div id="projectList" class="list" style="margin-top: 10px;"></div>
+      </div>
+
+      <div class="section-title">Quick Actions</div>
+      <div class="panel">
+        <div class="list">
+          <button data-action="list_todos_for_project">List Todos</button>
+          <button data-action="list_message_boards">List Message Boards</button>
+          <button data-action="list_documents">List Documents</button>
+          <button data-action="list_schedule_entries">List Schedule Entries</button>
+          <button data-action="list_campfires">List Campfires</button>
+          <button data-action="list_webhooks">List Webhooks</button>
+          <button data-action="list_client_correspondences">Client Correspondences</button>
+          <button data-action="list_client_approvals">Client Approvals</button>
+          <button data-action="get_project_structure">Inspect Dock</button>
+        </div>
+      </div>
+    </aside>
+
+    <main>
+      <div>
+        <div class="panel" id="overviewPanel">
+          <h2>Project Focus</h2>
+          <p id="projectMeta">No project selected yet. Load projects and pick one.</p>
+          <div class="actions-grid" id="actionGrid"></div>
+        </div>
+
+        <div class="panel" style="margin-top: 16px;">
+          <h2>Action Builder</h2>
+          <p>Guided inputs for common tools. Pick an action to fill fields automatically.</p>
+          <div id="builderForm"></div>
+          <div style="display: flex; gap: 10px;">
+            <button id="runActionBtn">Run Action</button>
+            <button class="secondary" id="clearBuilder">Clear</button>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top: 16px;">
+          <h2>Raw Basecamp Request</h2>
+          <div class="field">
+            <label>Path or URL</label>
+            <input id="rawPath" placeholder="/projects.json or https://3.basecampapi.com/...">
+          </div>
+          <div class="field">
+            <label>Method</label>
+            <select id="rawMethod">
+              <option>GET</option>
+              <option>POST</option>
+              <option>PUT</option>
+              <option>DELETE</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Body (JSON)</label>
+            <textarea id="rawBody" placeholder='{"key": "value"}'></textarea>
+          </div>
+          <button id="runRaw">Send Raw</button>
+        </div>
+      </div>
+
+      <div>
+        <div class="panel">
+          <h2>Live Result</h2>
+          <div class="result" id="liveResult">Waiting for your first action.</div>
+        </div>
+
+        <div class="panel" style="margin-top: 16px;">
+          <h2>History</h2>
+          <div id="history"></div>
+        </div>
+
+        <div class="panel" style="margin-top: 16px;">
+          <h2>Tool Library</h2>
+          <p>Auto-generated from MCP tools/list for one-click testing.</p>
+          <div class="field">
+            <label>Tool</label>
+            <select id="toolSelect"></select>
+          </div>
+          <div id="toolForm"></div>
+          <div id="toolSuggestions"></div>
+          <button id="runTool">Run Tool</button>
+        </div>
+      </div>
+    </main>
   </div>
-  <div class="section">
-    <h2>Find Project by Name</h2>
-    <input id="find_name" placeholder="Project name" />
-    <button onclick="callApi('find_project', { name: document.getElementById('find_name').value })">Find Project</button>
-    <div class="result" id="result-find_project"></div>
+
+  <div class="toast" id="toast"></div>
+
+  <div class="modal" id="authModal">
+    <div class="modal-card">
+      <h2>Basecamp Authentication</h2>
+      <p id="authMessage">Checking status...</p>
+      <div style="display: flex; gap: 10px; margin-top: 12px;">
+        <button id="openAuth">Open Auth Window</button>
+        <button class="secondary" id="closeAuth">Close</button>
+      </div>
+    </div>
   </div>
-  <div class="section">
-    <h2>Raw Basecamp Request</h2>
-    <input id="raw_path" placeholder="/projects.json or full URL" style="width:300px" />
-    <button onclick="callApi('basecamp_raw', { path: document.getElementById('raw_path').value })">Send</button>
-    <div class="result" id="result-basecamp_raw"></div>
-  </div>
+
   <script>
-    async function callApi(name, args = {}) {
-      const resultDiv = document.getElementById('result-' + name);
-      resultDiv.innerHTML = 'Loading...';
-      try {
-        const res = await fetch('/dev/api', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, args })
-        });
-        const data = await res.json();
-        resultDiv.innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
-      } catch (e) {
-        resultDiv.innerHTML = '<pre>' + e + '</pre>';
+    const state = {
+      project: null,
+      actions: [],
+      tools: [],
+      selectedAction: null,
+      auth: null,
+      entities: {},
+      mineStatus: null,
+    };
+
+    const actionDefinitions = [
+      {
+        id: "search_project",
+        label: "Search Project",
+        description: "Search content in the current project.",
+        requiresProject: true,
+        fields: [{ name: "query", type: "text", placeholder: "Search keyword" }]
+      },
+      {
+        id: "list_schedule_entries",
+        label: "Schedule Range",
+        description: "List schedule entries with an optional range.",
+        requiresProject: true,
+        fields: [
+          { name: "start", type: "text", placeholder: "YYYY-MM-DD" },
+          { name: "end", type: "text", placeholder: "YYYY-MM-DD" }
+        ]
+      },
+      {
+        id: "list_card_tables",
+        label: "Card Tables",
+        description: "List kanban boards in the project.",
+        requiresProject: true,
+        fields: []
+      },
+      {
+        id: "list_message_types",
+        label: "Message Types",
+        description: "List message categories on a board.",
+        requiresProject: true,
+        fields: [{ name: "message_board_id", type: "number", placeholder: "Board ID (optional)" }]
+      },
+      {
+        id: "list_comments",
+        label: "List Comments",
+        description: "List comments for a recording.",
+        requiresProject: true,
+        fields: [{ name: "recording_id", type: "number", placeholder: "Recording ID" }]
+      },
+      {
+        id: "create_comment",
+        label: "Create Comment",
+        description: "Post a comment with JSON body.",
+        requiresProject: true,
+        fields: [
+          { name: "recording_id", type: "number", placeholder: "Recording ID" },
+          { name: "body", type: "json", placeholder: '{"content": "Hello"}' }
+        ]
+      }
+    ];
+
+    const fieldEntityMap = {
+      project: "project",
+      project_id: "project",
+      person_id: "person",
+      assignee_ids: "person",
+      message_board_id: "message_board",
+      message_id: "message",
+      card_table_id: "card_table",
+      card_id: "card",
+      column_id: "card_table_column",
+      todolist_id: "todolist",
+      todo_id: "todo",
+      schedule_id: "schedule",
+      entry_id: "schedule_entry",
+      vault_id: "vault",
+      upload_id: "upload",
+      chat_id: "campfire",
+      campfire_id: "campfire",
+      webhook_id: "webhook",
+      correspondence_id: "client_correspondence",
+      approval_id: "client_approval",
+      recording_id: "recording",
+    };
+
+    const toast = (msg) => {
+      const el = document.getElementById("toast");
+      el.textContent = msg;
+      el.classList.add("show");
+      setTimeout(() => el.classList.remove("show"), 2400);
+    };
+
+    const setResult = (title, payload) => {
+      const resultEl = document.getElementById("liveResult");
+      resultEl.textContent = JSON.stringify(payload, null, 2);
+      const history = document.getElementById("history");
+      const item = document.createElement("div");
+      item.className = "history-item";
+      item.innerHTML = `<div><span class="pill">${title}</span></div><div class="result">${resultEl.textContent}</div>`;
+      history.prepend(item);
+    };
+
+    async function callDevApi(name, args = {}) {
+      const res = await fetch("/dev/api", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, args })
+      });
+      return res.json();
+    }
+
+    async function fetchToolsList() {
+      const res = await fetch("/mcp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: "tools", method: "tools/list" })
+      });
+      const data = await res.json();
+      return data.result?.tools || [];
+    }
+
+    async function loadMineStatus() {
+      const res = await fetch("/dev/mine/status");
+      const data = await res.json();
+      state.mineStatus = data;
+      const status = document.getElementById("mineStatus");
+      status.textContent = data.running
+        ? "Mining in progress..."
+        : `Last run: ${data.last_result?.completed_at || "never"}`;
+      const stats = document.getElementById("mineStats");
+      stats.innerHTML = "";
+      (data.entity_stats || []).forEach((row) => {
+        const div = document.createElement("div");
+        div.className = "mine-stat";
+        div.innerHTML = `<span>${row.type}</span><span>${row.count}</span>`;
+        stats.appendChild(div);
+      });
+      return data;
+    }
+
+    async function runMine() {
+      toast("Starting data mine...");
+      const res = await fetch("/dev/mine/run", { method: "POST" });
+      const data = await res.json();
+      setResult("data_mine", data);
+      await loadMineStatus();
+      await preloadEntities();
+    }
+
+    async function fetchEntities(type, projectId = null) {
+      const params = new URLSearchParams({ type });
+      if (projectId) params.set("project_id", projectId);
+      const res = await fetch(`/dev/mine/entities?${params}`);
+      const data = await res.json();
+      return data.items || [];
+    }
+
+    async function preloadEntities() {
+      const types = [
+        "project",
+        "person",
+        "todolist",
+        "message_board",
+        "card_table",
+        "schedule",
+        "vault",
+        "campfire",
+        "webhook",
+        "client_correspondence",
+        "client_approval",
+      ];
+      for (const type of types) {
+        state.entities[type] = await fetchEntities(type, state.project?.id || null);
       }
     }
+
+    function renderActions() {
+      const grid = document.getElementById("actionGrid");
+      grid.innerHTML = "";
+      actionDefinitions.forEach((action) => {
+        const card = document.createElement("div");
+        card.className = "action-card";
+        card.innerHTML = `<h3>${action.label}</h3><span>${action.description}</span>`;
+        card.onclick = () => selectAction(action.id);
+        grid.appendChild(card);
+      });
+    }
+
+    function selectAction(actionId) {
+      const action = actionDefinitions.find(a => a.id === actionId);
+      if (!action) return;
+      state.selectedAction = action;
+      const form = document.getElementById("builderForm");
+      form.innerHTML = "";
+      if (action.requiresProject) {
+        const proj = state.project ? `${state.project.name}` : "No project selected";
+        const p = document.createElement("p");
+        p.textContent = `Project: ${proj}`;
+        p.style.color = "#9aa7c7";
+        form.appendChild(p);
+      }
+      action.fields.forEach((field) => {
+        const wrap = document.createElement("div");
+        wrap.className = "field";
+        const label = document.createElement("label");
+        label.textContent = field.name.replace(/_/g, " ");
+        let input;
+        if (field.type === "json") {
+          input = document.createElement("textarea");
+          input.placeholder = field.placeholder || "{}";
+        } else {
+          input = document.createElement("input");
+          input.type = field.type === "number" ? "number" : "text";
+          input.placeholder = field.placeholder || "";
+        }
+        input.dataset.field = field.name;
+        wrap.appendChild(label);
+        wrap.appendChild(input);
+        form.appendChild(wrap);
+      });
+    }
+
+    async function runSelectedAction() {
+      const action = state.selectedAction;
+      if (!action) {
+        toast("Pick an action first.");
+        return;
+      }
+      if (action.requiresProject && !state.project) {
+        toast("Select a project first.");
+        return;
+      }
+      const form = document.getElementById("builderForm");
+      const inputs = form.querySelectorAll("input, textarea");
+      const args = {};
+      inputs.forEach((input) => {
+        const key = input.dataset.field;
+        if (!key) return;
+        if (!input.value) return;
+        if (input.tagName === "TEXTAREA") {
+          try {
+            args[key] = JSON.parse(input.value);
+          } catch {
+            args[key] = input.value;
+          }
+        } else if (input.type === "number") {
+          args[key] = Number(input.value);
+        } else {
+          args[key] = input.value;
+        }
+      });
+      if (action.requiresProject) {
+        args.project = state.project.name;
+      }
+      const result = await callDevApi(action.id, args);
+      setResult(action.label, result);
+    }
+
+    async function loadProjects() {
+      const result = await callDevApi("list_projects");
+      const list = document.getElementById("projectList");
+      list.innerHTML = "";
+      (result || []).forEach((project) => {
+        const card = document.createElement("div");
+        card.className = "project-card";
+        card.innerHTML = `<strong>${project.name}</strong><br><span style="color:#9aa7c7;font-size:12px;">${project.status}</span>`;
+        card.onclick = () => selectProject(project, card);
+        list.appendChild(card);
+      });
+      setResult("list_projects", result);
+    }
+
+    async function selectProject(project, cardEl) {
+      state.project = project;
+      localStorage.setItem("bcgptProject", JSON.stringify(project));
+      document.querySelectorAll(".project-card").forEach(el => el.classList.remove("active"));
+      if (cardEl) cardEl.classList.add("active");
+      document.getElementById("projectMeta").textContent = `${project.name} (${project.status})`;
+      await preloadEntities();
+      toast(`Selected ${project.name}`);
+    }
+
+    async function refreshStatus() {
+      const res = await fetch("/startbcgpt");
+      const data = await res.json();
+      state.auth = data;
+      const chip = document.getElementById("statusChip");
+      chip.textContent = data.connected ? "connected" : "disconnected";
+      chip.style.borderColor = data.connected ? "rgba(51,214,166,0.5)" : "rgba(255,107,107,0.5)";
+      chip.style.color = data.connected ? "#33d6a6" : "#ff6b6b";
+      return data;
+    }
+
+    function openAuthModal() {
+      document.getElementById("authModal").classList.add("active");
+      const msg = document.getElementById("authMessage");
+      if (!state.auth) {
+        msg.textContent = "Status unknown. Click refresh or connect.";
+        return;
+      }
+      msg.textContent = state.auth.connected ? `Connected as ${state.auth.user?.name || "user"}` : "Not connected yet.";
+    }
+
+    async function loadToolCache(toolName) {
+      const res = await fetch(`/dev/cache/tool?name=${encodeURIComponent(toolName)}`);
+      const data = await res.json();
+      return data.items || [];
+    }
+
+    function renderToolSuggestions(toolName, schema) {
+      const container = document.getElementById("toolSuggestions");
+      container.innerHTML = "";
+      if (!schema || !schema.properties) return;
+
+      const fieldEntries = Object.keys(schema.properties);
+      fieldEntries.forEach((field) => {
+        const type = fieldEntityMap[field];
+        if (!type) return;
+        const items = state.entities[type] || [];
+        if (!items.length) return;
+        const wrap = document.createElement("div");
+        wrap.className = "field";
+        const label = document.createElement("label");
+        label.textContent = `${field.replace(/_/g, " ")} suggestions`;
+        const chips = document.createElement("div");
+        chips.className = "chips";
+        items.slice(0, 6).forEach((item) => {
+          const chip = document.createElement("div");
+          chip.className = "chip";
+          chip.textContent = item.title || item.data?.name || item.object_id;
+          chip.onclick = () => fillToolField(field, item);
+          chips.appendChild(chip);
+        });
+        wrap.appendChild(label);
+        wrap.appendChild(chips);
+        container.appendChild(wrap);
+      });
+
+      loadToolCache(toolName).then((items) => {
+        if (!items.length) return;
+        const wrap = document.createElement("div");
+        wrap.className = "field";
+        const label = document.createElement("label");
+        label.textContent = "Recent Runs";
+        const chips = document.createElement("div");
+        chips.className = "chips";
+        items.slice(0, 5).forEach((entry) => {
+          const chip = document.createElement("div");
+          chip.className = "chip";
+          chip.textContent = JSON.stringify(entry.args).slice(0, 42) + "...";
+          chip.onclick = () => fillToolForm(entry.args || {});
+          chips.appendChild(chip);
+        });
+        wrap.appendChild(label);
+        wrap.appendChild(chips);
+        container.appendChild(wrap);
+      });
+    }
+
+    function fillToolForm(args) {
+      const form = document.getElementById("toolForm");
+      form.querySelectorAll("input, textarea, select").forEach((input) => {
+        const key = input.dataset.key;
+        if (!(key in args)) return;
+        const value = args[key];
+        if (input.type === "checkbox") {
+          input.checked = Boolean(value);
+        } else if (input.tagName === "TEXTAREA") {
+          input.value = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+        } else {
+          input.value = value;
+        }
+      });
+      toast("Loaded cached args");
+    }
+
+    function fillToolField(field, entity) {
+      const form = document.getElementById("toolForm");
+      const input = form.querySelector(`[data-key="${field}"]`);
+      if (!input) return;
+      if (input.tagName === "TEXTAREA") {
+        input.value = entity.object_id;
+      } else if (input.type === "number") {
+        input.value = entity.object_id;
+      } else {
+        input.value = entity.object_id;
+      }
+      toast(`Filled ${field}`);
+    }
+
+    document.getElementById("refreshStatus").onclick = async () => {
+      const data = await refreshStatus();
+      setResult("startbcgpt", data);
+    };
+
+    document.getElementById("connectBtn").onclick = async () => {
+      const data = await refreshStatus();
+      openAuthModal();
+      if (data.reauth_url) {
+        window.open(data.reauth_url, "bcgptAuth", "width=720,height=720");
+      }
+    };
+
+    document.getElementById("logoutBtn").onclick = async () => {
+      await fetch("/logout", { method: "POST" });
+      await refreshStatus();
+      toast("Logged out.");
+    };
+
+    document.getElementById("openAuth").onclick = () => {
+      if (state.auth?.reauth_url) {
+        window.open(state.auth.reauth_url, "bcgptAuth", "width=720,height=720");
+      } else {
+        toast("No auth link yet. Refresh status.");
+      }
+    };
+
+    document.getElementById("closeAuth").onclick = () => {
+      document.getElementById("authModal").classList.remove("active");
+    };
+
+    document.getElementById("loadProjects").onclick = loadProjects;
+    document.getElementById("runActionBtn").onclick = runSelectedAction;
+    document.getElementById("clearBuilder").onclick = () => {
+      state.selectedAction = null;
+      document.getElementById("builderForm").innerHTML = "";
+    };
+
+    document.getElementById("runRaw").onclick = async () => {
+      const path = document.getElementById("rawPath").value.trim();
+      const method = document.getElementById("rawMethod").value;
+      const bodyText = document.getElementById("rawBody").value.trim();
+      const args = { path, method };
+      if (bodyText) {
+        try { args.body = JSON.parse(bodyText); } catch { args.body = bodyText; }
+      }
+      const result = await callDevApi("basecamp_raw", args);
+      setResult("basecamp_raw", result);
+    };
+
+    document.getElementById("runMine").onclick = runMine;
+    document.getElementById("refreshMine").onclick = loadMineStatus;
+
+    document.querySelectorAll("[data-action]").forEach((btn) => {
+      btn.onclick = async () => {
+        const action = btn.dataset.action;
+        if (["list_todos_for_project", "list_message_boards", "list_documents", "list_schedule_entries", "list_campfires", "list_webhooks", "list_client_correspondences", "list_client_approvals", "get_project_structure"].includes(action)) {
+          if (!state.project) return toast("Select a project first.");
+        }
+        const args = state.project ? { project: state.project.name } : {};
+        const result = await callDevApi(action, args);
+        setResult(action, result);
+      };
+    });
+
+    document.getElementById("runTool").onclick = async () => {
+      const select = document.getElementById("toolSelect");
+      const toolName = select.value;
+      const args = {};
+      const form = document.getElementById("toolForm");
+      form.querySelectorAll("input, textarea, select").forEach((input) => {
+        const key = input.dataset.key;
+        if (!key) return;
+        if (input.type === "checkbox") {
+          args[key] = input.checked;
+          return;
+        }
+        if (!input.value) return;
+        if (input.tagName === "TEXTAREA") {
+          try { args[key] = JSON.parse(input.value); } catch { args[key] = input.value; }
+        } else if (input.type === "number") {
+          args[key] = Number(input.value);
+        } else {
+          args[key] = input.value;
+        }
+      });
+      if ("project" in args && state.project && !args.project) {
+        args.project = state.project.name;
+      }
+      const result = await callDevApi(toolName, args);
+      setResult(toolName, result);
+      await preloadEntities();
+    };
+
+    function renderToolForm(schema) {
+      const form = document.getElementById("toolForm");
+      form.innerHTML = "";
+      if (!schema || !schema.properties) return;
+      Object.entries(schema.properties).forEach(([key, prop]) => {
+        const wrap = document.createElement("div");
+        wrap.className = "field";
+        const label = document.createElement("label");
+        label.textContent = key.replace(/_/g, " ");
+        let input;
+        if (prop.type === "boolean") {
+          input = document.createElement("input");
+          input.type = "checkbox";
+        } else if (prop.type === "integer" || prop.type === "number") {
+          input = document.createElement("input");
+          input.type = "number";
+        } else if (prop.type === "object" || prop.type === "array") {
+          input = document.createElement("textarea");
+          input.placeholder = prop.type === "array" ? "[]" : "{}";
+        } else {
+          input = document.createElement("input");
+          input.type = "text";
+        }
+        input.dataset.key = key;
+        if (key === "project" && state.project) {
+          input.value = state.project.name;
+        }
+        wrap.appendChild(label);
+        wrap.appendChild(input);
+        form.appendChild(wrap);
+      });
+    }
+
+    async function initTools() {
+      const tools = await fetchToolsList();
+      state.tools = tools;
+      const select = document.getElementById("toolSelect");
+      select.innerHTML = "";
+      tools.forEach((tool) => {
+        const opt = document.createElement("option");
+        opt.value = tool.name;
+        opt.textContent = tool.name;
+        select.appendChild(opt);
+      });
+      select.onchange = () => {
+        const selected = tools.find(t => t.name === select.value);
+        renderToolForm(selected?.inputSchema);
+        renderToolSuggestions(select.value, selected?.inputSchema);
+      };
+      if (tools[0]) {
+        renderToolForm(tools[0].inputSchema);
+        renderToolSuggestions(tools[0].name, tools[0].inputSchema);
+      }
+    }
+
+    function restoreProject() {
+      const saved = localStorage.getItem("bcgptProject");
+      if (saved) {
+        try {
+          state.project = JSON.parse(saved);
+          document.getElementById("projectMeta").textContent = `${state.project.name} (${state.project.status || ""})`;
+        } catch {
+          localStorage.removeItem("bcgptProject");
+        }
+      }
+    }
+
+    renderActions();
+    restoreProject();
+    refreshStatus();
+    loadMineStatus();
+    initTools();
+    preloadEntities();
   </script>
 </body>
 </html>

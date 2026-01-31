@@ -7,7 +7,21 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 import { handleMCP } from "./mcp.js";
-import { getToken, setToken, clearToken, getAuthCache, setAuthCache, getIndexStats } from "./db.js";
+import {
+  getToken,
+  setToken,
+  clearToken,
+  getAuthCache,
+  setAuthCache,
+  getIndexStats,
+  getEntityStats,
+  getToolCacheStats,
+  listEntityCache,
+  searchIndex,
+  setToolCache,
+  listToolCache,
+} from "./db.js";
+import { runMining } from "./miner.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,6 +43,9 @@ console.log(`[Startup] DEFAULT_ACCOUNT_ID from env: ${DEFAULT_ACCOUNT_ID}`);
 
 let TOKEN = null;      // single-user token
 let AUTH_CACHE = null; // cached authorization.json
+let MINER_RUNNING = false;
+let MINER_LAST_RESULT = null;
+let MINER_LAST_STARTED_AT = null;
 
 // Load TOKEN from database on startup, fallback to environment
 TOKEN = getToken();
@@ -337,6 +354,31 @@ async function startStatus(req) {
   }
 }
 
+async function runMiningJob({ force = false } = {}) {
+  if (MINER_RUNNING) return { ok: false, message: "Miner already running." };
+  if (!TOKEN?.access_token) return { ok: false, message: "Not authenticated." };
+  MINER_RUNNING = true;
+  MINER_LAST_STARTED_AT = new Date().toISOString();
+  try {
+    const accountId = await getAccountId();
+    const result = await runMining({
+      token: TOKEN,
+      accountId,
+      ua: UA,
+      delayMs: Number(process.env.MINER_DELAY_MS || 150),
+      projectsPerRun: Number(process.env.MINER_PROJECTS_PER_RUN || 4),
+      projectMinIntervalSec: Number(process.env.MINER_PROJECT_MIN_INTERVAL_SEC || 1800),
+    });
+    MINER_LAST_RESULT = result;
+    return { ok: true, result };
+  } catch (e) {
+    MINER_LAST_RESULT = { error: e?.message || String(e) };
+    return { ok: false, error: e?.message || String(e) };
+  } finally {
+    MINER_RUNNING = false;
+  }
+}
+
 async function buildMcpCtx(req) {
   const auth = TOKEN?.access_token ? await getAuthorization() : null;
   const accountId = TOKEN?.access_token ? await getAccountId() : null;
@@ -522,10 +564,59 @@ app.post("/dev/api", async (req, res) => {
     const { name, args } = req.body || {};
     if (!name) return res.status(400).json({ error: "Missing tool name" });
     const result = await runTool(name, args, req);
+    try {
+      setToolCache(name, args || {}, result);
+    } catch (e) {
+      console.error(`[dev/api] cache error for ${name}:`, e?.message || e);
+    }
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: e?.message || String(e), code: e?.code || "SERVER_ERROR", details: e?.details || null });
   }
+});
+
+app.get("/dev/mine/status", (req, res) => {
+  res.json({
+    running: MINER_RUNNING,
+    last_started_at: MINER_LAST_STARTED_AT,
+    last_result: MINER_LAST_RESULT,
+    index_stats: getIndexStats(),
+    entity_stats: getEntityStats(),
+    tool_cache_stats: getToolCacheStats(),
+  });
+});
+
+app.post("/dev/mine/run", async (req, res) => {
+  const result = await runMiningJob({ force: true });
+  res.json(result);
+});
+
+app.get("/dev/mine/entities", (req, res) => {
+  const { type, project_id, limit } = req.query || {};
+  if (!type) return res.status(400).json({ error: "Missing type" });
+  const items = listEntityCache(type, {
+    projectId: project_id ? Number(project_id) : null,
+    limit: limit ? Number(limit) : 200,
+  });
+  res.json({ type, count: items.length, items });
+});
+
+app.get("/dev/mine/search", (req, res) => {
+  const { q, type, project_id, limit } = req.query || {};
+  if (!q) return res.status(400).json({ error: "Missing q" });
+  const items = searchIndex(String(q), {
+    type: type || undefined,
+    projectId: project_id ? Number(project_id) : undefined,
+    limit: limit ? Number(limit) : 100,
+  });
+  res.json({ query: q, count: items.length, items });
+});
+
+app.get("/dev/cache/tool", (req, res) => {
+  const { name, limit } = req.query || {};
+  if (!name) return res.status(400).json({ error: "Missing name" });
+  const items = listToolCache(String(name), { limit: limit ? Number(limit) : 20 });
+  res.json({ name, count: items.length, items });
 });
 
 /* ================= Database Info ================= */
@@ -548,3 +639,8 @@ app.get("/db/info", (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`${UA} running on ${PORT}`));
+
+const minerIntervalMs = Number(process.env.MINER_INTERVAL_MS || 900000);
+setInterval(() => {
+  runMiningJob().catch(() => {});
+}, minerIntervalMs);
