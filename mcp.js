@@ -720,6 +720,8 @@ async function listScheduleEntries(ctx, projectId, { limit } = {}) {
     ends_at: e.ends_at,
     created_at: e.created_at,
     updated_at: e.updated_at,
+    creator_id: e.creator?.id,
+    bucket: e.bucket,
     app_url: e.app_url,
     url: e.url,
   }));
@@ -1857,9 +1859,33 @@ export async function handleMCP(reqBody, ctx) {
     }
 
     if (name === "list_schedule_entries") {
-      const p = await projectByName(ctx, args.project);
-      const entries = await listScheduleEntries(ctx, p.id, { from: args.from, to: args.to });
-      return ok(id, { project: { id: p.id, name: p.name }, schedule_entries: entries });
+      try {
+        const p = await projectByName(ctx, args.project);
+        const entries = await listScheduleEntries(ctx, p.id, { from: args.from, to: args.to });
+
+        // INTELLIGENT CHAINING: Enrich schedule entries with person/project details
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `schedule entries for ${p.name}`);
+        const enricher = intelligent.createEnricher(ctx_intel);
+
+        const enrichedEntries = await Promise.all(
+          entries.map(e => enricher.enrich({ ...e, bucket: { id: p.id, name: p.name } }, {
+            getPerson: (id) => ctx_intel.getPerson(id),
+            getProject: (id) => ctx_intel.getProject(id)
+          }))
+        );
+
+        return ok(id, { project: { id: p.id, name: p.name }, schedule_entries: enrichedEntries, count: enrichedEntries.length, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[list_schedule_entries] Error:`, e.message);
+        // Fallback to non-enriched schedule entries
+        try {
+          const p = await projectByName(ctx, args.project);
+          const entries = await listScheduleEntries(ctx, p.id, { from: args.from, to: args.to });
+          return ok(id, { project: { id: p.id, name: p.name }, schedule_entries: entries, count: entries.length, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "LIST_SCHEDULE_ENTRIES_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     if (name === "search_project") {
