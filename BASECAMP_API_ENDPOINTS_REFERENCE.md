@@ -18,7 +18,8 @@
 9. [Uploads](#uploads)
 10. [Documents](#documents)
 11. [Schedule Entries](#schedule-entries)
-12. [Recordings](#recordings)
+12. [Search](#search)
+13. [Recordings](#recordings)
 
 ---
 
@@ -508,6 +509,25 @@
 - **Path**: `/buckets/{bucket_id}/recordings/{id}/status/trashed.json`
 - **Parameters**: None
 - **Response**: `204 No Content`
+
+---
+
+## SEARCH
+
+### Search recordings
+- **Method**: `GET`
+- **Path**: `/search.json`
+- **Required Parameters**:
+  - `q` (string) - Search query
+- **Optional Parameters**:
+  - `type` (string) - Filter by recording type (Todo, Message, Document, Upload, etc.)
+  - `bucket_id` (integer) - Filter to a specific project/bucket
+  - `creator_id` (integer) - Filter by creator
+  - `file_type` (string) - Filter by file type
+  - `exclude_chat` (boolean) - Exclude chat from results
+  - `page` (integer) - Page number
+  - `per_page` (integer) - Items per page
+- **Response**: Paginated list of matching recordings
 
 ---
 

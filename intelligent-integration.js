@@ -24,6 +24,47 @@ async function initializeIntelligentContext(apiCtx, query) {
   return ctx;
 }
 
+// Simple sleep helper for retries
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Retry policy: only retry on 429 or 5xx Basecamp API errors
+function shouldRetry(err) {
+  const status = err?.status;
+  if (err?.code === "BASECAMP_API_ERROR") {
+    if (status === 429) return true;
+    if (status >= 500 && status <= 599) return true;
+  }
+  return false;
+}
+
+/**
+ * Execute with retry + exponential backoff
+ */
+async function executeWithRetry(fn, {
+  label = "operation",
+  maxRetries = 3,
+  baseDelayMs = 300,
+  maxDelayMs = 2000
+} = {}) {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (!shouldRetry(err) || attempt >= maxRetries) {
+        throw err;
+      }
+      const delay = Math.min(maxDelayMs, baseDelayMs * (2 ** attempt));
+      const jitter = Math.floor(Math.random() * 100);
+      console.warn(`[Retry] ${label} failed (attempt ${attempt + 1}/${maxRetries}). Retrying in ${delay + jitter}ms:`, err?.message);
+      await sleep(delay + jitter);
+      attempt += 1;
+    }
+  }
+}
+
 /**
  * Parse a user query to understand their intent
  */
@@ -50,7 +91,10 @@ function createEnricher(requestContext) {
  */
 async function executeIntelligentSearch(apiCtx, query, projectId = null) {
   const executor = new SearchEnrichExecutor(apiCtx);
-  return executor.execute(apiCtx, query, projectId);
+  return executeWithRetry(
+    () => executor.execute(apiCtx, query, projectId),
+    { label: "executeIntelligentSearch" }
+  );
 }
 
 /**
@@ -58,7 +102,10 @@ async function executeIntelligentSearch(apiCtx, query, projectId = null) {
  */
 async function executeAssignmentReport(apiCtx, projectId, maxTodos = 250) {
   const executor = new AssignmentExecutor(apiCtx);
-  return executor.execute(apiCtx, projectId, maxTodos);
+  return executeWithRetry(
+    () => executor.execute(apiCtx, projectId, maxTodos),
+    { label: "executeAssignmentReport" }
+  );
 }
 
 /**
@@ -66,7 +113,10 @@ async function executeAssignmentReport(apiCtx, projectId, maxTodos = 250) {
  */
 async function executeTimeline(apiCtx, projectId, startDate, endDate) {
   const executor = new TimelineExecutor(apiCtx);
-  return executor.execute(apiCtx, projectId, startDate, endDate);
+  return executeWithRetry(
+    () => executor.execute(apiCtx, projectId, startDate, endDate),
+    { label: "executeTimeline" }
+  );
 }
 
 /**
@@ -76,11 +126,16 @@ async function executeTimeline(apiCtx, projectId, startDate, endDate) {
 async function executeDailyReport(apiCtx, date) {
   // Initialize context for caching and enrichment
   const ctx = new RequestContext(apiCtx, `daily report for ${date}`);
-  await ctx.preloadEssentials();
 
   try {
-    // Load all open todos (this will be cached)
-    const rows = await apiCtx.listAllOpenTodos();
+    // Parallelize preload + data fetch to reduce latency
+    const [, rows] = await executeParallelStrict([
+      () => ctx.preloadEssentials(),
+      () => executeWithRetry(
+        () => apiCtx.listAllOpenTodos(),
+        { label: "listAllOpenTodos" }
+      )
+    ], { throwOnError: true });
 
     // Enrich with person and project details
     const enricher = createEnricher(ctx);
@@ -148,7 +203,10 @@ async function executeDailyReport(apiCtx, date) {
  */
 async function executePersonFinder(apiCtx, projectId, personName) {
   const executor = new PersonFinderExecutor(apiCtx);
-  return executor.execute(apiCtx, projectId, personName);
+  return executeWithRetry(
+    () => executor.execute(apiCtx, projectId, personName),
+    { label: "executePersonFinder" }
+  );
 }
 
 /**
@@ -156,7 +214,10 @@ async function executePersonFinder(apiCtx, projectId, personName) {
  */
 async function executeStatusFilter(apiCtx, projectId, status = 'active') {
   const executor = new StatusFilterExecutor(apiCtx);
-  return executor.execute(apiCtx, projectId, status);
+  return executeWithRetry(
+    () => executor.execute(apiCtx, projectId, status),
+    { label: "executeStatusFilter" }
+  );
 }
 
 /**
@@ -185,6 +246,16 @@ async function robustExecute(primaryFn, fallbacks = []) {
  */
 async function executeParallel(tasks) {
   return Promise.all(tasks.map(task => task().catch(e => ({ error: e.message }))));
+}
+
+/**
+ * Helper: Parallel execution with optional error propagation
+ */
+async function executeParallelStrict(tasks, { throwOnError = false } = {}) {
+  if (throwOnError) {
+    return Promise.all(tasks.map(task => task()));
+  }
+  return executeParallel(tasks);
 }
 
 /**
@@ -250,6 +321,7 @@ export {
   initializeIntelligentContext,
   analyzeQuery,
   createEnricher,
+  executeWithRetry,
 
   // Specialized executors
   executeIntelligentSearch,
@@ -262,5 +334,6 @@ export {
   // Execution helpers
   robustExecute,
   executeParallel,
+  executeParallelStrict,
   executeSequential
 };
