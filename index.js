@@ -646,6 +646,36 @@ app.get("/dev/cache/tool", (req, res) => {
   res.json({ name, count: items.length, items });
 });
 
+app.post("/dev/chat", async (req, res) => {
+  const CHATGPT_API_KEY = process.env.CHATGPT_API_KEY;
+  if (!CHATGPT_API_KEY) {
+    return res.status(500).json({ error: "CHATGPT_API_KEY not configured on server." });
+  }
+  const { model = "gpt-4o-mini", temperature = 0.6, messages = [] } = req.body || {};
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${CHATGPT_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model,
+        temperature,
+        messages,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      return res.status(response.status).json(data);
+    }
+    res.json(data);
+  } catch (e) {
+    console.error("[/dev/chat] OpenAI request failed:", e);
+    res.status(500).json({ error: e.message || "OpenAI request failed." });
+  }
+});
+
 /* ================= Database Info ================= */
 app.get("/db/info", (req, res) => {
   try {
