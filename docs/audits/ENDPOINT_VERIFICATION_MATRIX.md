@@ -2,7 +2,7 @@
 
 **Generated**: January 30, 2026  
 **Total Tools Audited**: 37  
-**Source Files**: mcp.js, basecamp.js, BASECAMP_API_ENDPOINTS_REFERENCE.md
+**Source Files**: mcp.js, basecamp.js, docs/reference/BASECAMP_API_ENDPOINTS_REFERENCE.md
 
 ---
 
@@ -353,3 +353,4 @@ The BCGPT implementation faithfully implements the Basecamp 4 API with excellent
 **Audit Completed**: January 30, 2026  
 **Auditor**: Code Analysis Engine  
 **Confidence Level**: High (Code review based on official API reference)
+

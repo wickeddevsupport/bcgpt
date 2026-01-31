@@ -58,7 +58,7 @@
 ### Requirement 2: Design Intelligent AI Architecture ✅ COMPLETE
 **User Demand**: "think of how we can improve the app to make it a truly intelligent ai...it can chain and search through various api calls and data to give actual factual exact results"
 
-**Deliverable**: `INTELLIGENT_CHAINING_ARCHITECTURE.md` (500+ lines)
+**Deliverable**: `docs/phases/INTELLIGENT_CHAINING_ARCHITECTURE.md` (500+ lines)
 
 **Core Vision**: Transform bcgpt from simple tool-calling to intelligent agent that:
 1. **Automatically chains** 2-5 API calls without user asking
@@ -124,14 +124,14 @@
 - ✅ 2 commits with detailed messages
 
 ### 2. **Architecture Document**
-- 📄 `INTELLIGENT_CHAINING_ARCHITECTURE.md` (500+ lines)
+- 📄 `docs/phases/INTELLIGENT_CHAINING_ARCHITECTURE.md` (500+ lines)
 - Comprehensive design for intelligent chaining system
 - Code examples, ROI metrics, implementation phases
 
 ### 3. **Documentation** (from audit)
-- 📄 `FULL_ENDPOINT_AUDIT_CHECKLIST.md` - Master audit with all 37 tools
+- 📄 `docs/audits/FULL_ENDPOINT_AUDIT_CHECKLIST.md` - Master audit with all 37 tools
 - 📄 `ENDPOINT_VERIFICATION_MATRIX.md` - Status matrix
-- 📄 `BASECAMP_API_ENDPOINTS_REFERENCE.md` - Complete API reference
+- 📄 `docs/reference/BASECAMP_API_ENDPOINTS_REFERENCE.md` - Complete API reference
 
 ---
 
@@ -248,4 +248,5 @@ Before starting implementation of intelligent chaining:
 **Estimated effort**: 10-12 hours to full implementation
 
 **Expected outcome**: An MCP server that automatically chains API calls, enriches data, and provides complete factual answers to complex queries without requiring follow-up requests.
+
 

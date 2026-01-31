@@ -194,16 +194,16 @@ async function handleSearchTodos(ctx, args) {
 
 ## References
 
-📄 **Architecture**: `INTELLIGENT_CHAINING_ARCHITECTURE.md` (500+ lines)
-📄 **API Reference**: `BASECAMP_API_ENDPOINTS_REFERENCE.md`
-📄 **Audit Checklist**: `FULL_ENDPOINT_AUDIT_CHECKLIST.md`
-📄 **Session Summary**: `SESSION_SUMMARY_COMPREHENSIVE_AUDIT.md`
+📄 **Architecture**: `docs/phases/INTELLIGENT_CHAINING_ARCHITECTURE.md` (500+ lines)
+📄 **API Reference**: `docs/reference/BASECAMP_API_ENDPOINTS_REFERENCE.md`
+📄 **Audit Checklist**: `docs/audits/FULL_ENDPOINT_AUDIT_CHECKLIST.md`
+📄 **Session Summary**: `docs/summaries/SESSION_SUMMARY_COMPREHENSIVE_AUDIT.md`
 
 ---
 
 ## When You're Ready to Start
 
-1. Read `INTELLIGENT_CHAINING_ARCHITECTURE.md` (30 min)
+1. Read `docs/phases/INTELLIGENT_CHAINING_ARCHITECTURE.md` (30 min)
 2. Create `intelligent-executor.js` with RequestContext (1 hr)
 3. Implement cache preloading (1 hr)
 4. Add to first tool handler as test (1 hr)
@@ -217,4 +217,5 @@ async function handleSearchTodos(ctx, args) {
 ## Questions?
 
 See architecture document for detailed design decisions, code examples, and ROI analysis.
+
 

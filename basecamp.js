@@ -129,8 +129,13 @@ export async function basecampFetch(
 
   let payload = undefined;
   if (body !== undefined && body !== null && httpMethod !== "GET" && httpMethod !== "HEAD") {
-    h["Content-Type"] = h["Content-Type"] || "application/json";
-    payload = typeof body === "string" ? body : JSON.stringify(body);
+    const isBinary = (typeof Buffer !== "undefined" && Buffer.isBuffer(body)) || body instanceof Uint8Array;
+    if (isBinary) {
+      payload = body;
+    } else {
+      h["Content-Type"] = h["Content-Type"] || "application/json";
+      payload = typeof body === "string" ? body : JSON.stringify(body);
+    }
   }
 
   for (let attempt = 0; attempt <= retries; attempt++) {
