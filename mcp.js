@@ -654,6 +654,8 @@ async function listMessages(ctx, projectId, { board_id, board_title, limit } = {
     status: m.status,
     created_at: m.created_at,
     updated_at: m.updated_at,
+    creator_id: m.creator?.id,
+    bucket: m.bucket,
     app_url: m.app_url,
     url: m.url,
   }));
@@ -693,6 +695,8 @@ async function listDocuments(ctx, projectId, { limit } = {}) {
     kind: d.kind,
     created_at: d.created_at,
     updated_at: d.updated_at,
+    creator_id: d.creator?.id,
+    bucket: d.bucket,
     app_url: d.app_url,
     url: d.url,
   }));
@@ -1793,17 +1797,63 @@ export async function handleMCP(reqBody, ctx) {
     }
 
     if (name === "list_messages") {
-      const p = await projectByName(ctx, args.project);
-      const boards = await listMessageBoards(ctx, p.id);
-      const board = resolveByName(boards, args.board, "message board");
-      const msgs = await listMessagesForBoard(ctx, board);
-      return ok(id, { project: { id: p.id, name: p.name }, board: { id: board.id, name: board.name }, messages: msgs });
+      try {
+        const p = await projectByName(ctx, args.project);
+        const msgs = await listMessages(ctx, p.id, { board_id: args.message_board_id });
+
+        // INTELLIGENT CHAINING: Enrich messages with person/project details
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `messages for ${p.name}`);
+        const enricher = intelligent.createEnricher(ctx_intel);
+
+        const enrichedMessages = await Promise.all(
+          msgs.map(m => enricher.enrich({ ...m, bucket: { id: p.id, name: p.name } }, {
+            getPerson: (id) => ctx_intel.getPerson(id),
+            getProject: (id) => ctx_intel.getProject(id)
+          }))
+        );
+
+        return ok(id, { project: { id: p.id, name: p.name }, messages: enrichedMessages, count: enrichedMessages.length, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[list_messages] Error:`, e.message);
+        // Fallback to non-enriched messages
+        try {
+          const p = await projectByName(ctx, args.project);
+          const msgs = await listMessages(ctx, p.id, { board_id: args.message_board_id });
+          return ok(id, { project: { id: p.id, name: p.name }, messages: msgs, count: msgs.length, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "LIST_MESSAGES_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     if (name === "list_documents") {
-      const p = await projectByName(ctx, args.project);
-      const docs = await listDocuments(ctx, p.id);
-      return ok(id, { project: { id: p.id, name: p.name }, documents: docs });
+      try {
+        const p = await projectByName(ctx, args.project);
+        const docs = await listDocuments(ctx, p.id);
+
+        // INTELLIGENT CHAINING: Enrich documents with person/project details
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `documents for ${p.name}`);
+        const enricher = intelligent.createEnricher(ctx_intel);
+
+        const enrichedDocs = await Promise.all(
+          docs.map(d => enricher.enrich({ ...d, bucket: { id: p.id, name: p.name } }, {
+            getPerson: (id) => ctx_intel.getPerson(id),
+            getProject: (id) => ctx_intel.getProject(id)
+          }))
+        );
+
+        return ok(id, { project: { id: p.id, name: p.name }, documents: enrichedDocs, count: enrichedDocs.length, metrics: ctx_intel.getMetrics() });
+      } catch (e) {
+        console.error(`[list_documents] Error:`, e.message);
+        // Fallback to non-enriched documents
+        try {
+          const p = await projectByName(ctx, args.project);
+          const docs = await listDocuments(ctx, p.id);
+          return ok(id, { project: { id: p.id, name: p.name }, documents: docs, count: docs.length, fallback: true });
+        } catch (fbErr) {
+          return fail(id, { code: "LIST_DOCUMENTS_ERROR", message: fbErr.message });
+        }
+      }
     }
 
     if (name === "list_schedule_entries") {
