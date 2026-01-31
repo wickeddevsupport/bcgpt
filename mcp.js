@@ -55,6 +55,7 @@ import crypto from "crypto";
 import { basecampFetch, basecampFetchAll } from "./basecamp.js";
 import { resolveByName, resolveBestEffort } from "./resolvers.js";
 import { indexSearchItem } from "./db.js";
+import { getTools } from "./mcp/tools.js";
 
 // Intelligent chaining modules
 import { RequestContext } from './intelligent-executor.js';
@@ -63,10 +64,6 @@ import * as intelligent from './intelligent-integration.js';
 // ---------- JSON-RPC helpers ----------
 function ok(id, result) { return { jsonrpc: "2.0", id, result }; }
 function fail(id, error) { return { jsonrpc: "2.0", id, error }; }
-
-// ---------- Tool schema helpers ----------
-function tool(name, description, inputSchema) { return { name, description, inputSchema }; }
-function noProps() { return { type: "object", properties: {}, additionalProperties: false }; }
 
 // ---------- Tiny in-memory cache ----------
 const CACHE = new Map(); // key -> { ts, value }
@@ -235,6 +232,19 @@ async function getProject(ctx, projectId) {
   return api(ctx, `/projects/${projectId}.json`);
 }
 
+async function createProject(ctx, body) {
+  return api(ctx, `/projects.json`, { method: "POST", body });
+}
+
+async function updateProject(ctx, projectId, body) {
+  return api(ctx, `/projects/${projectId}.json`, { method: "PUT", body });
+}
+
+async function trashProject(ctx, projectId) {
+  await api(ctx, `/projects/${projectId}.json`, { method: "DELETE" });
+  return { message: "Project trashed", project_id: projectId };
+}
+
 async function getDock(ctx, projectId) {
   const p = await getProject(ctx, projectId);
   return p?.dock || [];
@@ -291,6 +301,18 @@ async function listTodoLists(ctx, projectId) {
     // Return empty list on any error to avoid breaking project enumeration
     return [];
   }
+}
+
+async function getTodoList(ctx, projectId, todolistId) {
+  return api(ctx, `/buckets/${projectId}/todolists/${todolistId}.json`);
+}
+
+async function createTodoList(ctx, projectId, todosetId, body) {
+  return api(ctx, `/buckets/${projectId}/todosets/${todosetId}/todolists.json`, { method: "POST", body });
+}
+
+async function updateTodoList(ctx, projectId, todolistId, body) {
+  return api(ctx, `/buckets/${projectId}/todolists/${todolistId}.json`, { method: "PUT", body });
 }
 
 async function listTodosForList(ctx, projectId, todolist) {
@@ -579,8 +601,51 @@ async function listCardTables(ctx, projectId) {
   }
 }
 
+async function getCardTable(ctx, projectId, cardTableId) {
+  return api(ctx, `/buckets/${projectId}/card_tables/${cardTableId}.json`);
+}
+
 async function listCardTableColumns(ctx, projectId, cardTableId) {
-  return apiAll(ctx, `/buckets/${projectId}/card_tables/${cardTableId}/columns.json`);
+  const table = await api(ctx, `/buckets/${projectId}/card_tables/${cardTableId}.json`);
+  return Array.isArray(table?.lists) ? table.lists : [];
+}
+
+async function getCardTableColumn(ctx, projectId, columnId) {
+  return api(ctx, `/buckets/${projectId}/card_tables/columns/${columnId}.json`);
+}
+
+async function createCardTableColumn(ctx, projectId, cardTableId, body) {
+  return api(ctx, `/buckets/${projectId}/card_tables/${cardTableId}/columns.json`, { method: "POST", body });
+}
+
+async function updateCardTableColumn(ctx, projectId, columnId, body) {
+  return api(ctx, `/buckets/${projectId}/card_tables/columns/${columnId}.json`, { method: "PUT", body });
+}
+
+async function moveCardTableColumn(ctx, projectId, cardTableId, body) {
+  return api(ctx, `/buckets/${projectId}/card_tables/${cardTableId}/moves.json`, { method: "POST", body });
+}
+
+async function subscribeCardTableColumn(ctx, projectId, columnId) {
+  return api(ctx, `/buckets/${projectId}/card_tables/lists/${columnId}/subscription.json`, { method: "POST" });
+}
+
+async function unsubscribeCardTableColumn(ctx, projectId, columnId) {
+  await api(ctx, `/buckets/${projectId}/card_tables/lists/${columnId}/subscription.json`, { method: "DELETE" });
+  return { message: "Column unsubscribed", column_id: columnId };
+}
+
+async function createCardTableOnHold(ctx, projectId, columnId) {
+  return api(ctx, `/buckets/${projectId}/card_tables/columns/${columnId}/on_hold.json`, { method: "POST" });
+}
+
+async function deleteCardTableOnHold(ctx, projectId, columnId) {
+  await api(ctx, `/buckets/${projectId}/card_tables/columns/${columnId}/on_hold.json`, { method: "DELETE" });
+  return { message: "Column on-hold removed", column_id: columnId };
+}
+
+async function updateCardTableColumnColor(ctx, projectId, columnId, body) {
+  return api(ctx, `/buckets/${projectId}/card_tables/columns/${columnId}/color.json`, { method: "PUT", body });
 }
 
 // Fetch all cards from all columns in a card table
@@ -605,6 +670,10 @@ async function listCardTableCards(ctx, projectId, cardTableId) {
   }
 }
 
+async function getCard(ctx, projectId, cardId) {
+  return api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}.json`);
+}
+
 async function createCard(ctx, projectId, cardTableId, { title, content, column_id, due_on } = {}) {
   const body = { title };
   if (content) body.content = content;
@@ -613,6 +682,10 @@ async function createCard(ctx, projectId, cardTableId, { title, content, column_
   // If column_id not provided, user must specify via handler
   if (!column_id) throw new Error("column_id (list/column ID) is required to create a card");
   return api(ctx, `/buckets/${projectId}/card_tables/lists/${column_id}/cards.json`, { method: "POST", body });
+}
+
+async function updateCard(ctx, projectId, cardId, body) {
+  return api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}.json`, { method: "PUT", body });
 }
 
 async function moveCard(ctx, projectId, cardId, { column_id, position } = {}) {
@@ -697,6 +770,22 @@ async function listMessages(ctx, projectId, { board_id, board_title, limit } = {
   return mapped;
 }
 
+async function getMessageBoard(ctx, projectId, boardId) {
+  return api(ctx, `/buckets/${projectId}/message_boards/${boardId}.json`);
+}
+
+async function getMessage(ctx, projectId, messageId) {
+  return api(ctx, `/buckets/${projectId}/messages/${messageId}.json`);
+}
+
+async function createMessage(ctx, projectId, boardId, body) {
+  return api(ctx, `/buckets/${projectId}/message_boards/${boardId}/messages.json`, { method: "POST", body });
+}
+
+async function updateMessage(ctx, projectId, messageId, body) {
+  return api(ctx, `/buckets/${projectId}/messages/${messageId}.json`, { method: "PUT", body });
+}
+
 async function listDocuments(ctx, projectId, { limit } = {}) {
   const dock = await getDock(ctx, projectId);
   const vault = dockFind(dock, ["vault", "documents"]);
@@ -738,6 +827,19 @@ async function listDocuments(ctx, projectId, { limit } = {}) {
   return mapped;
 }
 
+async function getDocument(ctx, projectId, documentId) {
+  return api(ctx, `/buckets/${projectId}/documents/${documentId}.json`);
+}
+
+async function createDocument(ctx, projectId, vaultId, body) {
+  if (!vaultId) throw new Error("vault_id is required to create a document.");
+  return api(ctx, `/buckets/${projectId}/vaults/${vaultId}/documents.json`, { method: "POST", body });
+}
+
+async function updateDocument(ctx, projectId, documentId, body) {
+  return api(ctx, `/buckets/${projectId}/documents/${documentId}.json`, { method: "PUT", body });
+}
+
 async function listScheduleEntries(ctx, projectId, { limit } = {}) {
   const dock = await getDock(ctx, projectId);
   const schedule = dockFind(dock, ["schedule", "schedules"]);
@@ -763,6 +865,26 @@ async function listScheduleEntries(ctx, projectId, { limit } = {}) {
   return mapped;
 }
 
+async function getSchedule(ctx, projectId, scheduleId) {
+  return api(ctx, `/buckets/${projectId}/schedules/${scheduleId}.json`);
+}
+
+async function updateSchedule(ctx, projectId, scheduleId, body) {
+  return api(ctx, `/buckets/${projectId}/schedules/${scheduleId}.json`, { method: "PUT", body });
+}
+
+async function getScheduleEntry(ctx, projectId, entryId) {
+  return api(ctx, `/buckets/${projectId}/schedule_entries/${entryId}.json`);
+}
+
+async function createScheduleEntry(ctx, projectId, scheduleId, body) {
+  return api(ctx, `/buckets/${projectId}/schedules/${scheduleId}/entries.json`, { method: "POST", body });
+}
+
+async function updateScheduleEntry(ctx, projectId, entryId, body) {
+  return api(ctx, `/buckets/${projectId}/schedule_entries/${entryId}.json`, { method: "PUT", body });
+}
+
 // ========== PEOPLE ENDPOINTS ==========
 async function listAllPeople(ctx) {
   const people = await apiAll(ctx, `/people.json`);
@@ -779,6 +901,11 @@ async function listAllPeople(ctx) {
     avatar_url: p.avatar_url,
     app_url: p.app_url,
   }));
+}
+
+async function listPingablePeople(ctx) {
+  const people = await apiAll(ctx, `/circles/people.json`);
+  return Array.isArray(people) ? people : [];
 }
 
 async function getPerson(ctx, personId) {
@@ -829,6 +956,10 @@ async function listProjectPeople(ctx, projectId) {
     avatar_url: p.avatar_url,
     app_url: p.app_url,
   }));
+}
+
+async function updateProjectPeople(ctx, projectId, body) {
+  return api(ctx, `/projects/${projectId}/people/users.json`, { method: "PUT", body });
 }
 
 // ========== COMMENTS ENDPOINTS ==========
@@ -984,10 +1115,32 @@ async function createComment(ctx, projectId, recordingId, content) {
   };
 }
 
+async function updateComment(ctx, projectId, commentId, content) {
+  const c = await api(ctx, `/buckets/${projectId}/comments/${commentId}.json`, {
+    method: "PUT",
+    body: { content }
+  });
+  return {
+    id: c.id,
+    updated_at: c.updated_at,
+    content: c.content,
+    creator: c.creator?.name,
+    creator_id: c.creator?.id,
+    app_url: c.app_url,
+  };
+}
+
 // ========== UPLOADS/FILES ENDPOINTS ==========
 async function listUploads(ctx, projectId, vaultId) {
-  // Uploads endpoint: GET /buckets/{projectId}/uploads.json (NOT under vaults)
-  const uploads = await apiAll(ctx, `/buckets/${projectId}/uploads.json`);
+  // Uploads are nested under a vault: GET /buckets/{projectId}/vaults/{vaultId}/uploads.json
+  let useVaultId = vaultId;
+  if (!useVaultId) {
+    const vaults = await listVaults(ctx, projectId);
+    useVaultId = vaults?.[0]?.id;
+  }
+  if (!useVaultId) return [];
+
+  const uploads = await apiAll(ctx, `/buckets/${projectId}/vaults/${useVaultId}/uploads.json`);
   const arr = Array.isArray(uploads) ? uploads : [];
   return arr.map((u) => ({
     id: u.id,
@@ -1022,6 +1175,31 @@ async function getUpload(ctx, projectId, uploadId) {
     status: u.status,
     app_url: u.app_url,
   };
+}
+
+async function createUpload(ctx, projectId, vaultId, body) {
+  if (!vaultId) throw new Error("vault_id is required to create an upload.");
+  return api(ctx, `/buckets/${projectId}/vaults/${vaultId}/uploads.json`, { method: "POST", body });
+}
+
+async function updateUpload(ctx, projectId, uploadId, body) {
+  return api(ctx, `/buckets/${projectId}/uploads/${uploadId}.json`, { method: "PUT", body });
+}
+
+// ========== ATTACHMENTS ==========
+async function createAttachment(ctx, name, contentType, contentBase64) {
+  if (!name) throw new Error("name is required for attachment upload.");
+  if (!contentType) throw new Error("content_type is required for attachment upload.");
+  if (!contentBase64) throw new Error("content_base64 is required for attachment upload.");
+  const buffer = Buffer.from(contentBase64, "base64");
+  return api(ctx, `/attachments.json?name=${encodeURIComponent(name)}`, {
+    method: "POST",
+    body: buffer,
+    headers: {
+      "Content-Type": contentType,
+      "Content-Length": String(buffer.length)
+    }
+  });
 }
 
 // ========== RECORDINGS ENDPOINTS ==========
@@ -1067,15 +1245,260 @@ async function unarchiveRecording(ctx, projectId, recordingId) {
 
 // ========== VAULTS/DOCUMENT STORAGE ==========
 async function listVaults(ctx, projectId) {
-  const vault = await api(ctx, `/buckets/${projectId}/vault.json`);
-  return vault ? [{
-    id: vault.id,
-    name: vault.name,
-    title: vault.title,
-    position: vault.position,
-    app_url: vault.app_url,
-    entries_url: vault.entries_url,
-  }] : [];
+  try {
+    const dock = await getDock(ctx, projectId);
+    const vaultDock = dockFind(dock, ["vault", "documents", "vaults"]);
+    if (vaultDock?.url) {
+      const vault = await api(ctx, vaultDock.url);
+      return vault ? [{
+        id: vault.id,
+        name: vault.name,
+        title: vault.title,
+        position: vault.position,
+        app_url: vault.app_url,
+        entries_url: vault.entries_url,
+        documents_url: vault.documents_url,
+        uploads_url: vault.uploads_url,
+        vaults_url: vault.vaults_url
+      }] : [];
+    }
+  } catch (e) {
+    console.warn(`[listVaults] Dock lookup failed for project ${projectId}: ${e.message}`);
+  }
+
+  // Fallback: older endpoint (if supported)
+  try {
+    const vault = await api(ctx, `/buckets/${projectId}/vault.json`);
+    return vault ? [{
+      id: vault.id,
+      name: vault.name,
+      title: vault.title,
+      position: vault.position,
+      app_url: vault.app_url,
+      entries_url: vault.entries_url,
+      documents_url: vault.documents_url,
+      uploads_url: vault.uploads_url,
+      vaults_url: vault.vaults_url
+    }] : [];
+  } catch {
+    return [];
+  }
+}
+
+// ========== VAULT CHILD VAULTS ==========
+async function listChildVaults(ctx, projectId, vaultId) {
+  try {
+    return await apiAll(ctx, `/buckets/${projectId}/vaults/${vaultId}/vaults.json`);
+  } catch (e) {
+    if (e?.code === "BASECAMP_API_ERROR" && (e.status === 404 || e.status === 403)) {
+      return [];
+    }
+    throw e;
+  }
+}
+
+async function createChildVault(ctx, projectId, vaultId, body) {
+  return api(ctx, `/buckets/${projectId}/vaults/${vaultId}/vaults.json`, { method: "POST", body });
+}
+
+async function updateVault(ctx, projectId, vaultId, body) {
+  return api(ctx, `/buckets/${projectId}/vaults/${vaultId}.json`, { method: "PUT", body });
+}
+
+// ========== CAMPFIRES / CHAT ==========
+async function resolveCampfire(ctx, projectId, chatId = null) {
+  if (chatId) return api(ctx, `/buckets/${projectId}/chats/${chatId}.json`);
+
+  const dock = await getDock(ctx, projectId);
+  const chatDock = dockFind(dock, ["chat", "campfire", "campfires"]);
+  if (chatDock?.url) {
+    const chat = await api(ctx, chatDock.url);
+    if (Array.isArray(chat)) return chat[0] || null;
+    return chat;
+  }
+
+  try {
+    const chats = await apiAll(ctx, `/chats.json`);
+    const arr = Array.isArray(chats) ? chats : [];
+    return arr.find(c => String(c?.bucket?.id) === String(projectId)) || null;
+  } catch {
+    return null;
+  }
+}
+
+async function listCampfires(ctx, projectId = null) {
+  const chats = await apiAll(ctx, `/chats.json`);
+  const arr = Array.isArray(chats) ? chats : [];
+  if (!projectId) return arr;
+  return arr.filter(c => String(c?.bucket?.id) === String(projectId));
+}
+
+async function listCampfireLines(ctx, projectId, chatId, { limit } = {}) {
+  const lines = await apiAll(ctx, `/buckets/${projectId}/chats/${chatId}/lines.json`);
+  const arr = Array.isArray(lines) ? lines : [];
+  if (limit && Number.isFinite(Number(limit))) return arr.slice(0, Math.max(0, Number(limit)));
+  return arr;
+}
+
+async function getCampfireLine(ctx, projectId, chatId, lineId) {
+  return api(ctx, `/buckets/${projectId}/chats/${chatId}/lines/${lineId}.json`);
+}
+
+async function createCampfireLine(ctx, projectId, chatId, body) {
+  return api(ctx, `/buckets/${projectId}/chats/${chatId}/lines.json`, { method: "POST", body });
+}
+
+async function deleteCampfireLine(ctx, projectId, chatId, lineId) {
+  await api(ctx, `/buckets/${projectId}/chats/${chatId}/lines/${lineId}.json`, { method: "DELETE" });
+  return { message: "Line deleted", line_id: lineId };
+}
+
+// ========== CHATBOTS (Campfire integrations) ==========
+async function listChatbots(ctx, projectId, chatId) {
+  return apiAll(ctx, `/buckets/${projectId}/chats/${chatId}/integrations.json`);
+}
+
+async function getChatbot(ctx, projectId, chatId, integrationId) {
+  return api(ctx, `/buckets/${projectId}/chats/${chatId}/integrations/${integrationId}.json`);
+}
+
+async function createChatbot(ctx, projectId, chatId, body) {
+  return api(ctx, `/buckets/${projectId}/chats/${chatId}/integrations.json`, { method: "POST", body });
+}
+
+async function updateChatbot(ctx, projectId, chatId, integrationId, body) {
+  return api(ctx, `/buckets/${projectId}/chats/${chatId}/integrations/${integrationId}.json`, { method: "PUT", body });
+}
+
+async function deleteChatbot(ctx, projectId, chatId, integrationId) {
+  await api(ctx, `/buckets/${projectId}/chats/${chatId}/integrations/${integrationId}.json`, { method: "DELETE" });
+  return { message: "Chatbot deleted", integration_id: integrationId };
+}
+
+async function postChatbotLine(ctx, projectId, chatId, integrationKey, body) {
+  return api(ctx, `/integrations/${integrationKey}/buckets/${projectId}/chats/${chatId}/lines.json`, { method: "POST", body });
+}
+
+// ========== WEBHOOKS ==========
+async function listWebhooks(ctx, projectId) {
+  return apiAll(ctx, `/buckets/${projectId}/webhooks.json`);
+}
+
+async function getWebhook(ctx, projectId, webhookId) {
+  return api(ctx, `/buckets/${projectId}/webhooks/${webhookId}.json`);
+}
+
+async function createWebhook(ctx, projectId, body) {
+  return api(ctx, `/buckets/${projectId}/webhooks.json`, { method: "POST", body });
+}
+
+async function updateWebhook(ctx, projectId, webhookId, body) {
+  return api(ctx, `/buckets/${projectId}/webhooks/${webhookId}.json`, { method: "PUT", body });
+}
+
+async function deleteWebhook(ctx, projectId, webhookId) {
+  await api(ctx, `/buckets/${projectId}/webhooks/${webhookId}.json`, { method: "DELETE" });
+  return { message: "Webhook deleted", webhook_id: webhookId };
+}
+
+// ========== MESSAGE TYPES / PINNING ==========
+async function listMessageTypes(ctx, projectId) {
+  try {
+    return apiAll(ctx, `/buckets/${projectId}/categories.json`);
+  } catch (e) {
+    if (e?.code === "BASECAMP_API_ERROR" && (e.status === 404 || e.status === 403)) {
+      return [];
+    }
+    throw e;
+  }
+}
+
+async function getMessageType(ctx, projectId, categoryId) {
+  return api(ctx, `/buckets/${projectId}/categories/${categoryId}.json`);
+}
+
+async function createMessageType(ctx, projectId, body) {
+  return api(ctx, `/buckets/${projectId}/categories.json`, { method: "POST", body });
+}
+
+async function updateMessageType(ctx, projectId, categoryId, body) {
+  return api(ctx, `/buckets/${projectId}/categories/${categoryId}.json`, { method: "PUT", body });
+}
+
+async function deleteMessageType(ctx, projectId, categoryId) {
+  await api(ctx, `/buckets/${projectId}/categories/${categoryId}.json`, { method: "DELETE" });
+  return { message: "Message type deleted", category_id: categoryId };
+}
+
+async function pinRecording(ctx, projectId, recordingId) {
+  await api(ctx, `/buckets/${projectId}/recordings/${recordingId}/pin.json`, { method: "POST" });
+  return { message: "Recording pinned", recording_id: recordingId };
+}
+
+async function unpinRecording(ctx, projectId, recordingId) {
+  await api(ctx, `/buckets/${projectId}/recordings/${recordingId}/pin.json`, { method: "DELETE" });
+  return { message: "Recording unpinned", recording_id: recordingId };
+}
+
+// ========== CLIENT COMMUNICATIONS ==========
+async function listClientCorrespondences(ctx, projectId) {
+  return apiAll(ctx, `/buckets/${projectId}/client/correspondences.json`);
+}
+
+async function getClientCorrespondence(ctx, projectId, correspondenceId) {
+  return api(ctx, `/buckets/${projectId}/client/correspondences/${correspondenceId}.json`);
+}
+
+async function listClientApprovals(ctx, projectId) {
+  return apiAll(ctx, `/buckets/${projectId}/client/approvals.json`);
+}
+
+async function getClientApproval(ctx, projectId, approvalId) {
+  return api(ctx, `/buckets/${projectId}/client/approvals/${approvalId}.json`);
+}
+
+async function listClientReplies(ctx, projectId, recordingId) {
+  return apiAll(ctx, `/buckets/${projectId}/client/recordings/${recordingId}/replies.json`);
+}
+
+async function getClientReply(ctx, projectId, recordingId, replyId) {
+  return api(ctx, `/buckets/${projectId}/client/recordings/${recordingId}/replies/${replyId}.json`);
+}
+
+// ========== CARD STEPS ==========
+async function listCardSteps(ctx, projectId, cardId) {
+  const card = await api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}.json`);
+  return Array.isArray(card?.steps) ? card.steps : [];
+}
+
+async function createCardStep(ctx, projectId, cardId, body) {
+  return api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}/steps.json`, { method: "POST", body });
+}
+
+async function updateCardStep(ctx, projectId, stepId, body) {
+  return api(ctx, `/buckets/${projectId}/card_tables/steps/${stepId}.json`, { method: "PUT", body });
+}
+
+async function setCardStepCompletion(ctx, projectId, stepId, completion) {
+  return api(ctx, `/buckets/${projectId}/card_tables/steps/${stepId}/completions.json`, { method: "PUT", body: { completion } });
+}
+
+async function completeCardStep(ctx, projectId, stepId) {
+  await setCardStepCompletion(ctx, projectId, stepId, "on");
+  return { message: "Card step completed", step_id: stepId };
+}
+
+async function uncompleteCardStep(ctx, projectId, stepId) {
+  await setCardStepCompletion(ctx, projectId, stepId, "off");
+  return { message: "Card step uncompleted", step_id: stepId };
+}
+
+async function repositionCardStep(ctx, projectId, cardId, stepId, position) {
+  await api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}/positions.json`, {
+    method: "POST",
+    body: { source_id: stepId, position }
+  });
+  return { message: "Card step repositioned", step_id: stepId, position };
 }
 
 // ========== SEARCH ACROSS RECORDINGS ==========
@@ -1124,6 +1547,268 @@ async function searchRecordings(ctx, query, { bucket_id = null, type = null } = 
   }));
 }
 
+async function searchMetadata(ctx) {
+  return api(ctx, `/searches/metadata.json`);
+}
+
+// ========== CLIENT VISIBILITY ==========
+async function updateClientVisibility(ctx, projectId, recordingId, body) {
+  return api(ctx, `/buckets/${projectId}/recordings/${recordingId}/client_visibility.json`, { method: "PUT", body });
+}
+
+// ========== EVENTS ==========
+async function listRecordingEvents(ctx, projectId, recordingId) {
+  return apiAll(ctx, `/buckets/${projectId}/recordings/${recordingId}/events.json`);
+}
+
+// ========== SUBSCRIPTIONS ==========
+async function getSubscription(ctx, projectId, recordingId) {
+  return api(ctx, `/buckets/${projectId}/recordings/${recordingId}/subscription.json`);
+}
+
+async function subscribeRecording(ctx, projectId, recordingId) {
+  return api(ctx, `/buckets/${projectId}/recordings/${recordingId}/subscription.json`, { method: "POST" });
+}
+
+async function unsubscribeRecording(ctx, projectId, recordingId) {
+  await api(ctx, `/buckets/${projectId}/recordings/${recordingId}/subscription.json`, { method: "DELETE" });
+  return { message: "Unsubscribed", recording_id: recordingId };
+}
+
+async function updateSubscription(ctx, projectId, recordingId, body) {
+  return api(ctx, `/buckets/${projectId}/recordings/${recordingId}/subscription.json`, { method: "PUT", body });
+}
+
+// ========== REPORTS ==========
+async function reportTodosAssigned(ctx) {
+  return apiAll(ctx, `/reports/todos/assigned.json`);
+}
+
+async function reportTodosAssignedPerson(ctx, personId) {
+  return apiAll(ctx, `/reports/todos/assigned/${personId}.json`);
+}
+
+async function reportTodosOverdue(ctx) {
+  return apiAll(ctx, `/reports/todos/overdue.json`);
+}
+
+async function reportSchedulesUpcoming(ctx, query) {
+  const path = query ? `/reports/schedules/upcoming.json?${query}` : `/reports/schedules/upcoming.json`;
+  return apiAll(ctx, path);
+}
+
+// ========== TIMELINE ==========
+async function reportTimeline(ctx, query) {
+  const path = query ? `/reports/progress.json?${query}` : `/reports/progress.json`;
+  return apiAll(ctx, path);
+}
+
+async function projectTimeline(ctx, projectId, query) {
+  const path = query ? `/projects/${projectId}/timeline.json?${query}` : `/projects/${projectId}/timeline.json`;
+  return apiAll(ctx, path);
+}
+
+async function userTimeline(ctx, personId, query) {
+  const path = query ? `/reports/users/progress/${personId}.json?${query}` : `/reports/users/progress/${personId}.json`;
+  return apiAll(ctx, path);
+}
+
+// ========== TIMESHEETS ==========
+async function reportTimesheet(ctx, query) {
+  const path = query ? `/reports/timesheet.json?${query}` : `/reports/timesheet.json`;
+  return apiAll(ctx, path);
+}
+
+async function projectTimesheet(ctx, projectId, query) {
+  const path = query ? `/projects/${projectId}/timesheet.json?${query}` : `/projects/${projectId}/timesheet.json`;
+  return apiAll(ctx, path);
+}
+
+async function recordingTimesheet(ctx, projectId, recordingId, query) {
+  const path = query ? `/projects/${projectId}/recordings/${recordingId}/timesheet.json?${query}` : `/projects/${projectId}/recordings/${recordingId}/timesheet.json`;
+  return apiAll(ctx, path);
+}
+
+// ========== INBOXES / FORWARDS / REPLIES ==========
+async function getInbox(ctx, projectId, inboxId) {
+  return api(ctx, `/buckets/${projectId}/inboxes/${inboxId}.json`);
+}
+
+async function listInboxForwards(ctx, projectId, inboxId) {
+  return apiAll(ctx, `/buckets/${projectId}/inboxes/${inboxId}/forwards.json`);
+}
+
+async function getInboxForward(ctx, projectId, forwardId) {
+  return api(ctx, `/buckets/${projectId}/inbox_forwards/${forwardId}.json`);
+}
+
+async function listInboxReplies(ctx, projectId, forwardId) {
+  return apiAll(ctx, `/buckets/${projectId}/inbox_forwards/${forwardId}/replies.json`);
+}
+
+async function getInboxReply(ctx, projectId, forwardId, replyId) {
+  return api(ctx, `/buckets/${projectId}/inbox_forwards/${forwardId}/replies/${replyId}.json`);
+}
+
+// ========== QUESTIONNAIRES / QUESTIONS / ANSWERS ==========
+async function getQuestionnaire(ctx, projectId, questionnaireId) {
+  return api(ctx, `/buckets/${projectId}/questionnaires/${questionnaireId}.json`);
+}
+
+async function listQuestions(ctx, projectId, questionnaireId) {
+  return apiAll(ctx, `/buckets/${projectId}/questionnaires/${questionnaireId}/questions.json`);
+}
+
+async function getQuestion(ctx, projectId, questionId) {
+  return api(ctx, `/buckets/${projectId}/questions/${questionId}.json`);
+}
+
+async function createQuestion(ctx, projectId, questionnaireId, body) {
+  return api(ctx, `/buckets/${projectId}/questionnaires/${questionnaireId}/questions.json`, { method: "POST", body });
+}
+
+async function updateQuestion(ctx, projectId, questionId, body) {
+  return api(ctx, `/buckets/${projectId}/questions/${questionId}.json`, { method: "PUT", body });
+}
+
+async function pauseQuestion(ctx, projectId, questionId) {
+  await api(ctx, `/buckets/${projectId}/questions/${questionId}/pause.json`, { method: "POST" });
+  return { message: "Question paused", question_id: questionId };
+}
+
+async function resumeQuestion(ctx, projectId, questionId) {
+  await api(ctx, `/buckets/${projectId}/questions/${questionId}/pause.json`, { method: "DELETE" });
+  return { message: "Question resumed", question_id: questionId };
+}
+
+async function updateQuestionNotificationSettings(ctx, projectId, questionId, body) {
+  return api(ctx, `/buckets/${projectId}/questions/${questionId}/notification_settings.json`, { method: "PUT", body });
+}
+
+async function listQuestionAnswers(ctx, projectId, questionId) {
+  return apiAll(ctx, `/buckets/${projectId}/questions/${questionId}/answers.json`);
+}
+
+async function listQuestionAnswersBy(ctx, projectId, questionId) {
+  return apiAll(ctx, `/buckets/${projectId}/questions/${questionId}/answers/by.json`);
+}
+
+async function listQuestionAnswersByPerson(ctx, projectId, questionId, personId) {
+  return apiAll(ctx, `/buckets/${projectId}/questions/${questionId}/answers/by/${personId}.json`);
+}
+
+async function getQuestionAnswer(ctx, projectId, answerId) {
+  return api(ctx, `/buckets/${projectId}/question_answers/${answerId}.json`);
+}
+
+async function createQuestionAnswer(ctx, projectId, questionId, body) {
+  return api(ctx, `/buckets/${projectId}/questions/${questionId}/answers.json`, { method: "POST", body });
+}
+
+async function updateQuestionAnswer(ctx, projectId, answerId, body) {
+  return api(ctx, `/buckets/${projectId}/question_answers/${answerId}.json`, { method: "PUT", body });
+}
+
+async function listQuestionReminders(ctx) {
+  return apiAll(ctx, `/my/question_reminders.json`);
+}
+
+// ========== TEMPLATES ==========
+async function listTemplates(ctx) {
+  return apiAll(ctx, `/templates.json`);
+}
+
+async function getTemplate(ctx, templateId) {
+  return api(ctx, `/templates/${templateId}.json`);
+}
+
+async function createTemplate(ctx, body) {
+  return api(ctx, `/templates.json`, { method: "POST", body });
+}
+
+async function updateTemplate(ctx, templateId, body) {
+  return api(ctx, `/templates/${templateId}.json`, { method: "PUT", body });
+}
+
+async function trashTemplate(ctx, templateId) {
+  await api(ctx, `/templates/${templateId}.json`, { method: "DELETE" });
+  return { message: "Template trashed", template_id: templateId };
+}
+
+async function createProjectConstruction(ctx, templateId, body) {
+  return api(ctx, `/templates/${templateId}/project_constructions.json`, { method: "POST", body });
+}
+
+async function getProjectConstruction(ctx, templateId, constructionId) {
+  return api(ctx, `/templates/${templateId}/project_constructions/${constructionId}.json`);
+}
+
+// ========== TOOLS (DOCK TOOLS) ==========
+async function getDockTool(ctx, projectId, toolId) {
+  return api(ctx, `/buckets/${projectId}/dock/tools/${toolId}.json`);
+}
+
+async function createDockTool(ctx, projectId, body) {
+  return api(ctx, `/buckets/${projectId}/dock/tools.json`, { method: "POST", body });
+}
+
+async function updateDockTool(ctx, projectId, toolId, body) {
+  return api(ctx, `/buckets/${projectId}/dock/tools/${toolId}.json`, { method: "PUT", body });
+}
+
+async function enableDockTool(ctx, projectId, recordingId, body) {
+  return api(ctx, `/buckets/${projectId}/recordings/${recordingId}/position.json`, { method: "POST", body });
+}
+
+async function moveDockTool(ctx, projectId, recordingId, body) {
+  return api(ctx, `/buckets/${projectId}/recordings/${recordingId}/position.json`, { method: "PUT", body });
+}
+
+async function disableDockTool(ctx, projectId, recordingId) {
+  await api(ctx, `/buckets/${projectId}/recordings/${recordingId}/position.json`, { method: "DELETE" });
+  return { message: "Tool disabled", recording_id: recordingId };
+}
+
+async function trashDockTool(ctx, projectId, toolId) {
+  await api(ctx, `/buckets/${projectId}/dock/tools/${toolId}.json`, { method: "DELETE" });
+  return { message: "Tool trashed", tool_id: toolId };
+}
+
+// ========== LINEUP MARKERS ==========
+async function createLineupMarker(ctx, body) {
+  return api(ctx, `/lineup/markers.json`, { method: "POST", body });
+}
+
+async function updateLineupMarker(ctx, markerId, body) {
+  return api(ctx, `/lineup/markers/${markerId}.json`, { method: "PUT", body });
+}
+
+async function deleteLineupMarker(ctx, markerId) {
+  await api(ctx, `/lineup/markers/${markerId}.json`, { method: "DELETE" });
+  return { message: "Lineup marker deleted", marker_id: markerId };
+}
+
+// ========== TODO LIST GROUPS / TODOSETS ==========
+async function listTodolistGroups(ctx, projectId, todolistId) {
+  return apiAll(ctx, `/buckets/${projectId}/todolists/${todolistId}/groups.json`);
+}
+
+async function getTodolistGroup(ctx, projectId, groupId) {
+  return api(ctx, `/buckets/${projectId}/todolists/${groupId}.json`);
+}
+
+async function createTodolistGroup(ctx, projectId, todolistId, body) {
+  return api(ctx, `/buckets/${projectId}/todolists/${todolistId}/groups.json`, { method: "POST", body });
+}
+
+async function repositionTodolistGroup(ctx, projectId, groupId, position) {
+  return api(ctx, `/buckets/${projectId}/todolists/groups/${groupId}/position.json`, { method: "PUT", body: { position } });
+}
+
+async function getTodoset(ctx, projectId, todosetId) {
+  return api(ctx, `/buckets/${projectId}/todosets/${todosetId}.json`);
+}
+
 // ---------- MCP handler ----------
 export async function handleMCP(reqBody, ctx) {
   const { id, method, params } = reqBody || {};
@@ -1136,324 +1821,7 @@ export async function handleMCP(reqBody, ctx) {
 
     if (method === "tools/list") {
       return ok(id, {
-        tools: [
-          tool("startbcgpt", "Show connection status, current user (name/email), plus re-auth and logout links.", noProps()),
-          tool("whoami", "Return account id + authorized accounts list.", noProps()),
-
-          tool("list_accounts", "List Basecamp accounts available to the authenticated user.", noProps()),
-          tool("list_projects", "List projects (supports archived).", {
-            type: "object",
-            properties: { archived: { type: "boolean" } },
-            additionalProperties: false
-          }),
-          tool("find_project", "Resolve a project by name (fuzzy).", {
-            type: "object",
-            properties: { name: { type: "string" } },
-            required: ["name"],
-            additionalProperties: false
-          }),
-
-          tool("daily_report", "Across projects: totals + per-project breakdown + due today + overdue (open only).", {
-            type: "object",
-            properties: { date: { type: "string", description: "YYYY-MM-DD (defaults today)" } },
-            additionalProperties: false
-          }),
-          tool("list_todos_due", "Across projects: list open todos due on date; optionally include overdue.", {
-            type: "object",
-            properties: {
-              date: { type: "string", description: "YYYY-MM-DD (defaults today)" },
-              include_overdue: { type: "boolean" }
-            },
-            additionalProperties: false
-          }),
-          tool("search_todos", "Search open todos across all projects by keyword.", {
-            type: "object",
-            properties: { query: { type: "string" } },
-            required: ["query"],
-            additionalProperties: false
-          }),
-          tool("assignment_report", "Group open todos by assignee within a project (optimized).", {
-            type: "object",
-            properties: { project: { type: "string" }, max_todos: { type: "integer" } },
-            required: ["project"],
-            additionalProperties: false
-          }),
-          tool("get_person_assignments", "List todos assigned to a specific person within a project.", {
-            type: "object",
-            properties: { project: { type: "string" }, person: { type: "string" } },
-            required: ["project", "person"],
-            additionalProperties: false
-          }),
-          tool("list_assigned_to_me", "List todos assigned to the current user (optionally within a project).", {
-            type: "object",
-            properties: { project: { type: "string", nullable: true } },
-            additionalProperties: false
-          }),
-          tool("smart_action", "Smart router: decide which action to call based on natural language query and context.", {
-            type: "object",
-            properties: { 
-              query: { type: "string" },
-              project: { type: "string", nullable: true }
-            },
-            required: ["query"],
-            additionalProperties: false
-          }),
-
-          tool("list_todos_for_project", "List todolists + todos for a project by name.", {
-            type: "object",
-            properties: { project: { type: "string" } },
-            required: ["project"],
-            additionalProperties: false
-          }),
-
-          // Schema uses "task". We'll accept task OR content for backward compatibility.
-          tool("create_todo", "Create a to-do in a project; optionally specify todolist, due date, and assignees.", {
-            type: "object",
-            properties: {
-              project: { type: "string" },
-              todolist: { type: "string", nullable: true },
-              task: { type: "string" },
-              content: { type: "string", nullable: true },
-              description: { type: "string", nullable: true },
-              due_on: { type: "string", nullable: true },
-              assignee_ids: { type: "array", items: { type: "integer" }, nullable: true }
-            },
-            required: ["project", "task"],
-            additionalProperties: false
-          }),
-          tool("update_todo_details", "Update a to-do in a project. Fields omitted are preserved.", {
-            type: "object",
-            properties: {
-              project: { type: "string" },
-              todo_id: { type: "integer" },
-              content: { type: "string", nullable: true },
-              description: { type: "string", nullable: true },
-              assignee_ids: { type: "array", items: { type: "integer" }, nullable: true },
-              completion_subscriber_ids: { type: "array", items: { type: "integer" }, nullable: true },
-              notify: { type: "boolean", nullable: true },
-              due_on: { type: "string", nullable: true },
-              starts_on: { type: "string", nullable: true }
-            },
-            required: ["project", "todo_id"],
-            additionalProperties: false
-          }),
-
-          tool("complete_task_by_name", "Complete a todo in a project by fuzzy-matching its content.", {
-            type: "object",
-            properties: { project: { type: "string" }, task: { type: "string" } },
-            required: ["project", "task"],
-            additionalProperties: false
-          }),
-
-          // Card tables
-          tool("list_card_tables", "List card tables (kanban boards) for a project.", {
-            type: "object",
-            properties: { project: { type: "string" } },
-            required: ["project"],
-            additionalProperties: false
-          }),
-          tool("list_card_table_columns", "List columns for a card table.", {
-            type: "object",
-            properties: { project: { type: "string" }, card_table_id: { type: "integer" } },
-            required: ["project", "card_table_id"],
-            additionalProperties: false
-          }),
-          tool("list_card_table_cards", "List cards for a card table.", {
-            type: "object",
-            properties: { project: { type: "string" }, card_table_id: { type: "integer" } },
-            required: ["project", "card_table_id"],
-            additionalProperties: false
-          }),
-          tool("create_card", "Create a card in a card table.", {
-            type: "object",
-            properties: {
-              project: { type: "string" },
-              card_table_id: { type: "integer" },
-              title: { type: "string" },
-              content: { type: "string", nullable: true },
-              column_id: { type: "integer", nullable: true },
-              due_on: { type: "string", nullable: true }
-            },
-            required: ["project", "card_table_id", "title"],
-            additionalProperties: false
-          }),
-          tool("move_card", "Move/update a card (column/position).", {
-            type: "object",
-            properties: {
-              project: { type: "string" },
-              card_id: { type: "integer" },
-              column_id: { type: "integer", nullable: true },
-              position: { type: "integer", nullable: true }
-            },
-            required: ["project", "card_id"],
-            additionalProperties: false
-          }),
-
-          // Hill charts
-          tool("get_hill_chart", "Fetch the hill chart for a project (if enabled).", {
-            type: "object",
-            properties: { project: { type: "string" } },
-            required: ["project"],
-            additionalProperties: false
-          }),
-
-          // Messages / Docs / Schedule (dock-driven)
-          tool("list_message_boards", "List message boards for a project.", {
-            type: "object",
-            properties: { project: { type: "string" } },
-            required: ["project"],
-            additionalProperties: false
-          }),
-          tool("list_messages", "List messages in a message board. If message_board_id omitted, uses the first board.", {
-            type: "object",
-            properties: { project: { type: "string" }, message_board_id: { type: "integer", nullable: true } },
-            required: ["project"],
-            additionalProperties: false
-          }),
-          tool("list_documents", "List documents/files in the project vault.", {
-            type: "object",
-            properties: { project: { type: "string" } },
-            required: ["project"],
-            additionalProperties: false
-          }),
-          tool("list_schedule_entries", "List schedule entries for a project (date range optional).", {
-            type: "object",
-            properties: { project: { type: "string" }, start: { type: "string", nullable: true }, end: { type: "string", nullable: true } },
-            required: ["project"],
-            additionalProperties: false
-          }),
-          tool("search_project", "Search within a project (dock-driven search if enabled).", {
-            type: "object",
-            properties: { project: { type: "string" }, query: { type: "string" } },
-            required: ["project", "query"],
-            additionalProperties: false
-          }),
-
-          // People endpoints
-          tool("list_all_people", "List all people visible in the Basecamp account.", noProps()),
-          tool("get_person", "Get profile of a specific person by ID.", {
-            type: "object",
-            properties: { person_id: { type: "integer" } },
-            required: ["person_id"],
-            additionalProperties: false
-          }),
-          tool("get_my_profile", "Get current authenticated user's profile.", noProps()),
-          tool("list_project_people", "List all people on a project.", {
-            type: "object",
-            properties: { project: { type: "string" } },
-            required: ["project"],
-            additionalProperties: false
-          }),
-
-          // Comments endpoints
-          tool("list_comments", "List comments on a recording (message, document, todo, etc).", {
-            type: "object",
-            properties: { project: { type: "string" }, recording_id: { type: "integer" } },
-            required: ["project", "recording_id"],
-            additionalProperties: false
-          }),
-          tool("get_comment", "Get a specific comment by ID.", {
-            type: "object",
-            properties: { project: { type: "string" }, comment_id: { type: "integer" } },
-            required: ["project", "comment_id"],
-            additionalProperties: false
-          }),
-          tool("create_comment", "Create a comment on a recording.", {
-            type: "object",
-            properties: { 
-              project: { type: "string" }, 
-              recording_id: { type: "integer" },
-              content: { type: "string", description: "HTML content of comment" }
-            },
-            required: ["project", "recording_id", "content"],
-            additionalProperties: false
-          }),
-
-          // Uploads/Files endpoints
-          tool("list_uploads", "List files/uploads in a project vault.", {
-            type: "object",
-            properties: { project: { type: "string" }, vault_id: { type: "integer", nullable: true } },
-            required: ["project"],
-            additionalProperties: false
-          }),
-          tool("get_upload", "Get details of a specific file/upload.", {
-            type: "object",
-            properties: { project: { type: "string" }, upload_id: { type: "integer" } },
-            required: ["project", "upload_id"],
-            additionalProperties: false
-          }),
-
-          // Recordings management (trash/archive/unarchive)
-          tool("get_recordings", "Query all recordings across projects by type (Todo, Message, Document, Upload, etc).", {
-            type: "object",
-            properties: { 
-              type: { type: "string", description: "Recording type: Todo, Message, Document, Upload, Kanban::Card, etc" },
-              bucket: { type: "string", nullable: true, description: "Project ID(s) to filter" },
-              status: { type: "string", nullable: true, description: "active, archived, or trashed" }
-            },
-            required: ["type"],
-            additionalProperties: false
-          }),
-          tool("trash_recording", "Move a recording to trash.", {
-            type: "object",
-            properties: { project: { type: "string" }, recording_id: { type: "integer" } },
-            required: ["project", "recording_id"],
-            additionalProperties: false
-          }),
-          tool("archive_recording", "Archive a recording.", {
-            type: "object",
-            properties: { project: { type: "string" }, recording_id: { type: "integer" } },
-            required: ["project", "recording_id"],
-            additionalProperties: false
-          }),
-          tool("unarchive_recording", "Unarchive a recording.", {
-            type: "object",
-            properties: { project: { type: "string" }, recording_id: { type: "integer" } },
-            required: ["project", "recording_id"],
-            additionalProperties: false
-          }),
-
-          // Vault/Document storage
-          tool("list_vaults", "List document storage vaults for a project.", {
-            type: "object",
-            properties: { project: { type: "string" } },
-            required: ["project"],
-            additionalProperties: false
-          }),
-
-          // Global search
-          tool("search_recordings", "Search all recordings across projects by title/content.", {
-            type: "object",
-            properties: { 
-              query: { type: "string" },
-              bucket: { type: "string", nullable: true, description: "Optional project ID to filter" }
-            },
-            required: ["query"],
-            additionalProperties: false
-          }),
-
-          // Diagnostic: inspect project structure and available API links
-          tool("get_project_structure", "Inspect a project's dock and available API endpoints (for diagnostics).", {
-            type: "object",
-            properties: { project: { type: "string" } },
-            required: ["project"],
-            additionalProperties: false
-          }),
-
-          // Raw escape hatch
-          tool("basecamp_request", "Raw Basecamp API call. Provide full URL or a /path.", {
-            type: "object",
-            properties: { path: { type: "string" }, method: { type: "string" }, body: { type: "object" } },
-            required: ["path"],
-            additionalProperties: false
-          }),
-          tool("basecamp_raw", "Alias of basecamp_request for backward compatibility.", {
-            type: "object",
-            properties: { path: { type: "string" }, method: { type: "string" }, body: { type: "object" } },
-            required: ["path"],
-            additionalProperties: false
-          })
-        ]
+        tools: getTools(),
       });
     }
 
@@ -1521,6 +1889,42 @@ export async function handleMCP(reqBody, ctx) {
       const p = await projectByName(ctx, args.name);
       // Return concise summary, not raw
       return ok(id, projectSummary(p));
+    }
+
+    if (name === "get_project") {
+      try {
+        const project = await getProject(ctx, Number(args.project_id));
+        return ok(id, projectSummary(project));
+      } catch (e) {
+        return fail(id, { code: "GET_PROJECT_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "create_project") {
+      try {
+        const project = await createProject(ctx, args.body || {});
+        return ok(id, { message: "Project created", project });
+      } catch (e) {
+        return fail(id, { code: "CREATE_PROJECT_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_project") {
+      try {
+        const project = await updateProject(ctx, Number(args.project_id), args.body || {});
+        return ok(id, { message: "Project updated", project });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_PROJECT_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "trash_project") {
+      try {
+        const result = await trashProject(ctx, Number(args.project_id));
+        return ok(id, result);
+      } catch (e) {
+        return fail(id, { code: "TRASH_PROJECT_ERROR", message: e.message });
+      }
     }
 
     if (name === "list_todos_for_project") {
@@ -2211,6 +2615,67 @@ export async function handleMCP(reqBody, ctx) {
       }
     }
 
+    if (name === "list_card_steps") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const steps = await listCardSteps(ctx, p.id, Number(args.card_id));
+        return ok(id, { project: { id: p.id, name: p.name }, card_id: Number(args.card_id), steps, count: steps.length });
+      } catch (e) {
+        console.error(`[list_card_steps] Error:`, e.message);
+        return ok(id, { steps: [], fallback: true });
+      }
+    }
+
+    if (name === "create_card_step") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const step = await createCardStep(ctx, p.id, Number(args.card_id), args.body || {});
+        return ok(id, { message: "Card step created", project: { id: p.id, name: p.name }, step });
+      } catch (e) {
+        return fail(id, { code: "CREATE_CARD_STEP_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_card_step") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const step = await updateCardStep(ctx, p.id, Number(args.step_id), args.body || {});
+        return ok(id, { message: "Card step updated", project: { id: p.id, name: p.name }, step });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_CARD_STEP_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "complete_card_step") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await completeCardStep(ctx, p.id, Number(args.step_id));
+        return ok(id, { project: { id: p.id, name: p.name }, ...result });
+      } catch (e) {
+        return fail(id, { code: "COMPLETE_CARD_STEP_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "uncomplete_card_step") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await uncompleteCardStep(ctx, p.id, Number(args.step_id));
+        return ok(id, { project: { id: p.id, name: p.name }, ...result });
+      } catch (e) {
+        return fail(id, { code: "UNCOMPLETE_CARD_STEP_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "reposition_card_step") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await repositionCardStep(ctx, p.id, Number(args.card_id), Number(args.step_id), Number(args.position));
+        return ok(id, { project: { id: p.id, name: p.name }, ...result });
+      } catch (e) {
+        return fail(id, { code: "REPOSITION_CARD_STEP_ERROR", message: e.message });
+      }
+    }
+
     // Hill charts
     if (name === "get_hill_chart") {
       try {
@@ -2301,6 +2766,180 @@ export async function handleMCP(reqBody, ctx) {
       }
     }
 
+    if (name === "get_message_board") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const board = await getMessageBoard(ctx, p.id, Number(args.message_board_id));
+        return ok(id, { project: { id: p.id, name: p.name }, message_board: board });
+      } catch (e) {
+        return fail(id, { code: "GET_MESSAGE_BOARD_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_message") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const message = await getMessage(ctx, p.id, Number(args.message_id));
+        return ok(id, { project: { id: p.id, name: p.name }, message });
+      } catch (e) {
+        return fail(id, { code: "GET_MESSAGE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "create_message") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const message = await createMessage(ctx, p.id, Number(args.message_board_id), args.body || {});
+        return ok(id, { message: "Message created", project: { id: p.id, name: p.name }, message });
+      } catch (e) {
+        return fail(id, { code: "CREATE_MESSAGE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_message") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const message = await updateMessage(ctx, p.id, Number(args.message_id), args.body || {});
+        return ok(id, { message: "Message updated", project: { id: p.id, name: p.name }, message });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_MESSAGE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_message_types") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const types = await listMessageTypes(ctx, p.id);
+        return ok(id, { project: { id: p.id, name: p.name }, types, count: types.length });
+      } catch (e) {
+        console.error(`[list_message_types] Error:`, e.message);
+        return ok(id, { types: [], fallback: true });
+      }
+    }
+
+    if (name === "get_message_type") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const category = await getMessageType(ctx, p.id, Number(args.category_id));
+        return ok(id, { project: { id: p.id, name: p.name }, message_type: category });
+      } catch (e) {
+        return fail(id, { code: "GET_MESSAGE_TYPE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "create_message_type") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const category = await createMessageType(ctx, p.id, args.body || {});
+        return ok(id, { message: "Message type created", project: { id: p.id, name: p.name }, message_type: category });
+      } catch (e) {
+        return fail(id, { code: "CREATE_MESSAGE_TYPE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_message_type") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const category = await updateMessageType(ctx, p.id, Number(args.category_id), args.body || {});
+        return ok(id, { message: "Message type updated", project: { id: p.id, name: p.name }, message_type: category });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_MESSAGE_TYPE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "delete_message_type") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await deleteMessageType(ctx, p.id, Number(args.category_id));
+        return ok(id, { project: { id: p.id, name: p.name }, ...result });
+      } catch (e) {
+        return fail(id, { code: "DELETE_MESSAGE_TYPE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "pin_recording") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await pinRecording(ctx, p.id, Number(args.recording_id));
+        return ok(id, { project: { id: p.id, name: p.name }, ...result });
+      } catch (e) {
+        return fail(id, { code: "PIN_RECORDING_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "unpin_recording") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await unpinRecording(ctx, p.id, Number(args.recording_id));
+        return ok(id, { project: { id: p.id, name: p.name }, ...result });
+      } catch (e) {
+        return fail(id, { code: "UNPIN_RECORDING_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_client_correspondences") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const items = await listClientCorrespondences(ctx, p.id);
+        return ok(id, { project: { id: p.id, name: p.name }, correspondences: items, count: items.length });
+      } catch (e) {
+        console.error(`[list_client_correspondences] Error:`, e.message);
+        return ok(id, { correspondences: [], fallback: true });
+      }
+    }
+
+    if (name === "get_client_correspondence") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const item = await getClientCorrespondence(ctx, p.id, Number(args.correspondence_id));
+        return ok(id, { project: { id: p.id, name: p.name }, correspondence: item });
+      } catch (e) {
+        return fail(id, { code: "GET_CLIENT_CORRESPONDENCE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_client_approvals") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const items = await listClientApprovals(ctx, p.id);
+        return ok(id, { project: { id: p.id, name: p.name }, approvals: items, count: items.length });
+      } catch (e) {
+        console.error(`[list_client_approvals] Error:`, e.message);
+        return ok(id, { approvals: [], fallback: true });
+      }
+    }
+
+    if (name === "get_client_approval") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const item = await getClientApproval(ctx, p.id, Number(args.approval_id));
+        return ok(id, { project: { id: p.id, name: p.name }, approval: item });
+      } catch (e) {
+        return fail(id, { code: "GET_CLIENT_APPROVAL_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_client_replies") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const items = await listClientReplies(ctx, p.id, Number(args.recording_id));
+        return ok(id, { project: { id: p.id, name: p.name }, recording_id: Number(args.recording_id), replies: items, count: items.length });
+      } catch (e) {
+        console.error(`[list_client_replies] Error:`, e.message);
+        return ok(id, { replies: [], fallback: true });
+      }
+    }
+
+    if (name === "get_client_reply") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const item = await getClientReply(ctx, p.id, Number(args.recording_id), Number(args.reply_id));
+        return ok(id, { project: { id: p.id, name: p.name }, reply: item });
+      } catch (e) {
+        return fail(id, { code: "GET_CLIENT_REPLY_ERROR", message: e.message });
+      }
+    }
+
     if (name === "list_documents") {
       try {
         const p = await projectByName(ctx, args.project);
@@ -2328,6 +2967,87 @@ export async function handleMCP(reqBody, ctx) {
         } catch (fbErr) {
           return fail(id, { code: "LIST_DOCUMENTS_ERROR", message: fbErr.message });
         }
+      }
+    }
+
+    if (name === "get_document") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const doc = await getDocument(ctx, p.id, Number(args.document_id));
+        return ok(id, { project: { id: p.id, name: p.name }, document: doc });
+      } catch (e) {
+        return fail(id, { code: "GET_DOCUMENT_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "create_document") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const doc = await createDocument(ctx, p.id, Number(args.vault_id), args.body || {});
+        return ok(id, { message: "Document created", project: { id: p.id, name: p.name }, document: doc });
+      } catch (e) {
+        return fail(id, { code: "CREATE_DOCUMENT_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_document") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const doc = await updateDocument(ctx, p.id, Number(args.document_id), args.body || {});
+        return ok(id, { message: "Document updated", project: { id: p.id, name: p.name }, document: doc });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_DOCUMENT_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "create_upload") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const upload = await createUpload(ctx, p.id, Number(args.vault_id), args.body || {});
+        return ok(id, { message: "Upload created", project: { id: p.id, name: p.name }, upload });
+      } catch (e) {
+        return fail(id, { code: "CREATE_UPLOAD_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_upload") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const upload = await updateUpload(ctx, p.id, Number(args.upload_id), args.body || {});
+        return ok(id, { message: "Upload updated", project: { id: p.id, name: p.name }, upload });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_UPLOAD_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_child_vaults") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const vaults = await listChildVaults(ctx, p.id, Number(args.vault_id));
+        return ok(id, { project: { id: p.id, name: p.name }, vault_id: Number(args.vault_id), vaults, count: vaults.length });
+      } catch (e) {
+        console.error(`[list_child_vaults] Error:`, e.message);
+        return ok(id, { vaults: [], fallback: true });
+      }
+    }
+
+    if (name === "create_child_vault") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const vault = await createChildVault(ctx, p.id, Number(args.vault_id), args.body || {});
+        return ok(id, { message: "Child vault created", project: { id: p.id, name: p.name }, vault });
+      } catch (e) {
+        return fail(id, { code: "CREATE_CHILD_VAULT_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_vault") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const vault = await updateVault(ctx, p.id, Number(args.vault_id), args.body || {});
+        return ok(id, { message: "Vault updated", project: { id: p.id, name: p.name }, vault });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_VAULT_ERROR", message: e.message });
       }
     }
 
@@ -2419,6 +3139,15 @@ export async function handleMCP(reqBody, ctx) {
       }
     }
 
+    if (name === "list_pingable_people") {
+      try {
+        const people = await listPingablePeople(ctx);
+        return ok(id, { people, count: people.length });
+      } catch (e) {
+        return fail(id, { code: "LIST_PINGABLE_PEOPLE_ERROR", message: e.message });
+      }
+    }
+
     if (name === "get_person") {
       try {
         const person = await getPerson(ctx, args.person_id);
@@ -2477,6 +3206,16 @@ export async function handleMCP(reqBody, ctx) {
         } catch (fbErr) {
           return fail(id, { code: "LIST_PROJECT_PEOPLE_ERROR", message: fbErr.message });
         }
+      }
+    }
+
+    if (name === "update_project_people") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await updateProjectPeople(ctx, p.id, args.body || {});
+        return ok(id, { project: { id: p.id, name: p.name }, result });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_PROJECT_PEOPLE_ERROR", message: e.message });
       }
     }
 
@@ -2571,6 +3310,16 @@ export async function handleMCP(reqBody, ctx) {
         } catch (fbErr) {
           return fail(id, { code: "CREATE_COMMENT_ERROR", message: fbErr.message });
         }
+      }
+    }
+
+    if (name === "update_comment") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const comment = await updateComment(ctx, p.id, args.comment_id, args.content);
+        return ok(id, { message: "Comment updated", project: { id: p.id, name: p.name }, comment });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_COMMENT_ERROR", message: e.message });
       }
     }
 
@@ -2757,6 +3506,960 @@ export async function handleMCP(reqBody, ctx) {
       }
     }
 
+    if (name === "list_campfires") {
+      try {
+        const projectName = args.project || null;
+        if (!projectName) {
+          const chats = await listCampfires(ctx, null);
+          return ok(id, { campfires: chats, count: chats.length });
+        }
+        const p = await projectByName(ctx, projectName);
+        const chats = await listCampfires(ctx, p.id);
+        return ok(id, { project: { id: p.id, name: p.name }, campfires: chats, count: chats.length });
+      } catch (e) {
+        console.error(`[list_campfires] Error:`, e.message);
+        return ok(id, { campfires: [], fallback: true });
+      }
+    }
+
+    if (name === "get_campfire") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const chat = await resolveCampfire(ctx, p.id, args.chat_id ? Number(args.chat_id) : null);
+        if (!chat) return fail(id, { code: "CAMPFIRE_NOT_FOUND", message: "Campfire not found or not enabled." });
+        return ok(id, { project: { id: p.id, name: p.name }, campfire: chat });
+      } catch (e) {
+        return fail(id, { code: "GET_CAMPFIRE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_campfire_lines") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const lines = await listCampfireLines(ctx, p.id, Number(args.chat_id), { limit: args.limit });
+        return ok(id, { project: { id: p.id, name: p.name }, chat_id: Number(args.chat_id), lines, count: lines.length });
+      } catch (e) {
+        return fail(id, { code: "LIST_CAMPFIRE_LINES_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_campfire_line") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const line = await getCampfireLine(ctx, p.id, Number(args.chat_id), Number(args.line_id));
+        return ok(id, { project: { id: p.id, name: p.name }, chat_id: Number(args.chat_id), line });
+      } catch (e) {
+        return fail(id, { code: "GET_CAMPFIRE_LINE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "create_campfire_line") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const line = await createCampfireLine(ctx, p.id, Number(args.chat_id), args.body || {});
+        return ok(id, { message: "Campfire line created", project: { id: p.id, name: p.name }, line });
+      } catch (e) {
+        return fail(id, { code: "CREATE_CAMPFIRE_LINE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "delete_campfire_line") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await deleteCampfireLine(ctx, p.id, Number(args.chat_id), Number(args.line_id));
+        return ok(id, { project: { id: p.id, name: p.name }, ...result });
+      } catch (e) {
+        return fail(id, { code: "DELETE_CAMPFIRE_LINE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_chatbots") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const bots = await listChatbots(ctx, p.id, Number(args.chat_id));
+        return ok(id, { project: { id: p.id, name: p.name }, chat_id: Number(args.chat_id), chatbots: bots, count: bots.length });
+      } catch (e) {
+        return fail(id, { code: "LIST_CHATBOTS_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_chatbot") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const bot = await getChatbot(ctx, p.id, Number(args.chat_id), Number(args.integration_id));
+        return ok(id, { project: { id: p.id, name: p.name }, chat_id: Number(args.chat_id), chatbot: bot });
+      } catch (e) {
+        return fail(id, { code: "GET_CHATBOT_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "create_chatbot") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const bot = await createChatbot(ctx, p.id, Number(args.chat_id), args.body || {});
+        return ok(id, { message: "Chatbot created", project: { id: p.id, name: p.name }, chatbot: bot });
+      } catch (e) {
+        return fail(id, { code: "CREATE_CHATBOT_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_chatbot") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const bot = await updateChatbot(ctx, p.id, Number(args.chat_id), Number(args.integration_id), args.body || {});
+        return ok(id, { message: "Chatbot updated", project: { id: p.id, name: p.name }, chatbot: bot });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_CHATBOT_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "delete_chatbot") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await deleteChatbot(ctx, p.id, Number(args.chat_id), Number(args.integration_id));
+        return ok(id, { project: { id: p.id, name: p.name }, ...result });
+      } catch (e) {
+        return fail(id, { code: "DELETE_CHATBOT_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "post_chatbot_line") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const line = await postChatbotLine(ctx, p.id, Number(args.chat_id), args.integration_key, args.body || {});
+        return ok(id, { message: "Chatbot line posted", project: { id: p.id, name: p.name }, line });
+      } catch (e) {
+        return fail(id, { code: "POST_CHATBOT_LINE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_webhooks") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const hooks = await listWebhooks(ctx, p.id);
+        return ok(id, { project: { id: p.id, name: p.name }, webhooks: hooks, count: hooks.length });
+      } catch (e) {
+        return fail(id, { code: "LIST_WEBHOOKS_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_webhook") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const hook = await getWebhook(ctx, p.id, Number(args.webhook_id));
+        return ok(id, { project: { id: p.id, name: p.name }, webhook: hook });
+      } catch (e) {
+        return fail(id, { code: "GET_WEBHOOK_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "create_webhook") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const hook = await createWebhook(ctx, p.id, args.body || {});
+        return ok(id, { message: "Webhook created", project: { id: p.id, name: p.name }, webhook: hook });
+      } catch (e) {
+        return fail(id, { code: "CREATE_WEBHOOK_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_webhook") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const hook = await updateWebhook(ctx, p.id, Number(args.webhook_id), args.body || {});
+        return ok(id, { message: "Webhook updated", project: { id: p.id, name: p.name }, webhook: hook });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_WEBHOOK_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "delete_webhook") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await deleteWebhook(ctx, p.id, Number(args.webhook_id));
+        return ok(id, { project: { id: p.id, name: p.name }, ...result });
+      } catch (e) {
+        return fail(id, { code: "DELETE_WEBHOOK_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "create_attachment") {
+      try {
+        const attachment = await createAttachment(ctx, args.name, args.content_type, args.content_base64);
+        return ok(id, { attachment });
+      } catch (e) {
+        return fail(id, { code: "CREATE_ATTACHMENT_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_client_visibility") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await updateClientVisibility(ctx, p.id, Number(args.recording_id), args.body || {});
+        return ok(id, { project: { id: p.id, name: p.name }, result });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_CLIENT_VISIBILITY_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_recording_events") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const events = await listRecordingEvents(ctx, p.id, Number(args.recording_id));
+        return ok(id, { project: { id: p.id, name: p.name }, events, count: events.length });
+      } catch (e) {
+        return fail(id, { code: "LIST_RECORDING_EVENTS_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_subscription") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const sub = await getSubscription(ctx, p.id, Number(args.recording_id));
+        return ok(id, { project: { id: p.id, name: p.name }, subscription: sub });
+      } catch (e) {
+        return fail(id, { code: "GET_SUBSCRIPTION_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "subscribe_recording") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const sub = await subscribeRecording(ctx, p.id, Number(args.recording_id));
+        return ok(id, { project: { id: p.id, name: p.name }, subscription: sub });
+      } catch (e) {
+        return fail(id, { code: "SUBSCRIBE_RECORDING_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "unsubscribe_recording") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await unsubscribeRecording(ctx, p.id, Number(args.recording_id));
+        return ok(id, { project: { id: p.id, name: p.name }, ...result });
+      } catch (e) {
+        return fail(id, { code: "UNSUBSCRIBE_RECORDING_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_subscription") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const sub = await updateSubscription(ctx, p.id, Number(args.recording_id), args.body || {});
+        return ok(id, { project: { id: p.id, name: p.name }, subscription: sub });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_SUBSCRIPTION_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "search_metadata") {
+      try {
+        const meta = await searchMetadata(ctx);
+        return ok(id, meta);
+      } catch (e) {
+        return fail(id, { code: "SEARCH_METADATA_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "report_todos_assigned") {
+      try {
+        const data = await reportTodosAssigned(ctx);
+        return ok(id, { people: data, count: Array.isArray(data) ? data.length : 0 });
+      } catch (e) {
+        return fail(id, { code: "REPORT_TODOS_ASSIGNED_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "report_todos_assigned_person") {
+      try {
+        const data = await reportTodosAssignedPerson(ctx, Number(args.person_id));
+        return ok(id, { person_id: Number(args.person_id), todos: data, count: Array.isArray(data) ? data.length : 0 });
+      } catch (e) {
+        return fail(id, { code: "REPORT_TODOS_ASSIGNED_PERSON_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "report_todos_overdue") {
+      try {
+        const data = await reportTodosOverdue(ctx);
+        return ok(id, { overdue: data });
+      } catch (e) {
+        return fail(id, { code: "REPORT_TODOS_OVERDUE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "report_schedules_upcoming") {
+      try {
+        const data = await reportSchedulesUpcoming(ctx, args.query || "");
+        return ok(id, { upcoming: data });
+      } catch (e) {
+        return fail(id, { code: "REPORT_SCHEDULES_UPCOMING_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "report_timeline") {
+      try {
+        const data = await reportTimeline(ctx, args.query || "");
+        return ok(id, { events: data });
+      } catch (e) {
+        return fail(id, { code: "REPORT_TIMELINE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "project_timeline") {
+      try {
+        const data = await projectTimeline(ctx, Number(args.project_id), args.query || "");
+        return ok(id, { project_id: Number(args.project_id), events: data });
+      } catch (e) {
+        return fail(id, { code: "PROJECT_TIMELINE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "user_timeline") {
+      try {
+        const data = await userTimeline(ctx, Number(args.person_id), args.query || "");
+        return ok(id, { person_id: Number(args.person_id), events: data });
+      } catch (e) {
+        return fail(id, { code: "USER_TIMELINE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "report_timesheet") {
+      try {
+        const data = await reportTimesheet(ctx, args.query || "");
+        return ok(id, { entries: data });
+      } catch (e) {
+        return fail(id, { code: "REPORT_TIMESHEET_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "project_timesheet") {
+      try {
+        const data = await projectTimesheet(ctx, Number(args.project_id), args.query || "");
+        return ok(id, { project_id: Number(args.project_id), entries: data });
+      } catch (e) {
+        return fail(id, { code: "PROJECT_TIMESHEET_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "recording_timesheet") {
+      try {
+        const data = await recordingTimesheet(ctx, Number(args.project_id), Number(args.recording_id), args.query || "");
+        return ok(id, { project_id: Number(args.project_id), recording_id: Number(args.recording_id), entries: data });
+      } catch (e) {
+        return fail(id, { code: "RECORDING_TIMESHEET_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_inbox") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const inbox = await getInbox(ctx, p.id, Number(args.inbox_id));
+        return ok(id, { project: { id: p.id, name: p.name }, inbox });
+      } catch (e) {
+        return fail(id, { code: "GET_INBOX_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_inbox_forwards") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const forwards = await listInboxForwards(ctx, p.id, Number(args.inbox_id));
+        return ok(id, { project: { id: p.id, name: p.name }, forwards, count: forwards.length });
+      } catch (e) {
+        return fail(id, { code: "LIST_INBOX_FORWARDS_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_inbox_forward") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const forward = await getInboxForward(ctx, p.id, Number(args.forward_id));
+        return ok(id, { project: { id: p.id, name: p.name }, forward });
+      } catch (e) {
+        return fail(id, { code: "GET_INBOX_FORWARD_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_inbox_replies") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const replies = await listInboxReplies(ctx, p.id, Number(args.forward_id));
+        return ok(id, { project: { id: p.id, name: p.name }, replies, count: replies.length });
+      } catch (e) {
+        return fail(id, { code: "LIST_INBOX_REPLIES_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_inbox_reply") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const reply = await getInboxReply(ctx, p.id, Number(args.forward_id), Number(args.reply_id));
+        return ok(id, { project: { id: p.id, name: p.name }, reply });
+      } catch (e) {
+        return fail(id, { code: "GET_INBOX_REPLY_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_questionnaire") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const q = await getQuestionnaire(ctx, p.id, Number(args.questionnaire_id));
+        return ok(id, { project: { id: p.id, name: p.name }, questionnaire: q });
+      } catch (e) {
+        return fail(id, { code: "GET_QUESTIONNAIRE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_questions") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const questions = await listQuestions(ctx, p.id, Number(args.questionnaire_id));
+        return ok(id, { project: { id: p.id, name: p.name }, questions, count: questions.length });
+      } catch (e) {
+        return fail(id, { code: "LIST_QUESTIONS_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_question") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const question = await getQuestion(ctx, p.id, Number(args.question_id));
+        return ok(id, { project: { id: p.id, name: p.name }, question });
+      } catch (e) {
+        return fail(id, { code: "GET_QUESTION_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "create_question") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const question = await createQuestion(ctx, p.id, Number(args.questionnaire_id), args.body || {});
+        return ok(id, { message: "Question created", project: { id: p.id, name: p.name }, question });
+      } catch (e) {
+        return fail(id, { code: "CREATE_QUESTION_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_question") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const question = await updateQuestion(ctx, p.id, Number(args.question_id), args.body || {});
+        return ok(id, { message: "Question updated", project: { id: p.id, name: p.name }, question });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_QUESTION_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "pause_question") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await pauseQuestion(ctx, p.id, Number(args.question_id));
+        return ok(id, { project: { id: p.id, name: p.name }, ...result });
+      } catch (e) {
+        return fail(id, { code: "PAUSE_QUESTION_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "resume_question") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await resumeQuestion(ctx, p.id, Number(args.question_id));
+        return ok(id, { project: { id: p.id, name: p.name }, ...result });
+      } catch (e) {
+        return fail(id, { code: "RESUME_QUESTION_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_question_notification_settings") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await updateQuestionNotificationSettings(ctx, p.id, Number(args.question_id), args.body || {});
+        return ok(id, { project: { id: p.id, name: p.name }, result });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_QUESTION_NOTIFICATION_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_question_answers") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const answers = await listQuestionAnswers(ctx, p.id, Number(args.question_id));
+        return ok(id, { project: { id: p.id, name: p.name }, answers, count: answers.length });
+      } catch (e) {
+        return fail(id, { code: "LIST_QUESTION_ANSWERS_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_question_answers_by") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const people = await listQuestionAnswersBy(ctx, p.id, Number(args.question_id));
+        return ok(id, { project: { id: p.id, name: p.name }, people, count: people.length });
+      } catch (e) {
+        return fail(id, { code: "LIST_QUESTION_ANSWERS_BY_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_question_answers_by_person") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const answers = await listQuestionAnswersByPerson(ctx, p.id, Number(args.question_id), Number(args.person_id));
+        return ok(id, { project: { id: p.id, name: p.name }, answers, count: answers.length });
+      } catch (e) {
+        return fail(id, { code: "LIST_QUESTION_ANSWERS_BY_PERSON_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_question_answer") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const answer = await getQuestionAnswer(ctx, p.id, Number(args.answer_id));
+        return ok(id, { project: { id: p.id, name: p.name }, answer });
+      } catch (e) {
+        return fail(id, { code: "GET_QUESTION_ANSWER_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "create_question_answer") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const answer = await createQuestionAnswer(ctx, p.id, Number(args.question_id), args.body || {});
+        return ok(id, { message: "Answer created", project: { id: p.id, name: p.name }, answer });
+      } catch (e) {
+        return fail(id, { code: "CREATE_QUESTION_ANSWER_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_question_answer") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const answer = await updateQuestionAnswer(ctx, p.id, Number(args.answer_id), args.body || {});
+        return ok(id, { message: "Answer updated", project: { id: p.id, name: p.name }, answer });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_QUESTION_ANSWER_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_question_reminders") {
+      try {
+        const reminders = await listQuestionReminders(ctx);
+        return ok(id, { reminders, count: reminders.length });
+      } catch (e) {
+        return fail(id, { code: "LIST_QUESTION_REMINDERS_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_templates") {
+      try {
+        const templates = await listTemplates(ctx);
+        return ok(id, { templates, count: templates.length });
+      } catch (e) {
+        return fail(id, { code: "LIST_TEMPLATES_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_template") {
+      try {
+        const template = await getTemplate(ctx, Number(args.template_id));
+        return ok(id, { template });
+      } catch (e) {
+        return fail(id, { code: "GET_TEMPLATE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "create_template") {
+      try {
+        const template = await createTemplate(ctx, args.body || {});
+        return ok(id, { message: "Template created", template });
+      } catch (e) {
+        return fail(id, { code: "CREATE_TEMPLATE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_template") {
+      try {
+        const template = await updateTemplate(ctx, Number(args.template_id), args.body || {});
+        return ok(id, { message: "Template updated", template });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_TEMPLATE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "trash_template") {
+      try {
+        const result = await trashTemplate(ctx, Number(args.template_id));
+        return ok(id, result);
+      } catch (e) {
+        return fail(id, { code: "TRASH_TEMPLATE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "create_project_construction") {
+      try {
+        const construction = await createProjectConstruction(ctx, Number(args.template_id), args.body || {});
+        return ok(id, { message: "Project construction created", construction });
+      } catch (e) {
+        return fail(id, { code: "CREATE_PROJECT_CONSTRUCTION_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_project_construction") {
+      try {
+        const construction = await getProjectConstruction(ctx, Number(args.template_id), Number(args.construction_id));
+        return ok(id, { construction });
+      } catch (e) {
+        return fail(id, { code: "GET_PROJECT_CONSTRUCTION_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_dock_tool") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const toolResult = await getDockTool(ctx, p.id, Number(args.tool_id));
+        return ok(id, { project: { id: p.id, name: p.name }, tool: toolResult });
+      } catch (e) {
+        return fail(id, { code: "GET_DOCK_TOOL_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "create_dock_tool") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const toolResult = await createDockTool(ctx, p.id, args.body || {});
+        return ok(id, { message: "Dock tool created", project: { id: p.id, name: p.name }, tool: toolResult });
+      } catch (e) {
+        return fail(id, { code: "CREATE_DOCK_TOOL_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_dock_tool") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const toolResult = await updateDockTool(ctx, p.id, Number(args.tool_id), args.body || {});
+        return ok(id, { message: "Dock tool updated", project: { id: p.id, name: p.name }, tool: toolResult });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_DOCK_TOOL_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "enable_dock_tool") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const toolResult = await enableDockTool(ctx, p.id, Number(args.recording_id), args.body || {});
+        return ok(id, { message: "Dock tool enabled", project: { id: p.id, name: p.name }, tool: toolResult });
+      } catch (e) {
+        return fail(id, { code: "ENABLE_DOCK_TOOL_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "move_dock_tool") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const toolResult = await moveDockTool(ctx, p.id, Number(args.recording_id), args.body || {});
+        return ok(id, { message: "Dock tool moved", project: { id: p.id, name: p.name }, tool: toolResult });
+      } catch (e) {
+        return fail(id, { code: "MOVE_DOCK_TOOL_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "disable_dock_tool") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await disableDockTool(ctx, p.id, Number(args.recording_id));
+        return ok(id, { project: { id: p.id, name: p.name }, ...result });
+      } catch (e) {
+        return fail(id, { code: "DISABLE_DOCK_TOOL_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "trash_dock_tool") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await trashDockTool(ctx, p.id, Number(args.tool_id));
+        return ok(id, { project: { id: p.id, name: p.name }, ...result });
+      } catch (e) {
+        return fail(id, { code: "TRASH_DOCK_TOOL_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "create_lineup_marker") {
+      try {
+        const marker = await createLineupMarker(ctx, args.body || {});
+        return ok(id, { marker });
+      } catch (e) {
+        return fail(id, { code: "CREATE_LINEUP_MARKER_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_lineup_marker") {
+      try {
+        const marker = await updateLineupMarker(ctx, Number(args.marker_id), args.body || {});
+        return ok(id, { marker });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_LINEUP_MARKER_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "delete_lineup_marker") {
+      try {
+        const result = await deleteLineupMarker(ctx, Number(args.marker_id));
+        return ok(id, result);
+      } catch (e) {
+        return fail(id, { code: "DELETE_LINEUP_MARKER_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_todolist_groups") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const groups = await listTodolistGroups(ctx, p.id, Number(args.todolist_id));
+        return ok(id, { project: { id: p.id, name: p.name }, groups, count: groups.length });
+      } catch (e) {
+        return fail(id, { code: "LIST_TODOLIST_GROUPS_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_todolist_group") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const group = await getTodolistGroup(ctx, p.id, Number(args.group_id));
+        return ok(id, { project: { id: p.id, name: p.name }, group });
+      } catch (e) {
+        return fail(id, { code: "GET_TODOLIST_GROUP_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "create_todolist_group") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const group = await createTodolistGroup(ctx, p.id, Number(args.todolist_id), args.body || {});
+        return ok(id, { message: "Todolist group created", project: { id: p.id, name: p.name }, group });
+      } catch (e) {
+        return fail(id, { code: "CREATE_TODOLIST_GROUP_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "reposition_todolist_group") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await repositionTodolistGroup(ctx, p.id, Number(args.group_id), Number(args.position));
+        return ok(id, { project: { id: p.id, name: p.name }, result });
+      } catch (e) {
+        return fail(id, { code: "REPOSITION_TODOLIST_GROUP_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_todoset") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const todoset = await getTodoset(ctx, p.id, Number(args.todoset_id));
+        return ok(id, { project: { id: p.id, name: p.name }, todoset });
+      } catch (e) {
+        return fail(id, { code: "GET_TODOSET_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_todolist") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const todolist = await getTodoList(ctx, p.id, Number(args.todolist_id));
+        return ok(id, { project: { id: p.id, name: p.name }, todolist });
+      } catch (e) {
+        return fail(id, { code: "GET_TODOLIST_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "create_todolist") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const todolist = await createTodoList(ctx, p.id, Number(args.todoset_id), args.body || {});
+        return ok(id, { message: "Todolist created", project: { id: p.id, name: p.name }, todolist });
+      } catch (e) {
+        return fail(id, { code: "CREATE_TODOLIST_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_todolist") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const todolist = await updateTodoList(ctx, p.id, Number(args.todolist_id), args.body || {});
+        return ok(id, { message: "Todolist updated", project: { id: p.id, name: p.name }, todolist });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_TODOLIST_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_schedule") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const schedule = await getSchedule(ctx, p.id, Number(args.schedule_id));
+        return ok(id, { project: { id: p.id, name: p.name }, schedule });
+      } catch (e) {
+        return fail(id, { code: "GET_SCHEDULE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_schedule") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const schedule = await updateSchedule(ctx, p.id, Number(args.schedule_id), args.body || {});
+        return ok(id, { message: "Schedule updated", project: { id: p.id, name: p.name }, schedule });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_SCHEDULE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_schedule_entry") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const entry = await getScheduleEntry(ctx, p.id, Number(args.entry_id));
+        return ok(id, { project: { id: p.id, name: p.name }, entry });
+      } catch (e) {
+        return fail(id, { code: "GET_SCHEDULE_ENTRY_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "create_schedule_entry") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const entry = await createScheduleEntry(ctx, p.id, Number(args.schedule_id), args.body || {});
+        return ok(id, { message: "Schedule entry created", project: { id: p.id, name: p.name }, entry });
+      } catch (e) {
+        return fail(id, { code: "CREATE_SCHEDULE_ENTRY_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_schedule_entry") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const entry = await updateScheduleEntry(ctx, p.id, Number(args.entry_id), args.body || {});
+        return ok(id, { message: "Schedule entry updated", project: { id: p.id, name: p.name }, entry });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_SCHEDULE_ENTRY_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_card_table") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const table = await getCardTable(ctx, p.id, Number(args.card_table_id));
+        return ok(id, { project: { id: p.id, name: p.name }, card_table: table });
+      } catch (e) {
+        return fail(id, { code: "GET_CARD_TABLE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_card_table_column") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const column = await getCardTableColumn(ctx, p.id, Number(args.column_id));
+        return ok(id, { project: { id: p.id, name: p.name }, column });
+      } catch (e) {
+        return fail(id, { code: "GET_CARD_TABLE_COLUMN_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "create_card_table_column") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const column = await createCardTableColumn(ctx, p.id, Number(args.card_table_id), args.body || {});
+        return ok(id, { message: "Card table column created", project: { id: p.id, name: p.name }, column });
+      } catch (e) {
+        return fail(id, { code: "CREATE_CARD_TABLE_COLUMN_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_card_table_column") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const column = await updateCardTableColumn(ctx, p.id, Number(args.column_id), args.body || {});
+        return ok(id, { message: "Card table column updated", project: { id: p.id, name: p.name }, column });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_CARD_TABLE_COLUMN_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "move_card_table_column") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const column = await moveCardTableColumn(ctx, p.id, Number(args.card_table_id), args.body || {});
+        return ok(id, { message: "Card table column moved", project: { id: p.id, name: p.name }, column });
+      } catch (e) {
+        return fail(id, { code: "MOVE_CARD_TABLE_COLUMN_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "subscribe_card_table_column") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await subscribeCardTableColumn(ctx, p.id, Number(args.column_id));
+        return ok(id, { project: { id: p.id, name: p.name }, result });
+      } catch (e) {
+        return fail(id, { code: "SUBSCRIBE_CARD_TABLE_COLUMN_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "unsubscribe_card_table_column") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await unsubscribeCardTableColumn(ctx, p.id, Number(args.column_id));
+        return ok(id, { project: { id: p.id, name: p.name }, ...result });
+      } catch (e) {
+        return fail(id, { code: "UNSUBSCRIBE_CARD_TABLE_COLUMN_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "create_card_table_on_hold") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await createCardTableOnHold(ctx, p.id, Number(args.column_id));
+        return ok(id, { project: { id: p.id, name: p.name }, result });
+      } catch (e) {
+        return fail(id, { code: "CREATE_CARD_TABLE_ON_HOLD_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "delete_card_table_on_hold") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await deleteCardTableOnHold(ctx, p.id, Number(args.column_id));
+        return ok(id, { project: { id: p.id, name: p.name }, ...result });
+      } catch (e) {
+        return fail(id, { code: "DELETE_CARD_TABLE_ON_HOLD_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_card_table_column_color") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await updateCardTableColumnColor(ctx, p.id, Number(args.column_id), args.body || {});
+        return ok(id, { project: { id: p.id, name: p.name }, result });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_CARD_TABLE_COLUMN_COLOR_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_card") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const card = await getCard(ctx, p.id, Number(args.card_id));
+        return ok(id, { project: { id: p.id, name: p.name }, card });
+      } catch (e) {
+        return fail(id, { code: "GET_CARD_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "update_card") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const card = await updateCard(ctx, p.id, Number(args.card_id), args.body || {});
+        return ok(id, { message: "Card updated", project: { id: p.id, name: p.name }, card });
+      } catch (e) {
+        return fail(id, { code: "UPDATE_CARD_ERROR", message: e.message });
+      }
+    }
+
     // ===== NEW SEARCH ENDPOINTS =====
     if (name === "search_recordings") {
       try {
@@ -2819,3 +4522,4 @@ export async function handleMCP(reqBody, ctx) {
     return fail(id, { code: "INTERNAL_ERROR", message: e?.message || String(e) });
   }
 }
+
