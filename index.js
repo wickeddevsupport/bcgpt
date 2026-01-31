@@ -43,6 +43,7 @@ console.log(`[Startup] DEFAULT_ACCOUNT_ID from env: ${DEFAULT_ACCOUNT_ID}`);
 
 let TOKEN = null;      // single-user token
 let AUTH_CACHE = null; // cached authorization.json
+let USER_KEY = null;
 let MINER_RUNNING = false;
 let MINER_LAST_RESULT = null;
 let MINER_LAST_STARTED_AT = null;
@@ -65,11 +66,20 @@ if (!TOKEN && process.env.BASECAMP_TOKEN) {
 AUTH_CACHE = getAuthCache();
 if (AUTH_CACHE) {
   console.log(`[Startup] Loaded auth cache from database`);
+  USER_KEY = AUTH_CACHE.user_key || deriveUserKey(AUTH_CACHE);
 }
 
 function originBase(req) {
   const inferred = `${req.protocol}://${req.get("host")}`;
   return process.env.APP_BASE_URL || inferred;
+}
+
+function deriveUserKey(auth) {
+  const email = auth?.identity?.email_address ? String(auth.identity.email_address).trim().toLowerCase() : "";
+  if (email) return `email:${email}`;
+  const name = auth?.identity?.name ? String(auth.identity.name).trim().toLowerCase() : "";
+  if (name) return `name:${name}`;
+  return null;
 }
 
 function sleep(ms) {
@@ -273,7 +283,10 @@ async function getAuthorization(force = false) {
     err.code = "NOT_AUTHENTICATED";
     throw err;
   }
-  if (AUTH_CACHE && !force) return AUTH_CACHE;
+  if (AUTH_CACHE && !force) {
+    USER_KEY = USER_KEY || deriveUserKey(AUTH_CACHE);
+    return AUTH_CACHE;
+  }
 
   const r = await fetch("https://launchpad.37signals.com/authorization.json", {
     headers: { Authorization: `Bearer ${TOKEN.access_token}`, "User-Agent": UA },
@@ -287,7 +300,11 @@ async function getAuthorization(force = false) {
   }
 
   AUTH_CACHE = await r.json();
-  setAuthCache(AUTH_CACHE);
+  USER_KEY = deriveUserKey(AUTH_CACHE);
+  setAuthCache(AUTH_CACHE, USER_KEY);
+  if (TOKEN?.access_token) {
+    setToken(TOKEN, USER_KEY);
+  }
   return AUTH_CACHE;
 }
 
@@ -339,6 +356,7 @@ async function startStatus(req) {
     return {
       connected: true,
       user: { name: auth.identity?.name || null, email: auth.identity?.email_address || null },
+      user_key: USER_KEY,
       reauth_url,
       logout_url,
       message: "Connected. Not you? Use the auth link to re-login.",
@@ -361,10 +379,12 @@ async function runMiningJob({ force = false } = {}) {
   MINER_LAST_STARTED_AT = new Date().toISOString();
   try {
     const accountId = await getAccountId();
+    const userKey = USER_KEY || (await getAuthorization().then(() => USER_KEY));
     const result = await runMining({
       token: TOKEN,
       accountId,
       ua: UA,
+      userKey,
       delayMs: Number(process.env.MINER_DELAY_MS || 150),
       projectsPerRun: Number(process.env.MINER_PROJECTS_PER_RUN || 4),
       projectMinIntervalSec: Number(process.env.MINER_PROJECT_MIN_INTERVAL_SEC || 1800),
@@ -382,6 +402,7 @@ async function runMiningJob({ force = false } = {}) {
 async function buildMcpCtx(req) {
   const auth = TOKEN?.access_token ? await getAuthorization() : null;
   const accountId = TOKEN?.access_token ? await getAccountId() : null;
+  const userKey = USER_KEY || deriveUserKey(auth);
   
   console.log(`[buildMcpCtx] accountId retrieved: ${accountId} (type: ${typeof accountId})`);
 
@@ -389,6 +410,7 @@ async function buildMcpCtx(req) {
     TOKEN,
     accountId,
     ua: UA,
+    userKey,
     authAccounts: auth?.accounts || [],
     startStatus: async () => await startStatus(req),
 
@@ -477,6 +499,7 @@ app.get("/auth/basecamp/callback", async (req, res) => {
     TOKEN = await r.json();
     setToken(TOKEN);
     AUTH_CACHE = null;
+    USER_KEY = null;
 
     res.send("✅ Basecamp connected. Return to ChatGPT and run /startbcgpt.");
   } catch (e) {
@@ -490,6 +513,7 @@ app.post("/logout", (req, res) => {
   TOKEN = null;
   clearToken();
   AUTH_CACHE = null;
+  USER_KEY = null;
   res.json({ ok: true, connected: false, message: "Logged out." });
 });
 
@@ -565,7 +589,7 @@ app.post("/dev/api", async (req, res) => {
     if (!name) return res.status(400).json({ error: "Missing tool name" });
     const result = await runTool(name, args, req);
     try {
-      setToolCache(name, args || {}, result);
+      setToolCache(name, args || {}, result, { userKey: USER_KEY });
     } catch (e) {
       console.error(`[dev/api] cache error for ${name}:`, e?.message || e);
     }
@@ -580,9 +604,10 @@ app.get("/dev/mine/status", (req, res) => {
     running: MINER_RUNNING,
     last_started_at: MINER_LAST_STARTED_AT,
     last_result: MINER_LAST_RESULT,
-    index_stats: getIndexStats(),
-    entity_stats: getEntityStats(),
-    tool_cache_stats: getToolCacheStats(),
+    user_key: USER_KEY,
+    index_stats: getIndexStats({ userKey: USER_KEY }),
+    entity_stats: getEntityStats({ userKey: USER_KEY }),
+    tool_cache_stats: getToolCacheStats({ userKey: USER_KEY }),
   });
 });
 
@@ -597,6 +622,7 @@ app.get("/dev/mine/entities", (req, res) => {
   const items = listEntityCache(type, {
     projectId: project_id ? Number(project_id) : null,
     limit: limit ? Number(limit) : 200,
+    userKey: USER_KEY,
   });
   res.json({ type, count: items.length, items });
 });
@@ -608,6 +634,7 @@ app.get("/dev/mine/search", (req, res) => {
     type: type || undefined,
     projectId: project_id ? Number(project_id) : undefined,
     limit: limit ? Number(limit) : 100,
+    userKey: USER_KEY,
   });
   res.json({ query: q, count: items.length, items });
 });
@@ -615,7 +642,7 @@ app.get("/dev/mine/search", (req, res) => {
 app.get("/dev/cache/tool", (req, res) => {
   const { name, limit } = req.query || {};
   if (!name) return res.status(400).json({ error: "Missing name" });
-  const items = listToolCache(String(name), { limit: limit ? Number(limit) : 20 });
+  const items = listToolCache(String(name), { limit: limit ? Number(limit) : 20, userKey: USER_KEY });
   res.json({ name, count: items.length, items });
 });
 
@@ -624,13 +651,14 @@ app.get("/db/info", (req, res) => {
   try {
     const token = getToken();
     const auth = getAuthCache();
-    const indexStats = getIndexStats();
+    const indexStats = getIndexStats({ userKey: USER_KEY });
     res.json({
       status: "ok",
       database: {
         authenticated: !!token?.access_token,
         auth_cached: !!auth,
         index_stats: indexStats,
+        user_key: USER_KEY,
       },
     });
   } catch (e) {

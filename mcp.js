@@ -185,6 +185,7 @@ async function listProjects(ctx, { archived = false, compact = true, limit, chun
         url: p.app_url || p.url,
         created_at: p.created_at,
         updated_at: p.updated_at,
+        userKey: ctx.userKey,
       });
     }
   } catch (e) {
@@ -345,6 +346,7 @@ async function listTodosForProject(ctx, projectId) {
             url: t.app_url || t.url,
             created_at: t.created_at,
             updated_at: t.updated_at,
+            userKey: ctx.userKey,
           });
         }
       }
@@ -749,6 +751,7 @@ async function listMessages(ctx, projectId, { board_id, board_title, limit } = {
         url: m.app_url || m.url,
         created_at: m.created_at,
         updated_at: m.updated_at,
+        userKey: ctx.userKey,
       });
     }
   } catch (e) {
@@ -806,6 +809,7 @@ async function listDocuments(ctx, projectId, { limit } = {}) {
         url: d.app_url || d.url,
         created_at: d.created_at,
         updated_at: d.updated_at,
+        userKey: ctx.userKey,
       });
     }
   } catch (e) {

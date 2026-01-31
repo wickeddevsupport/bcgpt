@@ -16,6 +16,7 @@ db.exec(`
     access_token TEXT NOT NULL,
     token_type TEXT DEFAULT 'Bearer',
     expires_in INTEGER,
+    user_key TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );
@@ -24,12 +25,14 @@ db.exec(`
     id INTEGER PRIMARY KEY CHECK (id = 1),
     identity_name TEXT,
     identity_email TEXT,
+    user_key TEXT,
     accounts TEXT NOT NULL,
     updated_at INTEGER NOT NULL
   );
 
   CREATE TABLE IF NOT EXISTS search_index (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_key TEXT NOT NULL DEFAULT 'legacy',
     type TEXT NOT NULL,
     object_id TEXT NOT NULL,
     project_id INTEGER,
@@ -38,70 +41,268 @@ db.exec(`
     url TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
-    UNIQUE(type, object_id)
+    UNIQUE(user_key, type, object_id)
   );
 
-  CREATE INDEX IF NOT EXISTS idx_search_type ON search_index(type);
-  CREATE INDEX IF NOT EXISTS idx_search_project ON search_index(project_id);
+  CREATE INDEX IF NOT EXISTS idx_search_user_type ON search_index(user_key, type);
+  CREATE INDEX IF NOT EXISTS idx_search_user_project ON search_index(user_key, project_id);
   CREATE INDEX IF NOT EXISTS idx_search_content ON search_index(content);
 
   CREATE TABLE IF NOT EXISTS entity_cache (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_key TEXT NOT NULL DEFAULT 'legacy',
     type TEXT NOT NULL,
     object_id TEXT NOT NULL,
     project_id INTEGER,
     title TEXT,
     data TEXT NOT NULL,
     updated_at INTEGER NOT NULL,
-    UNIQUE(type, object_id)
+    UNIQUE(user_key, type, object_id)
   );
 
-  CREATE INDEX IF NOT EXISTS idx_entity_type ON entity_cache(type);
-  CREATE INDEX IF NOT EXISTS idx_entity_project ON entity_cache(project_id);
+  CREATE INDEX IF NOT EXISTS idx_entity_user_type ON entity_cache(user_key, type);
+  CREATE INDEX IF NOT EXISTS idx_entity_user_project ON entity_cache(user_key, project_id);
 
   CREATE TABLE IF NOT EXISTS tool_cache (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_key TEXT NOT NULL DEFAULT 'legacy',
     tool_name TEXT NOT NULL,
     args_hash TEXT NOT NULL,
     args_json TEXT NOT NULL,
     response_json TEXT NOT NULL,
     updated_at INTEGER NOT NULL,
-    UNIQUE(tool_name, args_hash)
+    UNIQUE(user_key, tool_name, args_hash)
   );
 
-  CREATE INDEX IF NOT EXISTS idx_tool_name ON tool_cache(tool_name);
+  CREATE INDEX IF NOT EXISTS idx_tool_user_name ON tool_cache(user_key, tool_name);
 
   CREATE TABLE IF NOT EXISTS mine_state (
-    key TEXT PRIMARY KEY,
+    user_key TEXT NOT NULL DEFAULT 'legacy',
+    key TEXT NOT NULL,
     value TEXT,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(user_key, key)
   );
 `);
 
+function normalizeUserKey(userKey) {
+  if (!userKey) return null;
+  const trimmed = String(userKey).trim();
+  return trimmed ? trimmed : null;
+}
+
+function tableHasColumn(table, column) {
+  try {
+    const rows = db.prepare(`PRAGMA table_info(${table})`).all();
+    return rows.some((r) => r.name === column);
+  } catch {
+    return false;
+  }
+}
+
+function getLegacyUserKey() {
+  try {
+    const row = db.prepare("SELECT identity_email, identity_name FROM auth_cache WHERE id = 1").get();
+    const email = row?.identity_email ? String(row.identity_email).trim().toLowerCase() : "";
+    if (email) return `email:${email}`;
+    const name = row?.identity_name ? String(row.identity_name).trim().toLowerCase() : "";
+    if (name) return `name:${name}`;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function rebuildSearchIndex(legacyUserKey) {
+  const key = normalizeUserKey(legacyUserKey) || "legacy";
+  db.exec("BEGIN");
+  try {
+    db.exec(`
+      CREATE TABLE search_index_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_key TEXT NOT NULL DEFAULT 'legacy',
+        type TEXT NOT NULL,
+        object_id TEXT NOT NULL,
+        project_id INTEGER,
+        title TEXT,
+        content TEXT,
+        url TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(user_key, type, object_id)
+      );
+    `);
+    const insert = db.prepare(`
+      INSERT INTO search_index_new (user_key, type, object_id, project_id, title, content, url, created_at, updated_at)
+      SELECT ?, type, object_id, project_id, title, content, url, created_at, updated_at
+      FROM search_index;
+    `);
+    insert.run(key);
+    db.exec("DROP TABLE search_index;");
+    db.exec("ALTER TABLE search_index_new RENAME TO search_index;");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_search_user_type ON search_index(user_key, type);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_search_user_project ON search_index(user_key, project_id);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_search_content ON search_index(content);");
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+}
+
+function rebuildEntityCache(legacyUserKey) {
+  const key = normalizeUserKey(legacyUserKey) || "legacy";
+  db.exec("BEGIN");
+  try {
+    db.exec(`
+      CREATE TABLE entity_cache_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_key TEXT NOT NULL DEFAULT 'legacy',
+        type TEXT NOT NULL,
+        object_id TEXT NOT NULL,
+        project_id INTEGER,
+        title TEXT,
+        data TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(user_key, type, object_id)
+      );
+    `);
+    const insert = db.prepare(`
+      INSERT INTO entity_cache_new (user_key, type, object_id, project_id, title, data, updated_at)
+      SELECT ?, type, object_id, project_id, title, data, updated_at
+      FROM entity_cache;
+    `);
+    insert.run(key);
+    db.exec("DROP TABLE entity_cache;");
+    db.exec("ALTER TABLE entity_cache_new RENAME TO entity_cache;");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_entity_user_type ON entity_cache(user_key, type);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_entity_user_project ON entity_cache(user_key, project_id);");
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+}
+
+function rebuildToolCache(legacyUserKey) {
+  const key = normalizeUserKey(legacyUserKey) || "legacy";
+  db.exec("BEGIN");
+  try {
+    db.exec(`
+      CREATE TABLE tool_cache_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_key TEXT NOT NULL DEFAULT 'legacy',
+        tool_name TEXT NOT NULL,
+        args_hash TEXT NOT NULL,
+        args_json TEXT NOT NULL,
+        response_json TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(user_key, tool_name, args_hash)
+      );
+    `);
+    const insert = db.prepare(`
+      INSERT INTO tool_cache_new (user_key, tool_name, args_hash, args_json, response_json, updated_at)
+      SELECT ?, tool_name, args_hash, args_json, response_json, updated_at
+      FROM tool_cache;
+    `);
+    insert.run(key);
+    db.exec("DROP TABLE tool_cache;");
+    db.exec("ALTER TABLE tool_cache_new RENAME TO tool_cache;");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_tool_user_name ON tool_cache(user_key, tool_name);");
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+}
+
+function rebuildMineState(legacyUserKey) {
+  const key = normalizeUserKey(legacyUserKey) || "legacy";
+  db.exec("BEGIN");
+  try {
+    db.exec(`
+      CREATE TABLE mine_state_new (
+        user_key TEXT NOT NULL DEFAULT 'legacy',
+        key TEXT NOT NULL,
+        value TEXT,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY(user_key, key)
+      );
+    `);
+    const insert = db.prepare(`
+      INSERT INTO mine_state_new (user_key, key, value, updated_at)
+      SELECT ?, key, value, updated_at
+      FROM mine_state;
+    `);
+    insert.run(key);
+    db.exec("DROP TABLE mine_state;");
+    db.exec("ALTER TABLE mine_state_new RENAME TO mine_state;");
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+}
+
+const legacyUserKey = getLegacyUserKey();
+
+if (!tableHasColumn("token", "user_key")) {
+  db.exec("ALTER TABLE token ADD COLUMN user_key TEXT;");
+  if (legacyUserKey) {
+    db.prepare("UPDATE token SET user_key = ? WHERE user_key IS NULL").run(legacyUserKey);
+  }
+}
+
+if (!tableHasColumn("auth_cache", "user_key")) {
+  db.exec("ALTER TABLE auth_cache ADD COLUMN user_key TEXT;");
+  if (legacyUserKey) {
+    db.prepare("UPDATE auth_cache SET user_key = ? WHERE user_key IS NULL").run(legacyUserKey);
+  }
+}
+
+if (!tableHasColumn("search_index", "user_key")) {
+  rebuildSearchIndex(legacyUserKey);
+}
+
+if (!tableHasColumn("entity_cache", "user_key")) {
+  rebuildEntityCache(legacyUserKey);
+}
+
+if (!tableHasColumn("tool_cache", "user_key")) {
+  rebuildToolCache(legacyUserKey);
+}
+
+if (!tableHasColumn("mine_state", "user_key")) {
+  rebuildMineState(legacyUserKey);
+}
+
 // Token operations
 export function getToken() {
-  const stmt = db.prepare("SELECT access_token, token_type, expires_in FROM token WHERE id = 1");
+  const stmt = db.prepare("SELECT access_token, token_type, expires_in, user_key FROM token WHERE id = 1");
   const row = stmt.get();
   if (!row) return null;
   return {
     access_token: row.access_token,
     token_type: row.token_type,
     expires_in: row.expires_in,
+    user_key: row.user_key || null,
   };
 }
 
-export function setToken(token) {
+export function setToken(token, userKey = null) {
   const now = Math.floor(Date.now() / 1000);
+  const key = normalizeUserKey(userKey);
   const stmt = db.prepare(`
-    INSERT INTO token (id, access_token, token_type, expires_in, created_at, updated_at)
-    VALUES (1, ?, ?, ?, ?, ?)
+    INSERT INTO token (id, access_token, token_type, expires_in, user_key, created_at, updated_at)
+    VALUES (1, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       access_token = excluded.access_token,
       token_type = excluded.token_type,
       expires_in = excluded.expires_in,
+      user_key = excluded.user_key,
       updated_at = excluded.updated_at
   `);
-  stmt.run(token.access_token, token.token_type || "Bearer", token.expires_in, now, now);
+  stmt.run(token.access_token, token.token_type || "Bearer", token.expires_in, key, now, now);
   console.log(`[DB] Token stored/updated`);
 }
 
@@ -113,29 +314,33 @@ export function clearToken() {
 
 // Auth cache operations
 export function getAuthCache() {
-  const stmt = db.prepare("SELECT identity_name, identity_email, accounts FROM auth_cache WHERE id = 1");
+  const stmt = db.prepare("SELECT identity_name, identity_email, accounts, user_key FROM auth_cache WHERE id = 1");
   const row = stmt.get();
   if (!row) return null;
   return {
     identity: { name: row.identity_name, email_address: row.identity_email },
     accounts: JSON.parse(row.accounts),
+    user_key: row.user_key || null,
   };
 }
 
-export function setAuthCache(auth) {
+export function setAuthCache(auth, userKey = null) {
   const now = Math.floor(Date.now() / 1000);
+  const key = normalizeUserKey(userKey);
   const stmt = db.prepare(`
-    INSERT INTO auth_cache (id, identity_name, identity_email, accounts, updated_at)
-    VALUES (1, ?, ?, ?, ?)
+    INSERT INTO auth_cache (id, identity_name, identity_email, user_key, accounts, updated_at)
+    VALUES (1, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       identity_name = excluded.identity_name,
       identity_email = excluded.identity_email,
+      user_key = excluded.user_key,
       accounts = excluded.accounts,
       updated_at = excluded.updated_at
   `);
   stmt.run(
     auth.identity?.name || null,
     auth.identity?.email_address || null,
+    key,
     JSON.stringify(auth.accounts || []),
     now
   );
@@ -143,31 +348,34 @@ export function setAuthCache(auth) {
 }
 
 // Search index operations
-export function indexSearchItem(type, objectId, { projectId, title, content, url }) {
+export function indexSearchItem(type, objectId, { projectId, title, content, url, userKey } = {}) {
   const now = Math.floor(Date.now() / 1000);
+  const key = normalizeUserKey(userKey) || "legacy";
   const stmt = db.prepare(`
-    INSERT INTO search_index (type, object_id, project_id, title, content, url, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(type, object_id) DO UPDATE SET
+    INSERT INTO search_index (user_key, type, object_id, project_id, title, content, url, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_key, type, object_id) DO UPDATE SET
       project_id = excluded.project_id,
       title = excluded.title,
       content = excluded.content,
       url = excluded.url,
       updated_at = excluded.updated_at
   `);
-  stmt.run(type, objectId, projectId, title, content, url, now, now);
+  stmt.run(key, type, objectId, projectId, title, content, url, now, now);
 }
 
-export function clearSearchIndex(type) {
-  const stmt = db.prepare("DELETE FROM search_index WHERE type = ?");
-  stmt.run(type);
+export function clearSearchIndex(type, { userKey = null } = {}) {
+  const key = normalizeUserKey(userKey) || "legacy";
+  const stmt = db.prepare("DELETE FROM search_index WHERE user_key = ? AND type = ?");
+  stmt.run(key, type);
   console.log(`[DB] Cleared search index for type: ${type}`);
 }
 
-export function searchIndex(query, { type, projectId, limit = 100 } = {}) {
+export function searchIndex(query, { type, projectId, limit = 100, userKey = null } = {}) {
+  const key = normalizeUserKey(userKey) || "legacy";
   const q = `%${query.toLowerCase()}%`;
-  let sql = "SELECT * FROM search_index WHERE (LOWER(title) LIKE ? OR LOWER(content) LIKE ?)";
-  const params = [q, q];
+  let sql = "SELECT * FROM search_index WHERE user_key = ? AND (LOWER(title) LIKE ? OR LOWER(content) LIKE ?)";
+  const params = [key, q, q];
 
   if (type) {
     sql += " AND type = ?";
@@ -186,28 +394,31 @@ export function searchIndex(query, { type, projectId, limit = 100 } = {}) {
   return stmt.all(...params);
 }
 
-export function getIndexStats() {
-  const stmt = db.prepare("SELECT type, COUNT(*) as count FROM search_index GROUP BY type");
-  return stmt.all();
+export function getIndexStats({ userKey = null } = {}) {
+  const key = normalizeUserKey(userKey) || "legacy";
+  const stmt = db.prepare("SELECT type, COUNT(*) as count FROM search_index WHERE user_key = ? GROUP BY type");
+  return stmt.all(key);
 }
 
-export function upsertEntityCache(type, objectId, { projectId = null, title = null, data } = {}) {
+export function upsertEntityCache(type, objectId, { projectId = null, title = null, data, userKey } = {}) {
   const now = Math.floor(Date.now() / 1000);
+  const key = normalizeUserKey(userKey) || "legacy";
   const stmt = db.prepare(`
-    INSERT INTO entity_cache (type, object_id, project_id, title, data, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT(type, object_id) DO UPDATE SET
+    INSERT INTO entity_cache (user_key, type, object_id, project_id, title, data, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_key, type, object_id) DO UPDATE SET
       project_id = excluded.project_id,
       title = excluded.title,
       data = excluded.data,
       updated_at = excluded.updated_at
   `);
-  stmt.run(type, String(objectId), projectId, title, JSON.stringify(data ?? {}), now);
+  stmt.run(key, type, String(objectId), projectId, title, JSON.stringify(data ?? {}), now);
 }
 
-export function listEntityCache(type, { projectId = null, limit = 200 } = {}) {
-  let sql = "SELECT * FROM entity_cache WHERE type = ?";
-  const params = [type];
+export function listEntityCache(type, { projectId = null, limit = 200, userKey = null } = {}) {
+  const key = normalizeUserKey(userKey) || "legacy";
+  let sql = "SELECT * FROM entity_cache WHERE user_key = ? AND type = ?";
+  const params = [key, type];
   if (projectId != null) {
     sql += " AND project_id = ?";
     params.push(projectId);
@@ -231,31 +442,33 @@ function hashArgs(args) {
   return crypto.createHash("sha256").update(json).digest("hex");
 }
 
-export function setToolCache(toolName, args, response) {
+export function setToolCache(toolName, args, response, { userKey = null } = {}) {
   const now = Math.floor(Date.now() / 1000);
+  const key = normalizeUserKey(userKey) || "legacy";
   const argsJson = JSON.stringify(args || {});
   const responseJson = JSON.stringify(response ?? null);
   const argsHash = hashArgs(args || {});
   const stmt = db.prepare(`
-    INSERT INTO tool_cache (tool_name, args_hash, args_json, response_json, updated_at)
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(tool_name, args_hash) DO UPDATE SET
+    INSERT INTO tool_cache (user_key, tool_name, args_hash, args_json, response_json, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_key, tool_name, args_hash) DO UPDATE SET
       args_json = excluded.args_json,
       response_json = excluded.response_json,
       updated_at = excluded.updated_at
   `);
-  stmt.run(toolName, argsHash, argsJson, responseJson, now);
+  stmt.run(key, toolName, argsHash, argsJson, responseJson, now);
 }
 
-export function listToolCache(toolName, { limit = 20 } = {}) {
+export function listToolCache(toolName, { limit = 20, userKey = null } = {}) {
+  const key = normalizeUserKey(userKey) || "legacy";
   const stmt = db.prepare(`
     SELECT tool_name, args_json, response_json, updated_at
     FROM tool_cache
-    WHERE tool_name = ?
+    WHERE user_key = ? AND tool_name = ?
     ORDER BY updated_at DESC
     LIMIT ?
   `);
-  const rows = stmt.all(toolName, limit);
+  const rows = stmt.all(key, toolName, limit);
   return rows.map((row) => ({
     tool_name: row.tool_name,
     args: JSON.parse(row.args_json || "{}"),
@@ -264,33 +477,37 @@ export function listToolCache(toolName, { limit = 20 } = {}) {
   }));
 }
 
-export function getMineState(key) {
-  const stmt = db.prepare("SELECT value, updated_at FROM mine_state WHERE key = ?");
-  const row = stmt.get(key);
+export function getMineState(key, { userKey = null } = {}) {
+  const ukey = normalizeUserKey(userKey) || "legacy";
+  const stmt = db.prepare("SELECT value, updated_at FROM mine_state WHERE user_key = ? AND key = ?");
+  const row = stmt.get(ukey, key);
   if (!row) return null;
   return { value: row.value, updated_at: row.updated_at };
 }
 
-export function setMineState(key, value) {
+export function setMineState(key, value, { userKey = null } = {}) {
   const now = Math.floor(Date.now() / 1000);
+  const ukey = normalizeUserKey(userKey) || "legacy";
   const stmt = db.prepare(`
-    INSERT INTO mine_state (key, value, updated_at)
-    VALUES (?, ?, ?)
-    ON CONFLICT(key) DO UPDATE SET
+    INSERT INTO mine_state (user_key, key, value, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(user_key, key) DO UPDATE SET
       value = excluded.value,
       updated_at = excluded.updated_at
   `);
-  stmt.run(key, value, now);
+  stmt.run(ukey, key, value, now);
 }
 
-export function getEntityStats() {
-  const stmt = db.prepare("SELECT type, COUNT(*) as count FROM entity_cache GROUP BY type");
-  return stmt.all();
+export function getEntityStats({ userKey = null } = {}) {
+  const key = normalizeUserKey(userKey) || "legacy";
+  const stmt = db.prepare("SELECT type, COUNT(*) as count FROM entity_cache WHERE user_key = ? GROUP BY type");
+  return stmt.all(key);
 }
 
-export function getToolCacheStats() {
-  const stmt = db.prepare("SELECT tool_name, COUNT(*) as count FROM tool_cache GROUP BY tool_name");
-  return stmt.all();
+export function getToolCacheStats({ userKey = null } = {}) {
+  const key = normalizeUserKey(userKey) || "legacy";
+  const stmt = db.prepare("SELECT tool_name, COUNT(*) as count FROM tool_cache WHERE user_key = ? GROUP BY tool_name");
+  return stmt.all(key);
 }
 
 export default db;

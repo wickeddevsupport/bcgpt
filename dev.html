@@ -105,6 +105,24 @@
       gap: 10px;
     }
 
+    .account-display {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .account-display span {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 200px;
+      display: inline-block;
+    }
+
     button, .btn {
       font-family: inherit;
       border: none;
@@ -325,6 +343,39 @@
       border: 1px solid rgba(255,255,255,0.08);
     }
 
+    .account-list {
+      max-height: 220px;
+      overflow-y: auto;
+      margin-bottom: 12px;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
+      background: rgba(255,255,255,0.02);
+    }
+
+    .account-row {
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      cursor: pointer;
+      transition: background 0.2s ease, border 0.2s ease;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 13px;
+    }
+
+    .account-row:last-child {
+      border-bottom: none;
+    }
+
+    .account-row:hover {
+      background: rgba(255,255,255,0.04);
+    }
+
+    .account-row.active {
+      border-color: var(--accent);
+      background: rgba(51,214,166,0.08);
+    }
+
     @keyframes fadeUp {
       from { opacity: 0; transform: translateY(8px); }
       to { opacity: 1; transform: translateY(0); }
@@ -347,6 +398,10 @@
         </div>
       </div>
       <div class="header-actions">
+        <div class="account-display" id="accountDisplay">
+          <span id="accountLabel">Account: not set</span>
+          <button class="secondary" id="accountSelectorBtn">Select Account</button>
+        </div>
         <span class="status-chip" id="statusChip">disconnected</span>
         <button class="secondary" id="refreshStatus">Refresh Status</button>
         <button id="connectBtn">Connect</button>
@@ -476,6 +531,28 @@
     </div>
   </div>
 
+  <div class="modal" id="accountModal">
+    <div class="modal-card">
+      <h2>Select Account</h2>
+      <p style="margin-bottom: 12px; color: var(--muted); font-size:13px;">
+        Choose the Basecamp account you want to target. Filters update as you type.
+      </p>
+      <div class="field" style="margin-bottom: 8px;">
+        <label>Filter accounts</label>
+        <input id="accountFilter" placeholder="Type account name or ID" autocomplete="off" />
+      </div>
+      <div class="account-list" id="accountList"></div>
+      <div class="field" style="margin-bottom: 12px;">
+        <label>Manual account (ID or name)</label>
+        <input id="accountManual" placeholder="Paste account ID or name" autocomplete="off" />
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;">
+        <button id="accountApply">Apply</button>
+        <button class="secondary" id="accountClose">Close</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const state = {
       project: null,
@@ -483,6 +560,11 @@
       tools: [],
       selectedAction: null,
       auth: null,
+      userKey: null,
+      selectedAccount: null,
+      accounts: [],
+      accountFilter: "",
+      accountModalSelectionId: null,
       entities: {},
       mineStatus: null,
     };
@@ -579,7 +661,79 @@
       history.prepend(item);
     };
 
+    const accountOptionalTools = new Set(["startbcgpt", "list_accounts", "whoami"]);
+
+    const accountStorageKey = () => `bcgptSelectedAccount:${state.userKey || "default"}`;
+    const projectStorageKey = () => `bcgptProject:${state.userKey || "default"}:${state.selectedAccount?.id || "none"}`;
+
+    function renderSelectedAccount() {
+      const label = document.getElementById("accountLabel");
+      if (state.selectedAccount) {
+        label.textContent = `Account: ${state.selectedAccount.name || state.selectedAccount.id}`;
+      } else {
+        label.textContent = "Account: not set";
+      }
+    }
+
+    function persistSelectedAccount() {
+      const key = accountStorageKey();
+      if (!state.selectedAccount) {
+        localStorage.removeItem(key);
+        return;
+      }
+      localStorage.setItem(key, JSON.stringify(state.selectedAccount));
+    }
+
+    function hydrateSelectedAccount() {
+      if (!state.accounts.length) return;
+      const saved = localStorage.getItem(accountStorageKey());
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          const match = state.accounts.find((acct) => String(acct.id) === String(parsed?.id));
+          if (match) {
+            setSelectedAccount(match);
+            return;
+          }
+        } catch {
+          // ignore invalid cache
+        }
+      }
+      if (!state.selectedAccount && state.accounts[0]) {
+        setSelectedAccount(state.accounts[0]);
+      }
+    }
+
+    function setSelectedAccount(account) {
+      const prevId = state.selectedAccount?.id;
+      const nextId = account?.id ?? null;
+      state.accountModalSelectionId = nextId;
+      state.selectedAccount = account;
+      renderSelectedAccount();
+      persistSelectedAccount();
+      if (prevId !== nextId) {
+        state.project = null;
+        state.entities = {};
+        document.getElementById("projectMeta").textContent = "No project selected yet. Load projects and pick one.";
+        restoreProject();
+      }
+    }
+
+    function requiresAccount(name) {
+      return !accountOptionalTools.has(name);
+    }
+
+    function ensureAccountSelected(context = "running this action") {
+      if (state.selectedAccount) return true;
+      toast(`Select an account before ${context}.`);
+      openAccountModal();
+      return false;
+    }
+
     async function callDevApi(name, args = {}) {
+      if (requiresAccount(name) && !ensureAccountSelected(`calling ${name}`)) {
+        return null;
+      }
       const res = await fetch("/dev/api", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -596,6 +750,83 @@
       });
       const data = await res.json();
       return data.result?.tools || [];
+    }
+
+    async function loadAccounts() {
+      const data = await callDevApi("list_accounts");
+      if (!data) return;
+      state.accounts = Array.isArray(data) ? data : [];
+      state.accountFilter = "";
+      document.getElementById("accountFilter").value = "";
+      renderAccountList();
+      hydrateSelectedAccount();
+    }
+
+    function renderAccountList() {
+      const container = document.getElementById("accountList");
+      const filter = (state.accountFilter || "").trim().toLowerCase();
+      container.innerHTML = "";
+      const matches = state.accounts.filter((acct) => {
+        if (!filter) return true;
+        const hay = `${acct.name || ""} ${acct.id || ""}`.toLowerCase();
+        return hay.includes(filter);
+      });
+      if (!matches.length) {
+        container.innerHTML = `<div class="account-row" style="justify-content:center;color:var(--muted);">No matching accounts</div>`;
+        return;
+      }
+      matches.forEach((acct) => {
+        const row = document.createElement("div");
+        row.className = "account-row";
+        if (String(acct.id) === String(state.accountModalSelectionId)) row.classList.add("active");
+        row.innerHTML = `<span>${acct.name || "Account"}</span><span style="color: var(--muted); font-size: 12px;">ID ${acct.id}</span>`;
+        row.onclick = () => {
+          state.accountModalSelectionId = acct.id;
+          renderAccountList();
+        };
+        container.appendChild(row);
+      });
+    }
+
+    function openAccountModal() {
+      if (!state.accounts.length) {
+        toast("No accounts yet. Refresh status first.");
+        return;
+      }
+      state.accountFilter = "";
+      document.getElementById("accountFilter").value = "";
+      document.getElementById("accountManual").value = "";
+      state.accountModalSelectionId = state.selectedAccount?.id ?? null;
+      document.getElementById("accountModal").classList.add("active");
+      renderAccountList();
+    }
+
+    function closeAccountModal() {
+      document.getElementById("accountModal").classList.remove("active");
+    }
+
+    function applyAccountSelection() {
+      const manualValue = document.getElementById("accountManual").value.trim();
+      let account = null;
+      if (manualValue) {
+        account = state.accounts.find(
+          (acct) =>
+            String(acct.id) === manualValue ||
+            acct.name?.toLowerCase() === manualValue.toLowerCase()
+        );
+        if (!account) {
+          account = { id: manualValue, name: manualValue };
+        }
+      } else if (state.accountModalSelectionId) {
+        account = state.accounts.find((acct) => String(acct.id) === String(state.accountModalSelectionId));
+      }
+      if (!account) {
+        toast("Pick an account before applying.");
+        return;
+      }
+      setSelectedAccount(account);
+      closeAccountModal();
+      toast(`Targeting ${account.name || account.id}`);
     }
 
     async function loadMineStatus() {
@@ -618,6 +849,7 @@
     }
 
     async function runMine() {
+      if (!ensureAccountSelected("running the data mine")) return;
       toast("Starting data mine...");
       const res = await fetch("/dev/mine/run", { method: "POST" });
       const data = await res.json();
@@ -732,11 +964,13 @@
         args.project = state.project.name;
       }
       const result = await callDevApi(action.id, args);
+      if (!result) return;
       setResult(action.label, result);
     }
 
     async function loadProjects() {
       const result = await callDevApi("list_projects");
+      if (!result) return;
       const list = document.getElementById("projectList");
       list.innerHTML = "";
       (result || []).forEach((project) => {
@@ -751,7 +985,7 @@
 
     async function selectProject(project, cardEl) {
       state.project = project;
-      localStorage.setItem("bcgptProject", JSON.stringify(project));
+      localStorage.setItem(projectStorageKey(), JSON.stringify(project));
       document.querySelectorAll(".project-card").forEach(el => el.classList.remove("active"));
       if (cardEl) cardEl.classList.add("active");
       document.getElementById("projectMeta").textContent = `${project.name} (${project.status})`;
@@ -763,6 +997,22 @@
       const res = await fetch("/startbcgpt");
       const data = await res.json();
       state.auth = data;
+      const previousUserKey = state.userKey;
+      state.userKey = data.user_key || null;
+      if (previousUserKey !== state.userKey) {
+        state.project = null;
+        state.entities = {};
+        document.getElementById("projectMeta").textContent = "No project selected yet. Load projects and pick one.";
+        state.selectedAccount = null;
+        renderSelectedAccount();
+      }
+      if (data.connected) {
+        await loadAccounts();
+      } else {
+        state.accounts = [];
+        state.selectedAccount = null;
+        renderSelectedAccount();
+      }
       const chip = document.getElementById("statusChip");
       chip.textContent = data.connected ? "connected" : "disconnected";
       chip.style.borderColor = data.connected ? "rgba(51,214,166,0.5)" : "rgba(255,107,107,0.5)";
@@ -898,6 +1148,14 @@
       document.getElementById("authModal").classList.remove("active");
     };
 
+    document.getElementById("accountSelectorBtn").onclick = openAccountModal;
+    document.getElementById("accountClose").onclick = closeAccountModal;
+    document.getElementById("accountApply").onclick = applyAccountSelection;
+    document.getElementById("accountFilter").oninput = (event) => {
+      state.accountFilter = event.target.value;
+      renderAccountList();
+    };
+
     document.getElementById("loadProjects").onclick = loadProjects;
     document.getElementById("runActionBtn").onclick = runSelectedAction;
     document.getElementById("clearBuilder").onclick = () => {
@@ -914,6 +1172,7 @@
         try { args.body = JSON.parse(bodyText); } catch { args.body = bodyText; }
       }
       const result = await callDevApi("basecamp_raw", args);
+      if (!result) return;
       setResult("basecamp_raw", result);
     };
 
@@ -928,6 +1187,7 @@
         }
         const args = state.project ? { project: state.project.name } : {};
         const result = await callDevApi(action, args);
+        if (!result) return;
         setResult(action, result);
       };
     });
@@ -957,6 +1217,7 @@
         args.project = state.project.name;
       }
       const result = await callDevApi(toolName, args);
+      if (!result) return;
       setResult(toolName, result);
       await preloadEntities();
     };
@@ -1017,18 +1278,19 @@
     }
 
     function restoreProject() {
-      const saved = localStorage.getItem("bcgptProject");
+      const saved = localStorage.getItem(projectStorageKey());
       if (saved) {
         try {
           state.project = JSON.parse(saved);
           document.getElementById("projectMeta").textContent = `${state.project.name} (${state.project.status || ""})`;
         } catch {
-          localStorage.removeItem("bcgptProject");
+          localStorage.removeItem(projectStorageKey());
         }
       }
     }
 
     renderActions();
+    renderSelectedAccount();
     restoreProject();
     refreshStatus();
     loadMineStatus();
