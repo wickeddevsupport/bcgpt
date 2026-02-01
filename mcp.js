@@ -68,6 +68,34 @@ function fail(id, error) { return { jsonrpc: "2.0", id, error }; }function logDe
   console.log(...args);
 }
 
+// Large payload cache (in-memory, short-lived)
+const largePayloadCache = new Map();
+const LARGE_CACHE_LIMIT = 10;
+
+function putLargePayload(payload, { chunkSizeBoards = 1 } = {}) {
+  const key = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString("hex");
+  const boards = Array.isArray(payload?.card_tables) ? payload.card_tables : [];
+  const chunks = [];
+  for (let i = 0; i < boards.length; i += Math.max(1, chunkSizeBoards)) {
+    chunks.push(boards.slice(i, i + Math.max(1, chunkSizeBoards)));
+  }
+  largePayloadCache.set(key, { chunks, createdAt: Date.now() });
+  // simple eviction
+  if (largePayloadCache.size > LARGE_CACHE_LIMIT) {
+    const oldest = [...largePayloadCache.entries()].sort((a, b) => a[1].createdAt - b[1].createdAt)[0];
+    if (oldest) largePayloadCache.delete(oldest[0]);
+  }
+  return { key, chunkCount: chunks.length, firstChunk: chunks[0] || [] };
+}
+
+function getLargePayloadChunk(key, index = 0) {
+  const entry = largePayloadCache.get(key);
+  if (!entry) return { chunk: [], next_index: null, done: true };
+  const idx = Math.max(0, Number(index) || 0);
+  const chunk = entry.chunks[idx] || [];
+  const next_index = idx + 1 < entry.chunks.length ? idx + 1 : null;
+  return { chunk, next_index, done: next_index == null, total_chunks: entry.chunks.length };
+}
 
 function toolError(code, message, extra = {}) {
   const err = new Error(message);
@@ -977,8 +1005,20 @@ async function summarizeCardTable(ctx, projectId, table, {
       if (!colUrl) continue;
       const cards = await apiAll(ctx, colUrl);
       const arr = Array.isArray(cards) ? cards : [];
-      if (arr.length > maxCardsPerColumn) truncated = true;
-      col.cards = arr.slice(0, Math.max(0, Number(maxCardsPerColumn) || 0)).map((c) => ({
+      const limit = Number(maxCardsPerColumn);
+      if (Number.isFinite(limit) && limit > 0) {
+        if (arr.length > limit) truncated = true;
+        col.cards = arr.slice(0, limit).map((c) => ({
+          id: c.id,
+          title: c.title,
+          content: c.content,
+          status: c.status,
+          due_on: c.due_on,
+          assignee_ids: c.assignee_ids,
+          app_url: c.app_url
+        }));
+      } else {
+        col.cards = arr.map((c) => ({
         id: c.id,
         title: c.title,
         content: c.content,
@@ -986,7 +1026,8 @@ async function summarizeCardTable(ctx, projectId, table, {
         due_on: c.due_on,
         assignee_ids: c.assignee_ids,
         app_url: c.app_url
-      }));
+        }));
+      }
     }
   }
 
@@ -1008,7 +1049,9 @@ async function listProjectCardTableContents(ctx, projectId, {
   cursor = 0,
   maxBoards = 2,
   autoAll = false,
-  maxBoardsTotal = 50
+  maxBoardsTotal = 50,
+  cacheOutput = false,
+  cacheChunkBoards = 1
 } = {}) {
   const tables = await listCardTables(ctx, projectId);
   const start = Math.max(0, Number(cursor) || 0);
@@ -1061,6 +1104,22 @@ async function listProjectCardTableContents(ctx, projectId, {
   const next_cursor = autoAll
     ? (idx < tables.length && boards.length < limit ? idx : null)
     : (start + count < tables.length ? start + count : null);
+
+  if (cacheOutput) {
+    const payload = { card_tables: boards };
+    const cached = putLargePayload(payload, { chunkSizeBoards: cacheChunkBoards });
+    const totalCards = boards.reduce((sum, b) => sum + (Number(b.total_cards) || 0), 0);
+    return {
+      payload_key: cached.key,
+      chunk_count: cached.chunkCount,
+      first_chunk: cached.firstChunk,
+      total: tables.length,
+      total_cards: totalCards,
+      next_cursor,
+      cursor: autoAll ? idx : start,
+      truncated: boards.length >= limit
+    };
+  }
 
   return { boards, next_cursor, total: tables.length, cursor: autoAll ? idx : start, truncated: boards.length >= limit };
 }
@@ -2997,7 +3056,7 @@ export async function handleMCP(reqBody, ctx) {
 
         if (args.project && (lower.includes("kanban") || lower.includes("card table") || lower.includes("card tables") || lower.includes("cards"))) {
           const wantsCards = /contents|all cards|everything|list all|full|titles/.test(lower);
-          const maxCardsPerColumn = wantsCards ? 25 : 0;
+          const maxCardsPerColumn = wantsCards ? 0 : 0;
           const maxBoardsTotal = wantsCards ? 10 : 50;
 
           const project = await projectByName(ctx, args.project);
@@ -3012,8 +3071,24 @@ export async function handleMCP(reqBody, ctx) {
               cursor: next,
               maxBoards: 2,
               autoAll: true,
-              maxBoardsTotal
+              maxBoardsTotal,
+              cacheOutput: wantsCards,
+              cacheChunkBoards: 1
             });
+            if (step?.payload_key) {
+              return ok(id, {
+                query,
+                action: "list_project_card_table_contents",
+                result: {
+                  project: { id: project.id, name: project.name },
+                  payload_key: step.payload_key,
+                  chunk_count: step.chunk_count,
+                  total_cards: step.total_cards,
+                  count: step.total
+                },
+                note: "Full details cached; fetch chunks with get_cached_payload_chunk."
+              });
+            }
             if (Array.isArray(step?.boards)) tables.push(...step.boards);
             cursor = step.cursor ?? cursor;
             next = step.next_cursor ?? null;
@@ -3278,14 +3353,19 @@ export async function handleMCP(reqBody, ctx) {
             maxCardsPerColumn,
             cursor: args.cursor,
             maxBoards: Number(args.max_boards || 2),
-            autoAll: true
+            autoAll: true,
+            cacheOutput: true,
+            cacheChunkBoards: 1
           });
           return ok(id, {
             project: { id: p.id, name: p.name },
-            card_tables: result.boards || [],
-            count: (result.boards || []).length,
+            payload_key: result.payload_key,
+            chunk_count: result.chunk_count,
+            total_cards: result.total_cards,
+            count: result.total,
             next_cursor: result.next_cursor ?? null,
-            truncated: !!result.truncated
+            truncated: !!result.truncated,
+            first_chunk: result.first_chunk || []
           });
         }
 
@@ -3340,14 +3420,19 @@ export async function handleMCP(reqBody, ctx) {
               maxCardsPerColumn,
               cursor: args.cursor,
               maxBoards: Number(args.max_boards || 2),
-              autoAll: true
+              autoAll: true,
+              cacheOutput: true,
+              cacheChunkBoards: 1
             });
             return ok(id, {
               project: { id: p.id, name: p.name },
-              card_tables: result.boards || [],
-              count: (result.boards || []).length,
+              payload_key: result.payload_key,
+              chunk_count: result.chunk_count,
+              total_cards: result.total_cards,
+              count: result.total,
               next_cursor: result.next_cursor ?? null,
               truncated: !!result.truncated,
+              first_chunk: result.first_chunk || [],
               fallback: true
             });
           }
@@ -3409,12 +3494,25 @@ export async function handleMCP(reqBody, ctx) {
           cursor: args.cursor,
           maxBoards: Number(args.max_boards || 2),
           autoAll: !!args.auto_all,
-          maxBoardsTotal: Number(args.max_boards_total || 50)
+          maxBoardsTotal: Number(args.max_boards_total || 50),
+          cacheOutput: !!args.cache_output,
+          cacheChunkBoards: Number(args.cache_chunk_boards || 1)
         });
         return ok(id, { project: { id: p.id, name: p.name }, ...result });
       } catch (e) {
         console.error(`[list_project_card_table_contents] Error:`, e.message);
         return fail(id, { code: "LIST_PROJECT_CARD_TABLE_CONTENTS_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_cached_payload_chunk") {
+      try {
+        const payloadKey = args.payload_key;
+        const result = getLargePayloadChunk(payloadKey, args.index);
+        return ok(id, { payload_key: payloadKey, ...result });
+      } catch (e) {
+        console.error(`[get_cached_payload_chunk] Error:`, e.message);
+        return fail(id, { code: "GET_CACHED_PAYLOAD_CHUNK_ERROR", message: e.message });
       }
     }
 

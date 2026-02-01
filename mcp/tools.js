@@ -180,9 +180,20 @@ export function getTools() {
         max_boards: { type: "integer" },
         cursor: { type: "integer" },
         auto_all: { type: "boolean" },
-        max_boards_total: { type: "integer" }
+        max_boards_total: { type: "integer" },
+        cache_output: { type: "boolean" },
+        cache_chunk_boards: { type: "integer" }
       },
       required: ["project"],
+      additionalProperties: false
+    }),
+    tool("get_cached_payload_chunk", "Retrieve a chunk from the large payload cache.", {
+      type: "object",
+      properties: {
+        payload_key: { type: "string" },
+        index: { type: "integer" }
+      },
+      required: ["payload_key"],
       additionalProperties: false
     }),
     tool("create_card", "Create a card in a card table.", {
