@@ -2062,6 +2062,13 @@ async function deleteWebhook(ctx, projectId, webhookId) {
   return { message: "Webhook deleted", webhook_id: webhookId };
 }
 
+async function listInboxes(ctx, projectId) {
+  const dock = await getDock(ctx, projectId);
+  const inboxDock = dockFind(dock, ["inbox", "inboxes"]);
+  if (inboxDock?.url) return apiAll(ctx, inboxDock.url);
+  return apiAll(ctx, `/buckets/${projectId}/inboxes.json`);
+}
+
 // ========== MESSAGE TYPES / PINNING ==========
 async function listMessageTypes(ctx, projectId) {
   try {
@@ -2464,6 +2471,10 @@ async function updateLineupMarker(ctx, markerId, body) {
 async function deleteLineupMarker(ctx, markerId) {
   await api(ctx, `/lineup/markers/${markerId}.json`, { method: "DELETE" });
   return { message: "Lineup marker deleted", marker_id: markerId };
+}
+
+async function listLineupMarkers(ctx) {
+  return apiAll(ctx, `/lineup/markers.json`);
 }
 
 // ========== TODO LIST GROUPS / TODOSETS ==========
@@ -4246,6 +4257,62 @@ export async function handleMCP(reqBody, ctx) {
       }
     }
 
+    if (name === "list_inboxes") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const inboxes = await listInboxes(ctx, p.id);
+        return ok(id, { project: { id: p.id, name: p.name }, ...buildListPayload("inboxes", inboxes) });
+      } catch (e) {
+        return fail(id, { code: "LIST_INBOXES_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_inbox_forwards") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        let inboxId = Number(args.inbox_id);
+        if (!inboxId) {
+          const inboxes = await listInboxes(ctx, p.id);
+          inboxId = inboxes?.[0]?.id;
+        }
+        if (!inboxId) throw new Error("Inbox not found or not enabled.");
+        const forwards = await listInboxForwards(ctx, p.id, inboxId);
+        return ok(id, { project: { id: p.id, name: p.name }, inbox_id: inboxId, ...buildListPayload("forwards", forwards) });
+      } catch (e) {
+        return fail(id, { code: "LIST_INBOX_FORWARDS_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_inbox_forward") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const forward = await getInboxForward(ctx, p.id, Number(args.forward_id));
+        return ok(id, { project: { id: p.id, name: p.name }, forward });
+      } catch (e) {
+        return fail(id, { code: "GET_INBOX_FORWARD_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_inbox_replies") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const replies = await listInboxReplies(ctx, p.id, Number(args.forward_id));
+        return ok(id, { project: { id: p.id, name: p.name }, forward_id: Number(args.forward_id), ...buildListPayload("replies", replies) });
+      } catch (e) {
+        return fail(id, { code: "LIST_INBOX_REPLIES_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "get_inbox_reply") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const reply = await getInboxReply(ctx, p.id, Number(args.forward_id), Number(args.reply_id));
+        return ok(id, { project: { id: p.id, name: p.name }, reply });
+      } catch (e) {
+        return fail(id, { code: "GET_INBOX_REPLY_ERROR", message: e.message });
+      }
+    }
+
     if (name === "get_client_reply") {
       try {
         const p = await projectByName(ctx, args.project);
@@ -5113,6 +5180,40 @@ export async function handleMCP(reqBody, ctx) {
       }
     }
 
+    if (name === "list_timesheet_report") {
+      try {
+        const params = new URLSearchParams();
+        if (args.start_date) params.set("start_date", args.start_date);
+        if (args.end_date) params.set("end_date", args.end_date);
+        if (args.person_id) params.set("person_id", String(args.person_id));
+        if (args.bucket_id) params.set("bucket_id", String(args.bucket_id));
+        const entries = await reportTimesheet(ctx, params.toString());
+        return ok(id, { ...buildListPayload("timesheet_entries", entries) });
+      } catch (e) {
+        return fail(id, { code: "LIST_TIMESHEET_REPORT_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_project_timesheet") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const entries = await projectTimesheet(ctx, p.id);
+        return ok(id, { project: { id: p.id, name: p.name }, ...buildListPayload("timesheet_entries", entries) });
+      } catch (e) {
+        return fail(id, { code: "LIST_PROJECT_TIMESHEET_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_recording_timesheet") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const entries = await recordingTimesheet(ctx, p.id, Number(args.recording_id));
+        return ok(id, { project: { id: p.id, name: p.name }, ...buildListPayload("timesheet_entries", entries) });
+      } catch (e) {
+        return fail(id, { code: "LIST_RECORDING_TIMESHEET_ERROR", message: e.message });
+      }
+    }
+
     if (name === "get_subscription") {
       try {
         const p = await projectByName(ctx, args.project);
@@ -5608,6 +5709,15 @@ export async function handleMCP(reqBody, ctx) {
         return ok(id, result);
       } catch (e) {
         return fail(id, { code: "DELETE_LINEUP_MARKER_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_lineup_markers") {
+      try {
+        const markers = await listLineupMarkers(ctx);
+        return ok(id, { ...buildListPayload("markers", markers) });
+      } catch (e) {
+        return fail(id, { code: "LIST_LINEUP_MARKERS_ERROR", message: e.message });
       }
     }
 

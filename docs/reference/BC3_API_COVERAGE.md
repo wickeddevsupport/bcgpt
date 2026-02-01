@@ -14,8 +14,12 @@
 | `webhooks.md` | ✅ | Full CRUD. |
 | `client_*` docs | ✅ | Client correspondences, approvals, replies, visibility handled. |
 | `hill_charts.md`, `timeline.md`, `templates.md`, `tools.md` | ✅ | Various helpers (dock tools, hill charts, timeline markers, template constructions). |
-| `attachments.md` | ⚠️ | Uploads are handled, but no dedicated attachment download/metadata UI yet. |
-| `events.md`, `lineup_markers.md`, `timesheets.md`, `questionnaires/*.md`, `forwards/*`, `inboxes/*` | ⚠️ | Smart-action may surface some data, but there are no dedicated tools or dedicated handlers yet. |
+| `attachments.md` | ✅ | `create_attachment` uploads via base64 and returns `attachable_sgid` for rich-text/recording embeds. |
+| `events.md` | ✅ | `list_recording_events` exposes every event and can chunk/cache large feeds for smart actions. |
+| `lineup_markers.md` | ✅ | `list_lineup_markers`, `create_lineup_marker`, `update_lineup_marker`, `delete_lineup_marker`. |
+| `timesheets.md` | ✅ | `list_timesheet_report`, `list_project_timesheet`, `list_recording_timesheet` cover account, project, and recording queries. |
+| `questionnaires.md` / `questions.md` | ✅ | Questionnaire + question CRUD (`get_questionnaire`, `list_questions`, pause/resume, notification updates). |
+| `forwards.md` / `inboxes.md` | ✅ | `list_inboxes`, `list_inbox_forwards`, `get_inbox_forward`, `list_inbox_replies`, `get_inbox_reply`. |
 | `rich_text.md`, `basecamps.md`, `vaults.md` (child sections) | ⚠️ | Partial coverage through general helpers; consider explicit tooling when needed. |
 
 ## Next actions
