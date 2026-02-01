@@ -145,26 +145,45 @@ function maybeCacheCollectionResult(collectionKey, items, {
   };
 }
 
+function unwrapItemsWithMeta(input) {
+  if (!input) return { items: [], meta: undefined };
+  if (Array.isArray(input)) {
+    return { items: input, meta: input._meta || input.meta };
+  }
+  if (typeof input === "object") {
+    if (Array.isArray(input.items)) return { items: input.items, meta: input._meta || input.meta };
+    if (Array.isArray(input.data)) return { items: input.data, meta: input._meta || input.meta };
+  }
+  return { items: [], meta: undefined };
+}
+
 function buildListPayload(collectionKey, items, options = {}) {
-  const cached = maybeCacheCollectionResult(collectionKey, items, options);
-  return {
+  const unwrapped = unwrapItemsWithMeta(items);
+  const cached = maybeCacheCollectionResult(collectionKey, unwrapped.items, options);
+  const payload = {
     [collectionKey]: cached.items,
     count: cached.total,
     cached: cached.cached,
     payload_key: cached.payload_key,
+    cache_key: cached.payload_key,
     chunk_count: cached.chunk_count,
     export: cached.export
   };
+  const meta = options.meta || unwrapped.meta;
+  if (meta) payload._meta = meta;
+  return payload;
 }
 
 function attachCachedCollection(target, collectionKey, items, options = {}) {
-  const cached = maybeCacheCollectionResult(collectionKey, items, options);
+  const unwrapped = unwrapItemsWithMeta(items);
+  const cached = maybeCacheCollectionResult(collectionKey, unwrapped.items, options);
   target[collectionKey] = cached.items;
   target[`${collectionKey}_count`] = cached.total;
   target[`${collectionKey}_cached`] = cached.cached;
   target[`${collectionKey}_payload_key`] = cached.payload_key;
   target[`${collectionKey}_chunk_count`] = cached.chunk_count;
   target[`${collectionKey}_export`] = cached.export;
+  if (unwrapped.meta) target[`${collectionKey}_meta`] = unwrapped.meta;
   return target;
 }
 
@@ -335,6 +354,10 @@ function apiAll(ctx, pathOrUrl, opts = {}) {
   // Otherwise use the standalone function (requires TOKEN)
   console.log(`[apiAll] Using standalone basecampFetchAll for:`, pathOrUrl);
   return basecampFetchAll(ctx.TOKEN, pathOrUrl, { ...opts, accountId: ctx.accountId, ua: ctx.ua });
+}
+
+function apiAllWithMeta(ctx, pathOrUrl, opts = {}) {
+  return apiAll(ctx, pathOrUrl, { ...opts, includeMeta: true });
 }
 
 // ---------- Projects ----------
@@ -2065,8 +2088,8 @@ async function deleteWebhook(ctx, projectId, webhookId) {
 async function listInboxes(ctx, projectId) {
   const dock = await getDock(ctx, projectId);
   const inboxDock = dockFind(dock, ["inbox", "inboxes"]);
-  if (inboxDock?.url) return apiAll(ctx, inboxDock.url);
-  return apiAll(ctx, `/buckets/${projectId}/inboxes.json`);
+  if (inboxDock?.url) return apiAllWithMeta(ctx, inboxDock.url);
+  return apiAllWithMeta(ctx, `/buckets/${projectId}/inboxes.json`);
 }
 
 // ========== MESSAGE TYPES / PINNING ==========
@@ -2243,7 +2266,7 @@ async function updateClientVisibility(ctx, projectId, recordingId, body) {
 
 // ========== EVENTS ==========
 async function listRecordingEvents(ctx, projectId, recordingId) {
-  return apiAll(ctx, `/buckets/${projectId}/recordings/${recordingId}/events.json`);
+  return apiAllWithMeta(ctx, `/buckets/${projectId}/recordings/${recordingId}/events.json`);
 }
 
 // ========== SUBSCRIPTIONS ==========
@@ -2301,17 +2324,17 @@ async function userTimeline(ctx, personId, query) {
 // ========== TIMESHEETS ==========
 async function reportTimesheet(ctx, query) {
   const path = query ? `/reports/timesheet.json?${query}` : `/reports/timesheet.json`;
-  return apiAll(ctx, path);
+  return apiAllWithMeta(ctx, path);
 }
 
 async function projectTimesheet(ctx, projectId, query) {
   const path = query ? `/projects/${projectId}/timesheet.json?${query}` : `/projects/${projectId}/timesheet.json`;
-  return apiAll(ctx, path);
+  return apiAllWithMeta(ctx, path);
 }
 
 async function recordingTimesheet(ctx, projectId, recordingId, query) {
   const path = query ? `/projects/${projectId}/recordings/${recordingId}/timesheet.json?${query}` : `/projects/${projectId}/recordings/${recordingId}/timesheet.json`;
-  return apiAll(ctx, path);
+  return apiAllWithMeta(ctx, path);
 }
 
 // ========== INBOXES / FORWARDS / REPLIES ==========
@@ -2320,7 +2343,7 @@ async function getInbox(ctx, projectId, inboxId) {
 }
 
 async function listInboxForwards(ctx, projectId, inboxId) {
-  return apiAll(ctx, `/buckets/${projectId}/inboxes/${inboxId}/forwards.json`);
+  return apiAllWithMeta(ctx, `/buckets/${projectId}/inboxes/${inboxId}/forwards.json`);
 }
 
 async function getInboxForward(ctx, projectId, forwardId) {
@@ -2328,7 +2351,7 @@ async function getInboxForward(ctx, projectId, forwardId) {
 }
 
 async function listInboxReplies(ctx, projectId, forwardId) {
-  return apiAll(ctx, `/buckets/${projectId}/inbox_forwards/${forwardId}/replies.json`);
+  return apiAllWithMeta(ctx, `/buckets/${projectId}/inbox_forwards/${forwardId}/replies.json`);
 }
 
 async function getInboxReply(ctx, projectId, forwardId, replyId) {
@@ -2341,7 +2364,7 @@ async function getQuestionnaire(ctx, projectId, questionnaireId) {
 }
 
 async function listQuestions(ctx, projectId, questionnaireId) {
-  return apiAll(ctx, `/buckets/${projectId}/questionnaires/${questionnaireId}/questions.json`);
+  return apiAllWithMeta(ctx, `/buckets/${projectId}/questionnaires/${questionnaireId}/questions.json`);
 }
 
 async function getQuestion(ctx, projectId, questionId) {
@@ -2371,15 +2394,15 @@ async function updateQuestionNotificationSettings(ctx, projectId, questionId, bo
 }
 
 async function listQuestionAnswers(ctx, projectId, questionId) {
-  return apiAll(ctx, `/buckets/${projectId}/questions/${questionId}/answers.json`);
+  return apiAllWithMeta(ctx, `/buckets/${projectId}/questions/${questionId}/answers.json`);
 }
 
 async function listQuestionAnswersBy(ctx, projectId, questionId) {
-  return apiAll(ctx, `/buckets/${projectId}/questions/${questionId}/answers/by.json`);
+  return apiAllWithMeta(ctx, `/buckets/${projectId}/questions/${questionId}/answers/by.json`);
 }
 
 async function listQuestionAnswersByPerson(ctx, projectId, questionId, personId) {
-  return apiAll(ctx, `/buckets/${projectId}/questions/${questionId}/answers/by/${personId}.json`);
+  return apiAllWithMeta(ctx, `/buckets/${projectId}/questions/${questionId}/answers/by/${personId}.json`);
 }
 
 async function getQuestionAnswer(ctx, projectId, answerId) {
@@ -2474,7 +2497,7 @@ async function deleteLineupMarker(ctx, markerId) {
 }
 
 async function listLineupMarkers(ctx) {
-  return apiAll(ctx, `/lineup/markers.json`);
+  return apiAllWithMeta(ctx, `/lineup/markers.json`);
 }
 
 // ========== TODO LIST GROUPS / TODOSETS ==========

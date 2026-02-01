@@ -219,6 +219,7 @@ export async function basecampFetchAll(
     retries = 3,
     maxPages = 50,
     pageDelayMs = 150,
+    includeMeta = false,
   } = {}
 ) {
   let url = normalizeUrl(pathOrUrl, accountId);
@@ -285,7 +286,22 @@ export async function basecampFetchAll(
         }
 
         // If not an array, don't paginate
-        if (!Array.isArray(data)) return data;
+        if (!Array.isArray(data)) {
+          if (includeMeta) {
+            return {
+              items: data,
+              _meta: {
+                pages: 1,
+                per_page: perPage,
+                max_pages: maxPages,
+                truncated: false,
+                next_url: null,
+                non_array: true,
+              },
+            };
+          }
+          return data;
+        }
 
         all.push(...data);
 
@@ -313,6 +329,20 @@ export async function basecampFetchAll(
   // Debug: log total items fetched
   if (process?.env?.DEBUG) {
     console.log(`[BasecampFetchAll] Total items fetched: ${all.length}`);
+  }
+
+  if (includeMeta) {
+    return {
+      items: all,
+      _meta: {
+        pages,
+        per_page: perPage,
+        max_pages: maxPages,
+        truncated: Boolean(url),
+        next_url: url || null,
+        total_items: all.length,
+      },
+    };
   }
   return all;
 }
