@@ -169,6 +169,18 @@ export function getTools() {
       required: ["project"],
       additionalProperties: false
     }),
+    tool("list_project_card_table_contents", "List card table contents for a project, chunked by boards.", {
+      type: "object",
+      properties: {
+        project: { type: "string" },
+        include_details: { type: "boolean" },
+        max_cards_per_column: { type: "integer" },
+        max_boards: { type: "integer" },
+        cursor: { type: "integer" }
+      },
+      required: ["project"],
+      additionalProperties: false
+    }),
     tool("create_card", "Create a card in a card table.", {
       type: "object",
       properties: {

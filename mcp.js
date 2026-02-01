@@ -1002,6 +1002,45 @@ async function summarizeCardTable(ctx, projectId, table, {
   };
 }
 
+async function listProjectCardTableContents(ctx, projectId, {
+  includeDetails = false,
+  maxCardsPerColumn = 50,
+  cursor = 0,
+  maxBoards = 2
+} = {}) {
+  const tables = await listCardTables(ctx, projectId);
+  const start = Math.max(0, Number(cursor) || 0);
+  const count = Math.max(1, Number(maxBoards) || 1);
+  const slice = tables.slice(start, start + count);
+
+  const boards = [];
+  for (const t of slice) {
+    const summary = await summarizeCardTable(ctx, projectId, t, {
+      includeCards: true,
+      maxCardsPerColumn
+    });
+    if (!includeDetails) {
+      summary.columns = (summary.columns || []).map((col) => ({
+        id: col.id,
+        title: col.title,
+        type: col.type,
+        cards_count: col.cards_count,
+        cards: (col.cards || []).map((c) => ({
+          id: c.id,
+          title: c.title,
+          status: c.status,
+          due_on: c.due_on,
+          app_url: c.app_url
+        }))
+      }));
+    }
+    boards.push(summary);
+  }
+
+  const next_cursor = start + slice.length < tables.length ? start + slice.length : null;
+  return { boards, next_cursor, total: tables.length, cursor: start };
+}
+
 async function listCardTableSummaries(ctx, projectId, {
   includeCards = false,
   maxCardsPerColumn = 50,
@@ -2935,37 +2974,34 @@ export async function handleMCP(reqBody, ctx) {
         if (args.project && (lower.includes("kanban") || lower.includes("card table") || lower.includes("card tables") || lower.includes("cards"))) {
           const wantsCards = /contents|all cards|everything|list all|full|titles/.test(lower);
           const maxCardsPerColumn = wantsCards ? 25 : 0;
-          const maxBoards = wantsCards ? 5 : 20;
+          const maxBoardsTotal = wantsCards ? 10 : 50;
 
           const project = await projectByName(ctx, args.project);
           const tables = [];
           let cursor = 0;
-          let done = false;
+          let next = 0;
 
-          while (!done && tables.length < maxBoards) {
-            const step = await listCardTableSummariesIter(ctx, project.id, {
-              includeCards: wantsCards,
+          while (next != null && tables.length < maxBoardsTotal) {
+            const step = await listProjectCardTableContents(ctx, project.id, {
+              includeDetails: false,
               maxCardsPerColumn,
-              includeArchived: false,
-              cursor
+              cursor: next,
+              maxBoards: 2
             });
-            if (step?.card_table) tables.push(step.card_table);
-            done = !!step.done;
-            cursor = step.cursor ?? null;
-            if (cursor == null) done = true;
+            if (Array.isArray(step?.boards)) tables.push(...step.boards);
+            cursor = step.cursor ?? cursor;
+            next = step.next_cursor ?? null;
           }
 
           return ok(id, {
             query,
-            action: "list_card_table_summaries_iter",
+            action: "list_project_card_table_contents",
             result: {
               project: { id: project.id, name: project.name },
               card_tables: tables,
               count: tables.length,
-              done,
-              next_cursor: done ? null : cursor
-            },
-            note: wantsCards ? "Cards truncated per column at 25 to avoid payload limits." : undefined
+              next_cursor: next ?? null
+            }
           });
         }
 
@@ -3295,6 +3331,22 @@ export async function handleMCP(reqBody, ctx) {
       } catch (e) {
         console.error(`[list_card_table_summaries_iter] Error:`, e.message);
         return fail(id, { code: "LIST_CARD_TABLE_SUMMARIES_ITER_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_project_card_table_contents") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await listProjectCardTableContents(ctx, p.id, {
+          includeDetails: !!args.include_details,
+          maxCardsPerColumn: Number(args.max_cards_per_column || 50),
+          cursor: args.cursor,
+          maxBoards: Number(args.max_boards || 2)
+        });
+        return ok(id, { project: { id: p.id, name: p.name }, ...result });
+      } catch (e) {
+        console.error(`[list_project_card_table_contents] Error:`, e.message);
+        return fail(id, { code: "LIST_PROJECT_CARD_TABLE_CONTENTS_ERROR", message: e.message });
       }
     }
 
