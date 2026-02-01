@@ -147,6 +147,18 @@ export function getTools() {
       required: ["project"],
       additionalProperties: false
     }),
+    tool("list_card_table_summaries_iter", "Iterate card table summaries one board per call.", {
+      type: "object",
+      properties: {
+        project: { type: "string" },
+        include_cards: { type: "boolean" },
+        max_cards_per_column: { type: "integer" },
+        include_archived: { type: "boolean" },
+        cursor: { type: "integer" }
+      },
+      required: ["project"],
+      additionalProperties: false
+    }),
     tool("create_card", "Create a card in a card table.", {
       type: "object",
       properties: {

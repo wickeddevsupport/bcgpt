@@ -929,61 +929,88 @@ async function listCardTableCards(ctx, projectId, cardTableId) {
   }
 }
 
+async function summarizeCardTable(ctx, projectId, table, {
+  includeCards = false,
+  maxCardsPerColumn = 50
+} = {}) {
+  let full = table;
+  if (!full?.lists && full?.url) {
+    full = await api(ctx, full.url);
+  } else if (!full?.lists && full?.id) {
+    full = await api(ctx, `/buckets/${projectId}/card_tables/${full.id}.json`);
+  }
+
+  const columns = (full?.lists || []).map((col) => ({
+    id: col.id,
+    title: col.title,
+    type: col.type,
+    cards_count: col.cards_count ?? null,
+    cards: []
+  }));
+
+  let truncated = false;
+  if (includeCards) {
+    for (const col of columns) {
+      const colUrl = (full?.lists || []).find((c) => c.id === col.id)?.cards_url;
+      if (!colUrl) continue;
+      const cards = await apiAll(ctx, colUrl);
+      const arr = Array.isArray(cards) ? cards : [];
+      if (arr.length > maxCardsPerColumn) truncated = true;
+      col.cards = arr.slice(0, Math.max(0, Number(maxCardsPerColumn) || 0)).map((c) => ({
+        id: c.id,
+        title: c.title,
+        content: c.content,
+        status: c.status,
+        due_on: c.due_on,
+        assignee_ids: c.assignee_ids,
+        app_url: c.app_url
+      }));
+    }
+  }
+
+  return {
+    id: full?.id,
+    title: full?.title,
+    status: full?.status,
+    type: full?.type,
+    total_columns: columns.length,
+    total_cards: columns.reduce((sum, c) => sum + (Number(c.cards_count) || 0), 0),
+    columns,
+    truncated
+  };
+}
+
 async function listCardTableSummaries(ctx, projectId, {
   includeCards = false,
   maxCardsPerColumn = 50,
   includeArchived = false
 } = {}) {
   const tables = await listCardTables(ctx, projectId, { includeArchived });
-  const summaries = await mapLimit(tables || [], 1, async (t) => {
-    let table = t;
-    if (!table?.lists && table?.url) {
-      table = await api(ctx, table.url);
-    } else if (!table?.lists) {
-      table = await api(ctx, `/buckets/${projectId}/card_tables/${t.id}.json`);
-    }
+  return mapLimit(tables || [], 1, (t) =>
+    summarizeCardTable(ctx, projectId, t, { includeCards, maxCardsPerColumn })
+  );
+}
 
-    const columns = (table?.lists || []).map((col) => ({
-      id: col.id,
-      title: col.title,
-      type: col.type,
-      cards_count: col.cards_count ?? null,
-      cards: []
-    }));
+async function listCardTableSummariesIter(ctx, projectId, {
+  includeCards = false,
+  maxCardsPerColumn = 50,
+  includeArchived = false,
+  cursor = 0
+} = {}) {
+  const tables = await listCardTables(ctx, projectId, { includeArchived });
+  const total = Array.isArray(tables) ? tables.length : 0;
+  const index = Math.max(0, Number(cursor) || 0);
+  if (!total || index >= total) {
+    return { done: true, cursor: null, total, card_table: null };
+  }
 
-    let truncated = false;
-    if (includeCards) {
-      for (const col of columns) {
-        const colUrl = (table?.lists || []).find((c) => c.id === col.id)?.cards_url;
-        if (!colUrl) continue;
-        const cards = await apiAll(ctx, colUrl);
-        const arr = Array.isArray(cards) ? cards : [];
-        if (arr.length > maxCardsPerColumn) truncated = true;
-        col.cards = arr.slice(0, Math.max(0, Number(maxCardsPerColumn) || 0)).map((c) => ({
-          id: c.id,
-          title: c.title,
-          content: c.content,
-          status: c.status,
-          due_on: c.due_on,
-          assignee_ids: c.assignee_ids,
-          app_url: c.app_url
-        }));
-      }
-    }
-
-    return {
-      id: table?.id,
-      title: table?.title,
-      status: table?.status,
-      type: table?.type,
-      total_columns: columns.length,
-      total_cards: columns.reduce((sum, c) => sum + (Number(c.cards_count) || 0), 0),
-      columns,
-      truncated
-    };
+  const cardTable = await summarizeCardTable(ctx, projectId, tables[index], {
+    includeCards,
+    maxCardsPerColumn
   });
+  const nextCursor = index + 1 < total ? index + 1 : null;
 
-  return summaries;
+  return { done: nextCursor == null, cursor: nextCursor, total, card_table: cardTable };
 }
 
 async function getCard(ctx, projectId, cardId) {
@@ -2885,12 +2912,39 @@ export async function handleMCP(reqBody, ctx) {
 
         if (args.project && (lower.includes("kanban") || lower.includes("card table") || lower.includes("card tables") || lower.includes("cards"))) {
           const wantsCards = /contents|all cards|everything|list all|full|titles/.test(lower);
-          const result = await callTool("list_card_table_summaries", {
-            project: args.project,
-            include_cards: wantsCards,
-            max_cards_per_column: 50
+          const maxCardsPerColumn = wantsCards ? 25 : 0;
+          const maxBoards = wantsCards ? 5 : 20;
+
+          const project = await projectByName(ctx, args.project);
+          const tables = [];
+          let cursor = 0;
+          let done = false;
+
+          while (!done && tables.length < maxBoards) {
+            const step = await listCardTableSummariesIter(ctx, project.id, {
+              includeCards: wantsCards,
+              maxCardsPerColumn,
+              includeArchived: false,
+              cursor
+            });
+            if (step?.card_table) tables.push(step.card_table);
+            done = !!step.done;
+            cursor = step.cursor ?? null;
+            if (cursor == null) done = true;
+          }
+
+          return ok(id, {
+            query,
+            action: "list_card_table_summaries_iter",
+            result: {
+              project: { id: project.id, name: project.name },
+              card_tables: tables,
+              count: tables.length,
+              done,
+              next_cursor: done ? null : cursor
+            },
+            note: wantsCards ? "Cards truncated per column at 25 to avoid payload limits." : undefined
           });
-          return ok(id, { query, action: "list_card_table_summaries", result, note: wantsCards ? "Cards truncated per column at 50 to avoid payload limits." : undefined });
         }
 
         const searchTodosInProject = async (projectId) => {
@@ -3119,6 +3173,22 @@ export async function handleMCP(reqBody, ctx) {
       } catch (e) {
         console.error(`[list_card_table_summaries] Error:`, e.message);
         return fail(id, { code: "LIST_CARD_TABLE_SUMMARIES_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_card_table_summaries_iter") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await listCardTableSummariesIter(ctx, p.id, {
+          includeCards: !!args.include_cards,
+          maxCardsPerColumn: Number(args.max_cards_per_column || 50),
+          includeArchived: !!args.include_archived,
+          cursor: args.cursor
+        });
+        return ok(id, { project: { id: p.id, name: p.name }, ...result });
+      } catch (e) {
+        console.error(`[list_card_table_summaries_iter] Error:`, e.message);
+        return fail(id, { code: "LIST_CARD_TABLE_SUMMARIES_ITER_ERROR", message: e.message });
       }
     }
 
