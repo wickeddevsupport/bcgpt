@@ -120,7 +120,7 @@ export function getTools() {
 
     tool("list_card_tables", "List card tables (kanban boards) for a project.", {
       type: "object",
-      properties: { project: { type: "string" } },
+      properties: { project: { type: "string" }, include_archived: { type: "boolean" }, debug: { type: "boolean" } },
       required: ["project"],
       additionalProperties: false
     }),

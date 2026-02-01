@@ -695,12 +695,17 @@ async function resolveCardTableFromDock(ctx, projectId) {
   return null;
 }
 
-async function listCardTables(ctx, projectId) {
+async function listCardTables(ctx, projectId, { includeArchived = false, onSource } = {}) {
+  const emit = (source, count) => {
+    if (typeof onSource === "function") onSource({ source, count });
+    logDebug("[listCardTables] source=" + source + " count=", count);
+  };
+
   // 1) Try the canonical list endpoint first (returns all tables when available).
   try {
     const tables = await apiAll(ctx, `/buckets/${projectId}/card_tables.json`);
     if (Array.isArray(tables) && tables.length) {
-      logDebug("[listCardTables] source=card_tables.json count=", tables.length);
+      emit("card_tables.json", tables.length);
       return tables;
     }
   } catch (e) {
@@ -723,7 +728,7 @@ async function listCardTables(ctx, projectId) {
         const obj = await api(ctx, `/buckets/${projectId}/card_tables/${card.id}.json`);
         if (obj) results.push(obj);
       }
-      if (results.length) logDebug("[listCardTables] source=dock count=", results.length);
+      if (results.length) emit("dock", results.length);
     } catch (inner) {
       if (isApiError(inner, 404) || isApiError(inner, 403)) {
         throw toolError("TOOL_UNAVAILABLE", "Card tables tool is not accessible for this project.", {
@@ -737,9 +742,10 @@ async function listCardTables(ctx, projectId) {
     }
   }
 
-  // 3) If we only got one (or none), use recordings list to discover all boards.
+  // 3) Use recordings list to discover boards.
   try {
-    const recs = await apiAll(ctx, `/projects/recordings.json?type=${encodeURIComponent("Kanban::Board")}&bucket=${projectId}`);
+    const base = `/projects/recordings.json?type=${encodeURIComponent("Kanban::Board")}&bucket=${projectId}`;
+    const recs = await apiAll(ctx, includeArchived ? `${base}&status=archived` : base);
     const boards = Array.isArray(recs) ? recs : [];
     if (boards.length) {
       const fetched = await mapLimit(boards, 2, async (r) => {
@@ -749,7 +755,7 @@ async function listCardTables(ctx, projectId) {
       for (const b of fetched) {
         if (b) results.push(b);
       }
-      if (results.length) logDebug("[listCardTables] source=recordings count=", results.length);
+      if (results.length) emit(includeArchived ? "recordings:archived" : "recordings", results.length);
     }
   } catch (e) {
     if (!results.length && (isApiError(e, 404) || isApiError(e, 403))) {
@@ -772,7 +778,7 @@ async function listCardTables(ctx, projectId) {
     deduped.push(t);
   }
 
-  logDebug("[listCardTables] source=deduped count=", deduped.length);
+  emit("deduped", deduped.length);
   return deduped;
 }
 
@@ -2896,7 +2902,11 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "list_card_tables") {
       try {
         const p = await projectByName(ctx, args.project);
-        const tables = await listCardTables(ctx, p.id);
+        const sources = [];
+        const tables = await listCardTables(ctx, p.id, {
+          includeArchived: !!args.include_archived,
+          onSource: (s) => sources.push(s)
+        });
 
         // INTELLIGENT CHAINING: Enrich card tables with person/project details
         const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `card tables for ${p.name}`);
@@ -2908,7 +2918,7 @@ export async function handleMCP(reqBody, ctx) {
           }))
         );
 
-        return ok(id, { project: { id: p.id, name: p.name }, card_tables: enrichedTables, count: enrichedTables.length, metrics: ctx_intel.getMetrics() });
+        return ok(id, { project: { id: p.id, name: p.name }, card_tables: enrichedTables, count: enrichedTables.length, metrics: ctx_intel.getMetrics(), sources: args.debug ? sources : undefined });
       } catch (e) {
         console.error(`[list_card_tables] Error:`, e.message);
         // Tool disabled / unavailable -> return empty with notice
