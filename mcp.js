@@ -3007,10 +3007,12 @@ export async function handleMCP(reqBody, ctx) {
 
           while (next != null && tables.length < maxBoardsTotal) {
             const step = await listProjectCardTableContents(ctx, project.id, {
-              includeDetails: false,
+              includeDetails: wantsCards,
               maxCardsPerColumn,
               cursor: next,
-              maxBoards: 2
+              maxBoards: 2,
+              autoAll: true,
+              maxBoardsTotal
             });
             if (Array.isArray(step?.boards)) tables.push(...step.boards);
             cursor = step.cursor ?? cursor;
