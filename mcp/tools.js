@@ -111,6 +111,30 @@ export function getTools() {
       required: ["project", "todo_id"],
       additionalProperties: false
     }),
+    tool("get_todo", "Get a to-do by ID.", {
+      type: "object",
+      properties: { project: { type: "string" }, todo_id: { type: "integer" } },
+      required: ["project", "todo_id"],
+      additionalProperties: false
+    }),
+    tool("list_todos_for_list", "List to-dos in a specific todolist.", {
+      type: "object",
+      properties: { project: { type: "string" }, todolist_id: { type: "integer" } },
+      required: ["project", "todolist_id"],
+      additionalProperties: false
+    }),
+    tool("uncomplete_todo", "Mark a to-do as incomplete.", {
+      type: "object",
+      properties: { project: { type: "string" }, todo_id: { type: "integer" } },
+      required: ["project", "todo_id"],
+      additionalProperties: false
+    }),
+    tool("reposition_todo", "Move/reposition a to-do within its list.", {
+      type: "object",
+      properties: { project: { type: "string" }, todo_id: { type: "integer" }, position: { type: "integer" } },
+      required: ["project", "todo_id", "position"],
+      additionalProperties: false
+    }),
     tool("complete_task_by_name", "Complete a todo in a project by fuzzy-matching its content.", {
       type: "object",
       properties: { project: { type: "string" }, task: { type: "string" } },
@@ -367,6 +391,12 @@ export function getTools() {
       type: "object",
       properties: { project: { type: "string" } },
       required: ["project"],
+      additionalProperties: false
+    }),
+    tool("get_vault", "Get a vault by ID.", {
+      type: "object",
+      properties: { project: { type: "string" }, vault_id: { type: "integer" } },
+      required: ["project", "vault_id"],
       additionalProperties: false
     }),
     tool("list_child_vaults", "List child vaults within a vault.", {
