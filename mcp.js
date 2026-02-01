@@ -74,15 +74,15 @@ function fail(id, error) { return { jsonrpc: "2.0", id, error }; }function logDe
 const largePayloadCache = new Map();
 const LARGE_CACHE_LIMIT = 10;
 const LARGE_EXPORT_DIR = path.join(process.cwd(), "exports");
+const DEFAULT_INLINE_LIMIT = 200;
+const DEFAULT_CHUNK_SIZE = 50;
 
-function putLargePayload(payload, { chunkSizeBoards = 1 } = {}) {
+function cacheCollection(collectionKey, items, { chunkSize = DEFAULT_CHUNK_SIZE } = {}) {
   const key = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString("hex");
-  const boards = Array.isArray(payload?.card_tables) ? payload.card_tables : [];
-  const chunks = [];
-  for (let i = 0; i < boards.length; i += Math.max(1, chunkSizeBoards)) {
-    chunks.push(boards.slice(i, i + Math.max(1, chunkSizeBoards)));
-  }
-  largePayloadCache.set(key, { chunks, createdAt: Date.now() });
+  const list = Array.isArray(items) ? items : [];
+  const size = Math.max(1, Number(chunkSize) || 1);
+  const chunks = chunkArray(list, size);
+  largePayloadCache.set(key, { chunks, createdAt: Date.now(), collectionKey });
   // simple eviction
   if (largePayloadCache.size > LARGE_CACHE_LIMIT) {
     const oldest = [...largePayloadCache.entries()].sort((a, b) => a[1].createdAt - b[1].createdAt)[0];
@@ -91,25 +91,81 @@ function putLargePayload(payload, { chunkSizeBoards = 1 } = {}) {
   return { key, chunkCount: chunks.length, firstChunk: chunks[0] || [] };
 }
 
+function putLargePayload(payload, { chunkSizeBoards = 1 } = {}) {
+  const boards = Array.isArray(payload?.card_tables) ? payload.card_tables : [];
+  return cacheCollection("card_tables", boards, { chunkSize: chunkSizeBoards });
+}
+
 function getLargePayloadChunk(key, index = 0) {
   const entry = largePayloadCache.get(key);
   if (!entry) return { chunk: [], next_index: null, done: true };
   const idx = Math.max(0, Number(index) || 0);
   const chunk = entry.chunks[idx] || [];
   const next_index = idx + 1 < entry.chunks.length ? idx + 1 : null;
-  return { chunk, next_index, done: next_index == null, total_chunks: entry.chunks.length };
+  return {
+    collection_key: entry.collectionKey,
+    chunk,
+    next_index,
+    done: next_index == null,
+    total_chunks: entry.chunks.length
+  };
 }
 
 function exportLargePayloadToFile(key) {
   const entry = largePayloadCache.get(key);
   if (!entry) return null;
   if (!fs.existsSync(LARGE_EXPORT_DIR)) fs.mkdirSync(LARGE_EXPORT_DIR, { recursive: true });
-  const allBoards = entry.chunks.flat();
-  const payload = { card_tables: allBoards };
-  const filePath = path.join(LARGE_EXPORT_DIR, `card_tables_${key}.json`);
+  const allItems = entry.chunks.flat();
+  const payload = { [entry.collectionKey || "items"]: allItems };
+  const filePath = path.join(LARGE_EXPORT_DIR, `${entry.collectionKey || "items"}_${key}.json`);
   fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), "utf8");
   const sizeBytes = fs.statSync(filePath).size;
-  return { file_path: filePath, size_bytes: sizeBytes, board_count: allBoards.length };
+  return { file_path: filePath, size_bytes: sizeBytes, item_count: allItems.length, collection_key: entry.collectionKey || "items" };
+}
+
+function maybeCacheCollectionResult(collectionKey, items, {
+  inlineLimit = DEFAULT_INLINE_LIMIT,
+  chunkSize = DEFAULT_CHUNK_SIZE,
+  forceCache = false
+} = {}) {
+  const list = Array.isArray(items) ? items : [];
+  const shouldCache = forceCache || list.length > inlineLimit;
+  if (!shouldCache) {
+    return { items: list, cached: false, total: list.length };
+  }
+  const cached = cacheCollection(collectionKey, list, { chunkSize });
+  const exported = exportLargePayloadToFile(cached.key);
+  return {
+    items: cached.firstChunk,
+    cached: true,
+    total: list.length,
+    payload_key: cached.key,
+    chunk_count: cached.chunkCount,
+    export: exported
+  };
+}
+
+function buildListPayload(collectionKey, items, options = {}) {
+  const cached = maybeCacheCollectionResult(collectionKey, items, options);
+  return {
+    [collectionKey]: cached.items,
+    count: cached.total,
+    cached: cached.cached,
+    payload_key: cached.payload_key,
+    chunk_count: cached.chunk_count,
+    export: cached.export
+  };
+}
+
+function attachCachedCollection(target, collectionKey, items, options = {}) {
+  const cached = maybeCacheCollectionResult(collectionKey, items, options);
+  target[collectionKey] = cached.items;
+  target[`${collectionKey}_count`] = cached.total;
+  target[`${collectionKey}_cached`] = cached.cached;
+  target[`${collectionKey}_payload_key`] = cached.payload_key;
+  target[`${collectionKey}_chunk_count`] = cached.chunk_count;
+  target[`${collectionKey}_export`] = cached.export;
+  return target;
 }
 
 function toolError(code, message, extra = {}) {
@@ -501,6 +557,20 @@ async function listTodosForProject(ctx, projectId) {
   return groups;
 }
 
+function capTodoGroups(groups, maxTodos) {
+  const limit = Number(maxTodos);
+  if (!Number.isFinite(limit) || limit <= 0) return groups || [];
+  let remaining = limit;
+  const out = [];
+  for (const g of (groups || [])) {
+    if (remaining <= 0) break;
+    const todos = (g?.todos || []).slice(0, remaining);
+    remaining -= todos.length;
+    if (todos.length) out.push({ ...g, todos });
+  }
+  return out;
+}
+
 function normalizeQuery(q) {
   return String(q || "").trim();
 }
@@ -553,13 +623,15 @@ async function findTodoInProject(ctx, projectId, todoId) {
   return null;
 }
 
-async function listAllOpenTodos(ctx, { archivedProjects = false, maxProjects = 500 } = {}) {
-  const cacheKey = `openTodos:${ctx.accountId}:${archivedProjects}:${maxProjects}`;
+async function listAllOpenTodos(ctx, { archivedProjects = false, maxProjects = 0 } = {}) {
+  const max = Number(maxProjects);
+  const cap = Number.isFinite(max) && max > 0 ? max : null;
+  const cacheKey = `openTodos:${ctx.accountId}:${archivedProjects}:${cap ?? "all"}`;
   const cached = cacheGet(cacheKey);
   if (cached) return cached;
 
   const projects = await listProjects(ctx, { archived: archivedProjects });
-  const use = (projects || []).slice(0, maxProjects);
+  const use = cap ? (projects || []).slice(0, cap) : (projects || []);
 
   // Conservative concurrency to reduce 429
   const perProject = await mapLimit(use, 1, async (p) => {
@@ -658,7 +730,7 @@ async function searchProject(ctx, projectId, { query } = {}) {
 }
 
 // ---------- Assignment report (schema expects this) ----------
-async function assignmentReport(ctx, projectName, { maxTodos = 250 } = {}) {
+async function assignmentReport(ctx, projectName, { maxTodos = 0 } = {}) {
   const p = await projectByName(ctx, projectName);
   const groups = await listTodosForProject(ctx, p.id);
 
@@ -675,9 +747,9 @@ async function assignmentReport(ctx, projectName, { maxTodos = 250 } = {}) {
         due_on: isoDate(t.due_on || t.due_at),
         raw: t,
       });
-      if (open.length >= maxTodos) break;
+      if (maxTodos > 0 && open.length >= maxTodos) break;
     }
-    if (open.length >= maxTodos) break;
+    if (maxTodos > 0 && open.length >= maxTodos) break;
   }
 
   // Basecamp todo assignee fields vary. We'll try common shapes.
@@ -725,7 +797,7 @@ async function assignmentReport(ctx, projectName, { maxTodos = 250 } = {}) {
   return {
     project: p.name,
     total_open: open.length,
-    capped: open.length >= maxTodos,
+    capped: maxTodos > 0 && open.length >= maxTodos,
     by_assignee,
   };
 }
@@ -914,7 +986,7 @@ async function updateCardTableColumnColor(ctx, projectId, columnId, body) {
 
 // Fetch cards from all columns in a card table (truncated per column for safety)
 async function listCardTableCards(ctx, projectId, cardTableId, {
-  maxCardsPerColumn = 50,
+  maxCardsPerColumn = 0,
   includeDetails = false
 } = {}) {
   try {
@@ -996,7 +1068,7 @@ async function listCardTableCards(ctx, projectId, cardTableId, {
 
 async function summarizeCardTable(ctx, projectId, table, {
   includeCards = false,
-  maxCardsPerColumn = 50
+  maxCardsPerColumn = 0
 } = {}) {
   let full = table;
   if (!full?.lists && full?.url) {
@@ -1023,25 +1095,9 @@ async function summarizeCardTable(ctx, projectId, table, {
       const limit = Number(maxCardsPerColumn);
       if (Number.isFinite(limit) && limit > 0) {
         if (arr.length > limit) truncated = true;
-        col.cards = arr.slice(0, limit).map((c) => ({
-          id: c.id,
-          title: c.title,
-          content: c.content,
-          status: c.status,
-          due_on: c.due_on,
-          assignee_ids: c.assignee_ids,
-          app_url: c.app_url
-        }));
+        col.cards = arr.slice(0, limit);
       } else {
-        col.cards = arr.map((c) => ({
-        id: c.id,
-        title: c.title,
-        content: c.content,
-        status: c.status,
-        due_on: c.due_on,
-        assignee_ids: c.assignee_ids,
-        app_url: c.app_url
-        }));
+        col.cards = arr;
       }
     }
   }
@@ -1060,18 +1116,20 @@ async function summarizeCardTable(ctx, projectId, table, {
 
 async function listProjectCardTableContents(ctx, projectId, {
   includeDetails = false,
-  maxCardsPerColumn = 50,
+  maxCardsPerColumn = 0,
   cursor = 0,
   maxBoards = 2,
   autoAll = false,
-  maxBoardsTotal = 50,
+  maxBoardsTotal = 0,
   cacheOutput = false,
   cacheChunkBoards = 1
 } = {}) {
   const tables = await listCardTables(ctx, projectId);
   const start = Math.max(0, Number(cursor) || 0);
   const count = Math.max(1, Number(maxBoards) || 1);
-  const limit = Math.max(1, Number(maxBoardsTotal) || 1);
+  const limitValue = Number(maxBoardsTotal);
+  const capActive = Number.isFinite(limitValue) && limitValue > 0;
+  const limit = capActive ? limitValue : (tables || []).length;
 
   const boards = [];
   let idx = start;
@@ -1120,10 +1178,11 @@ async function listProjectCardTableContents(ctx, projectId, {
     ? (idx < tables.length && boards.length < limit ? idx : null)
     : (start + count < tables.length ? start + count : null);
 
-  if (cacheOutput) {
+  const totalCards = boards.reduce((sum, b) => sum + (Number(b.total_cards) || 0), 0);
+  const shouldCache = !!cacheOutput || !!autoAll || !!includeDetails || totalCards > DEFAULT_INLINE_LIMIT;
+  if (shouldCache) {
     const payload = { card_tables: boards };
     const cached = putLargePayload(payload, { chunkSizeBoards: cacheChunkBoards });
-    const totalCards = boards.reduce((sum, b) => sum + (Number(b.total_cards) || 0), 0);
     return {
       payload_key: cached.key,
       chunk_count: cached.chunkCount,
@@ -1132,16 +1191,16 @@ async function listProjectCardTableContents(ctx, projectId, {
       total_cards: totalCards,
       next_cursor,
       cursor: autoAll ? idx : start,
-      truncated: boards.length >= limit
+      truncated: capActive && boards.length >= limit
     };
   }
 
-  return { boards, next_cursor, total: tables.length, cursor: autoAll ? idx : start, truncated: boards.length >= limit };
+  return { boards, next_cursor, total: tables.length, cursor: autoAll ? idx : start, truncated: capActive && boards.length >= limit };
 }
 
 async function listCardTableSummaries(ctx, projectId, {
   includeCards = false,
-  maxCardsPerColumn = 50,
+  maxCardsPerColumn = 0,
   includeArchived = false
 } = {}) {
   const tables = await listCardTables(ctx, projectId, { includeArchived });
@@ -1152,7 +1211,7 @@ async function listCardTableSummaries(ctx, projectId, {
 
 async function listCardTableSummariesIter(ctx, projectId, {
   includeCards = false,
-  maxCardsPerColumn = 50,
+  maxCardsPerColumn = 0,
   includeArchived = false,
   cursor = 0
 } = {}) {
@@ -2385,7 +2444,7 @@ export async function handleMCP(reqBody, ctx) {
       return fail(id, { code: "NOT_AUTHENTICATED", message: "Not connected. Run /startbcgpt to get the auth link." });
     }
 
-    if (name === "list_accounts") return ok(id, authAccounts || []);
+    if (name === "list_accounts") return ok(id, buildListPayload("accounts", authAccounts || []));
 
     if (name === "get_project_structure") {
       try {
@@ -2416,7 +2475,7 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "list_projects") {
       // Return all projects as a flat array (no chunking for MCP)
       const projects = await listProjects(ctx, { archived: !!args.archived, compact: true, chunkSize: null });
-      return ok(id, { projects, count: Array.isArray(projects) ? projects.length : 0 });
+      return ok(id, buildListPayload("projects", projects));
     }
 
     if (name === "find_project") {
@@ -2482,10 +2541,10 @@ export async function handleMCP(reqBody, ctx) {
           }))
         );
         
-        return ok(id, { 
-          project: { id: p.id, name: p.name }, 
-          groups: enrichedGroups,
-          metrics: ctx_intel.getMetrics()
+        return ok(id, {
+          project: { id: p.id, name: p.name },
+          metrics: ctx_intel.getMetrics(),
+          ...buildListPayload("groups", enrichedGroups)
         });
       } catch (e) {
         console.error(`[list_todos_for_project] Error:`, e.message);
@@ -2493,7 +2552,7 @@ export async function handleMCP(reqBody, ctx) {
         try {
           const p = await projectByName(ctx, args.project);
           const groups = await listTodosForProject(ctx, p.id);
-          return ok(id, { project: { id: p.id, name: p.name }, groups, fallback: true });
+          return ok(id, { project: { id: p.id, name: p.name }, fallback: true, ...buildListPayload("groups", groups) });
         } catch (fbErr) {
           return fail(id, { code: "LIST_TODOS_FOR_PROJECT_ERROR", message: fbErr.message });
         }
@@ -2506,16 +2565,18 @@ export async function handleMCP(reqBody, ctx) {
 
         // INTELLIGENT CHAINING: Load todos and enrich in parallel
         // Automatically fetches project names, assignee details, and formats results
-        const result = await intelligent.executeDailyReport(ctx, date);
+        const rows = await listAllOpenTodos(ctx);
+        const result = await intelligent.executeDailyReport(ctx, date, rows);
 
-        return ok(id, {
+        const payload = {
           date,
           totals: result.totals,
-          perProject: result.perProject,
-          dueToday: result.dueToday,
-          overdue: result.overdue,
           metrics: result._metadata
-        });
+        };
+        attachCachedCollection(payload, "perProject", result.perProject);
+        attachCachedCollection(payload, "dueToday", result.dueToday);
+        attachCachedCollection(payload, "overdue", result.overdue);
+        return ok(id, payload);
       } catch (e) {
         console.error(`[daily_report] Error:`, e.message);
         // Fallback to original implementation
@@ -2538,18 +2599,19 @@ export async function handleMCP(reqBody, ctx) {
             (a, b) => (b.overdue - a.overdue) || (b.dueToday - a.dueToday) || (a.project || "").localeCompare(b.project || "")
           );
 
-          return ok(id, {
+          const payload = {
             date,
             totals: {
               projects: new Set(rows.map((r) => r.projectId)).size,
               dueToday: dueToday.length,
               overdue: overdue.length
             },
-            perProject: perProjectArr,
-            dueToday,
-            overdue,
             fallback: true
-          });
+          };
+          attachCachedCollection(payload, "perProject", perProjectArr);
+          attachCachedCollection(payload, "dueToday", dueToday);
+          attachCachedCollection(payload, "overdue", overdue);
+          return ok(id, payload);
         } catch (fbErr) {
           return fail(id, { code: "DAILY_REPORT_ERROR", message: fbErr.message });
         }
@@ -2573,7 +2635,8 @@ export async function handleMCP(reqBody, ctx) {
         // INTELLIGENT CHAINING: Use TimelineExecutor for intelligent filtering
         // Automatically filters by date range, enriches with person/project details
         const p = await projectByName(ctx, args.project || "[current]");
-        const result = await intelligent.executeTimeline(ctx, p.id, date, endDate);
+        const groups = await listTodosForProject(ctx, p.id);
+        const result = await intelligent.executeTimeline(ctx, p.id, date, endDate, groups);
 
         // Format results with overdue indicator
         const formattedTodos = result.todos.map(group => ({
@@ -2584,13 +2647,14 @@ export async function handleMCP(reqBody, ctx) {
           }))
         }));
 
-        return ok(id, {
+        const payload = {
           project: p.name,
           date_range: { start: date, end: endDate },
           count: result.count,
-          todos: formattedTodos,
           metrics: result._metadata
-        });
+        };
+        attachCachedCollection(payload, "todos", formattedTodos);
+        return ok(id, payload);
       } catch (e) {
         console.error(`[list_todos_due] Error:`, e.message);
         // Fallback to original implementation
@@ -2610,7 +2674,9 @@ export async function handleMCP(reqBody, ctx) {
               (a.project || "").localeCompare(b.project || "")
           );
 
-          return ok(id, { date, count: todos.length, todos, fallback: true });
+          const payload = { date, count: todos.length, fallback: true };
+          attachCachedCollection(payload, "todos", todos);
+          return ok(id, payload);
         } catch (fbErr) {
           return fail(id, { code: "LIST_TODOS_DUE_ERROR", message: fbErr.message });
         }
@@ -2619,11 +2685,19 @@ export async function handleMCP(reqBody, ctx) {
 
     if (name === "search_todos") {
       const q = String(args.query || "").trim();
-      if (!q) return ok(id, { query: "", count: 0, todos: [] });
+      if (!q) {
+        const payload = { query: "", count: 0 };
+        attachCachedCollection(payload, "todos", []);
+        return ok(id, payload);
+      }
 
       const cacheKey = `search:${ctx.accountId}:${q}`;
       const cached = cacheGet(cacheKey);
-      if (cached) return ok(id, { cached: true, ...cached });
+      if (cached) {
+        const payload = { cached: true, ...cached };
+        attachCachedCollection(payload, "todos", cached.todos || []);
+        return ok(id, payload);
+      }
 
       try {
         // INTELLIGENT CHAINING: Search with automatic enrichment
@@ -2668,7 +2742,9 @@ export async function handleMCP(reqBody, ctx) {
                 }));
             }
             const cachedApi = cacheSet(cacheKey, { query: args.query, count: todos.length, todos });
-            return ok(id, { ...cachedApi, source: "fallback_search" });
+            const payload = { ...cachedApi, source: "fallback_search" };
+            attachCachedCollection(payload, "todos", todos);
+            return ok(id, payload);
           } catch (fallbackErr) {
             // Final fallback: local DB index
             try {
@@ -2683,7 +2759,9 @@ export async function handleMCP(reqBody, ctx) {
                 source: "db"
               }));
               const cachedDb = cacheSet(cacheKey, { query: args.query, count: todos.length, todos });
-              return ok(id, { ...cachedDb, source: "db_fallback", error: fallbackErr.message });
+              const payload = { ...cachedDb, source: "db_fallback", error: fallbackErr.message };
+              attachCachedCollection(payload, "todos", todos);
+              return ok(id, payload);
             } catch (dbErr) {
               console.error(`[search_todos] Fallback also failed:`, dbErr.message);
               return ok(id, { query: args.query, count: 0, todos: [], error: dbErr.message });
@@ -2691,7 +2769,9 @@ export async function handleMCP(reqBody, ctx) {
           }
         }
 
-        return ok(id, { ...response, source: "intelligent_api", metrics: result._metadata });
+        const payload = { ...response, source: "intelligent_api", metrics: result._metadata };
+        attachCachedCollection(payload, "todos", response.todos || []);
+        return ok(id, payload);
       } catch (e) {
         console.error(`[search_todos] Intelligent search failed:`, e.message);
         
@@ -2707,39 +2787,47 @@ export async function handleMCP(reqBody, ctx) {
             app_url: r.app_url
           }));
           const response = cacheSet(cacheKey, { query: args.query, count: todos.length, todos });
-          return ok(id, { ...response, source: "fallback_search" });
+          const payload = { ...response, source: "fallback_search" };
+          attachCachedCollection(payload, "todos", todos);
+          return ok(id, payload);
         } catch (fallbackErr) {
           console.error(`[search_todos] Fallback also failed:`, fallbackErr.message);
-          return ok(id, { query: args.query, count: 0, todos: [], error: fallbackErr.message });
+          const payload = { query: args.query, count: 0, todos: [], error: fallbackErr.message };
+          attachCachedCollection(payload, "todos", []);
+          return ok(id, payload);
         }
       }
     }
 
     if (name === "assignment_report") {
       try {
-        const maxTodos = Number(args.max_todos || 250);
+        const maxTodos = args.max_todos == null ? 0 : Number(args.max_todos);
         const p = await projectByName(ctx, args.project);
+        const groups = capTodoGroups(await listTodosForProject(ctx, p.id), maxTodos);
         
         // INTELLIGENT CHAINING: Use specialized executor for assignment pattern
         // Automatically groups by assignee, enriches with person details, aggregates stats
-        const result = await intelligent.executeAssignmentReport(ctx, p.id, maxTodos);
-        
-        return ok(id, {
+        const result = await intelligent.executeAssignmentReport(ctx, p.id, maxTodos, groups);
+
+        const payload = {
           project: p.name,
           project_id: p.id,
-          by_person: result.by_person,
           summary: {
             total_todos: result.total_todos,
             total_people: result.by_person.length,
             metrics: result._metadata
           }
-        });
+        };
+        attachCachedCollection(payload, "by_person", result.by_person);
+        return ok(id, payload);
       } catch (e) {
         console.error(`[assignment_report] Error:`, e.message);
         // Fallback to original implementation
         try {
           const result = await assignmentReport(ctx, args.project, { maxTodos: args.max_todos });
-          return ok(id, result);
+          const payload = { ...result, fallback: true };
+          attachCachedCollection(payload, "by_assignee", result.by_assignee || []);
+          return ok(id, payload);
         } catch (fbErr) {
           return fail(id, { code: "ASSIGNMENT_REPORT_ERROR", message: fbErr.message });
         }
@@ -2778,9 +2866,8 @@ export async function handleMCP(reqBody, ctx) {
         return ok(id, {
           project: { id: p.id, name: p.name },
           person: { id: person.id, name: person.name, email: person.email_address },
-          todos: enriched,
-          count: enriched.length,
-          metrics: ctx_intel.getMetrics()
+          metrics: ctx_intel.getMetrics(),
+          ...buildListPayload("todos", enriched)
         });
       } catch (e) {
         console.error(`[get_person_assignments] Error:`, e.message);
@@ -2814,10 +2901,9 @@ export async function handleMCP(reqBody, ctx) {
 
           return ok(id, {
             person: { id: person.id, name: person.name, email: person.email_address },
-            todos: enriched,
-            count: enriched.length,
             fallback: true,
-            metrics: ctx_intel.getMetrics()
+            metrics: ctx_intel.getMetrics(),
+            ...buildListPayload("todos", enriched)
           });
         } catch (fbErr) {
           return fail(id, { code: "GET_PERSON_ASSIGNMENTS_ERROR", message: fbErr.message });
@@ -2848,9 +2934,8 @@ export async function handleMCP(reqBody, ctx) {
         return ok(id, {
           person: { id: profile.id, name: profile.name, email: profile.email },
           project: args.project ? { name: args.project } : null,
-          todos: enriched,
-          count: enriched.length,
-          metrics: ctx_intel.getMetrics()
+          metrics: ctx_intel.getMetrics(),
+          ...buildListPayload("todos", enriched)
         });
       } catch (e) {
         console.error(`[list_assigned_to_me] Error:`, e.message);
@@ -2868,10 +2953,9 @@ export async function handleMCP(reqBody, ctx) {
 
           return ok(id, {
             person: { id: profile.id, name: profile.name, email: profile.email },
-            todos: enriched,
-            count: enriched.length,
             fallback: true,
-            metrics: ctx_intel.getMetrics()
+            metrics: ctx_intel.getMetrics(),
+            ...buildListPayload("todos", enriched)
           });
         } catch (fbErr) {
           return fail(id, { code: "LIST_ASSIGNED_TO_ME_ERROR", message: fbErr.message });
@@ -3072,14 +3156,15 @@ export async function handleMCP(reqBody, ctx) {
         if (args.project && (lower.includes("kanban") || lower.includes("card table") || lower.includes("card tables") || lower.includes("cards"))) {
           const wantsCards = /contents|all cards|everything|list all|full|titles/.test(lower);
           const maxCardsPerColumn = wantsCards ? 0 : 0;
-          const maxBoardsTotal = wantsCards ? 10 : 50;
+          const maxBoardsTotal = wantsCards ? 0 : 0;
+          const maxTotal = maxBoardsTotal > 0 ? maxBoardsTotal : Number.POSITIVE_INFINITY;
 
           const project = await projectByName(ctx, args.project);
           const tables = [];
           let cursor = 0;
           let next = 0;
 
-          while (next != null && tables.length < maxBoardsTotal) {
+          while (next != null && tables.length < maxTotal) {
             const step = await listProjectCardTableContents(ctx, project.id, {
               includeDetails: wantsCards,
               maxCardsPerColumn,
@@ -3101,7 +3186,8 @@ export async function handleMCP(reqBody, ctx) {
                   chunk_count: step.chunk_count,
                   total_cards: step.total_cards,
                   count: step.total,
-                  export: exported || null
+                  export: exported || null,
+                  first_chunk: step.first_chunk || []
                 },
                 note: "Full details cached; export available."
               });
@@ -3259,7 +3345,7 @@ export async function handleMCP(reqBody, ctx) {
           }))
         );
 
-        return ok(id, { project: { id: p.id, name: p.name }, card_tables: enrichedTables, count: enrichedTables.length, metrics: ctx_intel.getMetrics(), sources: args.debug ? sources : undefined });
+        return ok(id, { project: { id: p.id, name: p.name }, metrics: ctx_intel.getMetrics(), sources: args.debug ? sources : undefined, ...buildListPayload("card_tables", enrichedTables) });
       } catch (e) {
         console.error(`[list_card_tables] Error:`, e.message);
         // Tool disabled / unavailable -> return empty with notice
@@ -3309,7 +3395,7 @@ export async function handleMCP(reqBody, ctx) {
             }
             return base;
           });
-          return ok(id, { project: { id: p.id, name: p.name }, card_tables: normalizedTables, count: normalizedTables.length, fallback: true });
+          return ok(id, { project: { id: p.id, name: p.name }, fallback: true, ...buildListPayload("card_tables", normalizedTables) });
         } catch (fbErr) {
           return fail(id, { code: "LIST_CARD_TABLES_ERROR", message: fbErr.message });
         }
@@ -3331,7 +3417,7 @@ export async function handleMCP(reqBody, ctx) {
           }))
         );
 
-        return ok(id, { project: { id: p.id, name: p.name }, columns: enrichedCols, count: enrichedCols.length, metrics: ctx_intel.getMetrics() });
+        return ok(id, { project: { id: p.id, name: p.name }, metrics: ctx_intel.getMetrics(), ...buildListPayload("columns", enrichedCols) });
       } catch (e) {
         console.error(`[list_card_table_columns] Error:`, e.message);
         // Tool disabled / table not found -> return empty with notice
@@ -3350,7 +3436,7 @@ export async function handleMCP(reqBody, ctx) {
         try {
           const p = await projectByName(ctx, args.project);
           const cols = await listCardTableColumns(ctx, p.id, Number(args.card_table_id));
-          return ok(id, { project: { id: p.id, name: p.name }, columns: cols, count: cols.length, fallback: true });
+          return ok(id, { project: { id: p.id, name: p.name }, fallback: true, ...buildListPayload("columns", cols) });
         } catch (fbErr) {
           return fail(id, { code: "LIST_CARD_TABLE_COLUMNS_ERROR", message: fbErr.message });
         }
@@ -3361,7 +3447,7 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const tableId = args.card_table_id ? Number(args.card_table_id) : null;
-        const maxCardsPerColumn = Number(args.max_cards_per_column || 50);
+        const maxCardsPerColumn = args.max_cards_per_column == null ? 0 : Number(args.max_cards_per_column);
         const includeDetails = !!args.include_details;
 
         if (!tableId) {
@@ -3405,11 +3491,10 @@ export async function handleMCP(reqBody, ctx) {
         return ok(id, {
           project: { id: p.id, name: p.name },
           card_table_id: tableId,
-          cards: enrichedCards,
           columns: result.columns || [],
           truncated: !!result.truncated,
-          count: enrichedCards.length,
-          metrics: ctx_intel.getMetrics()
+          metrics: ctx_intel.getMetrics(),
+          ...buildListPayload("cards", enrichedCards, { forceCache: includeDetails })
         });
       } catch (e) {
         console.error(`[list_card_table_cards] Error:`, e.message);
@@ -3429,7 +3514,7 @@ export async function handleMCP(reqBody, ctx) {
         try {
           const p = await projectByName(ctx, args.project);
           const tableId = args.card_table_id ? Number(args.card_table_id) : null;
-          const maxCardsPerColumn = Number(args.max_cards_per_column || 50);
+          const maxCardsPerColumn = args.max_cards_per_column == null ? 0 : Number(args.max_cards_per_column);
           const includeDetails = !!args.include_details;
           if (!tableId) {
             const result = await listProjectCardTableContents(ctx, p.id, {
@@ -3459,11 +3544,10 @@ export async function handleMCP(reqBody, ctx) {
           });
           return ok(id, {
             project: { id: p.id, name: p.name },
-            cards: result.cards || [],
             columns: result.columns || [],
             truncated: !!result.truncated,
-            count: (result.cards || []).length,
-            fallback: true
+            fallback: true,
+            ...buildListPayload("cards", result.cards || [], { forceCache: includeDetails })
           });
         } catch (fbErr) {
           return fail(id, { code: "LIST_CARD_TABLE_CARDS_ERROR", message: fbErr.message });
@@ -3476,10 +3560,10 @@ export async function handleMCP(reqBody, ctx) {
         const p = await projectByName(ctx, args.project);
         const summaries = await listCardTableSummaries(ctx, p.id, {
           includeCards: !!args.include_cards,
-          maxCardsPerColumn: Number(args.max_cards_per_column || 50),
+          maxCardsPerColumn: args.max_cards_per_column == null ? 0 : Number(args.max_cards_per_column),
           includeArchived: !!args.include_archived
         });
-        return ok(id, { project: { id: p.id, name: p.name }, card_tables: summaries, count: summaries.length });
+        return ok(id, { project: { id: p.id, name: p.name }, ...buildListPayload("card_tables", summaries) });
       } catch (e) {
         console.error(`[list_card_table_summaries] Error:`, e.message);
         return fail(id, { code: "LIST_CARD_TABLE_SUMMARIES_ERROR", message: e.message });
@@ -3491,7 +3575,7 @@ export async function handleMCP(reqBody, ctx) {
         const p = await projectByName(ctx, args.project);
         const result = await listCardTableSummariesIter(ctx, p.id, {
           includeCards: !!args.include_cards,
-          maxCardsPerColumn: Number(args.max_cards_per_column || 50),
+          maxCardsPerColumn: args.max_cards_per_column == null ? 0 : Number(args.max_cards_per_column),
           includeArchived: !!args.include_archived,
           cursor: args.cursor
         });
@@ -3505,14 +3589,15 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "list_project_card_table_contents") {
       try {
         const p = await projectByName(ctx, args.project);
+        const cacheOutput = args.cache_output == null ? (!!args.auto_all || !!args.include_details) : !!args.cache_output;
         const result = await listProjectCardTableContents(ctx, p.id, {
           includeDetails: !!args.include_details,
-          maxCardsPerColumn: Number(args.max_cards_per_column || 50),
+          maxCardsPerColumn: args.max_cards_per_column == null ? 0 : Number(args.max_cards_per_column),
           cursor: args.cursor,
           maxBoards: Number(args.max_boards || 2),
           autoAll: !!args.auto_all,
-          maxBoardsTotal: Number(args.max_boards_total || 50),
-          cacheOutput: !!args.cache_output,
+          maxBoardsTotal: args.max_boards_total == null ? 0 : Number(args.max_boards_total),
+          cacheOutput,
           cacheChunkBoards: Number(args.cache_chunk_boards || 1)
         });
         return ok(id, { project: { id: p.id, name: p.name }, ...result });
@@ -3621,7 +3706,7 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const steps = await listCardSteps(ctx, p.id, Number(args.card_id));
-        return ok(id, { project: { id: p.id, name: p.name }, card_id: Number(args.card_id), steps, count: steps.length });
+        return ok(id, { project: { id: p.id, name: p.name }, card_id: Number(args.card_id), ...buildListPayload("steps", steps) });
       } catch (e) {
         console.error(`[list_card_steps] Error:`, e.message);
         try {
@@ -3635,7 +3720,7 @@ export async function handleMCP(reqBody, ctx) {
         } catch {
           // ignore resolution failures
         }
-        return ok(id, { steps: [], fallback: true });
+        return ok(id, { fallback: true, ...buildListPayload("steps", []) });
       }
     }
 
@@ -3760,7 +3845,7 @@ export async function handleMCP(reqBody, ctx) {
           }))
         );
 
-        return ok(id, { project: { id: p.id, name: p.name }, message_boards: enrichedBoards, count: enrichedBoards.length, metrics: ctx_intel.getMetrics() });
+        return ok(id, { project: { id: p.id, name: p.name }, metrics: ctx_intel.getMetrics(), ...buildListPayload("message_boards", enrichedBoards) });
       } catch (e) {
         console.error(`[list_message_boards] Error:`, e.message);
         // Tool disabled / unavailable -> return empty with notice
@@ -3779,7 +3864,7 @@ export async function handleMCP(reqBody, ctx) {
         try {
           const p = await projectByName(ctx, args.project);
           const boards = await listMessageBoards(ctx, p.id);
-          return ok(id, { project: { id: p.id, name: p.name }, message_boards: boards, count: boards.length, fallback: true });
+          return ok(id, { project: { id: p.id, name: p.name }, fallback: true, ...buildListPayload("message_boards", boards) });
         } catch (fbErr) {
           return fail(id, { code: "LIST_MESSAGE_BOARDS_ERROR", message: fbErr.message });
         }
@@ -3802,7 +3887,7 @@ export async function handleMCP(reqBody, ctx) {
           }))
         );
 
-        return ok(id, { project: { id: p.id, name: p.name }, messages: enrichedMessages, count: enrichedMessages.length, metrics: ctx_intel.getMetrics() });
+        return ok(id, { project: { id: p.id, name: p.name }, metrics: ctx_intel.getMetrics(), ...buildListPayload("messages", enrichedMessages) });
       } catch (e) {
         console.error(`[list_messages] Error:`, e.message);
         // Tool disabled / unavailable -> return empty with notice
@@ -3821,7 +3906,7 @@ export async function handleMCP(reqBody, ctx) {
         try {
           const p = await projectByName(ctx, args.project);
           const msgs = await listMessages(ctx, p.id, { board_id: args.message_board_id });
-          return ok(id, { project: { id: p.id, name: p.name }, messages: msgs, count: msgs.length, fallback: true });
+          return ok(id, { project: { id: p.id, name: p.name }, fallback: true, ...buildListPayload("messages", msgs) });
         } catch (fbErr) {
           return fail(id, { code: "LIST_MESSAGES_ERROR", message: fbErr.message });
         }
@@ -3878,10 +3963,10 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const types = await listMessageTypes(ctx, p.id);
-        return ok(id, { project: { id: p.id, name: p.name }, types, count: types.length });
+        return ok(id, { project: { id: p.id, name: p.name }, ...buildListPayload("types", types) });
       } catch (e) {
         console.error(`[list_message_types] Error:`, e.message);
-        return ok(id, { types: [], fallback: true });
+        return ok(id, { fallback: true, ...buildListPayload("types", []) });
       }
     }
 
@@ -3958,10 +4043,10 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const items = await listClientCorrespondences(ctx, p.id);
-        return ok(id, { project: { id: p.id, name: p.name }, correspondences: items, count: items.length });
+        return ok(id, { project: { id: p.id, name: p.name }, ...buildListPayload("correspondences", items) });
       } catch (e) {
         console.error(`[list_client_correspondences] Error:`, e.message);
-        return ok(id, { correspondences: [], fallback: true });
+        return ok(id, { fallback: true, ...buildListPayload("correspondences", []) });
       }
     }
 
@@ -3979,10 +4064,10 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const items = await listClientApprovals(ctx, p.id);
-        return ok(id, { project: { id: p.id, name: p.name }, approvals: items, count: items.length });
+        return ok(id, { project: { id: p.id, name: p.name }, ...buildListPayload("approvals", items) });
       } catch (e) {
         console.error(`[list_client_approvals] Error:`, e.message);
-        return ok(id, { approvals: [], fallback: true });
+        return ok(id, { fallback: true, ...buildListPayload("approvals", []) });
       }
     }
 
@@ -4000,10 +4085,10 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const items = await listClientReplies(ctx, p.id, Number(args.recording_id));
-        return ok(id, { project: { id: p.id, name: p.name }, recording_id: Number(args.recording_id), replies: items, count: items.length });
+        return ok(id, { project: { id: p.id, name: p.name }, recording_id: Number(args.recording_id), ...buildListPayload("replies", items) });
       } catch (e) {
         console.error(`[list_client_replies] Error:`, e.message);
-        return ok(id, { replies: [], fallback: true });
+        return ok(id, { fallback: true, ...buildListPayload("replies", []) });
       }
     }
 
@@ -4033,7 +4118,7 @@ export async function handleMCP(reqBody, ctx) {
           }))
         );
 
-        return ok(id, { project: { id: p.id, name: p.name }, documents: enrichedDocs, count: enrichedDocs.length, metrics: ctx_intel.getMetrics() });
+        return ok(id, { project: { id: p.id, name: p.name }, metrics: ctx_intel.getMetrics(), ...buildListPayload("documents", enrichedDocs) });
       } catch (e) {
         console.error(`[list_documents] Error:`, e.message);
         // Tool disabled / unavailable -> return empty with notice
@@ -4052,7 +4137,7 @@ export async function handleMCP(reqBody, ctx) {
         try {
           const p = await projectByName(ctx, args.project);
           const docs = await listDocuments(ctx, p.id);
-          return ok(id, { project: { id: p.id, name: p.name }, documents: docs, count: docs.length, fallback: true });
+          return ok(id, { project: { id: p.id, name: p.name }, fallback: true, ...buildListPayload("documents", docs) });
         } catch (fbErr) {
           return fail(id, { code: "LIST_DOCUMENTS_ERROR", message: fbErr.message });
         }
@@ -4119,10 +4204,10 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const vaults = await listChildVaults(ctx, p.id, Number(args.vault_id));
-        return ok(id, { project: { id: p.id, name: p.name }, vault_id: Number(args.vault_id), vaults, count: vaults.length });
+        return ok(id, { project: { id: p.id, name: p.name }, vault_id: Number(args.vault_id), ...buildListPayload("vaults", vaults) });
       } catch (e) {
         console.error(`[list_child_vaults] Error:`, e.message);
-        return ok(id, { vaults: [], fallback: true });
+        return ok(id, { fallback: true, ...buildListPayload("vaults", []) });
       }
     }
 
@@ -4162,7 +4247,7 @@ export async function handleMCP(reqBody, ctx) {
           }))
         );
 
-        return ok(id, { project: { id: p.id, name: p.name }, schedule_entries: enrichedEntries, count: enrichedEntries.length, metrics: ctx_intel.getMetrics() });
+        return ok(id, { project: { id: p.id, name: p.name }, metrics: ctx_intel.getMetrics(), ...buildListPayload("schedule_entries", enrichedEntries) });
       } catch (e) {
         console.error(`[list_schedule_entries] Error:`, e.message);
         // Tool disabled / unavailable -> return empty with notice
@@ -4181,7 +4266,7 @@ export async function handleMCP(reqBody, ctx) {
         try {
           const p = await projectByName(ctx, args.project);
           const entries = await listScheduleEntries(ctx, p.id, { from: args.from, to: args.to });
-          return ok(id, { project: { id: p.id, name: p.name }, schedule_entries: entries, count: entries.length, fallback: true });
+          return ok(id, { project: { id: p.id, name: p.name }, fallback: true, ...buildListPayload("schedule_entries", entries) });
         } catch (fbErr) {
           return fail(id, { code: "LIST_SCHEDULE_ENTRIES_ERROR", message: fbErr.message });
         }
@@ -4207,12 +4292,11 @@ export async function handleMCP(reqBody, ctx) {
           );
         }
         
-        return ok(id, { 
-          project: { id: p.id, name: p.name }, 
-          query: args.query, 
-          results: enrichedResults,
-          count: enrichedResults.length,
-          metrics: ctx_intel.getMetrics()
+        return ok(id, {
+          project: { id: p.id, name: p.name },
+          query: args.query,
+          metrics: ctx_intel.getMetrics(),
+          ...buildListPayload("results", enrichedResults)
         });
       } catch (e) {
         console.error(`[search_project] Error:`, e.message);
@@ -4220,7 +4304,7 @@ export async function handleMCP(reqBody, ctx) {
         try {
           const p = await projectByName(ctx, args.project);
           const results = await searchProject(ctx, p.id, { query: args.query });
-          return ok(id, { project: { id: p.id, name: p.name }, query: args.query, results, fallback: true });
+          return ok(id, { project: { id: p.id, name: p.name }, query: args.query, fallback: true, ...buildListPayload("results", results) });
         } catch (fbErr) {
           return fail(id, { code: "SEARCH_PROJECT_ERROR", message: fbErr.message });
         }
@@ -4234,12 +4318,12 @@ export async function handleMCP(reqBody, ctx) {
 
         // INTELLIGENT CHAINING: Provide metrics for consistency
         const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `list all people`);
-        return ok(id, { people, count: people.length, metrics: ctx_intel.getMetrics() });
+        return ok(id, { metrics: ctx_intel.getMetrics(), ...buildListPayload("people", people) });
       } catch (e) {
         console.error(`[list_all_people] Error:`, e.message);
         try {
           const people = await listAllPeople(ctx);
-          return ok(id, { people, count: people.length, fallback: true });
+          return ok(id, { fallback: true, ...buildListPayload("people", people) });
         } catch (fbErr) {
           return fail(id, { code: "LIST_ALL_PEOPLE_ERROR", message: fbErr.message });
         }
@@ -4249,7 +4333,7 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "list_pingable_people") {
       try {
         const people = await listPingablePeople(ctx);
-        return ok(id, { people, count: people.length });
+        return ok(id, { ...buildListPayload("people", people) });
       } catch (e) {
         return fail(id, { code: "LIST_PINGABLE_PEOPLE_ERROR", message: e.message });
       }
@@ -4303,13 +4387,13 @@ export async function handleMCP(reqBody, ctx) {
           bucket: { id: p.id, name: p.name }
         }));
 
-        return ok(id, { project: { id: p.id, name: p.name }, people: enrichedPeople, count: enrichedPeople.length, metrics: ctx_intel.getMetrics() });
+        return ok(id, { project: { id: p.id, name: p.name }, metrics: ctx_intel.getMetrics(), ...buildListPayload("people", enrichedPeople) });
       } catch (e) {
         console.error(`[list_project_people] Error:`, e.message);
         try {
           const p = await projectByName(ctx, args.project);
           const people = await listProjectPeople(ctx, p.id);
-          return ok(id, { project: { id: p.id, name: p.name }, people, count: people.length, fallback: true });
+          return ok(id, { project: { id: p.id, name: p.name }, fallback: true, ...buildListPayload("people", people) });
         } catch (fbErr) {
           return fail(id, { code: "LIST_PROJECT_PEOPLE_ERROR", message: fbErr.message });
         }
@@ -4347,10 +4431,9 @@ export async function handleMCP(reqBody, ctx) {
         return ok(id, {
           project: { id: p.id, name: p.name },
           recording_id: args.recording_id,
-          comments: enrichedComments,
-          count: enrichedComments.length,
           _meta: result._meta,
-          metrics: ctx_intel.getMetrics()
+          metrics: ctx_intel.getMetrics(),
+          ...buildListPayload("comments", enrichedComments)
         });
       } catch (e) {
         console.error(`[list_comments] Error:`, e.message);
@@ -4359,7 +4442,7 @@ export async function handleMCP(reqBody, ctx) {
           const p = await projectByName(ctx, args.project);
           const result = await listComments(ctx, p.id, args.recording_id);
           const comments = result.comments || [];
-          return ok(id, { project: { id: p.id, name: p.name }, recording_id: args.recording_id, comments, count: comments.length, _meta: result._meta, fallback: true });
+          return ok(id, { project: { id: p.id, name: p.name }, recording_id: args.recording_id, _meta: result._meta, fallback: true, ...buildListPayload("comments", comments) });
         } catch (fbErr) {
           return fail(id, { code: "LIST_COMMENTS_ERROR", message: fbErr.message });
         }
@@ -4450,7 +4533,7 @@ export async function handleMCP(reqBody, ctx) {
           }))
         );
 
-        return ok(id, { project: { id: p.id, name: p.name }, vault_id: vaultId, uploads: enrichedUploads, count: enrichedUploads.length, metrics: ctx_intel.getMetrics() });
+        return ok(id, { project: { id: p.id, name: p.name }, vault_id: vaultId, metrics: ctx_intel.getMetrics(), ...buildListPayload("uploads", enrichedUploads) });
       } catch (e) {
         console.error(`[list_uploads] Error:`, e.message);
         // Fallback to non-enriched uploads
@@ -4460,7 +4543,7 @@ export async function handleMCP(reqBody, ctx) {
           const vaultId = args.vault_id || (vaults?.[0]?.id);
           if (!vaultId) return fail(id, { code: "NO_VAULT", message: "No vault found for this project." });
           const uploads = await listUploads(ctx, p.id, vaultId);
-          return ok(id, { project: { id: p.id, name: p.name }, vault_id: vaultId, uploads, count: uploads.length, fallback: true });
+          return ok(id, { project: { id: p.id, name: p.name }, vault_id: vaultId, fallback: true, ...buildListPayload("uploads", uploads) });
         } catch (fbErr) {
           return fail(id, { code: "LIST_UPLOADS_ERROR", message: fbErr.message });
         }
@@ -4510,13 +4593,13 @@ export async function handleMCP(reqBody, ctx) {
           }))
         );
 
-        return ok(id, { type: args.type, recordings: enrichedRecordings, count: enrichedRecordings.length, metrics: ctx_intel.getMetrics() });
+        return ok(id, { type: args.type, metrics: ctx_intel.getMetrics(), ...buildListPayload("recordings", enrichedRecordings) });
       } catch (e) {
         console.error(`[get_recordings] Error:`, e.message);
         // Fallback to non-enriched recordings
         try {
           const recordings = await getRecordings(ctx, args.type, { bucket: args.bucket, status: args.status });
-          return ok(id, { type: args.type, recordings, count: recordings.length, fallback: true });
+          return ok(id, { type: args.type, fallback: true, ...buildListPayload("recordings", recordings) });
         } catch (fbErr) {
           return fail(id, { code: "GET_RECORDINGS_ERROR", message: fbErr.message });
         }
@@ -4599,14 +4682,14 @@ export async function handleMCP(reqBody, ctx) {
           }))
         );
 
-        return ok(id, { project: { id: p.id, name: p.name }, vaults: enrichedVaults, count: enrichedVaults.length, metrics: ctx_intel.getMetrics() });
+        return ok(id, { project: { id: p.id, name: p.name }, metrics: ctx_intel.getMetrics(), ...buildListPayload("vaults", enrichedVaults) });
       } catch (e) {
         console.error(`[list_vaults] Error:`, e.message);
         // Fallback to non-enriched vaults
         try {
           const p = await projectByName(ctx, args.project);
           const vaults = await listVaults(ctx, p.id);
-          return ok(id, { project: { id: p.id, name: p.name }, vaults, count: vaults.length, fallback: true });
+          return ok(id, { project: { id: p.id, name: p.name }, fallback: true, ...buildListPayload("vaults", vaults) });
         } catch (fbErr) {
           return fail(id, { code: "LIST_VAULTS_ERROR", message: fbErr.message });
         }
@@ -4618,14 +4701,14 @@ export async function handleMCP(reqBody, ctx) {
         const projectName = args.project || null;
         if (!projectName) {
           const chats = await listCampfires(ctx, null);
-          return ok(id, { campfires: chats, count: chats.length });
+          return ok(id, { ...buildListPayload("campfires", chats) });
         }
         const p = await projectByName(ctx, projectName);
         const chats = await listCampfires(ctx, p.id);
-        return ok(id, { project: { id: p.id, name: p.name }, campfires: chats, count: chats.length });
+        return ok(id, { project: { id: p.id, name: p.name }, ...buildListPayload("campfires", chats) });
       } catch (e) {
         console.error(`[list_campfires] Error:`, e.message);
-        return ok(id, { campfires: [], fallback: true });
+        return ok(id, { fallback: true, ...buildListPayload("campfires", []) });
       }
     }
 
@@ -4644,7 +4727,7 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const lines = await listCampfireLines(ctx, p.id, Number(args.chat_id), { limit: args.limit });
-        return ok(id, { project: { id: p.id, name: p.name }, chat_id: Number(args.chat_id), lines, count: lines.length });
+        return ok(id, { project: { id: p.id, name: p.name }, chat_id: Number(args.chat_id), ...buildListPayload("lines", lines) });
       } catch (e) {
         return fail(id, { code: "LIST_CAMPFIRE_LINES_ERROR", message: e.message });
       }
@@ -4690,7 +4773,7 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const bots = await listChatbots(ctx, p.id, Number(args.chat_id));
-        return ok(id, { project: { id: p.id, name: p.name }, chat_id: Number(args.chat_id), chatbots: bots, count: bots.length });
+        return ok(id, { project: { id: p.id, name: p.name }, chat_id: Number(args.chat_id), ...buildListPayload("chatbots", bots) });
       } catch (e) {
         return fail(id, { code: "LIST_CHATBOTS_ERROR", message: e.message });
       }
@@ -4762,7 +4845,7 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const hooks = await listWebhooks(ctx, p.id);
-        return ok(id, { project: { id: p.id, name: p.name }, webhooks: hooks, count: hooks.length });
+        return ok(id, { project: { id: p.id, name: p.name }, ...buildListPayload("webhooks", hooks) });
       } catch (e) {
         return fail(id, { code: "LIST_WEBHOOKS_ERROR", message: e.message });
       }
@@ -4831,7 +4914,7 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const events = await listRecordingEvents(ctx, p.id, Number(args.recording_id));
-        return ok(id, { project: { id: p.id, name: p.name }, events, count: events.length });
+        return ok(id, { project: { id: p.id, name: p.name }, ...buildListPayload("events", events) });
       } catch (e) {
         return fail(id, { code: "LIST_RECORDING_EVENTS_ERROR", message: e.message });
       }
@@ -4907,7 +4990,7 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "report_todos_overdue") {
       try {
         const data = await reportTodosOverdue(ctx);
-        return ok(id, { overdue: data });
+        return ok(id, { ...buildListPayload("overdue", data) });
       } catch (e) {
         return fail(id, { code: "REPORT_TODOS_OVERDUE_ERROR", message: e.message });
       }
@@ -4916,7 +4999,7 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "report_schedules_upcoming") {
       try {
         const data = await reportSchedulesUpcoming(ctx, args.query || "");
-        return ok(id, { upcoming: data });
+        return ok(id, { ...buildListPayload("upcoming", data) });
       } catch (e) {
         return fail(id, { code: "REPORT_SCHEDULES_UPCOMING_ERROR", message: e.message });
       }
@@ -4925,7 +5008,7 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "report_timeline") {
       try {
         const data = await reportTimeline(ctx, args.query || "");
-        return ok(id, { events: data });
+        return ok(id, { ...buildListPayload("events", data) });
       } catch (e) {
         return fail(id, { code: "REPORT_TIMELINE_ERROR", message: e.message });
       }
@@ -4934,7 +5017,7 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "project_timeline") {
       try {
         const data = await projectTimeline(ctx, Number(args.project_id), args.query || "");
-        return ok(id, { project_id: Number(args.project_id), events: data });
+        return ok(id, { project_id: Number(args.project_id), ...buildListPayload("events", data) });
       } catch (e) {
         return fail(id, { code: "PROJECT_TIMELINE_ERROR", message: e.message });
       }
@@ -4943,7 +5026,7 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "user_timeline") {
       try {
         const data = await userTimeline(ctx, Number(args.person_id), args.query || "");
-        return ok(id, { person_id: Number(args.person_id), events: data });
+        return ok(id, { person_id: Number(args.person_id), ...buildListPayload("events", data) });
       } catch (e) {
         return fail(id, { code: "USER_TIMELINE_ERROR", message: e.message });
       }
@@ -4952,7 +5035,7 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "report_timesheet") {
       try {
         const data = await reportTimesheet(ctx, args.query || "");
-        return ok(id, { entries: data });
+        return ok(id, { ...buildListPayload("entries", data) });
       } catch (e) {
         return fail(id, { code: "REPORT_TIMESHEET_ERROR", message: e.message });
       }
@@ -4961,7 +5044,7 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "project_timesheet") {
       try {
         const data = await projectTimesheet(ctx, Number(args.project_id), args.query || "");
-        return ok(id, { project_id: Number(args.project_id), entries: data });
+        return ok(id, { project_id: Number(args.project_id), ...buildListPayload("entries", data) });
       } catch (e) {
         return fail(id, { code: "PROJECT_TIMESHEET_ERROR", message: e.message });
       }
@@ -4970,7 +5053,7 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "recording_timesheet") {
       try {
         const data = await recordingTimesheet(ctx, Number(args.project_id), Number(args.recording_id), args.query || "");
-        return ok(id, { project_id: Number(args.project_id), recording_id: Number(args.recording_id), entries: data });
+        return ok(id, { project_id: Number(args.project_id), recording_id: Number(args.recording_id), ...buildListPayload("entries", data) });
       } catch (e) {
         return fail(id, { code: "RECORDING_TIMESHEET_ERROR", message: e.message });
       }
@@ -4990,7 +5073,7 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const forwards = await listInboxForwards(ctx, p.id, Number(args.inbox_id));
-        return ok(id, { project: { id: p.id, name: p.name }, forwards, count: forwards.length });
+        return ok(id, { project: { id: p.id, name: p.name }, ...buildListPayload("forwards", forwards) });
       } catch (e) {
         return fail(id, { code: "LIST_INBOX_FORWARDS_ERROR", message: e.message });
       }
@@ -5010,7 +5093,7 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const replies = await listInboxReplies(ctx, p.id, Number(args.forward_id));
-        return ok(id, { project: { id: p.id, name: p.name }, replies, count: replies.length });
+        return ok(id, { project: { id: p.id, name: p.name }, ...buildListPayload("replies", replies) });
       } catch (e) {
         return fail(id, { code: "LIST_INBOX_REPLIES_ERROR", message: e.message });
       }
@@ -5040,7 +5123,7 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const questions = await listQuestions(ctx, p.id, Number(args.questionnaire_id));
-        return ok(id, { project: { id: p.id, name: p.name }, questions, count: questions.length });
+        return ok(id, { project: { id: p.id, name: p.name }, ...buildListPayload("questions", questions) });
       } catch (e) {
         return fail(id, { code: "LIST_QUESTIONS_ERROR", message: e.message });
       }
@@ -5110,7 +5193,7 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const answers = await listQuestionAnswers(ctx, p.id, Number(args.question_id));
-        return ok(id, { project: { id: p.id, name: p.name }, answers, count: answers.length });
+        return ok(id, { project: { id: p.id, name: p.name }, ...buildListPayload("answers", answers) });
       } catch (e) {
         return fail(id, { code: "LIST_QUESTION_ANSWERS_ERROR", message: e.message });
       }
@@ -5120,7 +5203,7 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const people = await listQuestionAnswersBy(ctx, p.id, Number(args.question_id));
-        return ok(id, { project: { id: p.id, name: p.name }, people, count: people.length });
+        return ok(id, { project: { id: p.id, name: p.name }, ...buildListPayload("people", people) });
       } catch (e) {
         return fail(id, { code: "LIST_QUESTION_ANSWERS_BY_ERROR", message: e.message });
       }
@@ -5130,7 +5213,7 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const answers = await listQuestionAnswersByPerson(ctx, p.id, Number(args.question_id), Number(args.person_id));
-        return ok(id, { project: { id: p.id, name: p.name }, answers, count: answers.length });
+        return ok(id, { project: { id: p.id, name: p.name }, ...buildListPayload("answers", answers) });
       } catch (e) {
         return fail(id, { code: "LIST_QUESTION_ANSWERS_BY_PERSON_ERROR", message: e.message });
       }
@@ -5169,7 +5252,7 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "list_question_reminders") {
       try {
         const reminders = await listQuestionReminders(ctx);
-        return ok(id, { reminders, count: reminders.length });
+        return ok(id, { ...buildListPayload("reminders", reminders) });
       } catch (e) {
         return fail(id, { code: "LIST_QUESTION_REMINDERS_ERROR", message: e.message });
       }
@@ -5178,7 +5261,7 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "list_templates") {
       try {
         const templates = await listTemplates(ctx);
-        return ok(id, { templates, count: templates.length });
+        return ok(id, { ...buildListPayload("templates", templates) });
       } catch (e) {
         return fail(id, { code: "LIST_TEMPLATES_ERROR", message: e.message });
       }
@@ -5339,7 +5422,7 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const groups = await listTodolistGroups(ctx, p.id, Number(args.todolist_id));
-        return ok(id, { project: { id: p.id, name: p.name }, groups, count: groups.length });
+        return ok(id, { project: { id: p.id, name: p.name }, ...buildListPayload("groups", groups) });
       } catch (e) {
         return fail(id, { code: "LIST_TODOLIST_GROUPS_ERROR", message: e.message });
       }
@@ -5648,18 +5731,17 @@ export async function handleMCP(reqBody, ctx) {
           );
         }
         
-        return ok(id, { 
-          query: args.query, 
-          results: enrichedResults, 
-          count: enrichedResults.length,
-          metrics: ctx_intel.getMetrics()
+        return ok(id, {
+          query: args.query,
+          metrics: ctx_intel.getMetrics(),
+          ...buildListPayload("results", enrichedResults)
         });
       } catch (e) {
         console.error(`[search_recordings] Error:`, e.message);
         // Fallback to non-enriched search
         try {
           const results = await searchRecordings(ctx, args.query, { bucket_id: bucketId, type: args.type });
-          return ok(id, { query: args.query, results, count: results.length, fallback: true });
+          return ok(id, { query: args.query, fallback: true, ...buildListPayload("results", results) });
         } catch (fbErr) {
           return fail(id, { code: "SEARCH_RECORDINGS_ERROR", message: fbErr.message });
         }
@@ -5669,12 +5751,14 @@ export async function handleMCP(reqBody, ctx) {
     // Raw
     if (name === "basecamp_request" || name === "basecamp_raw") {
       const method = args.method || "GET";
+      const httpMethod = String(method || "GET").toUpperCase();
+      const paginate = args.paginate !== false && httpMethod === "GET";
       try {
-        const data = await api(ctx, args.path, { method, body: args.body });
+        const data = paginate ? await apiAll(ctx, args.path) : await api(ctx, args.path, { method, body: args.body });
         return ok(id, data);
       } catch (e) {
         // Auto-recover common card table path mistakes for GETs.
-        if (method.toUpperCase() === "GET" && isApiError(e, 404)) {
+        if (httpMethod === "GET" && isApiError(e, 404)) {
           const path = String(args.path || "");
           const tableMatch = path.match(/^\/buckets\/(\d+)\/card_tables\/(\d+)\.json$/);
           const cardsMatch = path.match(/^\/buckets\/(\d+)\/card_tables\/(\d+)\/cards\.json$/);

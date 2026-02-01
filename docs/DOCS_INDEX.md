@@ -24,6 +24,7 @@
 - `docs/audits/FULL_ENDPOINT_AUDIT_CHECKLIST.md`
 - `docs/audits/FIX_SUMMARY.md`
 - `docs/audits/FIX_SUMMARY_CRITICAL_CARDS.md`
+- `docs/audits/ITERATION_PAGINATION_CASE.md`
 - `docs/audits/SEARCH_FIXES.md`
 - `docs/audits/VISUAL_FIX_SUMMARY.md`
 - `docs/audits/VISUAL_SEARCH_SUMMARY.md`

@@ -36,6 +36,20 @@ This document describes the global edge-case handling strategy used by the MCP h
    - API search
    - Local DB index (as a last resort)
 
+7. **Pagination + iteration are mandatory**  
+   Any list endpoint must use `apiAll()` so no data is missed. If a resource has nested
+   collections (board -> columns -> cards, messages -> comments), iterate them automatically.
+
+8. **Large payload handling (cache + chunk + export)**  
+   When full results exceed connector/message limits:
+   - Cache the full payload server-side
+   - Return `payload_key` + chunk metadata
+   - Provide a file export path for guaranteed full-fidelity access
+
+9. **No user prompts for selectable subsets**  
+   If data is available and can be fetched safely, do it automatically. The MCP should
+   never ask the user to pick a subset when iteration is possible.
+
 ## Examples
 - `list_message_boards` -> empty array + notice if message boards not enabled.
 - `list_documents` -> empty array + notice if documents not enabled.

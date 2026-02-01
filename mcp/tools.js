@@ -1195,13 +1195,23 @@ export function getTools() {
 
     tool("basecamp_request", "Raw Basecamp API call. Provide full URL or a /path.", {
       type: "object",
-      properties: { path: { type: "string" }, method: { type: "string", nullable: true }, body: { type: "object", nullable: true } },
+      properties: {
+        path: { type: "string" },
+        method: { type: "string", nullable: true },
+        body: { type: "object", nullable: true },
+        paginate: { type: "boolean", nullable: true }
+      },
       required: ["path"],
       additionalProperties: false
     }),
     tool("basecamp_raw", "Alias of basecamp_request for backward compatibility.", {
       type: "object",
-      properties: { path: { type: "string" }, method: { type: "string", nullable: true }, body: { type: "object", nullable: true } },
+      properties: {
+        path: { type: "string" },
+        method: { type: "string", nullable: true },
+        body: { type: "object", nullable: true },
+        paginate: { type: "boolean", nullable: true }
+      },
       required: ["path"],
       additionalProperties: false
     })

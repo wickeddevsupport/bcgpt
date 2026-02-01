@@ -1,11 +1,11 @@
 # Basecamp API Coverage Report
 
-Last updated: 2026-01-31
+Last updated: 2026-02-01
 
 This report re-checks coverage against the app's current tool set and the 30-action OpenAPI limit.
 
 ## Summary
-- MCP tools defined in `mcp.js`: 180
+- MCP tools defined in `mcp.js`: 186
 - OpenAPI actions in `openapi.json`: 30 (limit enforced)
 - Smart routing available via `smart_action`
 
@@ -65,6 +65,7 @@ Added MCP tools to cover more of the Basecamp API families:
 - Chatbots (integrations): `list_chatbots`, `get_chatbot`, `create_chatbot`, `update_chatbot`, `delete_chatbot`, `post_chatbot_line`
 - Webhooks: `list_webhooks`, `get_webhook`, `create_webhook`, `update_webhook`, `delete_webhook`
 - Client communications: `list_client_correspondences`, `get_client_correspondence`, `list_client_approvals`, `get_client_approval`, `list_client_replies`, `get_client_reply`
+- Iteration/caching helpers: `list_card_table_summaries`, `list_card_table_summaries_iter`, `list_project_card_table_contents`, `get_cached_payload_chunk`, `export_cached_payload`
 
 ## Coverage vs Basecamp API Reference
 The `docs/reference/BASECAMP_API_ENDPOINTS_REFERENCE.md` file lists more endpoints than the app exposes directly.

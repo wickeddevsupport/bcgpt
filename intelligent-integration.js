@@ -100,10 +100,10 @@ async function executeIntelligentSearch(apiCtx, query, projectId = null) {
 /**
  * Execute assignment report with intelligent aggregation
  */
-async function executeAssignmentReport(apiCtx, projectId, maxTodos = 250) {
+async function executeAssignmentReport(apiCtx, projectId, maxTodos = 0, groups = null) {
   const executor = new AssignmentExecutor(apiCtx);
   return executeWithRetry(
-    () => executor.execute(apiCtx, projectId, maxTodos),
+    () => executor.execute(apiCtx, projectId, maxTodos, groups),
     { label: "executeAssignmentReport" }
   );
 }
@@ -111,10 +111,10 @@ async function executeAssignmentReport(apiCtx, projectId, maxTodos = 250) {
 /**
  * Execute timeline query with intelligent filtering
  */
-async function executeTimeline(apiCtx, projectId, startDate, endDate) {
+async function executeTimeline(apiCtx, projectId, startDate, endDate, groups = null) {
   const executor = new TimelineExecutor(apiCtx);
   return executeWithRetry(
-    () => executor.execute(apiCtx, projectId, startDate, endDate),
+    () => executor.execute(apiCtx, projectId, startDate, endDate, groups),
     { label: "executeTimeline" }
   );
 }
@@ -123,16 +123,23 @@ async function executeTimeline(apiCtx, projectId, startDate, endDate) {
  * Execute daily report with intelligent aggregation
  * Loads all todos and organizes by project with enrichment
  */
-async function executeDailyReport(apiCtx, date) {
+async function executeDailyReport(apiCtx, date, rowsOverride = null) {
   // Initialize context for caching and enrichment
   const ctx = new RequestContext(apiCtx, `daily report for ${date}`);
 
   try {
+    const fetchRows = async () => {
+      if (Array.isArray(rowsOverride)) return rowsOverride;
+      if (typeof apiCtx?.listAllOpenTodos === "function") {
+        return apiCtx.listAllOpenTodos();
+      }
+      return [];
+    };
     // Parallelize preload + data fetch to reduce latency
     const [, rows] = await executeParallelStrict([
       () => ctx.preloadEssentials(),
       () => executeWithRetry(
-        () => apiCtx.listAllOpenTodos(),
+        () => fetchRows(),
         { label: "listAllOpenTodos" }
       )
     ], { throwOnError: true });

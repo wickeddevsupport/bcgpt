@@ -13,7 +13,7 @@ This audit compares our app's MCP tools and OpenAPI actions to the current Basec
   - Reports, timeline, timesheets, inboxes, questions, templates, tools, events, subscriptions
 
 ## Method
-1) Extracted MCP tools from `mcp.js` (180 tools).
+1) Extracted MCP tools from `mcp.js` (186 tools).
 2) Extracted OpenAPI actions from `openapi.json` (30 actions, hard limit).
 3) Compared our coverage to online documentation families (not every endpoint, but every major API area).
 
@@ -43,3 +43,8 @@ We cover core daily workflows and the online API families. Remaining work is ver
 ## Notes
 - This audit focuses on API families confirmed by online docs; it does not assert coverage for features that appear only in product help pages.
 - The new tool endpoints are best-effort based on official docs; they should be validated against the cloned repo (`docs/reference/bc3-api`).
+
+## Addendum (2026-02-01)
+Internal iteration/caching helpers were added to ensure full-fidelity dumps for large datasets:
+`list_card_table_summaries`, `list_card_table_summaries_iter`, `list_project_card_table_contents`,
+`get_cached_payload_chunk`, and `export_cached_payload`.

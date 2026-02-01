@@ -3,7 +3,7 @@
  * Orchestrates multiple API calls, maintains context, enriches results
  */
 
-import { basecampFetch as api } from './basecamp.js';
+import { basecampFetch as api, basecampFetchAll as apiAll } from './basecamp.js';
 
 class RequestContext {
   constructor(apiCtx, userQuery = "") {
@@ -69,7 +69,7 @@ class RequestContext {
    * Load all people once, cache by ID
    */
   async _loadPeople() {
-    const people = await this._apiCall('/people.json');
+    const people = await this._apiCallAll('/people.json');
     if (!Array.isArray(people)) return;
     
     for (const p of people) {
@@ -81,7 +81,7 @@ class RequestContext {
    * Load all projects once, cache by ID
    */
   async _loadProjects() {
-    const projects = await this._apiCall('/projects.json');
+    const projects = await this._apiCallAll('/projects.json');
     if (!Array.isArray(projects)) return;
     
     for (const p of projects) {
@@ -95,7 +95,25 @@ class RequestContext {
   async _apiCall(path, options = {}) {
     this.metrics.apiCallsMade++;
     this.callHistory.push({ path, timestamp: Date.now(), ...options });
+    if (typeof this.apiCtx?.basecampFetch === "function") {
+      return this.apiCtx.basecampFetch(path, options);
+    }
+    if (this.apiCtx?.TOKEN) {
+      return api(this.apiCtx.TOKEN, path, { ...options, accountId: this.apiCtx.accountId, ua: this.apiCtx.ua });
+    }
     return api(this.apiCtx, path, options);
+  }
+
+  async _apiCallAll(path, options = {}) {
+    this.metrics.apiCallsMade++;
+    this.callHistory.push({ path, timestamp: Date.now(), paginated: true, ...options });
+    if (typeof this.apiCtx?.basecampFetchAll === "function") {
+      return this.apiCtx.basecampFetchAll(path, options);
+    }
+    if (this.apiCtx?.TOKEN) {
+      return apiAll(this.apiCtx.TOKEN, path, { ...options, accountId: this.apiCtx.accountId, ua: this.apiCtx.ua });
+    }
+    return apiAll(this.apiCtx, path, options);
   }
 
   /**
