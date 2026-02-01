@@ -139,11 +139,13 @@ export function getTools() {
       type: "object",
       properties: {
         project: { type: "string" },
-        card_table_id: { type: "integer" },
+        card_table_id: { type: "integer", nullable: true },
         max_cards_per_column: { type: "integer" },
-        include_details: { type: "boolean" }
+        include_details: { type: "boolean" },
+        max_boards: { type: "integer" },
+        cursor: { type: "integer" }
       },
-      required: ["project", "card_table_id"],
+      required: ["project"],
       additionalProperties: false
     }),
     tool("list_card_table_summaries", "List card table summaries for a project, optionally including card titles.", {

@@ -3243,9 +3243,27 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const tableId = args.card_table_id ? Number(args.card_table_id) : null;
+        const maxCardsPerColumn = Number(args.max_cards_per_column || 50);
+        const includeDetails = !!args.include_details;
+
+        if (!tableId) {
+          const result = await listProjectCardTableContents(ctx, p.id, {
+            includeDetails,
+            maxCardsPerColumn,
+            cursor: args.cursor,
+            maxBoards: Number(args.max_boards || 2)
+          });
+          return ok(id, {
+            project: { id: p.id, name: p.name },
+            card_tables: result.boards || [],
+            count: (result.boards || []).length,
+            next_cursor: result.next_cursor ?? null
+          });
+        }
+
         const result = await listCardTableCards(ctx, p.id, tableId, {
-          maxCardsPerColumn: Number(args.max_cards_per_column || 50),
-          includeDetails: !!args.include_details
+          maxCardsPerColumn,
+          includeDetails
         });
 
         // INTELLIGENT CHAINING: Enrich cards with person/project details
@@ -3285,9 +3303,27 @@ export async function handleMCP(reqBody, ctx) {
         // Fallback to non-enriched cards
         try {
           const p = await projectByName(ctx, args.project);
-          const result = await listCardTableCards(ctx, p.id, Number(args.card_table_id), {
-            maxCardsPerColumn: Number(args.max_cards_per_column || 50),
-            includeDetails: !!args.include_details
+          const tableId = args.card_table_id ? Number(args.card_table_id) : null;
+          const maxCardsPerColumn = Number(args.max_cards_per_column || 50);
+          const includeDetails = !!args.include_details;
+          if (!tableId) {
+            const result = await listProjectCardTableContents(ctx, p.id, {
+              includeDetails,
+              maxCardsPerColumn,
+              cursor: args.cursor,
+              maxBoards: Number(args.max_boards || 2)
+            });
+            return ok(id, {
+              project: { id: p.id, name: p.name },
+              card_tables: result.boards || [],
+              count: (result.boards || []).length,
+              next_cursor: result.next_cursor ?? null,
+              fallback: true
+            });
+          }
+          const result = await listCardTableCards(ctx, p.id, tableId, {
+            maxCardsPerColumn,
+            includeDetails
           });
           return ok(id, {
             project: { id: p.id, name: p.name },
