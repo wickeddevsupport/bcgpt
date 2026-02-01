@@ -196,6 +196,14 @@ export function getTools() {
       required: ["payload_key"],
       additionalProperties: false
     }),
+    tool("export_cached_payload", "Export a cached payload to a JSON file and return the file path.", {
+      type: "object",
+      properties: {
+        payload_key: { type: "string" }
+      },
+      required: ["payload_key"],
+      additionalProperties: false
+    }),
     tool("create_card", "Create a card in a card table.", {
       type: "object",
       properties: {

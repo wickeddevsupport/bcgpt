@@ -52,6 +52,8 @@
 // ============================================================================
 
 import crypto from "crypto";
+import fs from "fs";
+import path from "path";
 import { basecampFetch, basecampFetchAll } from "./basecamp.js";
 import { resolveByName, resolveBestEffort } from "./resolvers.js";
 import { indexSearchItem, searchIndex } from "./db.js";
@@ -71,6 +73,7 @@ function fail(id, error) { return { jsonrpc: "2.0", id, error }; }function logDe
 // Large payload cache (in-memory, short-lived)
 const largePayloadCache = new Map();
 const LARGE_CACHE_LIMIT = 10;
+const LARGE_EXPORT_DIR = path.join(process.cwd(), "exports");
 
 function putLargePayload(payload, { chunkSizeBoards = 1 } = {}) {
   const key = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString("hex");
@@ -95,6 +98,18 @@ function getLargePayloadChunk(key, index = 0) {
   const chunk = entry.chunks[idx] || [];
   const next_index = idx + 1 < entry.chunks.length ? idx + 1 : null;
   return { chunk, next_index, done: next_index == null, total_chunks: entry.chunks.length };
+}
+
+function exportLargePayloadToFile(key) {
+  const entry = largePayloadCache.get(key);
+  if (!entry) return null;
+  if (!fs.existsSync(LARGE_EXPORT_DIR)) fs.mkdirSync(LARGE_EXPORT_DIR, { recursive: true });
+  const allBoards = entry.chunks.flat();
+  const payload = { card_tables: allBoards };
+  const filePath = path.join(LARGE_EXPORT_DIR, `card_tables_${key}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), "utf8");
+  const sizeBytes = fs.statSync(filePath).size;
+  return { file_path: filePath, size_bytes: sizeBytes, board_count: allBoards.length };
 }
 
 function toolError(code, message, extra = {}) {
@@ -3076,6 +3091,7 @@ export async function handleMCP(reqBody, ctx) {
               cacheChunkBoards: 1
             });
             if (step?.payload_key) {
+              const exported = exportLargePayloadToFile(step.payload_key);
               return ok(id, {
                 query,
                 action: "list_project_card_table_contents",
@@ -3084,9 +3100,10 @@ export async function handleMCP(reqBody, ctx) {
                   payload_key: step.payload_key,
                   chunk_count: step.chunk_count,
                   total_cards: step.total_cards,
-                  count: step.total
+                  count: step.total,
+                  export: exported || null
                 },
-                note: "Full details cached; fetch chunks with get_cached_payload_chunk."
+                note: "Full details cached; export available."
               });
             }
             if (Array.isArray(step?.boards)) tables.push(...step.boards);
@@ -3513,6 +3530,18 @@ export async function handleMCP(reqBody, ctx) {
       } catch (e) {
         console.error(`[get_cached_payload_chunk] Error:`, e.message);
         return fail(id, { code: "GET_CACHED_PAYLOAD_CHUNK_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "export_cached_payload") {
+      try {
+        const payloadKey = args.payload_key;
+        const result = exportLargePayloadToFile(payloadKey);
+        if (!result) return fail(id, { code: "CACHE_MISS", message: "Payload not found in cache." });
+        return ok(id, { payload_key: payloadKey, ...result });
+      } catch (e) {
+        console.error(`[export_cached_payload] Error:`, e.message);
+        return fail(id, { code: "EXPORT_CACHED_PAYLOAD_ERROR", message: e.message });
       }
     }
 
