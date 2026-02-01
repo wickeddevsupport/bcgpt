@@ -692,25 +692,30 @@ async function resolveCardTableFromDock(ctx, projectId) {
 }
 
 async function listCardTables(ctx, projectId) {
-  // Dock-first: card tables are tool-gated and can 404 if disabled.
+  // 1) Try the canonical list endpoint first (returns all tables when available).
+  try {
+    const tables = await apiAll(ctx, `/buckets/${projectId}/card_tables.json`);
+    if (Array.isArray(tables) && tables.length) return tables;
+  } catch (e) {
+    if (!isApiError(e, 404) && !isApiError(e, 403)) throw e;
+    // fall through to dock/recordings strategy
+  }
+
+  // 2) Dock-first fallback (may return a single table).
   const dock = await getDock(ctx, projectId);
   const card = dockFind(dock, ["card_table", "card_tables", "kanban", "kanban_board"]);
+  const results = [];
 
   if (card) {
     try {
       if (card.url) {
-        // Some docks return a list URL, others a single resource URL.
         const obj = await api(ctx, card.url);
-        return Array.isArray(obj) ? obj : [obj];
-      }
-      if (card.id) {
+        if (Array.isArray(obj)) results.push(...obj);
+        else if (obj) results.push(obj);
+      } else if (card.id) {
         const obj = await api(ctx, `/buckets/${projectId}/card_tables/${card.id}.json`);
-        return Array.isArray(obj) ? obj : [obj];
+        if (obj) results.push(obj);
       }
-      throw toolError("TOOL_UNAVAILABLE", "Card tables tool is enabled but missing a usable URL.", {
-        tool: "card_tables",
-        projectId,
-      });
     } catch (inner) {
       if (isApiError(inner, 404) || isApiError(inner, 403)) {
         throw toolError("TOOL_UNAVAILABLE", "Card tables tool is not accessible for this project.", {
@@ -724,11 +729,21 @@ async function listCardTables(ctx, projectId) {
     }
   }
 
-  // Fallback: attempt the generic list endpoint if dock info is missing.
+  // 3) If we only got one (or none), use recordings list to discover all boards.
   try {
-    return apiAll(ctx, `/buckets/${projectId}/card_tables.json`);
+    const recs = await apiAll(ctx, `/projects/recordings.json?type=${encodeURIComponent("Kanban::Board")}&bucket=${projectId}`);
+    const boards = Array.isArray(recs) ? recs : [];
+    if (boards.length) {
+      const fetched = await mapLimit(boards, 2, async (r) => {
+        if (r?.url) return api(ctx, r.url);
+        return null;
+      });
+      for (const b of fetched) {
+        if (b) results.push(b);
+      }
+    }
   } catch (e) {
-    if (isApiError(e, 404) || isApiError(e, 403)) {
+    if (!results.length && (isApiError(e, 404) || isApiError(e, 403))) {
       throw toolError("TOOL_NOT_ENABLED", "card_tables tool is not enabled for this project.", {
         tool: "card_tables",
         projectId,
@@ -736,8 +751,19 @@ async function listCardTables(ctx, projectId) {
         status: e.status,
       });
     }
-    throw e;
   }
+
+  // Dedupe by id.
+  const seen = new Set();
+  const deduped = [];
+  for (const t of results) {
+    const id = t?.id;
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    deduped.push(t);
+  }
+
+  return deduped;
 }
 
 async function getCardTable(ctx, projectId, cardTableId) {
@@ -5105,8 +5131,44 @@ export async function handleMCP(reqBody, ctx) {
 
     // Raw
     if (name === "basecamp_request" || name === "basecamp_raw") {
-      const data = await api(ctx, args.path, { method: args.method || "GET", body: args.body });
-      return ok(id, data);
+      const method = args.method || "GET";
+      try {
+        const data = await api(ctx, args.path, { method, body: args.body });
+        return ok(id, data);
+      } catch (e) {
+        // Auto-recover common card table path mistakes for GETs.
+        if (method.toUpperCase() === "GET" && isApiError(e, 404)) {
+          const path = String(args.path || "");
+          const tableMatch = path.match(/^\/buckets\/(\d+)\/card_tables\/(\d+)\.json$/);
+          const cardsMatch = path.match(/^\/buckets\/(\d+)\/card_tables\/(\d+)\/cards\.json$/);
+
+          if (tableMatch) {
+            const projectId = Number(tableMatch[1]);
+            const tables = await listCardTables(ctx, projectId);
+            const tableId = Number(tableMatch[2]);
+            const table = (tables || []).find(t => Number(t?.id) === tableId) || (tables || [])[0] || null;
+            if (table) return ok(id, { resolved: true, data: table, tables_count: (tables || []).length });
+          }
+
+          if (cardsMatch) {
+            const projectId = Number(cardsMatch[1]);
+            const tables = await listCardTables(ctx, projectId);
+            const tableId = Number(cardsMatch[2]);
+            const table = (tables || []).find(t => Number(t?.id) === tableId) || (tables || [])[0] || null;
+            if (table?.lists) {
+              const allCards = [];
+              for (const column of table.lists) {
+                if (column.cards_url) {
+                  const cards = await apiAll(ctx, column.cards_url);
+                  allCards.push(...(Array.isArray(cards) ? cards : []));
+                }
+              }
+              return ok(id, { resolved: true, card_table_id: table?.id || null, data: allCards, tables_count: (tables || []).length });
+            }
+          }
+        }
+        throw e;
+      }
     }
 
     return fail(id, { code: "UNKNOWN_TOOL", message: "Unknown tool name" });
