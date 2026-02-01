@@ -322,6 +322,81 @@ async function example_project_dashboard(ctx, args) {
 }
 
 /**
+ * EXAMPLE 8: Full project summary with chunked card tables
+ *
+ * Uses list_project_card_table_contents to fetch all boards with pagination
+ * and chunked payloads. Designed for "summarize project" or "dump boards" requests.
+ */
+async function example_full_project_summary(ctx, args) {
+  try {
+    const { projectByName, listProjectCardTableContents, getCachedPayloadChunk } = require('./mcp.js');
+    const project = await projectByName(ctx, args.project);
+
+    const initial = await listProjectCardTableContents(ctx, {
+      project: project.name,
+      include_details: true,
+      auto_all: true,
+      cache_output: true,
+      cache_chunk_boards: 1,
+    });
+
+    const payload = {
+      project: project,
+      card_tables: initial.card_tables || [],
+      metadata: initial._meta || null,
+      cache_key: initial.payload_key || initial.cache_key,
+    };
+
+    // Fetch remaining chunks if cached
+    if (payload.cache_key && initial.card_tables_cached) {
+      let idx = 1;
+      while (true) {
+        const chunk = await getCachedPayloadChunk(ctx, { payload_key: payload.cache_key, index: idx });
+        if (!chunk || !Array.isArray(chunk.chunk) || chunk.chunk.length === 0) break;
+        payload.card_tables.push(...chunk.chunk);
+        if (chunk.done) break;
+        idx += 1;
+      }
+    }
+
+    return {
+      summary: {
+        project_id: project.id,
+        project_name: project.name,
+        total_boards: payload.card_tables.length,
+      },
+      data: payload,
+    };
+  } catch (error) {
+    console.error(`[full_project_summary] Error:`, error.message);
+    throw error;
+  }
+}
+
+/**
+ * EXAMPLE 9: Events timeline with full pagination metadata
+ *
+ * For "show all changes" requests. Uses list_recording_events with iteration metadata.
+ */
+async function example_events_timeline(ctx, args) {
+  try {
+    const { projectByName, listRecordingEvents } = require('./mcp.js');
+    const project = await projectByName(ctx, args.project);
+    const events = await listRecordingEvents(ctx, project.id, args.recording_id);
+    return {
+      project: project.name,
+      recording_id: args.recording_id,
+      count: events.count,
+      events: events.events,
+      meta: events._meta || null,
+    };
+  } catch (error) {
+    console.error(`[events_timeline] Error:`, error.message);
+    throw error;
+  }
+}
+
+/**
  * IMPLEMENTATION STEPS
  * 
  * To add intelligent chaining to mcp.js:
@@ -351,5 +426,15 @@ module.exports = {
   example_list_todos_due,
   example_smart_query,
   example_robust_search,
-  example_project_dashboard
+  example_project_dashboard,
+  example_full_project_summary,
+  example_events_timeline,
+  sample_prompts: [
+    "Summarize the Sales project with all card tables and open todos.",
+    "Dump every card in the Internal Wicked Websites project (full details).",
+    "Show all changes on todo 12345 in project Sales.",
+    "List all inbox forwards and replies for Client Support.",
+    "Generate a weekly timesheet summary for project X.",
+    "Find all questionnaire answers for onboarding Q1."
+  ]
 };

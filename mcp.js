@@ -65,7 +65,8 @@ import * as intelligent from './intelligent-integration.js';
 
 // ---------- JSON-RPC helpers ----------
 function ok(id, result) { return { jsonrpc: "2.0", id, result }; }
-function fail(id, error) { return { jsonrpc: "2.0", id, error }; }function logDebug(...args) {
+function fail(id, error) { return { jsonrpc: "2.0", id, error: normalizeErrorPayload(error) }; }
+function logDebug(...args) {
   if (!process?.env?.DEBUG) return;
   console.log(...args);
 }
@@ -157,6 +158,24 @@ function unwrapItemsWithMeta(input) {
   return { items: [], meta: undefined };
 }
 
+function coverageFromMeta(meta) {
+  if (!meta || typeof meta !== "object") return null;
+  const pages = Number(meta.pages ?? meta.page_count ?? meta.pageCount);
+  const perPage = Number(meta.per_page ?? meta.perPage);
+  const total = Number(meta.total_items ?? meta.total ?? meta.totalItems);
+  const maxPages = Number(meta.max_pages ?? meta.maxPages);
+  const nextUrl = meta.next_url ?? meta.nextUrl ?? null;
+  const truncated = meta.truncated === true || (Number.isFinite(maxPages) && Number.isFinite(pages) && pages >= maxPages && !!nextUrl);
+  return {
+    pages_fetched: Number.isFinite(pages) ? pages : null,
+    per_page: Number.isFinite(perPage) ? perPage : null,
+    total_items: Number.isFinite(total) ? total : null,
+    max_pages: Number.isFinite(maxPages) ? maxPages : null,
+    next_url: nextUrl,
+    truncated
+  };
+}
+
 function buildListPayload(collectionKey, items, options = {}) {
   const unwrapped = unwrapItemsWithMeta(items);
   const cached = maybeCacheCollectionResult(collectionKey, unwrapped.items, options);
@@ -171,6 +190,11 @@ function buildListPayload(collectionKey, items, options = {}) {
   };
   const meta = options.meta || unwrapped.meta;
   if (meta) payload._meta = meta;
+  const coverage = options.coverage || coverageFromMeta(meta) || {
+    items_returned: cached.total,
+    truncated: null
+  };
+  if (coverage) payload.coverage = coverage;
   return payload;
 }
 
@@ -184,7 +208,63 @@ function attachCachedCollection(target, collectionKey, items, options = {}) {
   target[`${collectionKey}_chunk_count`] = cached.chunk_count;
   target[`${collectionKey}_export`] = cached.export;
   if (unwrapped.meta) target[`${collectionKey}_meta`] = unwrapped.meta;
+  const coverage = options.coverage || coverageFromMeta(unwrapped.meta) || {
+    items_returned: cached.total,
+    truncated: null
+  };
+  if (coverage) target[`${collectionKey}_coverage`] = coverage;
   return target;
+}
+
+const ERROR_TAXONOMY = {
+  NOT_AUTHENTICATED: { category: "auth", retryable: false, action: "reauth" },
+  NO_ACCOUNT_ID: { category: "config", retryable: false },
+  BASECAMP_API_ERROR: { category: "api" },
+  BASECAMP_FETCH_FAILED: { category: "network", retryable: true },
+  BASECAMP_REQUEST_FAILED: { category: "network", retryable: true },
+  CIRCUIT_OPEN: { category: "resilience", retryable: true, action: "retry_later" },
+  RESPONSE_TOO_LARGE: { category: "payload", retryable: true, action: "chunk" },
+  TOOL_NOT_ENABLED: { category: "feature", retryable: false },
+  TOOL_UNAVAILABLE: { category: "feature", retryable: false },
+  RESOURCE_NOT_FOUND: { category: "data", retryable: false },
+  NO_MATCH: { category: "input", retryable: false },
+  BAD_REQUEST: { category: "input", retryable: false },
+  INVALID_INPUT: { category: "input", retryable: false },
+  TOOL_ERROR: { category: "internal", retryable: false },
+};
+
+function normalizeErrorPayload(error) {
+  if (!error) return { code: "UNKNOWN_ERROR", message: "Unknown error", category: "unknown", retryable: false };
+  if (typeof error === "string") return { code: "ERROR", message: error, category: "unknown", retryable: false };
+  if (error.error && typeof error.error === "object") return normalizeErrorPayload(error.error);
+
+  const code = error.code || "UNKNOWN_ERROR";
+  const message = error.message || String(error);
+  const taxonomy = ERROR_TAXONOMY[code] || {};
+
+  let retryable = taxonomy.retryable;
+  if (code === "BASECAMP_API_ERROR") {
+    retryable = [429, 500, 502, 503, 504].includes(error.status);
+  }
+  if (retryable == null) retryable = false;
+
+  const payload = {
+    code,
+    message,
+    category: taxonomy.category || "unknown",
+    retryable,
+  };
+  if (taxonomy.action) payload.action = taxonomy.action;
+  if (error.status != null) payload.status = error.status;
+  if (error.retry_after_ms != null) payload.retry_after_ms = error.retry_after_ms;
+  if (error.details) payload.details = error.details;
+
+  for (const [key, value] of Object.entries(error)) {
+    if (key === "message" || key === "code") continue;
+    if (payload[key] == null) payload[key] = value;
+  }
+
+  return payload;
 }
 
 function toolError(code, message, extra = {}) {
@@ -611,6 +691,23 @@ async function listTodosForProject(ctx, projectId) {
     return { todolistId: l.id, todolist: l.name, todos };
   });
   return groups;
+}
+
+function summarizeTodoGroups(groups) {
+  const summary = {
+    lists_total: Array.isArray(groups) ? groups.length : 0,
+    todos_total: 0,
+    todos_open: 0,
+    todos_completed: 0
+  };
+  for (const g of groups || []) {
+    for (const t of g.todos || []) {
+      summary.todos_total += 1;
+      if (t.completed || t.completed_at) summary.todos_completed += 1;
+      else summary.todos_open += 1;
+    }
+  }
+  return summary;
 }
 
 function capTodoGroups(groups, maxTodos) {
@@ -1205,6 +1302,7 @@ async function summarizeCardTable(ctx, projectId, table, {
 
 async function listProjectCardTableContents(ctx, projectId, {
   includeDetails = false,
+  includeCards = true,
   maxCardsPerColumn = 0,
   cursor = 0,
   maxBoards = 2,
@@ -1233,7 +1331,7 @@ async function listProjectCardTableContents(ctx, projectId, {
 
     for (const t of slice) {
       const summary = await summarizeCardTable(ctx, projectId, t, {
-        includeCards: true,
+        includeCards,
         maxCardsPerColumn
       });
       if (!includeDetails) {
@@ -1268,14 +1366,37 @@ async function listProjectCardTableContents(ctx, projectId, {
     : (start + count < tables.length ? start + count : null);
 
   const totalCards = boards.reduce((sum, b) => sum + (Number(b.total_cards) || 0), 0);
+  const boardSummaries = boards.map((b) => ({
+    id: b.id,
+    title: b.title,
+    status: b.status,
+    total_columns: b.total_columns,
+    total_cards: b.total_cards,
+    truncated: b.truncated
+  }));
+  const coverage = {
+    total_boards: Array.isArray(tables) ? tables.length : 0,
+    boards_returned: boards.length,
+    cards_total: totalCards,
+    include_details: !!includeDetails,
+    include_cards: !!includeCards,
+    max_cards_per_column: Number(maxCardsPerColumn) || 0,
+    cursor: autoAll ? idx : start,
+    next_cursor,
+    truncated: capActive && boards.length >= limit
+  };
   const shouldCache = !!cacheOutput || !!autoAll || !!includeDetails || totalCards > DEFAULT_INLINE_LIMIT;
   if (shouldCache) {
     const payload = { card_tables: boards };
     const cached = putLargePayload(payload, { chunkSizeBoards: cacheChunkBoards });
+    const exported = exportLargePayloadToFile(cached.key);
     return {
       payload_key: cached.key,
       chunk_count: cached.chunkCount,
       first_chunk: cached.firstChunk,
+      export: exported,
+      summary: { boards: boardSummaries, total_boards: coverage.total_boards, total_cards: totalCards },
+      coverage,
       total: tables.length,
       total_cards: totalCards,
       next_cursor,
@@ -1284,7 +1405,15 @@ async function listProjectCardTableContents(ctx, projectId, {
     };
   }
 
-  return { boards, next_cursor, total: tables.length, cursor: autoAll ? idx : start, truncated: capActive && boards.length >= limit };
+  return {
+    boards,
+    summary: { boards: boardSummaries, total_boards: coverage.total_boards, total_cards: totalCards },
+    coverage,
+    next_cursor,
+    total: tables.length,
+    cursor: autoAll ? idx : start,
+    truncated: capActive && boards.length >= limit
+  };
 }
 
 async function listCardTableSummaries(ctx, projectId, {
@@ -3242,6 +3371,47 @@ export async function handleMCP(reqBody, ctx) {
         return payload;
       };
 
+      const computeConfidence = ({ analysis, hasProject, hasResources, hasConstraints, keywordBoost }) => {
+        let score = 0.2;
+        if (analysis?.pattern && analysis.pattern !== "generic") score += 0.25;
+        if (hasProject) score += 0.3;
+        if (hasResources) score += 0.1;
+        if (hasConstraints) score += 0.1;
+        if (keywordBoost) score += 0.1;
+        return Math.min(1, Math.max(0, score));
+      };
+
+      const extractProjectHints = (raw) => {
+        const hints = [];
+        const quoted = String(raw || "").match(/\"([^\"]+)\"/g) || [];
+        for (const q of quoted) {
+          const t = q.replace(/^\"|\"$/g, "").trim();
+          if (t) hints.push(t);
+        }
+        const projMatch = String(raw || "").match(/project\\s+([^,.;]+)/i);
+        if (projMatch?.[1]) hints.push(projMatch[1].trim());
+        return hints;
+      };
+
+      const resolveProjectBestEffort = (rawQuery, projects = []) => {
+        if (!projects.length) return { project: null, candidates: [] };
+        const lower = String(rawQuery || "").toLowerCase();
+        const direct = projects.filter(p => p?.name && lower.includes(String(p.name).toLowerCase()));
+        if (direct.length === 1) return { project: direct[0], candidates: direct };
+        if (direct.length > 1) {
+          const ranked = [...direct].sort((a, b) => (String(b.name || "").length - String(a.name || "").length));
+          return { project: ranked[0], candidates: ranked, ambiguous: true };
+        }
+        const hints = extractProjectHints(rawQuery);
+        for (const hint of hints) {
+          const picked = resolveBestEffort(projects, hint);
+          if (picked) return { project: picked, candidates: [picked] };
+        }
+        const fallback = resolveBestEffort(projects, rawQuery);
+        if (fallback) return { project: fallback, candidates: [fallback], ambiguous: true };
+        return { project: null, candidates: [] };
+      };
+
       const extractSearchQuery = (raw) => {
         const stop = [
           "find", "show", "search", "lookup", "first", "latest", "recent", "containing", "with", "about",
@@ -3277,49 +3447,116 @@ export async function handleMCP(reqBody, ctx) {
         const lower = query.toLowerCase();
         const searchQuery = extractSearchQuery(query) || query;
         const wantsComments = /comment(s)?/.test(lower);
+        const keywordBoost = /(summarize|summary|dump|list all|everything|full|all cards|all todos|all messages)/i.test(query);
+        const wantsSummary = /(summarize|summary|overview|status report|project report)/i.test(query);
         const ctx_intel = new RequestContext(ctx, `smart_action: ${query}`);
         await ctx_intel.preloadEssentials({ loadPeople: true, loadProjects: true });
 
         let project = null;
         let dock = null;
+        let projectResolution = { project: null, candidates: [] };
         if (args.project) {
           project = await projectByName(ctx, args.project);
           dock = await getDock(ctx, project.id);
+          projectResolution = { project, candidates: [project], ambiguous: false, source: "arg" };
+        } else {
+          const projects = Object.values(ctx_intel.cache.projects || {});
+          projectResolution = resolveProjectBestEffort(query, projects);
+          if (projectResolution?.project) {
+            project = projectResolution.project;
+            dock = await getDock(ctx, project.id);
+          }
         }
+
+        const confidence = computeConfidence({
+          analysis,
+          hasProject: !!project,
+          hasResources: (analysis?.resources || []).length > 0,
+          hasConstraints: Boolean(analysis?.constraints?.dueDate || analysis?.constraints?.dateRange || analysis?.constraints?.status),
+          keywordBoost
+        });
 
         // Quick intent rules
         if (lower.includes("daily report")) {
           const date = analysis.constraints.dueDate || new Date().toISOString().slice(0, 10);
           const result = await intelligent.executeDailyReport(ctx, date);
-          return ok(id, { query, action: "daily_report", result });
+          return ok(id, { query, action: "daily_report", confidence, result });
+        }
+
+        if (wantsSummary && project) {
+          const [cardTables, todoGroups] = await Promise.all([
+            listProjectCardTableContents(ctx, project.id, {
+              includeDetails: false,
+              includeCards: false,
+              maxCardsPerColumn: 0,
+              cursor: 0,
+              maxBoards: 2,
+              autoAll: true,
+              cacheOutput: true,
+              cacheChunkBoards: 1
+            }),
+            listTodosForProject(ctx, project.id)
+          ]);
+          const todoSummary = summarizeTodoGroups(todoGroups);
+          return ok(id, {
+            query,
+            action: "project_summary",
+            confidence,
+            project: { id: project.id, name: project.name },
+            summary: {
+              card_tables: cardTables.summary || null,
+              todos: todoSummary
+            },
+            coverage: {
+              card_tables: cardTables.coverage || null,
+              todos: todoSummary
+            },
+            payload_key: cardTables.payload_key || null,
+            chunk_count: cardTables.chunk_count || null,
+            export: cardTables.export || null,
+            note: cardTables.payload_key ? "Full data cached; export available." : undefined
+          });
         }
 
         if (lower.includes("assigned to me") || lower.includes("my todos")) {
           const result = await callTool("list_assigned_to_me", { project: args.project });
-          return ok(id, { query, action: "list_assigned_to_me", result });
+          return ok(id, { query, action: "list_assigned_to_me", confidence, result });
         }
 
         if (analysis.pattern === "person_finder" && analysis.personNames.length) {
           const person = analysis.personNames[0];
           if (args.project) {
             const result = await callTool("get_person_assignments", { project: args.project, person });
-            return ok(id, { query, action: "get_person_assignments", result });
+            return ok(id, { query, action: "get_person_assignments", confidence, result });
           }
         }
 
         if (analysis.constraints.dueDate) {
           if (args.project) {
             const result = await callTool("list_todos_due", { date: analysis.constraints.dueDate, include_overdue: lower.includes("overdue"), project: args.project });
-            return ok(id, { query, action: "list_todos_due", result });
+            return ok(id, { query, action: "list_todos_due", confidence, result });
           }
           const rows = await listAllOpenTodos(ctx);
           const todos = rows.filter(r => r.due_on === analysis.constraints.dueDate).map(r => r.raw).filter(Boolean);
-          return ok(id, { query, action: "list_todos_due_fallback", date: analysis.constraints.dueDate, todos, count: todos.length });
+          return ok(id, { query, action: "list_todos_due_fallback", confidence, date: analysis.constraints.dueDate, todos, count: todos.length });
         }
 
         if (analysis.pattern === "assignment" && args.project) {
           const result = await callTool("assignment_report", { project: args.project });
-          return ok(id, { query, action: "assignment_report", result });
+          return ok(id, { query, action: "assignment_report", confidence, result });
+        }
+
+        if (confidence < 0.45 && !project) {
+          const result = await callTool("search_recordings", { query: searchQuery, type: wantsComments ? "comment" : undefined });
+          return ok(id, {
+            query,
+            action: "search_recordings_low_confidence",
+            confidence,
+            ambiguous: true,
+            candidates: (projectResolution.candidates || []).map(p => ({ id: p.id, name: p.name })),
+            result,
+            note: "Ambiguous request; performed global search fallback."
+          });
         }
 
         if (args.project && (lower.includes("kanban") || lower.includes("card table") || lower.includes("card tables") || lower.includes("cards"))) {
@@ -3336,6 +3573,7 @@ export async function handleMCP(reqBody, ctx) {
           while (next != null && tables.length < maxTotal) {
             const step = await listProjectCardTableContents(ctx, project.id, {
               includeDetails: wantsCards,
+              includeCards: true,
               maxCardsPerColumn,
               cursor: next,
               maxBoards: 2,
@@ -3349,12 +3587,15 @@ export async function handleMCP(reqBody, ctx) {
               return ok(id, {
                 query,
                 action: "list_project_card_table_contents",
+                confidence,
                 result: {
                   project: { id: project.id, name: project.name },
                   payload_key: step.payload_key,
                   chunk_count: step.chunk_count,
                   total_cards: step.total_cards,
                   count: step.total,
+                  summary: step.summary,
+                  coverage: step.coverage,
                   export: exported || null,
                   first_chunk: step.first_chunk || []
                 },
@@ -3369,6 +3610,7 @@ export async function handleMCP(reqBody, ctx) {
           return ok(id, {
             query,
             action: "list_project_card_table_contents",
+            confidence,
             result: {
               project: { id: project.id, name: project.name },
               card_tables: tables,
@@ -3410,24 +3652,24 @@ export async function handleMCP(reqBody, ctx) {
               if (!wantsComments) {
                 const todos = await searchTodosInProject(project.id);
                 if (todos.length) {
-                  return ok(id, { query, action: "search_todos_fallback", project: { id: project.id, name: project.name }, todos, count: todos.length, dock });
+                  return ok(id, { query, action: "search_todos_fallback", confidence, project: { id: project.id, name: project.name }, todos, count: todos.length, dock });
                 }
               }
               const local = searchLocalIndex(searchQuery, { projectId: project.id });
               if (local.length) {
-                return ok(id, { query, action: "search_index_fallback", project: { id: project.id, name: project.name }, results: local, count: local.length, dock });
+                return ok(id, { query, action: "search_index_fallback", confidence, project: { id: project.id, name: project.name }, results: local, count: local.length, dock });
               }
             }
-            return ok(id, { query, action: "search_recordings", result, project: { id: project.id, name: project.name }, dock });
+            return ok(id, { query, action: "search_recordings", confidence, result, project: { id: project.id, name: project.name }, dock });
           }
           const result = await callTool("search_recordings", { query: searchQuery, type: wantsComments ? "comment" : undefined });
           if ((result?.results || []).length === 0) {
             const local = searchLocalIndex(searchQuery);
             if (local.length) {
-              return ok(id, { query, action: "search_index_fallback", results: local, count: local.length });
+              return ok(id, { query, action: "search_index_fallback", confidence, results: local, count: local.length });
             }
           }
-          return ok(id, { query, action: "search_recordings", result });
+          return ok(id, { query, action: "search_recordings", confidence, result });
         }
 
         // Default: global search
@@ -3435,10 +3677,10 @@ export async function handleMCP(reqBody, ctx) {
         if ((result?.results || []).length === 0) {
           const local = searchLocalIndex(searchQuery);
           if (local.length) {
-            return ok(id, { query, action: "search_index_fallback", results: local, count: local.length });
+            return ok(id, { query, action: "search_index_fallback", confidence, results: local, count: local.length });
           }
         }
-        return ok(id, { query, action: "search_recordings", result });
+        return ok(id, { query, action: "search_recordings", confidence, result });
       } catch (e) {
         console.error(`[smart_action] Error:`, e.message);
         try {
@@ -3514,7 +3756,17 @@ export async function handleMCP(reqBody, ctx) {
           }))
         );
 
-        return ok(id, { project: { id: p.id, name: p.name }, metrics: ctx_intel.getMetrics(), sources: args.debug ? sources : undefined, ...buildListPayload("card_tables", enrichedTables) });
+        const coverage = {
+          total_boards: Array.isArray(enrichedTables) ? enrichedTables.length : 0,
+          include_columns: !!includeColumns,
+          sources: sources.map(s => s.source)
+        };
+        return ok(id, {
+          project: { id: p.id, name: p.name },
+          metrics: ctx_intel.getMetrics(),
+          sources: args.debug ? sources : undefined,
+          ...buildListPayload("card_tables", enrichedTables, { coverage })
+        });
       } catch (e) {
         console.error(`[list_card_tables] Error:`, e.message);
         // Tool disabled / unavailable -> return empty with notice
@@ -3564,7 +3816,11 @@ export async function handleMCP(reqBody, ctx) {
             }
             return base;
           });
-          return ok(id, { project: { id: p.id, name: p.name }, fallback: true, ...buildListPayload("card_tables", normalizedTables) });
+          const coverage = {
+            total_boards: Array.isArray(normalizedTables) ? normalizedTables.length : 0,
+            include_columns: !!includeColumns
+          };
+          return ok(id, { project: { id: p.id, name: p.name }, fallback: true, ...buildListPayload("card_tables", normalizedTables, { coverage }) });
         } catch (fbErr) {
           return fail(id, { code: "LIST_CARD_TABLES_ERROR", message: fbErr.message });
         }
@@ -3586,7 +3842,8 @@ export async function handleMCP(reqBody, ctx) {
           }))
         );
 
-        return ok(id, { project: { id: p.id, name: p.name }, metrics: ctx_intel.getMetrics(), ...buildListPayload("columns", enrichedCols) });
+        const coverage = { columns_total: Array.isArray(enrichedCols) ? enrichedCols.length : 0 };
+        return ok(id, { project: { id: p.id, name: p.name }, metrics: ctx_intel.getMetrics(), ...buildListPayload("columns", enrichedCols, { coverage }) });
       } catch (e) {
         console.error(`[list_card_table_columns] Error:`, e.message);
         // Tool disabled / table not found -> return empty with notice
@@ -3605,7 +3862,8 @@ export async function handleMCP(reqBody, ctx) {
         try {
           const p = await projectByName(ctx, args.project);
           const cols = await listCardTableColumns(ctx, p.id, Number(args.card_table_id));
-          return ok(id, { project: { id: p.id, name: p.name }, fallback: true, ...buildListPayload("columns", cols) });
+          const coverage = { columns_total: Array.isArray(cols) ? cols.length : 0 };
+          return ok(id, { project: { id: p.id, name: p.name }, fallback: true, ...buildListPayload("columns", cols, { coverage }) });
         } catch (fbErr) {
           return fail(id, { code: "LIST_CARD_TABLE_COLUMNS_ERROR", message: fbErr.message });
         }
@@ -3622,6 +3880,7 @@ export async function handleMCP(reqBody, ctx) {
         if (!tableId) {
           const result = await listProjectCardTableContents(ctx, p.id, {
             includeDetails,
+            includeCards: true,
             maxCardsPerColumn,
             cursor: args.cursor,
             maxBoards: Number(args.max_boards || 2),
@@ -3633,6 +3892,9 @@ export async function handleMCP(reqBody, ctx) {
             project: { id: p.id, name: p.name },
             payload_key: result.payload_key,
             chunk_count: result.chunk_count,
+            export: result.export,
+            summary: result.summary,
+            coverage: result.coverage,
             total_cards: result.total_cards,
             count: result.total,
             next_cursor: result.next_cursor ?? null,
@@ -3656,12 +3918,22 @@ export async function handleMCP(reqBody, ctx) {
             getProject: (id) => ctx_intel.getProject(id)
           }))
         );
+        const cardsTotal = (result.columns || []).reduce((sum, col) => sum + (Number(col.cards_count) || 0), 0);
+        const coverage = {
+          columns_total: Array.isArray(result.columns) ? result.columns.length : 0,
+          cards_total: cardsTotal,
+          cards_returned: enrichedCards.length,
+          include_details: !!includeDetails,
+          max_cards_per_column: maxCardsPerColumn || 0,
+          truncated: !!result.truncated
+        };
 
         return ok(id, {
           project: { id: p.id, name: p.name },
           card_table_id: tableId,
           columns: result.columns || [],
           truncated: !!result.truncated,
+          coverage,
           metrics: ctx_intel.getMetrics(),
           ...buildListPayload("cards", enrichedCards, { forceCache: includeDetails })
         });
@@ -3688,6 +3960,7 @@ export async function handleMCP(reqBody, ctx) {
           if (!tableId) {
             const result = await listProjectCardTableContents(ctx, p.id, {
               includeDetails,
+              includeCards: true,
               maxCardsPerColumn,
               cursor: args.cursor,
               maxBoards: Number(args.max_boards || 2),
@@ -3699,6 +3972,9 @@ export async function handleMCP(reqBody, ctx) {
               project: { id: p.id, name: p.name },
               payload_key: result.payload_key,
               chunk_count: result.chunk_count,
+              export: result.export,
+              summary: result.summary,
+              coverage: result.coverage,
               total_cards: result.total_cards,
               count: result.total,
               next_cursor: result.next_cursor ?? null,
@@ -3711,10 +3987,20 @@ export async function handleMCP(reqBody, ctx) {
             maxCardsPerColumn,
             includeDetails
           });
+          const cardsTotal = (result.columns || []).reduce((sum, col) => sum + (Number(col.cards_count) || 0), 0);
+          const coverage = {
+            columns_total: Array.isArray(result.columns) ? result.columns.length : 0,
+            cards_total: cardsTotal,
+            cards_returned: (result.cards || []).length,
+            include_details: !!includeDetails,
+            max_cards_per_column: maxCardsPerColumn || 0,
+            truncated: !!result.truncated
+          };
           return ok(id, {
             project: { id: p.id, name: p.name },
             columns: result.columns || [],
             truncated: !!result.truncated,
+            coverage,
             fallback: true,
             ...buildListPayload("cards", result.cards || [], { forceCache: includeDetails })
           });
@@ -3759,13 +4045,17 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const autoAll = args.auto_all == null ? true : !!args.auto_all;
-        const cacheOutput = args.cache_output == null ? (autoAll || !!args.include_details) : !!args.cache_output;
+        const includeDetails = !!args.include_details;
+        const includeCards = args.include_cards == null ? true : !!args.include_cards;
+        const fullDump = !!args.full_dump;
+        const cacheOutput = args.cache_output == null ? (autoAll || includeDetails || fullDump) : !!args.cache_output;
         const result = await listProjectCardTableContents(ctx, p.id, {
-          includeDetails: !!args.include_details,
+          includeDetails: includeDetails || fullDump,
+          includeCards: includeCards || fullDump,
           maxCardsPerColumn: args.max_cards_per_column == null ? 0 : Number(args.max_cards_per_column),
           cursor: args.cursor,
           maxBoards: Number(args.max_boards || 2),
-          autoAll,
+          autoAll: fullDump ? true : autoAll,
           maxBoardsTotal: args.max_boards_total == null ? 0 : Number(args.max_boards_total),
           cacheOutput,
           cacheChunkBoards: Number(args.cache_chunk_boards || 1)

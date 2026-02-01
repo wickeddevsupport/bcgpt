@@ -206,13 +206,15 @@ export function getTools() {
       properties: {
         project: { type: "string" },
         include_details: { type: "boolean" },
+        include_cards: { type: "boolean" },
         max_cards_per_column: { type: "integer" },
         max_boards: { type: "integer" },
         cursor: { type: "integer" },
         auto_all: { type: "boolean" },
         max_boards_total: { type: "integer" },
         cache_output: { type: "boolean" },
-        cache_chunk_boards: { type: "integer" }
+        cache_chunk_boards: { type: "integer" },
+        full_dump: { type: "boolean" }
       },
       required: ["project"],
       additionalProperties: false

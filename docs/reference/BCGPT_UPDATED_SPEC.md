@@ -36,6 +36,8 @@ The future spec must explicitly include, at minimum, the following operations (a
 
 ## 5. Error taxonomy and instrumentation
 - Track `BASECAMP_API_ERROR`, `RESPONSE_TOO_LARGE`, `NOT_AUTHENTICATED`, `NO_MATCH`, `CHUNK_INCOMPLETE`. Each tool response should surface the same code so ChatGPT can reason about recovery steps.
+- Error payloads must include: `code`, `message`, `category`, `retryable`, and optional `action` (e.g., `reauth`, `chunk`, `retry_later`), plus `status` when available.
+- Recommended categories: `auth`, `config`, `api`, `network`, `payload`, `feature`, `data`, `input`, `resilience`, `internal`.
 - Log telemetry per tool with `page`, `entries`, `requestId`, `duration`, and `cacheHit` for throttling.
 
 ## 6. Next steps to fully lock the spec (Phase 3.5 → 4 gate)

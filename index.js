@@ -7,6 +7,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 import { handleMCP } from "./mcp.js";
+import { basecampFetch as basecampFetchCore, basecampFetchAll as basecampFetchAllCore, getCircuitStatus as getBasecampCircuitStatus } from "./basecamp.js";
 import {
   getToken,
   setToken,
@@ -416,14 +417,13 @@ async function buildMcpCtx(req) {
 
     // ✅ Provide both single-request AND auto-paginated versions to MCP
     basecampFetch: async (path, opts = {}) =>
-      basecampFetch(TOKEN, path, { ...opts, ua: UA, accountId, paginate: false }),
+      basecampFetchCore(TOKEN, path, { ...opts, ua: UA, accountId }),
 
     basecampFetchAll: async (path, opts = {}) =>
-      basecampFetch(TOKEN, path, {
+      basecampFetchAllCore(TOKEN, path, {
         ...opts,
         ua: UA,
         accountId,
-        paginate: true,
         // allow overrides, but keep sane defaults to avoid 429s
         maxPages: opts.maxPages ?? 50,
         pageDelayMs: opts.pageDelayMs ?? 150,
@@ -454,7 +454,7 @@ async function runTool(op, params, req) {
 }
 
 /* ================= Health ================= */
-app.get("/health", (req, res) => res.json({ ok: true, build: UA }));
+app.get("/health", (req, res) => res.json({ ok: true, build: UA, circuit: getBasecampCircuitStatus() }));
 
 /* ================= OpenAPI Schema ================= */
 app.get("/.well-known/openapi.json", (req, res) => {

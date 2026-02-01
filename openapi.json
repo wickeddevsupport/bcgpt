@@ -16,29 +16,55 @@
       "Project": {
         "type": "object",
         "properties": {
-          "id": { "type": "integer" },
-          "name": { "type": "string" },
-          "status": { "type": "string" },
-          "created_at": { "type": "string" },
-          "updated_at": { "type": "string" },
-          "app_url": { "type": "string" }
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "app_url": {
+            "type": "string"
+          }
         }
       },
       "Todo": {
         "type": "object",
         "properties": {
-          "id": { "type": "integer" },
-          "title": { "type": "string" },
-          "description": { "type": "string" },
-          "due_on": { "type": "string" },
-          "completed": { "type": "boolean" }
+          "id": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "due_on": {
+            "type": "string"
+          },
+          "completed": {
+            "type": "boolean"
+          }
         }
       },
       "Error": {
         "type": "object",
         "properties": {
-          "error": { "type": "string" },
-          "message": { "type": "string" }
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
         }
       }
     },
@@ -60,7 +86,10 @@
   },
   "security": [
     {
-      "oauth2": ["read", "write"]
+      "oauth2": [
+        "read",
+        "write"
+      ]
     }
   ],
   "paths": {
@@ -77,6 +106,40 @@
         }
       }
     },
+    "/action/smart_action": {
+      "post": {
+        "summary": "Smart router for natural language queries",
+        "description": "Routes a query to the best action based on context; falls back to global search if needed.",
+        "operationId": "smart_action",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string"
+                  },
+                  "project": {
+                    "type": "string",
+                    "description": "Optional project context"
+                  }
+                },
+                "required": [
+                  "query"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Smart action response"
+          }
+        }
+      }
+    },
     "/action/list_projects": {
       "post": {
         "summary": "List all Basecamp projects",
@@ -87,14 +150,19 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "archived": { "type": "boolean", "description": "List archived projects instead of active" }
+                  "archived": {
+                    "type": "boolean",
+                    "description": "List archived projects instead of active"
+                  }
                 }
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "List of projects with metadata" }
+          "200": {
+            "description": "List of projects with metadata"
+          }
         }
       }
     },
@@ -109,107 +177,29 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "name": { "type": "string", "description": "Project name (fuzzy match)" }
+                  "name": {
+                    "type": "string",
+                    "description": "Project name (fuzzy match)"
+                  }
                 },
-                "required": ["name"]
+                "required": [
+                  "name"
+                ]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Project details" }
-        }
-      }
-    },
-    "/action/daily_report": {
-      "post": {
-        "summary": "Daily report of todos due today",
-        "operationId": "daily_report",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "date": { "type": "string", "description": "YYYY-MM-DD (defaults to today)" }
-                }
-              }
-            }
+          "200": {
+            "description": "Project details"
           }
-        },
-        "responses": {
-          "200": { "description": "Daily summary with due/overdue counts" }
         }
       }
     },
-    "/action/list_todos_due": {
+    "/action/list_project_card_table_contents": {
       "post": {
-        "summary": "List todos due on a specific date",
-        "operationId": "list_todos_due",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "date": { "type": "string" },
-                  "include_overdue": { "type": "boolean" }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "Todos due on date" }
-        }
-      }
-    },
-    "/action/search_todos": {
-      "post": {
-        "summary": "Search todos by keyword across all projects",
-        "operationId": "search_todos",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": { "query": { "type": "string" } },
-                "required": ["query"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "Search results" }
-        }
-      }
-    },
-    "/action/list_todos_for_project": {
-      "post": {
-        "summary": "List all todos in a project",
-        "operationId": "list_todos_for_project",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": { "project": { "type": "string" } },
-                "required": ["project"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "Todos organized by list" }
-        }
-      }
-    },
-    "/action/create_todo": {
-      "post": {
-        "summary": "Create a new todo",
-        "operationId": "create_todo",
+        "summary": "List card table contents for a project (chunked by boards)",
+        "operationId": "list_project_card_table_contents",
         "requestBody": {
           "required": true,
           "content": {
@@ -217,25 +207,58 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "project": { "type": "string" },
-                  "task": { "type": "string" },
-                  "description": { "type": "string" },
-                  "due_on": { "type": "string" }
+                  "project": {
+                    "type": "string"
+                  },
+                  "include_details": {
+                    "type": "boolean"
+                  },
+                  "include_cards": {
+                    "type": "boolean"
+                  },
+                  "max_cards_per_column": {
+                    "type": "integer"
+                  },
+                  "max_boards": {
+                    "type": "integer"
+                  },
+                  "cursor": {
+                    "type": "integer"
+                  },
+                  "auto_all": {
+                    "type": "boolean"
+                  },
+                  "max_boards_total": {
+                    "type": "integer"
+                  },
+                  "cache_output": {
+                    "type": "boolean"
+                  },
+                  "cache_chunk_boards": {
+                    "type": "integer"
+                  },
+                  "full_dump": {
+                    "type": "boolean"
+                  }
                 },
-                "required": ["project", "task"]
+                "required": [
+                  "project"
+                ]
               }
             }
           }
         },
         "responses": {
-          "201": { "description": "Todo created" }
+          "200": {
+            "description": "Card tables with chunk metadata"
+          }
         }
       }
     },
-    "/action/complete_task_by_name": {
+    "/action/get_cached_payload_chunk": {
       "post": {
-        "summary": "Mark a todo as complete",
-        "operationId": "complete_task_by_name",
+        "summary": "Retrieve a chunk from cached payload",
+        "operationId": "get_cached_payload_chunk",
         "requestBody": {
           "required": true,
           "content": {
@@ -243,23 +266,31 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "project": { "type": "string" },
-                  "task": { "type": "string", "description": "Todo content (fuzzy match)" }
+                  "payload_key": {
+                    "type": "string"
+                  },
+                  "index": {
+                    "type": "integer"
+                  }
                 },
-                "required": ["project", "task"]
+                "required": [
+                  "payload_key"
+                ]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Todo completed" }
+          "200": {
+            "description": "Cached chunk"
+          }
         }
       }
     },
-    "/action/assignment_report": {
+    "/action/export_cached_payload": {
       "post": {
-        "summary": "Group todos by assignee in a project",
-        "operationId": "assignment_report",
+        "summary": "Export cached payload to JSON file",
+        "operationId": "export_cached_payload",
         "requestBody": {
           "required": true,
           "content": {
@@ -267,16 +298,21 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "project": { "type": "string" },
-                  "max_todos": { "type": "integer" }
+                  "payload_key": {
+                    "type": "string"
+                  }
                 },
-                "required": ["project"]
+                "required": [
+                  "payload_key"
+                ]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Todos grouped by assignee" }
+          "200": {
+            "description": "Export result"
+          }
         }
       }
     },
@@ -290,38 +326,31 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": { "project": { "type": "string" } },
-                "required": ["project"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "Card tables" }
-        }
-      }
-    },
-    "/action/list_card_table_columns": {
-      "post": {
-        "summary": "List columns in a kanban board",
-        "operationId": "list_card_table_columns",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
                 "properties": {
-                  "project": { "type": "string" },
-                  "card_table_id": { "type": "integer" }
+                  "project": {
+                    "type": "string"
+                  },
+                  "include_archived": {
+                    "type": "boolean"
+                  },
+                  "debug": {
+                    "type": "boolean"
+                  },
+                  "include_columns": {
+                    "type": "boolean"
+                  }
                 },
-                "required": ["project", "card_table_id"]
+                "required": [
+                  "project"
+                ]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Columns" }
+          "200": {
+            "description": "Card tables"
+          }
         }
       }
     },
@@ -336,16 +365,36 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "project": { "type": "string" },
-                  "card_table_id": { "type": "integer" }
+                  "project": {
+                    "type": "string"
+                  },
+                  "card_table_id": {
+                    "type": "integer"
+                  },
+                  "max_cards_per_column": {
+                    "type": "integer"
+                  },
+                  "include_details": {
+                    "type": "boolean"
+                  },
+                  "max_boards": {
+                    "type": "integer"
+                  },
+                  "cursor": {
+                    "type": "integer"
+                  }
                 },
-                "required": ["project", "card_table_id"]
+                "required": [
+                  "project"
+                ]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Cards" }
+          "200": {
+            "description": "Cards"
+          }
         }
       }
     },
@@ -360,19 +409,35 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "project": { "type": "string" },
-                  "card_table_id": { "type": "integer" },
-                  "title": { "type": "string" },
-                  "content": { "type": "string" },
-                  "due_on": { "type": "string" }
+                  "project": {
+                    "type": "string"
+                  },
+                  "card_table_id": {
+                    "type": "integer"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "content": {
+                    "type": "string"
+                  },
+                  "due_on": {
+                    "type": "string"
+                  }
                 },
-                "required": ["project", "card_table_id", "title"]
+                "required": [
+                  "project",
+                  "card_table_id",
+                  "title"
+                ]
               }
             }
           }
         },
         "responses": {
-          "201": { "description": "Card created" }
+          "201": {
+            "description": "Card created"
+          }
         }
       }
     },
@@ -387,26 +452,38 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "project": { "type": "string" },
-                  "card_id": { "type": "integer" },
-                  "column_id": { "type": "integer" },
-                  "position": { "type": "integer" }
+                  "project": {
+                    "type": "string"
+                  },
+                  "card_id": {
+                    "type": "integer"
+                  },
+                  "column_id": {
+                    "type": "integer"
+                  },
+                  "position": {
+                    "type": "integer"
+                  }
                 },
-                "required": ["project", "card_id"]
+                "required": [
+                  "project",
+                  "card_id"
+                ]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Card updated" }
+          "200": {
+            "description": "Card updated"
+          }
         }
       }
     },
-    "/action/smart_action": {
+    "/action/list_todos_for_project": {
       "post": {
-        "summary": "Smart router for natural language queries",
-        "description": "Routes a query to the best action based on context; falls back to global search if needed.",
-        "operationId": "smart_action",
+        "summary": "List all todos in a project",
+        "operationId": "list_todos_for_project",
         "requestBody": {
           "required": true,
           "content": {
@@ -414,16 +491,250 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "query": { "type": "string" },
-                  "project": { "type": "string", "description": "Optional project context" }
+                  "project": {
+                    "type": "string"
+                  }
                 },
-                "required": ["query"]
+                "required": [
+                  "project"
+                ]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Smart action response" }
+          "200": {
+            "description": "Todos organized by list"
+          }
+        }
+      }
+    },
+    "/action/create_todo": {
+      "post": {
+        "summary": "Create a new todo",
+        "operationId": "create_todo",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": {
+                    "type": "string"
+                  },
+                  "task": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "due_on": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "project",
+                  "task"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Todo created"
+          }
+        }
+      }
+    },
+    "/action/update_todo_details": {
+      "post": {
+        "summary": "Update a todo",
+        "operationId": "update_todo_details",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": {
+                    "type": "string"
+                  },
+                  "todo_id": {
+                    "type": "integer"
+                  },
+                  "content": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "description": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "due_on": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "starts_on": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "assignee_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "nullable": true
+                  },
+                  "completion_subscriber_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "nullable": true
+                  },
+                  "notify": {
+                    "type": "boolean",
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "project",
+                  "todo_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Todo updated"
+          }
+        }
+      }
+    },
+    "/action/complete_todo": {
+      "post": {
+        "summary": "Mark a todo as complete",
+        "operationId": "complete_todo",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": {
+                    "type": "string"
+                  },
+                  "todo_id": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "project",
+                  "todo_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Todo completed"
+          }
+        }
+      }
+    },
+    "/action/uncomplete_todo": {
+      "post": {
+        "summary": "Mark a todo as incomplete",
+        "operationId": "uncomplete_todo",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": {
+                    "type": "string"
+                  },
+                  "todo_id": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "project",
+                  "todo_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Todo reopened"
+          }
+        }
+      }
+    },
+    "/action/list_todos_due": {
+      "post": {
+        "summary": "List todos due on a specific date",
+        "operationId": "list_todos_due",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "date": {
+                    "type": "string"
+                  },
+                  "include_overdue": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Todos due on date"
+          }
+        }
+      }
+    },
+    "/action/search_todos": {
+      "post": {
+        "summary": "Search todos by keyword across all projects",
+        "operationId": "search_todos",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "query"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Search results"
+          }
         }
       }
     },
@@ -437,14 +748,22 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": { "project": { "type": "string" } },
-                "required": ["project"]
+                "properties": {
+                  "project": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "project"
+                ]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Message boards" }
+          "200": {
+            "description": "Message boards"
+          }
         }
       }
     },
@@ -459,16 +778,73 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "project": { "type": "string" },
-                  "message_board_id": { "type": "integer" }
+                  "project": {
+                    "type": "string"
+                  },
+                  "message_board_id": {
+                    "type": "integer"
+                  }
                 },
-                "required": ["project"]
+                "required": [
+                  "project"
+                ]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Messages" }
+          "200": {
+            "description": "Messages"
+          }
+        }
+      }
+    },
+    "/action/create_message": {
+      "post": {
+        "summary": "Create a message",
+        "operationId": "create_message",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": {
+                    "type": "string"
+                  },
+                  "board_id": {
+                    "type": "integer"
+                  },
+                  "subject": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "content": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "status": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "body": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                },
+                "required": [
+                  "project",
+                  "board_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Message created"
+          }
         }
       }
     },
@@ -482,14 +858,22 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": { "project": { "type": "string" } },
-                "required": ["project"]
+                "properties": {
+                  "project": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "project"
+                ]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Documents" }
+          "200": {
+            "description": "Documents"
+          }
         }
       }
     },
@@ -504,16 +888,24 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "project": { "type": "string" },
-                  "vault_id": { "type": "integer" }
+                  "project": {
+                    "type": "string"
+                  },
+                  "vault_id": {
+                    "type": "integer"
+                  }
                 },
-                "required": ["project"]
+                "required": [
+                  "project"
+                ]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Files with download URLs" }
+          "200": {
+            "description": "Files with download URLs"
+          }
         }
       }
     },
@@ -527,17 +919,27 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "project": { "type": "string" },
-                  "start": { "type": "string" },
-                  "end": { "type": "string" }
+                  "project": {
+                    "type": "string"
+                  },
+                  "start": {
+                    "type": "string"
+                  },
+                  "end": {
+                    "type": "string"
+                  }
                 },
-                "required": ["project"]
+                "required": [
+                  "project"
+                ]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Schedule entries" }
+          "200": {
+            "description": "Schedule entries"
+          }
         }
       }
     },
@@ -552,132 +954,25 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "project": { "type": "string" },
-                  "query": { "type": "string" }
+                  "project": {
+                    "type": "string"
+                  },
+                  "query": {
+                    "type": "string"
+                  }
                 },
-                "required": ["project", "query"]
+                "required": [
+                  "project",
+                  "query"
+                ]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Search results" }
-        }
-      }
-    },
-    "/action/list_all_people": {
-      "post": {
-        "summary": "List all people in the account",
-        "operationId": "list_all_people",
-        "responses": {
-          "200": { "description": "Array of people" }
-        }
-      }
-    },
-    "/action/get_my_profile": {
-      "post": {
-        "summary": "Get current user's profile",
-        "operationId": "get_my_profile",
-        "responses": {
-          "200": { "description": "Current user profile" }
-        }
-      }
-    },
-    "/action/list_comments": {
-      "post": {
-        "summary": "List comments on a recording",
-        "operationId": "list_comments",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "project": { "type": "string" },
-                  "recording_id": { "type": "integer" }
-                },
-                "required": ["project", "recording_id"]
-              }
-            }
+          "200": {
+            "description": "Search results"
           }
-        },
-        "responses": {
-          "200": { "description": "Comments" }
-        }
-      }
-    },
-    "/action/create_comment": {
-      "post": {
-        "summary": "Create a comment on a recording",
-        "operationId": "create_comment",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "project": { "type": "string" },
-                  "recording_id": { "type": "integer" },
-                  "content": { "type": "string" }
-                },
-                "required": ["project", "recording_id", "content"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": { "description": "Comment created" }
-        }
-      }
-    },
-    "/action/get_recordings": {
-      "post": {
-        "summary": "Query recordings by type across projects",
-        "operationId": "get_recordings",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "type": { "type": "string" },
-                  "bucket": { "type": "string" },
-                  "status": { "type": "string" }
-                },
-                "required": ["type"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "Recordings" }
-        }
-      }
-    },
-    "/action/trash_recording": {
-      "post": {
-        "summary": "Move a recording to trash",
-        "operationId": "trash_recording",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "project": { "type": "string" },
-                  "recording_id": { "type": "integer" }
-                },
-                "required": ["project", "recording_id"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": { "description": "Recording trashed" }
         }
       }
     },
@@ -692,17 +987,110 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "query": { "type": "string" },
-                  "bucket": { "type": "string", "description": "Project (bucket) id or name" },
-                  "type": { "type": "string", "description": "Filter by recording type (e.g., comment, message, todo)" }
+                  "query": {
+                    "type": "string"
+                  },
+                  "bucket": {
+                    "type": "string",
+                    "description": "Project (bucket) id or name"
+                  },
+                  "type": {
+                    "type": "string",
+                    "description": "Filter by recording type (e.g., comment, message, todo)"
+                  }
                 },
-                "required": ["query"]
+                "required": [
+                  "query"
+                ]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Search results" }
+          "200": {
+            "description": "Search results"
+          }
+        }
+      }
+    },
+    "/action/list_all_people": {
+      "post": {
+        "summary": "List all people in the account",
+        "operationId": "list_all_people",
+        "responses": {
+          "200": {
+            "description": "Array of people"
+          }
+        }
+      }
+    },
+    "/action/list_comments": {
+      "post": {
+        "summary": "List comments on a recording",
+        "operationId": "list_comments",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": {
+                    "type": "string"
+                  },
+                  "recording_id": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "project",
+                  "recording_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Comments"
+          }
+        }
+      }
+    },
+    "/action/create_comment": {
+      "post": {
+        "summary": "Create a comment on a recording",
+        "operationId": "create_comment",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project": {
+                    "type": "string"
+                  },
+                  "recording_id": {
+                    "type": "integer"
+                  },
+                  "content": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "project",
+                  "recording_id",
+                  "content"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Comment created"
+          }
         }
       }
     },
@@ -718,17 +1106,31 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "path": { "type": "string", "description": "API path (e.g., /projects.json, /people/123.json) or full URL" },
-                  "method": { "type": "string", "description": "HTTP method", "default": "GET" },
-                  "body": { "type": "object", "description": "Request body for POST/PUT" }
+                  "path": {
+                    "type": "string",
+                    "description": "API path (e.g., /projects.json, /people/123.json) or full URL"
+                  },
+                  "method": {
+                    "type": "string",
+                    "description": "HTTP method",
+                    "default": "GET"
+                  },
+                  "body": {
+                    "type": "object",
+                    "description": "Request body for POST/PUT"
+                  }
                 },
-                "required": ["path"]
+                "required": [
+                  "path"
+                ]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "API response" }
+          "200": {
+            "description": "API response"
+          }
         }
       }
     }

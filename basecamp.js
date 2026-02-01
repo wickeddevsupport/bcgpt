@@ -16,6 +16,61 @@ import fetch from "node-fetch";
 
 const BASE = "https://3.basecampapi.com";
 
+const CIRCUIT_THRESHOLD = Number(process.env.BASECAMP_CIRCUIT_THRESHOLD || 5);
+const CIRCUIT_COOLDOWN_MS = Number(process.env.BASECAMP_CIRCUIT_COOLDOWN_MS || 15000);
+
+const circuitState = {
+  state: "closed",
+  failures: 0,
+  openedAt: null,
+  openUntil: null,
+  lastError: null,
+};
+
+function getCircuitConfig() {
+  return { threshold: CIRCUIT_THRESHOLD, cooldown_ms: CIRCUIT_COOLDOWN_MS };
+}
+
+function noteSuccess() {
+  circuitState.state = "closed";
+  circuitState.failures = 0;
+  circuitState.openedAt = null;
+  circuitState.openUntil = null;
+  circuitState.lastError = null;
+}
+
+function noteFailure(err) {
+  circuitState.failures += 1;
+  circuitState.lastError = {
+    message: err?.message || String(err),
+    code: err?.code,
+    status: err?.status,
+    at: Date.now(),
+  };
+  if (circuitState.failures >= CIRCUIT_THRESHOLD) {
+    circuitState.state = "open";
+    circuitState.openedAt = Date.now();
+    circuitState.openUntil = circuitState.openedAt + CIRCUIT_COOLDOWN_MS;
+  }
+}
+
+function assertCircuit() {
+  if (circuitState.state === "open") {
+    const now = Date.now();
+    if (circuitState.openUntil && now < circuitState.openUntil) {
+      const err = new Error("Circuit breaker open");
+      err.code = "CIRCUIT_OPEN";
+      err.retry_after_ms = circuitState.openUntil - now;
+      throw err;
+    }
+    circuitState.state = "half-open";
+  }
+}
+
+export function getCircuitStatus() {
+  return { ...circuitState, ...getCircuitConfig() };
+}
+
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -117,6 +172,8 @@ export async function basecampFetch(
     throw err;
   }
 
+  assertCircuit();
+
   const httpMethod = String(method || "GET").toUpperCase();
   const url = normalizeUrl(pathOrUrl, accountId);
 
@@ -160,7 +217,10 @@ export async function basecampFetch(
         continue;
       }
 
-      if (res.status === 204) return null;
+      if (res.status === 204) {
+        noteSuccess();
+        return null;
+      }
 
       const text = await res.text();
       let data = null;
@@ -176,9 +236,11 @@ export async function basecampFetch(
         err.status = res.status;
         err.url = url;
         err.data = data;
+        noteFailure(err);
         throw err;
       }
 
+      noteSuccess();
       return data;
     } catch (e) {
       clearTimeout(timer);
@@ -191,6 +253,7 @@ export async function basecampFetch(
       const err = new Error(`BASECAMP_FETCH_FAILED: ${e?.message || e}`);
       err.code = "BASECAMP_FETCH_FAILED";
       err.url = url;
+      noteFailure(err);
       throw err;
     }
   }
@@ -198,6 +261,7 @@ export async function basecampFetch(
   const err = new Error("BASECAMP_REQUEST_FAILED");
   err.code = "BASECAMP_REQUEST_FAILED";
   err.url = url;
+  noteFailure(err);
   throw err;
 }
 
@@ -225,6 +289,8 @@ export async function basecampFetchAll(
   let url = normalizeUrl(pathOrUrl, accountId);
   const all = [];
   let pages = 0;
+
+  assertCircuit();
 
   // Encourage deterministic pagination. Many Basecamp collection endpoints
   // default to 15 items/page. Adding per_page + page=1 typically reduces
@@ -288,6 +354,7 @@ export async function basecampFetchAll(
         // If not an array, don't paginate
         if (!Array.isArray(data)) {
           if (includeMeta) {
+            noteSuccess();
             return {
               items: data,
               _meta: {
@@ -300,6 +367,7 @@ export async function basecampFetchAll(
               },
             };
           }
+          noteSuccess();
           return data;
         }
 
@@ -321,6 +389,7 @@ export async function basecampFetchAll(
           await sleep(250 * (attempt + 1));
           continue;
         }
+        noteFailure(e);
         throw e;
       }
     }
@@ -332,6 +401,7 @@ export async function basecampFetchAll(
   }
 
   if (includeMeta) {
+    noteSuccess();
     return {
       items: all,
       _meta: {
@@ -344,5 +414,6 @@ export async function basecampFetchAll(
       },
     };
   }
+  noteSuccess();
   return all;
 }
