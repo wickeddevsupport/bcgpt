@@ -673,6 +673,24 @@ async function assignmentReport(ctx, projectName, { maxTodos = 250 } = {}) {
 }
 
 // ---------- Card Tables ----------
+async function resolveCardTableFromDock(ctx, projectId) {
+  const dock = await getDock(ctx, projectId);
+  const card = dockFind(dock, ["card_table", "card_tables", "kanban", "kanban_board"]);
+  if (!card) return null;
+
+  if (card.url) {
+    const obj = await api(ctx, card.url);
+    if (Array.isArray(obj)) return obj[0] || null;
+    return obj || null;
+  }
+
+  if (card.id) {
+    return await api(ctx, `/buckets/${projectId}/card_tables/${card.id}.json`);
+  }
+
+  return null;
+}
+
 async function listCardTables(ctx, projectId) {
   // Dock-first: card tables are tool-gated and can 404 if disabled.
   const dock = await getDock(ctx, projectId);
@@ -733,6 +751,12 @@ async function listCardTableColumns(ctx, projectId, cardTableId) {
   } catch (e) {
     if (isApiError(e, 404)) {
       try {
+        const table = await resolveCardTableFromDock(ctx, projectId);
+        if (table?.lists) return table.lists;
+      } catch {
+        // ignore dock fallback errors
+      }
+      try {
         await requireDockTool(ctx, projectId, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
       } catch (dockErr) {
         throw dockErr;
@@ -789,8 +813,17 @@ async function updateCardTableColumnColor(ctx, projectId, columnId, body) {
 // Fetch all cards from all columns in a card table
 async function listCardTableCards(ctx, projectId, cardTableId) {
   try {
-    // First get the card table with all its columns (lists)
-    const cardTable = await api(ctx, `/buckets/${projectId}/card_tables/${cardTableId}.json`);
+    // If no id provided, use dock to resolve the active card table.
+    let resolvedTableId = cardTableId;
+    let cardTable = null;
+
+    if (resolvedTableId) {
+      cardTable = await api(ctx, `/buckets/${projectId}/card_tables/${resolvedTableId}.json`);
+    } else {
+      cardTable = await resolveCardTableFromDock(ctx, projectId);
+      resolvedTableId = cardTable?.id || null;
+    }
+
     if (!cardTable?.lists) return [];
 
     // Fetch cards from each column and aggregate
@@ -804,6 +837,22 @@ async function listCardTableCards(ctx, projectId, cardTableId) {
     return allCards;
   } catch (e) {
     if (isApiError(e, 404)) {
+      // Retry via dock if the provided card table id is stale/wrong
+      try {
+        const cardTable = await resolveCardTableFromDock(ctx, projectId);
+        if (cardTable?.lists) {
+          const allCards = [];
+          for (const column of cardTable.lists) {
+            if (column.cards_url) {
+              const cards = await apiAll(ctx, column.cards_url);
+              allCards.push(...(Array.isArray(cards) ? cards : []));
+            }
+          }
+          return allCards;
+        }
+      } catch {
+        // ignore dock fallback errors
+      }
       try {
         await requireDockTool(ctx, projectId, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
       } catch (dockErr) {
@@ -2718,6 +2767,11 @@ export async function handleMCP(reqBody, ctx) {
           return ok(id, { query, action: "assignment_report", result });
         }
 
+        if (args.project && (lower.includes("kanban") || lower.includes("card table") || lower.includes("card tables") || lower.includes("cards"))) {
+          const result = await callTool("list_card_table_cards", { project: args.project });
+          return ok(id, { query, action: "list_card_table_cards", result });
+        }
+
         const searchTodosInProject = async (projectId) => {
           const groups = await listTodosForProject(ctx, projectId);
           const needle = searchQuery.toLowerCase();
@@ -2888,10 +2942,11 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "list_card_table_cards") {
       try {
         const p = await projectByName(ctx, args.project);
-        const cards = await listCardTableCards(ctx, p.id, Number(args.card_table_id));
+        const tableId = args.card_table_id ? Number(args.card_table_id) : null;
+        const cards = await listCardTableCards(ctx, p.id, tableId);
 
         // INTELLIGENT CHAINING: Enrich cards with person/project details
-        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `card table ${args.card_table_id}`);
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `card table ${tableId || "dock"}`);
         const enricher = intelligent.createEnricher(ctx_intel);
 
         const enrichedCards = await Promise.all(
@@ -2901,7 +2956,7 @@ export async function handleMCP(reqBody, ctx) {
           }))
         );
 
-        return ok(id, { project: { id: p.id, name: p.name }, cards: enrichedCards, count: enrichedCards.length, metrics: ctx_intel.getMetrics() });
+        return ok(id, { project: { id: p.id, name: p.name }, card_table_id: tableId, cards: enrichedCards, count: enrichedCards.length, metrics: ctx_intel.getMetrics() });
       } catch (e) {
         console.error(`[list_card_table_cards] Error:`, e.message);
         // Tool disabled / table not found -> return empty with notice
