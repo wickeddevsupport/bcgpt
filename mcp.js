@@ -2622,10 +2622,41 @@ export async function handleMCP(reqBody, ctx) {
           return ok(id, { query, action: "assignment_report", result });
         }
 
+        const searchTodosInProject = async (projectId) => {
+          const groups = await listTodosForProject(ctx, projectId);
+          const needle = searchQuery.toLowerCase();
+          const todos = [];
+          for (const g of groups || []) {
+            for (const t of g.todos || []) {
+              const text = todoText(t).toLowerCase();
+              const desc = String(t.description || "").toLowerCase();
+              if (text.includes(needle) || desc.includes(needle)) {
+                todos.push({
+                  id: t.id,
+                  title: todoText(t),
+                  content: t.description || "",
+                  type: "todo",
+                  todolist: g.todolist,
+                  todolist_id: g.todolistId,
+                  bucket: t.bucket || { id: projectId },
+                  app_url: t.app_url || t.url || null
+                });
+              }
+            }
+          }
+          return todos;
+        };
+
         if (analysis.pattern === "search_enrich" || lower.includes("search") || lower.includes("find")) {
           if (project) {
             const result = await callTool("search_recordings", { query: searchQuery, bucket: project.id, type: wantsComments ? "comment" : undefined });
             if ((result?.results || []).length === 0) {
+              if (!wantsComments) {
+                const todos = await searchTodosInProject(project.id);
+                if (todos.length) {
+                  return ok(id, { query, action: "search_todos_fallback", project: { id: project.id, name: project.name }, todos, count: todos.length, dock });
+                }
+              }
               const local = searchLocalIndex(searchQuery, { projectId: project.id });
               if (local.length) {
                 return ok(id, { query, action: "search_index_fallback", project: { id: project.id, name: project.name }, results: local, count: local.length, dock });
@@ -4873,7 +4904,21 @@ export async function handleMCP(reqBody, ctx) {
     // ===== NEW SEARCH ENDPOINTS =====
     if (name === "search_recordings") {
       try {
-        const results = await searchRecordings(ctx, args.query, { bucket_id: args.bucket, type: args.type });
+        let bucketId = args.bucket;
+        if (bucketId != null && bucketId !== "") {
+          if (!/^\d+$/.test(String(bucketId))) {
+            try {
+              const p = await projectByName(ctx, String(bucketId));
+              bucketId = p?.id;
+            } catch {
+              return fail(id, { code: "INVALID_BUCKET", message: "bucket must be a project id or resolvable project name." });
+            }
+          } else {
+            bucketId = Number(bucketId);
+          }
+        }
+
+        const results = await searchRecordings(ctx, args.query, { bucket_id: bucketId, type: args.type });
         
         // INTELLIGENT CHAINING: Enrich search results with person/project details
         const ctx_intel = await intelligent.initializeIntelligentContext(ctx, args.query);
@@ -4899,7 +4944,7 @@ export async function handleMCP(reqBody, ctx) {
         console.error(`[search_recordings] Error:`, e.message);
         // Fallback to non-enriched search
         try {
-          const results = await searchRecordings(ctx, args.query, { bucket_id: args.bucket, type: args.type });
+          const results = await searchRecordings(ctx, args.query, { bucket_id: bucketId, type: args.type });
           return ok(id, { query: args.query, results, count: results.length, fallback: true });
         } catch (fbErr) {
           return fail(id, { code: "SEARCH_RECORDINGS_ERROR", message: fbErr.message });
