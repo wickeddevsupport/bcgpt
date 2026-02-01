@@ -136,6 +136,17 @@ export function getTools() {
       required: ["project", "card_table_id"],
       additionalProperties: false
     }),
+    tool("list_card_table_summaries", "List card table summaries for a project, optionally including card titles.", {
+      type: "object",
+      properties: {
+        project: { type: "string" },
+        include_cards: { type: "boolean" },
+        max_cards_per_column: { type: "integer" },
+        include_archived: { type: "boolean" }
+      },
+      required: ["project"],
+      additionalProperties: false
+    }),
     tool("create_card", "Create a card in a card table.", {
       type: "object",
       properties: {

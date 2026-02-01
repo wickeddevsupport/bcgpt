@@ -929,6 +929,63 @@ async function listCardTableCards(ctx, projectId, cardTableId) {
   }
 }
 
+async function listCardTableSummaries(ctx, projectId, {
+  includeCards = false,
+  maxCardsPerColumn = 50,
+  includeArchived = false
+} = {}) {
+  const tables = await listCardTables(ctx, projectId, { includeArchived });
+  const summaries = await mapLimit(tables || [], 1, async (t) => {
+    let table = t;
+    if (!table?.lists && table?.url) {
+      table = await api(ctx, table.url);
+    } else if (!table?.lists) {
+      table = await api(ctx, `/buckets/${projectId}/card_tables/${t.id}.json`);
+    }
+
+    const columns = (table?.lists || []).map((col) => ({
+      id: col.id,
+      title: col.title,
+      type: col.type,
+      cards_count: col.cards_count ?? null,
+      cards: []
+    }));
+
+    let truncated = false;
+    if (includeCards) {
+      for (const col of columns) {
+        const colUrl = (table?.lists || []).find((c) => c.id === col.id)?.cards_url;
+        if (!colUrl) continue;
+        const cards = await apiAll(ctx, colUrl);
+        const arr = Array.isArray(cards) ? cards : [];
+        if (arr.length > maxCardsPerColumn) truncated = true;
+        col.cards = arr.slice(0, Math.max(0, Number(maxCardsPerColumn) || 0)).map((c) => ({
+          id: c.id,
+          title: c.title,
+          content: c.content,
+          status: c.status,
+          due_on: c.due_on,
+          assignee_ids: c.assignee_ids,
+          app_url: c.app_url
+        }));
+      }
+    }
+
+    return {
+      id: table?.id,
+      title: table?.title,
+      status: table?.status,
+      type: table?.type,
+      total_columns: columns.length,
+      total_cards: columns.reduce((sum, c) => sum + (Number(c.cards_count) || 0), 0),
+      columns,
+      truncated
+    };
+  });
+
+  return summaries;
+}
+
 async function getCard(ctx, projectId, cardId) {
   return api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}.json`);
 }
@@ -2827,8 +2884,13 @@ export async function handleMCP(reqBody, ctx) {
         }
 
         if (args.project && (lower.includes("kanban") || lower.includes("card table") || lower.includes("card tables") || lower.includes("cards"))) {
-          const result = await callTool("list_card_table_cards", { project: args.project });
-          return ok(id, { query, action: "list_card_table_cards", result });
+          const wantsCards = /contents|all cards|everything|list all|full|titles/.test(lower);
+          const result = await callTool("list_card_table_summaries", {
+            project: args.project,
+            include_cards: wantsCards,
+            max_cards_per_column: 50
+          });
+          return ok(id, { query, action: "list_card_table_summaries", result, note: wantsCards ? "Cards truncated per column at 50 to avoid payload limits." : undefined });
         }
 
         const searchTodosInProject = async (projectId) => {
@@ -3042,6 +3104,21 @@ export async function handleMCP(reqBody, ctx) {
         } catch (fbErr) {
           return fail(id, { code: "LIST_CARD_TABLE_CARDS_ERROR", message: fbErr.message });
         }
+      }
+    }
+
+    if (name === "list_card_table_summaries") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const summaries = await listCardTableSummaries(ctx, p.id, {
+          includeCards: !!args.include_cards,
+          maxCardsPerColumn: Number(args.max_cards_per_column || 50),
+          includeArchived: !!args.include_archived
+        });
+        return ok(id, { project: { id: p.id, name: p.name }, card_tables: summaries, count: summaries.length });
+      } catch (e) {
+        console.error(`[list_card_table_summaries] Error:`, e.message);
+        return fail(id, { code: "LIST_CARD_TABLE_SUMMARIES_ERROR", message: e.message });
       }
     }
 
