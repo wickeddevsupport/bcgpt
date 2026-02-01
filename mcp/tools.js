@@ -137,7 +137,12 @@ export function getTools() {
     }),
     tool("list_card_table_cards", "List cards for a card table.", {
       type: "object",
-      properties: { project: { type: "string" }, card_table_id: { type: "integer" } },
+      properties: {
+        project: { type: "string" },
+        card_table_id: { type: "integer" },
+        max_cards_per_column: { type: "integer" },
+        include_details: { type: "boolean" }
+      },
       required: ["project", "card_table_id"],
       additionalProperties: false
     }),

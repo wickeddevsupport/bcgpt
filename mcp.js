@@ -869,8 +869,11 @@ async function updateCardTableColumnColor(ctx, projectId, columnId, body) {
   return api(ctx, `/buckets/${projectId}/card_tables/columns/${columnId}/color.json`, { method: "PUT", body });
 }
 
-// Fetch all cards from all columns in a card table
-async function listCardTableCards(ctx, projectId, cardTableId) {
+// Fetch cards from all columns in a card table (truncated per column for safety)
+async function listCardTableCards(ctx, projectId, cardTableId, {
+  maxCardsPerColumn = 50,
+  includeDetails = false
+} = {}) {
   try {
     // If no id provided, use dock to resolve the active card table.
     let resolvedTableId = cardTableId;
@@ -883,31 +886,50 @@ async function listCardTableCards(ctx, projectId, cardTableId) {
       resolvedTableId = cardTable?.id || null;
     }
 
-    if (!cardTable?.lists) return [];
+    if (!cardTable?.lists) return { cards: [], columns: [], truncated: false };
 
-    // Fetch cards from each column and aggregate
-    const allCards = [];
-    for (const column of cardTable.lists) {
-      if (column.cards_url) {
-        const cards = await apiAll(ctx, column.cards_url);
-        allCards.push(...(Array.isArray(cards) ? cards : []));
+    const summary = await summarizeCardTable(ctx, projectId, cardTable, {
+      includeCards: true,
+      maxCardsPerColumn
+    });
+
+    const cards = [];
+    for (const col of summary.columns || []) {
+      for (const c of col.cards || []) {
+        cards.push(includeDetails ? c : {
+          id: c.id,
+          title: c.title,
+          status: c.status,
+          due_on: c.due_on,
+          app_url: c.app_url
+        });
       }
     }
-    return allCards;
+
+    return { cards, columns: summary.columns || [], truncated: summary.truncated };
   } catch (e) {
     if (isApiError(e, 404)) {
       // Retry via dock if the provided card table id is stale/wrong
       try {
         const cardTable = await resolveCardTableFromDock(ctx, projectId);
         if (cardTable?.lists) {
-          const allCards = [];
-          for (const column of cardTable.lists) {
-            if (column.cards_url) {
-              const cards = await apiAll(ctx, column.cards_url);
-              allCards.push(...(Array.isArray(cards) ? cards : []));
+          const summary = await summarizeCardTable(ctx, projectId, cardTable, {
+            includeCards: true,
+            maxCardsPerColumn
+          });
+          const cards = [];
+          for (const col of summary.columns || []) {
+            for (const c of col.cards || []) {
+              cards.push(includeDetails ? c : {
+                id: c.id,
+                title: c.title,
+                status: c.status,
+                due_on: c.due_on,
+                app_url: c.app_url
+              });
             }
           }
-          return allCards;
+          return { cards, columns: summary.columns || [], truncated: summary.truncated };
         }
       } catch {
         // ignore dock fallback errors
@@ -925,7 +947,7 @@ async function listCardTableCards(ctx, projectId, cardTableId) {
       });
     }
     console.error(`[listCardTableCards] Error fetching cards for card table ${cardTableId}:`, e.message);
-    return [];
+    return { cards: [], columns: [], truncated: false };
   }
 }
 
@@ -3185,20 +3207,31 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const tableId = args.card_table_id ? Number(args.card_table_id) : null;
-        const cards = await listCardTableCards(ctx, p.id, tableId);
+        const result = await listCardTableCards(ctx, p.id, tableId, {
+          maxCardsPerColumn: Number(args.max_cards_per_column || 50),
+          includeDetails: !!args.include_details
+        });
 
         // INTELLIGENT CHAINING: Enrich cards with person/project details
         const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `card table ${tableId || "dock"}`);
         const enricher = intelligent.createEnricher(ctx_intel);
 
         const enrichedCards = await Promise.all(
-          (cards || []).map(c => enricher.enrich({ ...c, bucket: { id: p.id, name: p.name } }, {
+          (result.cards || []).map(c => enricher.enrich({ ...c, bucket: { id: p.id, name: p.name } }, {
             getPerson: (id) => ctx_intel.getPerson(id),
             getProject: (id) => ctx_intel.getProject(id)
           }))
         );
 
-        return ok(id, { project: { id: p.id, name: p.name }, card_table_id: tableId, cards: enrichedCards, count: enrichedCards.length, metrics: ctx_intel.getMetrics() });
+        return ok(id, {
+          project: { id: p.id, name: p.name },
+          card_table_id: tableId,
+          cards: enrichedCards,
+          columns: result.columns || [],
+          truncated: !!result.truncated,
+          count: enrichedCards.length,
+          metrics: ctx_intel.getMetrics()
+        });
       } catch (e) {
         console.error(`[list_card_table_cards] Error:`, e.message);
         // Tool disabled / table not found -> return empty with notice
@@ -3216,8 +3249,18 @@ export async function handleMCP(reqBody, ctx) {
         // Fallback to non-enriched cards
         try {
           const p = await projectByName(ctx, args.project);
-          const cards = await listCardTableCards(ctx, p.id, Number(args.card_table_id));
-          return ok(id, { project: { id: p.id, name: p.name }, cards, count: cards.length, fallback: true });
+          const result = await listCardTableCards(ctx, p.id, Number(args.card_table_id), {
+            maxCardsPerColumn: Number(args.max_cards_per_column || 50),
+            includeDetails: !!args.include_details
+          });
+          return ok(id, {
+            project: { id: p.id, name: p.name },
+            cards: result.cards || [],
+            columns: result.columns || [],
+            truncated: !!result.truncated,
+            count: (result.cards || []).length,
+            fallback: true
+          });
         } catch (fbErr) {
           return fail(id, { code: "LIST_CARD_TABLE_CARDS_ERROR", message: fbErr.message });
         }
