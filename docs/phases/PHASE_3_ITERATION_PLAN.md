@@ -50,6 +50,15 @@ When a user asks for summaries or "everything," the server must:
 5. **Project summary path**
    - Project summary should aggregate *all* tools (todos + cards + messages + docs + schedule + uploads) using iterators and chunking.
 
+## Phase 3 QA checklist
+- **Todos** — list, get, create, update, complete, uncomplete, reposition; ensure pagination results are complete and payload key generated when large, then verify summary uses the iterators.
+- **Card tables** — list tables/columns/cards (single board + full project dump) and confirm cached exports + chunk navigation work without ResponseTooLarge.
+- **Messages & comments** — list boards, create/update messages with subject/content aliases, list/create/update comments via `extractContent`.
+- **Campfire & chatbots** — list campfire lines, create lines with plain text, create/update/delete chatbots, post chatbot lines using integration key fallback.
+- **Vaults** — list/get vault metadata + any linked uploads/docs to confirm the new `get_vault` handler works.
+- **Smart actions** — ask for “summarize project”, “show every card”, “show every todo” and verify the server iterates internally and returns cached exports instead of partial answers.
+- **API docs sync** — after the QA sweep, update `docs/reference/bc3-api` sections or OpenAPI specs to match any newly surfaced endpoints/responses.
+
 ## Acceptance criteria for Phase 3
 - A single user request for "summarize project" returns complete data (or cached export + chunk pointers) **without** user follow-up.
 - No tool silently truncates data.
