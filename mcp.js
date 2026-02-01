@@ -302,6 +302,17 @@ function dockFind(dock, names) {
   return null;
 }
 
+function dockFindAll(dock, names) {
+  const list = Array.isArray(names) ? names : [names];
+  const hits = [];
+  for (const n of list) {
+    for (const d of (dock || [])) {
+      if (d?.name === n && d?.enabled !== false) hits.push(d);
+    }
+  }
+  return hits;
+}
+
 async function requireDockTool(ctx, projectId, names, toolKey, { allowId = true } = {}) {
   const dock = await getDock(ctx, projectId);
   const tool = dockFind(dock, names);
@@ -715,18 +726,24 @@ async function listCardTables(ctx, projectId, { includeArchived = false, onSourc
 
   // 2) Dock-first fallback (may return a single table).
   const dock = await getDock(ctx, projectId);
-  const card = dockFind(dock, ["card_table", "card_tables", "kanban", "kanban_board"]);
+  const cards = dockFindAll(dock, ["card_table", "card_tables", "kanban", "kanban_board"]);
   const results = [];
 
-  if (card) {
+  if (cards.length) {
     try {
-      if (card.url) {
-        const obj = await api(ctx, card.url);
-        if (Array.isArray(obj)) results.push(...obj);
-        else if (obj) results.push(obj);
-      } else if (card.id) {
-        const obj = await api(ctx, `/buckets/${projectId}/card_tables/${card.id}.json`);
-        if (obj) results.push(obj);
+      const fetched = await mapLimit(cards, 2, async (card) => {
+        if (card.url) {
+          const obj = await api(ctx, card.url);
+          return Array.isArray(obj) ? obj : [obj];
+        }
+        if (card.id) {
+          const obj = await api(ctx, `/buckets/${projectId}/card_tables/${card.id}.json`);
+          return obj ? [obj] : [];
+        }
+        return [];
+      });
+      for (const batch of fetched) {
+        if (Array.isArray(batch)) results.push(...batch);
       }
       if (results.length) emit("dock", results.length);
     } catch (inner) {
