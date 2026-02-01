@@ -106,6 +106,35 @@ function toolFailResult(id, e) {
   });
 }
 
+function inferToolFromName(name) {
+  const n = String(name || "").toLowerCase();
+  if (n.includes("message")) return "message_boards";
+  if (n.includes("document") || n.includes("vault")) return "documents";
+  if (n.includes("schedule")) return "schedule";
+  if (n.includes("card")) return "card_tables";
+  if (n.includes("campfire") || n.includes("chatbot") || n.includes("chat")) return "campfire";
+  if (n.includes("hill")) return "hill_charts";
+  return null;
+}
+
+function emptyPayloadForToolName(name) {
+  const n = String(name || "").toLowerCase();
+  if (n === "get_hill_chart") return { hill_chart: null };
+  if (n.includes("list_message_boards")) return { message_boards: [], count: 0 };
+  if (n.includes("list_messages")) return { messages: [], count: 0 };
+  if (n.includes("list_documents")) return { documents: [], count: 0 };
+  if (n.includes("list_schedule_entries")) return { schedule_entries: [], count: 0 };
+  if (n.includes("list_card_tables")) return { card_tables: [], count: 0 };
+  if (n.includes("list_card_table_columns")) return { columns: [], count: 0 };
+  if (n.includes("list_card_table_cards")) return { cards: [], count: 0 };
+  if (n.includes("list_card_steps")) return { steps: [], count: 0 };
+  if (n.includes("list_campfires")) return { campfires: [], count: 0 };
+  if (n.includes("list_chatbots")) return { chatbots: [], count: 0 };
+  if (n.includes("search_recordings")) return { results: [], count: 0 };
+  if (n.includes("search_project")) return { results: [], count: 0 };
+  return null;
+}
+
 // ---------- Tiny in-memory cache ----------
 const CACHE = new Map(); // key -> { ts, value }
 const CACHE_TTL_MS = 60 * 1000;
@@ -2238,24 +2267,61 @@ export async function handleMCP(reqBody, ctx) {
         // INTELLIGENT CHAINING: Search with automatic enrichment
         // Detects assignee_ids and automatically fetches person objects
         const result = await intelligent.executeIntelligentSearch(ctx, q);
-        
-        const response = cacheSet(cacheKey, { 
-          query: args.query, 
-          count: result.count, 
-          todos: result.items 
+
+        const response = cacheSet(cacheKey, {
+          query: args.query,
+          count: result.count,
+          todos: result.items
         });
+
+        // If intelligent layer returns empty or made no API calls, fall back to API search
+        if (!result?.count || (result?._metadata && result._metadata.apiCallsMade === 0)) {
+          try {
+            const apiResults = await searchRecordings(ctx, q, { type: "todo" });
+            const todos = apiResults.map((r) => ({
+              id: r.id,
+              title: r.title,
+              content: r.title,
+              type: "todo",
+              bucket: r.bucket,
+              app_url: r.app_url
+            }));
+            const cachedApi = cacheSet(cacheKey, { query: args.query, count: todos.length, todos });
+            return ok(id, { ...cachedApi, source: "fallback_search" });
+          } catch (fallbackErr) {
+            // Final fallback: local DB index
+            try {
+              const hits = searchIndex(q, { type: "todo", userKey: ctx.userKey });
+              const todos = (hits || []).map((h) => ({
+                id: h.object_id,
+                title: h.title,
+                content: h.content,
+                type: "todo",
+                bucket: { id: h.project_id },
+                app_url: h.url,
+                source: "db"
+              }));
+              const cachedDb = cacheSet(cacheKey, { query: args.query, count: todos.length, todos });
+              return ok(id, { ...cachedDb, source: "db_fallback", error: fallbackErr.message });
+            } catch (dbErr) {
+              console.error(`[search_todos] Fallback also failed:`, dbErr.message);
+              return ok(id, { query: args.query, count: 0, todos: [], error: dbErr.message });
+            }
+          }
+        }
+
         return ok(id, { ...response, source: "intelligent_api", metrics: result._metadata });
       } catch (e) {
         console.error(`[search_todos] Intelligent search failed:`, e.message);
         
         // Fallback: Traditional search without enrichment
         try {
-          const results = await searchRecordings(ctx, q, { type: "Todo" });
+          const results = await searchRecordings(ctx, q, { type: "todo" });
           const todos = results.map((r) => ({
             id: r.id,
             title: r.title,
             content: r.title,
-            type: "Todo",
+            type: "todo",
             bucket: r.bucket,
             app_url: r.app_url
           }));
@@ -4970,6 +5036,24 @@ export async function handleMCP(reqBody, ctx) {
     }
     if (e?.code === "NOT_AUTHENTICATED") {
       return fail(id, { code: "NOT_AUTHENTICATED", message: "Not connected. Run /startbcgpt to get the auth link." });
+    }
+    if (e?.code === "BASECAMP_API_ERROR" && (e.status === 404 || e.status === 403)) {
+      const tool = inferToolFromName(params?.name);
+      const empty = emptyPayloadForToolName(params?.name);
+      if (tool && empty) {
+        try {
+          const projectName = params?.arguments?.project;
+          const project = projectName ? await projectByName(ctx, projectName) : null;
+          const notice = toolNoticeResult(id, toolError("TOOL_UNAVAILABLE", "Tool unavailable or disabled for this project.", {
+            tool,
+            status: e.status,
+            hint: "Enable the tool in the project’s Basecamp settings."
+          }), { tool, project, empty });
+          if (notice) return notice;
+        } catch {
+          // fall through
+        }
+      }
     }
     if (e?.code === "BASECAMP_API_ERROR") {
       return fail(id, { code: "BASECAMP_API_ERROR", message: `Basecamp API error (${e.status})`, url: e.url, data: e.data });
