@@ -63,7 +63,11 @@ import * as intelligent from './intelligent-integration.js';
 
 // ---------- JSON-RPC helpers ----------
 function ok(id, result) { return { jsonrpc: "2.0", id, result }; }
-function fail(id, error) { return { jsonrpc: "2.0", id, error }; }
+function fail(id, error) { return { jsonrpc: "2.0", id, error }; }function logDebug(...args) {
+  if (!process?.env?.DEBUG) return;
+  console.log(...args);
+}
+
 
 function toolError(code, message, extra = {}) {
   const err = new Error(message);
@@ -695,7 +699,10 @@ async function listCardTables(ctx, projectId) {
   // 1) Try the canonical list endpoint first (returns all tables when available).
   try {
     const tables = await apiAll(ctx, `/buckets/${projectId}/card_tables.json`);
-    if (Array.isArray(tables) && tables.length) return tables;
+    if (Array.isArray(tables) && tables.length) {
+      logDebug("[listCardTables] source=card_tables.json count=", tables.length);
+      return tables;
+    }
   } catch (e) {
     if (!isApiError(e, 404) && !isApiError(e, 403)) throw e;
     // fall through to dock/recordings strategy
@@ -716,6 +723,7 @@ async function listCardTables(ctx, projectId) {
         const obj = await api(ctx, `/buckets/${projectId}/card_tables/${card.id}.json`);
         if (obj) results.push(obj);
       }
+      if (results.length) logDebug("[listCardTables] source=dock count=", results.length);
     } catch (inner) {
       if (isApiError(inner, 404) || isApiError(inner, 403)) {
         throw toolError("TOOL_UNAVAILABLE", "Card tables tool is not accessible for this project.", {
@@ -741,6 +749,7 @@ async function listCardTables(ctx, projectId) {
       for (const b of fetched) {
         if (b) results.push(b);
       }
+      if (results.length) logDebug("[listCardTables] source=recordings count=", results.length);
     }
   } catch (e) {
     if (!results.length && (isApiError(e, 404) || isApiError(e, 403))) {
@@ -763,6 +772,7 @@ async function listCardTables(ctx, projectId) {
     deduped.push(t);
   }
 
+  logDebug("[listCardTables] source=deduped count=", deduped.length);
   return deduped;
 }
 
@@ -5147,7 +5157,10 @@ export async function handleMCP(reqBody, ctx) {
             const tables = await listCardTables(ctx, projectId);
             const tableId = Number(tableMatch[2]);
             const table = (tables || []).find(t => Number(t?.id) === tableId) || (tables || [])[0] || null;
-            if (table) return ok(id, { resolved: true, data: table, tables_count: (tables || []).length });
+            if (table) {
+              logDebug("[basecamp_raw] resolved card_table from listCardTables", { projectId, tableId, tablesCount: (tables || []).length });
+              return ok(id, { resolved: true, data: table, tables_count: (tables || []).length });
+            }
           }
 
           if (cardsMatch) {
@@ -5163,6 +5176,7 @@ export async function handleMCP(reqBody, ctx) {
                   allCards.push(...(Array.isArray(cards) ? cards : []));
                 }
               }
+              logDebug("[basecamp_raw] resolved card_table cards from listCardTables", { projectId, tableId, resolvedId: table?.id || null, tablesCount: (tables || []).length, cards: allCards.length });
               return ok(id, { resolved: true, card_table_id: table?.id || null, data: allCards, tables_count: (tables || []).length });
             }
           }
@@ -5208,5 +5222,8 @@ export async function handleMCP(reqBody, ctx) {
     return fail(id, { code: "INTERNAL_ERROR", message: e?.message || String(e) });
   }
 }
+
+
+
 
 
