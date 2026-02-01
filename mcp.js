@@ -674,22 +674,18 @@ async function assignmentReport(ctx, projectName, { maxTodos = 250 } = {}) {
 
 // ---------- Card Tables ----------
 async function listCardTables(ctx, projectId) {
-  try {
-    return apiAll(ctx, `/buckets/${projectId}/card_tables.json`);
-  } catch (e) {
-    if (!isApiError(e, 404) && !isApiError(e, 403)) throw e;
-    const { tool: card } = await requireDockTool(
-      ctx,
-      projectId,
-      ["card_table", "card_tables", "kanban", "kanban_board"],
-      "card_tables"
-    );
+  // Dock-first: card tables are tool-gated and can 404 if disabled.
+  const dock = await getDock(ctx, projectId);
+  const card = dockFind(dock, ["card_table", "card_tables", "kanban", "kanban_board"]);
+
+  if (card) {
     try {
-      if (card?.url) {
+      if (card.url) {
+        // Some docks return a list URL, others a single resource URL.
         const obj = await api(ctx, card.url);
         return Array.isArray(obj) ? obj : [obj];
       }
-      if (card?.id) {
+      if (card.id) {
         const obj = await api(ctx, `/buckets/${projectId}/card_tables/${card.id}.json`);
         return Array.isArray(obj) ? obj : [obj];
       }
@@ -702,12 +698,27 @@ async function listCardTables(ctx, projectId) {
         throw toolError("TOOL_UNAVAILABLE", "Card tables tool is not accessible for this project.", {
           tool: "card_tables",
           projectId,
-          hint: "Enable Card Tables in the project’s tools.",
+          hint: "Enable Card Tables in the project's tools.",
           status: inner.status,
         });
       }
       throw inner;
     }
+  }
+
+  // Fallback: attempt the generic list endpoint if dock info is missing.
+  try {
+    return apiAll(ctx, `/buckets/${projectId}/card_tables.json`);
+  } catch (e) {
+    if (isApiError(e, 404) || isApiError(e, 403)) {
+      throw toolError("TOOL_NOT_ENABLED", "card_tables tool is not enabled for this project.", {
+        tool: "card_tables",
+        projectId,
+        hint: "Enable Card Tables in the project's tools.",
+        status: e.status,
+      });
+    }
+    throw e;
   }
 }
 
@@ -5080,4 +5091,5 @@ export async function handleMCP(reqBody, ctx) {
     return fail(id, { code: "INTERNAL_ERROR", message: e?.message || String(e) });
   }
 }
+
 
