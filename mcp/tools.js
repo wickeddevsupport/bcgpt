@@ -129,6 +129,12 @@ export function getTools() {
       required: ["project", "todo_id"],
       additionalProperties: false
     }),
+    tool("complete_todo", "Mark a to-do as complete.", {
+      type: "object",
+      properties: { project: { type: "string" }, todo_id: { type: "integer" } },
+      required: ["project", "todo_id"],
+      additionalProperties: false
+    }),
     tool("reposition_todo", "Move/reposition a to-do within its list.", {
       type: "object",
       properties: { project: { type: "string" }, todo_id: { type: "integer" }, position: { type: "integer" } },
@@ -234,8 +240,10 @@ export function getTools() {
         project: { type: "string" },
         card_table_id: { type: "integer" },
         title: { type: "string" },
+        content: { type: "string", nullable: true },
         description: { type: "string", nullable: true },
         column_id: { type: "integer", nullable: true },
+        due_on: { type: "string", nullable: true },
         position: { type: "integer", nullable: true }
       },
       required: ["project", "card_table_id", "title"],
@@ -284,8 +292,8 @@ export function getTools() {
     }),
     tool("reposition_card_step", "Reposition a card step within its card.", {
       type: "object",
-      properties: { project: { type: "string" }, step_id: { type: "integer" }, position: { type: "integer" } },
-      required: ["project", "step_id", "position"],
+      properties: { project: { type: "string" }, card_id: { type: "integer" }, step_id: { type: "integer" }, position: { type: "integer" } },
+      required: ["project", "card_id", "step_id", "position"],
       additionalProperties: false
     }),
 
@@ -472,9 +480,10 @@ export function getTools() {
       properties: {
         project: { type: "string" },
         recording_id: { type: "integer" },
+        content: { type: "string", nullable: true },
         body: { type: "object", additionalProperties: true }
       },
-      required: ["project", "recording_id", "body"],
+      required: ["project", "recording_id"],
       additionalProperties: false
     }),
 
@@ -556,8 +565,13 @@ export function getTools() {
     }),
     tool("create_campfire_line", "Create a chat line. Provide official fields in body (content, etc).", {
       type: "object",
-      properties: { project: { type: "string" }, chat_id: { type: "integer" }, body: { type: "object", additionalProperties: true } },
-      required: ["project", "chat_id", "body"],
+      properties: {
+        project: { type: "string" },
+        chat_id: { type: "integer" },
+        content: { type: "string", nullable: true },
+        body: { type: "object", additionalProperties: true }
+      },
+      required: ["project", "chat_id"],
       additionalProperties: false
     }),
     tool("delete_campfire_line", "Delete a chat line.", {
@@ -600,8 +614,15 @@ export function getTools() {
     }),
     tool("post_chatbot_line", "Post a chat line as a chatbot using integration key. Provide body if needed.", {
       type: "object",
-      properties: { project: { type: "string" }, chat_id: { type: "integer" }, chatbot_id: { type: "integer" }, body: { type: "object", additionalProperties: true } },
-      required: ["project", "chat_id", "chatbot_id"],
+      properties: {
+        project: { type: "string" },
+        chat_id: { type: "integer" },
+        chatbot_id: { type: "integer", nullable: true },
+        integration_key: { type: "string", nullable: true },
+        content: { type: "string", nullable: true },
+        body: { type: "object", additionalProperties: true }
+      },
+      required: ["project", "chat_id"],
       additionalProperties: false
     }),
 
@@ -682,8 +703,13 @@ export function getTools() {
 
     tool("update_comment", "Update a comment's content.", {
       type: "object",
-      properties: { project: { type: "string" }, comment_id: { type: "integer" }, body: { type: "object", additionalProperties: true } },
-      required: ["project", "comment_id", "body"],
+      properties: {
+        project: { type: "string" },
+        comment_id: { type: "integer" },
+        content: { type: "string", nullable: true },
+        body: { type: "object", additionalProperties: true }
+      },
+      required: ["project", "comment_id"],
       additionalProperties: false
     }),
 
@@ -712,14 +738,28 @@ export function getTools() {
     }),
     tool("create_message", "Create a message. Provide official fields in body.", {
       type: "object",
-      properties: { project: { type: "string" }, board_id: { type: "integer" }, body: { type: "object", additionalProperties: true } },
-      required: ["project", "board_id", "body"],
+      properties: {
+        project: { type: "string" },
+        board_id: { type: "integer" },
+        subject: { type: "string", nullable: true },
+        content: { type: "string", nullable: true },
+        status: { type: "string", nullable: true },
+        body: { type: "object", additionalProperties: true }
+      },
+      required: ["project", "board_id"],
       additionalProperties: false
     }),
     tool("update_message", "Update a message. Provide official fields in body.", {
       type: "object",
-      properties: { project: { type: "string" }, message_id: { type: "integer" }, body: { type: "object", additionalProperties: true } },
-      required: ["project", "message_id", "body"],
+      properties: {
+        project: { type: "string" },
+        message_id: { type: "integer" },
+        subject: { type: "string", nullable: true },
+        content: { type: "string", nullable: true },
+        status: { type: "string", nullable: true },
+        body: { type: "object", additionalProperties: true }
+      },
+      required: ["project", "message_id"],
       additionalProperties: false
     }),
 

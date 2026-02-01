@@ -175,6 +175,39 @@ function toolError(code, message, extra = {}) {
   return err;
 }
 
+function firstDefined(...values) {
+  for (const v of values) {
+    if (v !== undefined && v !== null && v !== "") return v;
+  }
+  return undefined;
+}
+
+function extractContent(args) {
+  if (!args) return undefined;
+  if (typeof args === "string") return args;
+  if (typeof args.content === "string") return args.content;
+  if (typeof args.html === "string") return args.html;
+  if (typeof args.text === "string") return args.text;
+  if (typeof args.message === "string") return args.message;
+  if (typeof args.body === "string") return args.body;
+  if (args.body && typeof args.body === "object") {
+    return extractContent(args.body);
+  }
+  return undefined;
+}
+
+function normalizeMessageBody(args = {}, { defaultStatus = null } = {}) {
+  const body = (args.body && typeof args.body === "object" && !Array.isArray(args.body)) ? { ...args.body } : {};
+  const subject = firstDefined(args.subject, body.subject, args.title, body.title);
+  if (subject != null) body.subject = subject;
+  const content = firstDefined(extractContent(body), extractContent(args));
+  if (content != null) body.content = content;
+  const status = firstDefined(args.status, body.status);
+  if (status != null) body.status = status;
+  if (defaultStatus && body.status == null) body.status = defaultStatus;
+  return body;
+}
+
 function isApiError(e, status = null) {
   if (!e || e.code !== "BASECAMP_API_ERROR") return false;
   return status == null ? true : e.status === status;
@@ -603,6 +636,39 @@ async function updateTodoDetails(ctx, projectId, todoId, updates = {}) {
   else if (current?.starts_on) body.starts_on = current.starts_on;
 
   return api(ctx, `/buckets/${projectId}/todos/${todoId}.json`, { method: "PUT", body });
+}
+
+async function getTodo(ctx, projectId, todoId) {
+  return api(ctx, `/buckets/${projectId}/todos/${todoId}.json`);
+}
+
+async function listTodosForListById(ctx, projectId, todolistId) {
+  try {
+    const list = await getTodoList(ctx, projectId, todolistId);
+    return await listTodosForList(ctx, projectId, list);
+  } catch (e) {
+    if (isApiError(e, 404)) {
+      const lists = await listTodoLists(ctx, projectId);
+      const match = (lists || []).find((l) => String(l.id) === String(todolistId));
+      if (match) return await listTodosForList(ctx, projectId, match);
+    }
+    throw e;
+  }
+}
+
+async function completeTodo(ctx, projectId, todoId) {
+  await api(ctx, `/buckets/${projectId}/todos/${todoId}/completion.json`, { method: "POST" });
+  return { message: "Todo completed", todo_id: todoId };
+}
+
+async function uncompleteTodo(ctx, projectId, todoId) {
+  await api(ctx, `/buckets/${projectId}/todos/${todoId}/completion.json`, { method: "DELETE" });
+  return { message: "Todo marked incomplete", todo_id: todoId };
+}
+
+async function repositionTodo(ctx, projectId, todoId, position) {
+  await api(ctx, `/buckets/${projectId}/todos/${todoId}/position.json`, { method: "PUT", body: { position } });
+  return { message: "Todo repositioned", todo_id: todoId, position };
 }
 
 /**
@@ -1235,14 +1301,25 @@ async function getCard(ctx, projectId, cardId) {
   return api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}.json`);
 }
 
-async function createCard(ctx, projectId, cardTableId, { title, content, column_id, due_on } = {}) {
+async function createCard(ctx, projectId, cardTableId, { title, content, description, column_id, due_on, position } = {}) {
   const body = { title };
-  if (content) body.content = content;
+  const cardContent = firstDefined(content, description);
+  if (cardContent) body.content = cardContent;
   if (due_on) body.due_on = due_on;
+  if (position != null) body.position = position;
   // Note: column_id is the list/column to create the card in
-  // If column_id not provided, user must specify via handler
-  if (!column_id) throw new Error("column_id (list/column ID) is required to create a card");
-  return api(ctx, `/buckets/${projectId}/card_tables/lists/${column_id}/cards.json`, { method: "POST", body });
+  // If column_id not provided, fall back to the first available column
+  let targetColumnId = column_id;
+  if (!targetColumnId) {
+    const table = await api(ctx, `/buckets/${projectId}/card_tables/${cardTableId}.json`);
+    const lists = Array.isArray(table?.lists) ? table.lists : [];
+    const fallback = lists.find((l) => l.type === "Kanban::Triage")
+      || lists.find((l) => l.type === "Kanban::Column")
+      || lists[0];
+    targetColumnId = fallback?.id || null;
+  }
+  if (!targetColumnId) throw new Error("column_id (list/column ID) is required to create a card");
+  return api(ctx, `/buckets/${projectId}/card_tables/lists/${targetColumnId}/cards.json`, { method: "POST", body });
 }
 
 async function updateCard(ctx, projectId, cardId, body) {
@@ -1677,9 +1754,11 @@ async function getComment(ctx, projectId, commentId) {
 }
 
 async function createComment(ctx, projectId, recordingId, content) {
+  const text = String(content ?? "").trim();
+  if (!text) throw new Error("Missing comment content.");
   const c = await api(ctx, `/buckets/${projectId}/recordings/${recordingId}/comments.json`, {
     method: "POST",
-    body: { content },
+    body: { content: text },
   });
   return {
     id: c.id,
@@ -1692,9 +1771,11 @@ async function createComment(ctx, projectId, recordingId, content) {
 }
 
 async function updateComment(ctx, projectId, commentId, content) {
+  const text = String(content ?? "").trim();
+  if (!text) throw new Error("Missing comment content.");
   const c = await api(ctx, `/buckets/${projectId}/comments/${commentId}.json`, {
     method: "PUT",
-    body: { content }
+    body: { content: text }
   });
   return {
     id: c.id,
@@ -1859,6 +1940,10 @@ async function listVaults(ctx, projectId) {
   } catch {
     return [];
   }
+}
+
+async function getVault(ctx, projectId, vaultId) {
+  return api(ctx, `/buckets/${projectId}/vaults/${vaultId}.json`);
 }
 
 // ========== VAULT CHILD VAULTS ==========
@@ -3059,6 +3144,56 @@ export async function handleMCP(reqBody, ctx) {
       }
     }
 
+    if (name === "get_todo") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const todo = await getTodo(ctx, p.id, Number(args.todo_id));
+        return ok(id, { project: { id: p.id, name: p.name }, todo });
+      } catch (e) {
+        return fail(id, { code: "GET_TODO_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_todos_for_list") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const todos = await listTodosForListById(ctx, p.id, Number(args.todolist_id));
+        return ok(id, { project: { id: p.id, name: p.name }, todolist_id: Number(args.todolist_id), ...buildListPayload("todos", todos) });
+      } catch (e) {
+        return fail(id, { code: "LIST_TODOS_FOR_LIST_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "complete_todo") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await completeTodo(ctx, p.id, Number(args.todo_id));
+        return ok(id, { project: { id: p.id, name: p.name }, ...result });
+      } catch (e) {
+        return fail(id, { code: "COMPLETE_TODO_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "uncomplete_todo") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await uncompleteTodo(ctx, p.id, Number(args.todo_id));
+        return ok(id, { project: { id: p.id, name: p.name }, ...result });
+      } catch (e) {
+        return fail(id, { code: "UNCOMPLETE_TODO_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "reposition_todo") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await repositionTodo(ctx, p.id, Number(args.todo_id), Number(args.position));
+        return ok(id, { project: { id: p.id, name: p.name }, ...result });
+      } catch (e) {
+        return fail(id, { code: "REPOSITION_TODO_ERROR", message: e.message });
+      }
+    }
+
     if (name === "smart_action") {
       const query = normalizeQuery(args.query);
       if (!query) return fail(id, { code: "BAD_REQUEST", message: "Missing query." });
@@ -3589,13 +3724,14 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "list_project_card_table_contents") {
       try {
         const p = await projectByName(ctx, args.project);
-        const cacheOutput = args.cache_output == null ? (!!args.auto_all || !!args.include_details) : !!args.cache_output;
+        const autoAll = args.auto_all == null ? true : !!args.auto_all;
+        const cacheOutput = args.cache_output == null ? (autoAll || !!args.include_details) : !!args.cache_output;
         const result = await listProjectCardTableContents(ctx, p.id, {
           includeDetails: !!args.include_details,
           maxCardsPerColumn: args.max_cards_per_column == null ? 0 : Number(args.max_cards_per_column),
           cursor: args.cursor,
           maxBoards: Number(args.max_boards || 2),
-          autoAll: !!args.auto_all,
+          autoAll,
           maxBoardsTotal: args.max_boards_total == null ? 0 : Number(args.max_boards_total),
           cacheOutput,
           cacheChunkBoards: Number(args.cache_chunk_boards || 1)
@@ -3637,8 +3773,10 @@ export async function handleMCP(reqBody, ctx) {
         const card = await createCard(ctx, p.id, Number(args.card_table_id), {
           title: args.title,
           content: args.content,
+          description: args.description,
           column_id: args.column_id,
-          due_on: args.due_on
+          due_on: args.due_on,
+          position: args.position
         });
 
         // INTELLIGENT CHAINING: Enrich created card with person/project details
@@ -3661,8 +3799,10 @@ export async function handleMCP(reqBody, ctx) {
           const card = await createCard(ctx, p.id, Number(args.card_table_id), {
             title: args.title,
             content: args.content,
+            description: args.description,
             column_id: args.column_id,
-            due_on: args.due_on
+            due_on: args.due_on,
+            position: args.position
           });
           return ok(id, { message: "Card created", project: { id: p.id, name: p.name }, card, fallback: true });
         } catch (fbErr) {
@@ -3874,7 +4014,8 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "list_messages") {
       try {
         const p = await projectByName(ctx, args.project);
-        const msgs = await listMessages(ctx, p.id, { board_id: args.message_board_id });
+        const boardId = firstDefined(args.message_board_id, args.board_id);
+        const msgs = await listMessages(ctx, p.id, { board_id: boardId, board_title: args.board_title });
 
         // INTELLIGENT CHAINING: Enrich messages with person/project details
         const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `messages for ${p.name}`);
@@ -3905,7 +4046,8 @@ export async function handleMCP(reqBody, ctx) {
         // Fallback to non-enriched messages
         try {
           const p = await projectByName(ctx, args.project);
-          const msgs = await listMessages(ctx, p.id, { board_id: args.message_board_id });
+          const boardId = firstDefined(args.message_board_id, args.board_id);
+          const msgs = await listMessages(ctx, p.id, { board_id: boardId, board_title: args.board_title });
           return ok(id, { project: { id: p.id, name: p.name }, fallback: true, ...buildListPayload("messages", msgs) });
         } catch (fbErr) {
           return fail(id, { code: "LIST_MESSAGES_ERROR", message: fbErr.message });
@@ -3916,7 +4058,8 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "get_message_board") {
       try {
         const p = await projectByName(ctx, args.project);
-        const board = await getMessageBoard(ctx, p.id, Number(args.message_board_id));
+        const boardId = firstDefined(args.message_board_id, args.board_id);
+        const board = await getMessageBoard(ctx, p.id, Number(boardId));
         return ok(id, { project: { id: p.id, name: p.name }, message_board: board });
       } catch (e) {
         return fail(id, { code: "GET_MESSAGE_BOARD_ERROR", message: e.message });
@@ -3937,7 +4080,14 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         await requireDockTool(ctx, p.id, ["message_board", "message_boards"], "message_boards");
-        const message = await createMessage(ctx, p.id, Number(args.message_board_id), args.body || {});
+        let boardId = firstDefined(args.message_board_id, args.board_id);
+        if (!boardId) {
+          const boards = await listMessageBoards(ctx, p.id);
+          boardId = boards?.[0]?.id;
+        }
+        if (!boardId) throw new Error("No message board found for this project.");
+        const body = normalizeMessageBody(args, { defaultStatus: "active" });
+        const message = await createMessage(ctx, p.id, Number(boardId), body);
         return ok(id, { message: "Message created", project: { id: p.id, name: p.name }, message });
       } catch (e) {
         const known = toolFailResult(id, e);
@@ -3950,7 +4100,8 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         await requireDockTool(ctx, p.id, ["message_board", "message_boards"], "message_boards");
-        const message = await updateMessage(ctx, p.id, Number(args.message_id), args.body || {});
+        const body = normalizeMessageBody(args);
+        const message = await updateMessage(ctx, p.id, Number(args.message_id), body);
         return ok(id, { message: "Message updated", project: { id: p.id, name: p.name }, message });
       } catch (e) {
         const known = toolFailResult(id, e);
@@ -3973,7 +4124,8 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "get_message_type") {
       try {
         const p = await projectByName(ctx, args.project);
-        const category = await getMessageType(ctx, p.id, Number(args.category_id));
+        const messageTypeId = firstDefined(args.message_type_id, args.category_id);
+        const category = await getMessageType(ctx, p.id, Number(messageTypeId));
         return ok(id, { project: { id: p.id, name: p.name }, message_type: category });
       } catch (e) {
         return fail(id, { code: "GET_MESSAGE_TYPE_ERROR", message: e.message });
@@ -3997,7 +4149,8 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         await requireDockTool(ctx, p.id, ["message_board", "message_boards"], "message_boards");
-        const category = await updateMessageType(ctx, p.id, Number(args.category_id), args.body || {});
+        const messageTypeId = firstDefined(args.message_type_id, args.category_id);
+        const category = await updateMessageType(ctx, p.id, Number(messageTypeId), args.body || {});
         return ok(id, { message: "Message type updated", project: { id: p.id, name: p.name }, message_type: category });
       } catch (e) {
         const known = toolFailResult(id, e);
@@ -4010,7 +4163,8 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         await requireDockTool(ctx, p.id, ["message_board", "message_boards"], "message_boards");
-        const result = await deleteMessageType(ctx, p.id, Number(args.category_id));
+        const messageTypeId = firstDefined(args.message_type_id, args.category_id);
+        const result = await deleteMessageType(ctx, p.id, Number(messageTypeId));
         return ok(id, { project: { id: p.id, name: p.name }, ...result });
       } catch (e) {
         const known = toolFailResult(id, e);
@@ -4479,7 +4633,8 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "create_comment") {
       try {
         const p = await projectByName(ctx, args.project);
-        const comment = await createComment(ctx, p.id, args.recording_id, args.content);
+        const content = extractContent(args);
+        const comment = await createComment(ctx, p.id, args.recording_id, content);
 
         // INTELLIGENT CHAINING: Enrich created comment with person/project details
         const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `created comment`);
@@ -4495,7 +4650,8 @@ export async function handleMCP(reqBody, ctx) {
         // Fallback to non-enriched comment
         try {
           const p = await projectByName(ctx, args.project);
-          const comment = await createComment(ctx, p.id, args.recording_id, args.content);
+          const content = extractContent(args);
+          const comment = await createComment(ctx, p.id, args.recording_id, content);
           return ok(id, { message: "Comment created", project: { id: p.id, name: p.name }, comment, fallback: true });
         } catch (fbErr) {
           return fail(id, { code: "CREATE_COMMENT_ERROR", message: fbErr.message });
@@ -4506,7 +4662,8 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "update_comment") {
       try {
         const p = await projectByName(ctx, args.project);
-        const comment = await updateComment(ctx, p.id, args.comment_id, args.content);
+        const content = extractContent(args);
+        const comment = await updateComment(ctx, p.id, args.comment_id, content);
         return ok(id, { message: "Comment updated", project: { id: p.id, name: p.name }, comment });
       } catch (e) {
         return fail(id, { code: "UPDATE_COMMENT_ERROR", message: e.message });
@@ -4667,6 +4824,16 @@ export async function handleMCP(reqBody, ctx) {
     }
 
     // ===== NEW VAULT ENDPOINTS =====
+    if (name === "get_vault") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const vault = await getVault(ctx, p.id, Number(args.vault_id));
+        return ok(id, { project: { id: p.id, name: p.name }, vault });
+      } catch (e) {
+        return fail(id, { code: "GET_VAULT_ERROR", message: e.message });
+      }
+    }
+
     if (name === "list_vaults") {
       try {
         const p = await projectByName(ctx, args.project);
@@ -4747,7 +4914,10 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         await requireDockTool(ctx, p.id, ["chat", "campfire", "campfires"], "campfire");
-        const line = await createCampfireLine(ctx, p.id, Number(args.chat_id), args.body || {});
+        const body = (args.body && typeof args.body === "object" && !Array.isArray(args.body)) ? { ...args.body } : {};
+        const content = firstDefined(extractContent(body), extractContent(args));
+        if (content != null && body.content == null) body.content = content;
+        const line = await createCampfireLine(ctx, p.id, Number(args.chat_id), body);
         return ok(id, { message: "Campfire line created", project: { id: p.id, name: p.name }, line });
       } catch (e) {
         const known = toolFailResult(id, e);
@@ -4782,7 +4952,8 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "get_chatbot") {
       try {
         const p = await projectByName(ctx, args.project);
-        const bot = await getChatbot(ctx, p.id, Number(args.chat_id), Number(args.integration_id));
+        const chatbotId = firstDefined(args.chatbot_id, args.integration_id);
+        const bot = await getChatbot(ctx, p.id, Number(args.chat_id), Number(chatbotId));
         return ok(id, { project: { id: p.id, name: p.name }, chat_id: Number(args.chat_id), chatbot: bot });
       } catch (e) {
         return fail(id, { code: "GET_CHATBOT_ERROR", message: e.message });
@@ -4806,7 +4977,8 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         await requireDockTool(ctx, p.id, ["chat", "campfire", "campfires"], "campfire");
-        const bot = await updateChatbot(ctx, p.id, Number(args.chat_id), Number(args.integration_id), args.body || {});
+        const chatbotId = firstDefined(args.chatbot_id, args.integration_id);
+        const bot = await updateChatbot(ctx, p.id, Number(args.chat_id), Number(chatbotId), args.body || {});
         return ok(id, { message: "Chatbot updated", project: { id: p.id, name: p.name }, chatbot: bot });
       } catch (e) {
         const known = toolFailResult(id, e);
@@ -4819,7 +4991,8 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         await requireDockTool(ctx, p.id, ["chat", "campfire", "campfires"], "campfire");
-        const result = await deleteChatbot(ctx, p.id, Number(args.chat_id), Number(args.integration_id));
+        const chatbotId = firstDefined(args.chatbot_id, args.integration_id);
+        const result = await deleteChatbot(ctx, p.id, Number(args.chat_id), Number(chatbotId));
         return ok(id, { project: { id: p.id, name: p.name }, ...result });
       } catch (e) {
         const known = toolFailResult(id, e);
@@ -4832,7 +5005,27 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         await requireDockTool(ctx, p.id, ["chat", "campfire", "campfires"], "campfire");
-        const line = await postChatbotLine(ctx, p.id, Number(args.chat_id), args.integration_key, args.body || {});
+        const body = (args.body && typeof args.body === "object" && !Array.isArray(args.body)) ? { ...args.body } : {};
+        const content = firstDefined(extractContent(body), extractContent(args));
+        if (content != null && body.content == null) body.content = content;
+
+        let integrationKey = firstDefined(args.integration_key, args.integrationKey);
+        const chatbotId = firstDefined(args.chatbot_id, args.integration_id);
+
+        if (!integrationKey && chatbotId) {
+          const bot = await getChatbot(ctx, p.id, Number(args.chat_id), Number(chatbotId));
+          if (bot?.lines_url) {
+            const line = await api(ctx, bot.lines_url, { method: "POST", body });
+            return ok(id, { message: "Chatbot line posted", project: { id: p.id, name: p.name }, line });
+          }
+          integrationKey = bot?.integration_key || bot?.key || null;
+        }
+
+        if (!integrationKey) {
+          throw new Error("Missing integration_key or chatbot_id to post chatbot line.");
+        }
+
+        const line = await postChatbotLine(ctx, p.id, Number(args.chat_id), integrationKey, body);
         return ok(id, { message: "Chatbot line posted", project: { id: p.id, name: p.name }, line });
       } catch (e) {
         const known = toolFailResult(id, e);
