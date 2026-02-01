@@ -78,7 +78,7 @@ Current strategy:
 - Enrichment (ResultEnricher)
 - Fallback logic to avoid hard errors
 - Smart routing (`smart_action`) for 30-action limit
-- Phase 4 resilience still in progress (circuit breaker, health metrics, broader parallelization)
+- Phase 4 resilience not started (circuit breaker, health metrics, broader parallelization pending)
 
 ## Action items when adding new endpoints
 1) Add tool to `mcp.js`

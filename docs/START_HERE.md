@@ -43,8 +43,8 @@ Some MCP tools are intentionally NOT in OpenAPI; see coverage report.
 
 ## Current phase status
 - Phase 3: complete
-- Phase 3.5: complete (missing tools added + fallbacks + smart_action)
-- Phase 4: in progress (resilience/production hardening)
+- Phase 3.5: in progress (edge-case handling + intelligent fallbacks still being hardened)
+- Phase 4: not started
 
 See: `docs/phases/PHASE_3_STATUS.md`
 

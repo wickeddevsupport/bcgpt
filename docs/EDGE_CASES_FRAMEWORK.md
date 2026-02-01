@@ -31,6 +31,11 @@ This document describes the global edge-case handling strategy used by the MCP h
 5. **Write operations return explicit failures**  
    For create/update/delete, the handler returns a failure with the typed code and hint.
 
+6. **Intelligent search fallbacks**  
+   When the intelligent layer returns empty or makes zero API calls, fall back to:
+   - API search
+   - Local DB index (as a last resort)
+
 ## Examples
 - `list_message_boards` -> empty array + notice if message boards not enabled.
 - `list_documents` -> empty array + notice if documents not enabled.

@@ -2278,7 +2278,7 @@ export async function handleMCP(reqBody, ctx) {
         if (!result?.count || (result?._metadata && result._metadata.apiCallsMade === 0)) {
           try {
             const apiResults = await searchRecordings(ctx, q, { type: "todo" });
-            const todos = apiResults.map((r) => ({
+            let todos = apiResults.map((r) => ({
               id: r.id,
               title: r.title,
               content: r.title,
@@ -2286,6 +2286,25 @@ export async function handleMCP(reqBody, ctx) {
               bucket: r.bucket,
               app_url: r.app_url
             }));
+            if (!todos.length) {
+              const rows = await listAllOpenTodos(ctx);
+              const needle = q.toLowerCase();
+              todos = rows
+                .filter(r => {
+                  const text = todoText(r.raw || {}).toLowerCase();
+                  const desc = String(r.raw?.description || "").toLowerCase();
+                  return text.includes(needle) || desc.includes(needle);
+                })
+                .map(r => ({
+                  id: r.todoId,
+                  title: r.content,
+                  content: r.raw?.description || "",
+                  type: "todo",
+                  bucket: { id: r.projectId, name: r.project },
+                  app_url: r.url || null,
+                  source: "scan"
+                }));
+            }
             const cachedApi = cacheSet(cacheKey, { query: args.query, count: todos.length, todos });
             return ok(id, { ...cachedApi, source: "fallback_search" });
           } catch (fallbackErr) {
