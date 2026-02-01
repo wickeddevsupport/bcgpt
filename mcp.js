@@ -3036,16 +3036,48 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const sources = [];
+        const includeColumns = !!args.include_columns;
         const tables = await listCardTables(ctx, p.id, {
           includeArchived: !!args.include_archived,
           onSource: (s) => sources.push(s)
+        });
+
+        const normalizedTables = (tables || []).map((t) => {
+          if (!t || typeof t !== "object") return t;
+          const base = { ...t };
+          const lists = Array.isArray(t.lists) ? t.lists : [];
+          if (includeColumns) {
+            base.lists = lists.map((c) => ({
+              id: c.id,
+              title: c.title,
+              status: c.status,
+              type: c.type,
+              position: c.position,
+              cards_count: c.cards_count,
+              comment_count: c.comment_count,
+              url: c.url,
+              app_url: c.app_url,
+              parent: c.parent
+                ? {
+                    id: c.parent.id,
+                    title: c.parent.title,
+                    type: c.parent.type,
+                    url: c.parent.url,
+                    app_url: c.parent.app_url
+                  }
+                : undefined
+            }));
+          } else {
+            delete base.lists;
+          }
+          return base;
         });
 
         // INTELLIGENT CHAINING: Enrich card tables with person/project details
         const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `card tables for ${p.name}`);
         const enricher = intelligent.createEnricher(ctx_intel);
         const enrichedTables = await Promise.all(
-          (tables || []).map(t => enricher.enrich({ ...t, bucket: { id: p.id, name: p.name } }, {
+          (normalizedTables || []).map(t => enricher.enrich({ ...t, bucket: { id: p.id, name: p.name } }, {
             getPerson: (id) => ctx_intel.getPerson(id),
             getProject: (id) => ctx_intel.getProject(id)
           }))
@@ -3069,8 +3101,39 @@ export async function handleMCP(reqBody, ctx) {
         // Fallback to non-enriched card tables
         try {
           const p = await projectByName(ctx, args.project);
+          const includeColumns = !!args.include_columns;
           const tables = await listCardTables(ctx, p.id);
-          return ok(id, { project: { id: p.id, name: p.name }, card_tables: tables, count: tables.length, fallback: true });
+          const normalizedTables = (tables || []).map((t) => {
+            if (!t || typeof t !== "object") return t;
+            const base = { ...t };
+            const lists = Array.isArray(t.lists) ? t.lists : [];
+            if (includeColumns) {
+              base.lists = lists.map((c) => ({
+                id: c.id,
+                title: c.title,
+                status: c.status,
+                type: c.type,
+                position: c.position,
+                cards_count: c.cards_count,
+                comment_count: c.comment_count,
+                url: c.url,
+                app_url: c.app_url,
+                parent: c.parent
+                  ? {
+                      id: c.parent.id,
+                      title: c.parent.title,
+                      type: c.parent.type,
+                      url: c.parent.url,
+                      app_url: c.parent.app_url
+                    }
+                  : undefined
+              }));
+            } else {
+              delete base.lists;
+            }
+            return base;
+          });
+          return ok(id, { project: { id: p.id, name: p.name }, card_tables: normalizedTables, count: normalizedTables.length, fallback: true });
         } catch (fbErr) {
           return fail(id, { code: "LIST_CARD_TABLES_ERROR", message: fbErr.message });
         }
