@@ -1006,39 +1006,63 @@ async function listProjectCardTableContents(ctx, projectId, {
   includeDetails = false,
   maxCardsPerColumn = 50,
   cursor = 0,
-  maxBoards = 2
+  maxBoards = 2,
+  autoAll = false,
+  maxBoardsTotal = 50
 } = {}) {
   const tables = await listCardTables(ctx, projectId);
   const start = Math.max(0, Number(cursor) || 0);
   const count = Math.max(1, Number(maxBoards) || 1);
-  const slice = tables.slice(start, start + count);
+  const limit = Math.max(1, Number(maxBoardsTotal) || 1);
 
   const boards = [];
-  for (const t of slice) {
-    const summary = await summarizeCardTable(ctx, projectId, t, {
-      includeCards: true,
-      maxCardsPerColumn
-    });
-    if (!includeDetails) {
-      summary.columns = (summary.columns || []).map((col) => ({
-        id: col.id,
-        title: col.title,
-        type: col.type,
-        cards_count: col.cards_count,
-        cards: (col.cards || []).map((c) => ({
-          id: c.id,
-          title: c.title,
-          status: c.status,
-          due_on: c.due_on,
-          app_url: c.app_url
-        }))
-      }));
+  let idx = start;
+  let done = false;
+
+  while (!done) {
+    const slice = autoAll ? tables.slice(idx, idx + count) : tables.slice(start, start + count);
+    if (!slice.length) {
+      done = true;
+      break;
     }
-    boards.push(summary);
+
+    for (const t of slice) {
+      const summary = await summarizeCardTable(ctx, projectId, t, {
+        includeCards: true,
+        maxCardsPerColumn
+      });
+      if (!includeDetails) {
+        summary.columns = (summary.columns || []).map((col) => ({
+          id: col.id,
+          title: col.title,
+          type: col.type,
+          cards_count: col.cards_count,
+          cards: (col.cards || []).map((c) => ({
+            id: c.id,
+            title: c.title,
+            status: c.status,
+            due_on: c.due_on,
+            app_url: c.app_url
+          }))
+        }));
+      }
+      boards.push(summary);
+      if (boards.length >= limit) {
+        done = true;
+        break;
+      }
+    }
+
+    if (!autoAll) break;
+    idx += slice.length;
+    if (idx >= tables.length) done = true;
   }
 
-  const next_cursor = start + slice.length < tables.length ? start + slice.length : null;
-  return { boards, next_cursor, total: tables.length, cursor: start };
+  const next_cursor = autoAll
+    ? (idx < tables.length && boards.length < limit ? idx : null)
+    : (start + count < tables.length ? start + count : null);
+
+  return { boards, next_cursor, total: tables.length, cursor: autoAll ? idx : start, truncated: boards.length >= limit };
 }
 
 async function listCardTableSummaries(ctx, projectId, {
@@ -3251,13 +3275,15 @@ export async function handleMCP(reqBody, ctx) {
             includeDetails,
             maxCardsPerColumn,
             cursor: args.cursor,
-            maxBoards: Number(args.max_boards || 2)
+            maxBoards: Number(args.max_boards || 2),
+            autoAll: true
           });
           return ok(id, {
             project: { id: p.id, name: p.name },
             card_tables: result.boards || [],
             count: (result.boards || []).length,
-            next_cursor: result.next_cursor ?? null
+            next_cursor: result.next_cursor ?? null,
+            truncated: !!result.truncated
           });
         }
 
@@ -3311,13 +3337,15 @@ export async function handleMCP(reqBody, ctx) {
               includeDetails,
               maxCardsPerColumn,
               cursor: args.cursor,
-              maxBoards: Number(args.max_boards || 2)
+              maxBoards: Number(args.max_boards || 2),
+              autoAll: true
             });
             return ok(id, {
               project: { id: p.id, name: p.name },
               card_tables: result.boards || [],
               count: (result.boards || []).length,
               next_cursor: result.next_cursor ?? null,
+              truncated: !!result.truncated,
               fallback: true
             });
           }
@@ -3377,7 +3405,9 @@ export async function handleMCP(reqBody, ctx) {
           includeDetails: !!args.include_details,
           maxCardsPerColumn: Number(args.max_cards_per_column || 50),
           cursor: args.cursor,
-          maxBoards: Number(args.max_boards || 2)
+          maxBoards: Number(args.max_boards || 2),
+          autoAll: !!args.auto_all,
+          maxBoardsTotal: Number(args.max_boards_total || 50)
         });
         return ok(id, { project: { id: p.id, name: p.name }, ...result });
       } catch (e) {

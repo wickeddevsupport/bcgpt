@@ -178,7 +178,9 @@ export function getTools() {
         include_details: { type: "boolean" },
         max_cards_per_column: { type: "integer" },
         max_boards: { type: "integer" },
-        cursor: { type: "integer" }
+        cursor: { type: "integer" },
+        auto_all: { type: "boolean" },
+        max_boards_total: { type: "integer" }
       },
       required: ["project"],
       additionalProperties: false
