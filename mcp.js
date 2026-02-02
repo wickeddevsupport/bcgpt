@@ -1858,6 +1858,7 @@ async function listComments(ctx, projectId, recordingId) {
                 return { comments: [], _meta: { ...meta, error: "NOT_FOUND", message: `Recording, todo, or card with ID ${recordingId} not found in project ${projectId}` } };
               }
             }
+          }
         } catch (searchErr) {
           console.warn(`[listComments] Search/lookup failed: ${searchErr?.message}`);
           return { comments: [], _meta: { ...meta, error: "LOOKUP_FAILED", message: `Could not locate ID ${recordingId}` } };
