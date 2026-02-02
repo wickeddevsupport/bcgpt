@@ -1838,8 +1838,16 @@ async function listComments(ctx, projectId, recordingId) {
               // Not a recording, todo, or card — try fuzzy search by ID
               console.log(`[listComments] ID ${recordingId} not found as recording or todo — attempting search`);
               
-              const results = await searchRecordings(ctx, recordingId, { bucket_id: projectId });
-              const arr = Array.isArray(results) ? results : [];
+              let results = await searchRecordings(ctx, recordingId, { bucket_id: projectId });
+              let arr = Array.isArray(results) ? results : [];
+              if (!arr.length) {
+                try {
+                  results = await searchRecordings(ctx, recordingId);
+                  arr = Array.isArray(results) ? results : [];
+                } catch (_) {
+                  arr = [];
+                }
+              }
               if (arr.length) {
                 // Choose best effort match by title/content
                 const candidates = arr.map((r) => ({ id: r.id, name: r.title || r.content || "", raw: r }));
@@ -1942,6 +1950,26 @@ async function getComment(ctx, projectId, commentId) {
   };
 }
 
+async function resolveRecordingForComment(ctx, recordingId, projectId) {
+  const idStr = String(recordingId ?? "").trim();
+  if (!idStr) return null;
+  let results = [];
+  try {
+    results = await searchRecordings(ctx, idStr, { bucket_id: projectId });
+  } catch (_) {
+    results = [];
+  }
+  let match = (results || []).find(r => String(r.id) === idStr);
+  if (match) return match;
+  try {
+    results = await searchRecordings(ctx, idStr);
+  } catch (_) {
+    results = [];
+  }
+  match = (results || []).find(r => String(r.id) === idStr);
+  return match || null;
+}
+
 async function createComment(ctx, projectId, recordingId, content) {
   const text = String(content ?? "").trim();
   if (!text) throw new Error("Missing comment content.");
@@ -1962,10 +1990,36 @@ async function createComment(ctx, projectId, recordingId, content) {
     } catch (todoErr) {
       const todoMsg = String(todoErr?.message || "");
       if (!todoMsg.includes("404")) throw todoErr;
-      c = await api(ctx, `/buckets/${projectId}/card_tables/cards/${recordingId}/comments.json`, {
-        method: "POST",
-        body: { content: text },
-      });
+      try {
+        c = await api(ctx, `/buckets/${projectId}/card_tables/cards/${recordingId}/comments.json`, {
+          method: "POST",
+          body: { content: text },
+        });
+      } catch (cardErr) {
+        const cardMsg = String(cardErr?.message || "");
+        if (!cardMsg.includes("404")) throw cardErr;
+        const resolved = await resolveRecordingForComment(ctx, recordingId, projectId);
+        if (!resolved) throw cardErr;
+        const bucketId = resolved.bucket_id || resolved.bucket?.id || projectId;
+        const type = String(resolved.type || "").toLowerCase();
+        const url = String(resolved.url || resolved.app_url || "");
+        if (url.includes("/card_tables/cards/") || type.includes("kanban::card")) {
+          c = await api(ctx, `/buckets/${bucketId}/card_tables/cards/${resolved.id}/comments.json`, {
+            method: "POST",
+            body: { content: text },
+          });
+        } else if (type.includes("todo")) {
+          c = await api(ctx, `/buckets/${bucketId}/todos/${resolved.id}/comments.json`, {
+            method: "POST",
+            body: { content: text },
+          });
+        } else {
+          c = await api(ctx, `/buckets/${bucketId}/recordings/${resolved.id}/comments.json`, {
+            method: "POST",
+            body: { content: text },
+          });
+        }
+      }
     }
   }
   return {

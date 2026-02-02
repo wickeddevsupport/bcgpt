@@ -28,6 +28,12 @@ export function ambiguity(label, options) {
 }
 
 export function resolveByName(items, name, label = "item") {
+  const raw = String(name ?? "").trim();
+  if (/^\d+$/.test(raw)) {
+    const byId = (items || []).filter(i => String(i.id) === raw);
+    if (byId.length === 1) return byId[0];
+    if (byId.length > 1) return ambiguity(label, byId);
+  }
   const n = normalize(name);
 
   const exact = (items || []).filter(i => normalize(i.name) === n);
