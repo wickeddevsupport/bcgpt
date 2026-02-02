@@ -481,7 +481,9 @@ export function getTools() {
       type: "object",
       properties: {
         project: { type: "string" },
-        recording_id: { type: "integer" },
+        recording_id: { type: ["integer", "string"] },
+        recording_query: { type: "string", nullable: true, description: "Title or search query to resolve the recording when ID is unknown." },
+        recording_title: { type: "string", nullable: true },
         content: { type: "string", nullable: true },
         body: { type: "object", additionalProperties: true }
       },

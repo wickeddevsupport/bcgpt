@@ -1071,9 +1071,18 @@
                   "project": {
                     "type": "string"
                   },
-                  "recording_id": {
-                    "type": "integer"
-                  },
+                "recording_id": {
+                  "oneOf": [
+                    { "type": "integer" },
+                    { "type": "string" }
+                  ]
+                },
+                "recording_query": {
+                  "type": "string"
+                },
+                "recording_title": {
+                  "type": "string"
+                },
                   "content": {
                     "type": "string"
                   }

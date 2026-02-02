@@ -1970,6 +1970,31 @@ async function resolveRecordingForComment(ctx, recordingId, projectId) {
   return match || null;
 }
 
+async function resolveRecordingByQuery(ctx, query, projectId) {
+  const q = String(query ?? "").trim();
+  if (!q) return null;
+  let results = [];
+  try {
+    results = await searchRecordings(ctx, q, { bucket_id: projectId });
+  } catch (_) {
+    results = [];
+  }
+  if (!results.length) {
+    try {
+      results = await searchRecordings(ctx, q);
+    } catch (_) {
+      results = [];
+    }
+  }
+  const candidates = (results || []).map((r) => ({
+    id: r.id,
+    name: r.title || r.content || r.plain_text_content || "",
+    raw: r
+  }));
+  const best = resolveBestEffort(candidates, q) || candidates[0];
+  return best?.raw || null;
+}
+
 function parseRecordingUrl(input) {
   const raw = String(input ?? "").trim();
   if (!raw || !raw.includes("basecamp.com")) return null;
@@ -1991,7 +2016,7 @@ function extractRecordingUrlFromText(text) {
   return m ? parseRecordingUrl(m[0]) : null;
 }
 
-async function createComment(ctx, projectId, recordingId, content) {
+async function createComment(ctx, projectId, recordingId, content, opts = {}) {
   const text = String(content ?? "").trim();
   if (!text) throw new Error("Missing comment content.");
   let c;
@@ -2027,6 +2052,40 @@ async function createComment(ctx, projectId, recordingId, content) {
       app_url: c.app_url,
     };
   }
+  const idStr = String(recordingId ?? "").trim();
+  if (idStr && !/^\d+$/.test(idStr)) {
+    const resolved = await resolveRecordingByQuery(ctx, idStr, projectId);
+    if (resolved) {
+      const bucketId = resolved.bucket_id || resolved.bucket?.id || projectId;
+      const type = String(resolved.type || "").toLowerCase();
+      const url = String(resolved.url || resolved.app_url || "");
+      if (url.includes("/card_tables/cards/") || type.includes("kanban::card")) {
+        c = await api(ctx, `/buckets/${bucketId}/card_tables/cards/${resolved.id}/comments.json`, {
+          method: "POST",
+          body: { content: text },
+        });
+      } else if (type.includes("todo")) {
+        c = await api(ctx, `/buckets/${bucketId}/todos/${resolved.id}/comments.json`, {
+          method: "POST",
+          body: { content: text },
+        });
+      } else {
+        c = await api(ctx, `/buckets/${bucketId}/recordings/${resolved.id}/comments.json`, {
+          method: "POST",
+          body: { content: text },
+        });
+      }
+      return {
+        id: c.id,
+        created_at: c.created_at,
+        content: c.content,
+        creator: c.creator?.name,
+        creator_id: c.creator?.id,
+        app_url: c.app_url,
+      };
+    }
+  }
+
   try {
     c = await api(ctx, `/buckets/${projectId}/recordings/${recordingId}/comments.json`, {
       method: "POST",
@@ -2051,7 +2110,10 @@ async function createComment(ctx, projectId, recordingId, content) {
       } catch (cardErr) {
         const cardMsg = String(cardErr?.message || "");
         if (!cardMsg.includes("404")) throw cardErr;
-        const resolved = await resolveRecordingForComment(ctx, recordingId, projectId);
+        let resolved = await resolveRecordingForComment(ctx, recordingId, projectId);
+        if (!resolved && opts?.recordingQuery) {
+          resolved = await resolveRecordingByQuery(ctx, opts.recordingQuery, projectId);
+        }
         if (!resolved) throw cardErr;
         const bucketId = resolved.bucket_id || resolved.bucket?.id || projectId;
         const type = String(resolved.type || "").toLowerCase();
@@ -5177,7 +5239,7 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const content = extractContent(args);
-        const comment = await createComment(ctx, p.id, args.recording_id, content);
+        const comment = await createComment(ctx, p.id, args.recording_id, content, { recordingQuery: args.recording_query || args.recording_title || args.query || null });
 
         // INTELLIGENT CHAINING: Enrich created comment with person/project details
         const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `created comment`);
@@ -5194,7 +5256,7 @@ export async function handleMCP(reqBody, ctx) {
         try {
           const p = await projectByName(ctx, args.project);
           const content = extractContent(args);
-          const comment = await createComment(ctx, p.id, args.recording_id, content);
+          const comment = await createComment(ctx, p.id, args.recording_id, content, { recordingQuery: args.recording_query || args.recording_title || args.query || null });
           return ok(id, { message: "Comment created", project: { id: p.id, name: p.name }, comment, fallback: true });
         } catch (fbErr) {
           return fail(id, { code: "CREATE_COMMENT_ERROR", message: fbErr.message });
