@@ -2061,6 +2061,33 @@ async function postCardComment(ctx, projectId, cardId, text) {
   });
 }
 
+async function postCommentViaParent(ctx, projectId, commentId, text) {
+  const comment = await api(ctx, `/buckets/${projectId}/comments/${commentId}.json`);
+  const parent = comment?.parent || {};
+  const commentsUrl = parent?.comments_url || parent?.comments_url_raw;
+  if (commentsUrl) {
+    return api(ctx, commentsUrl, { method: "POST", body: { content: text } });
+  }
+  const parentId = parent?.id;
+  const parentType = String(parent?.type || "").toLowerCase();
+  if (parentId && parentType.includes("todo")) {
+    return api(ctx, `/buckets/${projectId}/todos/${parentId}/comments.json`, {
+      method: "POST",
+      body: { content: text },
+    });
+  }
+  if (parentId && (parentType.includes("card") || parentType.includes("kanban"))) {
+    return postCardComment(ctx, projectId, parentId, text);
+  }
+  if (parentId) {
+    return api(ctx, `/buckets/${projectId}/recordings/${parentId}/comments.json`, {
+      method: "POST",
+      body: { content: text },
+    });
+  }
+  throw new Error("COMMENT_PARENT_NOT_FOUND");
+}
+
 async function createComment(ctx, projectId, recordingId, content, opts = {}) {
   const text = String(content ?? "").trim();
   if (!text) throw new Error("Missing comment content.");
@@ -2093,6 +2120,23 @@ async function createComment(ctx, projectId, recordingId, content, opts = {}) {
       creator_id: c.creator?.id,
       app_url: c.app_url,
     };
+  }
+
+  const numericId = /^\d+$/.test(String(recordingId ?? ""));
+  if (numericId) {
+    try {
+      c = await postCommentViaParent(ctx, projectId, recordingId, text);
+      return {
+        id: c.id,
+        created_at: c.created_at,
+        content: c.content,
+        creator: c.creator?.name,
+        creator_id: c.creator?.id,
+        app_url: c.app_url,
+      };
+    } catch (_) {
+      // fall through to other strategies
+    }
   }
   const idStr = String(recordingId ?? "").trim();
   if (idStr && !/^\d+$/.test(idStr)) {
