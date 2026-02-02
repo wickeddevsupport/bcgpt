@@ -2012,7 +2012,7 @@ function parseRecordingUrl(input) {
 
 function extractRecordingUrlFromText(text) {
   const raw = String(text ?? "");
-  const m = raw.match(/https?:\/\/[^\\s)]+basecamp\\.com\\/[^\\s)]+/i);
+  const m = raw.match(/https?:\/\/[^\s)]+basecamp\.com\/[^\s)]+/i);
   return m ? parseRecordingUrl(m[0]) : null;
 }
 
