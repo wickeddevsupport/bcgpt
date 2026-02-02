@@ -236,7 +236,10 @@ export async function basecampFetch(
         err.status = res.status;
         err.url = url;
         err.data = data;
-        noteFailure(err);
+        // Don't trip circuit breaker for expected 404s (used in fallbacks)
+        if (res.status !== 404) {
+          noteFailure(err);
+        }
         throw err;
       }
 
@@ -389,7 +392,9 @@ export async function basecampFetchAll(
           await sleep(250 * (attempt + 1));
           continue;
         }
-        noteFailure(e);
+        if (!(e?.code === "BASECAMP_API_ERROR" && e?.status === 404)) {
+          noteFailure(e);
+        }
         throw e;
       }
     }
