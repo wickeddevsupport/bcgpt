@@ -2055,10 +2055,23 @@ async function postCardComment(ctx, projectId, cardId, text) {
     });
   }
   const commentsUrl = card?.comments_url || `/buckets/${projectId}/card_tables/cards/${cardId}/comments.json`;
-  return api(ctx, commentsUrl, {
-    method: "POST",
-    body: { content: text },
-  });
+  try {
+    return api(ctx, commentsUrl, {
+      method: "POST",
+      body: { content: text },
+    });
+  } catch (err) {
+    const msg = String(err?.message || "");
+    if (!msg.includes("404")) throw err;
+    const recordingId = card?.recording?.id;
+    if (recordingId) {
+      return api(ctx, `/buckets/${projectId}/recordings/${recordingId}/comments.json`, {
+        method: "POST",
+        body: { content: text },
+      });
+    }
+    throw err;
+  }
 }
 
 async function postCommentViaParent(ctx, projectId, commentId, text) {
