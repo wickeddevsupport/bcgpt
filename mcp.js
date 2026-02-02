@@ -2065,12 +2065,29 @@ async function postCardComment(ctx, projectId, cardId, text) {
     if (!msg.includes("404")) throw err;
     const recordingId = card?.recording?.id || card?.recording_id || card?.id;
     if (recordingId) {
-      return api(ctx, `/buckets/${projectId}/recordings/${recordingId}/comments.json`, {
+      try {
+        return api(ctx, `/buckets/${projectId}/recordings/${recordingId}/comments.json`, {
+          method: "POST",
+          body: { content: text },
+        });
+      } catch (recErr) {
+        const recMsg = String(recErr?.message || "");
+        if (!recMsg.includes("404")) throw recErr;
+        // Some Basecamp web endpoints accept /comments without .json
+        return api(ctx, `/buckets/${projectId}/recordings/${recordingId}/comments`, {
+          method: "POST",
+          body: { content: text },
+        });
+      }
+    }
+    try {
+      return api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}/comments`, {
         method: "POST",
         body: { content: text },
       });
+    } catch (cardHtmlErr) {
+      throw err;
     }
-    throw err;
   }
 }
 
