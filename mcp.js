@@ -1985,11 +1985,20 @@ function parseRecordingUrl(input) {
   return null;
 }
 
+function extractRecordingUrlFromText(text) {
+  const raw = String(text ?? "");
+  const m = raw.match(/https?:\/\/[^\\s)]+basecamp\\.com\\/[^\\s)]+/i);
+  return m ? parseRecordingUrl(m[0]) : null;
+}
+
 async function createComment(ctx, projectId, recordingId, content) {
   const text = String(content ?? "").trim();
   if (!text) throw new Error("Missing comment content.");
   let c;
-  const parsed = parseRecordingUrl(recordingId);
+  let parsed = parseRecordingUrl(recordingId);
+  if (!parsed) {
+    parsed = extractRecordingUrlFromText(text);
+  }
   if (parsed?.bucketId && parsed?.id) {
     projectId = parsed.bucketId;
     recordingId = parsed.id;
