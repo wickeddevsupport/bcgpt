@@ -2063,7 +2063,7 @@ async function postCardComment(ctx, projectId, cardId, text) {
   } catch (err) {
     const msg = String(err?.message || "");
     if (!msg.includes("404")) throw err;
-    const recordingId = card?.recording?.id;
+    const recordingId = card?.recording?.id || card?.recording_id || card?.id;
     if (recordingId) {
       return api(ctx, `/buckets/${projectId}/recordings/${recordingId}/comments.json`, {
         method: "POST",
