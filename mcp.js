@@ -1970,10 +1970,54 @@ async function resolveRecordingForComment(ctx, recordingId, projectId) {
   return match || null;
 }
 
+function parseRecordingUrl(input) {
+  const raw = String(input ?? "").trim();
+  if (!raw || !raw.includes("basecamp.com")) return null;
+  const patterns = [
+    { type: "card", re: /\/buckets\/(\d+)\/card_tables\/cards\/(\d+)/i },
+    { type: "todo", re: /\/buckets\/(\d+)\/todos\/(\d+)/i },
+    { type: "recording", re: /\/buckets\/(\d+)\/recordings\/(\d+)/i },
+  ];
+  for (const p of patterns) {
+    const m = raw.match(p.re);
+    if (m) return { type: p.type, bucketId: m[1], id: m[2] };
+  }
+  return null;
+}
+
 async function createComment(ctx, projectId, recordingId, content) {
   const text = String(content ?? "").trim();
   if (!text) throw new Error("Missing comment content.");
   let c;
+  const parsed = parseRecordingUrl(recordingId);
+  if (parsed?.bucketId && parsed?.id) {
+    projectId = parsed.bucketId;
+    recordingId = parsed.id;
+    if (parsed.type === "card") {
+      c = await api(ctx, `/buckets/${projectId}/card_tables/cards/${recordingId}/comments.json`, {
+        method: "POST",
+        body: { content: text },
+      });
+    } else if (parsed.type === "todo") {
+      c = await api(ctx, `/buckets/${projectId}/todos/${recordingId}/comments.json`, {
+        method: "POST",
+        body: { content: text },
+      });
+    } else {
+      c = await api(ctx, `/buckets/${projectId}/recordings/${recordingId}/comments.json`, {
+        method: "POST",
+        body: { content: text },
+      });
+    }
+    return {
+      id: c.id,
+      created_at: c.created_at,
+      content: c.content,
+      creator: c.creator?.name,
+      creator_id: c.creator?.id,
+      app_url: c.app_url,
+    };
+  }
   try {
     c = await api(ctx, `/buckets/${projectId}/recordings/${recordingId}/comments.json`, {
       method: "POST",
