@@ -2043,6 +2043,24 @@ function extractRecordingUrlFromText(text) {
   return m ? parseRecordingUrl(m[0]) : null;
 }
 
+async function postCardComment(ctx, projectId, cardId, text) {
+  let card;
+  try {
+    card = await api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}.json`);
+  } catch (err) {
+    // fallback to direct comments endpoint if card fetch fails
+    return api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}/comments.json`, {
+      method: "POST",
+      body: { content: text },
+    });
+  }
+  const commentsUrl = card?.comments_url || `/buckets/${projectId}/card_tables/cards/${cardId}/comments.json`;
+  return api(ctx, commentsUrl, {
+    method: "POST",
+    body: { content: text },
+  });
+}
+
 async function createComment(ctx, projectId, recordingId, content, opts = {}) {
   const text = String(content ?? "").trim();
   if (!text) throw new Error("Missing comment content.");
@@ -2055,10 +2073,7 @@ async function createComment(ctx, projectId, recordingId, content, opts = {}) {
     projectId = parsed.bucketId;
     recordingId = parsed.id;
     if (parsed.type === "card") {
-      c = await api(ctx, `/buckets/${projectId}/card_tables/cards/${recordingId}/comments.json`, {
-        method: "POST",
-        body: { content: text },
-      });
+      c = await postCardComment(ctx, projectId, recordingId, text);
     } else if (parsed.type === "todo") {
       c = await api(ctx, `/buckets/${projectId}/todos/${recordingId}/comments.json`, {
         method: "POST",
@@ -2087,10 +2102,7 @@ async function createComment(ctx, projectId, recordingId, content, opts = {}) {
       const type = String(resolved.type || "").toLowerCase();
       const url = String(resolved.url || resolved.app_url || "");
       if (url.includes("/card_tables/cards/") || type.includes("kanban::card")) {
-        c = await api(ctx, `/buckets/${bucketId}/card_tables/cards/${resolved.id}/comments.json`, {
-          method: "POST",
-          body: { content: text },
-        });
+        c = await postCardComment(ctx, bucketId, resolved.id, text);
       } else if (type.includes("todo")) {
         c = await api(ctx, `/buckets/${bucketId}/todos/${resolved.id}/comments.json`, {
           method: "POST",
@@ -2130,10 +2142,7 @@ async function createComment(ctx, projectId, recordingId, content, opts = {}) {
       const todoMsg = String(todoErr?.message || "");
       if (!todoMsg.includes("404")) throw todoErr;
       try {
-        c = await api(ctx, `/buckets/${projectId}/card_tables/cards/${recordingId}/comments.json`, {
-          method: "POST",
-          body: { content: text },
-        });
+        c = await postCardComment(ctx, projectId, recordingId, text);
       } catch (cardErr) {
         const cardMsg = String(cardErr?.message || "");
         if (!cardMsg.includes("404")) throw cardErr;
@@ -2144,10 +2153,7 @@ async function createComment(ctx, projectId, recordingId, content, opts = {}) {
         if (!resolved && /^\d+$/.test(String(recordingId ?? ""))) {
           const card = await findCardInProjectById(ctx, projectId, recordingId);
           if (card) {
-            c = await api(ctx, `/buckets/${projectId}/card_tables/cards/${card.id}/comments.json`, {
-              method: "POST",
-              body: { content: text },
-            });
+            c = await postCardComment(ctx, projectId, card.id, text);
             return {
               id: c.id,
               created_at: c.created_at,
@@ -2163,10 +2169,7 @@ async function createComment(ctx, projectId, recordingId, content, opts = {}) {
         const type = String(resolved.type || "").toLowerCase();
         const url = String(resolved.url || resolved.app_url || "");
         if (url.includes("/card_tables/cards/") || type.includes("kanban::card")) {
-          c = await api(ctx, `/buckets/${bucketId}/card_tables/cards/${resolved.id}/comments.json`, {
-            method: "POST",
-            body: { content: text },
-          });
+          c = await postCardComment(ctx, bucketId, resolved.id, text);
         } else if (type.includes("todo")) {
           c = await api(ctx, `/buckets/${bucketId}/todos/${resolved.id}/comments.json`, {
             method: "POST",
