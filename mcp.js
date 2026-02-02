@@ -1820,29 +1820,44 @@ async function listComments(ctx, projectId, recordingId) {
             commentsCount = typeof todoJson?.comments_count === 'number' ? todoJson.comments_count : null;
             recordingJson = todoJson;
           } else {
-            // Not a recording or a todo — try fuzzy search by ID
-            console.log(`[listComments] ID ${recordingId} not found as recording or todo — attempting search`);
-            
-            const results = await searchRecordings(ctx, recordingId, { bucket_id: projectId });
-            const arr = Array.isArray(results) ? results : [];
-            if (arr.length) {
-              // Choose best effort match by title/content
-              const candidates = arr.map((r) => ({ id: r.id, name: r.title || r.content || "", raw: r }));
-              const best = resolveBestEffort(candidates, recordingId) || candidates[0];
-              meta.usedRecordingId = best.id;
-              meta.autoResolved = true;
-              meta.matchedTitle = best.name;
-              meta.resolvedType = "recording";
-              recordingId = best.id;
-              recordingJson = best.raw || (await api(ctx, `/buckets/${projectId}/recordings/${best.id}.json`));
-              commentsUrl = recordingJson?.comments_url || `/buckets/${projectId}/recordings/${best.id}/comments.json`;
-              commentsCount = typeof recordingJson?.comments_count === 'number' ? recordingJson.comments_count : null;
-              console.log(`[listComments] Auto-resolved to recording id=${best.id} title="${best.name}"`);
-            } else {
-              console.warn(`[listComments] ID ${recordingId} not found as recording, todo, or search result in project ${projectId}`);
-              return { comments: [], _meta: { ...meta, error: "NOT_FOUND", message: `Recording or todo with ID ${recordingId} not found in project ${projectId}` } };
+            // Not a recording or a todo — try card lookup first
+            try {
+              const cardJson = await api(ctx, `/buckets/${projectId}/card_tables/cards/${recordingId}.json`);
+              console.log(`[listComments] Found ID ${recordingId} as a card — fetching its comments`);
+              meta.resolvedType = "card";
+              meta.usedRecordingId = recordingId;
+              meta.matchedTitle = cardJson?.title || null;
+              commentsUrl = cardJson?.comments_url || `/buckets/${projectId}/card_tables/cards/${recordingId}/comments.json`;
+              commentsCount = typeof cardJson?.comments_count === 'number' ? cardJson.comments_count : null;
+              recordingJson = cardJson;
+            } catch (cardErr) {
+              // ignore and try search below
             }
-          }
+
+            if (!commentsUrl) {
+              // Not a recording, todo, or card — try fuzzy search by ID
+              console.log(`[listComments] ID ${recordingId} not found as recording or todo — attempting search`);
+              
+              const results = await searchRecordings(ctx, recordingId, { bucket_id: projectId });
+              const arr = Array.isArray(results) ? results : [];
+              if (arr.length) {
+                // Choose best effort match by title/content
+                const candidates = arr.map((r) => ({ id: r.id, name: r.title || r.content || "", raw: r }));
+                const best = resolveBestEffort(candidates, recordingId) || candidates[0];
+                meta.usedRecordingId = best.id;
+                meta.autoResolved = true;
+                meta.matchedTitle = best.name;
+                meta.resolvedType = "recording";
+                recordingId = best.id;
+                recordingJson = best.raw || (await api(ctx, `/buckets/${projectId}/recordings/${best.id}.json`));
+                commentsUrl = recordingJson?.comments_url || `/buckets/${projectId}/recordings/${best.id}/comments.json`;
+                commentsCount = typeof recordingJson?.comments_count === 'number' ? recordingJson.comments_count : null;
+                console.log(`[listComments] Auto-resolved to recording id=${best.id} title="${best.name}"`);
+              } else {
+                console.warn(`[listComments] ID ${recordingId} not found as recording, todo, card, or search result in project ${projectId}`);
+                return { comments: [], _meta: { ...meta, error: "NOT_FOUND", message: `Recording, todo, or card with ID ${recordingId} not found in project ${projectId}` } };
+              }
+            }
         } catch (searchErr) {
           console.warn(`[listComments] Search/lookup failed: ${searchErr?.message}`);
           return { comments: [], _meta: { ...meta, error: "LOOKUP_FAILED", message: `Could not locate ID ${recordingId}` } };
@@ -1883,6 +1898,27 @@ async function listComments(ctx, projectId, recordingId) {
   } catch (e) {
     if (e && e.message && e.message.includes('404')) {
       console.warn(`[listComments] Comments endpoint returned 404 for ${meta.resolvedType || 'recording'} ${recordingId} in project ${projectId}`);
+      if (meta.resolvedType !== "card") {
+        try {
+          const cardCommentsUrl = `/buckets/${projectId}/card_tables/cards/${recordingId}/comments.json`;
+          const cardComments = await apiAll(ctx, cardCommentsUrl);
+          const arr = Array.isArray(cardComments) ? cardComments : [];
+          const mapped = arr.map((c) => ({
+            id: c.id,
+            created_at: c.created_at,
+            updated_at: c.updated_at,
+            content: c.content,
+            creator: c.creator?.name,
+            creator_id: c.creator?.id,
+            status: c.status,
+            visible_to_clients: c.visible_to_clients,
+            app_url: c.app_url,
+          }));
+          return { comments: mapped, _meta: { ...meta, resolvedType: "card", comments_supported: true, comments_count: arr.length } };
+        } catch (cardErr) {
+          // fall through to empty result
+        }
+      }
       return { comments: [], _meta: { ...meta, comments_supported: false } };
     }
     throw e;
@@ -1908,10 +1944,29 @@ async function getComment(ctx, projectId, commentId) {
 async function createComment(ctx, projectId, recordingId, content) {
   const text = String(content ?? "").trim();
   if (!text) throw new Error("Missing comment content.");
-  const c = await api(ctx, `/buckets/${projectId}/recordings/${recordingId}/comments.json`, {
-    method: "POST",
-    body: { content: text },
-  });
+  let c;
+  try {
+    c = await api(ctx, `/buckets/${projectId}/recordings/${recordingId}/comments.json`, {
+      method: "POST",
+      body: { content: text },
+    });
+  } catch (err) {
+    const msg = String(err?.message || "");
+    if (!msg.includes("404")) throw err;
+    try {
+      c = await api(ctx, `/buckets/${projectId}/todos/${recordingId}/comments.json`, {
+        method: "POST",
+        body: { content: text },
+      });
+    } catch (todoErr) {
+      const todoMsg = String(todoErr?.message || "");
+      if (!todoMsg.includes("404")) throw todoErr;
+      c = await api(ctx, `/buckets/${projectId}/card_tables/cards/${recordingId}/comments.json`, {
+        method: "POST",
+        body: { content: text },
+      });
+    }
+  }
   return {
     id: c.id,
     created_at: c.created_at,
@@ -6449,6 +6504,7 @@ export async function handleMCP(reqBody, ctx) {
     return fail(id, { code: "INTERNAL_ERROR", message: e?.message || String(e) });
   }
 }
+
 
 
 
