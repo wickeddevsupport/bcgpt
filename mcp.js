@@ -1995,6 +1995,33 @@ async function resolveRecordingByQuery(ctx, query, projectId) {
   return best?.raw || null;
 }
 
+async function findCardInProjectById(ctx, projectId, cardId) {
+  const idStr = String(cardId ?? "").trim();
+  if (!idStr) return null;
+  let tables = [];
+  try {
+    tables = await listCardTables(ctx, projectId);
+  } catch (_) {
+    tables = [];
+  }
+  if (!Array.isArray(tables) || !tables.length) return null;
+  for (const t of tables) {
+    try {
+      const summary = await summarizeCardTable(ctx, projectId, t, {
+        includeCards: true,
+        maxCardsPerColumn: 0
+      });
+      for (const col of summary.columns || []) {
+        const hit = (col.cards || []).find((c) => String(c.id) === idStr);
+        if (hit) return hit;
+      }
+    } catch (_) {
+      // ignore and keep scanning tables
+    }
+  }
+  return null;
+}
+
 function parseRecordingUrl(input) {
   const raw = String(input ?? "").trim();
   if (!raw || !raw.includes("basecamp.com")) return null;
@@ -2113,6 +2140,23 @@ async function createComment(ctx, projectId, recordingId, content, opts = {}) {
         let resolved = await resolveRecordingForComment(ctx, recordingId, projectId);
         if (!resolved && opts?.recordingQuery) {
           resolved = await resolveRecordingByQuery(ctx, opts.recordingQuery, projectId);
+        }
+        if (!resolved && /^\d+$/.test(String(recordingId ?? ""))) {
+          const card = await findCardInProjectById(ctx, projectId, recordingId);
+          if (card) {
+            c = await api(ctx, `/buckets/${projectId}/card_tables/cards/${card.id}/comments.json`, {
+              method: "POST",
+              body: { content: text },
+            });
+            return {
+              id: c.id,
+              created_at: c.created_at,
+              content: c.content,
+              creator: c.creator?.name,
+              creator_id: c.creator?.id,
+              app_url: c.app_url,
+            };
+          }
         }
         if (!resolved) throw cardErr;
         const bucketId = resolved.bucket_id || resolved.bucket?.id || projectId;
