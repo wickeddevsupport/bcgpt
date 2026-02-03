@@ -4719,6 +4719,35 @@ export async function handleMCP(reqBody, ctx) {
         return tokens.join(" ").trim();
       };
 
+      const extractPersonId = (raw) => {
+        const match = String(raw || "").match(/\b(?:user|person)?\s*id[:#]?\s*(\d{4,})\b/i);
+        return match?.[1] ? Number(match[1]) : null;
+      };
+
+      const pickPersonCandidate = (analysis, raw) => {
+        if (analysis?.personNames?.length) {
+          const sorted = [...analysis.personNames].sort((a, b) => b.length - a.length);
+          return sorted[0];
+        }
+        const id = extractPersonId(raw);
+        return id != null ? String(id) : null;
+      };
+
+      const wantsMembership = (raw) => {
+        const s = String(raw || "").toLowerCase();
+        return /project/.test(s) && /(member|membership|belongs|access|on|in)/.test(s);
+      };
+
+      const wantsAssignments = (raw) => {
+        const s = String(raw || "").toLowerCase();
+        return /(assigned|todos|tasks)/.test(s);
+      };
+
+      const wantsActivity = (raw) => {
+        const s = String(raw || "").toLowerCase();
+        return /(activity|recent|comment|comments|timeline)/.test(s);
+      };
+
       const searchLocalIndex = (q, { projectId = null, type = null, limit = 50 } = {}) => {
         if (!q) return [];
         const hits = searchIndex(q, { type, projectId, limit, userKey: ctx.userKey });
@@ -4815,16 +4844,61 @@ export async function handleMCP(reqBody, ctx) {
           return ok(id, { query, action: "list_assigned_to_me", confidence, result });
         }
 
-        if (analysis.personNames.length) {
-          const person = analysis.personNames[0];
-          if (/activity|recent|timeline/.test(lower)) {
+        if (analysis.personNames.length || extractPersonId(query)) {
+          const person = pickPersonCandidate(analysis, query);
+          const personId = extractPersonId(query);
+
+          if ((wantsMembership(query) || wantsAssignments(query) || wantsActivity(query)) && person) {
+            let projectsResult = null;
+            let assignmentsResult = null;
+            let activityResult = null;
+
+            if (wantsMembership(query)) {
+              projectsResult = await callTool("list_person_projects", {
+                person,
+                include_archived_projects: false
+              });
+            }
+
+            const resolvedPersonId =
+              personId ||
+              projectsResult?.person?.id ||
+              projectsResult?.result?.person?.id ||
+              null;
+
+            if (wantsAssignments(query) && resolvedPersonId) {
+              assignmentsResult = await callTool("report_todos_assigned_person", {
+                person_id: Number(resolvedPersonId)
+              });
+            }
+
+            if (wantsActivity(query)) {
+              activityResult = await callTool("list_person_activity", {
+                person,
+                project: args.project || null
+              });
+            }
+
+            return ok(id, {
+              query,
+              action: "person_audit",
+              confidence,
+              result: {
+                projects: projectsResult,
+                assignments: assignmentsResult,
+                activity: activityResult
+              }
+            });
+          }
+
+          if (/activity|recent|timeline/.test(lower) && person) {
             const result = await callTool("list_person_activity", {
               person,
               project: args.project || null
             });
             return ok(id, { query, action: "list_person_activity", confidence, result });
           }
-          if (/project/.test(lower) && /(on|member|access|projects?)/.test(lower)) {
+          if (/project/.test(lower) && /(on|member|access|projects?)/.test(lower) && person) {
             const result = await callTool("list_person_projects", {
               person,
               include_archived_projects: false
@@ -4833,8 +4907,8 @@ export async function handleMCP(reqBody, ctx) {
           }
         }
 
-        if (analysis.pattern === "person_finder" && analysis.personNames.length) {
-          const person = analysis.personNames[0];
+        if (analysis.pattern === "person_finder" && (analysis.personNames.length || extractPersonId(query))) {
+          const person = pickPersonCandidate(analysis, query);
           if (args.project) {
             const result = await callTool("get_person_assignments", { project: args.project, person });
             return ok(id, { query, action: "get_person_assignments", confidence, result });

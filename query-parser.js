@@ -84,9 +84,30 @@ class QueryParser {
   _extractEntities(analysis) {
     const query = analysis.normalized;
     
-    // Find person names (proper nouns - capitalized in original)
+    // Find person names (prefer multi-word proper nouns, filter stopwords)
+    const stopwords = new Set([
+      "a", "an", "and", "are", "as", "at", "by", "for", "from", "in", "is", "it", "of", "on", "or", "the", "to", "with",
+      "audit", "active", "archived", "archive", "projects", "project", "list", "check", "recent", "comments", "comment",
+      "todos", "todo", "tasks", "task", "user", "id", "report", "activity", "assigned", "assign", "member", "members", "membership",
+      "find", "search", "show", "what", "who", "where", "why", "how"
+    ]);
+
+    const fullNameMatches = analysis.originalQuery.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b/g) || [];
     const nameMatches = analysis.originalQuery.match(/\b[A-Z][a-z]+\b/g) || [];
-    analysis.personNames = [...new Set(nameMatches)];
+
+    const fullNames = fullNameMatches
+      .map(n => n.trim())
+      .filter(n => {
+        const tokens = n.split(/\s+/).map(t => t.toLowerCase());
+        return tokens.some(t => !stopwords.has(t));
+      });
+
+    const singleNames = nameMatches
+      .map(n => n.trim())
+      .filter(n => !stopwords.has(n.toLowerCase()))
+      .filter(n => !fullNames.some(fn => fn.includes(n)));
+
+    analysis.personNames = [...new Set([...fullNames, ...singleNames])];
     
     // Find resource types
     const resources = ['todo', 'todos', 'message', 'messages', 'document', 'documents', 'schedule', 'card', 'cards', 'comment', 'comments'];
