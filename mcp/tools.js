@@ -85,6 +85,76 @@ export function getTools() {
       required: ["person"],
       additionalProperties: false
     }),
+    tool("summarize_person", "Compact person summary (counts + previews).", {
+      type: "object",
+      properties: {
+        person: { type: "string", description: "Name, email, or person ID." },
+        include_archived_projects: { type: "boolean" },
+        include_assignments: { type: "boolean" },
+        include_activity: { type: "boolean" },
+        activity_limit: { type: "integer" },
+        preview_limit: { type: "integer" }
+      },
+      required: ["person"],
+      additionalProperties: false
+    }),
+    tool("summarize_project", "Compact project summary with optional counts.", {
+      type: "object",
+      properties: {
+        project: { type: "string" },
+        include_todolists: { type: "boolean" },
+        include_card_tables: { type: "boolean" },
+        include_message_boards: { type: "boolean" },
+        include_vaults: { type: "boolean" }
+      },
+      required: ["project"],
+      additionalProperties: false
+    }),
+    tool("summarize_todo", "Compact summary for a specific todo.", {
+      type: "object",
+      properties: {
+        project: { type: "string" },
+        todo_id: { type: "integer" }
+      },
+      required: ["project", "todo_id"],
+      additionalProperties: false
+    }),
+    tool("summarize_card", "Compact summary for a specific card.", {
+      type: "object",
+      properties: {
+        project: { type: "string" },
+        card_id: { type: "integer" }
+      },
+      required: ["project", "card_id"],
+      additionalProperties: false
+    }),
+    tool("summarize_message", "Compact summary for a specific message.", {
+      type: "object",
+      properties: {
+        project: { type: "string" },
+        message_id: { type: "integer" }
+      },
+      required: ["project", "message_id"],
+      additionalProperties: false
+    }),
+    tool("summarize_document", "Compact summary for a specific document.", {
+      type: "object",
+      properties: {
+        project: { type: "string" },
+        document_id: { type: "integer" }
+      },
+      required: ["project", "document_id"],
+      additionalProperties: false
+    }),
+    tool("summarize_upload", "Compact summary for a specific upload.", {
+      type: "object",
+      properties: {
+        project: { type: "string" },
+        upload_id: { type: "integer" }
+      },
+      required: ["project", "upload_id"],
+      additionalProperties: false
+    }),
     tool("run_regression_suite", "Run a set of tool calls and report pass/fail checks.", {
       type: "object",
       properties: {
@@ -1042,9 +1112,11 @@ export function getTools() {
       type: "object",
       properties: {
         person_id: { type: "integer" },
+        person: { type: "string", description: "Name, email, or person ID (alternative to person_id)." },
+        assignee: { type: "string", description: "Alias for person." },
         compact: { type: "boolean", description: "Return compact todos to avoid large responses." }
       },
-      required: ["person_id"],
+      required: [],
       additionalProperties: false
     }),
     tool("report_todos_overdue", "List overdue todos across all projects.", noProps()),

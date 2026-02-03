@@ -149,7 +149,12 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {},
+                "properties": {
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
+                  }
+                },
                 "additionalProperties": false
               }
             }
@@ -179,6 +184,10 @@
                   "project": {
                     "type": "string",
                     "nullable": true
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -262,6 +271,10 @@
                     "type": "object",
                     "additionalProperties": true,
                     "description": "Arguments for the tool."
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -304,6 +317,10 @@
                   "paginate": {
                     "type": "boolean",
                     "nullable": true
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -334,6 +351,10 @@
                 "properties": {
                   "archived": {
                     "type": "boolean"
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "additionalProperties": false
@@ -367,6 +388,10 @@
                   },
                   "limit": {
                     "type": "integer"
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -400,6 +425,10 @@
                   },
                   "query": {
                     "type": "string"
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -458,6 +487,10 @@
                   "exclude_chat": {
                     "type": "boolean",
                     "nullable": true
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -488,6 +521,10 @@
                 "properties": {
                   "query": {
                     "type": "string"
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -522,6 +559,10 @@
                   },
                   "include_overdue": {
                     "type": "boolean"
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "additionalProperties": false
@@ -549,6 +590,10 @@
                 "properties": {
                   "project": {
                     "type": "string"
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -614,6 +659,10 @@
                   "notify": {
                     "type": "boolean",
                     "nullable": true
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -681,6 +730,10 @@
                   "notify": {
                     "type": "boolean",
                     "nullable": true
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -715,6 +768,10 @@
                   },
                   "todo_id": {
                     "type": "integer"
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -749,6 +806,10 @@
                   },
                   "todo_id": {
                     "type": "integer"
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -789,6 +850,10 @@
                   },
                   "include_columns": {
                     "type": "boolean"
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -835,6 +900,10 @@
                   },
                   "cursor": {
                     "type": "integer"
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -895,6 +964,10 @@
                   },
                   "full_dump": {
                     "type": "boolean"
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -955,6 +1028,10 @@
                   "idempotency_key": {
                     "type": "string",
                     "nullable": true
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -1002,6 +1079,10 @@
                   "idempotency_key": {
                     "type": "string",
                     "nullable": true
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -1033,6 +1114,10 @@
                 "properties": {
                   "project": {
                     "type": "string"
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -1067,6 +1152,10 @@
                   "message_board_id": {
                     "type": "integer",
                     "nullable": true
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -1116,6 +1205,10 @@
                   "body": {
                     "type": "object",
                     "additionalProperties": true
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -1155,6 +1248,10 @@
                   "end": {
                     "type": "string",
                     "nullable": true
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -1194,6 +1291,10 @@
                   "include_archived_projects": {
                     "type": "boolean",
                     "description": "Include archived projects when deep scanning."
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -1230,6 +1331,10 @@
                       "integer",
                       "string"
                     ]
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -1284,6 +1389,10 @@
                   "body": {
                     "type": "object",
                     "additionalProperties": true
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -1318,6 +1427,10 @@
                   },
                   "index": {
                     "type": "integer"
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -1352,11 +1465,17 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact todos to avoid large responses."
+                  },
+                  "person": {
+                    "type": "string",
+                    "description": "Name, email, or person ID (alternative to person_id)."
+                  },
+                  "assignee": {
+                    "type": "string",
+                    "description": "Alias for person."
                   }
                 },
-                "required": [
-                  "person_id"
-                ],
+                "required": [],
                 "additionalProperties": false
               }
             }

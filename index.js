@@ -443,11 +443,16 @@ async function buildMcpCtx(req) {
 async function runTool(op, params, req) {
   const ctx = await buildMcpCtx(req);
 
+  const normalizedParams = params && typeof params === "object" ? { ...params } : {};
+  if (normalizedParams.compact === undefined) {
+    normalizedParams.compact = true;
+  }
+
   const rpc = {
     jsonrpc: "2.0",
     id: `action-${op}`,
     method: "tools/call",
-    params: { name: op, arguments: params || {} },
+    params: { name: op, arguments: normalizedParams },
   };
 
   const out = await handleMCP(rpc, ctx);

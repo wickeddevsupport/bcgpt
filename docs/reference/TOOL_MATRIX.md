@@ -75,6 +75,13 @@ This document maps MCP tools to Basecamp capabilities, highlights OpenAPI covera
 | `list_assigned_to_me` | List todos assigned to the current user (optionally within a project). | no |
 | `smart_action` | Smart router: decide which action to call based on natural language query and context. | yes |
 | `audit_person` | Summarize a person's Basecamp presence (projects, assigned todos, recent activity). | yes |
+| `summarize_person` | Compact person summary (counts + previews). | no |
+| `summarize_project` | Compact project summary with optional counts. | no |
+| `summarize_todo` | Compact summary for a specific todo. | no |
+| `summarize_card` | Compact summary for a specific card. | no |
+| `summarize_message` | Compact summary for a specific message. | no |
+| `summarize_document` | Compact summary for a specific document. | no |
+| `summarize_upload` | Compact summary for a specific upload. | no |
 | `run_regression_suite` | Run a set of tool calls and report pass/fail checks. | no |
 | `run_default_regression_suite` | Run the default regression suite (pre-packaged checks). | no |
 | `mcp_call` | Proxy call to any MCP tool by name (full toolset access). | yes |

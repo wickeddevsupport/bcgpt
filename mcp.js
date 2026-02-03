@@ -269,11 +269,68 @@ function buildEndpointPath(template, args) {
   });
 }
 
+function resolveCompactor(collectionKey, { allowGeneric = true } = {}) {
+  switch (collectionKey) {
+    case "accounts":
+      return (a) => ({ id: a?.id ?? null, name: a?.name ?? null });
+    case "projects":
+      return compactProjectSummary;
+    case "people":
+      return compactPerson;
+    case "todos":
+      return compactAssignmentTodo;
+    case "cards":
+      return compactCard;
+    case "messages":
+    case "documents":
+    case "uploads":
+    case "recordings":
+      return compactRecording;
+    case "comments":
+      return compactComment;
+    case "schedule_entries":
+      return compactScheduleEntry;
+    case "events":
+      return compactActivityEvent;
+    case "card_tables":
+      return compactCardTable;
+    case "columns":
+      return compactCardColumn;
+    case "groups":
+      return compactTodoGroup;
+    case "message_boards":
+      return compactMessageBoard;
+    case "campfires":
+    case "chats":
+      return compactCampfire;
+    case "lines":
+      return compactCampfireLine;
+    case "vaults":
+      return compactVault;
+    default:
+      return allowGeneric ? compactGenericItem : null;
+  }
+}
+
 function buildListPayload(collectionKey, items, options = {}) {
   const unwrapped = unwrapItemsWithMeta(items);
-  const cached = maybeCacheCollectionResult(collectionKey, unwrapped.items, options);
+  const {
+    compact,
+    compact_generic,
+    ...cacheOptions
+  } = options || {};
+  const cached = maybeCacheCollectionResult(collectionKey, unwrapped.items, cacheOptions);
+
+  const compactDefault = String(process.env.COMPACT_LIST_DEFAULT || "true").toLowerCase() !== "false";
+  const compactGenericDefault = String(process.env.COMPACT_GENERIC_DEFAULT || "false").toLowerCase() !== "false";
+  const shouldCompact = (compact ?? compactDefault) === true;
+  const allowGeneric = (compact_generic ?? compactGenericDefault) === true;
+  const compactor = shouldCompact ? resolveCompactor(collectionKey, { allowGeneric }) : null;
+  const displayItems = compactor
+    ? cached.items.map(compactor).filter(Boolean)
+    : cached.items;
   const payload = {
-    [collectionKey]: cached.items,
+    [collectionKey]: displayItems,
     count: cached.total,
     cached: cached.cached,
     expanded: cached.expanded || false,
@@ -290,13 +347,29 @@ function buildListPayload(collectionKey, items, options = {}) {
     truncated: null
   };
   if (coverage) payload.coverage = coverage;
+  if (compactor) payload.compact = true;
   return payload;
 }
 
 function attachCachedCollection(target, collectionKey, items, options = {}) {
   const unwrapped = unwrapItemsWithMeta(items);
-  const cached = maybeCacheCollectionResult(collectionKey, unwrapped.items, options);
-  target[collectionKey] = cached.items;
+  const {
+    compact,
+    compact_generic,
+    ...cacheOptions
+  } = options || {};
+  const cached = maybeCacheCollectionResult(collectionKey, unwrapped.items, cacheOptions);
+
+  const compactDefault = String(process.env.COMPACT_LIST_DEFAULT || "true").toLowerCase() !== "false";
+  const compactGenericDefault = String(process.env.COMPACT_GENERIC_DEFAULT || "false").toLowerCase() !== "false";
+  const shouldCompact = (compact ?? compactDefault) === true;
+  const allowGeneric = (compact_generic ?? compactGenericDefault) === true;
+  const compactor = shouldCompact ? resolveCompactor(collectionKey, { allowGeneric }) : null;
+  const displayItems = compactor
+    ? cached.items.map(compactor).filter(Boolean)
+    : cached.items;
+
+  target[collectionKey] = displayItems;
   target[`${collectionKey}_count`] = cached.total;
   target[`${collectionKey}_cached`] = cached.cached;
   target[`${collectionKey}_payload_key`] = cached.payload_key;
@@ -308,6 +381,7 @@ function attachCachedCollection(target, collectionKey, items, options = {}) {
     truncated: null
   };
   if (coverage) target[`${collectionKey}_coverage`] = coverage;
+  if (compactor) target[`${collectionKey}_compact`] = true;
   return target;
 }
 
@@ -528,7 +602,9 @@ function compactAssignmentTodo(todo) {
     : null;
   const assigneeIds = Array.isArray(todo.assignee_ids)
     ? todo.assignee_ids
-    : (todo.assignee_id != null ? [todo.assignee_id] : null);
+    : Array.isArray(todo.assignees)
+      ? todo.assignees.map(a => a?.id).filter(Boolean)
+      : (todo.assignee_id != null ? [todo.assignee_id] : null);
 
   return {
     id: todo.id ?? todo.todo_id ?? todo.recording_id ?? null,
@@ -552,6 +628,177 @@ function compactActivityEvent(event) {
     created_at: event.created_at ?? event.timestamp ?? null,
     bucket: bucket ? { id: bucket.id ?? null, name: bucket.name ?? null } : null,
     app_url: event.app_url ?? event.url ?? null
+  };
+}
+
+function compactBucket(bucket) {
+  if (!bucket) return null;
+  return {
+    id: bucket.id ?? null,
+    name: bucket.name ?? null
+  };
+}
+
+function truncateText(text, limit = 200) {
+  const raw = String(text || "").trim();
+  if (!raw) return "";
+  if (raw.length <= limit) return raw;
+  return `${raw.slice(0, limit)}…`;
+}
+
+function compactGenericItem(item) {
+  if (!item || typeof item !== "object") return item;
+  const out = {
+    id: item.id ?? null
+  };
+  const name = item.name || item.title || item.subject || null;
+  if (name) out.name = name;
+  if (item.type) out.type = item.type;
+  if (item.status) out.status = item.status;
+  if (item.created_at) out.created_at = item.created_at;
+  if (item.updated_at) out.updated_at = item.updated_at;
+  const appUrl = item.app_url || item.url || null;
+  if (appUrl) out.app_url = appUrl;
+  const bucket = compactBucket(item.bucket || item.project);
+  if (bucket) out.bucket = bucket;
+  return out;
+}
+
+function compactPerson(person) {
+  if (!person) return null;
+  return normalizePerson(person);
+}
+
+function compactCard(card) {
+  if (!card) return null;
+  return {
+    id: card.id ?? null,
+    title: card.title || card.name || card.content || null,
+    status: card.status || card.state || null,
+    bucket_id: card.bucket?.id || card.bucket_id || null,
+    project_id: card.bucket?.id || card.bucket_id || null,
+    card_table_id: card.card_table_id || card.card_table?.id || null,
+    column_id: card.column_id || card.list_id || null,
+    column_title: card.column_title || card.list?.name || null,
+    due_on: card.due_on || null,
+    assignee_ids: Array.isArray(card.assignee_ids) ? card.assignee_ids : null,
+    app_url: card.app_url || card.url || null
+  };
+}
+
+function compactRecording(recording) {
+  if (!recording) return null;
+  const bucket = compactBucket(recording.bucket || recording.project);
+  return {
+    id: recording.id ?? null,
+    title: recording.title || recording.subject || recording.name || null,
+    type: recording.type || recording.recording_type || null,
+    status: recording.status || null,
+    bucket,
+    created_at: recording.created_at || null,
+    updated_at: recording.updated_at || null,
+    app_url: recording.app_url || recording.url || null
+  };
+}
+
+function compactComment(comment) {
+  if (!comment) return null;
+  const creator = comment.creator
+    ? { id: comment.creator.id ?? null, name: comment.creator.name ?? null }
+    : null;
+  return {
+    id: comment.id ?? null,
+    content: truncateText(comment.content || comment.body || "", 200),
+    creator,
+    created_at: comment.created_at || null,
+    app_url: comment.app_url || comment.url || null,
+    parent: comment.parent
+      ? { id: comment.parent.id ?? null, type: comment.parent.type ?? null }
+      : null
+  };
+}
+
+function compactScheduleEntry(entry) {
+  if (!entry) return null;
+  const bucket = compactBucket(entry.bucket || entry.project);
+  return {
+    id: entry.id ?? null,
+    title: entry.title || entry.name || null,
+    starts_at: entry.starts_at || entry.start || null,
+    ends_at: entry.ends_at || entry.end || null,
+    all_day: entry.all_day ?? null,
+    bucket,
+    app_url: entry.app_url || entry.url || null
+  };
+}
+
+function compactCardTable(table) {
+  if (!table) return null;
+  return {
+    id: table.id ?? null,
+    name: table.name || table.title || null,
+    status: table.status || null,
+    app_url: table.app_url || table.url || null
+  };
+}
+
+function compactCardColumn(column) {
+  if (!column) return null;
+  return {
+    id: column.id ?? null,
+    title: column.title || column.name || null,
+    position: column.position ?? null,
+    color: column.color ?? null
+  };
+}
+
+function compactTodoGroup(group) {
+  if (!group) return null;
+  const todos = Array.isArray(group.todos) ? group.todos : [];
+  const previewLimit = Number(process.env.TODO_GROUP_PREVIEW_LIMIT || 5);
+  const preview = todos.slice(0, previewLimit).map(compactAssignmentTodo).filter(Boolean);
+  return {
+    todolist_id: group.todolistId ?? group.todolist_id ?? group.id ?? null,
+    todolist: group.todolist || group.name || group.title || null,
+    todos_count: todos.length,
+    todos_preview: preview
+  };
+}
+
+function compactMessageBoard(board) {
+  if (!board) return null;
+  return {
+    id: board.id ?? null,
+    name: board.name || board.title || null,
+    app_url: board.app_url || board.url || null
+  };
+}
+
+function compactCampfire(chat) {
+  if (!chat) return null;
+  return {
+    id: chat.id ?? null,
+    name: chat.name || chat.title || null,
+    app_url: chat.app_url || chat.url || null
+  };
+}
+
+function compactCampfireLine(line) {
+  if (!line) return null;
+  return {
+    id: line.id ?? null,
+    content: truncateText(line.content || "", 200),
+    created_at: line.created_at || null,
+    creator_id: line.creator_id ?? line.person_id ?? null
+  };
+}
+
+function compactVault(vault) {
+  if (!vault) return null;
+  return {
+    id: vault.id ?? null,
+    name: vault.name || vault.title || null,
+    app_url: vault.app_url || vault.url || null
   };
 }
 
@@ -6696,6 +6943,149 @@ export async function handleMCP(reqBody, ctx) {
       }
     }
 
+    if (name === "summarize_person") {
+      try {
+        const person = String(firstDefined(args.person, args.name, args.email) || "").trim();
+        if (!person) {
+          return fail(id, { code: "MISSING_PERSON", message: "Missing person. Provide name, email, or ID." });
+        }
+        const includeArchivedProjects = args.include_archived_projects === true || args.include_archived === true;
+        const result = await auditPerson(ctx, person, {
+          include_archived_projects: includeArchivedProjects,
+          include_assignments: args.include_assignments !== false,
+          include_activity: args.include_activity !== false,
+          activity_limit: Number.isFinite(Number(args.activity_limit)) ? Number(args.activity_limit) : 50
+        });
+        if (!result.person) {
+          if (Array.isArray(result.matches) && result.matches.length > 1) {
+            return fail(id, { code: "AMBIGUOUS_PERSON", message: "Multiple people matched.", matches: result.matches });
+          }
+          return fail(id, { code: "PERSON_NOT_FOUND", message: "No matching person found.", matches: result.matches || [] });
+        }
+        const previewLimit = Number.isFinite(Number(args.preview_limit)) ? Number(args.preview_limit) : 5;
+        const projects = Array.isArray(result.projects) ? result.projects : [];
+        const assignments = Array.isArray(result.assignments) ? result.assignments : [];
+        const activity = Array.isArray(result.activity) ? result.activity : [];
+
+        return ok(id, {
+          person: compactPerson(result.person),
+          projects_count: projects.length,
+          assignments_count: Array.isArray(result.assignments) ? assignments.length : null,
+          activity_count: Array.isArray(result.activity) ? activity.length : null,
+          projects_preview: projects.slice(0, previewLimit).map(compactProjectSummary).filter(Boolean),
+          assignments_preview: assignments.slice(0, previewLimit).map(compactAssignmentTodo).filter(Boolean),
+          activity_preview: activity.slice(0, previewLimit).map(compactActivityEvent).filter(Boolean),
+          coverage: result.coverage
+        });
+      } catch (e) {
+        console.error(`[summarize_person] Error:`, e.message);
+        return fail(id, { code: "SUMMARIZE_PERSON_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "summarize_project") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const summary = projectSummary(p);
+        const counts = {};
+
+        if (args.include_todolists !== false) {
+          const lists = await listTodoLists(ctx, p.id);
+          counts.todolists = Array.isArray(lists) ? lists.length : 0;
+        }
+        if (args.include_card_tables !== false) {
+          const tables = await listCardTables(ctx, p.id);
+          counts.card_tables = Array.isArray(tables) ? tables.length : 0;
+        }
+        if (args.include_message_boards !== false) {
+          const boards = await listMessageBoards(ctx, p.id);
+          counts.message_boards = Array.isArray(boards) ? boards.length : 0;
+        }
+        if (args.include_vaults !== false) {
+          const vaults = await listVaults(ctx, p.id);
+          counts.vaults = Array.isArray(vaults) ? vaults.length : 0;
+        }
+
+        return ok(id, {
+          project: summary,
+          counts
+        });
+      } catch (e) {
+        console.error(`[summarize_project] Error:`, e.message);
+        return fail(id, { code: "SUMMARIZE_PROJECT_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "summarize_todo") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const todo = await getTodo(ctx, p.id, Number(args.todo_id));
+        return ok(id, {
+          project: { id: p.id, name: p.name },
+          todo: compactAssignmentTodo(todo)
+        });
+      } catch (e) {
+        console.error(`[summarize_todo] Error:`, e.message);
+        return fail(id, { code: "SUMMARIZE_TODO_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "summarize_card") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const card = await getCard(ctx, p.id, Number(args.card_id));
+        return ok(id, {
+          project: { id: p.id, name: p.name },
+          card: compactCard(card)
+        });
+      } catch (e) {
+        console.error(`[summarize_card] Error:`, e.message);
+        return fail(id, { code: "SUMMARIZE_CARD_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "summarize_message") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const message = await getMessage(ctx, p.id, Number(args.message_id));
+        return ok(id, {
+          project: { id: p.id, name: p.name },
+          message: compactRecording(message)
+        });
+      } catch (e) {
+        console.error(`[summarize_message] Error:`, e.message);
+        return fail(id, { code: "SUMMARIZE_MESSAGE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "summarize_document") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const doc = await getDocument(ctx, p.id, Number(args.document_id));
+        return ok(id, {
+          project: { id: p.id, name: p.name },
+          document: compactRecording(doc)
+        });
+      } catch (e) {
+        console.error(`[summarize_document] Error:`, e.message);
+        return fail(id, { code: "SUMMARIZE_DOCUMENT_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "summarize_upload") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const upload = await getUpload(ctx, p.id, Number(args.upload_id));
+        return ok(id, {
+          project: { id: p.id, name: p.name },
+          upload: compactRecording(upload)
+        });
+      } catch (e) {
+        console.error(`[summarize_upload] Error:`, e.message);
+        return fail(id, { code: "SUMMARIZE_UPLOAD_ERROR", message: e.message });
+      }
+    }
+
     if (name === "run_regression_suite") {
       try {
         const cases = Array.isArray(args.cases) ? args.cases : [];
@@ -7662,14 +8052,31 @@ export async function handleMCP(reqBody, ctx) {
 
     if (name === "report_todos_assigned_person") {
       try {
-        const data = await reportTodosAssignedPerson(ctx, Number(args.person_id));
+        let personId = Number(args.person_id);
+        if (!Number.isFinite(personId)) {
+          const personQuery = firstDefined(args.person, args.assignee, args.name, args.email);
+          if (personQuery) {
+            const resolved = await resolvePersonQuery(ctx, String(personQuery));
+            if (!resolved.person) {
+              if (Array.isArray(resolved.matches) && resolved.matches.length > 1) {
+                return fail(id, { code: "AMBIGUOUS_PERSON", message: "Multiple people matched.", matches: resolved.matches });
+              }
+              return fail(id, { code: "PERSON_NOT_FOUND", message: "No matching person found.", matches: resolved.matches || [] });
+            }
+            personId = Number(resolved.person.id);
+          }
+        }
+        if (!Number.isFinite(personId)) {
+          return fail(id, { code: "MISSING_PERSON", message: "Missing person_id or person name/email." });
+        }
+        const data = await reportTodosAssignedPerson(ctx, personId);
         const compact = args.compact !== false;
         const inlineLimit = Number(process.env.REPORT_TODOS_ASSIGNED_PERSON_INLINE_LIMIT || 100);
         const autoExpand = String(process.env.REPORT_TODOS_ASSIGNED_PERSON_AUTO_EXPAND || "false").toLowerCase() === "true";
         const todos = Array.isArray(data)
           ? (compact ? data.map(compactAssignmentTodo).filter(Boolean) : data)
           : [];
-        const payload = { person_id: Number(args.person_id) };
+        const payload = { person_id: personId };
         attachCachedCollection(payload, "todos", todos, { inlineLimit, autoExpand });
         return ok(id, payload);
       } catch (e) {
