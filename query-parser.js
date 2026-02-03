@@ -89,7 +89,7 @@ class QueryParser {
       "a", "an", "and", "are", "as", "at", "by", "for", "from", "in", "is", "it", "of", "on", "or", "the", "to", "with",
       "audit", "active", "archived", "archive", "projects", "project", "list", "check", "recent", "comments", "comment",
       "todos", "todo", "tasks", "task", "user", "id", "report", "activity", "assigned", "assign", "member", "members", "membership",
-      "find", "search", "show", "what", "who", "where", "why", "how"
+      "find", "search", "show", "what", "who", "where", "why", "how", "which", "tell", "me", "about", "doing", "here", "there"
     ]);
 
     const fullNameMatches = analysis.originalQuery.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b/g) || [];
@@ -107,7 +107,39 @@ class QueryParser {
       .filter(n => !stopwords.has(n.toLowerCase()))
       .filter(n => !fullNames.some(fn => fn.includes(n)));
 
-    analysis.personNames = [...new Set([...fullNames, ...singleNames])];
+    let personNames = [...new Set([...fullNames, ...singleNames])];
+
+    // Fallback: handle lowercase or uncapitalized names in person-intent queries
+    if (personNames.length === 0) {
+      const looksLikePersonQuery =
+        query.includes("who is") ||
+        query.includes("about") ||
+        query.includes("tell me") ||
+        query.includes("find") ||
+        query.includes("person") ||
+        query.includes("user") ||
+        query.includes("member") ||
+        query.includes("collaborator") ||
+        query.includes("employee") ||
+        query.includes("audit");
+
+      if (looksLikePersonQuery) {
+        const resourceSet = new Set(resources.map(r => r.toLowerCase()));
+        const tokens = query
+          .split(/\s+/)
+          .map(t => t.trim())
+          .filter(Boolean)
+          .filter(t => !stopwords.has(t))
+          .filter(t => !resourceSet.has(t))
+          .filter(t => !/^\d+$/.test(t));
+
+        if (tokens.length) {
+          personNames = [tokens.slice(0, 3).join(" ").trim()];
+        }
+      }
+    }
+
+    analysis.personNames = personNames;
     
     // Find resource types
     const resources = ['todo', 'todos', 'message', 'messages', 'document', 'documents', 'schedule', 'card', 'cards', 'comment', 'comments'];
