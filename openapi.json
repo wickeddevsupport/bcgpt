@@ -43,7 +43,8 @@
     "Failure Handling:",
     "- Surface tool errors clearly (code/message) and suggest next steps.",
     "- If NOT_AUTHENTICATED, instruct user to run startbcgpt.",
-    "- Do not invent alternative data without tool calls."
+    "- Do not invent alternative data without tool calls.",
+    "- If the user provides an explicit action call (e.g., POST /action/... with JSON), execute that exact action with the provided params."
   ],
   "servers": [
     {

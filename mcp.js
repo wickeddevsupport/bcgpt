@@ -4345,6 +4345,10 @@ export async function handleMCP(reqBody, ctx) {
         const toolArgs = (args.args && typeof args.args === "object")
           ? args.args
           : (args.arguments && typeof args.arguments === "object" ? args.arguments : {});
+        const outerCompact = args.compact;
+        if (outerCompact === true && toolArgs.compact === undefined) {
+          toolArgs.compact = true;
+        }
 
         const nested = await handleMCP({
           jsonrpc: "2.0",
@@ -6909,6 +6913,7 @@ export async function handleMCP(reqBody, ctx) {
           : projects;
         attachCachedCollection(payload, "projects", projectItems, {
           inlineLimit: projectInlineLimit,
+          chunkSize: projectInlineLimit,
           autoExpand
         });
 
@@ -6918,6 +6923,7 @@ export async function handleMCP(reqBody, ctx) {
             : result.assignments;
           attachCachedCollection(payload, "assignments", assignments, {
             inlineLimit: assignmentInlineLimit,
+            chunkSize: assignmentInlineLimit,
             autoExpand
           });
         } else if (result.assignments) {
@@ -6930,6 +6936,7 @@ export async function handleMCP(reqBody, ctx) {
             : result.activity;
           attachCachedCollection(payload, "activity", activity, {
             inlineLimit: activityInlineLimit,
+            chunkSize: activityInlineLimit,
             autoExpand
           });
         } else if (result.activity) {
@@ -8077,7 +8084,7 @@ export async function handleMCP(reqBody, ctx) {
           ? (compact ? data.map(compactAssignmentTodo).filter(Boolean) : data)
           : [];
         const payload = { person_id: personId };
-        attachCachedCollection(payload, "todos", todos, { inlineLimit, autoExpand });
+        attachCachedCollection(payload, "todos", todos, { inlineLimit, chunkSize: inlineLimit, autoExpand });
         return ok(id, payload);
       } catch (e) {
         return fail(id, { code: "REPORT_TODOS_ASSIGNED_PERSON_ERROR", message: e.message });
