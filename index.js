@@ -420,14 +420,13 @@ async function buildMcpCtx(req) {
       basecampFetchCore(TOKEN, path, { ...opts, ua: UA, accountId }),
 
     basecampFetchAll: async (path, opts = {}) =>
-      basecampFetchAllCore(TOKEN, path, {
-        ...opts,
-        ua: UA,
-        accountId,
-        // allow overrides, but keep sane defaults to avoid 429s
-        maxPages: opts.maxPages ?? 50,
-        pageDelayMs: opts.pageDelayMs ?? 150,
-      }),
+      basecampFetchAllCore(TOKEN, path, (() => {
+        const out = { ...opts, ua: UA, accountId };
+        // allow overrides, otherwise let basecampFetchAll defaults apply
+        if (opts.maxPages != null) out.maxPages = opts.maxPages;
+        if (opts.pageDelayMs != null) out.pageDelayMs = opts.pageDelayMs;
+        return out;
+      })()),
   };
 }
 

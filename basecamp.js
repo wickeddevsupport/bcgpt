@@ -18,6 +18,8 @@ const BASE = "https://3.basecampapi.com";
 
 const CIRCUIT_THRESHOLD = Number(process.env.BASECAMP_CIRCUIT_THRESHOLD || 5);
 const CIRCUIT_COOLDOWN_MS = Number(process.env.BASECAMP_CIRCUIT_COOLDOWN_MS || 15000);
+const DEFAULT_MAX_PAGES = Number(process.env.BASECAMP_MAX_PAGES || 50);
+const DEFAULT_PAGE_DELAY_MS = Number(process.env.BASECAMP_PAGE_DELAY_MS || 150);
 
 const circuitState = {
   state: "closed",
@@ -284,14 +286,17 @@ export async function basecampFetchAll(
     headers = {},
     timeoutMs = 30000,
     retries = 3,
-    maxPages = 50,
-    pageDelayMs = 150,
+    maxPages = DEFAULT_MAX_PAGES,
+    pageDelayMs = DEFAULT_PAGE_DELAY_MS,
     includeMeta = false,
+    fallbackPaging = true,
   } = {}
 ) {
   let url = normalizeUrl(pathOrUrl, accountId);
   const all = [];
   let pages = 0;
+  let pagingMode = null;
+  const seenPageSignatures = new Set();
 
   assertCircuit();
 
@@ -379,8 +384,20 @@ export async function basecampFetchAll(
         const { next } = parseLinkHeader(linkHeader);
         if (next) {
           url = next;
+          pagingMode = pagingMode || "link";
         } else {
-          url = null;
+          // Fallback pagination when Link header is missing but page-size suggests more data
+          const currentPage = getParamInt(requestUrl, "page") ?? 1;
+          const signature = `${data.length}:${data?.[0]?.id ?? ""}:${data?.[data.length - 1]?.id ?? ""}`;
+          const looksPaged = Array.isArray(data) && data.length >= perPage;
+          const canAdvance = fallbackPaging && looksPaged && currentPage < maxPages;
+          if (canAdvance && !seenPageSignatures.has(signature)) {
+            seenPageSignatures.add(signature);
+            url = setParam(requestUrl, "page", currentPage + 1);
+            pagingMode = pagingMode || "page";
+          } else {
+            url = null;
+          }
         }
 
         pages++;
@@ -416,6 +433,7 @@ export async function basecampFetchAll(
         truncated: Boolean(url),
         next_url: url || null,
         total_items: all.length,
+        paging_mode: pagingMode,
       },
     };
   }

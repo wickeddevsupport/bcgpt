@@ -1746,7 +1746,83 @@ function normalizePerson(p) {
   };
 }
 
-async function listAllPeople(ctx) {
+function normalizeSearchTokens(input) {
+  return String(input || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9@\s.\-_+]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function personMatchesQuery(person, query) {
+  const tokens = normalizeSearchTokens(query);
+  if (!tokens.length) return true;
+  const name = String(person?.name || "").toLowerCase();
+  const email = String(person?.email || "").toLowerCase();
+  return tokens.every(t => name.includes(t) || email.includes(t));
+}
+
+function mergePeopleLists(primary, secondary) {
+  const out = [];
+  const seen = new Map();
+  for (const p of primary || []) {
+    if (!p) continue;
+    const key = p.id != null ? `id:${p.id}` : (p.email ? `email:${p.email}` : `name:${p.name}`);
+    seen.set(key, { ...p });
+    out.push(seen.get(key));
+  }
+  for (const p of secondary || []) {
+    if (!p) continue;
+    const key = p.id != null ? `id:${p.id}` : (p.email ? `email:${p.email}` : `name:${p.name}`);
+    if (seen.has(key)) {
+      const existing = seen.get(key);
+      for (const [k, v] of Object.entries(p)) {
+        if (existing[k] == null && v != null) existing[k] = v;
+      }
+      continue;
+    }
+    const cloned = { ...p };
+    seen.set(key, cloned);
+    out.push(cloned);
+  }
+  return out;
+}
+
+async function listPeopleFromProjects(ctx, { include_archived = false } = {}) {
+  const cacheKey = `people:deep:${ctx.accountId}:${include_archived ? "archived" : "active"}`;
+  const cached = cacheGet(cacheKey);
+  if (cached) return cached;
+
+  const projects = await listProjects(ctx, { archived: !!include_archived, compact: true });
+  const peopleMap = new Map();
+
+  for (const project of projects || []) {
+    if (!project?.id) continue;
+    let projectPeople = [];
+    try {
+      projectPeople = await listProjectPeople(ctx, project.id);
+    } catch (e) {
+      continue;
+    }
+    for (const person of projectPeople || []) {
+      const norm = normalizePerson(person);
+      const key = norm?.id != null ? `id:${norm.id}` : (norm?.email ? `email:${norm.email}` : `name:${norm?.name || ""}`);
+      if (!peopleMap.has(key)) {
+        peopleMap.set(key, { ...norm, project_ids: [project.id] });
+      } else {
+        const existing = peopleMap.get(key);
+        if (!existing.project_ids) existing.project_ids = [];
+        existing.project_ids.push(project.id);
+      }
+    }
+  }
+
+  const list = Array.from(peopleMap.values());
+  cacheSet(cacheKey, list);
+  return list;
+}
+
+async function listAllPeople(ctx, { deepScan = false, include_archived_projects = false } = {}) {
   const people = await apiAllWithMeta(ctx, `/people.json`, { maxPages: 200 });
   let arr = [];
   let meta = null;
@@ -1794,7 +1870,20 @@ async function listAllPeople(ctx) {
     meta: meta || null
   });
 
-  const normalized = arr.map(normalizePerson);
+  let normalized = arr.map(normalizePerson);
+
+  if (deepScan) {
+    try {
+      const projectPeople = await listPeopleFromProjects(ctx, { include_archived: include_archived_projects });
+      if (Array.isArray(projectPeople) && projectPeople.length) {
+        normalized = mergePeopleLists(normalized, projectPeople);
+        source = source === "people" ? "people+projects" : `${source}+projects`;
+      }
+    } catch (e) {
+      // ignore deep scan errors
+    }
+  }
+
   if (meta) {
     normalized._meta = meta;
   }
@@ -5361,16 +5450,42 @@ export async function handleMCP(reqBody, ctx) {
     // ===== NEW PEOPLE ENDPOINTS =====
     if (name === "list_all_people") {
       try {
-        const people = await listAllPeople(ctx);
+        const query = firstDefined(args.query, args.name, args.search, args.q);
+        const deepScanRequested = args.deep_scan === true || args.deep === true;
+        const includeArchivedProjects = args.include_archived_projects === true || args.include_archived === true;
+        const initialPeople = await listAllPeople(ctx, { deepScan: false });
+
+        let people = initialPeople;
+        let deepScanUsed = false;
+        if (query) {
+          let matches = (people || []).filter(p => personMatchesQuery(p, query));
+          if (!matches.length) {
+            // Auto deep-scan across project memberships when directory search is empty.
+            deepScanUsed = true;
+            people = await listAllPeople(ctx, { deepScan: true, include_archived_projects: includeArchivedProjects });
+            matches = (people || []).filter(p => personMatchesQuery(p, query));
+          }
+          people = matches;
+        } else if (deepScanRequested) {
+          deepScanUsed = true;
+          people = await listAllPeople(ctx, { deepScan: true, include_archived_projects: includeArchivedProjects });
+        }
 
         // INTELLIGENT CHAINING: Provide metrics for consistency
         const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `list all people`);
-        return ok(id, { metrics: ctx_intel.getMetrics(), ...buildListPayload("people", people) });
+        return ok(id, {
+          metrics: ctx_intel.getMetrics(),
+          query: query || undefined,
+          deep_scan: deepScanUsed,
+          ...buildListPayload("people", people)
+        });
       } catch (e) {
         console.error(`[list_all_people] Error:`, e.message);
         try {
-          const people = await listAllPeople(ctx);
-          return ok(id, { fallback: true, ...buildListPayload("people", people) });
+          const query = firstDefined(args.query, args.name, args.search, args.q);
+          const people = await listAllPeople(ctx, { deepScan: true });
+          const filtered = query ? (people || []).filter(p => personMatchesQuery(p, query)) : people;
+          return ok(id, { fallback: true, query: query || undefined, deep_scan: true, ...buildListPayload("people", filtered) });
         } catch (fbErr) {
           return fail(id, { code: "LIST_ALL_PEOPLE_ERROR", message: fbErr.message });
         }

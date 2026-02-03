@@ -15,7 +15,7 @@
     "- Always include project name/id when returning project-scoped results.",
     "",
     "Lookup Recipes:",
-    "- People: list_all_people -> match by exact email/id/name -> if multiple matches, ask to disambiguate.",
+    "- People: list_all_people (use query param) -> match by exact email/id/name -> if multiple matches, ask to disambiguate.",
     "- Projects: list_projects (active by default; include archived if user asks) -> match by exact name/id -> if multiple matches, ask to disambiguate.",
     "- Recordings/content: search_recordings -> if empty, report empty and offer narrower project scope or new query.",
     "- Todos: search_todos -> if empty, report empty and offer project scope or broader query.",
@@ -1052,7 +1052,31 @@
     "/action/list_all_people": {
       "post": {
         "summary": "List all people in the account",
+        "description": "Optionally filter by name/email with `query`. If the directory search is empty, the server will auto deep-scan project memberships to find matches.",
         "operationId": "list_all_people",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Optional name or email to search for (case-insensitive)."
+                  },
+                  "deep_scan": {
+                    "type": "boolean",
+                    "description": "Force a deep scan across project memberships."
+                  },
+                  "include_archived_projects": {
+                    "type": "boolean",
+                    "description": "Include archived projects when deep scanning."
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Array of people"
