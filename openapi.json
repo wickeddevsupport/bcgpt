@@ -1051,10 +1051,11 @@
     },
     "/action/list_all_people": {
       "post": {
-        "summary": "List all people in the account",
-        "description": "Optionally filter by name/email with `query`. If the directory search is empty, the server will auto deep-scan project memberships to find matches.",
+        "summary": "Search people in the account",
+        "description": "Use `query` to search by name/email (case-insensitive). If you need a full list, pass an empty string for `query`. If the directory search is empty, the server will auto deep-scan project memberships to find matches.",
         "operationId": "list_all_people",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -1072,7 +1073,10 @@
                     "type": "boolean",
                     "description": "Include archived projects when deep scanning."
                   }
-                }
+                },
+                "required": [
+                  "query"
+                ]
               }
             }
           }

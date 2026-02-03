@@ -5485,13 +5485,15 @@ export async function handleMCP(reqBody, ctx) {
           people = await listAllPeople(ctx, { deepScan: true, include_archived_projects: includeArchivedProjects });
         }
 
+        const inlineLimit = Number(process.env.PEOPLE_INLINE_LIMIT || 1000);
+
         // INTELLIGENT CHAINING: Provide metrics for consistency
         const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `list all people`);
         return ok(id, {
           metrics: ctx_intel.getMetrics(),
           query: query || undefined,
           deep_scan: deepScanUsed,
-          ...buildListPayload("people", people)
+          ...buildListPayload("people", people, { inlineLimit })
         });
       } catch (e) {
         console.error(`[list_all_people] Error:`, e.message);
@@ -5499,7 +5501,8 @@ export async function handleMCP(reqBody, ctx) {
           const query = firstDefined(args.query, args.name, args.search, args.q);
           const people = await listAllPeople(ctx, { deepScan: true });
           const filtered = query ? (people || []).filter(p => personMatchesQuery(p, query)) : people;
-          return ok(id, { fallback: true, query: query || undefined, deep_scan: true, ...buildListPayload("people", filtered) });
+          const inlineLimit = Number(process.env.PEOPLE_INLINE_LIMIT || 1000);
+          return ok(id, { fallback: true, query: query || undefined, deep_scan: true, ...buildListPayload("people", filtered, { inlineLimit }) });
         } catch (fbErr) {
           return fail(id, { code: "LIST_ALL_PEOPLE_ERROR", message: fbErr.message });
         }
