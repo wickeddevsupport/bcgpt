@@ -347,6 +347,15 @@ function buildListPayload(collectionKey, items, options = {}) {
     truncated: null
   };
   if (coverage) payload.coverage = coverage;
+  const previewLimit = Number.isFinite(Number(options.preview_limit))
+    ? Number(options.preview_limit)
+    : Number(process.env.PREVIEW_LIMIT || 5);
+  if (previewLimit > 0) {
+    const previewItems = displayItems.slice(0, previewLimit);
+    payload[`${collectionKey}_preview`] = previewItems;
+    payload[`${collectionKey}_preview_count`] = previewItems.length;
+    payload[`${collectionKey}_preview_limit`] = previewLimit;
+  }
   if (compactor) payload.compact = true;
   return payload;
 }
@@ -381,6 +390,15 @@ function attachCachedCollection(target, collectionKey, items, options = {}) {
     truncated: null
   };
   if (coverage) target[`${collectionKey}_coverage`] = coverage;
+  const previewLimit = Number.isFinite(Number(options.preview_limit))
+    ? Number(options.preview_limit)
+    : Number(process.env.PREVIEW_LIMIT || 5);
+  if (previewLimit > 0) {
+    const previewItems = displayItems.slice(0, previewLimit);
+    target[`${collectionKey}_preview`] = previewItems;
+    target[`${collectionKey}_preview_count`] = previewItems.length;
+    target[`${collectionKey}_preview_limit`] = previewLimit;
+  }
   if (compactor) target[`${collectionKey}_compact`] = true;
   return target;
 }
