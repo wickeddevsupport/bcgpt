@@ -71,6 +71,16 @@ export function getTools() {
       additionalProperties: false
     }),
 
+    tool("search_people", "Search people by name/email (server-side).", {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        include_archived_projects: { type: "boolean" }
+      },
+      required: ["query"],
+      additionalProperties: false
+    }),
+
     tool("list_todos_for_project", "List todolists + todos for a project by name.", {
       type: "object",
       properties: { project: { type: "string" } },

@@ -1762,6 +1762,20 @@ function personMatchesQuery(person, query) {
   return tokens.every(t => name.includes(t) || email.includes(t));
 }
 
+async function searchPeople(ctx, query, { include_archived_projects = false, deepScan = true } = {}) {
+  const initial = await listAllPeople(ctx, { deepScan: false });
+  let matches = (initial || []).filter(p => personMatchesQuery(p, query));
+  let deepScanUsed = false;
+
+  if (!matches.length && deepScan) {
+    deepScanUsed = true;
+    const full = await listAllPeople(ctx, { deepScan: true, include_archived_projects });
+    matches = (full || []).filter(p => personMatchesQuery(p, query));
+  }
+
+  return { people: matches, deep_scan: deepScanUsed };
+}
+
 function mergePeopleLists(primary, secondary) {
   const out = [];
   const seen = new Map();
@@ -4141,6 +4155,8 @@ export async function handleMCP(reqBody, ctx) {
             const result = await callTool("get_person_assignments", { project: args.project, person });
             return ok(id, { query, action: "get_person_assignments", confidence, result });
           }
+          const result = await callTool("search_people", { query: person });
+          return ok(id, { query, action: "search_people", confidence, result });
         }
 
         if (analysis.constraints.dueDate) {
@@ -5460,29 +5476,29 @@ export async function handleMCP(reqBody, ctx) {
     // ===== NEW PEOPLE ENDPOINTS =====
     if (name === "list_all_people") {
       try {
-        const query = firstDefined(args.query, args.name, args.search, args.q);
+        const rawQuery = firstDefined(args.query, args.name, args.search, args.q);
+        if (rawQuery === undefined || rawQuery === null) {
+          return fail(id, {
+            code: "MISSING_QUERY",
+            message: "Missing query. Provide a name/email in 'query'. Use an empty string to list all people."
+          });
+        }
+
+        const query = String(rawQuery);
         const deepScanRequested = args.deep_scan === true || args.deep === true;
         const includeArchivedProjects = args.include_archived_projects === true || args.include_archived === true;
-        const initialPeople = await listAllPeople(ctx, { deepScan: false });
-
-        let people = initialPeople;
+        let people = [];
         let deepScanUsed = false;
-        if (query) {
-          let matches = (people || []).filter(p => personMatchesQuery(p, query));
-          if (!matches.length) {
-            // Auto deep-scan across project memberships when directory search is empty.
+        if (query.trim() === "") {
+          people = await listAllPeople(ctx, { deepScan: false });
+          if (!people.length || deepScanRequested) {
             deepScanUsed = true;
             people = await listAllPeople(ctx, { deepScan: true, include_archived_projects: includeArchivedProjects });
-            matches = (people || []).filter(p => personMatchesQuery(p, query));
           }
-          people = matches;
-        } else if (!people.length) {
-          // If directory is empty, auto deep-scan so downstream clients can still search.
-          deepScanUsed = true;
-          people = await listAllPeople(ctx, { deepScan: true, include_archived_projects: includeArchivedProjects });
-        } else if (deepScanRequested) {
-          deepScanUsed = true;
-          people = await listAllPeople(ctx, { deepScan: true, include_archived_projects: includeArchivedProjects });
+        } else {
+          const result = await searchPeople(ctx, query, { include_archived_projects: includeArchivedProjects, deepScan: true });
+          people = result.people;
+          deepScanUsed = result.deep_scan;
         }
 
         const inlineLimit = Number(process.env.PEOPLE_INLINE_LIMIT || 1000);
@@ -5498,14 +5514,43 @@ export async function handleMCP(reqBody, ctx) {
       } catch (e) {
         console.error(`[list_all_people] Error:`, e.message);
         try {
-          const query = firstDefined(args.query, args.name, args.search, args.q);
-          const people = await listAllPeople(ctx, { deepScan: true });
-          const filtered = query ? (people || []).filter(p => personMatchesQuery(p, query)) : people;
+          const rawQuery = firstDefined(args.query, args.name, args.search, args.q);
+          const query = rawQuery == null ? "" : String(rawQuery);
+          const includeArchivedProjects = args.include_archived_projects === true || args.include_archived === true;
+          let people = [];
+          if (query.trim() === "") {
+            people = await listAllPeople(ctx, { deepScan: true });
+          } else {
+            const result = await searchPeople(ctx, query, { include_archived_projects: includeArchivedProjects, deepScan: true });
+            people = result.people;
+          }
           const inlineLimit = Number(process.env.PEOPLE_INLINE_LIMIT || 1000);
-          return ok(id, { fallback: true, query: query || undefined, deep_scan: true, ...buildListPayload("people", filtered, { inlineLimit }) });
+          return ok(id, { fallback: true, query: query || undefined, deep_scan: true, ...buildListPayload("people", people, { inlineLimit }) });
         } catch (fbErr) {
           return fail(id, { code: "LIST_ALL_PEOPLE_ERROR", message: fbErr.message });
         }
+      }
+    }
+
+    if (name === "search_people") {
+      try {
+        const query = String(firstDefined(args.query, args.name, args.search, args.q) || "").trim();
+        if (!query) {
+          return fail(id, { code: "MISSING_QUERY", message: "Missing query. Provide a name/email in 'query'." });
+        }
+        const includeArchivedProjects = args.include_archived_projects === true || args.include_archived === true;
+        const result = await searchPeople(ctx, query, { include_archived_projects: includeArchivedProjects, deepScan: true });
+        const inlineLimit = Number(process.env.PEOPLE_INLINE_LIMIT || 1000);
+        const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `search people: ${query}`);
+        return ok(id, {
+          metrics: ctx_intel.getMetrics(),
+          query,
+          deep_scan: result.deep_scan,
+          ...buildListPayload("people", result.people, { inlineLimit })
+        });
+      } catch (e) {
+        console.error(`[search_people] Error:`, e.message);
+        return fail(id, { code: "SEARCH_PEOPLE_ERROR", message: e.message });
       }
     }
 
