@@ -34,6 +34,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -75,6 +79,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -118,6 +126,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -160,6 +172,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -195,6 +211,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -236,6 +256,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -279,6 +303,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -320,6 +348,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -369,6 +401,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -412,6 +448,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -454,6 +494,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -490,6 +534,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -532,6 +580,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -567,6 +619,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -609,6 +665,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -650,6 +710,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -699,6 +763,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -742,6 +810,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -783,6 +855,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -826,6 +902,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -868,6 +948,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -909,6 +993,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -958,6 +1046,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -1001,6 +1093,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -1042,6 +1138,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -1085,6 +1185,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -1126,6 +1230,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -1169,6 +1277,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -1210,6 +1322,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -1253,6 +1369,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -1294,6 +1414,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -1337,6 +1461,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -1378,6 +1506,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -1421,6 +1553,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -1462,6 +1598,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -1505,6 +1645,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -1546,6 +1690,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -1589,6 +1737,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -1630,6 +1782,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -1673,6 +1829,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -1714,6 +1874,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -1757,6 +1921,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -1798,6 +1966,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -1841,6 +2013,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -1882,6 +2058,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -1925,6 +2105,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -1966,6 +2150,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -2009,6 +2197,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -2050,6 +2242,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -2093,6 +2289,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -2135,6 +2335,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -2165,6 +2369,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [],
@@ -2192,6 +2400,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [],
@@ -2218,6 +2430,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -2252,6 +2468,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -2280,6 +2500,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -2313,6 +2537,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -2355,6 +2583,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -2391,6 +2623,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -2426,6 +2662,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -2455,6 +2695,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [],
@@ -2481,6 +2725,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -2509,6 +2757,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [],
@@ -2535,6 +2787,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -2569,6 +2825,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -2597,6 +2857,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -2631,6 +2895,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -2659,6 +2927,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -2692,6 +2964,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -2734,6 +3010,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -2769,6 +3049,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },
@@ -2811,6 +3095,10 @@ export const ENDPOINT_TOOLS = [
         "paginate": {
           "type": "boolean",
           "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
+          "nullable": true
         }
       },
       "required": [
@@ -2846,6 +3134,10 @@ export const ENDPOINT_TOOLS = [
         },
         "paginate": {
           "type": "boolean",
+          "nullable": true
+        },
+        "idempotency_key": {
+          "type": "string",
           "nullable": true
         }
       },

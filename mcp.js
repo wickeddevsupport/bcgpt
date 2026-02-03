@@ -181,7 +181,9 @@ function exportLargePayloadToFile(key) {
 function maybeCacheCollectionResult(collectionKey, items, {
   inlineLimit = DEFAULT_INLINE_LIMIT,
   chunkSize = DEFAULT_CHUNK_SIZE,
-  forceCache = false
+  forceCache = false,
+  autoExpand = true,
+  autoExpandMaxItems = Number(process.env.AUTO_EXPAND_MAX_ITEMS || 1000)
 } = {}) {
   const list = Array.isArray(items) ? items : [];
   const shouldCache = forceCache || list.length > inlineLimit;
@@ -190,6 +192,18 @@ function maybeCacheCollectionResult(collectionKey, items, {
   }
   const cached = cacheCollection(collectionKey, list, { chunkSize });
   const exported = exportLargePayloadToFile(cached.key);
+  const canAutoExpand = autoExpand && Number.isFinite(autoExpandMaxItems) && list.length <= autoExpandMaxItems;
+  if (canAutoExpand) {
+    return {
+      items: list,
+      cached: false,
+      expanded: true,
+      total: list.length,
+      payload_key: cached.key,
+      chunk_count: cached.chunkCount,
+      export: exported
+    };
+  }
   return {
     items: cached.firstChunk,
     cached: true,
@@ -262,6 +276,8 @@ function buildListPayload(collectionKey, items, options = {}) {
     [collectionKey]: cached.items,
     count: cached.total,
     cached: cached.cached,
+    expanded: cached.expanded || false,
+    chunk_required: cached.cached === true,
     payload_key: cached.payload_key,
     cache_key: cached.payload_key,
     chunk_count: cached.chunk_count,
@@ -6592,6 +6608,84 @@ export async function handleMCP(reqBody, ctx) {
       }
     }
 
+    if (name === "run_regression_suite") {
+      try {
+        const cases = Array.isArray(args.cases) ? args.cases : [];
+        if (!cases.length) {
+          return fail(id, { code: "MISSING_CASES", message: "Provide one or more cases." });
+        }
+        const stopOnError = args.stop_on_error === true;
+        const results = [];
+
+        const inferCount = (payload) => {
+          if (!payload || typeof payload !== "object") return null;
+          if (typeof payload.count === "number") return payload.count;
+          for (const key of Object.keys(payload)) {
+            if (Array.isArray(payload[key])) return payload[key].length;
+          }
+          return null;
+        };
+
+        for (const testCase of cases) {
+          const toolName = String(testCase.tool || "").trim();
+          if (!toolName) {
+            results.push({ name: testCase.name || null, tool: toolName, pass: false, error: "MISSING_TOOL" });
+            if (stopOnError) break;
+            continue;
+          }
+          if (toolName === "run_regression_suite") {
+            results.push({ name: testCase.name || null, tool: toolName, pass: false, error: "INVALID_TOOL" });
+            if (stopOnError) break;
+            continue;
+          }
+
+          const nested = await handleMCP({
+            jsonrpc: "2.0",
+            id: `${id || "mcp"}:regression`,
+            method: "tools/call",
+            params: { name: toolName, arguments: testCase.args || {} }
+          }, ctx);
+
+          if (nested?.error) {
+            results.push({
+              name: testCase.name || null,
+              tool: toolName,
+              pass: false,
+              error: nested.error
+            });
+            if (stopOnError) break;
+            continue;
+          }
+
+          const result = nested?.result ?? nested;
+          const count = inferCount(result);
+          let pass = true;
+          const expect = testCase.expect || {};
+          if (expect.non_empty === true && (!count || count === 0)) pass = false;
+          if (Number.isFinite(expect.min_count) && (!count || count < expect.min_count)) pass = false;
+
+          results.push({
+            name: testCase.name || null,
+            tool: toolName,
+            pass,
+            count,
+            result
+          });
+          if (!pass && stopOnError) break;
+        }
+
+        return ok(id, {
+          total: results.length,
+          passed: results.filter(r => r.pass).length,
+          failed: results.filter(r => !r.pass).length,
+          results
+        });
+      } catch (e) {
+        console.error(`[run_regression_suite] Error:`, e.message);
+        return fail(id, { code: "REGRESSION_SUITE_ERROR", message: e.message });
+      }
+    }
+
     if (name === "resolve_entity_from_url") {
       try {
         const url = String(args.url || "").trim();
@@ -8338,7 +8432,7 @@ export async function handleMCP(reqBody, ctx) {
         const paginate = args.paginate !== false && httpMethod === "GET";
         const data = paginate
           ? await apiAllWithMeta(ctx, path)
-          : await api(ctx, path, { method: httpMethod, body: args.body });
+          : await api(ctx, path, { method: httpMethod, body: args.body, idempotency_key: args.idempotency_key });
 
         if (paginate && Array.isArray(data?.items || data)) {
           return ok(id, {

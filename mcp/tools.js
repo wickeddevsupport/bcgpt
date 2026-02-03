@@ -84,6 +84,35 @@ export function getTools() {
       required: ["person"],
       additionalProperties: false
     }),
+    tool("run_regression_suite", "Run a set of tool calls and report pass/fail checks.", {
+      type: "object",
+      properties: {
+        cases: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              tool: { type: "string" },
+              args: { type: "object", additionalProperties: true },
+              expect: {
+                type: "object",
+                properties: {
+                  min_count: { type: "integer", nullable: true },
+                  non_empty: { type: "boolean", nullable: true }
+                },
+                additionalProperties: false
+              }
+            },
+            required: ["tool"],
+            additionalProperties: false
+          }
+        },
+        stop_on_error: { type: "boolean", nullable: true }
+      },
+      required: ["cases"],
+      additionalProperties: false
+    }),
     tool("mcp_call", "Proxy call to any MCP tool by name (full toolset access).", {
       type: "object",
       properties: {

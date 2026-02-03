@@ -5,7 +5,7 @@ Last updated: 2026-02-03
 This report re-checks coverage against the app's current tool set and the OpenAPI wrapper.
 
 ## Summary
-- MCP tools defined in `mcp.js`: 281
+- MCP tools defined in `mcp.js`: 282
 - OpenAPI actions in `openapi.json`: 30 (limit enforced)
 - Smart routing available via `smart_action`
 
