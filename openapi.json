@@ -21,7 +21,8 @@
     "- People summaries: use audit_person after disambiguation; do not ask for extra confirmation.",
     "- Projects: list_projects (active by default; include archived if asked) -> match by exact name/id -> if multiple matches, ask to disambiguate.",
     "- Recordings/content: search_recordings -> if empty, report empty and offer narrower project scope or new query.",
-    "- Todos: search_todos -> if empty, report empty and offer project scope or broader query.",
+    "- Todos (keyword): search_todos -> if empty, report empty and offer project scope or broader query.",
+    "- Assigned todos: use report_todos_assigned_person (or audit_person) after resolving the person; do NOT use search_todos for assignee queries.",
     "- Comments: list_comments with project + recording/card/todo id or URL -> if 404, ask for correct id or URL.",
     "",
     "Chunked Responses:",
@@ -1124,40 +1125,6 @@
         }
       }
     },
-    "/action/list_uploads": {
-      "post": {
-        "summary": "List files/uploads in a project vault.",
-        "operationId": "list_uploads",
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "project": {
-                    "type": "string"
-                  },
-                  "vault_id": {
-                    "type": "integer",
-                    "nullable": true
-                  }
-                },
-                "required": [
-                  "project"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        }
-      }
-    },
     "/action/list_schedule_entries": {
       "post": {
         "summary": "List schedule entries for a project (date range optional).",
@@ -1351,6 +1318,36 @@
                 },
                 "required": [
                   "payload_key"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/action/report_todos_assigned_person": {
+      "post": {
+        "summary": "List todos assigned to a person (report).",
+        "operationId": "report_todos_assigned_person",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "person_id": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "person_id"
                 ],
                 "additionalProperties": false
               }

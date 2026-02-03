@@ -47,9 +47,9 @@ This document maps MCP tools to Basecamp capabilities, highlights OpenAPI covera
 - `list_schedule_entries`
 - `list_todos_due`
 - `list_todos_for_project`
-- `list_uploads`
 - `mcp_call`
 - `move_card`
+- `report_todos_assigned_person`
 - `search_project`
 - `search_projects`
 - `search_recordings`
@@ -143,7 +143,7 @@ This document maps MCP tools to Basecamp capabilities, highlights OpenAPI covera
 | `list_comments` | List comments on a recording (message, document, todo, etc). | yes |
 | `get_comment` | Get a specific comment by ID. | no |
 | `create_comment` | Create a comment on a recording. | yes |
-| `list_uploads` | List files/uploads in a project vault. | yes |
+| `list_uploads` | List files/uploads in a project vault. | no |
 | `get_upload` | Get details of a specific file/upload. | no |
 | `get_recordings` | Query all recordings across projects by type (Todo, Message, Document, Upload, etc). | no |
 | `trash_recording` | Move a recording to trash. | no |
@@ -195,7 +195,7 @@ This document maps MCP tools to Basecamp capabilities, highlights OpenAPI covera
 | `unsubscribe_recording` | Unsubscribe the current user from a recording. | no |
 | `update_subscription` | Update subscribers list for a recording. | no |
 | `report_todos_assigned` | List people who can have todos assigned. | no |
-| `report_todos_assigned_person` | List todos assigned to a person (report). | no |
+| `report_todos_assigned_person` | List todos assigned to a person (report). | yes |
 | `report_todos_overdue` | List overdue todos across all projects. | no |
 | `report_schedules_upcoming` | List upcoming schedule entries (report). Optional query string. | no |
 | `report_timeline` | Timeline events across all projects. Optional query string. | no |
