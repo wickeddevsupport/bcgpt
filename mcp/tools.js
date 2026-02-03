@@ -70,6 +70,18 @@ export function getTools() {
       required: ["query"],
       additionalProperties: false
     }),
+    tool("audit_person", "Summarize a person's Basecamp presence (projects, assigned todos, recent activity).", {
+      type: "object",
+      properties: {
+        person: { type: "string", description: "Name, email, or person ID." },
+        include_archived_projects: { type: "boolean" },
+        include_assignments: { type: "boolean" },
+        include_activity: { type: "boolean" },
+        activity_limit: { type: "integer" }
+      },
+      required: ["person"],
+      additionalProperties: false
+    }),
     tool("mcp_call", "Proxy call to any MCP tool by name (full toolset access).", {
       type: "object",
       properties: {

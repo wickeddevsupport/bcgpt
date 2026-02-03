@@ -2,7 +2,7 @@
   "openapi": "3.1.1",
   "info": {
     "title": "BCGPT - Basecamp Integration API",
-    "description": "Complete Basecamp integration for ChatGPT with 30 essential operations plus mcp_call/basecamp_raw for full tool access. See x-assistant-instructions for required tool-usage policy and workflows.",
+    "description": "Complete Basecamp integration for ChatGPT with 30 essential operations plus audit_person/mcp_call/basecamp_raw for full tool access. See x-assistant-instructions for required tool-usage policy and workflows.",
     "version": "1.0.0"
   },
   "x-assistant-instructions": [
@@ -18,6 +18,7 @@
     "",
     "Lookup Recipes:",
     "- People: list_all_people (use query param) -> match by exact email/id/name -> if multiple matches, ask to disambiguate.",
+    "- People summaries: use audit_person after disambiguation; do not ask for extra confirmation.",
     "- Projects: list_projects (active by default; include archived if asked) -> match by exact name/id -> if multiple matches, ask to disambiguate.",
     "- Recordings/content: search_recordings -> if empty, report empty and offer narrower project scope or new query.",
     "- Todos: search_todos -> if empty, report empty and offer project scope or broader query.",
@@ -181,6 +182,49 @@
                 },
                 "required": [
                   "query"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/action/audit_person": {
+      "post": {
+        "summary": "Summarize a person's Basecamp presence (projects, assigned todos, recent activity).",
+        "operationId": "audit_person",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "person": {
+                    "type": "string",
+                    "description": "Name, email, or person ID."
+                  },
+                  "include_archived_projects": {
+                    "type": "boolean"
+                  },
+                  "include_assignments": {
+                    "type": "boolean"
+                  },
+                  "include_activity": {
+                    "type": "boolean"
+                  },
+                  "activity_limit": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "person"
                 ],
                 "additionalProperties": false
               }
@@ -1072,36 +1116,6 @@
                 "required": [
                   "project",
                   "board_id"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        }
-      }
-    },
-    "/action/list_documents": {
-      "post": {
-        "summary": "List documents/files in the project vault.",
-        "operationId": "list_documents",
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "project": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "project"
                 ],
                 "additionalProperties": false
               }

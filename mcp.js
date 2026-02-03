@@ -2386,6 +2386,57 @@ async function listPersonProjects(ctx, personQuery, { include_archived_projects 
   };
 }
 
+async function auditPerson(ctx, personQuery, {
+  include_archived_projects = false,
+  include_assignments = true,
+  include_activity = true,
+  activity_limit = 50
+} = {}) {
+  const resolved = await resolvePersonQuery(ctx, personQuery, { include_archived_projects });
+  if (!resolved.person) {
+    return { person: null, matches: resolved.matches || [] };
+  }
+
+  const personId = Number(resolved.person.id);
+  const projectsResult = await listPersonProjects(ctx, String(resolved.person.id), { include_archived_projects });
+  const projects = projectsResult.projects || [];
+
+  let assignments = null;
+  if (include_assignments && Number.isFinite(personId)) {
+    try {
+      assignments = await reportTodosAssignedPerson(ctx, personId);
+    } catch (e) {
+      assignments = { error: e?.message || String(e) };
+    }
+  }
+
+  let activity = null;
+  if (include_activity) {
+    try {
+      const activityResult = await listPersonActivity(ctx, String(resolved.person.id), {
+        include_archived_projects,
+        limit: Number.isFinite(Number(activity_limit)) ? Number(activity_limit) : 50
+      });
+      activity = activityResult?.events || activityResult || null;
+    } catch (e) {
+      activity = { error: e?.message || String(e) };
+    }
+  }
+
+  return {
+    person: resolved.person,
+    projects,
+    assignments,
+    activity,
+    coverage: {
+      projects_scanned: projectsResult.coverage?.projects_scanned ?? null,
+      include_archived_projects: !!include_archived_projects,
+      assignments_included: !!include_assignments,
+      activity_included: !!include_activity
+    }
+  };
+}
+
 async function listPersonActivity(ctx, personQuery, {
   project = null,
   query = "",
@@ -4848,6 +4899,17 @@ export async function handleMCP(reqBody, ctx) {
           const person = pickPersonCandidate(analysis, query);
           const personId = extractPersonId(query);
 
+          if (wantsSummary && person) {
+            const result = await callTool("audit_person", {
+              person,
+              include_archived_projects: false,
+              include_assignments: true,
+              include_activity: true,
+              activity_limit: 50
+            });
+            return ok(id, { query, action: "audit_person", confidence, result });
+          }
+
           if ((wantsMembership(query) || wantsAssignments(query) || wantsActivity(query)) && person) {
             let projectsResult = null;
             let assignmentsResult = null;
@@ -6468,6 +6530,39 @@ export async function handleMCP(reqBody, ctx) {
       } catch (e) {
         console.error(`[list_person_activity] Error:`, e.message);
         return fail(id, { code: "LIST_PERSON_ACTIVITY_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "audit_person") {
+      try {
+        const person = String(firstDefined(args.person, args.name, args.email) || "").trim();
+        if (!person) {
+          return fail(id, { code: "MISSING_PERSON", message: "Missing person. Provide name, email, or ID." });
+        }
+        const includeArchivedProjects = args.include_archived_projects === true || args.include_archived === true;
+        const result = await auditPerson(ctx, person, {
+          include_archived_projects: includeArchivedProjects,
+          include_assignments: args.include_assignments !== false,
+          include_activity: args.include_activity !== false,
+          activity_limit: Number.isFinite(Number(args.activity_limit)) ? Number(args.activity_limit) : 50
+        });
+        if (!result.person) {
+          if (Array.isArray(result.matches) && result.matches.length > 1) {
+            return fail(id, { code: "AMBIGUOUS_PERSON", message: "Multiple people matched.", matches: result.matches });
+          }
+          return fail(id, { code: "PERSON_NOT_FOUND", message: "No matching person found.", matches: result.matches || [] });
+        }
+        return ok(id, {
+          person: result.person,
+          projects: result.projects || [],
+          projects_count: Array.isArray(result.projects) ? result.projects.length : 0,
+          assignments: result.assignments,
+          activity: result.activity,
+          coverage: result.coverage
+        });
+      } catch (e) {
+        console.error(`[audit_person] Error:`, e.message);
+        return fail(id, { code: "AUDIT_PERSON_ERROR", message: e.message });
       }
     }
 

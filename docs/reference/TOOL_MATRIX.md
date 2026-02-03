@@ -28,6 +28,7 @@ This document maps MCP tools to Basecamp capabilities, highlights OpenAPI covera
 
 
 ## OpenAPI Coverage (30 actions)
+- `audit_person`
 - `basecamp_raw`
 - `complete_todo`
 - `create_card`
@@ -39,7 +40,6 @@ This document maps MCP tools to Basecamp capabilities, highlights OpenAPI covera
 - `list_card_table_cards`
 - `list_card_tables`
 - `list_comments`
-- `list_documents`
 - `list_message_boards`
 - `list_messages`
 - `list_project_card_table_contents`
@@ -74,6 +74,7 @@ This document maps MCP tools to Basecamp capabilities, highlights OpenAPI covera
 | `get_person_assignments` | List todos assigned to a specific person within a project. | no |
 | `list_assigned_to_me` | List todos assigned to the current user (optionally within a project). | no |
 | `smart_action` | Smart router: decide which action to call based on natural language query and context. | yes |
+| `audit_person` | Summarize a person's Basecamp presence (projects, assigned todos, recent activity). | yes |
 | `mcp_call` | Proxy call to any MCP tool by name (full toolset access). | yes |
 | `search_people` | Search people by name/email (server-side). | no |
 | `search_projects` | Search projects by name. | yes |
@@ -126,7 +127,7 @@ This document maps MCP tools to Basecamp capabilities, highlights OpenAPI covera
 | `get_client_approval` | Get a client approval by ID. | no |
 | `list_client_replies` | List client replies for a correspondence/approval recording. | no |
 | `get_client_reply` | Get a specific client reply by recording + reply ID. | no |
-| `list_documents` | List documents/files in the project vault. | yes |
+| `list_documents` | List documents/files in the project vault. | no |
 | `get_vault` | Get a vault by ID. | no |
 | `list_child_vaults` | List child vaults within a vault. | no |
 | `create_child_vault` | Create a child vault within a vault. Provide official fields in body. | no |
