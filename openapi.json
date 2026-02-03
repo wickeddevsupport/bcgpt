@@ -18,7 +18,6 @@
     "",
     "Lookup Recipes:",
     "- People: list_all_people (use query param) -> match by exact email/id/name -> if multiple matches, ask to disambiguate.",
-    "- People summaries: use audit_person after disambiguation; do not ask for extra confirmation.",
     "- Projects: list_projects (active by default; include archived if asked) -> match by exact name/id -> if multiple matches, ask to disambiguate.",
     "- Recordings/content: search_recordings -> if empty, report empty and offer narrower project scope or new query.",
     "- Todos (keyword): search_todos -> if empty, report empty and offer project scope or broader query.",
@@ -44,7 +43,8 @@
     "- Surface tool errors clearly (code/message) and suggest next steps.",
     "- If NOT_AUTHENTICATED, instruct user to run startbcgpt.",
     "- Do not invent alternative data without tool calls.",
-    "- If the user provides an explicit action call (e.g., POST /action/... with JSON), execute that exact action with the provided params."
+    "- If the user provides an explicit action call (e.g., POST /action/... with JSON), execute that exact action with the provided params.",
+    "- People summaries: use summarize_person (preferred) or audit_person if summary tool is unavailable."
   ],
   "servers": [
     {
@@ -1223,48 +1223,6 @@
         }
       }
     },
-    "/action/list_schedule_entries": {
-      "post": {
-        "summary": "List schedule entries for a project (date range optional).",
-        "operationId": "list_schedule_entries",
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "project": {
-                    "type": "string"
-                  },
-                  "start": {
-                    "type": "string",
-                    "nullable": true
-                  },
-                  "end": {
-                    "type": "string",
-                    "nullable": true
-                  },
-                  "compact": {
-                    "type": "boolean",
-                    "description": "Return compact payloads to avoid large responses."
-                  }
-                },
-                "required": [
-                  "project"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        }
-      }
-    },
     "/action/list_all_people": {
       "post": {
         "summary": "List all people visible in the Basecamp account (use empty query to list all).",
@@ -1477,6 +1435,56 @@
                   }
                 },
                 "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/action/summarize_person": {
+      "post": {
+        "summary": "Compact person summary (counts + previews).",
+        "operationId": "summarize_person",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "person": {
+                    "type": "string",
+                    "description": "Name, email, or person ID."
+                  },
+                  "include_archived_projects": {
+                    "type": "boolean"
+                  },
+                  "include_assignments": {
+                    "type": "boolean"
+                  },
+                  "include_activity": {
+                    "type": "boolean"
+                  },
+                  "activity_limit": {
+                    "type": "integer"
+                  },
+                  "preview_limit": {
+                    "type": "integer"
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
+                  }
+                },
+                "required": [
+                  "person"
+                ],
                 "additionalProperties": false
               }
             }

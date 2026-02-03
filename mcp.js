@@ -5246,14 +5246,14 @@ export async function handleMCP(reqBody, ctx) {
           const personId = extractPersonId(query);
 
           if (wantsSummary && person) {
-            const result = await callTool("audit_person", {
+            const result = await callTool("summarize_person", {
               person,
               include_archived_projects: false,
               include_assignments: true,
               include_activity: true,
               activity_limit: 50
             });
-            return ok(id, { query, action: "audit_person", confidence, result });
+            return ok(id, { query, action: "summarize_person", confidence, result });
           }
 
           if ((wantsMembership(query) || wantsAssignments(query) || wantsActivity(query)) && person) {

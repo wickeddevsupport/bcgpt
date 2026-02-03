@@ -44,7 +44,7 @@ This document maps MCP tools to Basecamp capabilities, highlights OpenAPI covera
 - `list_messages`
 - `list_project_card_table_contents`
 - `list_projects`
-- `list_schedule_entries`
+- `summarize_person`
 - `list_todos_due`
 - `list_todos_for_project`
 - `mcp_call`
@@ -75,7 +75,7 @@ This document maps MCP tools to Basecamp capabilities, highlights OpenAPI covera
 | `list_assigned_to_me` | List todos assigned to the current user (optionally within a project). | no |
 | `smart_action` | Smart router: decide which action to call based on natural language query and context. | yes |
 | `audit_person` | Summarize a person's Basecamp presence (projects, assigned todos, recent activity). | yes |
-| `summarize_person` | Compact person summary (counts + previews). | no |
+| `summarize_person` | Compact person summary (counts + previews). | yes |
 | `summarize_project` | Compact project summary with optional counts. | no |
 | `summarize_todo` | Compact summary for a specific todo. | no |
 | `summarize_card` | Compact summary for a specific card. | no |
@@ -141,7 +141,7 @@ This document maps MCP tools to Basecamp capabilities, highlights OpenAPI covera
 | `list_child_vaults` | List child vaults within a vault. | no |
 | `create_child_vault` | Create a child vault within a vault. Provide official fields in body. | no |
 | `update_vault` | Update vault metadata. Provide official fields in body. | no |
-| `list_schedule_entries` | List schedule entries for a project (date range optional). | yes |
+| `list_schedule_entries` | List schedule entries for a project (date range optional). | no |
 | `search_project` | Search within a project (dock-driven search if enabled). | yes |
 | `list_all_people` | List all people visible in the Basecamp account (use empty query to list all). | yes |
 | `get_person` | Get profile of a specific person by ID. | no |
