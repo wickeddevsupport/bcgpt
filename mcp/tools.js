@@ -81,6 +81,23 @@ export function getTools() {
       additionalProperties: false
     }),
 
+    tool("search_entities", "Search across people/projects/recordings/todos (and cards by ID when project provided).", {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        project: { type: "string", nullable: true },
+        include_archived_projects: { type: "boolean" },
+        include_people: { type: "boolean" },
+        include_projects: { type: "boolean" },
+        include_recordings: { type: "boolean" },
+        include_todos: { type: "boolean" },
+        include_cards: { type: "boolean" },
+        limit: { type: "integer" }
+      },
+      required: ["query"],
+      additionalProperties: false
+    }),
+
     tool("list_todos_for_project", "List todolists + todos for a project by name.", {
       type: "object",
       properties: { project: { type: "string" } },

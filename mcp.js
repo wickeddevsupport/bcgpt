@@ -1776,6 +1776,89 @@ async function searchPeople(ctx, query, { include_archived_projects = false, dee
   return { people: matches, deep_scan: deepScanUsed };
 }
 
+async function searchEntities(ctx, query, {
+  project = null,
+  include_archived_projects = false,
+  include_recordings = true,
+  include_todos = true,
+  include_people = true,
+  include_projects = true,
+  include_cards = true,
+  limit = 20
+} = {}) {
+  const q = String(query || "").trim();
+  if (!q) return { query: q, results: {} };
+
+  let projectId = null;
+  let projectObj = null;
+  if (project) {
+    try {
+      const p = await projectByName(ctx, project);
+      projectId = p?.id || null;
+      projectObj = p ? { id: p.id, name: p.name } : null;
+    } catch (_) {
+      projectId = null;
+    }
+  }
+
+  const results = {};
+  const sources = {};
+
+  if (include_people) {
+    const peopleResult = await searchPeople(ctx, q, { include_archived_projects, deepScan: true });
+    results.people = (peopleResult.people || []).slice(0, limit);
+    sources.people = { count: results.people.length, deep_scan: peopleResult.deep_scan };
+  }
+
+  if (include_projects) {
+    const projects = await listProjects(ctx, { archived: include_archived_projects, compact: true });
+    const matches = findNameMatches(projects, q, { limit });
+    results.projects = matches;
+    sources.projects = { count: matches.length };
+  }
+
+  if (include_recordings) {
+    try {
+      const recordings = await searchRecordings(ctx, q, { bucket_id: projectId });
+      results.recordings = (recordings || []).slice(0, limit);
+      sources.recordings = { count: results.recordings.length, scoped: !!projectId };
+    } catch (e) {
+      sources.recordings = { count: 0, error: e?.message || String(e) };
+    }
+  }
+
+  if (include_todos) {
+    try {
+      const todos = await searchRecordings(ctx, q, { bucket_id: projectId, type: "todo" });
+      results.todos = (todos || []).slice(0, limit);
+      sources.todos = { count: results.todos.length, scoped: !!projectId };
+    } catch (e) {
+      sources.todos = { count: 0, error: e?.message || String(e) };
+    }
+  }
+
+  if (include_cards && projectId) {
+    const idStr = String(q).trim();
+    if (/^\d+$/.test(idStr)) {
+      const card = await findCardInProjectById(ctx, projectId, idStr);
+      if (card) {
+        results.cards = [card];
+        sources.cards = { count: 1, mode: "id_lookup" };
+      } else {
+        results.cards = [];
+        sources.cards = { count: 0, mode: "id_lookup" };
+      }
+    }
+  }
+
+  return {
+    query: q,
+    project: projectObj,
+    sources,
+    results
+  };
+}
+
 function mergePeopleLists(primary, secondary) {
   const out = [];
   const seen = new Map();
@@ -3561,7 +3644,7 @@ export async function handleMCP(reqBody, ctx) {
       const q = String(args.query || "").trim();
       if (!q) {
         const payload = { query: "", count: 0 };
-        attachCachedCollection(payload, "todos", []);
+        attachCachedCollection(payload, "todos", [], { inlineLimit: Number(process.env.SEARCH_INLINE_LIMIT || 1000) });
         return ok(id, payload);
       }
 
@@ -3569,7 +3652,7 @@ export async function handleMCP(reqBody, ctx) {
       const cached = cacheGet(cacheKey);
       if (cached) {
         const payload = { cached: true, ...cached };
-        attachCachedCollection(payload, "todos", cached.todos || []);
+        attachCachedCollection(payload, "todos", cached.todos || [], { inlineLimit: Number(process.env.SEARCH_INLINE_LIMIT || 1000) });
         return ok(id, payload);
       }
 
@@ -3617,7 +3700,7 @@ export async function handleMCP(reqBody, ctx) {
             }
             const cachedApi = cacheSet(cacheKey, { query: args.query, count: todos.length, todos });
             const payload = { ...cachedApi, source: "fallback_search" };
-            attachCachedCollection(payload, "todos", todos);
+            attachCachedCollection(payload, "todos", todos, { inlineLimit: Number(process.env.SEARCH_INLINE_LIMIT || 1000) });
             return ok(id, payload);
           } catch (fallbackErr) {
             // Final fallback: local DB index
@@ -3634,7 +3717,7 @@ export async function handleMCP(reqBody, ctx) {
               }));
               const cachedDb = cacheSet(cacheKey, { query: args.query, count: todos.length, todos });
               const payload = { ...cachedDb, source: "db_fallback", error: fallbackErr.message };
-              attachCachedCollection(payload, "todos", todos);
+              attachCachedCollection(payload, "todos", todos, { inlineLimit: Number(process.env.SEARCH_INLINE_LIMIT || 1000) });
               return ok(id, payload);
             } catch (dbErr) {
               console.error(`[search_todos] Fallback also failed:`, dbErr.message);
@@ -3644,7 +3727,7 @@ export async function handleMCP(reqBody, ctx) {
         }
 
         const payload = { ...response, source: "intelligent_api", metrics: result._metadata };
-        attachCachedCollection(payload, "todos", response.todos || []);
+        attachCachedCollection(payload, "todos", response.todos || [], { inlineLimit: Number(process.env.SEARCH_INLINE_LIMIT || 1000) });
         return ok(id, payload);
       } catch (e) {
         console.error(`[search_todos] Intelligent search failed:`, e.message);
@@ -3662,12 +3745,12 @@ export async function handleMCP(reqBody, ctx) {
           }));
           const response = cacheSet(cacheKey, { query: args.query, count: todos.length, todos });
           const payload = { ...response, source: "fallback_search" };
-          attachCachedCollection(payload, "todos", todos);
+          attachCachedCollection(payload, "todos", todos, { inlineLimit: Number(process.env.SEARCH_INLINE_LIMIT || 1000) });
           return ok(id, payload);
         } catch (fallbackErr) {
           console.error(`[search_todos] Fallback also failed:`, fallbackErr.message);
           const payload = { query: args.query, count: 0, todos: [], error: fallbackErr.message };
-          attachCachedCollection(payload, "todos", []);
+          attachCachedCollection(payload, "todos", [], { inlineLimit: Number(process.env.SEARCH_INLINE_LIMIT || 1000) });
           return ok(id, payload);
         }
       }
@@ -4295,6 +4378,16 @@ export async function handleMCP(reqBody, ctx) {
             const local = searchLocalIndex(searchQuery);
             if (local.length) {
               return ok(id, { query, action: "search_index_fallback", confidence, results: local, count: local.length });
+            }
+            const entities = await callTool("search_entities", { query: searchQuery, limit: 10 });
+            const hasEntities =
+              (entities?.results?.people || []).length ||
+              (entities?.results?.projects || []).length ||
+              (entities?.results?.recordings || []).length ||
+              (entities?.results?.todos || []).length ||
+              (entities?.results?.cards || []).length;
+            if (hasEntities) {
+              return ok(id, { query, action: "search_entities", confidence, result: entities });
             }
           }
           return ok(id, { query, action: "search_recordings", confidence, result });
@@ -5551,6 +5644,29 @@ export async function handleMCP(reqBody, ctx) {
       } catch (e) {
         console.error(`[search_people] Error:`, e.message);
         return fail(id, { code: "SEARCH_PEOPLE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "search_entities") {
+      try {
+        const query = String(firstDefined(args.query, args.name, args.search, args.q) || "").trim();
+        if (!query) {
+          return fail(id, { code: "MISSING_QUERY", message: "Missing query. Provide a search term in 'query'." });
+        }
+        const payload = await searchEntities(ctx, query, {
+          project: args.project || null,
+          include_archived_projects: args.include_archived_projects === true || args.include_archived === true,
+          include_people: args.include_people !== false,
+          include_projects: args.include_projects !== false,
+          include_recordings: args.include_recordings !== false,
+          include_todos: args.include_todos !== false,
+          include_cards: args.include_cards !== false,
+          limit: Number.isFinite(Number(args.limit)) ? Number(args.limit) : 20
+        });
+        return ok(id, payload);
+      } catch (e) {
+        console.error(`[search_entities] Error:`, e.message);
+        return fail(id, { code: "SEARCH_ENTITIES_ERROR", message: e.message });
       }
     }
 
@@ -7081,10 +7197,11 @@ export async function handleMCP(reqBody, ctx) {
           );
         }
 
+        const inlineLimit = Number(process.env.SEARCH_INLINE_LIMIT || 1000);
         const payload = {
           query: args.query,
           metrics: ctx_intel.getMetrics(),
-          ...buildListPayload("results", enrichedResults)
+          ...buildListPayload("results", enrichedResults, { inlineLimit })
         };
 
         if (Array.isArray(enrichedResults) && enrichedResults.length === 0) {
@@ -7124,7 +7241,8 @@ export async function handleMCP(reqBody, ctx) {
         // Fallback to non-enriched search
         try {
           const results = await searchRecordings(ctx, args.query, { bucket_id: bucketId, type: args.type });
-          return ok(id, { query: args.query, fallback: true, ...buildListPayload("results", results) });
+          const inlineLimit = Number(process.env.SEARCH_INLINE_LIMIT || 1000);
+          return ok(id, { query: args.query, fallback: true, ...buildListPayload("results", results, { inlineLimit }) });
         } catch (fbErr) {
           return fail(id, { code: "SEARCH_RECORDINGS_ERROR", message: fbErr.message });
         }
