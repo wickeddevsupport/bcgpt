@@ -70,6 +70,15 @@ export function getTools() {
       required: ["query"],
       additionalProperties: false
     }),
+    tool("mcp_call", "Proxy call to any MCP tool by name (full toolset access).", {
+      type: "object",
+      properties: {
+        tool: { type: "string", description: "MCP tool name to invoke." },
+        args: { type: "object", additionalProperties: true, description: "Arguments for the tool." }
+      },
+      required: ["tool"],
+      additionalProperties: false
+    }),
 
     tool("search_people", "Search people by name/email (server-side).", {
       type: "object",

@@ -3937,6 +3937,43 @@ export async function handleMCP(reqBody, ctx) {
       return ok(id, { accountId, user: null, accounts: authAccounts || [] });
     }
 
+    // mcp_call: proxy to any MCP tool by name
+    if (name === "mcp_call") {
+      try {
+        const toolName = String(firstDefined(args.tool, args.name, args.operation) || "").trim();
+        if (!toolName) return fail(id, { code: "MISSING_TOOL", message: "Missing tool name." });
+        if (toolName === "mcp_call") return fail(id, { code: "INVALID_TOOL", message: "Nested mcp_call is not allowed." });
+
+        const toolList = getTools().map(t => t.name);
+        if (!toolList.includes(toolName)) {
+          return fail(id, { code: "UNKNOWN_TOOL", message: `Unknown tool: ${toolName}` });
+        }
+
+        const toolArgs = (args.args && typeof args.args === "object")
+          ? args.args
+          : (args.arguments && typeof args.arguments === "object" ? args.arguments : {});
+
+        const nested = await handleMCP({
+          jsonrpc: "2.0",
+          id: `${id || "mcp"}:mcp_call`,
+          method: "tools/call",
+          params: { name: toolName, arguments: toolArgs }
+        }, ctx);
+
+        if (nested?.error) {
+          return fail(id, {
+            code: nested.error.code || "MCP_CALL_ERROR",
+            message: nested.error.message || "Tool error",
+            details: nested.error
+          });
+        }
+
+        return ok(id, { tool: toolName, forwarded: true, result: nested?.result ?? nested });
+      } catch (e) {
+        return fail(id, { code: "MCP_CALL_ERROR", message: e.message });
+      }
+    }
+
     // Everything else requires auth
     if (!TOKEN?.access_token) {
       return fail(id, { code: "NOT_AUTHENTICATED", message: "Not connected. Run /startbcgpt to get the auth link." });

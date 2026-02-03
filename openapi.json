@@ -2,7 +2,7 @@
   "openapi": "3.1.1",
   "info": {
     "title": "BCGPT - Basecamp Integration API",
-    "description": "Complete Basecamp integration for ChatGPT with 30 essential operations plus basecamp_raw for advanced use. See x-assistant-instructions for required tool-usage policy and workflows.",
+    "description": "Complete Basecamp integration for ChatGPT with 30 essential operations plus mcp_call/basecamp_raw for full tool access. See x-assistant-instructions for required tool-usage policy and workflows.",
     "version": "1.0.0"
   },
   "x-assistant-instructions": [
@@ -12,6 +12,7 @@
     "- If results are empty, explicitly say: \"No results found.\" Offer next steps or alternative queries.",
     "- Ask clarifying questions ONLY when the request is ambiguous (multiple exact matches).",
     "- Prefer direct tools; use smart_action only when unsure which tool applies.",
+    "- If a needed tool is not in the 30-action list, use mcp_call with { tool, args }.",
     "- Always include project name/id when returning project-scoped results.",
     "",
     "Lookup Recipes:",
@@ -22,13 +23,13 @@
     "- Comments: list_comments with project + recording/card/todo id or URL -> if 404, ask for correct id or URL.",
     "",
     "Chunked Responses:",
-    "- If a response returns cached=true with payload_key and chunk_count, you MUST call get_cached_payload_chunk (or export_cached_payload) to retrieve remaining data before concluding.",
+    "- If a response returns cached=true with payload_key and chunk_count, you MUST call get_cached_payload_chunk (or export_cached_payload via mcp_call) to retrieve remaining data before concluding.",
     "- Never filter or infer negatives from only the first chunk.",
     "",
     "Project Membership (\"Which projects is person X on?\"):",
     "- Resolve person via list_all_people.",
     "- list_projects for active projects (include archived if asked).",
-    "- For each project: list_project_people (via smart_action or MCP if not in OpenAPI).",
+    "- For each project: list_project_people (via mcp_call if not in OpenAPI).",
     "- Match by person id/email/name. Return only confirmed matches.",
     "- If duplicates exist, ask to confirm which person BEFORE scanning memberships.",
     "",
@@ -179,6 +180,42 @@
                 },
                 "required": [
                   "query"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/action/mcp_call": {
+      "post": {
+        "summary": "Proxy call to any MCP tool by name (full toolset access).",
+        "operationId": "mcp_call",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tool": {
+                    "type": "string",
+                    "description": "MCP tool name to invoke."
+                  },
+                  "args": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Arguments for the tool."
+                  }
+                },
+                "required": [
+                  "tool"
                 ],
                 "additionalProperties": false
               }
@@ -1295,36 +1332,6 @@
                   },
                   "index": {
                     "type": "integer"
-                  }
-                },
-                "required": [
-                  "payload_key"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        }
-      }
-    },
-    "/action/export_cached_payload": {
-      "post": {
-        "summary": "Export a cached payload to a JSON file and return the file path.",
-        "operationId": "export_cached_payload",
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "payload_key": {
-                    "type": "string"
                   }
                 },
                 "required": [

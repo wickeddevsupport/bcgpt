@@ -34,7 +34,6 @@ This document maps MCP tools to Basecamp capabilities, highlights OpenAPI covera
 - `create_comment`
 - `create_message`
 - `create_todo`
-- `export_cached_payload`
 - `get_cached_payload_chunk`
 - `list_all_people`
 - `list_card_table_cards`
@@ -49,6 +48,7 @@ This document maps MCP tools to Basecamp capabilities, highlights OpenAPI covera
 - `list_todos_due`
 - `list_todos_for_project`
 - `list_uploads`
+- `mcp_call`
 - `move_card`
 - `search_project`
 - `search_projects`
@@ -74,6 +74,7 @@ This document maps MCP tools to Basecamp capabilities, highlights OpenAPI covera
 | `get_person_assignments` | List todos assigned to a specific person within a project. | no |
 | `list_assigned_to_me` | List todos assigned to the current user (optionally within a project). | no |
 | `smart_action` | Smart router: decide which action to call based on natural language query and context. | yes |
+| `mcp_call` | Proxy call to any MCP tool by name (full toolset access). | yes |
 | `search_people` | Search people by name/email (server-side). | no |
 | `search_projects` | Search projects by name. | yes |
 | `search_cards` | Search cards by title/content (project required unless index is available). | no |
@@ -97,7 +98,7 @@ This document maps MCP tools to Basecamp capabilities, highlights OpenAPI covera
 | `list_card_table_summaries_iter` | Iterate card table summaries one board per call. | no |
 | `list_project_card_table_contents` | List card table contents for a project, chunked by boards. | yes |
 | `get_cached_payload_chunk` | Retrieve a chunk from the large payload cache. | yes |
-| `export_cached_payload` | Export a cached payload to a JSON file and return the file path. | yes |
+| `export_cached_payload` | Export a cached payload to a JSON file and return the file path. | no |
 | `create_card` | Create a card in a card table. | yes |
 | `move_card` | Move/update a card (column/position). | yes |
 | `archive_card` | Archive a card (recording). | no |
