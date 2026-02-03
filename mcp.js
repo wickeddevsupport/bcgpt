@@ -1794,6 +1794,11 @@ async function listPeopleFromProjects(ctx, { include_archived = false } = {}) {
   if (cached) return cached;
 
   const projects = await listProjects(ctx, { archived: !!include_archived, compact: true });
+  logPeopleDebug("[listPeopleFromProjects] projects", {
+    accountId: ctx?.accountId ?? null,
+    include_archived: !!include_archived,
+    count: Array.isArray(projects) ? projects.length : 0
+  });
   const peopleMap = new Map();
 
   for (const project of projects || []) {
@@ -1818,6 +1823,11 @@ async function listPeopleFromProjects(ctx, { include_archived = false } = {}) {
   }
 
   const list = Array.from(peopleMap.values());
+  logPeopleDebug("[listPeopleFromProjects] people", {
+    accountId: ctx?.accountId ?? null,
+    include_archived: !!include_archived,
+    count: list.length
+  });
   cacheSet(cacheKey, list);
   return list;
 }
@@ -5466,6 +5476,10 @@ export async function handleMCP(reqBody, ctx) {
             matches = (people || []).filter(p => personMatchesQuery(p, query));
           }
           people = matches;
+        } else if (!people.length) {
+          // If directory is empty, auto deep-scan so downstream clients can still search.
+          deepScanUsed = true;
+          people = await listAllPeople(ctx, { deepScan: true, include_archived_projects: includeArchivedProjects });
         } else if (deepScanRequested) {
           deepScanUsed = true;
           people = await listAllPeople(ctx, { deepScan: true, include_archived_projects: includeArchivedProjects });
