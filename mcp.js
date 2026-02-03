@@ -74,6 +74,10 @@ function logCommentDebug(...args) {
   if (!process?.env?.DEBUG && !process?.env?.COMMENT_DEBUG) return;
   console.log(...args);
 }
+function logPeopleDebug(...args) {
+  if (!process?.env?.DEBUG && !process?.env?.PEOPLE_DEBUG) return;
+  console.log(...args);
+}
 
 // Large payload cache (in-memory, short-lived)
 const largePayloadCache = new Map();
@@ -1726,13 +1730,12 @@ async function updateScheduleEntry(ctx, projectId, entryId, body) {
 }
 
 // ========== PEOPLE ENDPOINTS ==========
-async function listAllPeople(ctx) {
-  const people = await apiAll(ctx, `/people.json`);
-  const arr = Array.isArray(people) ? people : [];
-  return arr.map((p) => ({
+function normalizePerson(p) {
+  if (!p || typeof p !== "object") return p;
+  return {
     id: p.id,
     name: p.name,
-    email: p.email_address,
+    email: p.email_address || p.email || null,
     title: p.title,
     admin: p.admin,
     owner: p.owner,
@@ -1740,12 +1743,83 @@ async function listAllPeople(ctx) {
     employee: p.employee,
     avatar_url: p.avatar_url,
     app_url: p.app_url,
-  }));
+  };
+}
+
+async function listAllPeople(ctx) {
+  const people = await apiAllWithMeta(ctx, `/people.json`, { maxPages: 200 });
+  let arr = [];
+  let meta = null;
+  if (Array.isArray(people)) {
+    arr = people;
+  } else if (people && Array.isArray(people.items)) {
+    arr = people.items;
+    meta = people._meta || null;
+  } else if (people && Array.isArray(people.people)) {
+    arr = people.people;
+  } else if (people && Array.isArray(people.data)) {
+    arr = people.data;
+  }
+  let source = "people";
+
+  if (!arr.length) {
+    try {
+      const pingable = await apiAllWithMeta(ctx, `/circles/people.json`, { maxPages: 200 });
+      let parr = [];
+      let pmeta = null;
+      if (Array.isArray(pingable)) {
+        parr = pingable;
+      } else if (pingable && Array.isArray(pingable.items)) {
+        parr = pingable.items;
+        pmeta = pingable._meta || null;
+      } else if (pingable && Array.isArray(pingable.people)) {
+        parr = pingable.people;
+      } else if (pingable && Array.isArray(pingable.data)) {
+        parr = pingable.data;
+      }
+      if (parr.length) {
+        arr = parr;
+        meta = pmeta || meta;
+        source = "circles";
+      }
+    } catch (e) {
+      // ignore fallback errors, we'll just return empty
+    }
+  }
+
+  logPeopleDebug("[listAllPeople] result", {
+    accountId: ctx?.accountId ?? null,
+    source,
+    count: arr.length,
+    meta: meta || null
+  });
+
+  const normalized = arr.map(normalizePerson);
+  if (meta) {
+    normalized._meta = meta;
+  }
+  return normalized;
 }
 
 async function listPingablePeople(ctx) {
-  const people = await apiAll(ctx, `/circles/people.json`);
-  return Array.isArray(people) ? people : [];
+  const people = await apiAllWithMeta(ctx, `/circles/people.json`, { maxPages: 200 });
+  let arr = [];
+  let meta = null;
+  if (Array.isArray(people)) {
+    arr = people;
+  } else if (people && Array.isArray(people.items)) {
+    arr = people.items;
+    meta = people._meta || null;
+  } else if (people && Array.isArray(people.people)) {
+    arr = people.people;
+  } else if (people && Array.isArray(people.data)) {
+    arr = people.data;
+  }
+  const normalized = arr.map(normalizePerson);
+  if (meta) {
+    normalized._meta = meta;
+  }
+  return normalized;
 }
 
 async function getPerson(ctx, personId) {
