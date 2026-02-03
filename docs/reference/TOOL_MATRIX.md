@@ -76,6 +76,7 @@ This document maps MCP tools to Basecamp capabilities, highlights OpenAPI covera
 | `smart_action` | Smart router: decide which action to call based on natural language query and context. | yes |
 | `audit_person` | Summarize a person's Basecamp presence (projects, assigned todos, recent activity). | yes |
 | `run_regression_suite` | Run a set of tool calls and report pass/fail checks. | no |
+| `run_default_regression_suite` | Run the default regression suite (pre-packaged checks). | no |
 | `mcp_call` | Proxy call to any MCP tool by name (full toolset access). | yes |
 | `search_people` | Search people by name/email (server-side). | no |
 | `search_projects` | Search projects by name. | yes |

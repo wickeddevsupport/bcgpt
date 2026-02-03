@@ -113,6 +113,13 @@ export function getTools() {
       required: ["cases"],
       additionalProperties: false
     }),
+    tool("run_default_regression_suite", "Run the default regression suite (pre-packaged checks).", {
+      type: "object",
+      properties: {
+        stop_on_error: { type: "boolean", nullable: true }
+      },
+      additionalProperties: false
+    }),
     tool("mcp_call", "Proxy call to any MCP tool by name (full toolset access).", {
       type: "object",
       properties: {

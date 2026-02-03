@@ -536,8 +536,48 @@ app.post("/action/:op", async (req, res) => {
     return res.status(404).json({ ok: false, error: "Use /action/startbcgpt", code: "BAD_ROUTE" });
   }
 
+  const findChunkRequirement = (value, depth = 0, maxDepth = 6) => {
+    if (!value || typeof value !== "object" || depth > maxDepth) return null;
+    if (value.chunk_required === true && value.payload_key) {
+      return {
+        payload_key: value.payload_key,
+        chunk_count: value.chunk_count || null,
+        partial: value
+      };
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const found = findChunkRequirement(item, depth + 1, maxDepth);
+        if (found) return found;
+      }
+      return null;
+    }
+    for (const key of Object.keys(value)) {
+      const found = findChunkRequirement(value[key], depth + 1, maxDepth);
+      if (found) return found;
+    }
+    return null;
+  };
+
   try {
     const result = await runTool(req.params.op, req.body || {}, req);
+    const enforceChunks = String(process.env.ACTION_ENFORCE_CHUNK_REQUIRED || "true").toLowerCase() !== "false";
+    if (enforceChunks && !["get_cached_payload_chunk", "export_cached_payload"].includes(req.params.op)) {
+      const chunk = findChunkRequirement(result);
+      if (chunk?.payload_key) {
+        return res.json({
+          ok: false,
+          error: "CHUNK_REQUIRED",
+          code: "CHUNK_REQUIRED",
+          details: {
+            payload_key: chunk.payload_key,
+            chunk_count: chunk.chunk_count,
+            note: "Call get_cached_payload_chunk (or export_cached_payload) to retrieve remaining data.",
+            partial: chunk.partial
+          }
+        });
+      }
+    }
     res.json(result);
   } catch (e) {
     // Return 200 for tool errors so ChatGPT doesn't show "connector failed"

@@ -2479,6 +2479,12 @@ async function auditPerson(ctx, personQuery, {
   };
 }
 
+const DEFAULT_REGRESSION_CASES = [
+  { name: "List projects", tool: "list_projects", args: {}, expect: { min_count: 1 } },
+  { name: "List all people", tool: "list_all_people", args: { query: "" }, expect: { min_count: 1 } },
+  { name: "Search recordings (smoke)", tool: "search_recordings", args: { query: "test" } }
+];
+
 async function listPersonActivity(ctx, personQuery, {
   project = null,
   query = "",
@@ -6682,6 +6688,24 @@ export async function handleMCP(reqBody, ctx) {
         });
       } catch (e) {
         console.error(`[run_regression_suite] Error:`, e.message);
+        return fail(id, { code: "REGRESSION_SUITE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "run_default_regression_suite") {
+      try {
+        const nested = await handleMCP({
+          jsonrpc: "2.0",
+          id: `${id || "mcp"}:default_regression`,
+          method: "tools/call",
+          params: { name: "run_regression_suite", arguments: { cases: DEFAULT_REGRESSION_CASES, stop_on_error: args.stop_on_error === true } }
+        }, ctx);
+        if (nested?.error) {
+          return fail(id, { code: nested.error.code || "REGRESSION_SUITE_ERROR", message: nested.error.message || "Regression error" });
+        }
+        return ok(id, { suite: "default", ...nested.result });
+      } catch (e) {
+        console.error(`[run_default_regression_suite] Error:`, e.message);
         return fail(id, { code: "REGRESSION_SUITE_ERROR", message: e.message });
       }
     }
