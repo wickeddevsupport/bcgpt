@@ -70,6 +70,10 @@ function logDebug(...args) {
   if (!process?.env?.DEBUG) return;
   console.log(...args);
 }
+function logCommentDebug(...args) {
+  if (!process?.env?.DEBUG && !process?.env?.COMMENT_DEBUG) return;
+  console.log(...args);
+}
 
 // Large payload cache (in-memory, short-lived)
 const largePayloadCache = new Map();
@@ -1858,7 +1862,10 @@ async function listComments(ctx, projectId, recordingId) {
               meta.resolvedType = "card";
               meta.usedRecordingId = recordingId;
               meta.matchedTitle = cardJson?.title || null;
-              commentsUrl = cardJson?.comments_url || `/buckets/${projectId}/card_tables/cards/${recordingId}/comments.json`;
+              const cardRecordingId = cardJson?.recording?.id || cardJson?.recording_id || null;
+              commentsUrl = cardJson?.comments_url
+                || (cardRecordingId ? `/buckets/${projectId}/recordings/${cardRecordingId}/comments.json` : null)
+                || `/buckets/${projectId}/card_tables/cards/${recordingId}/comments.json`;
               commentsCount = typeof cardJson?.comments_count === 'number' ? cardJson.comments_count : null;
               recordingJson = cardJson;
             } catch (cardErr) {
@@ -2075,17 +2082,36 @@ function extractRecordingUrlFromText(text) {
 }
 
 async function postCardComment(ctx, projectId, cardId, text) {
+  logCommentDebug("[postCardComment] start", {
+    projectId,
+    cardId,
+    content_len: String(text || "").length
+  });
   let card;
   try {
     card = await api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}.json`);
   } catch (err) {
     // fallback to direct comments endpoint if card fetch fails
+    logCommentDebug("[postCardComment] card fetch failed, fallback to card comments endpoint", {
+      projectId,
+      cardId,
+      error: err?.message || String(err)
+    });
     return api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}/comments.json`, {
       method: "POST",
       body: { content: text },
     });
   }
-  const commentsUrl = card?.comments_url || `/buckets/${projectId}/card_tables/cards/${cardId}/comments.json`;
+  const cardRecordingId = card?.recording?.id || card?.recording_id || null;
+  const commentsUrl = card?.comments_url
+    || (cardRecordingId ? `/buckets/${projectId}/recordings/${cardRecordingId}/comments.json` : null)
+    || `/buckets/${projectId}/card_tables/cards/${cardId}/comments.json`;
+  logCommentDebug("[postCardComment] resolved comments url", {
+    projectId,
+    cardId,
+    cardRecordingId: cardRecordingId || null,
+    commentsUrl
+  });
   try {
     return api(ctx, commentsUrl, {
       method: "POST",
@@ -2094,6 +2120,11 @@ async function postCardComment(ctx, projectId, cardId, text) {
   } catch (err) {
     const msg = String(err?.message || "");
     if (!msg.includes("404")) throw err;
+    logCommentDebug("[postCardComment] comments url 404, trying recording/card fallbacks", {
+      projectId,
+      cardId,
+      cardRecordingId: cardRecordingId || null
+    });
     const recordingId = card?.recording?.id || card?.recording_id || card?.id;
     if (recordingId) {
       try {
@@ -2104,6 +2135,10 @@ async function postCardComment(ctx, projectId, cardId, text) {
       } catch (recErr) {
         const recMsg = String(recErr?.message || "");
         if (!recMsg.includes("404")) throw recErr;
+        logCommentDebug("[postCardComment] recording comments 404, trying /comments without .json", {
+          projectId,
+          recordingId
+        });
         // Some Basecamp web endpoints accept /comments without .json
         return api(ctx, `/buckets/${projectId}/recordings/${recordingId}/comments`, {
           method: "POST",
@@ -2112,6 +2147,10 @@ async function postCardComment(ctx, projectId, cardId, text) {
       }
     }
     try {
+      logCommentDebug("[postCardComment] trying card comments without .json", {
+        projectId,
+        cardId
+      });
       return api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}/comments`, {
         method: "POST",
         body: { content: text },
@@ -2152,12 +2191,19 @@ async function postCommentViaParent(ctx, projectId, commentId, text) {
 async function createComment(ctx, projectId, recordingId, content, opts = {}) {
   const text = String(content ?? "").trim();
   if (!text) throw new Error("Missing comment content.");
+  logCommentDebug("[createComment] start", {
+    projectId,
+    recordingId,
+    recordingQuery: opts?.recordingQuery || null,
+    content_len: text.length
+  });
   let c;
   let parsed = parseRecordingUrl(recordingId);
   if (!parsed) {
     parsed = extractRecordingUrlFromText(text);
   }
   if (parsed?.bucketId && parsed?.id) {
+    logCommentDebug("[createComment] parsed URL", parsed);
     projectId = parsed.bucketId;
     recordingId = parsed.id;
     if (parsed.type === "card") {
@@ -2186,6 +2232,7 @@ async function createComment(ctx, projectId, recordingId, content, opts = {}) {
   const numericId = /^\d+$/.test(String(recordingId ?? ""));
   if (numericId) {
     try {
+      logCommentDebug("[createComment] numeric id -> postCommentViaParent", { projectId, recordingId });
       c = await postCommentViaParent(ctx, projectId, recordingId, text);
       return {
         id: c.id,
@@ -2197,12 +2244,19 @@ async function createComment(ctx, projectId, recordingId, content, opts = {}) {
       };
     } catch (_) {
       // fall through to other strategies
+      logCommentDebug("[createComment] postCommentViaParent failed, falling through", { projectId, recordingId });
     }
   }
   const idStr = String(recordingId ?? "").trim();
   if (idStr && !/^\d+$/.test(idStr)) {
     const resolved = await resolveRecordingByQuery(ctx, idStr, projectId);
     if (resolved) {
+      logCommentDebug("[createComment] resolved by query", {
+        projectId,
+        query: idStr,
+        resolved_id: resolved?.id,
+        resolved_type: resolved?.type || null
+      });
       const bucketId = resolved.bucket_id || resolved.bucket?.id || projectId;
       const type = String(resolved.type || "").toLowerCase();
       const url = String(resolved.url || resolved.app_url || "");
@@ -2231,6 +2285,7 @@ async function createComment(ctx, projectId, recordingId, content, opts = {}) {
   }
 
   try {
+    logCommentDebug("[createComment] trying recording comments", { projectId, recordingId });
     c = await api(ctx, `/buckets/${projectId}/recordings/${recordingId}/comments.json`, {
       method: "POST",
       body: { content: text },
@@ -2239,6 +2294,7 @@ async function createComment(ctx, projectId, recordingId, content, opts = {}) {
     const msg = String(err?.message || "");
     if (!msg.includes("404")) throw err;
     try {
+      logCommentDebug("[createComment] recording comments 404, trying todo comments", { projectId, recordingId });
       c = await api(ctx, `/buckets/${projectId}/todos/${recordingId}/comments.json`, {
         method: "POST",
         body: { content: text },
@@ -2247,10 +2303,16 @@ async function createComment(ctx, projectId, recordingId, content, opts = {}) {
       const todoMsg = String(todoErr?.message || "");
       if (!todoMsg.includes("404")) throw todoErr;
       try {
+        logCommentDebug("[createComment] todo comments 404, trying card comments", { projectId, recordingId });
         c = await postCardComment(ctx, projectId, recordingId, text);
       } catch (cardErr) {
         const cardMsg = String(cardErr?.message || "");
         if (!cardMsg.includes("404")) throw cardErr;
+        logCommentDebug("[createComment] card comments 404, attempting resolveRecordingForComment", {
+          projectId,
+          recordingId,
+          recordingQuery: opts?.recordingQuery || null
+        });
         let resolved = await resolveRecordingForComment(ctx, recordingId, projectId);
         if (!resolved && opts?.recordingQuery) {
           resolved = await resolveRecordingByQuery(ctx, opts.recordingQuery, projectId);
@@ -5391,7 +5453,29 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const content = extractContent(args);
-        const comment = await createComment(ctx, p.id, args.recording_id, content, { recordingQuery: args.recording_query || args.recording_title || args.query || null });
+        const recordingId = firstDefined(
+          args.recording_id,
+          args.card_id,
+          args.card,
+          args.recording,
+          args.recordingId,
+          args.cardId,
+          args.recording_url,
+          args.card_url,
+          args.url
+        );
+        logCommentDebug("[create_comment] tool input", {
+          project: args.project,
+          project_id: p?.id,
+          recording_id: args.recording_id ?? null,
+          card_id: args.card_id ?? null,
+          recordingId: args.recordingId ?? null,
+          cardId: args.cardId ?? null,
+          url: args.url || args.card_url || args.recording_url || null,
+          resolved_recording_id: recordingId ?? null,
+          content_len: String(content || "").length
+        });
+        const comment = await createComment(ctx, p.id, recordingId, content, { recordingQuery: args.recording_query || args.recording_title || args.query || null });
 
         // INTELLIGENT CHAINING: Enrich created comment with person/project details
         const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `created comment`);
@@ -5408,7 +5492,29 @@ export async function handleMCP(reqBody, ctx) {
         try {
           const p = await projectByName(ctx, args.project);
           const content = extractContent(args);
-          const comment = await createComment(ctx, p.id, args.recording_id, content, { recordingQuery: args.recording_query || args.recording_title || args.query || null });
+          const recordingId = firstDefined(
+            args.recording_id,
+            args.card_id,
+            args.card,
+            args.recording,
+            args.recordingId,
+            args.cardId,
+            args.recording_url,
+            args.card_url,
+            args.url
+          );
+          logCommentDebug("[create_comment] tool input (fallback)", {
+            project: args.project,
+            project_id: p?.id,
+            recording_id: args.recording_id ?? null,
+            card_id: args.card_id ?? null,
+            recordingId: args.recordingId ?? null,
+            cardId: args.cardId ?? null,
+            url: args.url || args.card_url || args.recording_url || null,
+            resolved_recording_id: recordingId ?? null,
+            content_len: String(content || "").length
+          });
+          const comment = await createComment(ctx, p.id, recordingId, content, { recordingQuery: args.recording_query || args.recording_title || args.query || null });
           return ok(id, { message: "Comment created", project: { id: p.id, name: p.name }, comment, fallback: true });
         } catch (fbErr) {
           return fail(id, { code: "CREATE_COMMENT_ERROR", message: fbErr.message });
