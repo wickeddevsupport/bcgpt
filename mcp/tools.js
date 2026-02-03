@@ -79,7 +79,8 @@ export function getTools() {
         include_archived_projects: { type: "boolean" },
         include_assignments: { type: "boolean" },
         include_activity: { type: "boolean" },
-        activity_limit: { type: "integer" }
+        activity_limit: { type: "integer" },
+        compact: { type: "boolean", description: "Return compact payloads to avoid large responses." }
       },
       required: ["person"],
       additionalProperties: false
@@ -1039,7 +1040,10 @@ export function getTools() {
     tool("report_todos_assigned", "List people who can have todos assigned.", noProps()),
     tool("report_todos_assigned_person", "List todos assigned to a person (report).", {
       type: "object",
-      properties: { person_id: { type: "integer" } },
+      properties: {
+        person_id: { type: "integer" },
+        compact: { type: "boolean", description: "Return compact todos to avoid large responses." }
+      },
       required: ["person_id"],
       additionalProperties: false
     }),

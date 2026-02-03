@@ -222,6 +222,10 @@
                   },
                   "activity_limit": {
                     "type": "integer"
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact payloads to avoid large responses."
                   }
                 },
                 "required": [
@@ -1344,6 +1348,10 @@
                 "properties": {
                   "person_id": {
                     "type": "integer"
+                  },
+                  "compact": {
+                    "type": "boolean",
+                    "description": "Return compact todos to avoid large responses."
                   }
                 },
                 "required": [

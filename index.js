@@ -545,6 +545,22 @@ app.post("/action/:op", async (req, res) => {
         partial: value
       };
     }
+    for (const key of Object.keys(value)) {
+      if (!key.endsWith("_payload_key")) continue;
+      const payloadKey = value[key];
+      if (!payloadKey) continue;
+      const prefix = key.slice(0, -"_payload_key".length);
+      const chunkCount = value[`${prefix}_chunk_count`];
+      const cached = value[`${prefix}_cached`];
+      const chunkRequired = value[`${prefix}_chunk_required`];
+      if (chunkRequired === true || cached === true || (Number.isFinite(Number(chunkCount)) && Number(chunkCount) > 1)) {
+        return {
+          payload_key: payloadKey,
+          chunk_count: chunkCount || null,
+          partial: value
+        };
+      }
+    }
     if (Array.isArray(value)) {
       for (const item of value) {
         const found = findChunkRequirement(item, depth + 1, maxDepth);

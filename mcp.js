@@ -508,6 +508,53 @@ function todoText(t) {
   return (t?.content || t?.title || t?.name || "").trim();
 }
 
+function compactProjectSummary(project) {
+  if (!project) return null;
+  return {
+    id: project.id ?? null,
+    name: project.name ?? null,
+    status: project.status ?? null,
+    app_url: project.app_url ?? project.url ?? null
+  };
+}
+
+function compactAssignmentTodo(todo) {
+  if (!todo) return null;
+  const title = todo.title || todo.content || todoText(todo);
+  const completed = Boolean(todo.completed || todo.completed_at);
+  const bucket = todo.bucket || todo.project || null;
+  const project = bucket
+    ? { id: bucket.id ?? null, name: bucket.name ?? null }
+    : null;
+  const assigneeIds = Array.isArray(todo.assignee_ids)
+    ? todo.assignee_ids
+    : (todo.assignee_id != null ? [todo.assignee_id] : null);
+
+  return {
+    id: todo.id ?? todo.todo_id ?? todo.recording_id ?? null,
+    title: title || null,
+    status: todo.status ?? (completed ? "completed" : "open"),
+    completed,
+    due_on: todo.due_on ?? null,
+    project,
+    assignee_ids: assigneeIds,
+    app_url: todo.app_url ?? todo.url ?? null
+  };
+}
+
+function compactActivityEvent(event) {
+  if (!event) return null;
+  const bucket = event.bucket || event.project || null;
+  return {
+    id: event.id ?? null,
+    type: event.type ?? event.kind ?? null,
+    summary: event.summary ?? event.title ?? event.action ?? null,
+    created_at: event.created_at ?? event.timestamp ?? null,
+    bucket: bucket ? { id: bucket.id ?? null, name: bucket.name ?? null } : null,
+    app_url: event.app_url ?? event.url ?? null
+  };
+}
+
 // ---------- Basecamp wrappers (use ctx if provided) ----------
 async function api(ctx, pathOrUrl, opts = {}) {
   const method = String(opts.method || "GET").toUpperCase();
@@ -6600,14 +6647,49 @@ export async function handleMCP(reqBody, ctx) {
           }
           return fail(id, { code: "PERSON_NOT_FOUND", message: "No matching person found.", matches: result.matches || [] });
         }
-        return ok(id, {
-          person: result.person,
-          projects: result.projects || [],
-          projects_count: Array.isArray(result.projects) ? result.projects.length : 0,
-          assignments: result.assignments,
-          activity: result.activity,
-          coverage: result.coverage
+
+        const compact = args.compact !== false;
+        const projectInlineLimit = Number(process.env.AUDIT_PERSON_PROJECTS_INLINE_LIMIT || 100);
+        const assignmentInlineLimit = Number(process.env.AUDIT_PERSON_ASSIGNMENTS_INLINE_LIMIT || 50);
+        const activityInlineLimit = Number(process.env.AUDIT_PERSON_ACTIVITY_INLINE_LIMIT || 50);
+        const autoExpand = String(process.env.AUDIT_PERSON_AUTO_EXPAND || "false").toLowerCase() === "true";
+
+        const payload = { person: result.person, coverage: result.coverage };
+
+        const projects = Array.isArray(result.projects) ? result.projects : [];
+        const projectItems = compact
+          ? projects.map(compactProjectSummary).filter(Boolean)
+          : projects;
+        attachCachedCollection(payload, "projects", projectItems, {
+          inlineLimit: projectInlineLimit,
+          autoExpand
         });
+
+        if (Array.isArray(result.assignments)) {
+          const assignments = compact
+            ? result.assignments.map(compactAssignmentTodo).filter(Boolean)
+            : result.assignments;
+          attachCachedCollection(payload, "assignments", assignments, {
+            inlineLimit: assignmentInlineLimit,
+            autoExpand
+          });
+        } else if (result.assignments) {
+          payload.assignments = result.assignments;
+        }
+
+        if (Array.isArray(result.activity)) {
+          const activity = compact
+            ? result.activity.map(compactActivityEvent).filter(Boolean)
+            : result.activity;
+          attachCachedCollection(payload, "activity", activity, {
+            inlineLimit: activityInlineLimit,
+            autoExpand
+          });
+        } else if (result.activity) {
+          payload.activity = result.activity;
+        }
+
+        return ok(id, payload);
       } catch (e) {
         console.error(`[audit_person] Error:`, e.message);
         return fail(id, { code: "AUDIT_PERSON_ERROR", message: e.message });
@@ -7581,7 +7663,15 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "report_todos_assigned_person") {
       try {
         const data = await reportTodosAssignedPerson(ctx, Number(args.person_id));
-        return ok(id, { person_id: Number(args.person_id), todos: data, count: Array.isArray(data) ? data.length : 0 });
+        const compact = args.compact !== false;
+        const inlineLimit = Number(process.env.REPORT_TODOS_ASSIGNED_PERSON_INLINE_LIMIT || 100);
+        const autoExpand = String(process.env.REPORT_TODOS_ASSIGNED_PERSON_AUTO_EXPAND || "false").toLowerCase() === "true";
+        const todos = Array.isArray(data)
+          ? (compact ? data.map(compactAssignmentTodo).filter(Boolean) : data)
+          : [];
+        const payload = { person_id: Number(args.person_id) };
+        attachCachedCollection(payload, "todos", todos, { inlineLimit, autoExpand });
+        return ok(id, payload);
       } catch (e) {
         return fail(id, { code: "REPORT_TODOS_ASSIGNED_PERSON_ERROR", message: e.message });
       }
