@@ -41,12 +41,22 @@ This document describes the global edge-case handling strategy used by the MCP h
    collections (board -> columns -> cards, messages -> comments), iterate them automatically.
 
 8. **Large payload handling (cache + chunk + export)**  
-   When full results exceed connector/message limits:
+    When full results exceed connector/message limits:
    - Cache the full payload server-side
    - Return `payload_key` + chunk metadata
    - Provide a file export path for guaranteed full-fidelity access
+   - Never return partial arrays without a `payload_key` + `chunk_count`
 
-9. **No user prompts for selectable subsets**  
+9. **Search requires a query**  
+   Search tools must return `MISSING_QUERY` for empty or missing queries. Clients should pass
+   a `query` string or explicitly request a full list (empty string when supported).
+
+10. **Chunk retrieval is mandatory for clients**  
+   If a response includes `payload_key`, clients must call `get_cached_payload_chunk` until `done=true`.
+   If the client cannot do this, server-side tools must raise inline limits for search-like responses to
+   avoid false negatives.
+
+11. **No user prompts for selectable subsets**  
    If data is available and can be fetched safely, do it automatically. The MCP should
    never ask the user to pick a subset when iteration is possible.
 

@@ -1764,16 +1764,23 @@ function personMatchesQuery(person, query) {
 
 async function searchPeople(ctx, query, { include_archived_projects = false, deepScan = true } = {}) {
   const initial = await listAllPeople(ctx, { deepScan: false });
-  let matches = (initial || []).filter(p => personMatchesQuery(p, query));
+  let matches = (initial || []).filter((p) => personMatchesQuery(p, query));
   let deepScanUsed = false;
+  let archivedScanUsed = false;
 
   if (!matches.length && deepScan) {
     deepScanUsed = true;
     const full = await listAllPeople(ctx, { deepScan: true, include_archived_projects });
-    matches = (full || []).filter(p => personMatchesQuery(p, query));
+    matches = (full || []).filter((p) => personMatchesQuery(p, query));
   }
 
-  return { people: matches, deep_scan: deepScanUsed };
+  if (!matches.length && deepScan && !include_archived_projects) {
+    archivedScanUsed = true;
+    const fullArchived = await listAllPeople(ctx, { deepScan: true, include_archived_projects: true });
+    matches = (fullArchived || []).filter((p) => personMatchesQuery(p, query));
+  }
+
+  return { people: matches, deep_scan: deepScanUsed, archived_scan: archivedScanUsed };
 }
 
 async function searchEntities(ctx, query, {
@@ -1807,14 +1814,21 @@ async function searchEntities(ctx, query, {
   if (include_people) {
     const peopleResult = await searchPeople(ctx, q, { include_archived_projects, deepScan: true });
     results.people = (peopleResult.people || []).slice(0, limit);
-    sources.people = { count: results.people.length, deep_scan: peopleResult.deep_scan };
+    sources.people = {
+      count: results.people.length,
+      deep_scan: peopleResult.deep_scan,
+      archived_scan: peopleResult.archived_scan === true
+    };
   }
 
   if (include_projects) {
-    const projects = await listProjects(ctx, { archived: include_archived_projects, compact: true });
-    const matches = findNameMatches(projects, q, { limit });
-    results.projects = matches;
-    sources.projects = { count: matches.length };
+    const projResult = await searchProjects(ctx, q, { include_archived_projects, limit });
+    results.projects = projResult.projects || [];
+    sources.projects = {
+      count: results.projects.length,
+      total_scanned: projResult.coverage?.total_scanned ?? null,
+      archived_scan: projResult.coverage?.archived_scan ?? false
+    };
   }
 
   if (include_recordings) {
@@ -1837,18 +1851,14 @@ async function searchEntities(ctx, query, {
     }
   }
 
-  if (include_cards && projectId) {
-    const idStr = String(q).trim();
-    if (/^\d+$/.test(idStr)) {
-      const card = await findCardInProjectById(ctx, projectId, idStr);
-      if (card) {
-        results.cards = [card];
-        sources.cards = { count: 1, mode: "id_lookup" };
-      } else {
-        results.cards = [];
-        sources.cards = { count: 0, mode: "id_lookup" };
-      }
-    }
+  if (include_cards) {
+    const cardResult = await searchCards(ctx, q, {
+      project: projectObj?.name || project || null,
+      include_archived_projects,
+      limit
+    });
+    results.cards = cardResult.cards || [];
+    sources.cards = { count: results.cards.length, ...cardResult.coverage };
   }
 
   return {
@@ -2016,6 +2026,274 @@ async function listPingablePeople(ctx) {
     normalized._meta = meta;
   }
   return normalized;
+}
+
+async function searchProjects(ctx, query, { include_archived_projects = false, limit = 20 } = {}) {
+  const projects = await listProjects(ctx, { archived: include_archived_projects, compact: true });
+  let matches = findNameMatches(projects, query, { limit });
+  let archivedScanUsed = false;
+
+  if (!matches.length && !include_archived_projects) {
+    archivedScanUsed = true;
+    const archived = await listProjects(ctx, { archived: true, compact: true });
+    matches = findNameMatches(archived, query, { limit });
+  }
+
+  return {
+    projects: matches,
+    coverage: {
+      total_scanned: Array.isArray(projects) ? projects.length : 0,
+      archived_scan: archivedScanUsed
+    }
+  };
+}
+
+function normalizeCardHit(card, { projectId = null, cardTableId = null, columnId = null, columnTitle = null } = {}) {
+  if (!card) return null;
+  return {
+    id: card.id,
+    title: card.title || card.name || card.content || null,
+    content: card.content || card.description || null,
+    status: card.status || null,
+    bucket_id: card.bucket?.id || card.bucket_id || projectId || null,
+    project_id: projectId || card.bucket?.id || card.bucket_id || null,
+    card_table_id: cardTableId || card.card_table_id || null,
+    column_id: columnId || card.column_id || null,
+    column_title: columnTitle || null,
+    app_url: card.app_url || card.url || null,
+    url: card.url || card.app_url || null
+  };
+}
+
+function cardMatchesQuery(card, query) {
+  const tokens = normalizeSearchTokens(query);
+  if (!tokens.length) return true;
+  const title = String(card?.title || card?.name || card?.content || "").toLowerCase();
+  const content = String(card?.content || card?.description || "").toLowerCase();
+  return tokens.every((t) => title.includes(t) || content.includes(t));
+}
+
+async function searchCards(ctx, query, {
+  project = null,
+  include_archived_projects = false,
+  limit = 20,
+  max_cards_per_column = 0
+} = {}) {
+  const q = String(query || "").trim();
+  if (!q) return { cards: [], coverage: { reason: "MISSING_QUERY" } };
+
+  let projectId = null;
+  let projectObj = null;
+  if (project) {
+    try {
+      const p = await projectByName(ctx, project);
+      projectId = p?.id || null;
+      projectObj = p ? { id: p.id, name: p.name } : null;
+    } catch (_) {
+      projectId = null;
+    }
+  }
+
+  if (/^\d+$/.test(q) && projectId) {
+    const byId = await findCardInProjectById(ctx, projectId, q);
+    if (byId) {
+      return {
+        cards: [normalizeCardHit(byId, { projectId })],
+        project: projectObj,
+        coverage: { source: "id_lookup", project_scoped: true }
+      };
+    }
+  }
+
+  const indexHits = searchIndex(q, { type: "card", projectId, limit: Math.max(50, limit), userKey: ctx.userKey });
+  if (Array.isArray(indexHits) && indexHits.length) {
+    const mapped = indexHits.map((hit) => ({
+      id: Number(hit.object_id),
+      title: hit.title,
+      content: hit.content || null,
+      project_id: hit.project_id || projectId || null,
+      app_url: hit.url || null,
+      source: "index"
+    }));
+    return {
+      cards: mapped.slice(0, limit),
+      project: projectObj,
+      coverage: {
+        source: "index",
+        index_hits: indexHits.length,
+        project_scoped: !!projectId
+      }
+    };
+  }
+
+  if (!projectId) {
+    return {
+      cards: [],
+      project: null,
+      coverage: {
+        source: "index",
+        project_scoped: false,
+        reason: "PROJECT_REQUIRED"
+      }
+    };
+  }
+
+  const tables = await listCardTables(ctx, projectId);
+  let matches = [];
+  let cardsScanned = 0;
+  let tablesScanned = 0;
+  let truncated = false;
+
+  for (const table of tables || []) {
+    tablesScanned += 1;
+    let summary;
+    try {
+      summary = await summarizeCardTable(ctx, projectId, table, {
+        includeCards: true,
+        maxCardsPerColumn: max_cards_per_column
+      });
+    } catch {
+      continue;
+    }
+    for (const col of summary.columns || []) {
+      for (const card of col.cards || []) {
+        cardsScanned += 1;
+        if (cardMatchesQuery(card, q)) {
+          const normalized = normalizeCardHit(card, {
+            projectId,
+            cardTableId: summary.id,
+            columnId: col.id,
+            columnTitle: col.title
+          });
+          if (normalized) matches.push(normalized);
+          if (matches.length >= limit) break;
+        }
+      }
+      if (matches.length >= limit) break;
+    }
+    if (summary.truncated) truncated = true;
+    if (matches.length >= limit) break;
+  }
+
+  return {
+    cards: matches,
+    project: projectObj,
+    coverage: {
+      source: "scan",
+      project_scoped: true,
+      tables_scanned: tablesScanned,
+      cards_scanned: cardsScanned,
+      truncated
+    }
+  };
+}
+
+async function resolvePersonQuery(ctx, personQuery, { include_archived_projects = false } = {}) {
+  const raw = String(personQuery ?? "").trim();
+  if (!raw) return { person: null, matches: [] };
+  if (/^\d+$/.test(raw)) {
+    try {
+      const person = await getPerson(ctx, Number(raw));
+      return { person, matches: [person] };
+    } catch (_) {
+      // fall through to search
+    }
+  }
+  const result = await searchPeople(ctx, raw, { include_archived_projects, deepScan: true });
+  const matches = result.people || [];
+  if (matches.length === 1) return { person: matches[0], matches };
+  return { person: null, matches };
+}
+
+async function listPersonProjects(ctx, personQuery, { include_archived_projects = false } = {}) {
+  const resolved = await resolvePersonQuery(ctx, personQuery, { include_archived_projects });
+  if (!resolved.person) {
+    return { person: null, matches: resolved.matches || [] };
+  }
+
+  const people = await listPeopleFromProjects(ctx, { include_archived: include_archived_projects });
+  const targetId = resolved.person.id;
+  const targetEmail = String(resolved.person.email || "").toLowerCase();
+  const targetName = String(resolved.person.name || "").toLowerCase();
+  const match = (people || []).find((p) => {
+    if (targetId != null && p.id === targetId) return true;
+    if (targetEmail && String(p.email || "").toLowerCase() === targetEmail) return true;
+    return targetName && String(p.name || "").toLowerCase() === targetName;
+  });
+
+  const projectIds = Array.isArray(match?.project_ids) ? match.project_ids : [];
+  const projects = await listProjects(ctx, { archived: include_archived_projects, compact: true });
+  const projectMap = new Map((projects || []).map((p) => [p.id, p]));
+  const mapped = projectIds
+    .map((id) => projectMap.get(id))
+    .filter(Boolean)
+    .map((p) => ({ id: p.id, name: p.name, status: p.status || null, app_url: p.app_url || null }));
+
+  return {
+    person: resolved.person,
+    projects: mapped,
+    coverage: {
+      projects_scanned: Array.isArray(projects) ? projects.length : 0,
+      include_archived_projects: !!include_archived_projects
+    }
+  };
+}
+
+async function listPersonActivity(ctx, personQuery, {
+  project = null,
+  query = "",
+  include_archived_projects = false,
+  limit = 50
+} = {}) {
+  const resolved = await resolvePersonQuery(ctx, personQuery, { include_archived_projects });
+  if (!resolved.person) {
+    return { person: null, matches: resolved.matches || [] };
+  }
+
+  let projectId = null;
+  if (project) {
+    try {
+      const p = await projectByName(ctx, project);
+      projectId = p?.id || null;
+    } catch {
+      projectId = null;
+    }
+  }
+
+  let arr = [];
+  let source = "user_timeline";
+  try {
+    const events = await userTimeline(ctx, Number(resolved.person.id), query || "");
+    arr = Array.isArray(events) ? events : [];
+  } catch (e) {
+    if (query) {
+      source = "search_recordings";
+      const recordings = await searchRecordings(ctx, query, { bucket_id: projectId, creator_id: resolved.person.id });
+      arr = Array.isArray(recordings) ? recordings : [];
+    } else {
+      throw e;
+    }
+  }
+  if (projectId) {
+    arr = arr.filter((e) => {
+      const bucketId = e?.bucket?.id || e?.project?.id || e?.bucket_id || e?.project_id;
+      return Number(bucketId) === Number(projectId);
+    });
+  }
+  if (Number.isFinite(Number(limit)) && arr.length > Number(limit)) {
+    arr = arr.slice(0, Number(limit));
+  }
+
+  return {
+    person: resolved.person,
+    project_id: projectId,
+    events: arr,
+    coverage: {
+      source,
+      project_scoped: !!projectId,
+      events_returned: arr.length
+    }
+  };
 }
 
 async function getPerson(ctx, personId) {
@@ -2330,17 +2608,64 @@ async function findCardInProjectById(ctx, projectId, cardId) {
   return null;
 }
 
-function parseRecordingUrl(input) {
+function parseBasecampUrl(input) {
   const raw = String(input ?? "").trim();
   if (!raw || !raw.includes("basecamp.com")) return null;
+
+  const cleaned = raw.replace(/[)>.,]+$/, "");
+  const accountMatch = cleaned.match(/basecamp\.com\/(\d+)/i);
+  const accountId = accountMatch ? accountMatch[1] : null;
+
   const patterns = [
-    { type: "card", re: /\/buckets\/(\d+)\/card_tables\/cards\/(\d+)/i },
-    { type: "todo", re: /\/buckets\/(\d+)\/todos\/(\d+)/i },
-    { type: "recording", re: /\/buckets\/(\d+)\/recordings\/(\d+)/i },
+    { type: "comment", re: /\/buckets\/(\d+)\/recordings\/(\d+)\/comments\/(\d+)/i, map: (m) => ({ bucket_id: m[1], recording_id: m[2], comment_id: m[3] }) },
+    { type: "comment", re: /\/buckets\/(\d+)\/todos\/(\d+)\/comments\/(\d+)/i, map: (m) => ({ bucket_id: m[1], todo_id: m[2], comment_id: m[3] }) },
+    { type: "comment", re: /\/buckets\/(\d+)\/card_tables\/cards\/(\d+)\/comments\/(\d+)/i, map: (m) => ({ bucket_id: m[1], card_id: m[2], comment_id: m[3] }) },
+    { type: "card", re: /\/buckets\/(\d+)\/card_tables\/cards\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "card_table", re: /\/buckets\/(\d+)\/card_tables\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "card_column", re: /\/buckets\/(\d+)\/card_tables\/lists\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "todo", re: /\/buckets\/(\d+)\/todos\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "todolist", re: /\/buckets\/(\d+)\/todolists\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "todolist_group", re: /\/buckets\/(\d+)\/todolist_groups\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "recording", re: /\/buckets\/(\d+)\/recordings\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "message", re: /\/buckets\/(\d+)\/message_boards\/(\d+)\/messages\/(\d+)/i, map: (m) => ({ bucket_id: m[1], message_board_id: m[2], id: m[3] }) },
+    { type: "message", re: /\/buckets\/(\d+)\/messages\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "message_board", re: /\/buckets\/(\d+)\/message_boards\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "document", re: /\/buckets\/(\d+)\/vaults\/(\d+)\/documents\/(\d+)/i, map: (m) => ({ bucket_id: m[1], vault_id: m[2], id: m[3] }) },
+    { type: "document", re: /\/buckets\/(\d+)\/documents\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "upload", re: /\/buckets\/(\d+)\/vaults\/(\d+)\/uploads\/(\d+)/i, map: (m) => ({ bucket_id: m[1], vault_id: m[2], id: m[3] }) },
+    { type: "upload", re: /\/buckets\/(\d+)\/uploads\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "schedule_entry", re: /\/buckets\/(\d+)\/schedule_entries\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "schedule", re: /\/buckets\/(\d+)\/schedules\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "campfire", re: /\/buckets\/(\d+)\/chats\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "project", re: /\/projects\/(\d+)/i, map: (m) => ({ project_id: m[1], bucket_id: m[1], id: m[1] }) },
+    { type: "project", re: /\/buckets\/(\d+)/i, map: (m) => ({ project_id: m[1], bucket_id: m[1], id: m[1] }) },
+    { type: "person", re: /\/people\/(\d+)/i, map: (m) => ({ id: m[1] }) },
   ];
-  for (const p of patterns) {
-    const m = raw.match(p.re);
-    if (m) return { type: p.type, bucketId: m[1], id: m[2] };
+
+  for (const pattern of patterns) {
+    const match = cleaned.match(pattern.re);
+    if (match) {
+      const payload = pattern.map(match);
+      return {
+        type: pattern.type,
+        account_id: accountId ? Number(accountId) : null,
+        bucket_id: payload.bucket_id ? Number(payload.bucket_id) : null,
+        project_id: payload.project_id ? Number(payload.project_id) : (payload.bucket_id ? Number(payload.bucket_id) : null),
+        id: payload.id ? Number(payload.id) : null,
+        ...payload,
+        url: cleaned
+      };
+    }
+  }
+
+  return null;
+}
+
+function parseRecordingUrl(input) {
+  const parsed = parseBasecampUrl(input);
+  if (!parsed) return null;
+  if (parsed.type === "card" || parsed.type === "todo" || parsed.type === "recording") {
+    return { type: parsed.type, bucketId: parsed.bucket_id, id: parsed.id };
   }
   return null;
 }
@@ -3050,30 +3375,35 @@ async function repositionCardStep(ctx, projectId, cardId, stepId, position) {
 // ========== SEARCH ACROSS RECORDINGS ==========
 // Official Basecamp search endpoint: GET /search.json
 // Query params: q (required), type, bucket_id, creator_id, file_type, exclude_chat, page, per_page
-async function searchRecordings(ctx, query, { bucket_id = null, type = null } = {}) {
-  // Coerce query to string and validate — prevents TypeError when non-strings (e.g., numeric ids) are passed
-  const rawQuery = (typeof query === 'string' ? query : String(query || '')).trim();
+async function searchRecordings(ctx, query, { bucket_id = null, type = null, creator_id = null, file_type = null, exclude_chat = null } = {}) {
+  // Coerce query to string and validate - prevents TypeError when non-strings (e.g., numeric ids) are passed
+  const rawQuery = (typeof query === "string" ? query : String(query || "")).trim();
   if (!rawQuery) throw new Error("Search query is required");
-  
+
   // Build the search endpoint with proper query parameters
   let path = `/search.json?q=${encodeURIComponent(rawQuery)}`;
-  
+
   // Add optional filters
   if (bucket_id) path += `&bucket_id=${encodeURIComponent(bucket_id)}`;
   if (type) path += `&type=${encodeURIComponent(type)}`;
-  
+  if (creator_id) path += `&creator_id=${encodeURIComponent(creator_id)}`;
+  if (file_type) path += `&file_type=${encodeURIComponent(file_type)}`;
+  if (exclude_chat != null) path += `&exclude_chat=${exclude_chat ? "true" : "false"}`;
+
   // Pagination: per_page and page will be added by apiAll/basecampFetchAll
   // Force pagination with per_page=100, page=1
   path += `&per_page=100&page=1`;
-  
+
   console.log(`[searchRecordings] Searching with endpoint: ${path}`);
-  
+
   // apiAll will automatically follow pagination and aggregate all pages
-  const results = await apiAll(ctx, path);
-  const arr = Array.isArray(results) ? results : [];
-  
+  const results = await apiAllWithMeta(ctx, path);
+  const { items, meta } = unwrapItemsWithMeta(results);
+  const arr = Array.isArray(items) ? items : [];
+  if (meta) arr._meta = meta;
+
   console.log(`[searchRecordings] Found ${arr.length} results for query: "${rawQuery}"`);
-  
+
   return arr.map((r) => ({
     id: r.id,
     type: r.type,
@@ -4232,6 +4562,24 @@ export async function handleMCP(reqBody, ctx) {
           return ok(id, { query, action: "list_assigned_to_me", confidence, result });
         }
 
+        if (analysis.personNames.length) {
+          const person = analysis.personNames[0];
+          if (/activity|recent|timeline/.test(lower)) {
+            const result = await callTool("list_person_activity", {
+              person,
+              project: args.project || null
+            });
+            return ok(id, { query, action: "list_person_activity", confidence, result });
+          }
+          if (/project/.test(lower) && /(on|member|access|projects?)/.test(lower)) {
+            const result = await callTool("list_person_projects", {
+              person,
+              include_archived_projects: false
+            });
+            return ok(id, { query, action: "list_person_projects", confidence, result });
+          }
+        }
+
         if (analysis.pattern === "person_finder" && analysis.personNames.length) {
           const person = analysis.personNames[0];
           if (args.project) {
@@ -4240,6 +4588,14 @@ export async function handleMCP(reqBody, ctx) {
           }
           const result = await callTool("search_people", { query: person });
           return ok(id, { query, action: "search_people", confidence, result });
+        }
+
+        if (/card|kanban/.test(lower) && /(find|search|lookup|show)/.test(lower)) {
+          const result = await callTool("search_cards", {
+            query: searchQuery || query,
+            project: args.project || null
+          });
+          return ok(id, { query, action: "search_cards", confidence, result });
         }
 
         if (analysis.constraints.dueDate) {
@@ -5582,16 +5938,22 @@ export async function handleMCP(reqBody, ctx) {
         const includeArchivedProjects = args.include_archived_projects === true || args.include_archived === true;
         let people = [];
         let deepScanUsed = false;
+        let archivedScanUsed = false;
         if (query.trim() === "") {
           people = await listAllPeople(ctx, { deepScan: false });
           if (!people.length || deepScanRequested) {
             deepScanUsed = true;
             people = await listAllPeople(ctx, { deepScan: true, include_archived_projects: includeArchivedProjects });
+            if (!people.length && !includeArchivedProjects) {
+              archivedScanUsed = true;
+              people = await listAllPeople(ctx, { deepScan: true, include_archived_projects: true });
+            }
           }
         } else {
           const result = await searchPeople(ctx, query, { include_archived_projects: includeArchivedProjects, deepScan: true });
           people = result.people;
           deepScanUsed = result.deep_scan;
+          archivedScanUsed = result.archived_scan === true;
         }
 
         const inlineLimit = Number(process.env.PEOPLE_INLINE_LIMIT || 1000);
@@ -5602,6 +5964,7 @@ export async function handleMCP(reqBody, ctx) {
           metrics: ctx_intel.getMetrics(),
           query: query || undefined,
           deep_scan: deepScanUsed,
+          archived_scan: archivedScanUsed,
           ...buildListPayload("people", people, { inlineLimit })
         });
       } catch (e) {
@@ -5618,7 +5981,7 @@ export async function handleMCP(reqBody, ctx) {
             people = result.people;
           }
           const inlineLimit = Number(process.env.PEOPLE_INLINE_LIMIT || 1000);
-          return ok(id, { fallback: true, query: query || undefined, deep_scan: true, ...buildListPayload("people", people, { inlineLimit }) });
+          return ok(id, { fallback: true, query: query || undefined, deep_scan: true, archived_scan: includeArchivedProjects, ...buildListPayload("people", people, { inlineLimit }) });
         } catch (fbErr) {
           return fail(id, { code: "LIST_ALL_PEOPLE_ERROR", message: fbErr.message });
         }
@@ -5639,11 +6002,160 @@ export async function handleMCP(reqBody, ctx) {
           metrics: ctx_intel.getMetrics(),
           query,
           deep_scan: result.deep_scan,
+          archived_scan: result.archived_scan === true,
           ...buildListPayload("people", result.people, { inlineLimit })
         });
       } catch (e) {
         console.error(`[search_people] Error:`, e.message);
         return fail(id, { code: "SEARCH_PEOPLE_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "search_projects") {
+      try {
+        const query = String(firstDefined(args.query, args.name, args.search, args.q) || "").trim();
+        if (!query) {
+          return fail(id, { code: "MISSING_QUERY", message: "Missing query. Provide a project name in 'query'." });
+        }
+        const includeArchivedProjects = args.include_archived_projects === true || args.include_archived === true;
+        const limit = Number.isFinite(Number(args.limit)) ? Number(args.limit) : 20;
+        const result = await searchProjects(ctx, query, { include_archived_projects: includeArchivedProjects, limit });
+        return ok(id, {
+          query,
+          archived_scan: result.coverage?.archived_scan ?? false,
+          ...buildListPayload("projects", result.projects, { coverage: result.coverage })
+        });
+      } catch (e) {
+        console.error(`[search_projects] Error:`, e.message);
+        return fail(id, { code: "SEARCH_PROJECTS_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "search_cards") {
+      try {
+        const query = String(firstDefined(args.query, args.name, args.search, args.q) || "").trim();
+        if (!query) {
+          return fail(id, { code: "MISSING_QUERY", message: "Missing query. Provide a card title or ID in 'query'." });
+        }
+        const includeArchivedProjects = args.include_archived_projects === true || args.include_archived === true;
+        const limit = Number.isFinite(Number(args.limit)) ? Number(args.limit) : 20;
+        const result = await searchCards(ctx, query, {
+          project: args.project || null,
+          include_archived_projects: includeArchivedProjects,
+          limit,
+          max_cards_per_column: Number.isFinite(Number(args.max_cards_per_column)) ? Number(args.max_cards_per_column) : 0
+        });
+        const payload = {
+          query,
+          project: result.project || null,
+          ...buildListPayload("cards", result.cards || [], { coverage: result.coverage, inlineLimit: limit })
+        };
+        if (result.coverage?.reason === "PROJECT_REQUIRED") {
+          payload.note = "Card search requires a project unless the index already contains cards.";
+        }
+        return ok(id, payload);
+      } catch (e) {
+        console.error(`[search_cards] Error:`, e.message);
+        return fail(id, { code: "SEARCH_CARDS_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_person_projects") {
+      try {
+        const person = String(firstDefined(args.person, args.name, args.email) || "").trim();
+        if (!person) {
+          return fail(id, { code: "MISSING_PERSON", message: "Missing person. Provide name, email, or ID." });
+        }
+        const includeArchivedProjects = args.include_archived_projects === true || args.include_archived === true;
+        const result = await listPersonProjects(ctx, person, { include_archived_projects: includeArchivedProjects });
+        if (!result.person) {
+          if (Array.isArray(result.matches) && result.matches.length > 1) {
+            return fail(id, { code: "AMBIGUOUS_PERSON", message: "Multiple people matched.", matches: result.matches });
+          }
+          return fail(id, { code: "PERSON_NOT_FOUND", message: "No matching person found.", matches: result.matches || [] });
+        }
+        return ok(id, {
+          person: result.person,
+          ...buildListPayload("projects", result.projects || [], { coverage: result.coverage })
+        });
+      } catch (e) {
+        console.error(`[list_person_projects] Error:`, e.message);
+        return fail(id, { code: "LIST_PERSON_PROJECTS_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "list_person_activity") {
+      try {
+        const person = String(firstDefined(args.person, args.name, args.email) || "").trim();
+        if (!person) {
+          return fail(id, { code: "MISSING_PERSON", message: "Missing person. Provide name, email, or ID." });
+        }
+        const includeArchivedProjects = args.include_archived_projects === true || args.include_archived === true;
+        const limit = Number.isFinite(Number(args.limit)) ? Number(args.limit) : 50;
+        const result = await listPersonActivity(ctx, person, {
+          project: args.project || null,
+          query: args.query || "",
+          include_archived_projects: includeArchivedProjects,
+          limit
+        });
+        if (!result.person) {
+          if (Array.isArray(result.matches) && result.matches.length > 1) {
+            return fail(id, { code: "AMBIGUOUS_PERSON", message: "Multiple people matched.", matches: result.matches });
+          }
+          return fail(id, { code: "PERSON_NOT_FOUND", message: "No matching person found.", matches: result.matches || [] });
+        }
+        return ok(id, {
+          person: result.person,
+          project_id: result.project_id || null,
+          ...buildListPayload("events", result.events || [], { coverage: result.coverage, inlineLimit: limit })
+        });
+      } catch (e) {
+        console.error(`[list_person_activity] Error:`, e.message);
+        return fail(id, { code: "LIST_PERSON_ACTIVITY_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "resolve_entity_from_url") {
+      try {
+        const url = String(args.url || "").trim();
+        if (!url) {
+          return fail(id, { code: "MISSING_URL", message: "Missing url." });
+        }
+        const parsed = parseBasecampUrl(url);
+        if (!parsed) {
+          return fail(id, { code: "INVALID_URL", message: "URL is not a recognized Basecamp URL." });
+        }
+        let details = null;
+        let fetch_error = null;
+        if (args.fetch === true) {
+          try {
+            if (parsed.type === "card" && parsed.bucket_id && parsed.id) {
+              details = await getCard(ctx, parsed.bucket_id, parsed.id);
+            } else if (parsed.type === "todo" && parsed.bucket_id && parsed.id) {
+              details = await getTodo(ctx, parsed.bucket_id, parsed.id);
+            } else if (parsed.type === "message" && parsed.bucket_id && parsed.id) {
+              details = await getMessage(ctx, parsed.bucket_id, parsed.id);
+            } else if (parsed.type === "document" && parsed.bucket_id && parsed.id) {
+              details = await getDocument(ctx, parsed.bucket_id, parsed.id);
+            } else if (parsed.type === "upload" && parsed.bucket_id && parsed.id) {
+              details = await getUpload(ctx, parsed.bucket_id, parsed.id);
+            } else if (parsed.type === "project" && parsed.project_id) {
+              details = await getProject(ctx, parsed.project_id);
+            } else if (parsed.type === "person" && parsed.id) {
+              details = await getPerson(ctx, parsed.id);
+            } else if (parsed.type === "comment" && parsed.bucket_id && parsed.comment_id) {
+              details = await getComment(ctx, parsed.bucket_id, parsed.comment_id);
+            } else if (parsed.type === "card_table" && parsed.bucket_id && parsed.id) {
+              details = await getCardTable(ctx, parsed.bucket_id, parsed.id);
+            }
+          } catch (e) {
+            fetch_error = e?.message || String(e);
+          }
+        }
+        return ok(id, { ...parsed, details, fetch_error });
+      } catch (e) {
+        console.error(`[resolve_entity_from_url] Error:`, e.message);
+        return fail(id, { code: "RESOLVE_ENTITY_ERROR", message: e.message });
       }
     }
 
@@ -7181,7 +7693,13 @@ export async function handleMCP(reqBody, ctx) {
           }
         }
 
-        const results = await searchRecordings(ctx, args.query, { bucket_id: bucketId, type: args.type });
+        const results = await searchRecordings(ctx, args.query, {
+          bucket_id: bucketId,
+          type: args.type,
+          creator_id: args.creator_id,
+          file_type: args.file_type,
+          exclude_chat: args.exclude_chat
+        });
 
         // INTELLIGENT CHAINING: Enrich search results with person/project details
         const ctx_intel = await intelligent.initializeIntelligentContext(ctx, args.query);
@@ -7240,7 +7758,13 @@ export async function handleMCP(reqBody, ctx) {
         console.error(`[search_recordings] Error:`, e.message);
         // Fallback to non-enriched search
         try {
-          const results = await searchRecordings(ctx, args.query, { bucket_id: bucketId, type: args.type });
+          const results = await searchRecordings(ctx, args.query, {
+            bucket_id: bucketId,
+            type: args.type,
+            creator_id: args.creator_id,
+            file_type: args.file_type,
+            exclude_chat: args.exclude_chat
+          });
           const inlineLimit = Number(process.env.SEARCH_INLINE_LIMIT || 1000);
           return ok(id, { query: args.query, fallback: true, ...buildListPayload("results", results, { inlineLimit }) });
         } catch (fbErr) {

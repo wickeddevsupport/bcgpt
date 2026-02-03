@@ -1033,6 +1033,18 @@
                   "type": {
                     "type": "string",
                     "description": "Filter by recording type (e.g., comment, message, todo)"
+                  },
+                  "creator_id": {
+                    "type": "string",
+                    "description": "Filter by creator id"
+                  },
+                  "file_type": {
+                    "type": "string",
+                    "description": "Filter by file type (uploads)"
+                  },
+                  "exclude_chat": {
+                    "type": "boolean",
+                    "description": "Exclude chat/campfire results"
                   }
                 },
                 "required": [
@@ -1103,7 +1115,11 @@
                     "type": "string"
                   },
                   "recording_id": {
-                    "type": "integer"
+                    "type": [
+                      "integer",
+                      "string"
+                    ],
+                    "description": "Recording, todo, or card ID (or a Basecamp URL)"
                   }
                 },
                 "required": [
@@ -1135,34 +1151,42 @@
                   "project": {
                     "type": "string"
                   },
-                "recording_id": {
-                  "oneOf": [
-                    { "type": "integer" },
-                    { "type": "string" }
-                  ],
-                  "description": "Recording ID or card ID. You may also pass a full Basecamp recording/card URL."
-                },
-                "card_id": {
-                  "oneOf": [
-                    { "type": "integer" },
-                    { "type": "string" }
-                  ],
-                  "description": "Alias for recording_id when commenting on a kanban card."
-                },
-                "card_url": {
-                  "type": "string",
-                  "description": "Full Basecamp card URL (will be parsed to bucket + card id)."
-                },
-                "recording_url": {
-                  "type": "string",
-                  "description": "Full Basecamp recording URL (will be parsed to bucket + recording id)."
-                },
-                "recording_query": {
-                  "type": "string"
-                },
-                "recording_title": {
-                  "type": "string"
-                },
+                  "recording_id": {
+                    "oneOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ],
+                    "description": "Recording ID or card ID. You may also pass a full Basecamp recording/card URL."
+                  },
+                  "card_id": {
+                    "oneOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ],
+                    "description": "Alias for recording_id when commenting on a kanban card."
+                  },
+                  "card_url": {
+                    "type": "string",
+                    "description": "Full Basecamp card URL (will be parsed to bucket + card id)."
+                  },
+                  "recording_url": {
+                    "type": "string",
+                    "description": "Full Basecamp recording URL (will be parsed to bucket + recording id)."
+                  },
+                  "recording_query": {
+                    "type": "string"
+                  },
+                  "recording_title": {
+                    "type": "string"
+                  },
                   "content": {
                     "type": "string"
                   }

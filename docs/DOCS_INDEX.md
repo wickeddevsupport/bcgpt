@@ -7,6 +7,7 @@
 - `docs/coverage/BASECAMP_API_COVERAGE.md`
 - `docs/coverage/BASECAMP_API_ONLINE_AUDIT_2026-01-31.md`
 - `docs/reference/BASECAMP_API_ENDPOINTS_REFERENCE.md`
+- `docs/reference/TOOL_MATRIX.md`
 - `docs/reference/bc3-api` (official Basecamp API docs repo)
 
 ## Phases & Architecture
@@ -15,6 +16,7 @@
 - `docs/phases/INTELLIGENT_CHAINING_STATUS.md`
 - `docs/phases/PHASE_3_STATUS.md`
 - `docs/phases/PHASE_3_COMPLETION.md`
+- `docs/phases/TRUE_MCP_ROADMAP.md`
 
 ## Audits & Fixes
 - `docs/audits/COMPREHENSIVE_AUDIT.md`
@@ -28,6 +30,7 @@
 - `docs/audits/SEARCH_FIXES.md`
 - `docs/audits/VISUAL_FIX_SUMMARY.md`
 - `docs/audits/VISUAL_SEARCH_SUMMARY.md`
+- `docs/audits/TRUE_MCP_DEEP_AUDIT.md`
 
 ## Summaries
 - `docs/summaries/COMPLETION_REPORT.md`

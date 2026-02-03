@@ -66,6 +66,10 @@ export async function runMining({
   projectsPerRun = 4,
   projectMinIntervalSec = 1800,
   userKey = null,
+  includeCards = true,
+  includeTodos = true,
+  maxCardsPerProject = 0,
+  maxTodosPerProject = 0,
 } = {}) {
   const summary = {
     started_at: new Date().toISOString(),
@@ -128,6 +132,20 @@ export async function runMining({
           const lists = await safeFetchAll(token, accountId, todolistsUrl, { ua, delayMs });
           if (Array.isArray(lists)) {
             for (const list of lists) trackEntity("todolist", list, { projectId, titleKey: "name", userKey });
+            if (includeTodos) {
+              let todoCount = 0;
+              for (const list of lists) {
+                if (Number.isFinite(maxTodosPerProject) && maxTodosPerProject > 0 && todoCount >= maxTodosPerProject) break;
+                const todosUrl = list?.todos_url || `/buckets/${projectId}/todolists/${list.id}/todos.json`;
+                const todos = await safeFetchAll(token, accountId, todosUrl, { ua, delayMs });
+                if (!Array.isArray(todos)) continue;
+                for (const todo of todos) {
+                  if (Number.isFinite(maxTodosPerProject) && maxTodosPerProject > 0 && todoCount >= maxTodosPerProject) break;
+                  trackEntity("todo", todo, { projectId, titleKey: "content", userKey });
+                  todoCount += 1;
+                }
+              }
+            }
           }
         }
       }
@@ -156,6 +174,27 @@ export async function runMining({
     const cardTables = await safeFetchAll(token, accountId, `/buckets/${projectId}/card_tables.json`, { ua, delayMs });
     if (Array.isArray(cardTables)) {
       for (const table of cardTables) trackEntity("card_table", table, { projectId, titleKey: "title", userKey });
+      if (includeCards) {
+        let cardCount = 0;
+        for (const table of cardTables) {
+          if (Number.isFinite(maxCardsPerProject) && maxCardsPerProject > 0 && cardCount >= maxCardsPerProject) break;
+          const tableUrl = table?.url || `/buckets/${projectId}/card_tables/${table.id}.json`;
+          const tableDetail = await safeFetch(token, accountId, tableUrl, { ua, delayMs });
+          const lists = Array.isArray(tableDetail?.lists) ? tableDetail.lists : [];
+          for (const list of lists) {
+            if (Number.isFinite(maxCardsPerProject) && maxCardsPerProject > 0 && cardCount >= maxCardsPerProject) break;
+            const cardsUrl = list?.cards_url;
+            if (!cardsUrl) continue;
+            const cards = await safeFetchAll(token, accountId, cardsUrl, { ua, delayMs });
+            if (!Array.isArray(cards)) continue;
+            for (const card of cards) {
+              if (Number.isFinite(maxCardsPerProject) && maxCardsPerProject > 0 && cardCount >= maxCardsPerProject) break;
+              trackEntity("card", card, { projectId, titleKey: "title", userKey });
+              cardCount += 1;
+            }
+          }
+        }
+      }
     }
 
     const webhooks = await safeFetchAll(token, accountId, `/buckets/${projectId}/webhooks.json`, { ua, delayMs });

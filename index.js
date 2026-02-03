@@ -389,6 +389,10 @@ async function runMiningJob({ force = false } = {}) {
       delayMs: Number(process.env.MINER_DELAY_MS || 150),
       projectsPerRun: Number(process.env.MINER_PROJECTS_PER_RUN || 4),
       projectMinIntervalSec: Number(process.env.MINER_PROJECT_MIN_INTERVAL_SEC || 1800),
+      includeCards: String(process.env.MINER_INCLUDE_CARDS || "true").toLowerCase() !== "false",
+      includeTodos: String(process.env.MINER_INCLUDE_TODOS || "true").toLowerCase() !== "false",
+      maxCardsPerProject: Number(process.env.MINER_MAX_CARDS_PER_PROJECT || 0),
+      maxTodosPerProject: Number(process.env.MINER_MAX_TODOS_PER_PROJECT || 0),
     });
     MINER_LAST_RESULT = result;
     return { ok: true, result };

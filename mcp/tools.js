@@ -81,6 +81,63 @@ export function getTools() {
       additionalProperties: false
     }),
 
+    tool("search_projects", "Search projects by name.", {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        include_archived_projects: { type: "boolean" },
+        limit: { type: "integer" }
+      },
+      required: ["query"],
+      additionalProperties: false
+    }),
+
+    tool("search_cards", "Search cards by title/content (project required unless index is available).", {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        project: { type: "string", nullable: true },
+        include_archived_projects: { type: "boolean" },
+        limit: { type: "integer" },
+        max_cards_per_column: { type: "integer" }
+      },
+      required: ["query"],
+      additionalProperties: false
+    }),
+
+    tool("list_person_projects", "List projects a person belongs to (by name, email, or ID).", {
+      type: "object",
+      properties: {
+        person: { type: "string" },
+        include_archived_projects: { type: "boolean" }
+      },
+      required: ["person"],
+      additionalProperties: false
+    }),
+
+    tool("list_person_activity", "List recent activity for a person (timeline-based).", {
+      type: "object",
+      properties: {
+        person: { type: "string" },
+        project: { type: "string", nullable: true },
+        query: { type: "string", nullable: true },
+        include_archived_projects: { type: "boolean" },
+        limit: { type: "integer" }
+      },
+      required: ["person"],
+      additionalProperties: false
+    }),
+
+    tool("resolve_entity_from_url", "Resolve a Basecamp UI/API URL into a structured entity reference.", {
+      type: "object",
+      properties: {
+        url: { type: "string" },
+        fetch: { type: "boolean", nullable: true }
+      },
+      required: ["url"],
+      additionalProperties: false
+    }),
+
     tool("search_entities", "Search across people/projects/recordings/todos (and cards by ID when project provided).", {
       type: "object",
       properties: {
@@ -494,7 +551,7 @@ export function getTools() {
     // Comments endpoints
     tool("list_comments", "List comments on a recording (message, document, todo, etc).", {
       type: "object",
-      properties: { project: { type: "string" }, recording_id: { type: "integer" } },
+      properties: { project: { type: "string" }, recording_id: { type: ["integer", "string"] } },
       required: ["project", "recording_id"],
       additionalProperties: false
     }),
@@ -809,7 +866,10 @@ export function getTools() {
       properties: {
         query: { type: "string" },
         bucket: { type: ["integer", "string"], nullable: true },
-        type: { type: "string", nullable: true, description: "Filter by recording type (e.g., comment, message, todo)" }
+        type: { type: "string", nullable: true, description: "Filter by recording type (e.g., comment, message, todo)" },
+        creator_id: { type: ["integer", "string"], nullable: true },
+        file_type: { type: "string", nullable: true },
+        exclude_chat: { type: "boolean", nullable: true }
       },
       required: ["query"],
       additionalProperties: false

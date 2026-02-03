@@ -1,23 +1,23 @@
-# Next Steps (Phase 3.5 -> Phase 4 Gate)
+# Next Steps (True MCP Path)
 
-This is the short, actionable backlog to finish Phase 3.5 and prepare a clean Phase 4 transition.
+This is the short, actionable backlog to finish the transition to a **true MCP server** (see `docs/phases/TRUE_MCP_ROADMAP.md`).
 
-## Must do (Phase 3.5 completion)
-1) Verify official Basecamp endpoint fields for new tools (campfires, chatbots, webhooks, card steps, message types, vault children).
-2) Implement client communications endpoints (correspondences/approvals/replies).
-3) Run a tool-by-tool smoke check in a staging account (focus on new tools + fallback paths).
-4) Roll out iteration + caching across all list endpoints (see `docs/audits/ITERATION_PAGINATION_CASE.md`). **(in progress: list tools + RequestContext updated)**
-5) Annotate `docs/reference/BC3_API_COVERAGE.md` and the new updated spec with which handlers already iterate across pages/chunk payloads; call out missing iteration/caching behaviors before Phase 4. **(coverage doc updated)** 
-6) Implement iteration/caching for the outstanding domains (events, lineup markers, timesheets, questionnaires, forwards/inboxes); each handler must record `pages`, `truncated`, `cache_key`, and optionally expose `next_url` so smart_action can stream the remaining data. **(implemented in mcp.js + basecamp.js)** 
+## Must do (Search + Correctness)
+1) Enforce query requirements for all search-like tools (return `MISSING_QUERY` for missing inputs).
+2) Add idempotency protections for create/update flows (idempotency keys for retries).
+3) Ensure chunk integrity: never return partial arrays without `payload_key` + `chunk_count`.
+4) Add card deletion and status transitions to cover full card lifecycle.
 
-## Phase 4 prep (after verification)
-1) Re-rank and update the top 30 OpenAPI actions (keep `smart_action`, `basecamp_raw`, `startbcgpt`). **(openapi.json updated)** 
-2) Add resiliency: circuit breaker + health metrics + structured error taxonomy. **(implemented)** 
-3) Expand intelligent routing coverage and add sample prompts for typical workflows. **(examples + prompts added; ambiguity handling added to smart_action)** 
-4) Standardize large-payload handling across all tools (payload cache + export + chunk retrieval). **(already wired in mcp.js; export + summary + coverage now returned)** 
-5) Add regression tests for pagination, nesting, and chunk integrity. **(docs/qa/REGRESSION_TESTS.md added)** 
-6) Add coverage metadata in list payloads and an internal summary pipeline for full-data project summaries. **(implemented in mcp.js)** 
+## Near-term (Index + Cards)
+1) Index messages, documents, and uploads in the miner.
+2) Add regression tests for search (people/projects/cards) and chunk retrieval.
+3) Add coverage checks for search_recordings with `creator_id`.
+
+## OpenAPI wrapper hardening
+1) Force `query` in `/action` search tools (or return `MISSING_QUERY`).
+2) Prefer `/mcp` for tool execution in new clients.
+3) Document that `/action` is a compatibility wrapper.
 
 ## Notes
-- The new MCP tools were added as best-effort endpoints; they should be validated against official Basecamp docs.
-- OpenAPI updates are deferred until endpoint verification is complete.
+- The most reliable interface is `/mcp` (JSON-RPC). `/action` is best-effort compatibility.
+- Use `docs/phases/TRUE_MCP_ROADMAP.md` as the canonical plan.
