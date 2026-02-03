@@ -6,14 +6,39 @@ This report re-checks coverage against the app's current tool set and the OpenAP
 
 ## Summary
 - MCP tools defined in `mcp.js`: 206
-- OpenAPI actions in `openapi.json`: 206 (full coverage)
+- OpenAPI actions in `openapi.json`: 30 (limit enforced)
 - Smart routing available via `smart_action`
 
 ## Latest online audit
 See `docs/coverage/BASECAMP_API_ONLINE_AUDIT_2026-01-31.md` for an online comparison against the Basecamp API documentation.
 
-## MCP vs OpenAPI
-OpenAPI now exposes the full MCP toolset via `/action/<tool>`. `/mcp` remains the authoritative interface (JSON-RPC) for richer envelopes and diagnostics.
+## MCP vs OpenAPI (30-action limit)
+The OpenAPI schema intentionally exposes only 30 actions. The rest are accessed via MCP or `smart_action`/`basecamp_raw`.
+
+### Missing in OpenAPI (still available in MCP)
+OpenAPI intentionally omits a large set of MCP tools, including but not limited to:
+- `archive_recording`
+- `basecamp_request`
+- `get_comment`
+- `get_hill_chart`
+- `get_person`
+- `get_person_assignments`
+- `get_project_structure`
+- `get_upload`
+- `list_accounts`
+- `list_assigned_to_me`
+- `list_project_people`
+- `list_person_projects`
+- `list_person_activity`
+- `list_vaults`
+- `archive_card`
+- `unarchive_card`
+- `trash_card`
+- `resolve_entity_from_url`
+- `search_cards`
+- `search_people`
+- `unarchive_recording`
+- `whoami`
 
 ### Missing in MCP
 - None (core families covered; verify endpoint details against official docs)
@@ -75,5 +100,5 @@ Current strategy:
 ## Action items when adding new endpoints
 1) Add tool to `mcp.js`
 2) Add fallback behavior to avoid hard errors
-3) Regenerate OpenAPI from tool definitions to keep `/action` in sync
+3) Decide if it belongs in OpenAPI (30-action cap) or rely on `smart_action`
 4) Update this coverage report

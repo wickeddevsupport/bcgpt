@@ -163,7 +163,6 @@ All Basecamp entity types, all CRUD and comment surfaces, all search paths, all 
 ### Required fixes
 - Required `query` fields in OpenAPI for search-like actions.
 - Inline limits for search responses to avoid chunk drops.
-- Expose full MCP toolset via OpenAPI and document chunk retrieval.
 
 ---
 

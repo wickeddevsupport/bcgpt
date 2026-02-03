@@ -14,8 +14,8 @@ This is the short, actionable backlog to finish the transition to a **true MCP s
 ## OpenAPI wrapper hardening
 1) Force `query` in `/action` search tools (or return `MISSING_QUERY`).
 2) Enforce chunk retrieval when `payload_key` is present.
-3) Keep `/mcp` authoritative, but ensure `/action` stays in full parity.
+3) Keep `/action` aligned with the 30-action cap and route extras through `smart_action`.
 
 ## Notes
-- The most reliable interface is `/mcp` (JSON-RPC). `/action` is a full-coverage compatibility wrapper.
+- The most reliable interface is `/mcp` (JSON-RPC). `/action` is best-effort compatibility.
 - Use `docs/phases/TRUE_MCP_ROADMAP.md` as the canonical plan.

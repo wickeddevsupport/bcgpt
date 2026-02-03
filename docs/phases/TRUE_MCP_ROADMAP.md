@@ -2,7 +2,7 @@
 
 Last updated: 2026-02-03
 
-This roadmap defines the path to a **true MCP server**: deterministic tool behavior, full data coverage, and reliable search semantics. The OpenAPI `/action/*` wrapper now exposes the full toolset, while `/mcp` remains the primary, standards-compliant interface.
+This roadmap defines the path to a **true MCP server**: deterministic tool behavior, full data coverage, and reliable search semantics. It assumes the OpenAPI `/action/*` wrapper remains capped at 30 actions, while `/mcp` is the primary, standards-compliant interface.
 
 ## Target Definition (What "True MCP" Means)
 1) **Authoritative tools**: every tool response is derived from actual API calls or a documented cache/index.
@@ -84,17 +84,15 @@ Success criteria:
 
 ---
 
-## Phase 4 -- Client Integration (OpenAPI)
+## Phase 4 -- Client Integration (OpenAPI wrapper)
 Goal: make `/action` behave safely even with weak clients.
 
 Actions:
 1) **Query-required actions**
    - Require `query` for any search-like action.
 2) **Search-first routing**
-   - Update descriptions to steer ChatGPT to `search_entities` or `search_*` tools.
-3) **Chunk retrieval enforcement**
-   - If `cached=true` with `payload_key`, require follow-up chunk retrieval before final answers.
-4) **Auto-deep-scan on empty**
+   - Update descriptions to steer ChatGPT to `search_entities` or `smart_action`.
+3) **Auto-deep-scan on empty**
    - If `/action` calls return empty, server-side fallbacks must run.
 
 Success criteria:
@@ -117,5 +115,5 @@ Success criteria:
 ---
 
 ## Notes
-- `/mcp` is the authoritative interface. `/action` is full coverage compatibility.
+- `/mcp` is the authoritative interface. `/action` is best-effort compatibility.
 - Any new tool must specify its fallback strategy and coverage metadata.
