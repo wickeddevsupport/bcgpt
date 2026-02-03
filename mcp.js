@@ -728,6 +728,37 @@ function normalizeQuery(q) {
   return String(q || "").trim();
 }
 
+function normalizeNameMatch(q) {
+  return String(q || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s\-'.]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function scoreNameMatch(name, query) {
+  if (!name || !query) return 0;
+  if (name === query) return 3;
+  if (name.startsWith(query)) return 2;
+  if (name.includes(query)) return 1;
+  return 0;
+}
+
+function findNameMatches(items, query, { limit = 5, nameKey = "name" } = {}) {
+  const q = normalizeNameMatch(query);
+  if (!q || q.length < 2) return [];
+  const scored = [];
+  for (const item of (items || [])) {
+    const rawName = item?.[nameKey] ?? item?.name ?? item?.title ?? "";
+    const n = normalizeNameMatch(rawName);
+    const score = scoreNameMatch(n, q);
+    if (!score) continue;
+    scored.push({ item, score, nameLen: n.length });
+  }
+  scored.sort((a, b) => (b.score - a.score) || (a.nameLen - b.nameLen));
+  return scored.slice(0, Math.max(1, Number(limit) || 5)).map((s) => s.item);
+}
+
 // Update todo details (preserve existing fields unless overridden)
 async function updateTodoDetails(ctx, projectId, todoId, updates = {}) {
   const current = await api(ctx, `/buckets/${projectId}/todos/${todoId}.json`);
@@ -6662,8 +6693,8 @@ export async function handleMCP(reqBody, ctx) {
 
     // ===== NEW SEARCH ENDPOINTS =====
     if (name === "search_recordings") {
+      let bucketId = args.bucket;
       try {
-        let bucketId = args.bucket;
         if (bucketId != null && bucketId !== "") {
           if (!/^\d+$/.test(String(bucketId))) {
             try {
@@ -6678,11 +6709,11 @@ export async function handleMCP(reqBody, ctx) {
         }
 
         const results = await searchRecordings(ctx, args.query, { bucket_id: bucketId, type: args.type });
-        
+
         // INTELLIGENT CHAINING: Enrich search results with person/project details
         const ctx_intel = await intelligent.initializeIntelligentContext(ctx, args.query);
         const enricher = intelligent.createEnricher(ctx_intel);
-        
+
         let enrichedResults = results;
         if (Array.isArray(results)) {
           enrichedResults = await Promise.all(
@@ -6692,12 +6723,45 @@ export async function handleMCP(reqBody, ctx) {
             }))
           );
         }
-        
-        return ok(id, {
+
+        const payload = {
           query: args.query,
           metrics: ctx_intel.getMetrics(),
           ...buildListPayload("results", enrichedResults)
-        });
+        };
+
+        if (Array.isArray(enrichedResults) && enrichedResults.length === 0) {
+          try {
+            const [people, projects] = await Promise.all([
+              listAllPeople(ctx),
+              listProjects(ctx, { archived: false, compact: true })
+            ]);
+            const peopleMatches = findNameMatches(people, args.query, { limit: 8 }).map((p) => ({
+              id: p.id,
+              name: p.name,
+              email: p.email_address || p.email || null,
+              title: p.title || null,
+              app_url: p.app_url || null
+            }));
+            const projectMatches = findNameMatches(projects, args.query, { limit: 8 }).map((p) => ({
+              id: p.id,
+              name: p.name,
+              status: p.status || null,
+              app_url: p.app_url || null
+            }));
+            if (peopleMatches.length || projectMatches.length) {
+              payload.name_matches = {
+                people: peopleMatches,
+                projects: projectMatches
+              };
+              payload.note = "No recordings matched. Showing people/projects name matches from /people.json and /projects.json.";
+            }
+          } catch (nameErr) {
+            console.warn("[search_recordings] name-match fallback failed:", nameErr?.message || nameErr);
+          }
+        }
+
+        return ok(id, payload);
       } catch (e) {
         console.error(`[search_recordings] Error:`, e.message);
         // Fallback to non-enriched search
