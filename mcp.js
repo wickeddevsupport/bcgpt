@@ -58,6 +58,7 @@ import { basecampFetch, basecampFetchAll } from "./basecamp.js";
 import { resolveByName, resolveBestEffort } from "./resolvers.js";
 import { indexSearchItem, searchIndex, getIdempotencyResponse, setIdempotencyResponse } from "./db.js";
 import { getTools } from "./mcp/tools.js";
+import { ENDPOINT_TOOL_MAP } from "./mcp/endpoint-tools.js";
 
 // Intelligent chaining modules
 import { RequestContext } from './intelligent-executor.js';
@@ -227,6 +228,31 @@ function coverageFromMeta(meta) {
     next_url: nextUrl,
     truncated
   };
+}
+
+function appendQuery(pathOrUrl, queryObj) {
+  if (!queryObj || typeof queryObj !== "object") return pathOrUrl;
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(queryObj)) {
+    if (value === undefined || value === null || value === "") continue;
+    params.append(key, String(value));
+  }
+  const qs = params.toString();
+  if (!qs) return pathOrUrl;
+  const joiner = pathOrUrl.includes("?") ? "&" : "?";
+  return `${pathOrUrl}${joiner}${qs}`;
+}
+
+function buildEndpointPath(template, args) {
+  const raw = String(template || "");
+  if (!raw) return raw;
+  return raw.replace(/\{([^}]+)\}/g, (_, key) => {
+    const value = args?.[key];
+    if (value === undefined || value === null || value === "") {
+      throw toolError("MISSING_PARAM", `Missing required path param: ${key}`, { param: key });
+    }
+    return encodeURIComponent(String(value));
+  });
 }
 
 function buildListPayload(collectionKey, items, options = {}) {
@@ -8299,6 +8325,31 @@ export async function handleMCP(reqBody, ctx) {
         } catch (fbErr) {
           return fail(id, { code: "SEARCH_RECORDINGS_ERROR", message: fbErr.message });
         }
+      }
+    }
+
+    // Auto-generated endpoint tools (api_* wrappers)
+    if (ENDPOINT_TOOL_MAP.has(name)) {
+      const endpoint = ENDPOINT_TOOL_MAP.get(name);
+      const method = endpoint.method || "GET";
+      const httpMethod = String(method).toUpperCase();
+      try {
+        const path = appendQuery(buildEndpointPath(endpoint.path, args), args.query);
+        const paginate = args.paginate !== false && httpMethod === "GET";
+        const data = paginate
+          ? await apiAllWithMeta(ctx, path)
+          : await api(ctx, path, { method: httpMethod, body: args.body });
+
+        if (paginate && Array.isArray(data?.items || data)) {
+          return ok(id, {
+            endpoint: { method: httpMethod, path },
+            ...buildListPayload("results", data)
+          });
+        }
+
+        return ok(id, { endpoint: { method: httpMethod, path }, result: data });
+      } catch (e) {
+        return fail(id, { code: "ENDPOINT_TOOL_ERROR", message: e.message, details: { tool: name } });
       }
     }
 

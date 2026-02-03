@@ -1,4 +1,6 @@
 // mcp/tools.js
+import { ENDPOINT_TOOLS } from "./endpoint-tools.js";
+
 function tool(name, description, inputSchema) {
   return { name, description, inputSchema };
 }
@@ -8,7 +10,7 @@ function noProps() {
 }
 
 export function getTools() {
-  return [
+  const tools = [
     tool("startbcgpt", "Show connection status, current user (name/email), plus re-auth and logout links.", noProps()),
     tool("whoami", "Return account id + authorized accounts list.", noProps()),
 
@@ -1461,4 +1463,11 @@ export function getTools() {
       additionalProperties: false
     })
   ];
+
+  // Append auto-generated endpoint tools (api_* wrappers)
+  for (const endpoint of ENDPOINT_TOOLS || []) {
+    tools.push(tool(endpoint.name, endpoint.description, endpoint.inputSchema));
+  }
+
+  return tools;
 }
