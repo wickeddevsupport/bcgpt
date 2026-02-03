@@ -1,6 +1,7 @@
 # Basecamp API Online Coverage Audit (2026-01-31)
 
 This audit compares our app's MCP tools and OpenAPI actions to the current Basecamp API documentation available online (Basecamp bc3-api repo + DeepWiki index pages).
+Note: As of 2026-02-03, OpenAPI exposes the full toolset; this audit reflects the 2026-01-31 state.
 
 ## Sources (online)
 - Basecamp bc3-api documentation (official repo cloned to `docs/reference/bc3-api`)
@@ -14,7 +15,7 @@ This audit compares our app's MCP tools and OpenAPI actions to the current Basec
 
 ## Method
 1) Extracted MCP tools from `mcp.js` (186 tools).
-2) Extracted OpenAPI actions from `openapi.json` (30 actions, hard limit).
+2) Extracted OpenAPI actions from `openapi.json` (30 actions at the time).
 3) Compared our coverage to online documentation families (not every endpoint, but every major API area).
 
 ## Current MCP tool coverage (high level)
@@ -27,8 +28,8 @@ Covered areas:
 - Smart routing: `smart_action`
 - Escape hatch: `basecamp_raw`
 
-## OpenAPI coverage (30 actions)
-OpenAPI exposes 30 actions, with `smart_action` included to cover additional intent-driven workflows.
+## OpenAPI coverage (historical)
+At the time of this audit, OpenAPI exposed 30 actions, with `smart_action` included to cover additional intent-driven workflows.
 
 ## Online API families status
 Based on official docs, the major API families are now covered by MCP tools (see notes for verification).
@@ -38,7 +39,7 @@ We cover core daily workflows and the online API families. Remaining work is ver
 
 ## Recommended next additions (priority order)
 1) Verify endpoint field requirements and edge behaviors for all new families
-2) Re-rank the OpenAPI 30-actions after stability verification
+2) Re-rank the OpenAPI action list after stability verification (historical; now full coverage)
 
 ## Notes
 - This audit focuses on API families confirmed by online docs; it does not assert coverage for features that appear only in product help pages.

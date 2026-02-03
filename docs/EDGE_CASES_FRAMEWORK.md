@@ -56,7 +56,11 @@ This document describes the global edge-case handling strategy used by the MCP h
    If the client cannot do this, server-side tools must raise inline limits for search-like responses to
    avoid false negatives.
 
-11. **No user prompts for selectable subsets**  
+11. **Idempotency for write operations**  
+   When clients provide `idempotency_key`, write operations must re-use prior responses and avoid
+   duplicate creates or updates.
+
+12. **No user prompts for selectable subsets**  
    If data is available and can be fetched safely, do it automatically. The MCP should
    never ask the user to pick a subset when iteration is possible.
 

@@ -203,7 +203,7 @@ try {
 **Outcome**:
 - Handles missing/unsupported endpoints by scanning cached/open todos when possible
 - Returns reasonable output instead of hard errors
-- Adds a smart router to reduce reliance on a long action list (30-action limit)
+- Adds a smart router to reduce reliance on manual tool selection
 
 ## Intelligent Agent Readiness (Pre-Phase 4 Gate)
 

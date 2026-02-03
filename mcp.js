@@ -56,7 +56,7 @@ import fs from "fs";
 import path from "path";
 import { basecampFetch, basecampFetchAll } from "./basecamp.js";
 import { resolveByName, resolveBestEffort } from "./resolvers.js";
-import { indexSearchItem, searchIndex } from "./db.js";
+import { indexSearchItem, searchIndex, getIdempotencyResponse, setIdempotencyResponse } from "./db.js";
 import { getTools } from "./mcp/tools.js";
 
 // Intelligent chaining modules
@@ -77,6 +77,51 @@ function logCommentDebug(...args) {
 function logPeopleDebug(...args) {
   if (!process?.env?.DEBUG && !process?.env?.PEOPLE_DEBUG) return;
   console.log(...args);
+}
+
+function normalizeIdempotencyPath(pathOrUrl) {
+  const raw = String(pathOrUrl || "").trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    return `${url.pathname}${url.search || ""}`;
+  } catch {
+    return raw;
+  }
+}
+
+function extractIdempotencyKey(opts = {}) {
+  const fromOpts = firstDefined(
+    opts.idempotencyKey,
+    opts.idempotency_key,
+    opts.request_id,
+    opts.requestId
+  );
+  if (fromOpts) return String(fromOpts).trim();
+  const fromHeader = opts.headers?.["X-Request-Id"] || opts.headers?.["Idempotency-Key"];
+  if (fromHeader) return String(fromHeader).trim();
+  const body = opts.body;
+  if (body && typeof body === "object" && !Buffer.isBuffer(body) && !(body instanceof Uint8Array)) {
+    const fromBody = firstDefined(body.idempotency_key, body.request_id, body.requestId);
+    if (fromBody) return String(fromBody).trim();
+  }
+  return null;
+}
+
+function stripIdempotencyKeys(body) {
+  if (!body || typeof body !== "object" || Buffer.isBuffer(body) || body instanceof Uint8Array) return body;
+  const cloned = { ...body };
+  delete cloned.idempotency_key;
+  delete cloned.request_id;
+  delete cloned.requestId;
+  return cloned;
+}
+
+function withIdempotency(body, args) {
+  if (!body || typeof body !== "object" || Buffer.isBuffer(body) || body instanceof Uint8Array) return body;
+  const key = firstDefined(args?.idempotency_key, args?.request_id, args?.requestId);
+  if (!key) return body;
+  return { ...body, idempotency_key: key };
 }
 
 // Large payload cache (in-memory, short-lived)
@@ -422,15 +467,47 @@ function todoText(t) {
 }
 
 // ---------- Basecamp wrappers (use ctx if provided) ----------
-function api(ctx, pathOrUrl, opts = {}) {
-  // If ctx has basecampFetch function, use it directly (already has TOKEN and accountId baked in)
-  if (typeof ctx?.basecampFetch === "function") {
-    console.log(`[api] Using ctx.basecampFetch for:`, pathOrUrl);
-    return ctx.basecampFetch(pathOrUrl, opts);
+async function api(ctx, pathOrUrl, opts = {}) {
+  const method = String(opts.method || "GET").toUpperCase();
+  const isWrite = method !== "GET" && method !== "HEAD";
+  const idempotencyKey = extractIdempotencyKey(opts);
+  const idempotencyPath = idempotencyKey ? normalizeIdempotencyPath(pathOrUrl) : null;
+  const ttl = Number(process.env.IDEMPOTENCY_TTL_SEC || 86400);
+
+  if (isWrite && idempotencyKey && idempotencyPath) {
+    const cached = getIdempotencyResponse(idempotencyKey, {
+      method,
+      path: idempotencyPath,
+      userKey: ctx.userKey,
+      maxAgeSec: ttl
+    });
+    if (cached) return cached;
   }
-  // Otherwise use the standalone function (requires TOKEN)
-  console.log(`[api] Using standalone basecampFetch for:`, pathOrUrl);
-  return basecampFetch(ctx.TOKEN, pathOrUrl, { ...opts, accountId: ctx.accountId, ua: ctx.ua });
+
+  const headers = { ...(opts.headers || {}) };
+  if (idempotencyKey) {
+    if (!headers["X-Request-Id"]) headers["X-Request-Id"] = idempotencyKey;
+    if (!headers["Idempotency-Key"]) headers["Idempotency-Key"] = idempotencyKey;
+  }
+  const body = idempotencyKey ? stripIdempotencyKeys(opts.body) : opts.body;
+  const requestOpts = { ...opts, headers, body };
+
+  const fetcher = typeof ctx?.basecampFetch === "function"
+    ? ctx.basecampFetch
+    : (path, options) => basecampFetch(ctx.TOKEN, path, { ...options, accountId: ctx.accountId, ua: ctx.ua });
+
+  console.log(`[api] Using ${typeof ctx?.basecampFetch === "function" ? "ctx.basecampFetch" : "standalone basecampFetch"} for:`, pathOrUrl);
+  const result = await fetcher(pathOrUrl, requestOpts);
+
+  if (isWrite && idempotencyKey && idempotencyPath) {
+    setIdempotencyResponse(idempotencyKey, result, {
+      method,
+      path: idempotencyPath,
+      userKey: ctx.userKey
+    });
+  }
+
+  return result;
 }
 
 function apiAll(ctx, pathOrUrl, opts = {}) {
@@ -486,12 +563,15 @@ async function listProjects(ctx, { archived = false, compact = true, limit, chun
   qs.set("page", "1");
 
   // Fetch all pages (apiAll already paginates and returns flat array)
-  let data = await apiAll(ctx, `/projects.json?${qs.toString()}`);
+  const result = await apiAllWithMeta(ctx, `/projects.json?${qs.toString()}`);
+  const { items, meta } = unwrapItemsWithMeta(result);
+  let data = items;
   
   if (!Array.isArray(data)) {
     console.error("[listProjects] apiAll did not return array:", typeof data, data);
     data = [];
   }
+  if (meta) data._meta = meta;
 
   // Index projects in search database
   try {
@@ -513,6 +593,7 @@ async function listProjects(ctx, { archived = false, compact = true, limit, chun
   if (compact) {
     out = data.map(projectSummary);
   }
+  if (data._meta) out._meta = data._meta;
 
   if (limit && Number.isFinite(Number(limit))) {
     out = out.slice(0, Math.max(0, Number(limit)));
@@ -576,11 +657,11 @@ async function getProject(ctx, projectId) {
 }
 
 async function createProject(ctx, body) {
-  return api(ctx, `/projects.json`, { method: "POST", body });
+  return api(ctx, `/projects.json`, { method: "POST", body: withIdempotency(body, body) });
 }
 
 async function updateProject(ctx, projectId, body) {
-  return api(ctx, `/projects/${projectId}.json`, { method: "PUT", body });
+  return api(ctx, `/projects/${projectId}.json`, { method: "PUT", body: withIdempotency(body, body) });
 }
 
 async function trashProject(ctx, projectId) {
@@ -651,11 +732,17 @@ async function getTodoList(ctx, projectId, todolistId) {
 }
 
 async function createTodoList(ctx, projectId, todosetId, body) {
-  return api(ctx, `/buckets/${projectId}/todosets/${todosetId}/todolists.json`, { method: "POST", body });
+  return api(ctx, `/buckets/${projectId}/todosets/${todosetId}/todolists.json`, {
+    method: "POST",
+    body: withIdempotency(body, body)
+  });
 }
 
 async function updateTodoList(ctx, projectId, todolistId, body) {
-  return api(ctx, `/buckets/${projectId}/todolists/${todolistId}.json`, { method: "PUT", body });
+  return api(ctx, `/buckets/${projectId}/todolists/${todolistId}.json`, {
+    method: "PUT",
+    body: withIdempotency(body, body)
+  });
 }
 
 async function listTodosForList(ctx, projectId, todolist) {
@@ -794,7 +881,10 @@ async function updateTodoDetails(ctx, projectId, todoId, updates = {}) {
   if ("starts_on" in updates) body.starts_on = updates.starts_on;
   else if (current?.starts_on) body.starts_on = current.starts_on;
 
-  return api(ctx, `/buckets/${projectId}/todos/${todoId}.json`, { method: "PUT", body });
+  return api(ctx, `/buckets/${projectId}/todos/${todoId}.json`, {
+    method: "PUT",
+    body: withIdempotency(body, updates)
+  });
 }
 
 async function getTodo(ctx, projectId, todoId) {
@@ -1492,7 +1582,13 @@ async function getCard(ctx, projectId, cardId) {
   return api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}.json`);
 }
 
-async function createCard(ctx, projectId, cardTableId, { title, content, description, column_id, due_on, position } = {}) {
+async function resolveCardRecordingId(ctx, projectId, cardId) {
+  const card = await getCard(ctx, projectId, cardId);
+  const recordingId = card?.recording?.id || card?.recording_id || null;
+  return { card, recording_id: recordingId };
+}
+
+async function createCard(ctx, projectId, cardTableId, { title, content, description, column_id, due_on, position, idempotency_key } = {}) {
   const body = { title };
   const cardContent = firstDefined(content, description);
   if (cardContent) body.content = cardContent;
@@ -1510,19 +1606,46 @@ async function createCard(ctx, projectId, cardTableId, { title, content, descrip
     targetColumnId = fallback?.id || null;
   }
   if (!targetColumnId) throw new Error("column_id (list/column ID) is required to create a card");
-  return api(ctx, `/buckets/${projectId}/card_tables/lists/${targetColumnId}/cards.json`, { method: "POST", body });
+  return api(ctx, `/buckets/${projectId}/card_tables/lists/${targetColumnId}/cards.json`, {
+    method: "POST",
+    body: withIdempotency(body, { idempotency_key })
+  });
 }
 
 async function updateCard(ctx, projectId, cardId, body) {
-  return api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}.json`, { method: "PUT", body });
+  return api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}.json`, {
+    method: "PUT",
+    body: withIdempotency(body, body)
+  });
 }
 
-async function moveCard(ctx, projectId, cardId, { column_id, position } = {}) {
+async function moveCard(ctx, projectId, cardId, { column_id, position, idempotency_key } = {}) {
   const body = {};
   if (column_id) body.column_id = column_id;
   if (position != null) body.position = position;
   // Move endpoint: POST /buckets/{id}/card_tables/cards/{id}/moves.json
-  return api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}/moves.json`, { method: "POST", body });
+  return api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}/moves.json`, {
+    method: "POST",
+    body: withIdempotency(body, { idempotency_key })
+  });
+}
+
+async function archiveCard(ctx, projectId, cardId) {
+  const resolved = await resolveCardRecordingId(ctx, projectId, cardId);
+  if (!resolved.recording_id) throw new Error("Card recording id not found.");
+  return archiveRecording(ctx, projectId, resolved.recording_id);
+}
+
+async function unarchiveCard(ctx, projectId, cardId) {
+  const resolved = await resolveCardRecordingId(ctx, projectId, cardId);
+  if (!resolved.recording_id) throw new Error("Card recording id not found.");
+  return unarchiveRecording(ctx, projectId, resolved.recording_id);
+}
+
+async function trashCard(ctx, projectId, cardId) {
+  const resolved = await resolveCardRecordingId(ctx, projectId, cardId);
+  if (!resolved.recording_id) throw new Error("Card recording id not found.");
+  return trashRecording(ctx, projectId, resolved.recording_id);
 }
 
 // ---------- Hill Charts ----------
@@ -1571,8 +1694,10 @@ async function listMessages(ctx, projectId, { board_id, board_title, limit } = {
   if (!board?.messages_url) {
     throw new Error("No message board/messages_url found. Provide board_id or board_title.");
   }
-  const msgs = await apiAll(ctx, board.messages_url);
-  const arr = Array.isArray(msgs) ? msgs : [];
+  const msgs = await apiAllWithMeta(ctx, board.messages_url);
+  const { items, meta } = unwrapItemsWithMeta(msgs);
+  const arr = Array.isArray(items) ? items : [];
+  if (meta) arr._meta = meta;
   
   // Index messages in search database
   try {
@@ -1601,6 +1726,7 @@ async function listMessages(ctx, projectId, { board_id, board_title, limit } = {
     app_url: m.app_url,
     url: m.url,
   }));
+  if (arr._meta) mapped._meta = arr._meta;
   if (limit != null) return mapped.slice(0, Math.max(0, Number(limit) || 0));
   return mapped;
 }
@@ -1614,11 +1740,17 @@ async function getMessage(ctx, projectId, messageId) {
 }
 
 async function createMessage(ctx, projectId, boardId, body) {
-  return api(ctx, `/buckets/${projectId}/message_boards/${boardId}/messages.json`, { method: "POST", body });
+  return api(ctx, `/buckets/${projectId}/message_boards/${boardId}/messages.json`, {
+    method: "POST",
+    body: withIdempotency(body, body)
+  });
 }
 
 async function updateMessage(ctx, projectId, messageId, body) {
-  return api(ctx, `/buckets/${projectId}/messages/${messageId}.json`, { method: "PUT", body });
+  return api(ctx, `/buckets/${projectId}/messages/${messageId}.json`, {
+    method: "PUT",
+    body: withIdempotency(body, body)
+  });
 }
 
 async function listDocuments(ctx, projectId, { limit } = {}) {
@@ -1633,8 +1765,10 @@ async function listDocuments(ctx, projectId, { limit } = {}) {
   // Many vault payloads include a documents_url.
   const docsUrl = vaultObj?.documents_url || vaultObj?.documents?.url || vaultObj?.documents;
   if (!docsUrl) throw new Error("Could not locate documents_url on vault payload.");
-  const docs = await apiAll(ctx, docsUrl);
-  const arr = Array.isArray(docs) ? docs : [];
+  const docs = await apiAllWithMeta(ctx, docsUrl);
+  const { items, meta } = unwrapItemsWithMeta(docs);
+  const arr = Array.isArray(items) ? items : [];
+  if (meta) arr._meta = meta;
   
   // Index documents in search database
   try {
@@ -1663,6 +1797,7 @@ async function listDocuments(ctx, projectId, { limit } = {}) {
     app_url: d.app_url,
     url: d.url,
   }));
+  if (arr._meta) mapped._meta = arr._meta;
   if (limit != null) return mapped.slice(0, Math.max(0, Number(limit) || 0));
   return mapped;
 }
@@ -1673,11 +1808,17 @@ async function getDocument(ctx, projectId, documentId) {
 
 async function createDocument(ctx, projectId, vaultId, body) {
   if (!vaultId) throw new Error("vault_id is required to create a document.");
-  return api(ctx, `/buckets/${projectId}/vaults/${vaultId}/documents.json`, { method: "POST", body });
+  return api(ctx, `/buckets/${projectId}/vaults/${vaultId}/documents.json`, {
+    method: "POST",
+    body: withIdempotency(body, body)
+  });
 }
 
 async function updateDocument(ctx, projectId, documentId, body) {
-  return api(ctx, `/buckets/${projectId}/documents/${documentId}.json`, { method: "PUT", body });
+  return api(ctx, `/buckets/${projectId}/documents/${documentId}.json`, {
+    method: "PUT",
+    body: withIdempotency(body, body)
+  });
 }
 
 async function listScheduleEntries(ctx, projectId, { limit } = {}) {
@@ -1722,11 +1863,17 @@ async function getScheduleEntry(ctx, projectId, entryId) {
 }
 
 async function createScheduleEntry(ctx, projectId, scheduleId, body) {
-  return api(ctx, `/buckets/${projectId}/schedules/${scheduleId}/entries.json`, { method: "POST", body });
+  return api(ctx, `/buckets/${projectId}/schedules/${scheduleId}/entries.json`, {
+    method: "POST",
+    body: withIdempotency(body, body)
+  });
 }
 
 async function updateScheduleEntry(ctx, projectId, entryId, body) {
-  return api(ctx, `/buckets/${projectId}/schedule_entries/${entryId}.json`, { method: "PUT", body });
+  return api(ctx, `/buckets/${projectId}/schedule_entries/${entryId}.json`, {
+    method: "PUT",
+    body: withIdempotency(body, body)
+  });
 }
 
 // ========== PEOPLE ENDPOINTS ==========
@@ -2280,6 +2427,11 @@ async function listPersonActivity(ctx, personQuery, {
       return Number(bucketId) === Number(projectId);
     });
   }
+  if (query && arr.length === 0) {
+    const recordings = await searchRecordings(ctx, query, { bucket_id: projectId, creator_id: resolved.person.id });
+    arr = Array.isArray(recordings) ? recordings : [];
+    source = "search_recordings";
+  }
   if (Number.isFinite(Number(limit)) && arr.length > Number(limit)) {
     arr = arr.slice(0, Number(limit));
   }
@@ -2334,9 +2486,11 @@ async function getMyProfile(ctx) {
 }
 
 async function listProjectPeople(ctx, projectId) {
-  const people = await apiAll(ctx, `/projects/${projectId}/people.json`);
-  const arr = Array.isArray(people) ? people : [];
-  return arr.map((p) => ({
+  const people = await apiAllWithMeta(ctx, `/projects/${projectId}/people.json`);
+  const { items, meta } = unwrapItemsWithMeta(people);
+  const arr = Array.isArray(items) ? items : [];
+  if (meta) arr._meta = meta;
+  const mapped = arr.map((p) => ({
     id: p.id,
     name: p.name,
     email: p.email_address,
@@ -2344,10 +2498,15 @@ async function listProjectPeople(ctx, projectId) {
     avatar_url: p.avatar_url,
     app_url: p.app_url,
   }));
+  if (arr._meta) mapped._meta = arr._meta;
+  return mapped;
 }
 
 async function updateProjectPeople(ctx, projectId, body) {
-  return api(ctx, `/projects/${projectId}/people/users.json`, { method: "PUT", body });
+  return api(ctx, `/projects/${projectId}/people/users.json`, {
+    method: "PUT",
+    body: withIdempotency(body, body)
+  });
 }
 
 // ========== COMMENTS ENDPOINTS ==========
@@ -2622,6 +2781,7 @@ function parseBasecampUrl(input) {
     { type: "comment", re: /\/buckets\/(\d+)\/card_tables\/cards\/(\d+)\/comments\/(\d+)/i, map: (m) => ({ bucket_id: m[1], card_id: m[2], comment_id: m[3] }) },
     { type: "card", re: /\/buckets\/(\d+)\/card_tables\/cards\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
     { type: "card_table", re: /\/buckets\/(\d+)\/card_tables\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "card_column", re: /\/buckets\/(\d+)\/card_tables\/columns\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
     { type: "card_column", re: /\/buckets\/(\d+)\/card_tables\/lists\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
     { type: "todo", re: /\/buckets\/(\d+)\/todos\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
     { type: "todolist", re: /\/buckets\/(\d+)\/todolists\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
@@ -2634,6 +2794,18 @@ function parseBasecampUrl(input) {
     { type: "document", re: /\/buckets\/(\d+)\/documents\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
     { type: "upload", re: /\/buckets\/(\d+)\/vaults\/(\d+)\/uploads\/(\d+)/i, map: (m) => ({ bucket_id: m[1], vault_id: m[2], id: m[3] }) },
     { type: "upload", re: /\/buckets\/(\d+)\/uploads\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "inbox_reply", re: /\/buckets\/(\d+)\/inbox_forwards\/(\d+)\/replies\/(\d+)/i, map: (m) => ({ bucket_id: m[1], forward_id: m[2], reply_id: m[3] }) },
+    { type: "inbox_forward", re: /\/buckets\/(\d+)\/inbox_forwards\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "inbox", re: /\/buckets\/(\d+)\/inboxes\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "client_correspondence", re: /\/buckets\/(\d+)\/client\/correspondences\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "client_approval", re: /\/buckets\/(\d+)\/client\/approvals\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "question_answer", re: /\/buckets\/(\d+)\/questions\/(\d+)\/answers\/(\d+)/i, map: (m) => ({ bucket_id: m[1], question_id: m[2], id: m[3] }) },
+    { type: "question", re: /\/buckets\/(\d+)\/questions\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "questionnaire", re: /\/buckets\/(\d+)\/questionnaires\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "webhook", re: /\/buckets\/(\d+)\/webhooks\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
+    { type: "lineup_marker", re: /\/lineup\/markers\/(\d+)/i, map: (m) => ({ id: m[1] }) },
+    { type: "template_construction", re: /\/templates\/(\d+)\/constructions\/(\d+)/i, map: (m) => ({ template_id: m[1], id: m[2] }) },
+    { type: "template", re: /\/templates\/(\d+)/i, map: (m) => ({ id: m[1] }) },
     { type: "schedule_entry", re: /\/buckets\/(\d+)\/schedule_entries\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
     { type: "schedule", re: /\/buckets\/(\d+)\/schedules\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
     { type: "campfire", re: /\/buckets\/(\d+)\/chats\/(\d+)/i, map: (m) => ({ bucket_id: m[1], id: m[2] }) },
@@ -2676,7 +2848,7 @@ function extractRecordingUrlFromText(text) {
   return m ? parseRecordingUrl(m[0]) : null;
 }
 
-async function postCardComment(ctx, projectId, cardId, text) {
+async function postCardComment(ctx, projectId, cardId, text, opts = {}) {
   logCommentDebug("[postCardComment] start", {
     projectId,
     cardId,
@@ -2694,7 +2866,7 @@ async function postCardComment(ctx, projectId, cardId, text) {
     });
     return api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}/comments.json`, {
       method: "POST",
-      body: { content: text },
+      body: withIdempotency({ content: text }, opts),
     });
   }
   const cardRecordingId = card?.recording?.id || card?.recording_id || null;
@@ -2710,7 +2882,7 @@ async function postCardComment(ctx, projectId, cardId, text) {
   try {
     return api(ctx, commentsUrl, {
       method: "POST",
-      body: { content: text },
+      body: withIdempotency({ content: text }, opts),
     });
   } catch (err) {
     const msg = String(err?.message || "");
@@ -2725,7 +2897,7 @@ async function postCardComment(ctx, projectId, cardId, text) {
       try {
         return api(ctx, `/buckets/${projectId}/recordings/${recordingId}/comments.json`, {
           method: "POST",
-          body: { content: text },
+          body: withIdempotency({ content: text }, opts),
         });
       } catch (recErr) {
         const recMsg = String(recErr?.message || "");
@@ -2756,28 +2928,29 @@ async function postCardComment(ctx, projectId, cardId, text) {
   }
 }
 
-async function postCommentViaParent(ctx, projectId, commentId, text) {
+async function postCommentViaParent(ctx, projectId, commentId, text, opts = {}) {
+  const commentBody = withIdempotency({ content: text }, opts);
   const comment = await api(ctx, `/buckets/${projectId}/comments/${commentId}.json`);
   const parent = comment?.parent || {};
   const commentsUrl = parent?.comments_url || parent?.comments_url_raw;
   if (commentsUrl) {
-    return api(ctx, commentsUrl, { method: "POST", body: { content: text } });
+    return api(ctx, commentsUrl, { method: "POST", body: commentBody });
   }
   const parentId = parent?.id;
   const parentType = String(parent?.type || "").toLowerCase();
   if (parentId && parentType.includes("todo")) {
     return api(ctx, `/buckets/${projectId}/todos/${parentId}/comments.json`, {
       method: "POST",
-      body: { content: text },
+      body: commentBody,
     });
   }
   if (parentId && (parentType.includes("card") || parentType.includes("kanban"))) {
-    return postCardComment(ctx, projectId, parentId, text);
+    return postCardComment(ctx, projectId, parentId, text, opts);
   }
   if (parentId) {
     return api(ctx, `/buckets/${projectId}/recordings/${parentId}/comments.json`, {
       method: "POST",
-      body: { content: text },
+      body: commentBody,
     });
   }
   throw new Error("COMMENT_PARENT_NOT_FOUND");
@@ -2786,6 +2959,7 @@ async function postCommentViaParent(ctx, projectId, commentId, text) {
 async function createComment(ctx, projectId, recordingId, content, opts = {}) {
   const text = String(content ?? "").trim();
   if (!text) throw new Error("Missing comment content.");
+  const commentBody = withIdempotency({ content: text }, opts);
   logCommentDebug("[createComment] start", {
     projectId,
     recordingId,
@@ -2802,16 +2976,16 @@ async function createComment(ctx, projectId, recordingId, content, opts = {}) {
     projectId = parsed.bucketId;
     recordingId = parsed.id;
     if (parsed.type === "card") {
-      c = await postCardComment(ctx, projectId, recordingId, text);
+      c = await postCardComment(ctx, projectId, recordingId, text, opts);
     } else if (parsed.type === "todo") {
       c = await api(ctx, `/buckets/${projectId}/todos/${recordingId}/comments.json`, {
         method: "POST",
-        body: { content: text },
+        body: commentBody,
       });
     } else {
       c = await api(ctx, `/buckets/${projectId}/recordings/${recordingId}/comments.json`, {
         method: "POST",
-        body: { content: text },
+        body: commentBody,
       });
     }
     return {
@@ -2828,7 +3002,7 @@ async function createComment(ctx, projectId, recordingId, content, opts = {}) {
   if (numericId) {
     try {
       logCommentDebug("[createComment] numeric id -> postCommentViaParent", { projectId, recordingId });
-      c = await postCommentViaParent(ctx, projectId, recordingId, text);
+      c = await postCommentViaParent(ctx, projectId, recordingId, text, opts);
       return {
         id: c.id,
         created_at: c.created_at,
@@ -2856,16 +3030,16 @@ async function createComment(ctx, projectId, recordingId, content, opts = {}) {
       const type = String(resolved.type || "").toLowerCase();
       const url = String(resolved.url || resolved.app_url || "");
       if (url.includes("/card_tables/cards/") || type.includes("kanban::card")) {
-        c = await postCardComment(ctx, bucketId, resolved.id, text);
+        c = await postCardComment(ctx, bucketId, resolved.id, text, opts);
       } else if (type.includes("todo")) {
         c = await api(ctx, `/buckets/${bucketId}/todos/${resolved.id}/comments.json`, {
           method: "POST",
-          body: { content: text },
+          body: commentBody,
         });
       } else {
         c = await api(ctx, `/buckets/${bucketId}/recordings/${resolved.id}/comments.json`, {
           method: "POST",
-          body: { content: text },
+          body: commentBody,
         });
       }
       return {
@@ -2883,7 +3057,7 @@ async function createComment(ctx, projectId, recordingId, content, opts = {}) {
     logCommentDebug("[createComment] trying recording comments", { projectId, recordingId });
     c = await api(ctx, `/buckets/${projectId}/recordings/${recordingId}/comments.json`, {
       method: "POST",
-      body: { content: text },
+      body: commentBody,
     });
   } catch (err) {
     const msg = String(err?.message || "");
@@ -2892,14 +3066,14 @@ async function createComment(ctx, projectId, recordingId, content, opts = {}) {
       logCommentDebug("[createComment] recording comments 404, trying todo comments", { projectId, recordingId });
       c = await api(ctx, `/buckets/${projectId}/todos/${recordingId}/comments.json`, {
         method: "POST",
-        body: { content: text },
+        body: commentBody,
       });
     } catch (todoErr) {
       const todoMsg = String(todoErr?.message || "");
       if (!todoMsg.includes("404")) throw todoErr;
       try {
         logCommentDebug("[createComment] todo comments 404, trying card comments", { projectId, recordingId });
-        c = await postCardComment(ctx, projectId, recordingId, text);
+        c = await postCardComment(ctx, projectId, recordingId, text, opts);
       } catch (cardErr) {
         const cardMsg = String(cardErr?.message || "");
         if (!cardMsg.includes("404")) throw cardErr;
@@ -2915,7 +3089,7 @@ async function createComment(ctx, projectId, recordingId, content, opts = {}) {
         if (!resolved && /^\d+$/.test(String(recordingId ?? ""))) {
           const card = await findCardInProjectById(ctx, projectId, recordingId);
           if (card) {
-            c = await postCardComment(ctx, projectId, card.id, text);
+            c = await postCardComment(ctx, projectId, card.id, text, opts);
             return {
               id: c.id,
               created_at: c.created_at,
@@ -2931,16 +3105,16 @@ async function createComment(ctx, projectId, recordingId, content, opts = {}) {
         const type = String(resolved.type || "").toLowerCase();
         const url = String(resolved.url || resolved.app_url || "");
         if (url.includes("/card_tables/cards/") || type.includes("kanban::card")) {
-          c = await postCardComment(ctx, bucketId, resolved.id, text);
+          c = await postCardComment(ctx, bucketId, resolved.id, text, opts);
         } else if (type.includes("todo")) {
           c = await api(ctx, `/buckets/${bucketId}/todos/${resolved.id}/comments.json`, {
             method: "POST",
-            body: { content: text },
+            body: commentBody,
           });
         } else {
           c = await api(ctx, `/buckets/${bucketId}/recordings/${resolved.id}/comments.json`, {
             method: "POST",
-            body: { content: text },
+            body: commentBody,
           });
         }
       }
@@ -2956,12 +3130,12 @@ async function createComment(ctx, projectId, recordingId, content, opts = {}) {
   };
 }
 
-async function updateComment(ctx, projectId, commentId, content) {
+async function updateComment(ctx, projectId, commentId, content, opts = {}) {
   const text = String(content ?? "").trim();
   if (!text) throw new Error("Missing comment content.");
   const c = await api(ctx, `/buckets/${projectId}/comments/${commentId}.json`, {
     method: "PUT",
-    body: { content: text }
+    body: withIdempotency({ content: text }, opts)
   });
   return {
     id: c.id,
@@ -2983,9 +3157,28 @@ async function listUploads(ctx, projectId, vaultId) {
   }
   if (!useVaultId) return [];
 
-  const uploads = await apiAll(ctx, `/buckets/${projectId}/vaults/${useVaultId}/uploads.json`);
-  const arr = Array.isArray(uploads) ? uploads : [];
-  return arr.map((u) => ({
+  const uploads = await apiAllWithMeta(ctx, `/buckets/${projectId}/vaults/${useVaultId}/uploads.json`);
+  const { items, meta } = unwrapItemsWithMeta(uploads);
+  const arr = Array.isArray(items) ? items : [];
+  if (meta) arr._meta = meta;
+
+  // Index uploads in search database
+  try {
+    for (const u of arr) {
+      indexSearchItem("upload", u.id, {
+        title: u.title || u.filename || "",
+        content: u.description || "",
+        url: u.app_url || u.url,
+        created_at: u.created_at,
+        updated_at: u.updated_at,
+        userKey: ctx.userKey,
+      });
+    }
+  } catch (e) {
+    console.error(`[listUploads] Error indexing uploads:`, e.message);
+  }
+
+  const mapped = arr.map((u) => ({
     id: u.id,
     title: u.title,
     filename: u.filename,
@@ -2999,6 +3192,8 @@ async function listUploads(ctx, projectId, vaultId) {
     status: u.status,
     app_url: u.app_url,
   }));
+  if (arr._meta) mapped._meta = arr._meta;
+  return mapped;
 }
 
 async function getUpload(ctx, projectId, uploadId) {
@@ -3022,11 +3217,17 @@ async function getUpload(ctx, projectId, uploadId) {
 
 async function createUpload(ctx, projectId, vaultId, body) {
   if (!vaultId) throw new Error("vault_id is required to create an upload.");
-  return api(ctx, `/buckets/${projectId}/vaults/${vaultId}/uploads.json`, { method: "POST", body });
+  return api(ctx, `/buckets/${projectId}/vaults/${vaultId}/uploads.json`, {
+    method: "POST",
+    body: withIdempotency(body, body)
+  });
 }
 
 async function updateUpload(ctx, projectId, uploadId, body) {
-  return api(ctx, `/buckets/${projectId}/uploads/${uploadId}.json`, { method: "PUT", body });
+  return api(ctx, `/buckets/${projectId}/uploads/${uploadId}.json`, {
+    method: "PUT",
+    body: withIdempotency(body, body)
+  });
 }
 
 // ========== ATTACHMENTS ==========
@@ -3343,11 +3544,17 @@ async function listCardSteps(ctx, projectId, cardId) {
 }
 
 async function createCardStep(ctx, projectId, cardId, body) {
-  return api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}/steps.json`, { method: "POST", body });
+  return api(ctx, `/buckets/${projectId}/card_tables/cards/${cardId}/steps.json`, {
+    method: "POST",
+    body: withIdempotency(body, body)
+  });
 }
 
 async function updateCardStep(ctx, projectId, stepId, body) {
-  return api(ctx, `/buckets/${projectId}/card_tables/steps/${stepId}.json`, { method: "PUT", body });
+  return api(ctx, `/buckets/${projectId}/card_tables/steps/${stepId}.json`, {
+    method: "PUT",
+    body: withIdempotency(body, body)
+  });
 }
 
 async function setCardStepCompletion(ctx, projectId, stepId, completion) {
@@ -3400,11 +3607,10 @@ async function searchRecordings(ctx, query, { bucket_id = null, type = null, cre
   const results = await apiAllWithMeta(ctx, path);
   const { items, meta } = unwrapItemsWithMeta(results);
   const arr = Array.isArray(items) ? items : [];
-  if (meta) arr._meta = meta;
 
   console.log(`[searchRecordings] Found ${arr.length} results for query: "${rawQuery}"`);
 
-  return arr.map((r) => ({
+  const mapped = arr.map((r) => ({
     id: r.id,
     type: r.type,
     title: r.title,
@@ -3421,6 +3627,8 @@ async function searchRecordings(ctx, query, { bucket_id = null, type = null, cre
     app_url: r.app_url,
     url: r.url,
   }));
+  if (meta) mapped._meta = meta;
+  return mapped;
 }
 
 async function searchMetadata(ctx) {
@@ -3678,7 +3886,10 @@ async function getTodolistGroup(ctx, projectId, groupId) {
 }
 
 async function createTodolistGroup(ctx, projectId, todolistId, body) {
-  return api(ctx, `/buckets/${projectId}/todolists/${todolistId}/groups.json`, { method: "POST", body });
+  return api(ctx, `/buckets/${projectId}/todolists/${todolistId}/groups.json`, {
+    method: "POST",
+    body: withIdempotency(body, body)
+  });
 }
 
 async function repositionTodolistGroup(ctx, projectId, groupId, position) {
@@ -3782,7 +3993,9 @@ export async function handleMCP(reqBody, ctx) {
 
     if (name === "create_project") {
       try {
-        const project = await createProject(ctx, args.body || {});
+        const body = { ...(args.body || {}) };
+        if (args.idempotency_key && !body.idempotency_key) body.idempotency_key = args.idempotency_key;
+        const project = await createProject(ctx, body);
         return ok(id, { message: "Project created", project });
       } catch (e) {
         return fail(id, { code: "CREATE_PROJECT_ERROR", message: e.message });
@@ -3791,7 +4004,9 @@ export async function handleMCP(reqBody, ctx) {
 
     if (name === "update_project") {
       try {
-        const project = await updateProject(ctx, Number(args.project_id), args.body || {});
+        const body = { ...(args.body || {}) };
+        if (args.idempotency_key && !body.idempotency_key) body.idempotency_key = args.idempotency_key;
+        const project = await updateProject(ctx, Number(args.project_id), body);
         return ok(id, { message: "Project updated", project });
       } catch (e) {
         return fail(id, { code: "UPDATE_PROJECT_ERROR", message: e.message });
@@ -4266,7 +4481,7 @@ export async function handleMCP(reqBody, ctx) {
         const taskText = String(args.task || args.content || "").trim();
         if (!taskText) return fail(id, { code: "BAD_REQUEST", message: "Missing task/content." });
 
-        const body = { content: taskText };
+        const body = withIdempotency({ content: taskText }, args);
         if (args.description) body.description = args.description;
         if (args.due_on) body.due_on = args.due_on;
         if (args.assignee_ids && Array.isArray(args.assignee_ids)) body.assignee_ids = args.assignee_ids;
@@ -4314,7 +4529,8 @@ export async function handleMCP(reqBody, ctx) {
           completion_subscriber_ids: args.completion_subscriber_ids,
           notify: args.notify,
           due_on: args.due_on,
-          starts_on: args.starts_on
+          starts_on: args.starts_on,
+          idempotency_key: args.idempotency_key
         });
 
         const ctx_intel = new RequestContext(ctx, `updated todo`);
@@ -4588,6 +4804,11 @@ export async function handleMCP(reqBody, ctx) {
           }
           const result = await callTool("search_people", { query: person });
           return ok(id, { query, action: "search_people", confidence, result });
+        }
+
+        if (/project/.test(lower) && /(find|search|lookup)/.test(lower)) {
+          const result = await callTool("search_projects", { query: searchQuery || query, include_archived_projects: false });
+          return ok(id, { query, action: "search_projects", confidence, result });
         }
 
         if (/card|kanban/.test(lower) && /(find|search|lookup|show)/.test(lower)) {
@@ -5177,7 +5398,8 @@ export async function handleMCP(reqBody, ctx) {
           description: args.description,
           column_id: args.column_id,
           due_on: args.due_on,
-          position: args.position
+          position: args.position,
+          idempotency_key: args.idempotency_key
         });
 
         // INTELLIGENT CHAINING: Enrich created card with person/project details
@@ -5203,7 +5425,8 @@ export async function handleMCP(reqBody, ctx) {
             description: args.description,
             column_id: args.column_id,
             due_on: args.due_on,
-            position: args.position
+            position: args.position,
+            idempotency_key: args.idempotency_key
           });
           return ok(id, { message: "Card created", project: { id: p.id, name: p.name }, card, fallback: true });
         } catch (fbErr) {
@@ -5216,7 +5439,11 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         await requireDockTool(ctx, p.id, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
-        const card = await moveCard(ctx, p.id, Number(args.card_id), { column_id: args.column_id, position: args.position });
+        const card = await moveCard(ctx, p.id, Number(args.card_id), {
+          column_id: args.column_id,
+          position: args.position,
+          idempotency_key: args.idempotency_key
+        });
 
         // INTELLIGENT CHAINING: Enrich moved card with person/project details
         const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `moved card ${args.card_id}`);
@@ -5235,7 +5462,11 @@ export async function handleMCP(reqBody, ctx) {
         try {
           const p = await projectByName(ctx, args.project);
           await requireDockTool(ctx, p.id, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
-          const card = await moveCard(ctx, p.id, Number(args.card_id), { column_id: args.column_id, position: args.position });
+          const card = await moveCard(ctx, p.id, Number(args.card_id), {
+            column_id: args.column_id,
+            position: args.position,
+            idempotency_key: args.idempotency_key
+          });
           return ok(id, { message: "Card updated", project: { id: p.id, name: p.name }, card, fallback: true });
         } catch (fbErr) {
           return fail(id, { code: "MOVE_CARD_ERROR", message: fbErr.message });
@@ -5269,7 +5500,9 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         await requireDockTool(ctx, p.id, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
-        const step = await createCardStep(ctx, p.id, Number(args.card_id), args.body || {});
+        const body = { ...(args.body || {}) };
+        if (args.idempotency_key && !body.idempotency_key) body.idempotency_key = args.idempotency_key;
+        const step = await createCardStep(ctx, p.id, Number(args.card_id), body);
         return ok(id, { message: "Card step created", project: { id: p.id, name: p.name }, step });
       } catch (e) {
         const known = toolFailResult(id, e);
@@ -5282,7 +5515,9 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         await requireDockTool(ctx, p.id, ["card_table", "card_tables", "kanban", "kanban_board"], "card_tables");
-        const step = await updateCardStep(ctx, p.id, Number(args.step_id), args.body || {});
+        const body = { ...(args.body || {}) };
+        if (args.idempotency_key && !body.idempotency_key) body.idempotency_key = args.idempotency_key;
+        const step = await updateCardStep(ctx, p.id, Number(args.step_id), body);
         return ok(id, { message: "Card step updated", project: { id: p.id, name: p.name }, step });
       } catch (e) {
         const known = toolFailResult(id, e);
@@ -5488,6 +5723,7 @@ export async function handleMCP(reqBody, ctx) {
         }
         if (!boardId) throw new Error("No message board found for this project.");
         const body = normalizeMessageBody(args, { defaultStatus: "active" });
+        if (args.idempotency_key && !body.idempotency_key) body.idempotency_key = args.idempotency_key;
         const message = await createMessage(ctx, p.id, Number(boardId), body);
         return ok(id, { message: "Message created", project: { id: p.id, name: p.name }, message });
       } catch (e) {
@@ -5502,6 +5738,7 @@ export async function handleMCP(reqBody, ctx) {
         const p = await projectByName(ctx, args.project);
         await requireDockTool(ctx, p.id, ["message_board", "message_boards"], "message_boards");
         const body = normalizeMessageBody(args);
+        if (args.idempotency_key && !body.idempotency_key) body.idempotency_key = args.idempotency_key;
         const message = await updateMessage(ctx, p.id, Number(args.message_id), body);
         return ok(id, { message: "Message updated", project: { id: p.id, name: p.name }, message });
       } catch (e) {
@@ -5769,7 +6006,9 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         await requireDockTool(ctx, p.id, ["vault", "documents"], "documents");
-        const doc = await createDocument(ctx, p.id, Number(args.vault_id), args.body || {});
+        const body = { ...(args.body || {}) };
+        if (args.idempotency_key && !body.idempotency_key) body.idempotency_key = args.idempotency_key;
+        const doc = await createDocument(ctx, p.id, Number(args.vault_id), body);
         return ok(id, { message: "Document created", project: { id: p.id, name: p.name }, document: doc });
       } catch (e) {
         const known = toolFailResult(id, e);
@@ -5782,7 +6021,9 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         await requireDockTool(ctx, p.id, ["vault", "documents"], "documents");
-        const doc = await updateDocument(ctx, p.id, Number(args.document_id), args.body || {});
+        const body = { ...(args.body || {}) };
+        if (args.idempotency_key && !body.idempotency_key) body.idempotency_key = args.idempotency_key;
+        const doc = await updateDocument(ctx, p.id, Number(args.document_id), body);
         return ok(id, { message: "Document updated", project: { id: p.id, name: p.name }, document: doc });
       } catch (e) {
         const known = toolFailResult(id, e);
@@ -5794,7 +6035,9 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "create_upload") {
       try {
         const p = await projectByName(ctx, args.project);
-        const upload = await createUpload(ctx, p.id, Number(args.vault_id), args.body || {});
+        const body = { ...(args.body || {}) };
+        if (args.idempotency_key && !body.idempotency_key) body.idempotency_key = args.idempotency_key;
+        const upload = await createUpload(ctx, p.id, Number(args.vault_id), body);
         return ok(id, { message: "Upload created", project: { id: p.id, name: p.name }, upload });
       } catch (e) {
         return fail(id, { code: "CREATE_UPLOAD_ERROR", message: e.message });
@@ -5804,7 +6047,9 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "update_upload") {
       try {
         const p = await projectByName(ctx, args.project);
-        const upload = await updateUpload(ctx, p.id, Number(args.upload_id), args.body || {});
+        const body = { ...(args.body || {}) };
+        if (args.idempotency_key && !body.idempotency_key) body.idempotency_key = args.idempotency_key;
+        const upload = await updateUpload(ctx, p.id, Number(args.upload_id), body);
         return ok(id, { message: "Upload updated", project: { id: p.id, name: p.name }, upload });
       } catch (e) {
         return fail(id, { code: "UPDATE_UPLOAD_ERROR", message: e.message });
@@ -6147,6 +6392,34 @@ export async function handleMCP(reqBody, ctx) {
               details = await getComment(ctx, parsed.bucket_id, parsed.comment_id);
             } else if (parsed.type === "card_table" && parsed.bucket_id && parsed.id) {
               details = await getCardTable(ctx, parsed.bucket_id, parsed.id);
+            } else if (parsed.type === "inbox" && parsed.bucket_id && parsed.id) {
+              details = await getInbox(ctx, parsed.bucket_id, parsed.id);
+            } else if (parsed.type === "inbox_forward" && parsed.bucket_id && parsed.id) {
+              details = await getInboxForward(ctx, parsed.bucket_id, parsed.id);
+            } else if (parsed.type === "inbox_reply" && parsed.bucket_id && parsed.forward_id && parsed.reply_id) {
+              details = await getInboxReply(ctx, parsed.bucket_id, parsed.forward_id, parsed.reply_id);
+            } else if (parsed.type === "client_correspondence" && parsed.bucket_id && parsed.id) {
+              details = await getClientCorrespondence(ctx, parsed.bucket_id, parsed.id);
+            } else if (parsed.type === "client_approval" && parsed.bucket_id && parsed.id) {
+              details = await getClientApproval(ctx, parsed.bucket_id, parsed.id);
+            } else if (parsed.type === "questionnaire" && parsed.bucket_id && parsed.id) {
+              details = await getQuestionnaire(ctx, parsed.bucket_id, parsed.id);
+            } else if (parsed.type === "question" && parsed.bucket_id && parsed.id) {
+              details = await getQuestion(ctx, parsed.bucket_id, parsed.id);
+            } else if (parsed.type === "question_answer" && parsed.bucket_id && parsed.id) {
+              details = await getQuestionAnswer(ctx, parsed.bucket_id, parsed.id);
+            } else if (parsed.type === "webhook" && parsed.bucket_id && parsed.id) {
+              details = await getWebhook(ctx, parsed.bucket_id, parsed.id);
+            } else if (parsed.type === "template" && parsed.id) {
+              details = await getTemplate(ctx, parsed.id);
+            } else if (parsed.type === "template_construction" && parsed.template_id && parsed.id) {
+              details = await getProjectConstruction(ctx, parsed.template_id, parsed.id);
+            } else if (parsed.type === "schedule" && parsed.bucket_id && parsed.id) {
+              details = await getSchedule(ctx, parsed.bucket_id, parsed.id);
+            } else if (parsed.type === "schedule_entry" && parsed.bucket_id && parsed.id) {
+              details = await getScheduleEntry(ctx, parsed.bucket_id, parsed.id);
+            } else if (parsed.type === "lineup_marker" && parsed.id) {
+              details = await api(ctx, `/lineup/markers/${parsed.id}.json`);
             }
           } catch (e) {
             fetch_error = e?.message || String(e);
@@ -6255,7 +6528,9 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "update_project_people") {
       try {
         const p = await projectByName(ctx, args.project);
-        const result = await updateProjectPeople(ctx, p.id, args.body || {});
+        const body = { ...(args.body || {}) };
+        if (args.idempotency_key && !body.idempotency_key) body.idempotency_key = args.idempotency_key;
+        const result = await updateProjectPeople(ctx, p.id, body);
         return ok(id, { project: { id: p.id, name: p.name }, result });
       } catch (e) {
         return fail(id, { code: "UPDATE_PROJECT_PEOPLE_ERROR", message: e.message });
@@ -6354,7 +6629,10 @@ export async function handleMCP(reqBody, ctx) {
           resolved_recording_id: recordingId ?? null,
           content_len: String(content || "").length
         });
-        const comment = await createComment(ctx, p.id, recordingId, content, { recordingQuery: args.recording_query || args.recording_title || args.query || null });
+        const comment = await createComment(ctx, p.id, recordingId, content, {
+          recordingQuery: args.recording_query || args.recording_title || args.query || null,
+          idempotency_key: args.idempotency_key
+        });
 
         // INTELLIGENT CHAINING: Enrich created comment with person/project details
         const ctx_intel = await intelligent.initializeIntelligentContext(ctx, `created comment`);
@@ -6393,7 +6671,10 @@ export async function handleMCP(reqBody, ctx) {
             resolved_recording_id: recordingId ?? null,
             content_len: String(content || "").length
           });
-          const comment = await createComment(ctx, p.id, recordingId, content, { recordingQuery: args.recording_query || args.recording_title || args.query || null });
+          const comment = await createComment(ctx, p.id, recordingId, content, {
+            recordingQuery: args.recording_query || args.recording_title || args.query || null,
+            idempotency_key: args.idempotency_key
+          });
           return ok(id, { message: "Comment created", project: { id: p.id, name: p.name }, comment, fallback: true });
         } catch (fbErr) {
           return fail(id, { code: "CREATE_COMMENT_ERROR", message: fbErr.message });
@@ -6405,7 +6686,7 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const content = extractContent(args);
-        const comment = await updateComment(ctx, p.id, args.comment_id, content);
+        const comment = await updateComment(ctx, p.id, args.comment_id, content, { idempotency_key: args.idempotency_key });
         return ok(id, { message: "Comment updated", project: { id: p.id, name: p.name }, comment });
       } catch (e) {
         return fail(id, { code: "UPDATE_COMMENT_ERROR", message: e.message });
@@ -7419,7 +7700,9 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "create_todolist_group") {
       try {
         const p = await projectByName(ctx, args.project);
-        const group = await createTodolistGroup(ctx, p.id, Number(args.todolist_id), args.body || {});
+        const body = { ...(args.body || {}) };
+        if (args.idempotency_key && !body.idempotency_key) body.idempotency_key = args.idempotency_key;
+        const group = await createTodolistGroup(ctx, p.id, Number(args.todolist_id), body);
         return ok(id, { message: "Todolist group created", project: { id: p.id, name: p.name }, group });
       } catch (e) {
         return fail(id, { code: "CREATE_TODOLIST_GROUP_ERROR", message: e.message });
@@ -7459,7 +7742,9 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "create_todolist") {
       try {
         const p = await projectByName(ctx, args.project);
-        const todolist = await createTodoList(ctx, p.id, Number(args.todoset_id), args.body || {});
+        const body = { ...(args.body || {}) };
+        if (args.idempotency_key && !body.idempotency_key) body.idempotency_key = args.idempotency_key;
+        const todolist = await createTodoList(ctx, p.id, Number(args.todoset_id), body);
         return ok(id, { message: "Todolist created", project: { id: p.id, name: p.name }, todolist });
       } catch (e) {
         return fail(id, { code: "CREATE_TODOLIST_ERROR", message: e.message });
@@ -7469,7 +7754,9 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "update_todolist") {
       try {
         const p = await projectByName(ctx, args.project);
-        const todolist = await updateTodoList(ctx, p.id, Number(args.todolist_id), args.body || {});
+        const body = { ...(args.body || {}) };
+        if (args.idempotency_key && !body.idempotency_key) body.idempotency_key = args.idempotency_key;
+        const todolist = await updateTodoList(ctx, p.id, Number(args.todolist_id), body);
         return ok(id, { message: "Todolist updated", project: { id: p.id, name: p.name }, todolist });
       } catch (e) {
         return fail(id, { code: "UPDATE_TODOLIST_ERROR", message: e.message });
@@ -7513,7 +7800,9 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         await requireDockTool(ctx, p.id, ["schedule", "schedules"], "schedule");
-        const entry = await createScheduleEntry(ctx, p.id, Number(args.schedule_id), args.body || {});
+        const body = { ...(args.body || {}) };
+        if (args.idempotency_key && !body.idempotency_key) body.idempotency_key = args.idempotency_key;
+        const entry = await createScheduleEntry(ctx, p.id, Number(args.schedule_id), body);
         return ok(id, { message: "Schedule entry created", project: { id: p.id, name: p.name }, entry });
       } catch (e) {
         const known = toolFailResult(id, e);
@@ -7526,7 +7815,9 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         await requireDockTool(ctx, p.id, ["schedule", "schedules"], "schedule");
-        const entry = await updateScheduleEntry(ctx, p.id, Number(args.entry_id), args.body || {});
+        const body = { ...(args.body || {}) };
+        if (args.idempotency_key && !body.idempotency_key) body.idempotency_key = args.idempotency_key;
+        const entry = await updateScheduleEntry(ctx, p.id, Number(args.entry_id), body);
         return ok(id, { message: "Schedule entry updated", project: { id: p.id, name: p.name }, entry });
       } catch (e) {
         const known = toolFailResult(id, e);
@@ -7669,10 +7960,42 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "update_card") {
       try {
         const p = await projectByName(ctx, args.project);
-        const card = await updateCard(ctx, p.id, Number(args.card_id), args.body || {});
+        const body = { ...(args.body || {}) };
+        if (args.idempotency_key && !body.idempotency_key) body.idempotency_key = args.idempotency_key;
+        const card = await updateCard(ctx, p.id, Number(args.card_id), body);
         return ok(id, { message: "Card updated", project: { id: p.id, name: p.name }, card });
       } catch (e) {
         return fail(id, { code: "UPDATE_CARD_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "archive_card") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await archiveCard(ctx, p.id, Number(args.card_id));
+        return ok(id, { ...result, project: { id: p.id, name: p.name } });
+      } catch (e) {
+        return fail(id, { code: "ARCHIVE_CARD_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "unarchive_card") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await unarchiveCard(ctx, p.id, Number(args.card_id));
+        return ok(id, { ...result, project: { id: p.id, name: p.name } });
+      } catch (e) {
+        return fail(id, { code: "UNARCHIVE_CARD_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "trash_card") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await trashCard(ctx, p.id, Number(args.card_id));
+        return ok(id, { ...result, project: { id: p.id, name: p.name } });
+      } catch (e) {
+        return fail(id, { code: "TRASH_CARD_ERROR", message: e.message });
       }
     }
 

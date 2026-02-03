@@ -163,6 +163,7 @@ All Basecamp entity types, all CRUD and comment surfaces, all search paths, all 
 ### Required fixes
 - Required `query` fields in OpenAPI for search-like actions.
 - Inline limits for search responses to avoid chunk drops.
+- Expose full MCP toolset via OpenAPI and document chunk retrieval.
 
 ---
 
@@ -307,10 +308,9 @@ All Basecamp entity types, all CRUD and comment surfaces, all search paths, all 
 ---
 
 ## Summary of Gaps to Eliminate
-- Card deletion tools are still missing.
-- Indexing remains incomplete for messages, documents, and uploads.
+- Card restore from trash is not guaranteed; confirm Basecamp endpoint support for untrash.
 - Activity scoping to project is heuristic and needs stronger verification.
 - Search tools returning partial lists without forcing chunk retrieval must be audited continuously.
-- Idempotency protections for create operations remain incomplete.
+- Idempotency protections require client-supplied `idempotency_key` for full coverage.
 
 This audit is the checklist for completion before calling the MCP "bulletproof".

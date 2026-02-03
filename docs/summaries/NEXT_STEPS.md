@@ -4,20 +4,18 @@ This is the short, actionable backlog to finish the transition to a **true MCP s
 
 ## Must do (Search + Correctness)
 1) Enforce query requirements for all search-like tools (return `MISSING_QUERY` for missing inputs).
-2) Add idempotency protections for create/update flows (idempotency keys for retries).
-3) Ensure chunk integrity: never return partial arrays without `payload_key` + `chunk_count`.
-4) Add card deletion and status transitions to cover full card lifecycle.
+2) Ensure chunk integrity: never return partial arrays without `payload_key` + `chunk_count`.
+3) Add card restore-from-trash if Basecamp supports it.
 
 ## Near-term (Index + Cards)
-1) Index messages, documents, and uploads in the miner.
-2) Add regression tests for search (people/projects/cards) and chunk retrieval.
-3) Add coverage checks for search_recordings with `creator_id`.
+1) Add regression tests for search (people/projects/cards) and chunk retrieval.
+2) Add coverage checks for search_recordings with `creator_id`.
 
 ## OpenAPI wrapper hardening
 1) Force `query` in `/action` search tools (or return `MISSING_QUERY`).
-2) Prefer `/mcp` for tool execution in new clients.
-3) Document that `/action` is a compatibility wrapper.
+2) Enforce chunk retrieval when `payload_key` is present.
+3) Keep `/mcp` authoritative, but ensure `/action` stays in full parity.
 
 ## Notes
-- The most reliable interface is `/mcp` (JSON-RPC). `/action` is best-effort compatibility.
+- The most reliable interface is `/mcp` (JSON-RPC). `/action` is a full-coverage compatibility wrapper.
 - Use `docs/phases/TRUE_MCP_ROADMAP.md` as the canonical plan.

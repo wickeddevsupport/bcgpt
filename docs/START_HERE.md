@@ -5,13 +5,13 @@ Last updated: 2026-02-03
 This doc is the entry point for a brand-new session. Read this first, then follow the links.
 
 ## What this project is
-BCGPT is a Basecamp MCP server with an OpenAPI layer for ChatGPT. It supports an intelligent chaining layer that enriches results, applies fallback logic, and (via `smart_action`) routes queries even when the action list is limited to 30 items. **/mcp is the authoritative interface; /action is a compatibility wrapper.**
+BCGPT is a Basecamp MCP server with an OpenAPI layer for ChatGPT. It supports an intelligent chaining layer that enriches results, applies fallback logic, and (via `smart_action`) routes queries across the full toolset. **/mcp is the authoritative interface; /action exposes the full toolset for compatibility.**
 
 ## Behavior guide (for humans and AIs)
 When you work on this repo, follow these rules:
 1) Prefer official docs: use `docs/reference/bc3-api` as the source of truth.
 2) Preserve stability: add fallbacks to avoid hard errors (prefer empty lists/soft failures over throws).
-3) Respect the 30-action OpenAPI limit: route extras through MCP + `smart_action`.
+3) Keep `/action` and `/mcp` in parity: regenerate OpenAPI after tool changes.
 4) Search correctness is mandatory: every search tool must return coverage metadata and avoid false negatives.
 5) Prefer server-side search tools (`search_people`, `search_entities`) instead of client-side filtering.
 6) Keep documentation in `docs/` only; do not add new .md files at repo root.
@@ -38,10 +38,8 @@ When you work on this repo, follow these rules:
 - `result-enricher.js` ? enrichment logic
 - `query-parser.js` ? intent detection used by `smart_action`
 
-## OpenAPI 30-action limit
-The OpenAPI schema is capped at 30 actions. We added:
-- `smart_action` ? a router that interprets natural language and calls the best tool.
-Some MCP tools are intentionally NOT in OpenAPI; see coverage report.
+## OpenAPI coverage
+OpenAPI exposes the full MCP toolset via `/action/<tool>`. `/mcp` remains the authoritative interface.
 
 ## True MCP roadmap
 See `docs/phases/TRUE_MCP_ROADMAP.md` for the full plan to eliminate false negatives and strengthen search.
@@ -64,7 +62,7 @@ All documentation is under `docs/`:
 ## How to extend safely
 1) Update `mcp.js` tools list + handler
 2) Add fallbacks (avoid hard errors)
-3) Update OpenAPI if it needs a new action (or use `smart_action`)
+3) Regenerate OpenAPI after tool changes
 4) Update `docs/coverage/BASECAMP_API_COVERAGE.md`
 
 ## Quick debugging

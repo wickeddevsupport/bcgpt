@@ -330,7 +330,8 @@ export function getTools() {
         description: { type: "string", nullable: true },
         column_id: { type: "integer", nullable: true },
         due_on: { type: "string", nullable: true },
-        position: { type: "integer", nullable: true }
+        position: { type: "integer", nullable: true },
+        idempotency_key: { type: "string", nullable: true }
       },
       required: ["project", "card_table_id", "title"],
       additionalProperties: false
@@ -341,8 +342,27 @@ export function getTools() {
         project: { type: "string" },
         card_id: { type: "integer" },
         column_id: { type: "integer", nullable: true },
-        position: { type: "integer", nullable: true }
+        position: { type: "integer", nullable: true },
+        idempotency_key: { type: "string", nullable: true }
       },
+      required: ["project", "card_id"],
+      additionalProperties: false
+    }),
+    tool("archive_card", "Archive a card (recording).", {
+      type: "object",
+      properties: { project: { type: "string" }, card_id: { type: "integer" } },
+      required: ["project", "card_id"],
+      additionalProperties: false
+    }),
+    tool("unarchive_card", "Unarchive a card (recording).", {
+      type: "object",
+      properties: { project: { type: "string" }, card_id: { type: "integer" } },
+      required: ["project", "card_id"],
+      additionalProperties: false
+    }),
+    tool("trash_card", "Trash a card (recording).", {
+      type: "object",
+      properties: { project: { type: "string" }, card_id: { type: "integer" } },
       required: ["project", "card_id"],
       additionalProperties: false
     }),
@@ -533,7 +553,16 @@ export function getTools() {
     }),
 
     // People endpoints
-    tool("list_all_people", "List all people visible in the Basecamp account.", noProps()),
+    tool("list_all_people", "List all people visible in the Basecamp account (use empty query to list all).", {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Name or email to search for. Use empty string to list all." },
+        deep_scan: { type: "boolean", description: "Force a deep scan across project memberships." },
+        include_archived_projects: { type: "boolean", description: "Include archived projects when deep scanning." }
+      },
+      required: ["query"],
+      additionalProperties: false
+    }),
     tool("get_person", "Get profile of a specific person by ID.", {
       type: "object",
       properties: { person_id: { type: "integer" } },
@@ -765,99 +794,6 @@ export function getTools() {
       type: "object",
       properties: { project: { type: "string" }, recording_id: { type: "integer" } },
       required: ["project", "recording_id"],
-      additionalProperties: false
-    }),
-
-    tool("get_questionnaire", "Get a questionnaire by ID.", {
-      type: "object",
-      properties: { project: { type: "string" }, questionnaire_id: { type: "integer" } },
-      required: ["project", "questionnaire_id"],
-      additionalProperties: false
-    }),
-    tool("list_questions", "List questions under a questionnaire.", {
-      type: "object",
-      properties: { project: { type: "string" }, questionnaire_id: { type: "integer" } },
-      required: ["project", "questionnaire_id"],
-      additionalProperties: false
-    }),
-    tool("get_question", "Get a question by ID.", {
-      type: "object",
-      properties: { project: { type: "string" }, question_id: { type: "integer" } },
-      required: ["project", "question_id"],
-      additionalProperties: false
-    }),
-    tool("create_question", "Create a question under a questionnaire.", {
-      type: "object",
-      properties: {
-        project: { type: "string" },
-        questionnaire_id: { type: "integer" },
-        question: { type: "object", additionalProperties: true }
-      },
-      required: ["project", "questionnaire_id", "question"],
-      additionalProperties: false
-    }),
-    tool("update_question", "Update a question. Provide fields in question object.", {
-      type: "object",
-      properties: {
-        project: { type: "string" },
-        question_id: { type: "integer" },
-        question: { type: "object", additionalProperties: true }
-      },
-      required: ["project", "question_id", "question"],
-      additionalProperties: false
-    }),
-    tool("pause_question", "Pause a question.", {
-      type: "object",
-      properties: { project: { type: "string" }, question_id: { type: "integer" } },
-      required: ["project", "question_id"],
-      additionalProperties: false
-    }),
-    tool("resume_question", "Resume a paused question.", {
-      type: "object",
-      properties: { project: { type: "string" }, question_id: { type: "integer" } },
-      required: ["project", "question_id"],
-      additionalProperties: false
-    }),
-    tool("update_question_notification", "Update notification settings for a question.", {
-      type: "object",
-      properties: {
-        project: { type: "string" },
-        question_id: { type: "integer" },
-        responding: { type: "boolean", nullable: true },
-        subscribed: { type: "boolean", nullable: true }
-      },
-      required: ["project", "question_id"],
-      additionalProperties: false
-    }),
-
-    tool("list_inboxes", "List inboxes for a project.", {
-      type: "object",
-      properties: { project: { type: "string" } },
-      required: ["project"],
-      additionalProperties: false
-    }),
-    tool("list_inbox_forwards", "List forwards in an inbox.", {
-      type: "object",
-      properties: { project: { type: "string" }, inbox_id: { type: "integer" } },
-      required: ["project", "inbox_id"],
-      additionalProperties: false
-    }),
-    tool("get_inbox_forward", "Get a forward by ID.", {
-      type: "object",
-      properties: { project: { type: "string" }, forward_id: { type: "integer" } },
-      required: ["project", "forward_id"],
-      additionalProperties: false
-    }),
-    tool("list_inbox_replies", "List replies for an inbox forward.", {
-      type: "object",
-      properties: { project: { type: "string" }, forward_id: { type: "integer" } },
-      required: ["project", "forward_id"],
-      additionalProperties: false
-    }),
-    tool("get_inbox_reply", "Get an inbox reply by ID.", {
-      type: "object",
-      properties: { project: { type: "string" }, reply_id: { type: "integer" }, forward_id: { type: "integer" } },
-      required: ["project", "forward_id", "reply_id"],
       additionalProperties: false
     }),
 
@@ -1095,6 +1031,12 @@ export function getTools() {
       required: ["project", "inbox_id"],
       additionalProperties: false
     }),
+    tool("list_inboxes", "List inboxes for a project.", {
+      type: "object",
+      properties: { project: { type: "string" } },
+      required: ["project"],
+      additionalProperties: false
+    }),
     tool("list_inbox_forwards", "List forwards for an inbox.", {
       type: "object",
       properties: { project: { type: "string" }, inbox_id: { type: "integer" } },
@@ -1122,86 +1064,86 @@ export function getTools() {
 
     tool("get_questionnaire", "Get a questionnaire by ID.", {
       type: "object",
-      properties: { questionnaire_id: { type: "integer" } },
-      required: ["questionnaire_id"],
+      properties: { project: { type: "string" }, questionnaire_id: { type: "integer" } },
+      required: ["project", "questionnaire_id"],
       additionalProperties: false
     }),
     tool("list_questions", "List questions in a questionnaire.", {
       type: "object",
-      properties: { questionnaire_id: { type: "integer" } },
-      required: ["questionnaire_id"],
+      properties: { project: { type: "string" }, questionnaire_id: { type: "integer" } },
+      required: ["project", "questionnaire_id"],
       additionalProperties: false
     }),
     tool("get_question", "Get a question by ID.", {
       type: "object",
-      properties: { question_id: { type: "integer" } },
-      required: ["question_id"],
+      properties: { project: { type: "string" }, question_id: { type: "integer" } },
+      required: ["project", "question_id"],
       additionalProperties: false
     }),
     tool("create_question", "Create a question. Provide official fields in body.", {
       type: "object",
-      properties: { questionnaire_id: { type: "integer" }, body: { type: "object", additionalProperties: true } },
-      required: ["questionnaire_id", "body"],
+      properties: { project: { type: "string" }, questionnaire_id: { type: "integer" }, body: { type: "object", additionalProperties: true } },
+      required: ["project", "questionnaire_id", "body"],
       additionalProperties: false
     }),
     tool("update_question", "Update a question. Provide official fields in body.", {
       type: "object",
-      properties: { question_id: { type: "integer" }, body: { type: "object", additionalProperties: true } },
-      required: ["question_id", "body"],
+      properties: { project: { type: "string" }, question_id: { type: "integer" }, body: { type: "object", additionalProperties: true } },
+      required: ["project", "question_id", "body"],
       additionalProperties: false
     }),
     tool("pause_question", "Pause a question.", {
       type: "object",
-      properties: { question_id: { type: "integer" } },
-      required: ["question_id"],
+      properties: { project: { type: "string" }, question_id: { type: "integer" } },
+      required: ["project", "question_id"],
       additionalProperties: false
     }),
     tool("resume_question", "Resume a question.", {
       type: "object",
-      properties: { question_id: { type: "integer" } },
-      required: ["question_id"],
+      properties: { project: { type: "string" }, question_id: { type: "integer" } },
+      required: ["project", "question_id"],
       additionalProperties: false
     }),
     tool("update_question_notification_settings", "Update question notification settings. Provide official fields in body.", {
       type: "object",
-      properties: { question_id: { type: "integer" }, body: { type: "object", additionalProperties: true } },
-      required: ["question_id", "body"],
+      properties: { project: { type: "string" }, question_id: { type: "integer" }, body: { type: "object", additionalProperties: true } },
+      required: ["project", "question_id", "body"],
       additionalProperties: false
     }),
     tool("list_question_answers", "List answers for a question.", {
       type: "object",
-      properties: { question_id: { type: "integer" } },
-      required: ["question_id"],
+      properties: { project: { type: "string" }, question_id: { type: "integer" } },
+      required: ["project", "question_id"],
       additionalProperties: false
     }),
     tool("list_question_answers_by", "List people who answered a question.", {
       type: "object",
-      properties: { question_id: { type: "integer" } },
-      required: ["question_id"],
+      properties: { project: { type: "string" }, question_id: { type: "integer" } },
+      required: ["project", "question_id"],
       additionalProperties: false
     }),
     tool("list_question_answers_by_person", "List answers by person for a question.", {
       type: "object",
-      properties: { question_id: { type: "integer" }, person_id: { type: "integer" } },
-      required: ["question_id", "person_id"],
+      properties: { project: { type: "string" }, question_id: { type: "integer" }, person_id: { type: "integer" } },
+      required: ["project", "question_id", "person_id"],
       additionalProperties: false
     }),
     tool("get_question_answer", "Get a question answer by ID.", {
       type: "object",
-      properties: { answer_id: { type: "integer" } },
-      required: ["answer_id"],
+      properties: { project: { type: "string" }, answer_id: { type: "integer" } },
+      required: ["project", "answer_id"],
       additionalProperties: false
     }),
     tool("create_question_answer", "Create an answer to a question. Provide official fields in body.", {
       type: "object",
-      properties: { question_id: { type: "integer" }, body: { type: "object", additionalProperties: true } },
-      required: ["question_id", "body"],
+      properties: { project: { type: "string" }, question_id: { type: "integer" }, body: { type: "object", additionalProperties: true } },
+      required: ["project", "question_id", "body"],
       additionalProperties: false
     }),
     tool("update_question_answer", "Update a question answer. Provide official fields in body.", {
       type: "object",
-      properties: { answer_id: { type: "integer" }, body: { type: "object", additionalProperties: true } },
-      required: ["answer_id", "body"],
+      properties: { project: { type: "string" }, answer_id: { type: "integer" }, body: { type: "object", additionalProperties: true } },
+      required: ["project", "answer_id", "body"],
       additionalProperties: false
     }),
     tool("list_question_reminders", "List pending question reminders for the current user.", noProps()),

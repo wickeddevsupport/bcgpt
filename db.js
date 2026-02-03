@@ -83,6 +83,20 @@ db.exec(`
     updated_at INTEGER NOT NULL,
     PRIMARY KEY(user_key, key)
   );
+
+  CREATE TABLE IF NOT EXISTS idempotency_cache (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_key TEXT NOT NULL DEFAULT 'legacy',
+    idempotency_key TEXT NOT NULL,
+    method TEXT NOT NULL,
+    path TEXT NOT NULL,
+    response_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(user_key, idempotency_key, method, path)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_idempotency_user_key ON idempotency_cache(user_key, idempotency_key);
 `);
 
 function normalizeUserKey(userKey) {
@@ -435,6 +449,51 @@ export function listEntityCache(type, { projectId = null, limit = 200, userKey =
     data: JSON.parse(row.data || "{}"),
     updated_at: row.updated_at,
   }));
+}
+
+// Idempotency cache
+export function getIdempotencyResponse(idempotencyKey, { method, path, userKey = null, maxAgeSec = 86400 } = {}) {
+  if (!idempotencyKey || !method || !path) return null;
+  const key = normalizeUserKey(userKey) || "legacy";
+  const stmt = db.prepare(`
+    SELECT response_json, updated_at
+    FROM idempotency_cache
+    WHERE user_key = ? AND idempotency_key = ? AND method = ? AND path = ?
+  `);
+  const row = stmt.get(key, idempotencyKey, method, path);
+  if (!row) return null;
+  const now = Math.floor(Date.now() / 1000);
+  if (Number.isFinite(maxAgeSec) && maxAgeSec > 0 && row.updated_at < now - maxAgeSec) {
+    try {
+      const del = db.prepare(`
+        DELETE FROM idempotency_cache
+        WHERE user_key = ? AND idempotency_key = ? AND method = ? AND path = ?
+      `);
+      del.run(key, idempotencyKey, method, path);
+    } catch {
+      // ignore cleanup errors
+    }
+    return null;
+  }
+  try {
+    return JSON.parse(row.response_json);
+  } catch {
+    return null;
+  }
+}
+
+export function setIdempotencyResponse(idempotencyKey, response, { method, path, userKey = null } = {}) {
+  if (!idempotencyKey || !method || !path) return;
+  const key = normalizeUserKey(userKey) || "legacy";
+  const now = Math.floor(Date.now() / 1000);
+  const stmt = db.prepare(`
+    INSERT INTO idempotency_cache (user_key, idempotency_key, method, path, response_json, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_key, idempotency_key, method, path) DO UPDATE SET
+      response_json = excluded.response_json,
+      updated_at = excluded.updated_at
+  `);
+  stmt.run(key, idempotencyKey, method, path, JSON.stringify(response ?? {}), now, now);
 }
 
 function hashArgs(args) {

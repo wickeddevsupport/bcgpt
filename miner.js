@@ -68,8 +68,14 @@ export async function runMining({
   userKey = null,
   includeCards = true,
   includeTodos = true,
+  includeMessages = false,
+  includeDocuments = false,
+  includeUploads = false,
   maxCardsPerProject = 0,
   maxTodosPerProject = 0,
+  maxMessagesPerProject = 0,
+  maxDocumentsPerProject = 0,
+  maxUploadsPerProject = 0,
 } = {}) {
   const summary = {
     started_at: new Date().toISOString(),
@@ -155,6 +161,21 @@ export async function runMining({
         const boards = await safeFetchAll(token, accountId, mbDock.url, { ua, delayMs });
         if (Array.isArray(boards)) {
           for (const board of boards) trackEntity("message_board", board, { projectId, titleKey: "title", userKey });
+          if (includeMessages) {
+            let messageCount = 0;
+            for (const board of boards) {
+              if (Number.isFinite(maxMessagesPerProject) && maxMessagesPerProject > 0 && messageCount >= maxMessagesPerProject) break;
+              const messagesUrl = board?.messages_url;
+              if (!messagesUrl) continue;
+              const messages = await safeFetchAll(token, accountId, messagesUrl, { ua, delayMs });
+              if (!Array.isArray(messages)) continue;
+              for (const message of messages) {
+                if (Number.isFinite(maxMessagesPerProject) && maxMessagesPerProject > 0 && messageCount >= maxMessagesPerProject) break;
+                trackEntity("message", message, { projectId, titleKey: "subject", userKey });
+                messageCount += 1;
+              }
+            }
+          }
         }
       }
 
@@ -167,7 +188,31 @@ export async function runMining({
       const vaultDock = dockFind(dock, ["vault", "documents", "vaults"]);
       if (vaultDock?.url) {
         const vault = await safeFetch(token, accountId, vaultDock.url, { ua, delayMs });
-        if (vault && !vault._error) trackEntity("vault", vault, { projectId, titleKey: "name", userKey });
+        if (vault && !vault._error) {
+          trackEntity("vault", vault, { projectId, titleKey: "name", userKey });
+          if (includeDocuments && vault?.documents_url) {
+            const docs = await safeFetchAll(token, accountId, vault.documents_url, { ua, delayMs });
+            if (Array.isArray(docs)) {
+              let docCount = 0;
+              for (const doc of docs) {
+                if (Number.isFinite(maxDocumentsPerProject) && maxDocumentsPerProject > 0 && docCount >= maxDocumentsPerProject) break;
+                trackEntity("document", doc, { projectId, titleKey: "title", userKey });
+                docCount += 1;
+              }
+            }
+          }
+          if (includeUploads && vault?.uploads_url) {
+            const uploads = await safeFetchAll(token, accountId, vault.uploads_url, { ua, delayMs });
+            if (Array.isArray(uploads)) {
+              let uploadCount = 0;
+              for (const upload of uploads) {
+                if (Number.isFinite(maxUploadsPerProject) && maxUploadsPerProject > 0 && uploadCount >= maxUploadsPerProject) break;
+                trackEntity("upload", upload, { projectId, titleKey: "title", userKey });
+                uploadCount += 1;
+              }
+            }
+          }
+        }
       }
     }
 
