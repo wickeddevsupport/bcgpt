@@ -9,6 +9,24 @@ function noProps() {
   return { type: "object", properties: {}, additionalProperties: false };
 }
 
+function sanitizeSchema(schema) {
+  if (!schema || typeof schema !== "object") return schema;
+  const clone = { ...schema };
+  if (Array.isArray(clone.required)) {
+    const seen = new Set();
+    const unique = [];
+    for (const item of clone.required) {
+      if (item == null) continue;
+      const key = String(item);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      unique.push(key);
+    }
+    clone.required = unique;
+  }
+  return clone;
+}
+
 export function getTools() {
   const tools = [
     tool("startbcgpt", "Show connection status, current user (name/email), plus re-auth and logout links.", noProps()),
@@ -1642,7 +1660,7 @@ export function getTools() {
 
   // Append auto-generated endpoint tools (api_* wrappers)
   for (const endpoint of ENDPOINT_TOOLS || []) {
-    tools.push(tool(endpoint.name, endpoint.description, endpoint.inputSchema));
+    tools.push(tool(endpoint.name, endpoint.description, sanitizeSchema(endpoint.inputSchema)));
   }
 
   return tools;
