@@ -4395,6 +4395,30 @@ export async function handleMCP(reqBody, ctx) {
       });
     }
 
+    if (method === "ping") {
+      return ok(id, { ok: true });
+    }
+
+    if (method === "logging/setLevel") {
+      return ok(id, { ok: true });
+    }
+
+    if (method === "resources/list") {
+      return ok(id, { resources: [] });
+    }
+
+    if (method === "resources/read") {
+      return fail(id, { code: "RESOURCE_NOT_FOUND", message: "No resources available." });
+    }
+
+    if (method === "prompts/list") {
+      return ok(id, { prompts: [] });
+    }
+
+    if (method === "prompts/get") {
+      return fail(id, { code: "RESOURCE_NOT_FOUND", message: "No prompts available." });
+    }
+
     if (method !== "tools/call") {
       return fail(id, { code: "UNKNOWN_METHOD", message: "Unknown MCP method" });
     }

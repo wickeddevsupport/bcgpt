@@ -871,7 +871,17 @@ app.get("/projects/:projectId", async (req, res) => {
 app.post("/mcp", async (req, res) => {
   try {
     const method = req.body?.method;
-    if (method === "initialize" || method === "tools/list" || method === "notifications/initialized") {
+    if ([
+      "initialize",
+      "tools/list",
+      "notifications/initialized",
+      "ping",
+      "logging/setLevel",
+      "resources/list",
+      "resources/read",
+      "prompts/list",
+      "prompts/get"
+    ].includes(method)) {
       const ctx = {
         TOKEN: null,
         accountId: null,
