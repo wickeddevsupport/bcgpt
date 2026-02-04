@@ -870,6 +870,31 @@ app.get("/projects/:projectId", async (req, res) => {
 /* ================= MCP ================= */
 app.post("/mcp", async (req, res) => {
   try {
+    const method = req.body?.method;
+    if (method === "initialize" || method === "tools/list" || method === "notifications/initialized") {
+      const ctx = {
+        TOKEN: null,
+        accountId: null,
+        ua: UA,
+        userKey: null,
+        sessionKey: extractSessionKey(req),
+        authAccounts: [],
+        startStatus: async () => await startStatus(req),
+        basecampFetch: async () => {
+          const err = new Error("NOT_AUTHENTICATED");
+          err.code = "NOT_AUTHENTICATED";
+          throw err;
+        },
+        basecampFetchAll: async () => {
+          const err = new Error("NOT_AUTHENTICATED");
+          err.code = "NOT_AUTHENTICATED";
+          throw err;
+        },
+      };
+      const out = await handleMCP(req.body, ctx);
+      return res.json(out);
+    }
+
     const ctx = await buildMcpCtx(req);
     const out = await handleMCP(req.body, ctx);
     res.json(out);
