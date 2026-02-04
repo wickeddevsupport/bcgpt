@@ -49,11 +49,7 @@
   "servers": [
     {
       "url": "https://bcgpt.wickedlab.io",
-      "description": "Production server (custom domain)"
-    },
-    {
-      "url": "https://bcgpt.onrender.com",
-      "description": "Render default domain"
+      "description": "Production server"
     }
   ],
   "components": {
