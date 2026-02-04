@@ -1,0 +1,36 @@
+{
+  "name": "pieces-basecamp",
+  "$schema": "../../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/pieces/community/basecamp/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": [
+        "{options.outputPath}"
+      ],
+      "options": {
+        "outputPath": "dist/packages/pieces/community/basecamp",
+        "tsConfig": "packages/pieces/community/basecamp/tsconfig.lib.json",
+        "packageJson": "packages/pieces/community/basecamp/package.json",
+        "main": "packages/pieces/community/basecamp/src/index.ts",
+        "assets": [
+          "packages/pieces/community/basecamp/*.md"
+        ],
+        "buildableProjectDepsInPackageJsonType": "dependencies",
+        "updateBuildableProjectDepsInPackageJson": true,
+        "clean": false
+      },
+      "dependsOn": [
+        "^build"
+      ]
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "outputs": [
+        "{options.outputFile}"
+      ]
+    }
+  },
+  "tags": []
+}

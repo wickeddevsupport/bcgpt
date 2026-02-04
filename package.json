@@ -5,7 +5,7 @@
   "scripts": {
     "start": "node index.js",
     "postinstall": "node scripts/prepare-activepieces-install.js",
-    "start:all": "concurrently -k -n BCGPT,AP_BACKEND,AP_UI \"node index.js\" \"npm --prefix activepieces run dev:backend\" \"npm --prefix activepieces run serve:frontend\""
+    "start:all": "npm --prefix activepieces run build:dev-pieces && concurrently -k -n BCGPT,AP_BACKEND,AP_UI \"node index.js\" \"npm --prefix activepieces run dev:backend\" \"npm --prefix activepieces run serve:frontend\""
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",

@@ -28,6 +28,7 @@ AP_EXECUTION_MODE=UNSANDBOXED
 AP_ENCRYPTION_KEY=<32 hex chars>
 AP_JWT_SECRET=<random string>
 AP_CONFIG_PATH=/var/data/activepieces
+AP_DEV_PIECES=bcgpt,basecamp
 ```
 
 Notes:
@@ -35,6 +36,7 @@ Notes:
 - `AP_JWT_SECRET` is required.
 - `AP_CONFIG_PATH` is where PGLite stores data. Ensure this path is persistent on your host.
 - `AP_REDIS_TYPE=MEMORY` is fine for small, internal setups; use Redis for scale.
+- `AP_DEV_PIECES` loads local custom pieces from `dist/packages/pieces/community/*`.
 
 ## Start command
 Use the root script:
@@ -47,6 +49,10 @@ This runs:
 - BCGPT server (`index.js`)
 - Activepieces backend + engine (`dev:backend`)
 - Activepieces UI (`serve:frontend`)
+
+Before the servers start, the script builds the dev pieces:
+- `bcgpt`
+- `basecamp`
 
 Note: Activepieces API uses port `3000`. Keep BCGPT on a different port (default in `.env.example` is `10000`).
 
