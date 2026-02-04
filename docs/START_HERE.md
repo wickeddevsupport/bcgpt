@@ -27,12 +27,12 @@ When you work on this repo, follow these rules:
 1) Set required env vars in `.env` or your environment:
    - `BASECAMP_CLIENT_ID`
    - `BASECAMP_CLIENT_SECRET`
-2) Start the server (see `package.json` scripts). Use `npm run start:all` to launch BCGPT + n8n together.
+2) Start the server (see `package.json` scripts). Use `npm run start:all` to launch BCGPT + Activepieces together.
 3) Connect via `/startbcgpt` to authorize.
 4) Use `/mcp` for MCP JSON-RPC (preferred). `/action/<operation>` is a compatibility wrapper and may omit query parameters if the connector is buggy.
 
-## n8n integration
-See `docs/integrations/N8N.md` for the reverse proxy setup, n8n API key flow, and custom node install.
+## Activepieces integration
+See `docs/integrations/ACTIVEPIECES.md` for the reverse proxy setup and runtime settings.
 
 ## Core runtime files
 - `index.js` ? HTTP server, OpenAPI, and MCP wiring

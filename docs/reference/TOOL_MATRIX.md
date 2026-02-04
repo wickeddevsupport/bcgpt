@@ -85,14 +85,6 @@ This document maps MCP tools to Basecamp capabilities, highlights OpenAPI covera
 | `run_regression_suite` | Run a set of tool calls and report pass/fail checks. | no |
 | `run_default_regression_suite` | Run the default regression suite (pre-packaged checks). | no |
 | `mcp_call` | Proxy call to any MCP tool by name (full toolset access). | yes |
-| `n8n_set_api_key` | Store an n8n API key for the current session/user. | no |
-| `n8n_status` | Check whether an n8n API key is stored for the current session/user. | no |
-| `n8n_request` | Raw n8n API call. | no |
-| `n8n_list_workflows` | List n8n workflows (optional active filter). | no |
-| `n8n_get_workflow` | Get an n8n workflow by ID. | no |
-| `n8n_create_workflow` | Create an n8n workflow (confirmation required). | no |
-| `n8n_update_workflow` | Update an n8n workflow (confirmation required). | no |
-| `n8n_delete_workflow` | Delete an n8n workflow (confirmation required). | no |
 | `search_people` | Search people by name/email (server-side). | no |
 | `search_projects` | Search projects by name. | yes |
 | `search_cards` | Search cards by title/content (project required unless index is available). | no |

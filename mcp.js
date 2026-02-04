@@ -60,13 +60,10 @@ import {
   indexSearchItem,
   searchIndex,
   getIdempotencyResponse,
-  setIdempotencyResponse,
-  getN8nApiKey,
-  setN8nApiKey
+  setIdempotencyResponse
 } from "./db.js";
 import { getTools } from "./mcp/tools.js";
 import { ENDPOINT_TOOL_MAP } from "./mcp/endpoint-tools.js";
-import { n8nRequest } from "./n8n.js";
 
 // Intelligent chaining modules
 import { RequestContext } from './intelligent-executor.js';
@@ -124,46 +121,6 @@ function stripIdempotencyKeys(body) {
   delete cloned.request_id;
   delete cloned.requestId;
   return cloned;
-}
-
-function getN8nUserKey(ctx) {
-  if (ctx?.userKey) return ctx.userKey;
-  if (ctx?.sessionKey) return `session:${ctx.sessionKey}`;
-  return null;
-}
-
-function requireN8nApiKey(ctx, args = {}) {
-  const provided = args.api_key ? String(args.api_key).trim() : "";
-  if (provided) return provided;
-  const key = getN8nApiKey(getN8nUserKey(ctx));
-  if (!key) {
-    const err = new Error("N8N_API_KEY_REQUIRED");
-    err.code = "N8N_API_KEY_REQUIRED";
-    throw err;
-  }
-  return key;
-}
-
-function getWorkflowMissingFields(workflow) {
-  const missing = [];
-  if (!workflow || typeof workflow !== "object") {
-    missing.push("workflow");
-    return missing;
-  }
-  if (!workflow.name) missing.push("workflow.name");
-  if (!Array.isArray(workflow.nodes)) missing.push("workflow.nodes");
-  if (!workflow.connections || typeof workflow.connections !== "object") missing.push("workflow.connections");
-  if (!workflow.settings || typeof workflow.settings !== "object") missing.push("workflow.settings");
-  return missing;
-}
-
-function summarizeWorkflow(workflow) {
-  return {
-    name: workflow?.name || null,
-    nodes: Array.isArray(workflow?.nodes) ? workflow.nodes.length : 0,
-    connections: workflow?.connections ? Object.keys(workflow.connections).length : 0,
-    active: workflow?.active ?? null,
-  };
 }
 
 function withIdempotency(body, args) {
@@ -4479,123 +4436,6 @@ export async function handleMCP(reqBody, ctx) {
       } catch (e) {
         return fail(id, { code: "MCP_CALL_ERROR", message: e.message });
       }
-    }
-
-    // n8n (does not require Basecamp auth)
-    if (name === "n8n_set_api_key") {
-      const apiKey = String(args.api_key || "").trim();
-      if (!apiKey) return fail(id, { code: "BAD_REQUEST", message: "Missing api_key" });
-      const n8nUserKey = getN8nUserKey(ctx);
-      if (!n8nUserKey) {
-        return fail(id, { code: "BAD_REQUEST", message: "Missing session/user context for n8n API key." });
-      }
-      setN8nApiKey(n8nUserKey, apiKey);
-      return ok(id, { ok: true, user_key: n8nUserKey });
-    }
-
-    if (name === "n8n_status") {
-      const n8nUserKey = getN8nUserKey(ctx);
-      if (!n8nUserKey) return ok(id, { has_api_key: false, user_key: null });
-      const stored = getN8nApiKey(n8nUserKey);
-      return ok(id, { has_api_key: !!stored, user_key: n8nUserKey });
-    }
-
-    if (name === "n8n_request") {
-      const path = String(args.path || "").trim();
-      if (!path) return fail(id, { code: "BAD_REQUEST", message: "Missing path" });
-      const apiKey = requireN8nApiKey(ctx, args);
-      const result = await n8nRequest({
-        path,
-        method: args.method,
-        body: args.body,
-        query: args.query,
-        apiKey,
-      });
-      return ok(id, { status: result.status, data: result.data });
-    }
-
-    if (name === "n8n_list_workflows") {
-      const apiKey = requireN8nApiKey(ctx, args);
-      const query = {};
-      if (args.active !== undefined) query.active = args.active;
-      if (args.limit != null) query.limit = args.limit;
-      const result = await n8nRequest({ path: "/workflows", query, apiKey });
-      return ok(id, result.data);
-    }
-
-    if (name === "n8n_get_workflow") {
-      const workflowId = Number(args.id);
-      if (!Number.isFinite(workflowId)) {
-        return fail(id, { code: "BAD_REQUEST", message: "Missing workflow id" });
-      }
-      const apiKey = requireN8nApiKey(ctx, args);
-      const result = await n8nRequest({ path: `/workflows/${workflowId}`, apiKey });
-      return ok(id, result.data);
-    }
-
-    if (name === "n8n_create_workflow") {
-      const workflow = args.workflow;
-      const missing = getWorkflowMissingFields(workflow);
-      if (missing.length) {
-        return fail(id, {
-          code: "MISSING_FIELDS",
-          message: "Missing required workflow fields.",
-          details: { missing_fields: missing }
-        });
-      }
-      if (args.confirm !== true) {
-        return fail(id, {
-          code: "CONFIRM_REQUIRED",
-          message: "Confirm n8n workflow creation.",
-          details: { summary: summarizeWorkflow(workflow) }
-        });
-      }
-      const apiKey = requireN8nApiKey(ctx, args);
-      const result = await n8nRequest({ path: "/workflows", method: "POST", body: workflow, apiKey });
-      return ok(id, result.data);
-    }
-
-    if (name === "n8n_update_workflow") {
-      const workflowId = Number(args.id);
-      if (!Number.isFinite(workflowId)) {
-        return fail(id, { code: "BAD_REQUEST", message: "Missing workflow id" });
-      }
-      const workflow = args.workflow;
-      const missing = getWorkflowMissingFields(workflow);
-      if (missing.length) {
-        return fail(id, {
-          code: "MISSING_FIELDS",
-          message: "Missing required workflow fields.",
-          details: { missing_fields: missing }
-        });
-      }
-      if (args.confirm !== true) {
-        return fail(id, {
-          code: "CONFIRM_REQUIRED",
-          message: "Confirm n8n workflow update.",
-          details: { summary: summarizeWorkflow(workflow), workflow_id: workflowId }
-        });
-      }
-      const apiKey = requireN8nApiKey(ctx, args);
-      const result = await n8nRequest({ path: `/workflows/${workflowId}`, method: "PUT", body: workflow, apiKey });
-      return ok(id, result.data);
-    }
-
-    if (name === "n8n_delete_workflow") {
-      const workflowId = Number(args.id);
-      if (!Number.isFinite(workflowId)) {
-        return fail(id, { code: "BAD_REQUEST", message: "Missing workflow id" });
-      }
-      if (args.confirm !== true) {
-        return fail(id, {
-          code: "CONFIRM_REQUIRED",
-          message: "Confirm n8n workflow deletion.",
-          details: { workflow_id: workflowId }
-        });
-      }
-      const apiKey = requireN8nApiKey(ctx, args);
-      const result = await n8nRequest({ path: `/workflows/${workflowId}`, method: "DELETE", apiKey });
-      return ok(id, result.data);
     }
 
     // Everything else requires auth

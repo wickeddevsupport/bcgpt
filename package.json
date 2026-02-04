@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "start:all": "concurrently -k -n BCGPT,N8N \"node index.js\" \"n8n\""
+    "postinstall": "npm --prefix activepieces install --include=dev",
+    "start:all": "concurrently -k -n BCGPT,AP_BACKEND,AP_UI \"node index.js\" \"npm --prefix activepieces run dev:backend\" \"npm --prefix activepieces run serve:frontend\""
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",
@@ -13,7 +14,6 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "http-proxy": "^1.18.1",
-    "n8n": "^1.0.0",
     "node-fetch": "^3.3.2"
   }
 }

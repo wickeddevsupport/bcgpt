@@ -46,15 +46,15 @@ app.set("trust proxy", 1);
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 const UA = "bcgpt-full-v3";
 const BASECAMP_API = "https://3.basecampapi.com";
 const DEFAULT_ACCOUNT_ID = process.env.BASECAMP_DEFAULT_ACCOUNT_ID || null;
-const N8N_PROXY_HOST = String(process.env.N8N_PROXY_HOST || "").trim().toLowerCase();
-const N8N_PROXY_TARGET = process.env.N8N_PROXY_TARGET || "http://127.0.0.1:5678";
-const N8N_PROXY_ENABLED =
-  String(process.env.N8N_PROXY_ENABLED || "").toLowerCase() === "true" || Boolean(N8N_PROXY_HOST);
-const N8N_PROXY_ACTIVE = N8N_PROXY_ENABLED && Boolean(N8N_PROXY_HOST);
+const ACTIVEPIECES_PROXY_HOST = String(process.env.ACTIVEPIECES_PROXY_HOST || "").trim().toLowerCase();
+const ACTIVEPIECES_PROXY_TARGET = process.env.ACTIVEPIECES_PROXY_TARGET || "http://127.0.0.1:4200";
+const ACTIVEPIECES_PROXY_ENABLED =
+  String(process.env.ACTIVEPIECES_PROXY_ENABLED || "").toLowerCase() === "true" || Boolean(ACTIVEPIECES_PROXY_HOST);
+const ACTIVEPIECES_PROXY_ACTIVE = ACTIVEPIECES_PROXY_ENABLED && Boolean(ACTIVEPIECES_PROXY_HOST);
 
 // Log the account ID being used on startup
 console.log(`[Startup] DEFAULT_ACCOUNT_ID from env: ${DEFAULT_ACCOUNT_ID}`);
@@ -1014,21 +1014,21 @@ app.get("/db/info", async (req, res) => {
 });
 
 let server = null;
-if (N8N_PROXY_ACTIVE) {
-  const n8nProxy = httpProxy.createProxyServer({
-    target: N8N_PROXY_TARGET,
+if (ACTIVEPIECES_PROXY_ACTIVE) {
+  const activepiecesProxy = httpProxy.createProxyServer({
+    target: ACTIVEPIECES_PROXY_TARGET,
     ws: true,
     changeOrigin: true,
     xfwd: true,
   });
 
-  n8nProxy.on("error", (err, req, res) => {
-    console.error(`[n8n proxy] ${err?.message || err}`);
+  activepiecesProxy.on("error", (err, req, res) => {
+    console.error(`[activepieces proxy] ${err?.message || err}`);
     if (res?.writeHead && !res.headersSent) {
       res.writeHead(502, { "Content-Type": "application/json" });
     }
     if (res?.end) {
-      res.end(JSON.stringify({ ok: false, error: "N8N_PROXY_ERROR" }));
+      res.end(JSON.stringify({ ok: false, error: "ACTIVEPIECES_PROXY_ERROR" }));
     } else {
       try {
         res?.destroy?.();
@@ -1038,28 +1038,28 @@ if (N8N_PROXY_ACTIVE) {
     }
   });
 
-  const isN8nHost = (req) => {
+  const isActivepiecesHost = (req) => {
     const host = String(req?.headers?.host || "").toLowerCase();
     const hostname = host.split(":")[0];
-    return hostname === N8N_PROXY_HOST;
+    return hostname === ACTIVEPIECES_PROXY_HOST;
   };
 
   server = http.createServer((req, res) => {
-    if (isN8nHost(req)) {
-      return n8nProxy.web(req, res);
+    if (isActivepiecesHost(req)) {
+      return activepiecesProxy.web(req, res);
     }
     return app(req, res);
   });
 
   server.on("upgrade", (req, socket, head) => {
-    if (isN8nHost(req)) {
-      n8nProxy.ws(req, socket, head);
+    if (isActivepiecesHost(req)) {
+      activepiecesProxy.ws(req, socket, head);
     } else {
       socket.destroy();
     }
   });
 
-  console.log(`[Startup] n8n proxy enabled for ${N8N_PROXY_HOST} -> ${N8N_PROXY_TARGET}`);
+  console.log(`[Startup] activepieces proxy enabled for ${ACTIVEPIECES_PROXY_HOST} -> ${ACTIVEPIECES_PROXY_TARGET}`);
 } else {
   server = http.createServer(app);
 }

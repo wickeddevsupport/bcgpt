@@ -11,7 +11,7 @@
 - `docs/reference/bc3-api` (official Basecamp API docs repo)
 
 ## Integrations
-- `docs/integrations/N8N.md`
+- `docs/integrations/ACTIVEPIECES.md`
 
 ## Phases & Architecture
 - `docs/phases/IMPLEMENTATION_QUICKSTART.md`

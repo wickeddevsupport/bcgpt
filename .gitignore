@@ -1,7 +1,14 @@
 node_modules/
 .env
+.env.example
 *.sqlite
 *.db
 data/
 .vscode/
 .DS_Store
+activepieces/node_modules/
+activepieces/dist/
+activepieces/.nx/
+activepieces/tmp/
+activepieces/.env
+activepieces/package-lock.json

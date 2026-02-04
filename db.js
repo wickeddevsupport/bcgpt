@@ -56,13 +56,6 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_user_sessions_user_key ON user_sessions(user_key);
 
-  CREATE TABLE IF NOT EXISTS n8n_credentials (
-    user_key TEXT PRIMARY KEY,
-    api_key TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-  );
-
   CREATE TABLE IF NOT EXISTS search_index (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_key TEXT NOT NULL DEFAULT 'legacy',
@@ -540,38 +533,6 @@ export function deleteSession(sessionKey) {
   if (!key) return;
   const stmt = db.prepare("DELETE FROM user_sessions WHERE session_key = ?");
   stmt.run(key);
-}
-
-// n8n credentials
-export function setN8nApiKey(userKey, apiKey) {
-  const key = normalizeUserKey(userKey);
-  if (!key || !apiKey) return;
-  const now = Math.floor(Date.now() / 1000);
-  const stmt = db.prepare(`
-    INSERT INTO n8n_credentials (user_key, api_key, created_at, updated_at)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(user_key) DO UPDATE SET
-      api_key = excluded.api_key,
-      updated_at = excluded.updated_at
-  `);
-  stmt.run(key, String(apiKey), now, now);
-  console.log(`[DB] n8n API key stored/updated`);
-}
-
-export function getN8nApiKey(userKey) {
-  const key = normalizeUserKey(userKey);
-  if (!key) return null;
-  const stmt = db.prepare("SELECT api_key FROM n8n_credentials WHERE user_key = ?");
-  const row = stmt.get(key);
-  return row?.api_key || null;
-}
-
-export function clearN8nApiKey(userKey) {
-  const key = normalizeUserKey(userKey);
-  if (!key) return;
-  const stmt = db.prepare("DELETE FROM n8n_credentials WHERE user_key = ?");
-  stmt.run(key);
-  console.log(`[DB] n8n API key cleared`);
 }
 
 // Search index operations

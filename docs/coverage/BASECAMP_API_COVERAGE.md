@@ -5,7 +5,7 @@ Last updated: 2026-02-04
 This report re-checks coverage against the app's current tool set and the OpenAPI wrapper.
 
 ## Summary
-- MCP tools defined in `mcp.js`: 298
+- MCP tools defined in `mcp.js`: 290
 - OpenAPI actions in `openapi.json`: 30 (limit enforced)
 - Smart routing available via `smart_action`
 
@@ -73,9 +73,6 @@ Added MCP tools to cover more of the Basecamp API families:
 - Webhooks: `list_webhooks`, `get_webhook`, `create_webhook`, `update_webhook`, `delete_webhook`
 - Client communications: `list_client_correspondences`, `get_client_correspondence`, `list_client_approvals`, `get_client_approval`, `list_client_replies`, `get_client_reply`
 - Iteration/caching helpers: `list_card_table_summaries`, `list_card_table_summaries_iter`, `list_project_card_table_contents`, `get_cached_payload_chunk`, `export_cached_payload`
-
-## Recent additions (Integrations)
-- n8n tools: `n8n_set_api_key`, `n8n_status`, `n8n_request`, `n8n_list_workflows`, `n8n_get_workflow`, `n8n_create_workflow`, `n8n_update_workflow`, `n8n_delete_workflow`
 
 ## Recent additions (True MCP hardening)
 - Search: `search_projects`, `search_cards`
