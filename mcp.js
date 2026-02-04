@@ -4371,7 +4371,22 @@ export async function handleMCP(reqBody, ctx) {
 
   try {
     if (method === "initialize") {
-      return ok(id, { name: "bcgpt", version: "3.1", sessionId: crypto.randomUUID() });
+      const requested = params?.protocolVersion ? String(params.protocolVersion) : null;
+      const protocolVersion = requested || process.env.MCP_PROTOCOL_VERSION || "2025-06-18";
+      return ok(id, {
+        protocolVersion,
+        capabilities: {
+          logging: {},
+          prompts: { listChanged: false },
+          resources: { subscribe: false, listChanged: false },
+          tools: { listChanged: true }
+        },
+        serverInfo: { name: "bcgpt", version: "3.1" }
+      });
+    }
+
+    if (method === "notifications/initialized") {
+      return ok(id, { ok: true });
     }
 
     if (method === "tools/list") {
