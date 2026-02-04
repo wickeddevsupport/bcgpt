@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "postinstall": "node scripts/prepare-activepieces-install.js && npm --prefix activepieces ci --include=dev --no-audit --no-fund",
+    "postinstall": "node scripts/prepare-activepieces-install.js",
     "start:all": "concurrently -k -n BCGPT,AP_BACKEND,AP_UI \"node index.js\" \"npm --prefix activepieces run dev:backend\" \"npm --prefix activepieces run serve:frontend\""
   },
   "dependencies": {
