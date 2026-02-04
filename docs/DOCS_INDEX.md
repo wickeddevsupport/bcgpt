@@ -10,6 +10,9 @@
 - `docs/reference/TOOL_MATRIX.md`
 - `docs/reference/bc3-api` (official Basecamp API docs repo)
 
+## Integrations
+- `docs/integrations/N8N.md`
+
 ## Phases & Architecture
 - `docs/phases/IMPLEMENTATION_QUICKSTART.md`
 - `docs/phases/INTELLIGENT_CHAINING_ARCHITECTURE.md`

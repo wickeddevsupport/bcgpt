@@ -1,11 +1,13 @@
 # START HERE: Project Onboarding (BCGPT)
 
-Last updated: 2026-02-03
+Last updated: 2026-02-04
 
 This doc is the entry point for a brand-new session. Read this first, then follow the links.
 
 ## What this project is
 BCGPT is a Basecamp MCP server with an OpenAPI layer for ChatGPT. It supports an intelligent chaining layer that enriches results, applies fallback logic, and (via `smart_action`) routes queries even when the action list is limited to 30 items. **/mcp is the authoritative interface; /action is a compatibility wrapper.**
+
+Multi-tenant support uses a `session_key`. Always include `session_key` in `/action` and `/mcp` calls when using multi-user sessions.
 
 ## Behavior guide (for humans and AIs)
 When you work on this repo, follow these rules:
@@ -25,9 +27,12 @@ When you work on this repo, follow these rules:
 1) Set required env vars in `.env` or your environment:
    - `BASECAMP_CLIENT_ID`
    - `BASECAMP_CLIENT_SECRET`
-2) Start the server (see `package.json` scripts).
+2) Start the server (see `package.json` scripts). Use `npm run start:all` to launch BCGPT + n8n together.
 3) Connect via `/startbcgpt` to authorize.
 4) Use `/mcp` for MCP JSON-RPC (preferred). `/action/<operation>` is a compatibility wrapper and may omit query parameters if the connector is buggy.
+
+## n8n integration
+See `docs/integrations/N8N.md` for the reverse proxy setup, n8n API key flow, and custom node install.
 
 ## Core runtime files
 - `index.js` ? HTTP server, OpenAPI, and MCP wiring

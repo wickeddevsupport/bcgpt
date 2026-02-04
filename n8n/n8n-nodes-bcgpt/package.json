@@ -1,0 +1,15 @@
+{
+  "name": "n8n-nodes-bcgpt",
+  "version": "0.1.0",
+  "description": "BCGPT MCP connector for n8n",
+  "license": "MIT",
+  "main": "index.js",
+  "n8n": {
+    "nodes": [
+      "nodes/Bcgpt.node.js"
+    ],
+    "credentials": [
+      "credentials/BcgptApi.credentials.js"
+    ]
+  }
+}

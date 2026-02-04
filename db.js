@@ -30,6 +30,39 @@ db.exec(`
     updated_at INTEGER NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS user_token (
+    user_key TEXT PRIMARY KEY,
+    access_token TEXT NOT NULL,
+    token_type TEXT DEFAULT 'Bearer',
+    expires_in INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS user_auth_cache (
+    user_key TEXT PRIMARY KEY,
+    identity_name TEXT,
+    identity_email TEXT,
+    accounts TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS user_sessions (
+    session_key TEXT PRIMARY KEY,
+    user_key TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_user_sessions_user_key ON user_sessions(user_key);
+
+  CREATE TABLE IF NOT EXISTS n8n_credentials (
+    user_key TEXT PRIMARY KEY,
+    api_key TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS search_index (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_key TEXT NOT NULL DEFAULT 'legacy',
@@ -102,6 +135,12 @@ db.exec(`
 function normalizeUserKey(userKey) {
   if (!userKey) return null;
   const trimmed = String(userKey).trim();
+  return trimmed ? trimmed : null;
+}
+
+function normalizeSessionKey(sessionKey) {
+  if (!sessionKey) return null;
+  const trimmed = String(sessionKey).trim();
   return trimmed ? trimmed : null;
 }
 
@@ -361,6 +400,180 @@ export function setAuthCache(auth, userKey = null) {
   console.log(`[DB] Auth cache updated`);
 }
 
+export function clearAuthCache() {
+  const stmt = db.prepare("DELETE FROM auth_cache WHERE id = 1");
+  stmt.run();
+  console.log(`[DB] Auth cache cleared`);
+}
+
+// User-scoped token operations
+export function getUserToken(userKey) {
+  const key = normalizeUserKey(userKey);
+  if (!key) return null;
+  const stmt = db.prepare("SELECT access_token, token_type, expires_in, user_key FROM user_token WHERE user_key = ?");
+  const row = stmt.get(key);
+  if (!row) return null;
+  return {
+    access_token: row.access_token,
+    token_type: row.token_type,
+    expires_in: row.expires_in,
+    user_key: row.user_key,
+  };
+}
+
+export function setUserToken(token, userKey) {
+  const key = normalizeUserKey(userKey);
+  if (!key || !token?.access_token) return;
+  const now = Math.floor(Date.now() / 1000);
+  const stmt = db.prepare(`
+    INSERT INTO user_token (user_key, access_token, token_type, expires_in, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_key) DO UPDATE SET
+      access_token = excluded.access_token,
+      token_type = excluded.token_type,
+      expires_in = excluded.expires_in,
+      updated_at = excluded.updated_at
+  `);
+  stmt.run(key, token.access_token, token.token_type || "Bearer", token.expires_in, now, now);
+  console.log(`[DB] User token stored/updated`);
+}
+
+export function clearUserToken(userKey) {
+  const key = normalizeUserKey(userKey);
+  if (!key) return;
+  const stmt = db.prepare("DELETE FROM user_token WHERE user_key = ?");
+  stmt.run(key);
+  console.log(`[DB] User token cleared`);
+}
+
+// User-scoped auth cache operations
+export function getUserAuthCache(userKey) {
+  const key = normalizeUserKey(userKey);
+  if (!key) return null;
+  const stmt = db.prepare("SELECT identity_name, identity_email, accounts, user_key FROM user_auth_cache WHERE user_key = ?");
+  const row = stmt.get(key);
+  if (!row) return null;
+  return {
+    identity: { name: row.identity_name, email_address: row.identity_email },
+    accounts: JSON.parse(row.accounts || "[]"),
+    user_key: row.user_key || null,
+  };
+}
+
+export function setUserAuthCache(auth, userKey) {
+  const key = normalizeUserKey(userKey);
+  if (!key) return;
+  const now = Math.floor(Date.now() / 1000);
+  const stmt = db.prepare(`
+    INSERT INTO user_auth_cache (user_key, identity_name, identity_email, accounts, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(user_key) DO UPDATE SET
+      identity_name = excluded.identity_name,
+      identity_email = excluded.identity_email,
+      accounts = excluded.accounts,
+      updated_at = excluded.updated_at
+  `);
+  stmt.run(
+    key,
+    auth.identity?.name || null,
+    auth.identity?.email_address || null,
+    JSON.stringify(auth.accounts || []),
+    now
+  );
+  console.log(`[DB] User auth cache updated`);
+}
+
+export function clearUserAuthCache(userKey) {
+  const key = normalizeUserKey(userKey);
+  if (!key) return;
+  const stmt = db.prepare("DELETE FROM user_auth_cache WHERE user_key = ?");
+  stmt.run(key);
+  console.log(`[DB] User auth cache cleared`);
+}
+
+function generateSessionKey() {
+  return crypto.randomBytes(18).toString("hex");
+}
+
+// Session operations
+export function createSession(sessionKey = null, userKey = null) {
+  const key = normalizeSessionKey(sessionKey) || generateSessionKey();
+  const ukey = normalizeUserKey(userKey);
+  const now = Math.floor(Date.now() / 1000);
+  const stmt = db.prepare(`
+    INSERT INTO user_sessions (session_key, user_key, created_at, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(session_key) DO UPDATE SET
+      user_key = COALESCE(excluded.user_key, user_key),
+      updated_at = excluded.updated_at
+  `);
+  stmt.run(key, ukey, now, now);
+  return key;
+}
+
+export function bindSession(sessionKey, userKey) {
+  const key = normalizeSessionKey(sessionKey);
+  const ukey = normalizeUserKey(userKey);
+  if (!key) return null;
+  const now = Math.floor(Date.now() / 1000);
+  const stmt = db.prepare(`
+    INSERT INTO user_sessions (session_key, user_key, created_at, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(session_key) DO UPDATE SET
+      user_key = excluded.user_key,
+      updated_at = excluded.updated_at
+  `);
+  stmt.run(key, ukey, now, now);
+  return key;
+}
+
+export function getSessionUser(sessionKey) {
+  const key = normalizeSessionKey(sessionKey);
+  if (!key) return null;
+  const stmt = db.prepare("SELECT user_key FROM user_sessions WHERE session_key = ?");
+  const row = stmt.get(key);
+  return row?.user_key || null;
+}
+
+export function deleteSession(sessionKey) {
+  const key = normalizeSessionKey(sessionKey);
+  if (!key) return;
+  const stmt = db.prepare("DELETE FROM user_sessions WHERE session_key = ?");
+  stmt.run(key);
+}
+
+// n8n credentials
+export function setN8nApiKey(userKey, apiKey) {
+  const key = normalizeUserKey(userKey);
+  if (!key || !apiKey) return;
+  const now = Math.floor(Date.now() / 1000);
+  const stmt = db.prepare(`
+    INSERT INTO n8n_credentials (user_key, api_key, created_at, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(user_key) DO UPDATE SET
+      api_key = excluded.api_key,
+      updated_at = excluded.updated_at
+  `);
+  stmt.run(key, String(apiKey), now, now);
+  console.log(`[DB] n8n API key stored/updated`);
+}
+
+export function getN8nApiKey(userKey) {
+  const key = normalizeUserKey(userKey);
+  if (!key) return null;
+  const stmt = db.prepare("SELECT api_key FROM n8n_credentials WHERE user_key = ?");
+  const row = stmt.get(key);
+  return row?.api_key || null;
+}
+
+export function clearN8nApiKey(userKey) {
+  const key = normalizeUserKey(userKey);
+  if (!key) return;
+  const stmt = db.prepare("DELETE FROM n8n_credentials WHERE user_key = ?");
+  stmt.run(key);
+  console.log(`[DB] n8n API key cleared`);
+}
+
 // Search index operations
 export function indexSearchItem(type, objectId, { projectId, title, content, url, userKey } = {}) {
   const now = Math.floor(Date.now() / 1000);
@@ -568,5 +781,30 @@ export function getToolCacheStats({ userKey = null } = {}) {
   const stmt = db.prepare("SELECT tool_name, COUNT(*) as count FROM tool_cache WHERE user_key = ? GROUP BY tool_name");
   return stmt.all(key);
 }
+
+function migrateLegacyUserData() {
+  if (!legacyUserKey) return;
+  try {
+    const hasUserToken = db.prepare("SELECT 1 FROM user_token WHERE user_key = ?").get(legacyUserKey);
+    if (!hasUserToken) {
+      const legacyToken = getToken();
+      if (legacyToken?.access_token) {
+        setUserToken(legacyToken, legacyUserKey);
+      }
+    }
+
+    const hasUserAuth = db.prepare("SELECT 1 FROM user_auth_cache WHERE user_key = ?").get(legacyUserKey);
+    if (!hasUserAuth) {
+      const legacyAuth = getAuthCache();
+      if (legacyAuth?.accounts) {
+        setUserAuthCache(legacyAuth, legacyUserKey);
+      }
+    }
+  } catch (e) {
+    console.warn(`[DB] Legacy migration skipped: ${e?.message || e}`);
+  }
+}
+
+migrateLegacyUserData();
 
 export default db;

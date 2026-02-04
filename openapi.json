@@ -48,8 +48,12 @@
   ],
   "servers": [
     {
+      "url": "https://bcgpt.wickedlab.io",
+      "description": "Production server (custom domain)"
+    },
+    {
       "url": "https://bcgpt.onrender.com",
-      "description": "Production server"
+      "description": "Render default domain"
     }
   ],
   "components": {
@@ -154,6 +158,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "additionalProperties": false
@@ -189,6 +197,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -236,6 +248,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -276,6 +292,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -322,6 +342,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -356,6 +380,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "additionalProperties": false
@@ -393,6 +421,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -430,6 +462,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -492,6 +528,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -526,6 +566,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -564,6 +608,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "additionalProperties": false
@@ -595,6 +643,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -664,6 +716,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -735,6 +791,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -773,6 +833,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -811,6 +875,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -855,6 +923,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -905,6 +977,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -969,6 +1045,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -1033,6 +1113,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -1084,6 +1168,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -1119,6 +1207,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -1157,6 +1249,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -1210,6 +1306,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -1254,6 +1354,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -1294,6 +1398,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -1352,6 +1460,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -1390,6 +1502,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -1432,6 +1548,10 @@
                   "assignee": {
                     "type": "string",
                     "description": "Alias for person."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [],
@@ -1480,6 +1600,10 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
+                  },
+                  "session_key": {
+                    "type": "string",
+                    "description": "Session key for multi-tenant auth."
                   }
                 },
                 "required": [

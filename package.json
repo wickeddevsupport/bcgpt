@@ -3,13 +3,17 @@
   "version": "1.2.0",
   "type": "module",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "start:all": "concurrently -k -n BCGPT,N8N \"node index.js\" \"n8n\""
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",
+    "concurrently": "^8.2.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "http-proxy": "^1.18.1",
+    "n8n": "^1.0.0",
     "node-fetch": "^3.3.2"
   }
 }
