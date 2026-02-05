@@ -3,8 +3,6 @@
 .gitignore
 .env
 .env.example
-.nx
-.tmp
-.tmp/*
-dist
-coverage
+*.sqlite
+*.db
+backup
