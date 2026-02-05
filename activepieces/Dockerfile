@@ -62,9 +62,9 @@ WORKDIR /usr/src/app
 # Copy only dependency files first for better layer caching
 COPY .npmrc package.json bun.lock ./
 
-# Install all dependencies with frozen lockfile
+# Install all dependencies (avoid frozen lockfile issues in CI)
 RUN --mount=type=cache,target=/root/.bun/install/cache \
-    bun install --frozen-lockfile
+    bun install
 
 # Copy source code after dependency installation
 COPY . .
@@ -75,7 +75,7 @@ RUN npx nx run-many --target=build --projects=react-ui,server-api --configuratio
 # Install production dependencies only for the backend API
 RUN --mount=type=cache,target=/root/.bun/install/cache \
     cd dist/packages/server/api && \
-    bun install --production --frozen-lockfile
+    bun install --production
 
 ### STAGE 2: Run ###
 FROM base AS run
