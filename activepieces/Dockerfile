@@ -77,6 +77,9 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
     cd dist/packages/server/api && \
     bun install --production
 
+# Remove top-level deps and source packages to avoid huge copy footprint
+RUN rm -rf /usr/src/app/node_modules /usr/src/app/packages
+
 ### STAGE 2: Run ###
 FROM base AS run
 
