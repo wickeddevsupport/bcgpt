@@ -77,6 +77,10 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
     cd dist/packages/server/api && \
     bun install --production
 
+# Preserve isolate default config before removing sources
+RUN mkdir -p /usr/src/app/dist/assets && \
+    cp /usr/src/app/packages/server/api/src/assets/default.cf /usr/src/app/dist/assets/default.cf
+
 # Remove top-level deps and source packages to avoid huge copy footprint
 RUN rm -rf /usr/src/app/node_modules /usr/src/app/packages
 
@@ -93,7 +97,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 # Copy static configuration files first (better layer caching)
 COPY nginx.react.conf /etc/nginx/nginx.conf
-COPY --from=build /usr/src/app/packages/server/api/src/assets/default.cf /usr/local/etc/isolate
+COPY --from=build /usr/src/app/dist/assets/default.cf /usr/local/etc/isolate
 COPY docker-entrypoint.sh .
 
 # Create all necessary directories in one layer
