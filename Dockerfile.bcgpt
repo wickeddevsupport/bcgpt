@@ -10,7 +10,7 @@ RUN apt-get update \
 
 COPY package.json package-lock.json ./
 ENV npm_config_build_from_source=true
-RUN npm install --omit=dev --no-audit --no-fund
+RUN npm install --omit=dev --no-audit --no-fund || (cat /root/.npm/_logs/* || true; exit 1)
 
 COPY . .
 
