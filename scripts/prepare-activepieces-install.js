@@ -5,7 +5,11 @@ import { execSync } from 'child_process';
 const root = process.cwd();
 const activepiecesRoot = path.join(root, 'activepieces');
 const activepiecesNodeModules = path.join(activepiecesRoot, 'node_modules');
-const forceClean = process.env.ACTIVEPIECES_CLEAN_INSTALL === 'true';
+const isRender =
+  String(process.env.RENDER || '').toLowerCase() === 'true' ||
+  Boolean(process.env.RENDER_SERVICE_ID) ||
+  Boolean(process.env.RENDER_EXTERNAL_URL);
+const forceClean = process.env.ACTIVEPIECES_CLEAN_INSTALL === 'true' || isRender;
 
 if (forceClean && fs.existsSync(activepiecesNodeModules)) {
   fs.rmSync(activepiecesNodeModules, { recursive: true, force: true });
