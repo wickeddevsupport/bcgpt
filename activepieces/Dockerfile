@@ -105,7 +105,7 @@ COPY --from=build /usr/src/app/LICENSE .
 COPY --from=build /usr/src/app/dist/packages/engine/ ./dist/packages/engine/
 COPY --from=build /usr/src/app/dist/packages/server/ ./dist/packages/server/
 COPY --from=build /usr/src/app/dist/packages/shared/ ./dist/packages/shared/
-COPY --from=build /usr/src/app/packages ./packages
+# Runtime does not require full source packages; keep image smaller and avoid deep paths
 
 # Copy frontend files to Nginx document root
 COPY --from=build /usr/src/app/dist/packages/react-ui /usr/share/nginx/html/
