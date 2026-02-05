@@ -11,6 +11,18 @@ const isRender =
   Boolean(process.env.RENDER_EXTERNAL_URL);
 const forceClean = process.env.ACTIVEPIECES_CLEAN_INSTALL === 'true' || isRender;
 
+const usePnpm = process.env.ACTIVEPIECES_USE_PNPM !== 'false';
+const pnpmVersion = process.env.ACTIVEPIECES_PNPM_VERSION || '9.15.0';
+
+const tryExec = (command) => {
+  try {
+    execSync(command, { stdio: 'inherit' });
+    return true;
+  } catch (err) {
+    return false;
+  }
+};
+
 if (forceClean && fs.existsSync(activepiecesNodeModules)) {
   fs.rmSync(activepiecesNodeModules, { recursive: true, force: true });
   console.log(`[postinstall] removed ${activepiecesNodeModules}`);
@@ -27,15 +39,28 @@ if (fs.existsSync(verdaccioNodeFetch)) {
   console.log(`[postinstall] removed ${verdaccioNodeFetch}`);
 }
 
-const lockfile = path.join(activepiecesRoot, 'package-lock.json');
-const useCi = fs.existsSync(lockfile);
-
-const installCmd = useCi
-  ? 'npm --prefix activepieces ci --include=dev --no-audit --no-fund'
-  : 'npm --prefix activepieces install --include=dev --no-audit --no-fund';
-
-if (!useCi) {
-  console.warn('[postinstall] activepieces/package-lock.json missing, using npm install');
+let pnpmReady = false;
+if (usePnpm) {
+  pnpmReady = tryExec('pnpm -v');
+  if (!pnpmReady) {
+    const corepackOk = tryExec('corepack enable') && tryExec(`corepack prepare pnpm@${pnpmVersion} --activate`);
+    pnpmReady = corepackOk && tryExec('pnpm -v');
+  }
 }
 
-execSync(installCmd, { stdio: 'inherit' });
+if (pnpmReady) {
+  console.log('[postinstall] using pnpm for activepieces install');
+  execSync('pnpm -C activepieces install --no-frozen-lockfile --prod=false', { stdio: 'inherit' });
+} else {
+  const lockfile = path.join(activepiecesRoot, 'package-lock.json');
+  const useCi = fs.existsSync(lockfile);
+  const installCmd = useCi
+    ? 'npm --prefix activepieces ci --include=dev --no-audit --no-fund'
+    : 'npm --prefix activepieces install --include=dev --no-audit --no-fund';
+
+  if (!useCi) {
+    console.warn('[postinstall] activepieces/package-lock.json missing, using npm install');
+  }
+
+  execSync(installCmd, { stdio: 'inherit' });
+}
