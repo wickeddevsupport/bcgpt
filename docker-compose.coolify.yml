@@ -1,0 +1,75 @@
+﻿version: "3.9"
+
+services:
+  bcgpt:
+    build:
+      context: .
+      dockerfile: Dockerfile.bcgpt
+    environment:
+      PORT: "10000"
+      APP_BASE_URL: "${APP_BASE_URL}"
+      BASECAMP_CLIENT_ID: "${BASECAMP_CLIENT_ID}"
+      BASECAMP_CLIENT_SECRET: "${BASECAMP_CLIENT_SECRET}"
+      BASECAMP_DEFAULT_ACCOUNT_ID: "${BASECAMP_DEFAULT_ACCOUNT_ID}"
+      CHATGPT_API_KEY: "${CHATGPT_API_KEY}"
+      OTP_SECRET: "${OTP_SECRET}"
+      PAYLOAD_CACHE_TTL_SEC: "${PAYLOAD_CACHE_TTL_SEC}"
+      SQLITE_PATH: "/data/bcgpt.sqlite"
+      ACTIVEPIECES_PROXY_ENABLED: "${ACTIVEPIECES_PROXY_ENABLED:-false}"
+      ACTIVEPIECES_PROXY_HOST: "${ACTIVEPIECES_PROXY_HOST:-automate.wickedlab.io}"
+      ACTIVEPIECES_PROXY_TARGET: "http://activepieces:80"
+    volumes:
+      - bcgpt-data:/data
+    expose:
+      - "10000"
+    depends_on:
+      - activepieces
+
+  activepieces:
+    build:
+      context: ./activepieces
+      dockerfile: Dockerfile
+    environment:
+      AP_EDITION: "ce"
+      AP_ENVIRONMENT: "prod"
+      AP_FRONTEND_URL: "${AP_FRONTEND_URL}"
+      AP_EXECUTION_MODE: "UNSANDBOXED"
+      AP_DB_TYPE: "POSTGRES"
+      AP_REDIS_TYPE: "STANDALONE"
+      AP_POSTGRES_HOST: "postgres"
+      AP_POSTGRES_PORT: "5432"
+      AP_POSTGRES_USERNAME: "${AP_POSTGRES_USERNAME}"
+      AP_POSTGRES_PASSWORD: "${AP_POSTGRES_PASSWORD}"
+      AP_POSTGRES_DATABASE: "${AP_POSTGRES_DATABASE}"
+      AP_REDIS_HOST: "redis"
+      AP_REDIS_PORT: "6379"
+      AP_JWT_SECRET: "${AP_JWT_SECRET}"
+      AP_ENCRYPTION_KEY: "${AP_ENCRYPTION_KEY}"
+      AP_CONFIG_PATH: "/var/data/activepieces"
+    volumes:
+      - activepieces-data:/var/data/activepieces
+    expose:
+      - "80"
+    depends_on:
+      - postgres
+      - redis
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: "${AP_POSTGRES_USERNAME}"
+      POSTGRES_PASSWORD: "${AP_POSTGRES_PASSWORD}"
+      POSTGRES_DB: "${AP_POSTGRES_DATABASE}"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis-data:/data
+
+volumes:
+  bcgpt-data:
+  activepieces-data:
+  postgres-data:
+  redis-data:

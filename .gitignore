@@ -12,3 +12,4 @@ activepieces/.nx/
 activepieces/tmp/
 activepieces/.env
 activepieces/package-lock.json
+local/

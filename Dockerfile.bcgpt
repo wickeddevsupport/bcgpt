@@ -1,0 +1,17 @@
+﻿FROM node:20.19-bullseye-slim
+
+WORKDIR /app
+ENV NODE_ENV=production \
+    SKIP_ACTIVEPIECES_INSTALL=true
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY . .
+
+EXPOSE 10000
+CMD ["node", "index.js"]

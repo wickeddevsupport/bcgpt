@@ -5,6 +5,9 @@ import { execSync } from 'child_process';
 const root = process.cwd();
 const activepiecesRoot = path.join(root, 'activepieces');
 const activepiecesNodeModules = path.join(activepiecesRoot, 'node_modules');
+const skipInstall =
+  process.env.SKIP_ACTIVEPIECES_INSTALL === 'true' ||
+  process.env.SKIP_ACTIVEPIECES_INSTALL === '1';
 const isRender =
   String(process.env.RENDER || '').toLowerCase() === 'true' ||
   Boolean(process.env.RENDER_SERVICE_ID) ||
@@ -22,6 +25,11 @@ const tryExec = (command) => {
     return false;
   }
 };
+
+if (skipInstall) {
+  console.log('[postinstall] SKIP_ACTIVEPIECES_INSTALL=true, skipping activepieces install');
+  process.exit(0);
+}
 
 if (forceClean && fs.existsSync(activepiecesNodeModules)) {
   fs.rmSync(activepiecesNodeModules, { recursive: true, force: true });
