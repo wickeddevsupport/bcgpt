@@ -5,6 +5,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.bcgpt
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.bcgpt.rule=Host(`bcgpt.wickedlab.io`)"
+      - "traefik.http.routers.bcgpt.entrypoints=http,https"
+      - "traefik.http.routers.bcgpt.tls=true"
+      - "traefik.http.routers.bcgpt.tls.certresolver=letsencrypt"
+      - "traefik.http.services.bcgpt.loadbalancer.server.port=10000"
     environment:
       PORT: "10000"
       APP_BASE_URL: "${APP_BASE_URL}"

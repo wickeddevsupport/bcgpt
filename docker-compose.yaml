@@ -5,6 +5,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.bcgpt
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.bcgpt.rule=Host(`bcgpt.wickedlab.io`)"
+      - "traefik.http.routers.bcgpt.entrypoints=http,https"
+      - "traefik.http.routers.bcgpt.tls=true"
+      - "traefik.http.routers.bcgpt.tls.certresolver=letsencrypt"
+      - "traefik.http.services.bcgpt.loadbalancer.server.port=10000"
     environment:
       PORT: "10000"
       APP_BASE_URL: "${APP_BASE_URL}"
@@ -29,6 +36,13 @@ services:
     build:
       context: ./activepieces
       dockerfile: Dockerfile
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.activepieces.rule=Host(`automate.wickedlab.io`)"
+      - "traefik.http.routers.activepieces.entrypoints=http,https"
+      - "traefik.http.routers.activepieces.tls=true"
+      - "traefik.http.routers.activepieces.tls.certresolver=letsencrypt"
+      - "traefik.http.services.activepieces.loadbalancer.server.port=80"
     environment:
       AP_EDITION: "ce"
       AP_ENVIRONMENT: "prod"
