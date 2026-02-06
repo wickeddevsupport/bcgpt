@@ -60,14 +60,14 @@ export async function devPiecesBuilder(app: FastifyInstance, io: Server, package
         const sourceDirectory = await filePiecesUtils(app.log).findSourcePiecePathByPieceName(packageName)
         if (!isNil(sourceDirectory)) {
             const packageJsonName = await filePiecesUtils(app.log).getPackageNameFromFolderPath(sourceDirectory)
-            return { packageName, pieceDirectory: sourceDirectory, packageJsonName, watch: true }
+            return { packageName, pieceDirectory: sourceDirectory, packageJsonName, watchEnabled: true }
         }
 
         const distDirectory = await filePiecesUtils(app.log).findDistPiecePathByPieceName(packageName)
         if (!isNil(distDirectory)) {
             const packageJsonName = await filePiecesUtils(app.log).getPackageNameFromFolderPath(distDirectory)
             app.log.info(chalk.yellow(`Source directory not found for ${packageName}, using dist pieces folder`))
-            return { packageName, pieceDirectory: distDirectory, packageJsonName, watch: false }
+            return { packageName, pieceDirectory: distDirectory, packageJsonName, watchEnabled: false }
         }
 
         app.log.info(chalk.yellow(`Piece directory not found for package: ${packageName}`))
@@ -75,7 +75,7 @@ export async function devPiecesBuilder(app: FastifyInstance, io: Server, package
     }))
     const pieceInfos = resolvedInfos.filter((info) => info !== null)
 
-    const buildablePieces = pieceInfos.filter(p => p.watch).map(p => p.packageName)
+    const buildablePieces = pieceInfos.filter(p => p.watchEnabled).map(p => p.packageName)
     await buildPieces(buildablePieces, io, app.log)
 
     await devPiecesInstaller(app.log).linkSharedActivepiecesPackagesToEachOther()
@@ -83,8 +83,8 @@ export async function devPiecesBuilder(app: FastifyInstance, io: Server, package
         await devPiecesInstaller(app.log).linkSharedActivepiecesPackagesToPiece(packageJsonName)
     }
 
-    for (const { packageName, pieceDirectory, watch } of pieceInfos) {
-        if (!watch) {
+    for (const { packageName, pieceDirectory, watchEnabled } of pieceInfos) {
+        if (!watchEnabled) {
             continue
         }
         app.log.info(chalk.blue(`Starting watch for package: ${packageName}`))
@@ -111,7 +111,7 @@ export async function devPiecesBuilder(app: FastifyInstance, io: Server, package
                 pollInterval: 200,
             },
         })
-        watcher.on('all', (_event, path) => {
+        watcher.on('all', (_event: string, path: string) => {
             if (path.endsWith('.ts') || path.endsWith('package.json')) {
                 debouncedBuild()
             }
