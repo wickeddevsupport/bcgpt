@@ -48,11 +48,14 @@ services:
       - ap-dev-pieces:/repo/activepieces/dist/packages/pieces
     command: >
       bash -lc "
-        apt-get update && apt-get install -y git curl &&
-        if [ ! -d /repo/.git ]; then git clone --depth=1 $$GIT_REPO_URL /repo; fi;
-        cd /repo;
-        git fetch origin $$GIT_REPO_REF --depth=1;
-        git reset --hard origin/$$GIT_REPO_REF;
+        set -e;
+        apt-get update && apt-get install -y git curl;
+        if [ ! -d /repo/.git ]; then
+          rm -rf /repo/* /repo/.[!.]* /repo/..?* || true;
+          git clone --depth=1 $$GIT_REPO_URL /repo;
+        fi;
+        git -C /repo fetch origin $$GIT_REPO_REF --depth=1 || true;
+        git -C /repo reset --hard origin/$$GIT_REPO_REF;
         cd /repo/activepieces;
         curl -fsSL https://bun.sh/install | bash;
         export PATH=/root/.bun/bin:$PATH;
