@@ -39,19 +39,21 @@ services:
 
   pieces-builder:
     image: node:20-bullseye
-    working_dir: /repo
+    working_dir: /repo/activepieces
     environment:
       GIT_REPO_URL: "https://github.com/wickeddevsupport/bcgpt.git"
       GIT_REPO_REF: "main"
     volumes:
       - ap-dev-repo:/repo
-      - ap-dev-pieces:/repo/dist/packages/pieces
+      - ap-dev-pieces:/repo/activepieces/dist/packages/pieces
     command: >
       bash -lc "
         apt-get update && apt-get install -y git curl &&
-        if [ ! -d .git ]; then git clone --depth=1 $$GIT_REPO_URL .; fi;
+        if [ ! -d /repo/.git ]; then git clone --depth=1 $$GIT_REPO_URL /repo; fi;
+        cd /repo;
         git fetch origin $$GIT_REPO_REF --depth=1;
         git reset --hard origin/$$GIT_REPO_REF;
+        cd /repo/activepieces;
         curl -fsSL https://bun.sh/install | bash;
         export PATH=/root/.bun/bin:$PATH;
         bun install;
