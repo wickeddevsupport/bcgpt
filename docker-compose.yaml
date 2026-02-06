@@ -23,7 +23,7 @@ services:
       PAYLOAD_CACHE_TTL_SEC: "${PAYLOAD_CACHE_TTL_SEC}"
       SQLITE_PATH: "/data/bcgpt.sqlite"
       ACTIVEPIECES_PROXY_ENABLED: "${ACTIVEPIECES_PROXY_ENABLED:-false}"
-      ACTIVEPIECES_PROXY_HOST: "${ACTIVEPIECES_PROXY_HOST:-automate.wickedlab.io}"
+      ACTIVEPIECES_PROXY_HOST: "${ACTIVEPIECES_PROXY_HOST:-flow.wickedlab.io}"
       ACTIVEPIECES_PROXY_TARGET: "http://activepieces:80"
     volumes:
       - bcgpt-data:/data
@@ -36,7 +36,7 @@ services:
     image: ghcr.io/wickeddevsupport/activepieces-bcgpt:latest
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.activepieces.rule=Host(`automate.wickedlab.io`)"
+      - "traefik.http.routers.activepieces.rule=Host(`flow.wickedlab.io`)"
       - "traefik.http.routers.activepieces.entrypoints=http,https"
       - "traefik.http.routers.activepieces.tls=true"
       - "traefik.http.routers.activepieces.tls.certresolver=letsencrypt"

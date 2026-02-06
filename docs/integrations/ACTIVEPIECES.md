@@ -2,14 +2,14 @@
 
 Last updated: 2026-02-04
 
-This doc shows how to run Activepieces alongside BCGPT on the same Render service and expose it at `https://automate.wickedlab.io`. The Activepieces source is vendored under `activepieces/`.
+This doc shows how to run Activepieces alongside BCGPT on the same Render service and expose it at `https://flow.wickedlab.io`. The Activepieces source is vendored under `activepieces/`.
 
 ## Reverse proxy (host-based)
 BCGPT proxies requests by host. Set these env vars:
 
 ```
 ACTIVEPIECES_PROXY_ENABLED=true
-ACTIVEPIECES_PROXY_HOST=automate.wickedlab.io
+ACTIVEPIECES_PROXY_HOST=flow.wickedlab.io
 ACTIVEPIECES_PROXY_TARGET=http://127.0.0.1:4200
 ```
 
@@ -21,7 +21,7 @@ Recommended minimum for single-host setup:
 ```
 AP_EDITION=ce
 AP_ENVIRONMENT=prod
-AP_FRONTEND_URL=https://automate.wickedlab.io
+AP_FRONTEND_URL=https://flow.wickedlab.io
 AP_DB_TYPE=PGLITE
 AP_REDIS_TYPE=MEMORY
 AP_EXECUTION_MODE=UNSANDBOXED

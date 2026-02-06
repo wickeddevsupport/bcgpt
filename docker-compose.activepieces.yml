@@ -5,7 +5,7 @@ services:
     image: ghcr.io/wickeddevsupport/activepieces-bcgpt:latest
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.activepieces.rule=Host(`automate.wickedlab.io`)"
+      - "traefik.http.routers.activepieces.rule=Host(`flow.wickedlab.io`)"
       - "traefik.http.routers.activepieces.entrypoints=http,https"
       - "traefik.http.routers.activepieces.tls=true"
       - "traefik.http.routers.activepieces.tls.certresolver=letsencrypt"
