@@ -77,7 +77,10 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 COPY . .
 
 # Build core projects (already has NX_NO_CLOUD from base stage)
-RUN npx nx run-many --target=build --projects=react-ui,server-api --configuration production --parallel=2 --skip-nx-cache
+# Run sequentially to reduce peak memory usage in CI
+ENV NODE_OPTIONS=--max-old-space-size=4096
+RUN npx nx build react-ui --configuration production --skip-nx-cache
+RUN npx nx build server-api --configuration production --skip-nx-cache
 
 # Build custom pieces so they can be loaded via AP_DEV_PIECES at runtime
 RUN npx nx build pieces-bcgpt && npx nx build pieces-basecamp
