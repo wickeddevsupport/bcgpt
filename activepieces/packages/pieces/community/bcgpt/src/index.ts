@@ -11,7 +11,7 @@ Paste the session key here after you connect.
 
 export const bcgptAuth = PieceAuth.CustomAuth({
   description: markdown,
-  required: false,
+  required: true,
   props: {
     base_url: Property.ShortText({
       displayName: 'BCGPT Base URL',

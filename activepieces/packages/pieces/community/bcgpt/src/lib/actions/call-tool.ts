@@ -1,5 +1,5 @@
 import { Property, createAction } from '@activepieces/pieces-framework';
-import { bcgptPost } from '../common/client';
+import { bcgptPost, type BcgptAuthConnection } from '../common/client';
 
 export const callTool = createAction({
   name: 'call_tool',
@@ -18,7 +18,7 @@ export const callTool = createAction({
     }),
   },
   async run(context) {
-    const auth = context.auth;
+    const auth = context.auth as BcgptAuthConnection | undefined;
     if (!auth?.props?.base_url) {
       throw new Error('Missing BCGPT base URL in connection.');
     }

@@ -59,6 +59,8 @@ services:
         git -C /repo-src fetch origin $$GIT_REPO_REF --depth=1 || true;
         git -C /repo-src reset --hard origin/$$GIT_REPO_REF;
         cd /repo-src/activepieces;
+        node -e \"const fs=require('fs');const p='/repo-src/activepieces/package.json';const pkg=JSON.parse(fs.readFileSync(p,'utf8'));if(pkg.dependencies&&pkg.dependencies['bcgpt-full-v3']){delete pkg.dependencies['bcgpt-full-v3'];fs.writeFileSync(p,JSON.stringify(pkg,null,2));}\";
+        rm -f /repo-src/activepieces/bun.lockb /repo-src/activepieces/bun.lock;
         curl -fsSL https://bun.sh/install | bash;
         export PATH=/root/.bun/bin:$PATH;
         bun install;

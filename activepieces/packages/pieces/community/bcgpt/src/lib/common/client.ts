@@ -1,17 +1,18 @@
 import { HttpMethod, httpClient } from '@activepieces/pieces-common';
+import type { AppConnectionValueForAuthProperty } from '@activepieces/pieces-framework';
+import type { bcgptAuth } from '../../index';
 
-export type BcgptAuthProps = {
-  base_url?: string;
-  session_key?: string;
-  user_key?: string;
-};
+export type BcgptAuthConnection = AppConnectionValueForAuthProperty<
+  typeof bcgptAuth
+>;
+export type BcgptAuthProps = BcgptAuthConnection['props'];
 
 export const normalizeBaseUrl = (value?: string): string => {
   const raw = value ?? '';
   return raw.replace(/\/+$/, '');
 };
 
-export const buildBcgptHeaders = (auth?: { props: BcgptAuthProps }) => {
+export const buildBcgptHeaders = (auth?: BcgptAuthConnection) => {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
   };
@@ -28,7 +29,7 @@ export const bcgptPost = async (params: {
   baseUrl: string;
   path: string;
   body?: unknown;
-  auth?: { props: BcgptAuthProps };
+  auth?: BcgptAuthConnection;
 }) => {
   const url = `${normalizeBaseUrl(params.baseUrl)}${
     params.path.startsWith('/') ? params.path : `/${params.path}`
