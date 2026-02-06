@@ -77,7 +77,17 @@ export const filePiecesUtils = (log: FastifyBaseLogger) => ({
 
 const findAllPiecesFolder = async (folderPath: string): Promise<string[]> => {
     const paths = []
-    const files = await readdir(folderPath)
+    let files: string[] = []
+    try {
+        files = await readdir(folderPath)
+    }
+    catch (e) {
+        const err = e as NodeJS.ErrnoException
+        if (err.code === 'ENOENT') {
+            return []
+        }
+        throw err
+    }
 
     const ignoredFiles = ['node_modules', 'dist', 'framework', 'common']
     for (const file of files) {
