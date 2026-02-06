@@ -1,9 +1,11 @@
+import { existsSync, mkdirSync, rmSync, symlinkSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { cwd } from 'node:process'
-import { filePiecesUtils, spawnWithKill } from '@activepieces/server-shared'
+import { filePiecesUtils } from '@activepieces/server-shared'
 import { FastifyBaseLogger } from 'fastify'
 
 const baseDistPath = resolve(cwd(), 'dist', 'packages')
+const linkType: 'junction' | 'dir' = process.platform === 'win32' ? 'junction' : 'dir'
 const sharedPiecesPackages = () => {
     const packages: Record<string, { path: string }> = {
         '@activepieces/pieces-framework': {
@@ -20,6 +22,33 @@ const sharedPiecesPackages = () => {
     return packages
 }
 
+const linkDependencyToPackage = (log: FastifyBaseLogger, packagePath: string, dependency: string, targetPath: string): void => {
+    try {
+        if (!existsSync(targetPath)) {
+            log.error({ dependency, targetPath }, 'Dependency target path does not exist')
+            return
+        }
+
+        const scopeDir = resolve(packagePath, 'node_modules', '@activepieces')
+        mkdirSync(scopeDir, { recursive: true })
+
+        const dependencyName = dependency.split('/')[1]
+        const linkPath = resolve(scopeDir, dependencyName)
+        rmSync(linkPath, { recursive: true, force: true })
+        symlinkSync(targetPath, linkPath, linkType)
+    }
+    catch (e: unknown) {
+        const errorMessage = e instanceof Error ? e.message : String(e)
+        log.error({
+            name: 'linkDependencyToPackage',
+            dependency,
+            packagePath,
+            targetPath,
+            error: errorMessage,
+        }, 'Error linking dependency to package (non-fatal)')
+    }
+}
+
 
 export const devPiecesInstaller = (log: FastifyBaseLogger) => ({
     linkSharedActivepiecesPackagesToPiece: async (packageName: string): Promise<void> => {
@@ -30,47 +59,22 @@ export const devPiecesInstaller = (log: FastifyBaseLogger) => ({
         }
 
         const dependencies = await filePiecesUtils(log).getPieceDependencies(packagePath)
-
-        const apDependencies = Object.keys(dependencies ?? {}).filter(dep => dep.startsWith('@activepieces/') && packageName !== dep)
+        const packages = sharedPiecesPackages()
+        const apDependencies = Object.keys(dependencies ?? {}).filter(
+            dep => dep.startsWith('@activepieces/') && packageName !== dep && packages[dep],
+        )
 
         for (const dependency of apDependencies) {
-            try {
-                await spawnWithKill({ cmd: `bun link --cwd ${packagePath} --save ${dependency} --quiet`, printOutput: true })
-            }
-            catch (e: unknown) {
-                const errorMessage = e instanceof Error ? e.message : String(e)
-                log.error({
-                    name: 'linkSharedActivepiecesPackagesToPiece',
-                    packageName,
-                    dependency,
-                    packagePath,
-                    error: errorMessage,
-                }, 'Error linking dependency to piece (non-fatal)')
-            }
+            linkDependencyToPackage(log, packagePath, dependency, packages[dependency].path)
         }
     },
 
     initSharedPackagesLinks: async (): Promise<void> => {
-        const packages = sharedPiecesPackages()
-        for (const [name, pkg] of Object.entries(packages)) {
-            try {
-                await spawnWithKill({ cmd: `bun link --cwd ${pkg.path} --quiet`, printOutput: true })
-            }
-            catch (e: unknown) {
-                const errorMessage = e instanceof Error ? e.message : String(e)
-                log.error({
-                    name: 'initSharedPackagesLinks',
-                    packageName: name,
-                    path: pkg.path,
-                    error: errorMessage,
-                }, 'Error initializing shared package link (non-fatal)')
-            }
-        }
+        // No-op when using filesystem links instead of bun link.
+        return
     },
 
     linkSharedActivepiecesPackagesToEachOther: async (): Promise<void> => {
-        await devPiecesInstaller(log).initSharedPackagesLinks()
-
         const packages = sharedPiecesPackages()
         const packageNames = Object.keys(packages)
 
@@ -81,19 +85,7 @@ export const devPiecesInstaller = (log: FastifyBaseLogger) => ({
             )
 
             for (const dependency of apDependencies) {
-                try {
-                    await spawnWithKill({ cmd: `bun link --cwd ${pkg.path} --save ${dependency} --quiet`, printOutput: true })
-                }
-                catch (e: unknown) {
-                    const errorMessage = e instanceof Error ? e.message : String(e)
-                    log.error({
-                        name: 'linkSharedActivepiecesPackagesToEachOther',
-                        packageName,
-                        dependency,
-                        path: pkg.path,
-                        error: errorMessage,
-                    }, 'Error linking shared packages to each other')
-                }
+                linkDependencyToPackage(log, pkg.path, dependency, packages[dependency].path)
             }
         }
     },
