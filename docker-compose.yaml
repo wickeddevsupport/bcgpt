@@ -71,7 +71,7 @@ services:
 
   pieces-builder:
     image: node:20-bullseye
-    working_dir: /repo-src/activepieces
+    working_dir: /repo-src
     environment:
       GIT_REPO_URL: "https://github.com/wickeddevsupport/bcgpt.git"
       GIT_REPO_REF: "main"
