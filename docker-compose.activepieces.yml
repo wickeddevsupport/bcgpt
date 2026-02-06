@@ -64,7 +64,7 @@ services:
         curl -fsSL https://bun.sh/install | bash;
         export PATH=/root/.bun/bin:$PATH;
         bun install;
-        npx nx build pieces-bcgpt pieces-basecamp;
+        npx nx run-many --target=build --projects=pieces-bcgpt,pieces-basecamp;
         rm -rf /repo-dist/bcgpt/* /repo-dist/basecamp/* || true;
         cp -a /repo-src/activepieces/dist/packages/pieces/community/bcgpt/. /repo-dist/bcgpt/;
         cp -a /repo-src/activepieces/dist/packages/pieces/community/basecamp/. /repo-dist/basecamp/;
