@@ -5,6 +5,10 @@ services:
     image: ghcr.io/wickeddevsupport/activepieces-bcgpt:latest
     labels:
       - "traefik.enable=true"
+      - "traefik.http.middlewares.activepieces-redirect-to-https.redirectscheme.scheme=https"
+      - "traefik.http.routers.activepieces-http.entrypoints=http"
+      - "traefik.http.routers.activepieces-http.rule=Host(`flow.wickedlab.io`)"
+      - "traefik.http.routers.activepieces-http.middlewares=activepieces-redirect-to-https"
       - "traefik.http.routers.activepieces.rule=Host(`flow.wickedlab.io`)"
       - "traefik.http.routers.activepieces.entrypoints=http,https"
       - "traefik.http.routers.activepieces.tls=true"
