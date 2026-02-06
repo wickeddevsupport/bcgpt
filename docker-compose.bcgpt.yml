@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  bcgpt:
+    build:
+      context: .
+      dockerfile: Dockerfile.bcgpt
+    environment:
+      PORT: "10000"
+      APP_BASE_URL: "${APP_BASE_URL}"
+      BASECAMP_CLIENT_ID: "${BASECAMP_CLIENT_ID}"
+      BASECAMP_CLIENT_SECRET: "${BASECAMP_CLIENT_SECRET}"
+      BASECAMP_DEFAULT_ACCOUNT_ID: "${BASECAMP_DEFAULT_ACCOUNT_ID}"
+      CHATGPT_API_KEY: "${CHATGPT_API_KEY}"
+      OTP_SECRET: "${OTP_SECRET}"
+      PAYLOAD_CACHE_TTL_SEC: "${PAYLOAD_CACHE_TTL_SEC}"
+      SQLITE_PATH: "/data/bcgpt.sqlite"
+      ACTIVEPIECES_PROXY_ENABLED: "${ACTIVEPIECES_PROXY_ENABLED:-false}"
+      ACTIVEPIECES_PROXY_HOST: "${ACTIVEPIECES_PROXY_HOST:-automate.wickedlab.io}"
+      ACTIVEPIECES_PROXY_TARGET: "${ACTIVEPIECES_PROXY_TARGET:-https://automate.wickedlab.io}"
+    volumes:
+      - bcgpt-data:/data
+    expose:
+      - "10000"
+
+volumes:
+  bcgpt-data:
