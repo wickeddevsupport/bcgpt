@@ -39,28 +39,30 @@ services:
 
   pieces-builder:
     image: node:20-bullseye
-    working_dir: /repo/activepieces
+    working_dir: /repo-src/activepieces
     environment:
       GIT_REPO_URL: "https://github.com/wickeddevsupport/bcgpt.git"
       GIT_REPO_REF: "main"
     volumes:
-      - ap-dev-repo:/repo
-      - ap-dev-pieces:/repo/activepieces/dist/packages/pieces
+      - ap-dev-repo:/repo-src
+      - ap-dev-pieces:/repo-dist
     command: >
       bash -lc "
         set -e;
         apt-get update && apt-get install -y git curl;
-        if [ ! -d /repo/.git ]; then
-          rm -rf /repo/* /repo/.[!.]* /repo/..?* || true;
-          git clone --depth=1 $$GIT_REPO_URL /repo;
+        if [ ! -d /repo-src/.git ]; then
+          rm -rf /repo-src/* /repo-src/.[!.]* /repo-src/..?* || true;
+          git clone --depth=1 $$GIT_REPO_URL /repo-src;
         fi;
-        git -C /repo fetch origin $$GIT_REPO_REF --depth=1 || true;
-        git -C /repo reset --hard origin/$$GIT_REPO_REF;
-        cd /repo/activepieces;
+        git -C /repo-src fetch origin $$GIT_REPO_REF --depth=1 || true;
+        git -C /repo-src reset --hard origin/$$GIT_REPO_REF;
+        cd /repo-src/activepieces;
         curl -fsSL https://bun.sh/install | bash;
         export PATH=/root/.bun/bin:$PATH;
         bun install;
         npx nx build pieces-bcgpt pieces-basecamp;
+        rm -rf /repo-dist/*;
+        cp -a /repo-src/activepieces/dist/packages/pieces/. /repo-dist/;
         sleep infinity
       "
 
