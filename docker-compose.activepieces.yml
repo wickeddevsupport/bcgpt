@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   activepieces:
-    image: ghcr.io/wickeddevsupport/activepieces-bcgpt:latest
+    image: activepieces/activepieces:latest
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.activepieces.rule=Host(`automate.wickedlab.io`)"
@@ -49,9 +49,9 @@ services:
     command: >
       bash -lc "
         apt-get update && apt-get install -y git curl &&
-        if [ ! -d .git ]; then git clone --depth=1 ${GIT_REPO_URL} .; fi;
-        git fetch origin ${GIT_REPO_REF} --depth=1;
-        git reset --hard origin/${GIT_REPO_REF};
+        if [ ! -d .git ]; then git clone --depth=1 $$GIT_REPO_URL .; fi;
+        git fetch origin $$GIT_REPO_REF --depth=1;
+        git reset --hard origin/$$GIT_REPO_REF;
         curl -fsSL https://bun.sh/install | bash;
         export PATH=/root/.bun/bin:$PATH;
         bun install;
