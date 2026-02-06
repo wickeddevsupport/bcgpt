@@ -32,3 +32,5 @@ services:
 
 volumes:
   bcgpt-data:
+    external: true
+    name: bcgpt-data

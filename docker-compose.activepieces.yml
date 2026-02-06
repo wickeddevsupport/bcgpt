@@ -51,5 +51,11 @@ services:
 
 volumes:
   activepieces-data:
+    external: true
+    name: activepieces-data
   postgres-data:
+    external: true
+    name: activepieces-postgres-data
   redis-data:
+    external: true
+    name: activepieces-redis-data
