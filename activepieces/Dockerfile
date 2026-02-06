@@ -84,8 +84,8 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 RUN mkdir -p /usr/src/app/dist/assets && \
     cp /usr/src/app/packages/server/api/src/assets/default.cf /usr/src/app/dist/assets/default.cf
 
-# Remove top-level deps and source packages to avoid huge copy footprint
-RUN rm -rf /usr/src/app/node_modules /usr/src/app/packages
+# NOTE: Avoid deleting large directories here to prevent occasional BuildKit
+# finalize snapshot errors in CI.
 
 ### STAGE 2: Run ###
 FROM base AS run
