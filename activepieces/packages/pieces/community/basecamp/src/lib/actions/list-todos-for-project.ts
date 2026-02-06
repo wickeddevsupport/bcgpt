@@ -1,5 +1,5 @@
 import { Property, createAction } from '@activepieces/pieces-framework';
-import { gatewayPost } from '../common/client';
+import { gatewayPost, type BasecampGatewayAuthConnection } from '../common/client';
 
 export const listTodosForProject = createAction({
   name: 'list_todos_for_project',
@@ -14,7 +14,7 @@ export const listTodosForProject = createAction({
     }),
   },
   async run(context) {
-    const auth = context.auth;
+    const auth = context.auth as BasecampGatewayAuthConnection | undefined;
     if (!auth?.props?.base_url) {
       throw new Error('Missing BCGPT base URL in connection.');
     }

@@ -1,17 +1,18 @@
 import { HttpMethod, httpClient } from '@activepieces/pieces-common';
+import type { AppConnectionValueForAuthProperty } from '@activepieces/pieces-framework';
+import type { basecampAuth } from '../../index';
 
-export type BasecampGatewayAuthProps = {
-  base_url?: string;
-  session_key?: string;
-  user_key?: string;
-};
+export type BasecampGatewayAuthConnection = AppConnectionValueForAuthProperty<
+  typeof basecampAuth
+>;
+export type BasecampGatewayAuthProps = BasecampGatewayAuthConnection['props'];
 
 export const normalizeBaseUrl = (value?: string): string => {
   const raw = value ?? '';
   return raw.replace(/\/+$/, '');
 };
 
-export const buildGatewayHeaders = (auth?: { props: BasecampGatewayAuthProps }) => {
+export const buildGatewayHeaders = (auth?: BasecampGatewayAuthConnection) => {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
   };
@@ -28,7 +29,7 @@ export const gatewayPost = async (params: {
   baseUrl: string;
   path: string;
   body?: unknown;
-  auth?: { props: BasecampGatewayAuthProps };
+  auth?: BasecampGatewayAuthConnection;
 }) => {
   const url = `${normalizeBaseUrl(params.baseUrl)}${
     params.path.startsWith('/') ? params.path : `/${params.path}`

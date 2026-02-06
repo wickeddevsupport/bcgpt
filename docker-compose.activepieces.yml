@@ -29,6 +29,8 @@ services:
       AP_DEV_PIECES: "${AP_DEV_PIECES:-bcgpt,basecamp}"
       AP_CONFIG_PATH: "/var/data/activepieces"
     volumes:
+      - ap-dev-piece-framework:/usr/src/app/dist/packages/pieces/community/framework
+      - ap-dev-piece-common:/usr/src/app/dist/packages/pieces/community/common
       - ap-dev-piece-bcgpt:/usr/src/app/dist/packages/pieces/community/bcgpt
       - ap-dev-piece-basecamp:/usr/src/app/dist/packages/pieces/community/basecamp
       - activepieces-data:/var/data/activepieces
@@ -46,6 +48,8 @@ services:
       GIT_REPO_REF: "main"
     volumes:
       - ap-dev-repo:/repo-src
+      - ap-dev-piece-framework:/repo-dist/framework
+      - ap-dev-piece-common:/repo-dist/common
       - ap-dev-piece-bcgpt:/repo-dist/bcgpt
       - ap-dev-piece-basecamp:/repo-dist/basecamp
     command: >
@@ -64,8 +68,11 @@ services:
         curl -fsSL https://bun.sh/install | bash;
         export PATH=/root/.bun/bin:$PATH;
         bun install;
-        npx nx run-many --target=build --projects=pieces-bcgpt,pieces-basecamp;
-        rm -rf /repo-dist/bcgpt/* /repo-dist/basecamp/* || true;
+        npx nx run-many --target=build --projects=pieces-framework,pieces-common,pieces-bcgpt,pieces-basecamp;
+        mkdir -p /repo-dist/framework /repo-dist/common /repo-dist/bcgpt /repo-dist/basecamp;
+        rm -rf /repo-dist/framework/* /repo-dist/common/* /repo-dist/bcgpt/* /repo-dist/basecamp/* || true;
+        cp -a /repo-src/activepieces/dist/packages/pieces/community/framework/. /repo-dist/framework/;
+        cp -a /repo-src/activepieces/dist/packages/pieces/community/common/. /repo-dist/common/;
         cp -a /repo-src/activepieces/dist/packages/pieces/community/bcgpt/. /repo-dist/bcgpt/;
         cp -a /repo-src/activepieces/dist/packages/pieces/community/basecamp/. /repo-dist/basecamp/;
         sleep infinity
@@ -98,6 +105,12 @@ volumes:
   ap-dev-repo:
     external: true
     name: ap-dev-repo
+  ap-dev-piece-framework:
+    external: true
+    name: ap-dev-piece-framework
+  ap-dev-piece-common:
+    external: true
+    name: ap-dev-piece-common
   ap-dev-piece-bcgpt:
     external: true
     name: ap-dev-piece-bcgpt
