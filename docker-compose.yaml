@@ -60,12 +60,35 @@ services:
       AP_DEV_PIECES: "${AP_DEV_PIECES:-bcgpt,basecamp}"
       AP_CONFIG_PATH: "/var/data/activepieces"
     volumes:
+      - ap-dev-pieces:/usr/src/app/dist/packages/pieces
       - activepieces-data:/var/data/activepieces
     expose:
       - "80"
     depends_on:
       - postgres
       - redis
+
+  pieces-builder:
+    image: node:20-bullseye
+    working_dir: /repo
+    environment:
+      GIT_REPO_URL: "https://github.com/wickeddevsupport/bcgpt.git"
+      GIT_REPO_REF: "main"
+    volumes:
+      - ap-dev-repo:/repo
+      - ap-dev-pieces:/repo/dist/packages/pieces
+    command: >
+      bash -lc "
+        apt-get update && apt-get install -y git curl &&
+        if [ ! -d .git ]; then git clone --depth=1 ${GIT_REPO_URL} .; fi;
+        git fetch origin ${GIT_REPO_REF} --depth=1;
+        git reset --hard origin/${GIT_REPO_REF};
+        curl -fsSL https://bun.sh/install | bash;
+        export PATH=/root/.bun/bin:$PATH;
+        bun install;
+        npx nx build pieces-bcgpt pieces-basecamp;
+        sleep infinity
+      "
 
   postgres:
     image: postgres:15
@@ -94,3 +117,9 @@ volumes:
   redis-data:
     external: true
     name: activepieces-redis-data
+  ap-dev-repo:
+    external: true
+    name: ap-dev-repo
+  ap-dev-pieces:
+    external: true
+    name: ap-dev-pieces
