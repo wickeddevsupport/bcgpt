@@ -57,24 +57,36 @@ export async function devPiecesBuilder(app: FastifyInstance, io: Server, package
     const watchers: FSWatcher[] = []
 
     const resolvedInfos = await Promise.all(packages.map(async (packageName) => {
-        const pieceDirectory = await filePiecesUtils(app.log).findSourcePiecePathByPieceName(packageName)
-        if (isNil(pieceDirectory)) {
-            app.log.info(chalk.yellow(`Piece directory not found for package: ${packageName}`))
-            return null
+        const sourceDirectory = await filePiecesUtils(app.log).findSourcePiecePathByPieceName(packageName)
+        if (!isNil(sourceDirectory)) {
+            const packageJsonName = await filePiecesUtils(app.log).getPackageNameFromFolderPath(sourceDirectory)
+            return { packageName, pieceDirectory: sourceDirectory, packageJsonName, watch: true }
         }
-        const packageJsonName = await filePiecesUtils(app.log).getPackageNameFromFolderPath(pieceDirectory)
-        return { packageName, pieceDirectory, packageJsonName }
+
+        const distDirectory = await filePiecesUtils(app.log).findDistPiecePathByPieceName(packageName)
+        if (!isNil(distDirectory)) {
+            const packageJsonName = await filePiecesUtils(app.log).getPackageNameFromFolderPath(distDirectory)
+            app.log.info(chalk.yellow(`Source directory not found for ${packageName}, using dist pieces folder`))
+            return { packageName, pieceDirectory: distDirectory, packageJsonName, watch: false }
+        }
+
+        app.log.info(chalk.yellow(`Piece directory not found for package: ${packageName}`))
+        return null
     }))
     const pieceInfos = resolvedInfos.filter((info) => info !== null)
 
-    await buildPieces(pieceInfos.map(p => p.packageName), io, app.log)
+    const buildablePieces = pieceInfos.filter(p => p.watch).map(p => p.packageName)
+    await buildPieces(buildablePieces, io, app.log)
 
     await devPiecesInstaller(app.log).linkSharedActivepiecesPackagesToEachOther()
     for (const { packageJsonName } of pieceInfos) {
         await devPiecesInstaller(app.log).linkSharedActivepiecesPackagesToPiece(packageJsonName)
     }
 
-    for (const { packageName, pieceDirectory } of pieceInfos) {
+    for (const { packageName, pieceDirectory, watch } of pieceInfos) {
+        if (!watch) {
+            continue
+        }
         app.log.info(chalk.blue(`Starting watch for package: ${packageName}`))
         app.log.info(chalk.yellow(`Found piece directory: ${pieceDirectory}`))
 

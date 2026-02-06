@@ -61,6 +61,12 @@ export const filePiecesUtils = (log: FastifyBaseLogger) => ({
         return piecePath ?? null
     },
 
+    findDistPiecePathByPieceName: async (pieceName: string): Promise<string | null> => {
+        const piecesPath = await findAllPiecesFolder(DIST_PIECES_PATH)
+        const piecePath = piecesPath.find((p) => p.endsWith(sep + pieceName))
+        return piecePath ?? null
+    },
+
     loadDistPiecesMetadata: async (piecesNames: string[]): Promise<PieceMetadata[]> => {
         try {
             const paths = (await findAllPiecesFolder(DIST_PIECES_PATH)).filter(path => piecesNames.some(name => path.endsWith(sep + name)))
