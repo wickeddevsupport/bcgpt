@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   activepieces:
-    image: activepieces/activepieces:latest
+    image: ghcr.io/wickeddevsupport/activepieces-bcgpt:latest
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.activepieces.rule=Host(`automate.wickedlab.io`)"
@@ -26,6 +26,7 @@ services:
       AP_REDIS_PORT: "6379"
       AP_JWT_SECRET: "${AP_JWT_SECRET}"
       AP_ENCRYPTION_KEY: "${AP_ENCRYPTION_KEY}"
+      AP_DEV_PIECES: "${AP_DEV_PIECES:-bcgpt,basecamp}"
       AP_CONFIG_PATH: "/var/data/activepieces"
     volumes:
       - activepieces-data:/var/data/activepieces

@@ -69,8 +69,11 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 # Copy source code after dependency installation
 COPY . .
 
-# Build both projects (already has NX_NO_CLOUD from base stage)
+# Build core projects (already has NX_NO_CLOUD from base stage)
 RUN npx nx run-many --target=build --projects=react-ui,server-api --configuration production --parallel=2 --skip-nx-cache
+
+# Build custom pieces so they can be loaded via AP_DEV_PIECES at runtime
+RUN npx nx build pieces-bcgpt && npx nx build pieces-basecamp
 
 # Install production dependencies only for the backend API
 RUN --mount=type=cache,target=/root/.bun/install/cache \
@@ -112,6 +115,8 @@ COPY --from=build /usr/src/app/LICENSE .
 COPY --from=build /usr/src/app/dist/packages/engine/ ./dist/packages/engine/
 COPY --from=build /usr/src/app/dist/packages/server/ ./dist/packages/server/
 COPY --from=build /usr/src/app/dist/packages/shared/ ./dist/packages/shared/
+# Custom pieces live under dist/packages/pieces
+COPY --from=build /usr/src/app/dist/packages/pieces/ ./dist/packages/pieces/
 # Runtime does not require full source packages; keep image smaller and avoid deep paths
 
 # Copy frontend files to Nginx document root
