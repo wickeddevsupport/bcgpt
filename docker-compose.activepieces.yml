@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   activepieces:
-    image: activepieces/activepieces:latest
+    image: ghcr.io/wickeddevsupport/activepieces-bcgpt:latest
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.activepieces.rule=Host(`automate.wickedlab.io`)"
@@ -26,57 +26,14 @@ services:
       AP_REDIS_PORT: "6379"
       AP_JWT_SECRET: "${AP_JWT_SECRET}"
       AP_ENCRYPTION_KEY: "${AP_ENCRYPTION_KEY}"
-      AP_DEV_PIECES: "${AP_DEV_PIECES:-bcgpt,basecamp}"
       AP_CONFIG_PATH: "/var/data/activepieces"
     volumes:
-      - ap-dev-piece-framework:/usr/src/app/dist/packages/pieces/community/framework
-      - ap-dev-piece-common:/usr/src/app/dist/packages/pieces/community/common
-      - ap-dev-piece-bcgpt:/usr/src/app/dist/packages/pieces/community/bcgpt
-      - ap-dev-piece-basecamp:/usr/src/app/dist/packages/pieces/community/basecamp
       - activepieces-data:/var/data/activepieces
     expose:
       - "80"
     depends_on:
       - postgres
       - redis
-
-  pieces-builder:
-    image: node:20-bullseye
-    working_dir: /repo-src
-    environment:
-      GIT_REPO_URL: "https://github.com/wickeddevsupport/bcgpt.git"
-      GIT_REPO_REF: "main"
-    volumes:
-      - ap-dev-repo:/repo-src
-      - ap-dev-piece-framework:/repo-dist/framework
-      - ap-dev-piece-common:/repo-dist/common
-      - ap-dev-piece-bcgpt:/repo-dist/bcgpt
-      - ap-dev-piece-basecamp:/repo-dist/basecamp
-    command: >
-      bash -lc "
-        set -e;
-        apt-get update && apt-get install -y git curl;
-        if [ ! -d /repo-src/.git ]; then
-          rm -rf /repo-src/* /repo-src/.[!.]* /repo-src/..?* || true;
-          git clone --depth=1 $$GIT_REPO_URL /repo-src;
-        fi;
-        git -C /repo-src fetch origin $$GIT_REPO_REF --depth=1 || true;
-        git -C /repo-src reset --hard origin/$$GIT_REPO_REF;
-        cd /repo-src/activepieces;
-        node -e \"const fs=require('fs');const p='/repo-src/activepieces/package.json';const pkg=JSON.parse(fs.readFileSync(p,'utf8'));if(pkg.dependencies&&pkg.dependencies['bcgpt-full-v3']){delete pkg.dependencies['bcgpt-full-v3'];fs.writeFileSync(p,JSON.stringify(pkg,null,2));}\";
-        rm -f /repo-src/activepieces/bun.lockb /repo-src/activepieces/bun.lock;
-        curl -fsSL https://bun.sh/install | bash;
-        export PATH=/root/.bun/bin:$PATH;
-        bun install;
-        npx nx run-many --target=build --projects=pieces-framework,pieces-common,pieces-bcgpt,pieces-basecamp;
-        mkdir -p /repo-dist/framework /repo-dist/common /repo-dist/bcgpt /repo-dist/basecamp;
-        rm -rf /repo-dist/framework/* /repo-dist/common/* /repo-dist/bcgpt/* /repo-dist/basecamp/* || true;
-        cp -a /repo-src/activepieces/dist/packages/pieces/community/framework/. /repo-dist/framework/;
-        cp -a /repo-src/activepieces/dist/packages/pieces/community/common/. /repo-dist/common/;
-        cp -a /repo-src/activepieces/dist/packages/pieces/community/bcgpt/. /repo-dist/bcgpt/;
-        cp -a /repo-src/activepieces/dist/packages/pieces/community/basecamp/. /repo-dist/basecamp/;
-        sleep infinity
-      "
 
   postgres:
     image: postgres:15
@@ -102,18 +59,3 @@ volumes:
   redis-data:
     external: true
     name: activepieces-redis-data
-  ap-dev-repo:
-    external: true
-    name: ap-dev-repo
-  ap-dev-piece-framework:
-    external: true
-    name: ap-dev-piece-framework
-  ap-dev-piece-common:
-    external: true
-    name: ap-dev-piece-common
-  ap-dev-piece-bcgpt:
-    external: true
-    name: ap-dev-piece-bcgpt
-  ap-dev-piece-basecamp:
-    external: true
-    name: ap-dev-piece-basecamp
