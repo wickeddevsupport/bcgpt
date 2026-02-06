@@ -29,7 +29,8 @@ services:
       AP_DEV_PIECES: "${AP_DEV_PIECES:-bcgpt,basecamp}"
       AP_CONFIG_PATH: "/var/data/activepieces"
     volumes:
-      - ap-dev-pieces:/usr/src/app/dist/packages/pieces
+      - ap-dev-piece-bcgpt:/usr/src/app/dist/packages/pieces/community/bcgpt
+      - ap-dev-piece-basecamp:/usr/src/app/dist/packages/pieces/community/basecamp
       - activepieces-data:/var/data/activepieces
     expose:
       - "80"
@@ -45,7 +46,8 @@ services:
       GIT_REPO_REF: "main"
     volumes:
       - ap-dev-repo:/repo-src
-      - ap-dev-pieces:/repo-dist
+      - ap-dev-piece-bcgpt:/repo-dist/bcgpt
+      - ap-dev-piece-basecamp:/repo-dist/basecamp
     command: >
       bash -lc "
         set -e;
@@ -61,8 +63,9 @@ services:
         export PATH=/root/.bun/bin:$PATH;
         bun install;
         npx nx build pieces-bcgpt pieces-basecamp;
-        rm -rf /repo-dist/*;
-        cp -a /repo-src/activepieces/dist/packages/pieces/. /repo-dist/;
+        rm -rf /repo-dist/bcgpt/* /repo-dist/basecamp/* || true;
+        cp -a /repo-src/activepieces/dist/packages/pieces/community/bcgpt/. /repo-dist/bcgpt/;
+        cp -a /repo-src/activepieces/dist/packages/pieces/community/basecamp/. /repo-dist/basecamp/;
         sleep infinity
       "
 
@@ -93,6 +96,9 @@ volumes:
   ap-dev-repo:
     external: true
     name: ap-dev-repo
-  ap-dev-pieces:
+  ap-dev-piece-bcgpt:
     external: true
-    name: ap-dev-pieces
+    name: ap-dev-piece-bcgpt
+  ap-dev-piece-basecamp:
+    external: true
+    name: ap-dev-piece-basecamp
