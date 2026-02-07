@@ -70,7 +70,10 @@ export const platformService = {
             filteredPieceBehavior: FilteredPieceBehavior.BLOCKED,
             federatedAuthProviders: {},
             cloudAuthEnabled: true,
-            pinnedPieces: [],
+            pinnedPieces: [
+                '@activepieces/piece-bcgpt',
+                '@activepieces/piece-basecamp',
+            ],
         }
 
         const savedPlatform = await platformRepo().save(newPlatform)

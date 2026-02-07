@@ -5,10 +5,10 @@ import { listTodosForProject } from './lib/actions/list-todos-for-project';
 import { createTodo } from './lib/actions/create-todo';
 import { listMessages } from './lib/actions/list-messages';
 import { createMessage } from './lib/actions/create-message';
+import { newTodoTrigger } from './lib/triggers/new-todo';
 
 const markdown = `
-Connect via your BCGPT gateway.
-Create a session using the BCGPT piece, connect Basecamp, then paste the session key here.
+Connect via your BCGPT gateway and paste your API key here.
 `;
 
 export const basecampAuth = PieceAuth.CustomAuth({
@@ -20,13 +20,9 @@ export const basecampAuth = PieceAuth.CustomAuth({
       required: true,
       defaultValue: 'https://bcgpt.wickedlab.io',
     }),
-    session_key: PieceAuth.SecretText({
-      displayName: 'Session Key',
-      required: false,
-    }),
-    user_key: Property.ShortText({
-      displayName: 'User Key (optional)',
-      required: false,
+    api_key: PieceAuth.SecretText({
+      displayName: 'API Key',
+      required: true,
     }),
   },
 });
@@ -36,9 +32,9 @@ export const basecamp = createPiece({
   description: 'Basecamp actions via BCGPT gateway',
   auth: basecampAuth,
   minimumSupportedRelease: '0.77.0',
-  logoUrl: 'https://cdn.activepieces.com/pieces/basecamp.png',
+  logoUrl: '/branding/basecamp.svg',
   categories: [PieceCategory.PRODUCTIVITY],
   actions: [listProjects, listTodosForProject, createTodo, listMessages, createMessage],
-  triggers: [],
+  triggers: [newTodoTrigger],
   authors: ['wickeddevsupport'],
 });

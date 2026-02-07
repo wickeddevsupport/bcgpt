@@ -18,7 +18,7 @@ const SyncPiecesButton = () => {
     },
     onSuccess: () => {
       toast.success(t('Pieces synced'), {
-        description: t('Pieces have been synced from the activepieces cloud.'),
+        description: t('Pieces have been synced from the Wicked Flow cloud.'),
       });
     },
   });

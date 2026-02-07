@@ -3,10 +3,11 @@ import { PieceCategory } from '@activepieces/shared';
 import { callTool } from './lib/actions/call-tool';
 import { listTools } from './lib/actions/list-tools';
 import { startSession } from './lib/actions/start-session';
+import { listAccounts } from './lib/actions/list-accounts';
+import { selectAccount } from './lib/actions/select-account';
 
 const markdown = `
-Create a session using the Start Session action, then open the reauth URL to connect Basecamp.
-Paste the session key here after you connect.
+Connect your Basecamp account via the BCGPT connect page and paste your API key here.
 `;
 
 export const bcgptAuth = PieceAuth.CustomAuth({
@@ -18,13 +19,9 @@ export const bcgptAuth = PieceAuth.CustomAuth({
       required: true,
       defaultValue: 'https://bcgpt.wickedlab.io',
     }),
-    session_key: PieceAuth.SecretText({
-      displayName: 'Session Key',
-      required: false,
-    }),
-    user_key: Property.ShortText({
-      displayName: 'User Key (optional)',
-      required: false,
+    api_key: PieceAuth.SecretText({
+      displayName: 'API Key',
+      required: true,
     }),
   },
 });
@@ -34,9 +31,9 @@ export const bcgpt = createPiece({
   description: 'Basecamp GPT MCP server actions and tools',
   auth: bcgptAuth,
   minimumSupportedRelease: '0.77.0',
-  logoUrl: 'https://cdn.activepieces.com/pieces/new-core/mcp.svg',
+  logoUrl: '/branding/bcgpt.svg',
   categories: [PieceCategory.PRODUCTIVITY, PieceCategory.ARTIFICIAL_INTELLIGENCE],
-  actions: [startSession, listTools, callTool],
+  actions: [startSession, listAccounts, selectAccount, listTools, callTool],
   triggers: [],
   authors: ['wickeddevsupport'],
 });

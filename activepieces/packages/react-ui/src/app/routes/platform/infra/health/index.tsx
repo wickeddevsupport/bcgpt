@@ -56,7 +56,7 @@ export default function SettingsHealthPage() {
                   {t('See the')}{' '}
                   <a
                     className="font-medium text-blue-600 dark:text-blue-500 hover:underline"
-                    href="https://github.com/activepieces/activepieces/releases"
+                    href="https://github.com/wickedlab/wicked-flow/releases"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -69,7 +69,7 @@ export default function SettingsHealthPage() {
           </div>
         </div>
       ),
-      link: 'https://github.com/activepieces/activepieces/releases',
+      link: 'https://github.com/wickedlab/wicked-flow/releases',
     },
     {
       id: 'disk-size',
@@ -83,12 +83,12 @@ export default function SettingsHealthPage() {
                 'The server has sufficient disk space. At least 30GB of disk space is required for optimal operation.',
               )
             : t(
-                'Insufficient disk space. A minimum of 30GB is required for Activepieces to function properly.',
+                'Insufficient disk space. A minimum of 30GB is required for Wicked Flow to function properly.',
               )}
         </span>
       ),
       loading: isPending,
-      link: 'https://www.activepieces.com/docs/install/configuration/hardware#technical-specifications',
+      link: 'https://wickedlab.io/docs/install/configuration/hardware#technical-specifications',
     },
     {
       id: 'ram',
@@ -106,7 +106,7 @@ export default function SettingsHealthPage() {
               )}
         </span>
       ),
-      link: 'https://www.activepieces.com/docs/install/configuration/hardware#technical-specifications',
+      link: 'https://wickedlab.io/docs/install/configuration/hardware#technical-specifications',
       loading: isPending,
     },
     {
@@ -118,14 +118,14 @@ export default function SettingsHealthPage() {
         <span>
           {systemHealth?.cpu
             ? t(
-                'The server has enough CPU resources. At least 1 CPU core is required to run Activepieces.',
+                'The server has enough CPU resources. At least 1 CPU core is required to run Wicked Flow.',
               )
             : t(
-                'Not enough CPU resources. At least 1 CPU core is necessary to operate Activepieces.',
+                'Not enough CPU resources. At least 1 CPU core is necessary to operate Wicked Flow.',
               )}
         </span>
       ),
-      link: 'https://www.activepieces.com/docs/install/configuration/hardware#technical-specifications',
+      link: 'https://wickedlab.io/docs/install/configuration/hardware#technical-specifications',
       loading: isPending,
     },
   ];

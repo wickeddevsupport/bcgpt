@@ -64,9 +64,9 @@ export function generateTheme({
 }
 
 export const defaultTheme = generateTheme({
-    primaryColor: '#6e41e2',
-    websiteName: 'Activepieces',
-    fullLogoUrl: 'https://cdn.activepieces.com/brand/full-logo.png',
-    favIconUrl: 'https://cdn.activepieces.com/brand/favicon.ico',
-    logoIconUrl: 'https://cdn.activepieces.com/brand/logo.svg',
+    primaryColor: '#FF415B',
+    websiteName: 'Wicked Flow',
+    fullLogoUrl: '/branding/wicked-flow-logo.svg',
+    favIconUrl: '/branding/wicked-flow-icon.svg',
+    logoIconUrl: '/branding/wicked-flow-icon.svg',
 })

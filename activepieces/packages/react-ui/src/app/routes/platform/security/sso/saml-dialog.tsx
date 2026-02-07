@@ -1,4 +1,4 @@
-import { typeboxResolver } from '@hookform/resolvers/typebox';
+﻿import { typeboxResolver } from '@hookform/resolvers/typebox';
 import { Static, Type } from '@sinclair/typebox';
 import { useMutation } from '@tanstack/react-query';
 import { t } from 'i18next';
@@ -26,7 +26,7 @@ import {
   ApFlagId,
   PlatformWithoutSensitiveData,
   UpdatePlatformRequestBody,
-} from '@activepieces/shared';
+} from '@Wicked Flow/shared';
 
 type ConfigureSamlDialogProps = {
   platform: PlatformWithoutSensitiveData;
@@ -119,7 +119,7 @@ export const ConfigureSamlDialog = ({
               markdown={t(
                 `
 **Setup Instructions**:
-Please check the following documentation: [SAML SSO](https://activepieces.com/docs/security/sso)
+Please check the following documentation: [SAML SSO](https://wickedlab.io/docs/security/sso)
 
 **Single sign-on URL**:
 \`\`\`text
@@ -127,7 +127,7 @@ Please check the following documentation: [SAML SSO](https://activepieces.com/do
 \`\`\`
 **Audience URI (SP Entity ID)**:
 \`\`\`text
-Activepieces
+Wicked Flow
 \`\`\`
 `,
                 { samlAcs: samlAcs ?? '' },
@@ -201,3 +201,4 @@ Activepieces
     </Dialog>
   );
 };
+

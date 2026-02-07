@@ -6,10 +6,8 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useEmbedding } from '@/components/embed-provider';
 import { Separator } from '@/components/ui/separator';
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar-shadcn';
-import { PurchaseExtraFlowsDialog } from '@/features/billing/components/active-flows-addon/purchase-active-flows-dialog';
-import { flagsHooks } from '@/hooks/flags-hooks';
 import { projectHooks } from '@/hooks/project-collection';
-import { ApEdition, ApFlagId, isNil } from '@activepieces/shared';
+import { isNil } from '@activepieces/shared';
 
 import { authenticationSession } from '../../../lib/authentication-session';
 import { ProjectDashboardSidebar } from '../sidebar/dashboard';
@@ -40,7 +38,6 @@ export function ProjectDashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { data: edition } = flagsHooks.useFlag<ApEdition>(ApFlagId.EDITION);
   const currentProjectId = authenticationSession.getProjectId();
   const { t } = useTranslation();
   const location = useLocation();
@@ -95,7 +92,6 @@ export function ProjectDashboardLayout({
         </SidebarInset>
       </SidebarProvider>
 
-      {edition === ApEdition.CLOUD && <PurchaseExtraFlowsDialog />}
     </ProjectChangedRedirector>
   );
 }

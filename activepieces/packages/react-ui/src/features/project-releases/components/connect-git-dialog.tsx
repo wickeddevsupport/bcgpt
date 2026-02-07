@@ -120,7 +120,7 @@ const ConnectGitDialog = ({ open, setOpen, showButton }: ConnectGitProps) => {
                     <FormLabel>{t('Remote URL')}</FormLabel>
                     <FormControl>
                       <Input
-                        placeholder="git@github.com:activepieces/activepieces.git"
+                        placeholder="git@github.com:wickedlab/wicked-flow.git"
                         {...field}
                       />
                     </FormControl>
@@ -146,7 +146,7 @@ const ConnectGitDialog = ({ open, setOpen, showButton }: ConnectGitProps) => {
                   <FormItem>
                     <FormLabel>{t('Folder')}</FormLabel>
                     <FormControl>
-                      <Input placeholder="activepieces" {...field} />
+                      <Input placeholder="wicked-flow" {...field} />
                     </FormControl>
                     <FormDescription>
                       {t(

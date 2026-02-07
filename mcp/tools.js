@@ -29,7 +29,13 @@ function sanitizeSchema(schema) {
 
 export function getTools() {
   const tools = [
-    tool("startbcgpt", "Show connection status, current user (name/email), plus re-auth and logout links.", noProps()),
+    tool("startbcgpt", "Show connection status, current user (name/email), plus re-auth and logout links.", {
+      type: "object",
+      properties: {
+        api_key: { type: "string", description: "Optional API key override." }
+      },
+      additionalProperties: false
+    }),
     tool("whoami", "Return account id + authorized accounts list.", noProps()),
 
     tool("list_accounts", "List Basecamp accounts available to the authenticated user.", noProps()),
@@ -305,7 +311,12 @@ export function getTools() {
 
     tool("list_todos_for_project", "List todolists + todos for a project by name.", {
       type: "object",
-      properties: { project: { type: "string" } },
+      properties: {
+        project: { type: "string" },
+        compact: { type: "boolean" },
+        preview_limit: { type: "integer" },
+        inlineLimit: { type: "integer" }
+      },
       required: ["project"],
       additionalProperties: false
     }),

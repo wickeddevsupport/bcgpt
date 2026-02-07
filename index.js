@@ -11,21 +11,18 @@ import { fileURLToPath } from "url";
 import { handleMCP } from "./mcp.js";
 import { basecampFetch as basecampFetchCore, basecampFetchAll as basecampFetchAllCore, getCircuitStatus as getBasecampCircuitStatus } from "./basecamp.js";
 import {
-  getToken,
-  setToken,
-  clearToken,
-  getAuthCache,
-  setAuthCache,
-  clearAuthCache,
   getUserToken,
   setUserToken,
   clearUserToken,
   getUserAuthCache,
   setUserAuthCache,
   clearUserAuthCache,
-  createSession,
-  bindSession,
-  getSessionUser,
+  getApiKeyForUser,
+  createApiKeyForUser,
+  getUserByApiKey,
+  bindApiKeyToUser,
+  getSelectedAccount,
+  setSelectedAccount,
   getIndexStats,
   getEntityStats,
   getToolCacheStats,
@@ -49,38 +46,15 @@ app.use(express.json({ limit: "2mb" }));
 const PORT = process.env.PORT || 10000;
 const UA = "bcgpt-full-v3";
 const BASECAMP_API = "https://3.basecampapi.com";
-const DEFAULT_ACCOUNT_ID = process.env.BASECAMP_DEFAULT_ACCOUNT_ID || null;
 const ACTIVEPIECES_PROXY_HOST = String(process.env.ACTIVEPIECES_PROXY_HOST || "").trim().toLowerCase();
 const ACTIVEPIECES_PROXY_TARGET = process.env.ACTIVEPIECES_PROXY_TARGET || "http://127.0.0.1:4200";
 const ACTIVEPIECES_PROXY_ENABLED =
   String(process.env.ACTIVEPIECES_PROXY_ENABLED || "").toLowerCase() === "true" || Boolean(ACTIVEPIECES_PROXY_HOST);
 const ACTIVEPIECES_PROXY_ACTIVE = ACTIVEPIECES_PROXY_ENABLED && Boolean(ACTIVEPIECES_PROXY_HOST);
 
-// Log the account ID being used on startup
-console.log(`[Startup] DEFAULT_ACCOUNT_ID from env: ${DEFAULT_ACCOUNT_ID}`);
-
 let MINER_RUNNING = false;
 let MINER_LAST_RESULT = null;
 let MINER_LAST_STARTED_AT = null;
-
-// Load legacy token from database on startup, fallback to environment
-const legacyToken = getToken();
-if (!legacyToken && process.env.BASECAMP_TOKEN) {
-  try {
-    const parsed = JSON.parse(process.env.BASECAMP_TOKEN);
-    setToken(parsed);
-    console.log(`[Startup] Loaded legacy token from BASECAMP_TOKEN env var and saved to database`);
-  } catch (e) {
-    console.error(`[Startup] Failed to parse BASECAMP_TOKEN from env:`, e.message);
-  }
-} else if (legacyToken) {
-  console.log(`[Startup] Loaded legacy token from database`);
-}
-
-const legacyAuth = getAuthCache();
-if (legacyAuth) {
-  console.log(`[Startup] Loaded legacy auth cache from database`);
-}
 
 function originBase(req) {
   const inferred = `${req.protocol}://${req.get("host")}`;
@@ -110,36 +84,24 @@ function getHeaderValue(req, name) {
   return value ?? null;
 }
 
-function extractSessionKey(req) {
+function extractApiKey(req) {
   return normalizeKey(
-    getHeaderValue(req, "x-bcgpt-session") ||
-      getHeaderValue(req, "x-session-key") ||
-      req?.body?.session_key ||
-      req?.query?.session_key ||
-      req?.query?.sessionKey
+    getHeaderValue(req, "x-bcgpt-api-key") ||
+      getHeaderValue(req, "x-api-key") ||
+      req?.body?.api_key ||
+      req?.query?.api_key ||
+      req?.query?.apiKey
   );
 }
 
-function extractUserKey(req) {
-  return normalizeKey(
-    getHeaderValue(req, "x-bcgpt-user") ||
-      getHeaderValue(req, "x-user-key") ||
-      req?.body?.user_key ||
-      req?.query?.user_key
-  );
-}
+async function resolveRequestContext(req, { apiKey: forcedApiKey, userKey: forcedUserKey } = {}) {
+  const apiKey = normalizeKey(forcedApiKey || extractApiKey(req));
+  const explicitUserKey = normalizeKey(forcedUserKey);
 
-async function resolveRequestContext(req, { sessionKey: forcedSessionKey, userKey: forcedUserKey } = {}) {
-  const sessionKey = normalizeKey(forcedSessionKey || extractSessionKey(req));
-  const explicitUserKey = normalizeKey(forcedUserKey || extractUserKey(req));
-
-  if (sessionKey) {
-    createSession(sessionKey);
+  let userKey = explicitUserKey || null;
+  if (!userKey && apiKey) {
+    userKey = getUserByApiKey(apiKey);
   }
-
-  const sessionUserKey = sessionKey ? getSessionUser(sessionKey) : null;
-  let userKey = sessionUserKey || explicitUserKey || null;
-  const isLegacyContext = !sessionKey && !explicitUserKey;
 
   let token = null;
   let auth = null;
@@ -147,17 +109,11 @@ async function resolveRequestContext(req, { sessionKey: forcedSessionKey, userKe
   if (userKey) {
     token = getUserToken(userKey);
     auth = getUserAuthCache(userKey);
-  } else if (isLegacyContext) {
-    token = getToken();
-    auth = getAuthCache();
-    userKey = auth?.user_key || deriveUserKey(auth) || token?.user_key || null;
   }
 
   return {
-    sessionKey,
-    explicitUserKey,
+    apiKey,
     userKey,
-    isLegacyContext,
     token,
     auth,
   };
@@ -184,78 +140,59 @@ async function fetchAuthorization(token) {
   return r.json();
 }
 
-async function ensureAuthorization({ token, userKey, sessionKey, isLegacyContext, force = false }) {
+async function ensureAuthorization({ token, userKey, force = false }) {
   if (!token?.access_token) {
     const err = new Error("NOT_AUTHENTICATED");
     err.code = "NOT_AUTHENTICATED";
     throw err;
   }
 
-  const useLegacy = Boolean(isLegacyContext) && !userKey && !sessionKey;
-
   if (!force) {
     if (userKey) {
       const cached = getUserAuthCache(userKey);
       if (cached) return { auth: cached, userKey };
-    } else if (useLegacy) {
-      const cached = getAuthCache();
-      if (cached) {
-        const derived = cached.user_key || deriveUserKey(cached);
-        return { auth: cached, userKey: derived || null };
-      }
     }
   }
 
   const auth = await fetchAuthorization(token);
-  let derivedUserKey = userKey || deriveUserKey(auth);
-  if (!derivedUserKey && sessionKey) {
-    derivedUserKey = `session:${sessionKey}`;
-  }
+  const derivedUserKey = userKey || deriveUserKey(auth);
 
   if (derivedUserKey) {
-    if (useLegacy) {
-      setAuthCache(auth, derivedUserKey);
-      setToken(token, derivedUserKey);
-    } else {
-      setUserAuthCache(auth, derivedUserKey);
-      setUserToken(token, derivedUserKey);
-    }
-    if (sessionKey) {
-      bindSession(sessionKey, derivedUserKey);
-    }
+    setUserAuthCache(auth, derivedUserKey);
+    setUserToken(token, derivedUserKey);
   }
 
   return { auth, userKey: derivedUserKey };
 }
 
-function pickAccountId(auth) {
+function pickAccountId(auth, userKey) {
   if (!auth?.accounts?.length) {
     const err = new Error("NO_ACCOUNTS");
     err.code = "NO_ACCOUNTS";
     throw err;
   }
 
-  if (DEFAULT_ACCOUNT_ID) {
-    console.log(`[getAccountId] Using DEFAULT_ACCOUNT_ID: ${DEFAULT_ACCOUNT_ID}`);
-    const match = (auth.accounts || []).find((a) => String(a.id) === String(DEFAULT_ACCOUNT_ID));
-    if (!match) {
-      console.error(`[getAccountId] DEFAULT_ACCOUNT_ID not found. Available accounts:`, auth.accounts?.map((a) => a.id));
-      const err = new Error(
-        `BASECAMP_DEFAULT_ACCOUNT_ID (${DEFAULT_ACCOUNT_ID}) not found in authorized accounts`
-      );
-      err.code = "DEFAULT_ACCOUNT_NOT_FOUND";
-      throw err;
-    }
-    console.log(`[getAccountId] Matched account: ${match.id}`);
-    return match.id;
+  const selected = getSelectedAccount(userKey);
+  if (!selected) {
+    const err = new Error("ACCOUNT_NOT_SELECTED");
+    err.code = "ACCOUNT_NOT_SELECTED";
+    err.accounts = auth.accounts;
+    throw err;
   }
 
-  console.log(`[getAccountId] Using first account: ${auth.accounts[0].id}`);
-  return auth.accounts[0].id;
+  const match = (auth.accounts || []).find((a) => String(a.id) === String(selected));
+  if (!match) {
+    const err = new Error("SELECTED_ACCOUNT_INVALID");
+    err.code = "SELECTED_ACCOUNT_INVALID";
+    err.accounts = auth.accounts;
+    throw err;
+  }
+
+  return match.id;
 }
 
-async function requireBasecampContext(req, { sessionKey: forcedSessionKey, forceAuth = false } = {}) {
-  const ctx = await resolveRequestContext(req, { sessionKey: forcedSessionKey });
+async function requireBasecampContext(req, { apiKey: forcedApiKey, forceAuth = false } = {}) {
+  const ctx = await resolveRequestContext(req, { apiKey: forcedApiKey });
   if (!ctx.token?.access_token) {
     const err = new Error("NOT_AUTHENTICATED");
     err.code = "NOT_AUTHENTICATED";
@@ -265,12 +202,10 @@ async function requireBasecampContext(req, { sessionKey: forcedSessionKey, force
   const authResult = await ensureAuthorization({
     token: ctx.token,
     userKey: ctx.userKey,
-    sessionKey: ctx.sessionKey,
-    isLegacyContext: ctx.isLegacyContext,
     force: forceAuth,
   });
 
-  const accountId = pickAccountId(authResult.auth);
+  const accountId = pickAccountId(authResult.auth, authResult.userKey || ctx.userKey);
 
   return {
     ...ctx,
@@ -476,27 +411,46 @@ async function basecampFetch(token, path, opts = {}) {
 }
 
 /* ============ Launchpad auth ============ */
-async function startStatus(req, { sessionKey: forcedSessionKey } = {}) {
-  const incomingSession = normalizeKey(forcedSessionKey || extractSessionKey(req));
-  const sessionKey = incomingSession || createSession();
-
-  if (incomingSession) {
-    createSession(incomingSession);
-  }
-
+async function startStatus(req, { apiKey: forcedApiKey } = {}) {
+  const apiKey = normalizeKey(forcedApiKey || extractApiKey(req));
   const base = originBase(req);
-  const stateParam = sessionKey ? `?state=${encodeURIComponent(sessionKey)}` : "";
+  const connect_url = `${base}/connect`;
+  const stateParam = apiKey ? `?state=${encodeURIComponent(apiKey)}` : "";
   const reauth_url = `${base}/auth/basecamp/start${stateParam}`;
   const logout_url = `${base}/logout`;
+  const select_account_url = connect_url;
+  const select_account_endpoint = `${base}/select_account`;
 
-  const ctx = await resolveRequestContext(req, { sessionKey });
+  if (!apiKey) {
+    return {
+      connected: false,
+      user: null,
+      user_key: null,
+      api_key: null,
+      selected_account_id: null,
+      accounts: [],
+      connect_url,
+      reauth_url,
+      select_account_url,
+      select_account_endpoint,
+      logout_url,
+      message: "No API key provided. Visit the connect page to generate one.",
+    };
+  }
+
+  const ctx = await resolveRequestContext(req, { apiKey });
   if (!ctx.token?.access_token) {
     return {
       connected: false,
       user: null,
       user_key: ctx.userKey || null,
-      session_key: sessionKey,
+      api_key: apiKey,
+      selected_account_id: null,
+      accounts: [],
+      connect_url,
       reauth_url,
+      select_account_url,
+      select_account_endpoint,
       logout_url,
       message: "Not connected. Use the auth link to connect Basecamp.",
     };
@@ -506,10 +460,14 @@ async function startStatus(req, { sessionKey: forcedSessionKey } = {}) {
     const authResult = await ensureAuthorization({
       token: ctx.token,
       userKey: ctx.userKey,
-      sessionKey,
-      isLegacyContext: ctx.isLegacyContext,
       force: true,
     });
+    const accounts = authResult.auth?.accounts || [];
+    const selected = getSelectedAccount(authResult.userKey || ctx.userKey);
+    const selectedMatch = selected
+      ? accounts.find((a) => String(a.id) === String(selected))
+      : null;
+
     return {
       connected: true,
       user: {
@@ -517,40 +475,50 @@ async function startStatus(req, { sessionKey: forcedSessionKey } = {}) {
         email: authResult.auth.identity?.email_address || null,
       },
       user_key: authResult.userKey || ctx.userKey,
-      session_key: sessionKey,
+      api_key: apiKey,
+      selected_account_id: selectedMatch ? selected : null,
+      accounts,
+      connect_url,
       reauth_url,
+      select_account_url,
+      select_account_endpoint,
       logout_url,
-      message: "Connected. Not you? Use the auth link to re-login.",
+      message: selectedMatch
+        ? "Connected."
+        : "Connected. Select a Basecamp account to continue.",
     };
   } catch {
     return {
       connected: false,
       user: null,
       user_key: ctx.userKey || null,
-      session_key: sessionKey,
+      api_key: apiKey,
+      selected_account_id: null,
+      accounts: [],
+      connect_url,
       reauth_url,
+      select_account_url,
+      select_account_endpoint,
       logout_url,
       message: "Token exists but authorization could not be loaded. Re-auth required.",
     };
   }
 }
 
-async function runMiningJob({ force = false, sessionKey = null, userKey = null } = {}) {
+async function runMiningJob({ force = false, apiKey = null, userKey = null } = {}) {
   if (MINER_RUNNING) return { ok: false, message: "Miner already running." };
   MINER_RUNNING = true;
   MINER_LAST_STARTED_AT = new Date().toISOString();
   try {
-    const ctx = await resolveRequestContext(null, { sessionKey, userKey });
+    const ctx = await resolveRequestContext(null, { apiKey, userKey });
     if (!ctx.token?.access_token) return { ok: false, message: "Not authenticated." };
 
     const authResult = await ensureAuthorization({
       token: ctx.token,
       userKey: ctx.userKey,
-      sessionKey: ctx.sessionKey,
-      isLegacyContext: ctx.isLegacyContext,
       force: false,
     });
-    const accountId = pickAccountId(authResult.auth);
+    const accountId = pickAccountId(authResult.auth, authResult.userKey || ctx.userKey);
     const resolvedUserKey = authResult.userKey || ctx.userKey || "legacy";
 
     const result = await runMining({
@@ -592,13 +560,11 @@ async function buildMcpCtx(req) {
     const authResult = await ensureAuthorization({
       token: ctx.token,
       userKey: ctx.userKey,
-      sessionKey: ctx.sessionKey,
-      isLegacyContext: ctx.isLegacyContext,
       force: false,
     });
     auth = authResult.auth;
     userKey = authResult.userKey || userKey;
-    accountId = pickAccountId(auth);
+    accountId = pickAccountId(auth, userKey);
   }
 
   console.log(`[buildMcpCtx] accountId retrieved: ${accountId} (type: ${typeof accountId})`);
@@ -608,9 +574,10 @@ async function buildMcpCtx(req) {
     accountId,
     ua: UA,
     userKey,
-    sessionKey: ctx.sessionKey,
+    apiKey: ctx.apiKey,
     authAccounts: auth?.accounts || [],
-    startStatus: async () => await startStatus(req, { sessionKey: ctx.sessionKey }),
+    startStatus: async (overrides = {}) =>
+      await startStatus(req, { apiKey: overrides.apiKey || ctx.apiKey }),
 
     // Provide both single-request AND auto-paginated versions to MCP
     basecampFetch: async (path, opts = {}) =>
@@ -634,6 +601,7 @@ async function runTool(op, params, req) {
   if (normalizedParams.compact === undefined) {
     normalizedParams.compact = true;
   }
+  delete normalizedParams.api_key;
   delete normalizedParams.session_key;
   delete normalizedParams.user_key;
 
@@ -668,14 +636,15 @@ app.get("/openapi.json", (req, res) => {
   res.sendFile(path.join(__dirname, "openapi.json"));
 });
 
+app.get("/connect", (req, res) => {
+  res.sendFile(path.join(__dirname, "connect.html"));
+});
+
 /* ================= OAuth ================= */
 app.get("/auth/basecamp/start", (req, res) => {
   const base = originBase(req);
   const redirectUri = `${base}/auth/basecamp/callback`;
-  const state = normalizeKey(req.query.state || req.query.session_key || req.query.sessionKey || extractSessionKey(req));
-  if (state) {
-    createSession(state);
-  }
+  const state = normalizeKey(req.query.state || req.query.api_key || req.query.apiKey || extractApiKey(req));
 
   const url =
     `https://launchpad.37signals.com/authorization/new` +
@@ -691,7 +660,7 @@ app.get("/auth/basecamp/callback", async (req, res) => {
   try {
     const base = originBase(req);
     const redirectUri = `${base}/auth/basecamp/callback`;
-    const sessionKey = normalizeKey(req.query.state || req.query.session_key || req.query.sessionKey);
+    const apiKeyFromState = normalizeKey(req.query.state || req.query.api_key || req.query.apiKey);
 
     const r = await fetch("https://launchpad.37signals.com/authorization/token", {
       method: "POST",
@@ -719,27 +688,26 @@ app.get("/auth/basecamp/callback", async (req, res) => {
     }
 
     const auth = await fetchAuthorization(token);
-    let derivedUserKey = deriveUserKey(auth);
-    if (!derivedUserKey && sessionKey) {
-      derivedUserKey = `session:${sessionKey}`;
+    const derivedUserKey = deriveUserKey(auth);
+    if (!derivedUserKey) {
+      throw new Error("USER_KEY_REQUIRED");
     }
 
-    if (sessionKey) {
-      if (!derivedUserKey) {
-        throw new Error("USER_KEY_REQUIRED");
-      }
-      setUserToken(token, derivedUserKey);
-      setUserAuthCache(auth, derivedUserKey);
-      bindSession(sessionKey, derivedUserKey);
-    } else {
-      const legacyKey = derivedUserKey || "legacy";
-      setToken(token, legacyKey);
-      setAuthCache(auth, legacyKey);
+    setUserToken(token, derivedUserKey);
+    setUserAuthCache(auth, derivedUserKey);
+
+    const existingKey = getApiKeyForUser(derivedUserKey);
+    let apiKey = existingKey || apiKeyFromState || null;
+    if (apiKey && !existingKey) {
+      bindApiKeyToUser(apiKey, derivedUserKey);
+    }
+    if (!apiKey) {
+      apiKey = createApiKeyForUser(derivedUserKey);
     }
 
-    res.send("✅ Basecamp connected. Return to ChatGPT and run /startbcgpt.");
+    res.redirect(`${base}/connect?api_key=${encodeURIComponent(apiKey)}`);
   } catch (e) {
-    res.status(500).send(`❌ OAuth failed: ${e?.message || e}`);
+    res.status(500).send(`OAuth failed: ${e?.message || e}`);
   }
 });
 
@@ -750,16 +718,77 @@ app.post("/logout", async (req, res) => {
   if (ctx.userKey) {
     clearUserToken(ctx.userKey);
     clearUserAuthCache(ctx.userKey);
-  } else if (ctx.isLegacyContext) {
-    clearToken();
-    clearAuthCache();
   }
-  res.json({ ok: true, connected: false, session_key: ctx.sessionKey || null, message: "Logged out." });
+  res.json({ ok: true, connected: false, api_key: ctx.apiKey || null, message: "Logged out." });
 });
 
 /* ================= Actions ================= */
 app.post("/action/startbcgpt", async (req, res) => {
   res.json(await startStatus(req));
+});
+
+app.post("/select_account", async (req, res) => {
+  try {
+    const apiKey = normalizeKey(extractApiKey(req));
+    const accountId = normalizeKey(req.body?.account_id || req.query?.account_id);
+    const base = originBase(req);
+    const connect_url = `${base}/connect`;
+    const reauth_url = apiKey ? `${base}/auth/basecamp/start?state=${encodeURIComponent(apiKey)}` : connect_url;
+
+    if (!apiKey) {
+      return res.status(400).json({
+        ok: false,
+        error: "API_KEY_REQUIRED",
+        message: "Missing api_key",
+        connect_url,
+      });
+    }
+
+    if (!accountId) {
+      return res.status(400).json({
+        ok: false,
+        error: "ACCOUNT_ID_REQUIRED",
+        message: "Missing account_id",
+      });
+    }
+
+    const ctx = await resolveRequestContext(req, { apiKey });
+    if (!ctx.token?.access_token) {
+      return res.status(401).json({
+        ok: false,
+        error: "NOT_AUTHENTICATED",
+        message: "Not connected. Use the auth link to connect Basecamp.",
+        reauth_url,
+        connect_url,
+      });
+    }
+
+    const authResult = await ensureAuthorization({
+      token: ctx.token,
+      userKey: ctx.userKey,
+      force: true,
+    });
+
+    const accounts = authResult.auth?.accounts || [];
+    const match = accounts.find((a) => String(a.id) === String(accountId));
+    if (!match) {
+      return res.status(400).json({
+        ok: false,
+        error: "ACCOUNT_NOT_FOUND",
+        message: "Account ID not found in authorized accounts.",
+        accounts,
+      });
+    }
+
+    const selected = setSelectedAccount(authResult.userKey || ctx.userKey, accountId);
+    return res.json({
+      ok: true,
+      selected_account_id: selected,
+      accounts,
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e?.code || "SERVER_ERROR", message: e?.message || String(e) });
+  }
 });
 
 app.post("/action/:op", async (req, res) => {
@@ -887,7 +916,7 @@ app.post("/mcp", async (req, res) => {
         accountId: null,
         ua: UA,
         userKey: null,
-        sessionKey: extractSessionKey(req),
+        apiKey: extractApiKey(req),
         authAccounts: [],
         startStatus: async () => await startStatus(req),
         basecampFetch: async () => {
@@ -946,7 +975,7 @@ app.get("/dev/mine/status", async (req, res) => {
     last_started_at: MINER_LAST_STARTED_AT,
     last_result: MINER_LAST_RESULT,
     user_key: ctx.userKey || null,
-    session_key: ctx.sessionKey || null,
+    api_key: ctx.apiKey || null,
     index_stats: getIndexStats({ userKey: ctx.userKey }),
     entity_stats: getEntityStats({ userKey: ctx.userKey }),
     tool_cache_stats: getToolCacheStats({ userKey: ctx.userKey }),
@@ -955,7 +984,7 @@ app.get("/dev/mine/status", async (req, res) => {
 
 app.post("/dev/mine/run", async (req, res) => {
   const ctx = await resolveRequestContext(req);
-  const result = await runMiningJob({ force: true, sessionKey: ctx.sessionKey, userKey: ctx.userKey });
+  const result = await runMiningJob({ force: true, apiKey: ctx.apiKey, userKey: ctx.userKey });
   res.json(result);
 });
 
@@ -1004,8 +1033,7 @@ app.get("/db/info", async (req, res) => {
         auth_cached: !!ctx.auth,
         index_stats: indexStats,
         user_key: ctx.userKey || null,
-        session_key: ctx.sessionKey || null,
-        legacy_context: ctx.isLegacyContext,
+        api_key: ctx.apiKey || null,
       },
     });
   } catch (e) {

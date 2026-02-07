@@ -15,7 +15,6 @@ import TelemetryProvider from '@/components/telemetry-provider';
 import { ThemeProvider } from '@/components/theme-provider';
 import { internalErrorToast, Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { useManagePlanDialogStore } from '@/features/billing/lib/active-flows-addon-dialog-state';
 import { RefreshAnalyticsProvider } from '@/features/platform-admin/lib/refresh-analytics-context';
 import { api } from '@/lib/api';
 import { ErrorCode, isNil } from '@activepieces/shared';
@@ -28,9 +27,10 @@ const queryClient = new QueryClient({
   mutationCache: new MutationCache({
     onError: (err: Error, _, __, mutation) => {
       if (api.isApError(err, ErrorCode.QUOTA_EXCEEDED)) {
-        const { openDialog } = useManagePlanDialogStore.getState();
-        openDialog();
-      } else if (isNil(mutation.options.onError)) {
+        internalErrorToast();
+        return;
+      }
+      if (isNil(mutation.options.onError)) {
         internalErrorToast();
       }
     },

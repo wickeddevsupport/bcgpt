@@ -11,10 +11,10 @@ import customHtmlPlugin from './vite-plugins/html-plugin';
 export default defineConfig(({ command, mode }) => {
   const isDev = command === 'serve' || mode === 'development';
 
-  const AP_TITLE = isDev ? 'Activepieces' : '${AP_APP_TITLE}';
+  const AP_TITLE = isDev ? 'Wicked Flow' : '${AP_APP_TITLE}';
 
   const AP_FAVICON = isDev
-    ? 'https://activepieces.com/favicon.ico'
+    ? '/branding/wicked-flow-icon.svg'
     : '${AP_FAVICON_URL}';
 
   return {

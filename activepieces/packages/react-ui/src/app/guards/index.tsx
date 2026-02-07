@@ -19,8 +19,6 @@ import { PlatformPiecesPage } from '@/app/routes/platform/setup/pieces';
 import { RedirectPage } from '@/app/routes/redirect';
 import { useEmbedding } from '@/components/embed-provider';
 import { VerifyEmail } from '@/features/authentication/components/verify-email';
-import { Error } from '@/features/billing/components/error';
-import { Success } from '@/features/billing/components/success';
 import { AcceptInvitation } from '@/features/members/component/accept-invitation';
 import { routesThatRequireProjectId } from '@/lib/utils';
 import { Permission } from '@activepieces/shared';
@@ -40,7 +38,6 @@ import { FlowBuilderPage } from '../routes/flows/id';
 import { ResetPasswordPage } from '../routes/forget-password';
 import { FormPage } from '../routes/forms';
 import LeaderboardPage from '../routes/leaderboard';
-import SettingsBilling from '../routes/platform/billing';
 import EventDestinationsPage from '../routes/platform/infra/event-destinations';
 import SettingsHealthPage from '../routes/platform/infra/health';
 import TriggerHealthPage from '../routes/platform/infra/triggers';
@@ -479,36 +476,6 @@ const routes = [
       <PlatformLayout>
         <PageTitle title="Event Streaming">
           <EventDestinationsPage />
-        </PageTitle>
-      </PlatformLayout>
-    ),
-  },
-  {
-    path: '/platform/setup/billing',
-    element: (
-      <PlatformLayout>
-        <PageTitle title="Billing">
-          <SettingsBilling />
-        </PageTitle>
-      </PlatformLayout>
-    ),
-  },
-  {
-    path: '/platform/setup/billing/success',
-    element: (
-      <PlatformLayout>
-        <PageTitle title="Billing">
-          <Success />
-        </PageTitle>
-      </PlatformLayout>
-    ),
-  },
-  {
-    path: '/platform/setup/billing/error',
-    element: (
-      <PlatformLayout>
-        <PageTitle title="Billing">
-          <Error />
         </PageTitle>
       </PlatformLayout>
     ),

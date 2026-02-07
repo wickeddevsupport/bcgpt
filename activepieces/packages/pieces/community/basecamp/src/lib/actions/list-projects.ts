@@ -18,8 +18,8 @@ export const listProjects = createAction({
     if (!auth?.props?.base_url) {
       throw new Error('Missing BCGPT base URL in connection.');
     }
-    if (!auth?.props?.session_key && !auth?.props?.user_key) {
-      throw new Error('Provide a session key or user key in the connection.');
+    if (!auth?.props?.api_key) {
+      throw new Error('Missing API key in the connection.');
     }
 
     const body: Record<string, unknown> = {};

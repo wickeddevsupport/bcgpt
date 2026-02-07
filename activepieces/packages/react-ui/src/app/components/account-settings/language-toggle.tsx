@@ -1,4 +1,4 @@
-import { useMutation } from '@tanstack/react-query';
+﻿import { useMutation } from '@tanstack/react-query';
 import { t } from 'i18next';
 import { Check, ChevronsUpDown, Globe } from 'lucide-react';
 import { useState } from 'react';
@@ -115,9 +115,9 @@ export const LanguageToggle = () => {
             className="text-xs text-primary hover:underline font-medium"
             rel="noopener noreferrer"
             target="_blank"
-            to="https://www.activepieces.com/docs/about/i18n"
+            to="https://wickedlab.io/docs/about/i18n"
           >
-            {t('Help translate Activepieces →')}
+            {t('Help translate Wicked Flow →')}
           </Link>
         </div>
       )}
@@ -126,3 +126,4 @@ export const LanguageToggle = () => {
 };
 
 export default LanguageToggle;
+

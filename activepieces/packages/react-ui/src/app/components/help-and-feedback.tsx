@@ -26,7 +26,7 @@ export const HelpAndFeedback = () => {
       <DropdownMenuSubContent className="w-[220px]">
         <DropdownMenuItem asChild>
           <Link
-            to="https://activepieces.com/docs"
+            to="https://wickedlab.io/docs"
             target="_blank"
             rel="noopener noreferrer"
             className="flex justify-between w-full"
@@ -40,7 +40,7 @@ export const HelpAndFeedback = () => {
 
         <DropdownMenuItem asChild>
           <Link
-            to="https://github.com/activepieces/activepieces/releases"
+            to="https://github.com/wickedlab/wicked-flow/releases"
             target="_blank"
             rel="noopener noreferrer"
             className="flex justify-between w-full"

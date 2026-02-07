@@ -56,6 +56,21 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_user_sessions_user_key ON user_sessions(user_key);
 
+  CREATE TABLE IF NOT EXISTS user_api_keys (
+    api_key TEXT PRIMARY KEY,
+    user_key TEXT UNIQUE,
+    created_at INTEGER NOT NULL,
+    last_used_at INTEGER
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_user_api_keys_user_key ON user_api_keys(user_key);
+
+  CREATE TABLE IF NOT EXISTS user_preferences (
+    user_key TEXT PRIMARY KEY,
+    selected_account_id TEXT,
+    updated_at INTEGER NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS search_index (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_key TEXT NOT NULL DEFAULT 'legacy',
@@ -134,6 +149,12 @@ function normalizeUserKey(userKey) {
 function normalizeSessionKey(sessionKey) {
   if (!sessionKey) return null;
   const trimmed = String(sessionKey).trim();
+  return trimmed ? trimmed : null;
+}
+
+function normalizeApiKey(apiKey) {
+  if (!apiKey) return null;
+  const trimmed = String(apiKey).trim();
   return trimmed ? trimmed : null;
 }
 
@@ -488,6 +509,10 @@ function generateSessionKey() {
   return crypto.randomBytes(18).toString("hex");
 }
 
+function generateApiKey() {
+  return crypto.randomBytes(24).toString("hex");
+}
+
 // Session operations
 export function createSession(sessionKey = null, userKey = null) {
   const key = normalizeSessionKey(sessionKey) || generateSessionKey();
@@ -533,6 +558,101 @@ export function deleteSession(sessionKey) {
   if (!key) return;
   const stmt = db.prepare("DELETE FROM user_sessions WHERE session_key = ?");
   stmt.run(key);
+}
+
+// API key operations
+export function getApiKeyForUser(userKey) {
+  const key = normalizeUserKey(userKey);
+  if (!key) return null;
+  const stmt = db.prepare("SELECT api_key FROM user_api_keys WHERE user_key = ?");
+  const row = stmt.get(key);
+  return row?.api_key || null;
+}
+
+export function createApiKeyForUser(userKey) {
+  const key = normalizeUserKey(userKey);
+  if (!key) return null;
+  const existing = getApiKeyForUser(key);
+  if (existing) return existing;
+
+  const now = Math.floor(Date.now() / 1000);
+  const stmt = db.prepare(`
+    INSERT INTO user_api_keys (api_key, user_key, created_at, last_used_at)
+    VALUES (?, ?, ?, ?)
+  `);
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const apiKey = generateApiKey();
+    try {
+      stmt.run(apiKey, key, now, now);
+      return apiKey;
+    } catch (e) {
+      if (String(e?.message || e).includes("UNIQUE")) continue;
+      throw e;
+    }
+  }
+
+  throw new Error("API_KEY_CREATE_FAILED");
+}
+
+export function getUserByApiKey(apiKey, { touch = true } = {}) {
+  const key = normalizeApiKey(apiKey);
+  if (!key) return null;
+  const stmt = db.prepare("SELECT user_key FROM user_api_keys WHERE api_key = ?");
+  const row = stmt.get(key);
+  if (!row?.user_key) return null;
+  if (touch) {
+    const touchStmt = db.prepare("UPDATE user_api_keys SET last_used_at = ? WHERE api_key = ?");
+    touchStmt.run(Math.floor(Date.now() / 1000), key);
+  }
+  return row.user_key;
+}
+
+export function bindApiKeyToUser(apiKey, userKey) {
+  const key = normalizeApiKey(apiKey);
+  const ukey = normalizeUserKey(userKey);
+  if (!key || !ukey) return null;
+  const existing = db.prepare("SELECT user_key FROM user_api_keys WHERE api_key = ?").get(key);
+  if (existing?.user_key && existing.user_key !== ukey) {
+    const err = new Error("API_KEY_IN_USE");
+    err.code = "API_KEY_IN_USE";
+    throw err;
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const stmt = db.prepare(`
+    INSERT INTO user_api_keys (api_key, user_key, created_at, last_used_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(api_key) DO UPDATE SET
+      user_key = excluded.user_key,
+      last_used_at = excluded.last_used_at
+  `);
+  stmt.run(key, ukey, now, now);
+  return key;
+}
+
+// User preference operations
+export function getSelectedAccount(userKey) {
+  const key = normalizeUserKey(userKey);
+  if (!key) return null;
+  const stmt = db.prepare("SELECT selected_account_id FROM user_preferences WHERE user_key = ?");
+  const row = stmt.get(key);
+  return row?.selected_account_id ? String(row.selected_account_id) : null;
+}
+
+export function setSelectedAccount(userKey, accountId) {
+  const key = normalizeUserKey(userKey);
+  if (!key) return null;
+  const value = accountId == null ? null : String(accountId);
+  const now = Math.floor(Date.now() / 1000);
+  const stmt = db.prepare(`
+    INSERT INTO user_preferences (user_key, selected_account_id, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(user_key) DO UPDATE SET
+      selected_account_id = excluded.selected_account_id,
+      updated_at = excluded.updated_at
+  `);
+  stmt.run(key, value, now);
+  return value;
 }
 
 // Search index operations

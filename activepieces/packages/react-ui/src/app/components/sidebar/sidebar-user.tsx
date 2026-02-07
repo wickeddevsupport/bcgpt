@@ -3,6 +3,8 @@ import { t } from 'i18next';
 import {
   ChevronsUpDown,
   LogOut,
+  Moon,
+  Sun,
   Shield,
   UserCogIcon,
   UserPlus,
@@ -12,6 +14,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 
 import { useEmbedding } from '@/components/embed-provider';
 import { useTelemetry } from '@/components/telemetry-provider';
+import { useTheme } from '@/components/theme-provider';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,6 +30,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from '@/components/ui/sidebar-shadcn';
+import { Switch } from '@/components/ui/switch';
 import { UserAvatar } from '@/components/ui/user-avatar';
 import { InviteUserDialog } from '@/features/members/component/invite-user/invite-user-dialog';
 import {
@@ -49,11 +53,13 @@ export function SidebarUser() {
   const location = useLocation();
   const { data: user } = userHooks.useCurrentUser();
   const queryClient = useQueryClient();
+  const { theme, setTheme } = useTheme();
   const { reset } = useTelemetry();
   const { checkAccess } = useAuthorization();
   const canInviteUsers = checkAccess(Permission.WRITE_INVITATION);
   const isInPlatformAdmin = location.pathname.startsWith('/platform');
   const isCollapsed = state === 'collapsed';
+  const isDark = theme === 'dark';
 
   if (!user || embedState.isEmbedded) {
     return null;
@@ -128,6 +134,28 @@ export function SidebarUser() {
               <DropdownMenuItem onClick={() => setAccountSettingsOpen(true)}>
                 <UserCogIcon className="w-4 h-4 mr-2" />
                 {t('Account Settings')}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={(event) => event.preventDefault()}
+                className="flex items-center justify-between"
+              >
+                <div className="flex items-center gap-2">
+                  {isDark ? (
+                    <Moon className="w-4 h-4 text-primary" />
+                  ) : (
+                    <Sun className="w-4 h-4 text-muted-foreground" />
+                  )}
+                  <span>{t('Dark Mode')}</span>
+                </div>
+                <Switch
+                  checked={isDark}
+                  onCheckedChange={(checked) =>
+                    setTheme(checked ? 'dark' : 'light')
+                  }
+                  checkedIcon={<Moon className="w-3 h-3 text-primary" />}
+                  uncheckedIcon={<Sun className="w-3 h-3 text-muted-foreground" />}
+                  aria-label="Toggle dark mode"
+                />
               </DropdownMenuItem>
               {canInviteUsers && (
                 <DropdownMenuItem onClick={() => setInviteUserOpen(true)}>

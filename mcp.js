@@ -4387,7 +4387,13 @@ export async function handleMCP(reqBody, ctx) {
     console.log(`[MCP] Tool called: ${name}`, { args, authenticated: !!TOKEN?.access_token, accountId });
 
     // startbcgpt always returns auth link info (even when disconnected)
-    if (name === "startbcgpt") return ok(id, await startStatus());
+    if (name === "startbcgpt") {
+      const apiKeyOverride = args.api_key || args.apiKey || null;
+      return ok(
+        id,
+        await startStatus(apiKeyOverride ? { apiKey: apiKeyOverride } : {}),
+      );
+    }
 
     // whoami
     if (name === "whoami") {
@@ -4547,7 +4553,7 @@ export async function handleMCP(reqBody, ctx) {
         return ok(id, {
           project: { id: p.id, name: p.name },
           metrics: ctx_intel.getMetrics(),
-          ...buildListPayload("groups", enrichedGroups)
+          ...buildListPayload("groups", enrichedGroups, args)
         });
       } catch (e) {
         console.error(`[list_todos_for_project] Error:`, e.message);
@@ -4555,7 +4561,7 @@ export async function handleMCP(reqBody, ctx) {
         try {
           const p = await projectByName(ctx, args.project);
           const groups = await listTodosForProject(ctx, p.id);
-          return ok(id, { project: { id: p.id, name: p.name }, fallback: true, ...buildListPayload("groups", groups) });
+          return ok(id, { project: { id: p.id, name: p.name }, fallback: true, ...buildListPayload("groups", groups, args) });
         } catch (fbErr) {
           return fail(id, { code: "LIST_TODOS_FOR_PROJECT_ERROR", message: fbErr.message });
         }

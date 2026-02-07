@@ -323,10 +323,10 @@
     --ring: theme('colors.neutral.400');
     --radius: 0.625rem;
 
-    --primary-100: 257 75% 85%;
-    --primary: 257 74% 57%;
-    --primary-300: 257 74% 25%;
-    --primary-foreground: 210 20% 98%;
+    --primary-100: 352 100% 90%;
+    --primary: 352 100% 63%;
+    --primary-300: 352 85% 35%;
+    --primary-foreground: 0 0% 100%;
 
 
     --success-100: 148 48% 80%;
@@ -352,8 +352,8 @@
     
     --sidebar-background: theme('colors.neutral.50');
     --sidebar-foreground: theme('colors.neutral.950');
-    --sidebar-primary: 257 74% 57%;
-    --sidebar-primary-foreground: theme('colors.neutral.50');
+    --sidebar-primary: var(--primary);
+    --sidebar-primary-foreground: var(--primary-foreground);
     --sidebar-accent: color-mix(in srgb, theme('colors.neutral.200') 60%, transparent);
     --sidebar-accent-foreground: theme('colors.neutral.900');
     --sidebar-border: theme('colors.neutral.200');
@@ -376,10 +376,10 @@
   --accent: theme('colors.neutral.700');
   --accent-foreground: theme('colors.neutral.50');
 
-  --primary-100: 210 80% 40%;
-  --primary: 210 90% 50%;
-  --primary-300: 210 100% 85%;
-  --primary-foreground: 210 90% 98%;
+  --primary-100: 352 85% 35%;
+  --primary: 352 100% 60%;
+  --primary-300: 352 100% 85%;
+  --primary-foreground: 0 0% 100%;
 
   --success-100: 140 60% 40%;
   --success: 140 80% 50%;
@@ -409,8 +409,8 @@
 
   --sidebar-background:theme('colors.neutral.800');
   --sidebar-foreground: theme('colors.neutral.50');
-  --sidebar-primary: 210 85% 65%;
-  --sidebar-primary-foreground: 210 90% 98%;
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
   --sidebar-accent: theme('colors.neutral.700');
   --sidebar-accent-foreground: theme('colors.neutral.50');
   --sidebar-border: hsla(0, 0%, 100%, 0.1);

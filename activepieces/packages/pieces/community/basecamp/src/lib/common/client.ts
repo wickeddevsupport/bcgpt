@@ -16,11 +16,8 @@ export const buildGatewayHeaders = (auth?: BasecampGatewayAuthConnection) => {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
   };
-  if (auth?.props?.session_key) {
-    headers['x-bcgpt-session'] = auth.props.session_key;
-  }
-  if (auth?.props?.user_key) {
-    headers['x-bcgpt-user'] = auth.props.user_key;
+  if (auth?.props?.api_key) {
+    headers['x-bcgpt-api-key'] = auth.props.api_key;
   }
   return headers;
 };

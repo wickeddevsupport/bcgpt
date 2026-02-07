@@ -1,4 +1,3 @@
-import { LockKeyhole } from 'lucide-react';
 import { ComponentType, SVGProps } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
@@ -44,10 +43,7 @@ export const ApSidebarItem = (item: SidebarItemType) => {
       >
         {item.icon && <item.icon className="size-4" />}
         {!isCollapsed && <span className="text-sm">{item.label}</span>}
-        {!isCollapsed && item.locked && (
-          <LockKeyhole className="size-3.5! ml-auto" />
-        )}
-        {item.notification && !item.locked && (
+        {item.notification && (
           <Dot
             variant="destructive"
             className="absolute right-1 top-2 transform -translate-y-1/2 size-2 rounded-full"

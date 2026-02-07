@@ -12,7 +12,6 @@ import {
 import { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
-import { RequestTrial } from '@/app/components/request-trial';
 import { ConfirmationDeleteDialog } from '@/components/delete-dialog';
 import { Button } from '@/components/ui/button';
 import {
@@ -142,20 +141,6 @@ const PiecesSettings = () => {
 
   return (
     <div className="space-y-6">
-      {!platform.plan.managePiecesEnabled && (
-        <LockedAlert
-          title={t('Control Pieces')}
-          description={t(
-            "Show the pieces that matter most to your users and hide the ones you don't like.",
-          )}
-          button={
-            <RequestTrial
-              featureKey="ENTERPRISE_PIECES"
-              buttonVariant="outline-primary"
-            />
-          }
-        />
-      )}
       <DataTable
         emptyStateTextTitle={t('No pieces found')}
         emptyStateTextDescription={t(

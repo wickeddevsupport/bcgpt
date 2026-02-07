@@ -29,9 +29,9 @@ type AIModelSelectorProps = {
 
 const ACTIVEPIECES_PROVIDER_CONFIG = {
   provider: AIProviderName.ACTIVEPIECES,
-  name: 'Activepieces',
+  name: 'Wicked Flow',
   markdown: '',
-  logoUrl: 'https://cdn.activepieces.com/pieces/activepieces.png',
+  logoUrl: '/branding/wicked-flow-icon.svg',
 };
 
 const ALL_PROVIDERS = [...SUPPORTED_AI_PROVIDERS, ACTIVEPIECES_PROVIDER_CONFIG];

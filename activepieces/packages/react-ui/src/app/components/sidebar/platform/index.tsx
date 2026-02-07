@@ -8,7 +8,6 @@ import {
   Bot,
   Unplug,
   Puzzle,
-  Receipt,
   SquareDashedBottomCode,
   LogIn,
   KeyRound,
@@ -38,7 +37,7 @@ import { useAuthorization } from '@/hooks/authorization-hooks';
 import { flagsHooks } from '@/hooks/flags-hooks';
 import { platformHooks } from '@/hooks/platform-hooks';
 import { cn, determineDefaultRoute } from '@/lib/utils';
-import { ApEdition, ApFlagId, TeamProjectsLimit } from '@activepieces/shared';
+import { TeamProjectsLimit } from '@activepieces/shared';
 
 import { ApSidebarItem } from '../ap-sidebar-item';
 import { SidebarUser } from '../sidebar-user';
@@ -46,7 +45,6 @@ import { SidebarUser } from '../sidebar-user';
 export function PlatformSidebar() {
   const navigate = useNavigate();
   const { platform } = platformHooks.useCurrentPlatform();
-  const { data: edition } = flagsHooks.useFlag<ApEdition>(ApFlagId.EDITION);
   const { checkAccess } = useAuthorization();
   const defaultRoute = determineDefaultRoute(checkAccess);
   const branding = flagsHooks.useWebsiteBranding();
@@ -81,12 +79,6 @@ export function PlatformSidebar() {
       label: t('Templates'),
       icon: LayoutGrid,
       locked: !platform.plan.manageTemplatesEnabled,
-    },
-    {
-      to: '/platform/setup/billing',
-      label: t('Billing'),
-      icon: Receipt,
-      locked: edition === ApEdition.COMMUNITY,
     },
   ].filter((item) => !(item.label === t('AI') && isEmbeddingEnabled));
 

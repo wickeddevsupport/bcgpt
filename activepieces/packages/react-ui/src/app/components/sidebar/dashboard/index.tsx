@@ -255,7 +255,7 @@ export function ProjectDashboardSidebar() {
                               className="text-xs text-primary underline hover:no-underline"
                               onClick={() =>
                                 window.open(
-                                  'https://www.activepieces.com/pricing',
+                                  'https://wickedlab.io/pricing',
                                   '_blank',
                                 )
                               }

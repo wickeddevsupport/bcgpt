@@ -116,7 +116,7 @@ export const NewOAuth2Dialog = ({
         <div className="mb-4">
           <ApMarkdown
             markdown={t(
-              'Read more information about how to configure {provider} SSO [here](https://www.activepieces.com/docs/security/sso).',
+              'Read more information about how to configure {provider} SSO [here](https://wickedlab.io/docs/security/sso).',
               { provider: providerDisplayName },
             )}
           />

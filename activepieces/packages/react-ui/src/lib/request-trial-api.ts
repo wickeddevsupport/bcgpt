@@ -10,7 +10,7 @@ export const requestTrialApi = {
   async contactSales(params: ContactSalesRequest): Promise<void> {
     const flags = await flagsApi.getAll();
     return api.post<void>(
-      `https://sales.activepieces.com/submit-inapp-contact-form`,
+      `https://wickedlab.io/submit-inapp-contact-form`,
       {
         ...params,
         flags: flags,

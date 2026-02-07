@@ -189,14 +189,21 @@ export const piecesHooks = {
     const piecesMetadataWithoutEmptySuggestions =
       filterOutPiecesWithNoSuggestions(metadata);
 
+    const defaultPinnedPieces = [
+      '@activepieces/piece-bcgpt',
+      '@activepieces/piece-basecamp',
+    ];
+    const pinnedPieceNames = Array.from(
+      new Set([...(platform.pinnedPieces ?? []), ...defaultPinnedPieces]),
+    );
     const pinnedPieces = getPinnedPieces(
       piecesMetadataWithoutEmptySuggestions,
-      platform.pinnedPieces ?? [],
+      pinnedPieceNames,
     );
 
     const popularPieces = getPopularPieces(
       piecesMetadataWithoutEmptySuggestions,
-      platform.pinnedPieces ?? [],
+      pinnedPieceNames,
     );
 
     const flowControllerPieces =
@@ -238,12 +245,15 @@ export const piecesHooks = {
       case PieceSelectorTabType.EXPLORE:
         return {
           isLoading: false,
-          data: getExploreTabContent(
-            piecesMetadataWithoutEmptySuggestions,
-            platform,
-            props.type,
-            environment,
-          ),
+      data: getExploreTabContent(
+        piecesMetadataWithoutEmptySuggestions,
+        {
+          ...platform,
+          pinnedPieces: pinnedPieceNames,
+        },
+        props.type,
+        environment,
+      ),
         };
       case PieceSelectorTabType.UTILITY:
         return {

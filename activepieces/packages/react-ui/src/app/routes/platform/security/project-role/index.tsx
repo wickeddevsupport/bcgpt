@@ -5,11 +5,6 @@ import { Plus } from 'lucide-react';
 import { DashboardPageHeader } from '@/app/components/dashboard-page-header';
 import LockedFeatureGuard from '@/app/components/locked-feature-guard';
 import { Button } from '@/components/ui/button';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
 import { projectRoleApi } from '@/features/platform-admin/lib/project-role-api';
 import { platformHooks } from '@/hooks/platform-hooks';
 
@@ -42,19 +37,7 @@ const ProjectRolePage = () => {
             'Define custom roles and permissions that can be assigned to your team members',
           )}
         >
-          {!platform.plan.customRolesEnabled && (
-            <Tooltip>
-              <TooltipTrigger>
-                <Button size="sm" className="flex items-center gap-2" disabled>
-                  <Plus className="size-4" />
-                  {t('New Role')}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                {t('Contact sales to unlock custom roles')}
-              </TooltipContent>
-            </Tooltip>
-          )}
+          {!platform.plan.customRolesEnabled && null}
           {platform.plan.customRolesEnabled && (
             <ProjectRoleDialog
               mode="create"

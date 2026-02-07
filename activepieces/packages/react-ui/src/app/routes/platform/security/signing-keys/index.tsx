@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+﻿import { useQuery } from '@tanstack/react-query';
 import { ColumnDef } from '@tanstack/react-table';
 import { t } from 'i18next';
 import { Key, Plus, Trash, Hash, Tag, Clock } from 'lucide-react';
@@ -85,7 +85,7 @@ const SigningKeysPage = () => {
                 rel="noopener noreferrer"
                 target="_blank"
                 className="font-medium text-primary underline underline-offset-4"
-                to="https://www.activepieces.com/docs/embedding/provision-users"
+                to="https://wickedlab.io/docs/embedding/provision-users"
               >
                 JavaScript SDK
               </Link>{' '}
@@ -147,3 +147,4 @@ const SigningKeysPage = () => {
 
 SigningKeysPage.displayName = 'SigningKeysPage';
 export { SigningKeysPage };
+

@@ -1,10 +1,10 @@
 import { createAction } from '@activepieces/pieces-framework';
-import { bcgptPost, type BcgptAuthConnection, normalizeBaseUrl } from '../common/client';
+import { bcgptPost, type BcgptAuthConnection } from '../common/client';
 
-export const startSession = createAction({
-  name: 'start_session',
-  displayName: 'Get Connection Status',
-  description: 'Fetch connection status, auth link, and available accounts.',
+export const listAccounts = createAction({
+  name: 'list_accounts',
+  displayName: 'List Basecamp Accounts',
+  description: 'List Basecamp accounts available for the connected user.',
   requireAuth: true,
   props: {},
   async run(context) {
@@ -17,7 +17,7 @@ export const startSession = createAction({
     }
 
     return await bcgptPost({
-      baseUrl: normalizeBaseUrl(auth.props.base_url),
+      baseUrl: auth.props.base_url,
       path: '/action/startbcgpt',
       auth,
     });

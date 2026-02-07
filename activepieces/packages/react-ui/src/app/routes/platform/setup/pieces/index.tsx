@@ -13,7 +13,6 @@ import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { DashboardPageHeader } from '@/app/components/dashboard-page-header';
-import { RequestTrial } from '@/app/components/request-trial';
 import { ApplyTags } from '@/app/routes/platform/setup/pieces/apply-tags';
 import { PieceActions } from '@/app/routes/platform/setup/pieces/piece-actions';
 import { SyncPiecesButton } from '@/app/routes/platform/setup/pieces/sync-pieces';
@@ -195,20 +194,6 @@ const PlatformPiecesPage = () => {
         </div>
       </DashboardPageHeader>
       <div className="mx-auto w-full flex-col">
-        {!isEnabled && (
-          <LockedAlert
-            title={t('Control Pieces')}
-            description={t(
-              "Show the pieces that matter most to your users and hide the ones you don't like.",
-            )}
-            button={
-              <RequestTrial
-                featureKey="ENTERPRISE_PIECES"
-                buttonVariant="outline-primary"
-              />
-            }
-          />
-        )}
         <DataTable
           emptyStateTextTitle={t('No pieces found')}
           emptyStateTextDescription={t(

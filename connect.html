@@ -1,0 +1,741 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wicked Flow Connect</title>
+  <link rel="icon" href="/branding/wicked-flow-icon.svg" />
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+    :root {
+      --bg: #0b0a0f;
+      --bg-2: #14121c;
+      --card: rgba(255, 255, 255, 0.04);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --text: #f7f6fb;
+      --muted: #b7b4c7;
+      --accent: #ff415b;
+      --accent-2: #ff7a8a;
+      --accent-3: #ffb3be;
+      --success: #3ddc97;
+      --warning: #f5b95a;
+      --shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: 'IBM Plex Sans', sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at top, rgba(255, 65, 91, 0.15), transparent 55%),
+        linear-gradient(180deg, var(--bg), #09080d 45%, #0f0d15 100%);
+      min-height: 100vh;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(circle at 20% 20%, rgba(255, 122, 138, 0.2), transparent 45%),
+        radial-gradient(circle at 80% 10%, rgba(255, 65, 91, 0.12), transparent 35%),
+        radial-gradient(circle at 30% 80%, rgba(253, 209, 60, 0.08), transparent 45%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .container {
+      position: relative;
+      z-index: 1;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 24px 80px;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    .hero {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 24px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 24px;
+      border-radius: 24px;
+      background: linear-gradient(120deg, rgba(255, 65, 91, 0.15), rgba(18, 16, 26, 0.6));
+      border: 1px solid rgba(255, 65, 91, 0.25);
+      box-shadow: var(--shadow);
+      animation: floatIn 0.6s ease-out;
+    }
+
+    .brand {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      min-width: 280px;
+    }
+
+    .brand img {
+      width: 64px;
+      height: 64px;
+    }
+
+    .hero h1 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 32px;
+      margin: 4px 0 6px;
+      letter-spacing: -0.02em;
+    }
+
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+      max-width: 540px;
+    }
+
+    .eyebrow {
+      font-family: 'Space Grotesk', sans-serif;
+      text-transform: uppercase;
+      letter-spacing: 0.3em;
+      font-size: 11px;
+      color: var(--accent-3);
+    }
+
+    .actions {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      border: none;
+      border-radius: 999px;
+      padding: 10px 18px;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.2s ease;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn.primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: #0b0a0f;
+      box-shadow: 0 12px 30px rgba(255, 65, 91, 0.35);
+    }
+
+    .btn.primary:hover {
+      transform: translateY(-1px);
+    }
+
+    .btn.ghost {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 18px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      padding: 20px;
+      backdrop-filter: blur(18px);
+      box-shadow: var(--shadow);
+      animation: fadeUp 0.7s ease-out;
+    }
+
+    .card h3 {
+      font-family: 'Space Grotesk', sans-serif;
+      margin: 0 0 10px;
+      font-size: 18px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--muted);
+    }
+
+    .badge.connected {
+      background: rgba(61, 220, 151, 0.18);
+      color: var(--success);
+    }
+
+    .badge.warn {
+      background: rgba(245, 185, 90, 0.2);
+      color: var(--warning);
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 14px;
+    }
+
+    .field label {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .field input,
+    .field textarea,
+    .field select {
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: rgba(9, 8, 13, 0.8);
+      color: var(--text);
+      padding: 10px 12px;
+      font-size: 14px;
+      resize: vertical;
+    }
+
+    .field input[readonly] {
+      color: var(--accent-3);
+    }
+
+    .stack {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .account-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .account-item {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(12, 10, 18, 0.9);
+    }
+
+    .account-item input {
+      accent-color: var(--accent);
+    }
+
+    .pill {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: var(--muted);
+    }
+
+    .flow-grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+
+    .toggle {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .toggle input {
+      accent-color: var(--accent);
+    }
+
+    .footer-note {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+
+    @keyframes fadeUp {
+      from {
+        opacity: 0;
+        transform: translateY(12px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes floatIn {
+      from {
+        opacity: 0;
+        transform: translateY(-8px) scale(0.98);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    @media (max-width: 720px) {
+      .hero {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .brand img {
+        width: 52px;
+        height: 52px;
+      }
+      .hero h1 {
+        font-size: 26px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <header class="hero">
+      <div class="brand">
+        <img src="/branding/wicked-flow-logo.svg" alt="Wicked Flow" />
+        <div>
+          <div class="eyebrow">Wicked Flow Connect</div>
+          <h1>Connect Basecamp to Wicked Flow</h1>
+          <p>Generate your API key, authorize Basecamp once, pick an account, then build and export your flow.</p>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="primaryConnect">Connect Basecamp</button>
+        <button class="btn ghost" id="refreshStatus">Refresh Status</button>
+      </div>
+    </header>
+
+    <section class="grid">
+      <div class="card">
+        <h3>Connection Status</h3>
+        <div class="stack">
+          <span class="badge" id="statusBadge">Not connected</span>
+          <span id="statusMessage" class="footer-note">Authorize Basecamp to generate your API key.</span>
+          <div class="actions">
+            <a class="btn primary" id="connectButton" href="/auth/basecamp/start">Connect Basecamp</a>
+            <a class="btn ghost" id="reauthButton" href="/auth/basecamp/start" style="display:none;">Re-auth</a>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Your API Key</h3>
+        <div class="field">
+          <label>API Key (use in ChatGPT and Activepieces)</label>
+          <input id="apiKeyInput" readonly placeholder="Connect to generate your key" />
+        </div>
+        <div class="actions" style="margin-top: 12px;">
+          <button class="btn ghost" id="copyKey">Copy</button>
+          <button class="btn ghost" id="forgetKey">Forget on this device</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="accountsCard">
+      <h3>Choose Basecamp Account</h3>
+      <div class="footer-note">Accounts are tied to your Basecamp login. Select one to route all requests.</div>
+      <div class="account-list" id="accountsList"></div>
+      <div class="actions" style="margin-top: 12px;">
+        <button class="btn primary" id="saveAccount">Save Account</button>
+        <span class="pill" id="selectedAccountPill">No account selected</span>
+      </div>
+    </section>
+
+    <section class="card" id="flowCard">
+      <h3>Flow Builder</h3>
+      <div class="footer-note">Build your Basecamp → Slack/WhatsApp flow and export it for import into Wicked Flow.</div>
+      <div class="flow-grid">
+        <div class="field">
+          <label>Basecamp Project</label>
+          <select id="projectSelect">
+            <option value="">Select a project</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Slack Channel</label>
+          <input id="slackChannel" placeholder="#general" />
+        </div>
+        <div class="field">
+          <label>WhatsApp To</label>
+          <input id="whatsappTo" placeholder="15551234567" />
+        </div>
+      </div>
+
+      <div class="flow-grid" style="margin-top: 12px;">
+        <div class="field">
+          <label>Slack Message</label>
+          <textarea id="slackMessage" rows="3">New Basecamp todo: {{trigger.content}} ({{trigger.project.name}})</textarea>
+        </div>
+        <div class="field">
+          <label>WhatsApp Message</label>
+          <textarea id="whatsappMessage" rows="3">New Basecamp todo: {{trigger.content}} ({{trigger.project.name}})</textarea>
+        </div>
+      </div>
+
+      <div class="flow-grid" style="margin-top: 12px;">
+        <div class="toggle">
+          <input type="checkbox" id="useSlack" checked />
+          <label for="useSlack">Include Slack notification</label>
+        </div>
+        <div class="toggle">
+          <input type="checkbox" id="useWhatsapp" checked />
+          <label for="useWhatsapp">Include WhatsApp notification</label>
+        </div>
+      </div>
+
+      <div class="actions" style="margin-top: 16px;">
+        <button class="btn primary" id="exportFlow">Export Flow JSON</button>
+        <button class="btn ghost" id="copyFlow">Copy JSON</button>
+      </div>
+      <pre id="flowPreview" class="footer-note" style="white-space: pre-wrap; margin-top: 12px;"></pre>
+    </section>
+  </main>
+
+  <script>
+    const storageKey = 'bcgpt_api_key';
+    const statusBadge = document.getElementById('statusBadge');
+    const statusMessage = document.getElementById('statusMessage');
+    const apiKeyInput = document.getElementById('apiKeyInput');
+    const connectButton = document.getElementById('connectButton');
+    const reauthButton = document.getElementById('reauthButton');
+    const accountsList = document.getElementById('accountsList');
+    const saveAccount = document.getElementById('saveAccount');
+    const selectedAccountPill = document.getElementById('selectedAccountPill');
+    const projectSelect = document.getElementById('projectSelect');
+    const flowPreview = document.getElementById('flowPreview');
+
+    const useSlack = document.getElementById('useSlack');
+    const useWhatsapp = document.getElementById('useWhatsapp');
+    const slackChannel = document.getElementById('slackChannel');
+    const whatsappTo = document.getElementById('whatsappTo');
+    const slackMessage = document.getElementById('slackMessage');
+    const whatsappMessage = document.getElementById('whatsappMessage');
+
+    const primaryConnect = document.getElementById('primaryConnect');
+    const refreshStatus = document.getElementById('refreshStatus');
+    const copyKey = document.getElementById('copyKey');
+    const forgetKey = document.getElementById('forgetKey');
+    const exportFlow = document.getElementById('exportFlow');
+    const copyFlow = document.getElementById('copyFlow');
+
+    let state = {
+      apiKey: null,
+      connected: false,
+      accounts: [],
+      selectedAccountId: null,
+      projects: [],
+      connectUrl: '/auth/basecamp/start',
+      reauthUrl: '/auth/basecamp/start',
+    };
+
+    function setBadge(text, type) {
+      statusBadge.textContent = text;
+      statusBadge.classList.remove('connected', 'warn');
+      if (type) statusBadge.classList.add(type);
+    }
+
+    function setApiKey(key) {
+      state.apiKey = key;
+      if (key) {
+        localStorage.setItem(storageKey, key);
+      }
+      apiKeyInput.value = key || '';
+    }
+
+    function loadApiKeyFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      const key = params.get('api_key');
+      if (key) {
+        setApiKey(key);
+        params.delete('api_key');
+        const newUrl = window.location.pathname + (params.toString() ? `?${params.toString()}` : '');
+        window.history.replaceState({}, '', newUrl);
+      }
+    }
+
+    function loadApiKeyFromStorage() {
+      const saved = localStorage.getItem(storageKey);
+      if (saved && !state.apiKey) {
+        setApiKey(saved);
+      }
+    }
+
+    async function fetchStatus() {
+      if (!state.apiKey) {
+        setBadge('Not connected', 'warn');
+        statusMessage.textContent = 'Connect Basecamp to generate your API key.';
+        connectButton.href = '/auth/basecamp/start';
+        reauthButton.style.display = 'none';
+        primaryConnect.textContent = 'Connect Basecamp';
+        return;
+      }
+      const response = await fetch('/action/startbcgpt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: state.apiKey }),
+      });
+      const data = await response.json();
+      state.connected = !!data.connected;
+      state.accounts = Array.isArray(data.accounts) ? data.accounts : [];
+      state.selectedAccountId = data.selected_account_id || null;
+      state.connectUrl = data.connect_url || '/auth/basecamp/start';
+      state.reauthUrl = data.reauth_url || '/auth/basecamp/start';
+
+      if (data.api_key) {
+        setApiKey(data.api_key);
+      }
+
+      if (state.connected) {
+        setBadge('Connected', 'connected');
+        statusMessage.textContent = data.message || 'Basecamp is connected.';
+        reauthButton.style.display = 'inline-flex';
+        reauthButton.href = state.reauthUrl;
+      } else {
+        setBadge('Not connected', 'warn');
+        statusMessage.textContent = data.message || 'Connect Basecamp to continue.';
+        reauthButton.style.display = 'none';
+      }
+      connectButton.href = state.connected ? state.reauthUrl : state.connectUrl;
+      connectButton.textContent = state.connected ? 'Reconnect Basecamp' : 'Connect Basecamp';
+      primaryConnect.textContent = state.connected ? 'Reconnect Basecamp' : 'Connect Basecamp';
+
+      renderAccounts();
+      if (state.selectedAccountId) {
+        selectedAccountPill.textContent = `Selected account: ${state.selectedAccountId}`;
+        await fetchProjects();
+      } else {
+        selectedAccountPill.textContent = 'No account selected';
+      }
+    }
+
+    function renderAccounts() {
+      accountsList.innerHTML = '';
+      if (!state.accounts.length) {
+        accountsList.innerHTML = '<div class="footer-note">No accounts yet. Connect Basecamp first.</div>';
+        return;
+      }
+      state.accounts.forEach((account) => {
+        const id = String(account.id || account.account_id || '');
+        const name = account.name || account.product || `Account ${id}`;
+        const wrapper = document.createElement('label');
+        wrapper.className = 'account-item';
+        const input = document.createElement('input');
+        input.type = 'radio';
+        input.name = 'account';
+        input.value = id;
+        input.checked = id === String(state.selectedAccountId || '');
+        const label = document.createElement('div');
+        label.innerHTML = `<strong>${name}</strong><div class="footer-note">${id}</div>`;
+        wrapper.appendChild(input);
+        wrapper.appendChild(label);
+        accountsList.appendChild(wrapper);
+      });
+    }
+
+    async function saveSelectedAccount() {
+      const selected = document.querySelector('input[name="account"]:checked');
+      if (!selected) {
+        alert('Select an account first.');
+        return;
+      }
+      const accountId = selected.value;
+      const response = await fetch('/select_account', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: state.apiKey, account_id: accountId }),
+      });
+      const data = await response.json();
+      if (!data.ok) {
+        alert(data.message || 'Failed to save account');
+        return;
+      }
+      state.selectedAccountId = data.selected_account_id;
+      selectedAccountPill.textContent = `Selected account: ${state.selectedAccountId}`;
+      await fetchProjects();
+    }
+
+    async function fetchProjects() {
+      projectSelect.innerHTML = '<option value="">Loading projects...</option>';
+      const response = await fetch('/action/list_projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: state.apiKey, archived: false }),
+      });
+      const data = await response.json();
+      const projects = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.data)
+        ? data.data
+        : Array.isArray(data?.projects)
+        ? data.projects
+        : [];
+      state.projects = projects;
+      projectSelect.innerHTML = '<option value="">Select a project</option>';
+      projects.forEach((project) => {
+        const option = document.createElement('option');
+        option.value = project.name || project.title || project.id;
+        option.textContent = `${project.name || project.title || 'Project'}${project.id ? ` (${project.id})` : ''}`;
+        projectSelect.appendChild(option);
+      });
+    }
+
+    function buildFlow() {
+      const project = projectSelect.value || '';
+      const flow = {
+        displayName: 'Basecamp Todo Notifications',
+        description: 'Send new Basecamp todos to Slack and WhatsApp.',
+        schemaVersion: '16',
+        valid: true,
+        notes: [],
+        trigger: {
+          name: 'trigger',
+          displayName: 'New Todo',
+          type: 'PIECE_TRIGGER',
+          valid: true,
+          settings: {
+            pieceName: '@activepieces/piece-basecamp',
+            pieceVersion: '0.0.1',
+            triggerName: 'new_todo',
+            input: {
+              project,
+            },
+            propertySettings: {
+              project: { type: 'MANUAL' },
+            },
+          },
+          nextAction: null,
+        },
+      };
+
+      let current = flow.trigger;
+
+      if (useSlack.checked) {
+        const slackAction = {
+          name: 'slack_notify',
+          displayName: 'Send Slack Message',
+          type: 'PIECE',
+          valid: true,
+          settings: {
+            pieceName: '@activepieces/piece-slack',
+            pieceVersion: '0.11.5',
+            actionName: 'send_channel_message',
+            input: {
+              channel: slackChannel.value || '',
+              text: slackMessage.value || 'New Basecamp todo: {{trigger.content}} ({{trigger.project.name}})',
+              sendAsBot: true,
+            },
+            propertySettings: {
+              channel: { type: 'MANUAL' },
+              text: { type: 'MANUAL' },
+              sendAsBot: { type: 'MANUAL' },
+            },
+            errorHandlingOptions: {},
+          },
+          nextAction: null,
+        };
+        current.nextAction = slackAction;
+        current = slackAction;
+      }
+
+      if (useWhatsapp.checked) {
+        const whatsappAction = {
+          name: 'whatsapp_notify',
+          displayName: 'Send WhatsApp Message',
+          type: 'PIECE',
+          valid: true,
+          settings: {
+            pieceName: '@activepieces/piece-whatsapp',
+            pieceVersion: '0.2.1',
+            actionName: 'sendMessage',
+            input: {
+              phone_number_id: '',
+              to: whatsappTo.value || '',
+              text: whatsappMessage.value || 'New Basecamp todo: {{trigger.content}} ({{trigger.project.name}})',
+            },
+            propertySettings: {
+              phone_number_id: { type: 'MANUAL' },
+              to: { type: 'MANUAL' },
+              text: { type: 'MANUAL' },
+            },
+            errorHandlingOptions: {},
+          },
+          nextAction: null,
+        };
+        current.nextAction = whatsappAction;
+      }
+
+      return flow;
+    }
+
+    function updateFlowPreview() {
+      const flow = buildFlow();
+      flowPreview.textContent = JSON.stringify(flow, null, 2);
+      return flow;
+    }
+
+    function downloadFlow() {
+      const flow = updateFlowPreview();
+      const blob = new Blob([JSON.stringify(flow, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'wickedflow-basecamp-todo-flow.json';
+      anchor.click();
+      URL.revokeObjectURL(url);
+    }
+
+    async function copyFlowJson() {
+      const flow = updateFlowPreview();
+      await navigator.clipboard.writeText(JSON.stringify(flow, null, 2));
+      alert('Flow JSON copied to clipboard');
+    }
+
+    primaryConnect.addEventListener('click', () => {
+      window.location.href = state.connected ? state.reauthUrl : state.connectUrl;
+    });
+    refreshStatus.addEventListener('click', fetchStatus);
+    saveAccount.addEventListener('click', saveSelectedAccount);
+    exportFlow.addEventListener('click', downloadFlow);
+    copyFlow.addEventListener('click', copyFlowJson);
+
+    copyKey.addEventListener('click', async () => {
+      if (!apiKeyInput.value) return;
+      await navigator.clipboard.writeText(apiKeyInput.value);
+      alert('API key copied');
+    });
+
+    forgetKey.addEventListener('click', () => {
+      localStorage.removeItem(storageKey);
+      setApiKey(null);
+      fetchStatus();
+    });
+
+    [projectSelect, slackChannel, whatsappTo, slackMessage, whatsappMessage, useSlack, useWhatsapp].forEach((el) => {
+      if (!el) return;
+      el.addEventListener('input', updateFlowPreview);
+    });
+
+    loadApiKeyFromUrl();
+    loadApiKeyFromStorage();
+    fetchStatus().finally(updateFlowPreview);
+  </script>
+</body>
+</html>
