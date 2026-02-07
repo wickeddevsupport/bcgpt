@@ -60,9 +60,9 @@ export const communityTemplates = {
         const remoteCategoriesRaw: unknown =
             Array.isArray(payload)
                 ? payload
-                : !isNil(payload) && typeof payload === 'object' && 'value' in payload
+                : payload != null && typeof payload === 'object' && 'value' in payload
                     ? (payload as { value?: unknown }).value
-                    : !isNil(payload) && typeof payload === 'object' && 'data' in payload
+                    : payload != null && typeof payload === 'object' && 'data' in payload
                         ? (payload as { data?: unknown }).data
                         : []
 
