@@ -88,12 +88,16 @@ export const platformService = {
         return platformRepo().find()
     },
     async getOldestPlatform(): Promise<Platform | null> {
-        return platformRepo().findOne({
+        const platform = await platformRepo().findOne({
             where: {},
             order: {
                 created: 'ASC',
             },
         })
+        if (isNil(platform)) {
+            return platform
+        }
+        return ensureBrandingAndPins(platform)
     },
     async update(params: UpdateParams): Promise<Platform> {
         const platform = await this.getOneOrThrow(params.id)
@@ -144,7 +148,7 @@ export const platformService = {
             })
         }
 
-        return platform
+        return ensureBrandingAndPins(platform)
     },
     async getOneWithPlan(id: PlatformId): Promise<PlatformWithoutSensitiveData | null> {
         const platform = await this.getOne(id)
@@ -173,10 +177,54 @@ export const platformService = {
         }
     },
     async getOne(id: PlatformId): Promise<Platform | null> {
-        return platformRepo().findOneBy({
+        const platform = await platformRepo().findOneBy({
             id,
         })
+        if (isNil(platform)) {
+            return null
+        }
+        return ensureBrandingAndPins(platform)
     },
+}
+
+function ensureBrandingAndPins(platform: Platform): Platform {
+    let updated = false
+    const pins = new Set(platform.pinnedPieces ?? [])
+    for (const p of ['@activepieces/piece-bcgpt', '@activepieces/piece-basecamp']) {
+        if (!pins.has(p)) {
+            pins.add(p)
+            updated = true
+        }
+    }
+
+    const maybeReplaceLogo = (value: string | undefined, fallback: string) => {
+        if (isNil(value) || value.toLowerCase().includes('activepieces')) {
+            updated = true
+            return fallback
+        }
+        return value
+    }
+
+    const patched: Platform = {
+        ...platform,
+        pinnedPieces: Array.from(pins),
+        name:
+            isNil(platform.name) || platform.name.toLowerCase().includes('activepieces')
+                ? 'Wicked Flow'
+                : platform.name,
+        primaryColor: platform.primaryColor ?? defaultTheme.colors.primary.default,
+        logoIconUrl: maybeReplaceLogo(platform.logoIconUrl, defaultTheme.logos.logoIconUrl),
+        fullLogoUrl: maybeReplaceLogo(platform.fullLogoUrl, defaultTheme.logos.fullLogoUrl),
+        favIconUrl: maybeReplaceLogo(platform.favIconUrl, defaultTheme.logos.favIconUrl),
+    }
+
+    if (updated) {
+        // Fire and forget save; not awaiting to avoid altering existing call signatures
+        platformRepo().save(patched).catch(() => {
+            /* ignore */
+        })
+    }
+    return patched
 }
 
 async function getUsage(platform: Platform): Promise<PlatformUsage | undefined> {
