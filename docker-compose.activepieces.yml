@@ -31,6 +31,11 @@ services:
       AP_JWT_SECRET: "${AP_JWT_SECRET}"
       AP_ENCRYPTION_KEY: "${AP_ENCRYPTION_KEY}"
       AP_CONFIG_PATH: "/var/data/activepieces"
+      # Custom branding
+      AP_APP_TITLE: "Wicked Flow"
+      AP_FAVICON_URL: "https://flow.wickedlab.io/branding/wicked-logo.svg"
+      # Load custom pieces built in the image
+      AP_DEV_PIECES: "/usr/src/app/dist/packages/pieces/community/bcgpt,/usr/src/app/dist/packages/pieces/community/basecamp"
     volumes:
       - activepieces-data:/var/data/activepieces
     expose:
