@@ -51,8 +51,26 @@ export const communityTemplates = {
                 'Content-Type': 'application/json',
             },
         })
-        const categories = await response.json()
-        return Array.from(new Set([...(categories || []), ...LOCAL_CATEGORIES]))
+        if (!response.ok) {
+            // Templates are a convenience feature; avoid breaking the UI if the cloud endpoint is down.
+            return Array.from(new Set([...LOCAL_CATEGORIES]))
+        }
+
+        const payload: unknown = await response.json()
+        const remoteCategoriesRaw: unknown =
+            Array.isArray(payload)
+                ? payload
+                : !isNil(payload) && typeof payload === 'object' && 'value' in payload
+                    ? (payload as { value?: unknown }).value
+                    : !isNil(payload) && typeof payload === 'object' && 'data' in payload
+                        ? (payload as { data?: unknown }).data
+                        : []
+
+        const remoteCategories = Array.isArray(remoteCategoriesRaw)
+            ? remoteCategoriesRaw.filter((c): c is string => typeof c === 'string')
+            : []
+
+        return Array.from(new Set([...remoteCategories, ...LOCAL_CATEGORIES]))
     },
     list: async (request: ListTemplatesRequestQuery): Promise<SeekPage<Template>> => {
         const queryString = convertToQueryString(request)
