@@ -6,7 +6,7 @@ import {
 } from '@activepieces/pieces-framework';
 import {
   DedupeStrategy,
-  Polling,
+  LastItemPolling,
   pollingHelper,
 } from '@activepieces/pieces-common';
 import { gatewayPost, type BasecampGatewayAuthConnection } from '../common/client';
@@ -30,12 +30,12 @@ type TodoGroup = {
   todos?: TodoItem[];
 };
 
-const polling: Polling<BasecampGatewayAuthConnection, { project: string }> = {
+const polling: LastItemPolling<BasecampGatewayAuthConnection, { project: string }> = {
   strategy: DedupeStrategy.LAST_ITEM,
-  items: async (params) => {
-    const { auth, propsValue } = params;
-    void ('lastItemId' in params ? params.lastItemId : undefined);
-    void ('lastFetchEpochMS' in params ? params.lastFetchEpochMS : undefined);
+  items: async ({ auth, propsValue, store, files, lastItemId }) => {
+    void store;
+    void files;
+    void lastItemId;
     if (!auth?.props?.base_url) {
       throw new Error('Missing BCGPT base URL in connection.');
     }
