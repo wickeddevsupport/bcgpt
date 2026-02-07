@@ -133,6 +133,17 @@ COPY --from=build /usr/src/app/dist/packages/shared/ ./dist/packages/shared/
 COPY --from=build /usr/src/app/dist/packages/pieces/ ./dist/packages/pieces/
 # Runtime does not require full source packages; keep image smaller and avoid deep paths
 
+# Ensure workspace packages resolve in the runtime image (avoid broken symlinks)
+RUN rm -rf node_modules/@activepieces/pieces-framework \
+    node_modules/@activepieces/pieces-common \
+    node_modules/@activepieces/shared && \
+    mkdir -p node_modules/@activepieces/pieces-framework \
+    node_modules/@activepieces/pieces-common \
+    node_modules/@activepieces/shared && \
+    cp -r dist/packages/pieces/community/framework/* node_modules/@activepieces/pieces-framework/ && \
+    cp -r dist/packages/pieces/community/common/* node_modules/@activepieces/pieces-common/ && \
+    cp -r dist/packages/shared/* node_modules/@activepieces/shared/
+
 # Make custom pieces available at a stable path and default AP_DEV_PIECES
 RUN mkdir -p /usr/src/app/custom-pieces && \
     cp -r /usr/src/app/dist/packages/pieces/community/bcgpt /usr/src/app/custom-pieces/bcgpt && \

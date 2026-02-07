@@ -219,10 +219,9 @@ function ensureBrandingAndPins(platform: Platform): Platform {
     }
 
     if (updated) {
-        // Fire and forget save; not awaiting to avoid altering existing call signatures
-        platformRepo().save(patched).catch(() => {
-            /* ignore */
-        })
+        // Persist corrections so subsequent calls and other services see the Wicked Flow branding/pins.
+        // This is intentionally awaited to avoid racing with subsequent reads.
+        return platformRepo().save(patched)
     }
     return patched
 }
