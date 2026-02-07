@@ -32,16 +32,15 @@ type TodoGroup = {
   todos?: TodoItem[];
 };
 
-const polling: Polling<BasecampGatewayAuthConnection, { project: string }> = {
-  strategy: DedupeStrategy.LAST_ITEM,
-  items: async (params: {
+const polling = {
+  strategy: DedupeStrategy.LAST_ITEM as const,
+  items: async ({ auth, propsValue }: {
     auth: BasecampGatewayAuthConnection;
+    propsValue: { project: string };
     store: Store;
     files?: FilesService;
-    propsValue: { project: string };
     lastItemId: unknown;
   }) => {
-    const { auth, propsValue } = params;
     if (!auth?.props?.base_url) {
       throw new Error('Missing BCGPT base URL in connection.');
     }
@@ -100,7 +99,7 @@ const polling: Polling<BasecampGatewayAuthConnection, { project: string }> = {
 
     return items;
   },
-};
+} satisfies Polling<BasecampGatewayAuthConnection, { project: string }>;
 
 export const newTodoTrigger = createTrigger({
   auth: basecampAuth,
