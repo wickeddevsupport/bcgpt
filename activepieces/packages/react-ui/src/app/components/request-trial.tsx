@@ -30,9 +30,4 @@ type RequestTrialProps = {
   buttonVariant?: 'default' | 'outline-primary';
 };
 
-export const RequestTrial = ({
-  featureKey,
-  buttonVariant = 'default',
-}: RequestTrialProps) => {
-  return null;
-};
+export const RequestTrial: React.FC<RequestTrialProps> = () => null;

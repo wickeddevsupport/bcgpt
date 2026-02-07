@@ -26,7 +26,7 @@ import {
   ApFlagId,
   PlatformWithoutSensitiveData,
   UpdatePlatformRequestBody,
-} from '@Wicked Flow/shared';
+} from '@activepieces/shared';
 
 type ConfigureSamlDialogProps = {
   platform: PlatformWithoutSensitiveData;

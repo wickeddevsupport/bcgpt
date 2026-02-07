@@ -13,11 +13,6 @@ type LockedFeatureGuardProps = {
 
 export const LockedFeatureGuard = ({
   children,
-  locked,
-  lockTitle,
-  lockDescription,
-  lockVideoUrl,
-  featureKey,
 }: LockedFeatureGuardProps) => {
   return children;
 };
