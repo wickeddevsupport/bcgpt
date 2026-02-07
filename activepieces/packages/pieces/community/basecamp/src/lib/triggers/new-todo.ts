@@ -32,7 +32,8 @@ type TodoGroup = {
 
 const polling: Polling<BasecampGatewayAuthConnection, { project: string }> = {
   strategy: DedupeStrategy.LAST_ITEM,
-  items: async ({ auth, propsValue }) => {
+  items: async ({ auth, propsValue, lastItemId }) => {
+    void lastItemId;
     if (!auth?.props?.base_url) {
       throw new Error('Missing BCGPT base URL in connection.');
     }
