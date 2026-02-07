@@ -86,7 +86,7 @@ const polling = {
           ? dayjs(timestamp).valueOf()
           : Date.now();
         return {
-          epochMilliSeconds,
+          id: `${epochMilliSeconds}-${todo.id}`,
           data: {
             ...todo,
             project: row.project,
@@ -95,7 +95,15 @@ const polling = {
           },
         };
       })
-      .sort((a, b) => b.epochMilliSeconds - a.epochMilliSeconds);
+      .sort((a, b) => {
+        // sort newest first by epoch, fallback to id to stabilize
+        const epochA = Number(a.id.split('-')[0]);
+        const epochB = Number(b.id.split('-')[0]);
+        if (epochA === epochB) {
+          return a.id > b.id ? -1 : 1;
+        }
+        return epochB - epochA;
+      });
 
     return items;
   },
