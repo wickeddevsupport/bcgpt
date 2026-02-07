@@ -125,6 +125,7 @@ RUN mkdir -p \
 
 # Copy built artifacts from build stage
 COPY --from=build /usr/src/app/LICENSE .
+COPY --from=build /usr/src/app/node_modules ./node_modules
 COPY --from=build /usr/src/app/dist/packages/engine/ ./dist/packages/engine/
 COPY --from=build /usr/src/app/dist/packages/server/ ./dist/packages/server/
 COPY --from=build /usr/src/app/dist/packages/shared/ ./dist/packages/shared/
