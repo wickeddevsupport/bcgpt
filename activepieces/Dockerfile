@@ -121,6 +121,8 @@ RUN mkdir -p \
     /usr/src/app/dist/packages/server \
     /usr/src/app/dist/packages/engine \
     /usr/src/app/dist/packages/shared && \
+    # Normalize line endings (Windows checkouts can introduce CRLF which breaks shebang execution)
+    sed -i 's/\r$//' docker-entrypoint.sh && \
     chmod +x docker-entrypoint.sh
 
 # Copy built artifacts from build stage
@@ -148,7 +150,7 @@ RUN rm -rf node_modules/@activepieces/pieces-framework \
 RUN mkdir -p /usr/src/app/custom-pieces && \
     cp -r /usr/src/app/dist/packages/pieces/community/bcgpt /usr/src/app/custom-pieces/bcgpt && \
     cp -r /usr/src/app/dist/packages/pieces/community/basecamp /usr/src/app/custom-pieces/basecamp
-ENV AP_DEV_PIECES="/usr/src/app/custom-pieces/bcgpt,/usr/src/app/custom-pieces/basecamp"
+ENV AP_DEV_PIECES="bcgpt,basecamp"
 
 # Copy frontend files to Nginx document root
 COPY --from=build /usr/src/app/dist/packages/react-ui /usr/share/nginx/html/

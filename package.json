@@ -5,7 +5,12 @@
   "scripts": {
     "start": "node index.js",
     "postinstall": "node scripts/prepare-activepieces-install.js",
-    "start:all": "npm --prefix activepieces run build:dev-pieces && concurrently -k -n BCGPT,AP_BACKEND,AP_UI \"node index.js\" \"npm --prefix activepieces run dev:backend\" \"npm --prefix activepieces run serve:frontend\""
+    "start:all": "npm --prefix activepieces run build:dev-pieces && concurrently -k -n BCGPT,AP_BACKEND,AP_UI \"node index.js\" \"npm --prefix activepieces run dev:backend\" \"npm --prefix activepieces run serve:frontend\"",
+    "ap:local:build": "docker buildx build --platform linux/amd64 -t activepieces-bcgpt:local --load -f activepieces/Dockerfile activepieces",
+    "ap:local:up": "docker compose -f docker-compose.activepieces.yml -f docker-compose.activepieces.local.yml --env-file .env.activepieces -p bcgpt-ap-local up -d --build",
+    "ap:local:logs": "docker compose -f docker-compose.activepieces.yml -f docker-compose.activepieces.local.yml --env-file .env.activepieces -p bcgpt-ap-local logs -f activepieces",
+    "ap:local:verify": "node scripts/verify-activepieces-local.mjs",
+    "ap:local:down": "docker compose -f docker-compose.activepieces.yml -f docker-compose.activepieces.local.yml --env-file .env.activepieces -p bcgpt-ap-local down"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",

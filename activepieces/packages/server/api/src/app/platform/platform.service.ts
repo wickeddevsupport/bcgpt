@@ -187,7 +187,7 @@ export const platformService = {
     },
 }
 
-function ensureBrandingAndPins(platform: Platform): Platform {
+async function ensureBrandingAndPins(platform: Platform): Promise<Platform> {
     let updated = false
     const pins = new Set(platform.pinnedPieces ?? [])
     for (const p of ['@activepieces/piece-bcgpt', '@activepieces/piece-basecamp']) {
@@ -221,7 +221,7 @@ function ensureBrandingAndPins(platform: Platform): Platform {
     if (updated) {
         // Persist corrections so subsequent calls and other services see the Wicked Flow branding/pins.
         // This is intentionally awaited to avoid racing with subsequent reads.
-        return platformRepo().save(patched)
+        return await platformRepo().save(patched)
     }
     return patched
 }

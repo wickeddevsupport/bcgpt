@@ -56,6 +56,35 @@ Before the servers start, the script builds the dev pieces:
 
 Note: Activepieces API uses port `3000`. Keep BCGPT on a different port (default in `.env.example` is `10000`).
 
+## Local Docker image test loop (fast)
+Use this when you want to push code to GitHub but validate the container image locally first.
+
+1. Build local image from current workspace:
+```
+npm run ap:local:build
+```
+2. Start local Activepieces stack (with local image + published port `8080`):
+```
+npm run ap:local:up
+```
+3. Watch logs:
+```
+npm run ap:local:logs
+```
+4. Verify theme + custom pieces are loaded:
+```
+npm run ap:local:verify
+```
+5. Stop local stack:
+```
+npm run ap:local:down
+```
+
+Notes:
+- Local test stack uses `docker-compose.activepieces.yml` + `docker-compose.activepieces.local.yml`.
+- The local override binds Activepieces to `http://localhost:8080`.
+- This does not push any image to GHCR.
+
 ## Production hardening (future)
 The UI currently runs via Vite dev server for simplicity. For production:
 1. Build UI (`nx build react-ui`).
