@@ -1,12 +1,14 @@
 import dayjs from 'dayjs';
 import {
+  FilesService,
+  Store,
   createTrigger,
   Property,
   TriggerStrategy,
 } from '@activepieces/pieces-framework';
 import {
   DedupeStrategy,
-  LastItemPolling,
+  Polling,
   pollingHelper,
 } from '@activepieces/pieces-common';
 import { gatewayPost, type BasecampGatewayAuthConnection } from '../common/client';
@@ -30,12 +32,16 @@ type TodoGroup = {
   todos?: TodoItem[];
 };
 
-const polling: LastItemPolling<BasecampGatewayAuthConnection, { project: string }> = {
+const polling: Polling<BasecampGatewayAuthConnection, { project: string }> = {
   strategy: DedupeStrategy.LAST_ITEM,
-  items: async ({ auth, propsValue, store, files, lastItemId }) => {
-    void store;
-    void files;
-    void lastItemId;
+  items: async (params: {
+    auth: BasecampGatewayAuthConnection;
+    store: Store;
+    files?: FilesService;
+    propsValue: { project: string };
+    lastItemId: unknown;
+  }) => {
+    const { auth, propsValue } = params;
     if (!auth?.props?.base_url) {
       throw new Error('Missing BCGPT base URL in connection.');
     }
