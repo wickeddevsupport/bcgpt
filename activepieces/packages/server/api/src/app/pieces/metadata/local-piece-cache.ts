@@ -125,7 +125,7 @@ async function updateCache(log: FastifyBaseLogger): Promise<void> {
                 if (!Number.isNaN(asDate.getTime())) {
                     return asDate.toISOString()
                 }
-                return recentUpdate.toString()
+                return String(recentUpdate)
             }
             const normalizeState = (state: State | undefined): State | undefined => {
                 if (isNil(state)) {
