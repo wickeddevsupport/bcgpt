@@ -4529,6 +4529,31 @@ export async function handleMCP(reqBody, ctx) {
       }
     }
 
+    if (name === "list_todolists") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const lists = await listTodoLists(ctx, p.id);
+        const coverage = { todolists_total: Array.isArray(lists) ? lists.length : 0 };
+        return ok(id, {
+          project: { id: p.id, name: p.name },
+          ...buildListPayload("todolists", lists || [], { ...args, coverage })
+        });
+      } catch (e) {
+        console.error(`[list_todolists] Error:`, e.message);
+        // Fallback to empty list to keep UI dropdowns functional
+        try {
+          const p = await projectByName(ctx, args.project);
+          return ok(id, {
+            project: { id: p.id, name: p.name },
+            fallback: true,
+            ...buildListPayload("todolists", [], { ...args, coverage: { todolists_total: 0 } })
+          });
+        } catch (fbErr) {
+          return fail(id, { code: "LIST_TODOLISTS_ERROR", message: fbErr.message });
+        }
+      }
+    }
+
     if (name === "list_todos_for_project") {
       try {
         const p = await projectByName(ctx, args.project);

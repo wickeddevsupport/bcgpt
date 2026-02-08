@@ -148,9 +148,8 @@ RUN rm -rf node_modules/@activepieces/pieces-framework \
 
 # Make custom pieces available at a stable path and default AP_DEV_PIECES
 RUN mkdir -p /usr/src/app/custom-pieces && \
-    cp -r /usr/src/app/dist/packages/pieces/community/bcgpt /usr/src/app/custom-pieces/bcgpt && \
     cp -r /usr/src/app/dist/packages/pieces/community/basecamp /usr/src/app/custom-pieces/basecamp
-ENV AP_DEV_PIECES="bcgpt,basecamp"
+ENV AP_DEV_PIECES="basecamp"
 
 # Copy frontend files to Nginx document root
 COPY --from=build /usr/src/app/dist/packages/react-ui /usr/share/nginx/html/

@@ -32,3 +32,29 @@ export const toInt = (value: unknown, fieldName: string): number => {
   return n;
 };
 
+export const toOptionalInt = (
+  value: unknown,
+  fieldName: string,
+): number | undefined => {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+  return toInt(value, fieldName);
+};
+
+export const toIntArray = (value: unknown, fieldName: string): number[] => {
+  if (!Array.isArray(value)) {
+    throw new Error(`${fieldName} must be an array`);
+  }
+  return value.map((v, idx) => toInt(v, `${fieldName}[${idx}]`));
+};
+
+export const toOptionalIntArray = (
+  value: unknown,
+  fieldName: string,
+): number[] | undefined => {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  return toIntArray(value, fieldName);
+};

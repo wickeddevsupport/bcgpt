@@ -320,6 +320,17 @@ export function getTools() {
       required: ["project"],
       additionalProperties: false
     }),
+    tool("list_todolists", "List to-do lists for a project (lightweight; no todo items).", {
+      type: "object",
+      properties: {
+        project: { type: "string" },
+        compact: { type: "boolean" },
+        preview_limit: { type: "integer" },
+        inlineLimit: { type: "integer" }
+      },
+      required: ["project"],
+      additionalProperties: false
+    }),
 
     // Schema uses "task". We'll accept task OR content for backward compatibility.
     tool("create_todo", "Create a to-do in a project; optionally specify todolist, due date, and assignees.", {

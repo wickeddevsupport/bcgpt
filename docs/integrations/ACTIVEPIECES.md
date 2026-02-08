@@ -28,7 +28,7 @@ AP_EXECUTION_MODE=UNSANDBOXED
 AP_ENCRYPTION_KEY=<32 hex chars>
 AP_JWT_SECRET=<random string>
 AP_CONFIG_PATH=/var/data/activepieces
-AP_DEV_PIECES=bcgpt,basecamp
+AP_DEV_PIECES=basecamp
 ```
 
 Notes:
@@ -51,7 +51,6 @@ This runs:
 - Activepieces UI (`serve:frontend`)
 
 Before the servers start, the script builds the dev pieces:
-- `bcgpt`
 - `basecamp`
 
 Note: Activepieces API uses port `3000`. Keep BCGPT on a different port (default in `.env.example` is `10000`).

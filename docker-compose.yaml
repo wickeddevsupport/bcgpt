@@ -64,7 +64,7 @@ services:
       AP_CONFIG_PATH: "/var/data/activepieces"
       AP_APP_TITLE: "${AP_APP_TITLE:-Wicked Flow}"
       AP_FAVICON_URL: "${AP_FAVICON_URL:-https://flow.wickedlab.io/branding/wicked-flow-icon.svg}"
-      AP_DEV_PIECES: "${AP_DEV_PIECES:-bcgpt,basecamp}"
+      AP_DEV_PIECES: "${AP_DEV_PIECES:-basecamp}"
     volumes:
       - activepieces-data:/var/data/activepieces
     expose:

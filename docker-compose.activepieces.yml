@@ -35,7 +35,7 @@ services:
       AP_APP_TITLE: "Wicked Flow"
       AP_FAVICON_URL: "https://flow.wickedlab.io/branding/wicked-flow-icon.svg"
       # Load custom pieces built in the image
-      AP_DEV_PIECES: "bcgpt,basecamp"
+      AP_DEV_PIECES: "basecamp"
     volumes:
       - activepieces-data:/var/data/activepieces
     expose:

@@ -1,11 +1,16 @@
 import { createAction, Property, DynamicPropsValue } from '@activepieces/pieces-framework';
 import { basecampAuth } from '../../index';
 import type { BasecampGatewayAuthConnection } from '../common/client';
-import { projectDropdown } from '../common/dropdowns';
+import {
+  projectDropdown,
+  messageTypeDropdown,
+  projectPeopleMultiSelectDropdown,
+} from '../common/dropdowns';
 import { callGatewayTool, requireGatewayAuth } from '../common/gateway';
-import { extractList, toInt } from '../common/payload';
+import { extractList, toInt, toOptionalIntArray } from '../common/payload';
 
 type MessageBoard = { id?: number; title?: string; name?: string };
+type Message = { id?: number; subject?: string; title?: string };
 
 const messageBoardDropdown = (required: boolean) =>
   Property.Dropdown({
@@ -44,6 +49,59 @@ const messageBoardDropdown = (required: boolean) =>
           value: String(b.id ?? ''),
         })),
         placeholder: boards.length ? 'Select a message board' : 'No boards found',
+      };
+    },
+  });
+
+const messageDropdown = (required: boolean) =>
+  Property.Dropdown({
+    auth: basecampAuth,
+    displayName: 'Message',
+    description: 'Select a message from the selected message board.',
+    required,
+    refreshers: ['auth', 'project', 'board'],
+    options: async ({ auth, project, board }) => {
+      if (!auth) {
+        return {
+          disabled: true,
+          options: [],
+          placeholder: 'Connect Basecamp first',
+        };
+      }
+      if (!project) {
+        return {
+          disabled: true,
+          options: [],
+          placeholder: 'Select a project first',
+        };
+      }
+      if (!board) {
+        return {
+          disabled: true,
+          options: [],
+          placeholder: 'Select a message board first',
+        };
+      }
+
+      const result = await callGatewayTool({
+        auth: auth as unknown as BasecampGatewayAuthConnection,
+        toolName: 'list_messages',
+        args: {
+          project: String(project),
+          message_board_id: toInt(board, 'Message board'),
+        },
+      });
+      const messages = extractList<Message>(result, 'messages');
+
+      return {
+        disabled: false,
+        options: messages
+          .filter((m) => m?.id != null)
+          .map((m) => ({
+            label: m.subject ?? m.title ?? String(m.id ?? 'Unknown message'),
+            value: String(m.id ?? ''),
+          })),
+        placeholder: messages.length ? 'Select a message' : 'No messages found',
       };
     },
   });
@@ -92,28 +150,32 @@ export const messagesAction = createAction({
           case 'list_message_boards':
             break;
           case 'get_message_board':
-            fields['board_id'] = Property.Number({
-              displayName: 'Board ID',
-              description:
-                'If you selected a Message board above, you can leave this empty.',
-              required: !hasBoard,
-            });
+            if (!hasBoard) {
+              fields['board_id'] = Property.Number({
+                displayName: 'Board ID',
+                required: true,
+              });
+            }
             break;
           case 'list_messages':
           case 'list_message_types':
-            fields['message_board_id'] = Property.Number({
-              displayName: 'Message board ID (optional)',
-              description:
-                'If you selected a Message board above, you can leave this empty.',
-              required: false,
-            });
+            if (!hasBoard) {
+              fields['message_board_id'] = Property.Number({
+                displayName: 'Message board ID (optional)',
+                required: false,
+              });
+            }
             break;
           case 'get_message':
           case 'update_message':
-            fields['message_id'] = Property.Number({
-              displayName: 'Message ID',
-              required: true,
-            });
+            if (hasBoard) {
+              fields['message'] = messageDropdown(true);
+            } else {
+              fields['message_id'] = Property.Number({
+                displayName: 'Message ID',
+                required: true,
+              });
+            }
             if (op === 'update_message') {
               fields['subject'] = Property.ShortText({
                 displayName: 'Subject (optional)',
@@ -127,6 +189,7 @@ export const messagesAction = createAction({
                 displayName: 'Status (optional)',
                 required: false,
               });
+              fields['message_type'] = messageTypeDropdown(false);
               fields['body'] = Property.Json({
                 displayName: 'Body (JSON, optional)',
                 description: 'Advanced: official Basecamp fields to update.',
@@ -135,12 +198,12 @@ export const messagesAction = createAction({
             }
             break;
           case 'create_message':
-            fields['board_id'] = Property.Number({
-              displayName: 'Board ID',
-              description:
-                'If you selected a Message board above, you can leave this empty.',
-              required: !hasBoard,
-            });
+            if (!hasBoard) {
+              fields['board_id'] = Property.Number({
+                displayName: 'Board ID',
+                required: true,
+              });
+            }
             fields['subject'] = Property.ShortText({
               displayName: 'Subject (optional)',
               required: false,
@@ -153,6 +216,12 @@ export const messagesAction = createAction({
               displayName: 'Status (optional)',
               required: false,
             });
+            fields['message_type'] = messageTypeDropdown(false);
+            fields['subscriptions'] = projectPeopleMultiSelectDropdown({
+              required: false,
+              displayName: 'Subscriptions (optional)',
+              description: 'People to notify and subscribe.',
+            });
             fields['body'] = Property.Json({
               displayName: 'Body (JSON, optional)',
               description: 'Advanced: official Basecamp fields to create.',
@@ -162,30 +231,28 @@ export const messagesAction = createAction({
           case 'get_message_type':
           case 'update_message_type':
           case 'delete_message_type':
-            fields['message_type_id'] = Property.Number({
-              displayName: 'Message type ID',
-              required: true,
-            });
+            fields['message_type'] = messageTypeDropdown(true);
             if (op === 'update_message_type') {
+              fields['name'] = Property.ShortText({
+                displayName: 'Name (optional)',
+                required: false,
+              });
               fields['body'] = Property.Json({
-                displayName: 'Body (JSON)',
-                description:
-                  'Official Basecamp fields to update a message type.',
-                required: true,
+                displayName: 'Body (JSON, optional)',
+                description: 'Advanced: official Basecamp fields to update.',
+                required: false,
               });
             }
             break;
           case 'create_message_type':
-            fields['message_board_id'] = Property.Number({
-              displayName: 'Message board ID (optional)',
-              description:
-                'If you selected a Message board above, you can leave this empty.',
-              required: false,
+            fields['name'] = Property.ShortText({
+              displayName: 'Name',
+              required: true,
             });
             fields['body'] = Property.Json({
-              displayName: 'Body (JSON)',
-              description: 'Official Basecamp fields to create a message type.',
-              required: true,
+              displayName: 'Body (JSON, optional)',
+              description: 'Advanced: official Basecamp fields to create.',
+              required: false,
             });
             break;
           case 'pin_recording':
@@ -224,6 +291,26 @@ export const messagesAction = createAction({
       return toInt(raw, 'Board ID');
     };
 
+    const resolveMessageId = (): number => {
+      const raw = inputs['message_id'] ?? inputs['message'];
+      if (raw == null || raw === '') {
+        throw new Error('Message is required');
+      }
+      return toInt(raw, 'Message ID');
+    };
+
+    const baseBody =
+      inputs['body'] && typeof inputs['body'] === 'object'
+        ? (inputs['body'] as Record<string, unknown>)
+        : {};
+
+    const mergeMessageType = (body: Record<string, unknown>) => {
+      const raw = inputs['message_type'];
+      if (raw != null && raw !== '') {
+        body['category_id'] = toInt(raw, 'Message type');
+      }
+    };
+
     switch (op) {
       case 'list_message_boards':
         return await callGatewayTool({
@@ -255,7 +342,7 @@ export const messagesAction = createAction({
         return await callGatewayTool({
           auth,
           toolName: 'get_message',
-          args: { project, message_id: inputs['message_id'] },
+          args: { project, message_id: resolveMessageId() },
         });
       case 'create_message':
         return await callGatewayTool({
@@ -267,7 +354,18 @@ export const messagesAction = createAction({
             subject: inputs['subject'] || undefined,
             content: inputs['content'] || undefined,
             status: inputs['status'] || undefined,
-            body: inputs['body'] || undefined,
+            body: (() => {
+              const body: Record<string, unknown> = { ...baseBody };
+              mergeMessageType(body);
+              const subscriptions = toOptionalIntArray(
+                inputs['subscriptions'],
+                'Subscriptions',
+              );
+              if (subscriptions) {
+                body['subscriptions'] = subscriptions;
+              }
+              return body;
+            })(),
           },
         });
       case 'update_message':
@@ -276,11 +374,15 @@ export const messagesAction = createAction({
           toolName: 'update_message',
           args: {
             project,
-            message_id: inputs['message_id'],
+            message_id: resolveMessageId(),
             subject: inputs['subject'] || undefined,
             content: inputs['content'] || undefined,
             status: inputs['status'] || undefined,
-            body: inputs['body'] || undefined,
+            body: (() => {
+              const body: Record<string, unknown> = { ...baseBody };
+              mergeMessageType(body);
+              return body;
+            })(),
           },
         });
       case 'list_message_types': {
@@ -301,20 +403,22 @@ export const messagesAction = createAction({
         return await callGatewayTool({
           auth,
           toolName: 'get_message_type',
-          args: { project, message_type_id: inputs['message_type_id'] },
+          args: {
+            project,
+            message_type_id: toInt(inputs['message_type'], 'Message type'),
+          },
         });
       case 'create_message_type': {
-        const maybeBoardId =
-          inputs['message_board_id'] ??
-          (boardFromDropdown ? toInt(boardFromDropdown, 'Message board') : null);
+        const body: Record<string, unknown> = { ...baseBody };
+        if (inputs['name']) {
+          body['name'] = inputs['name'];
+        }
         return await callGatewayTool({
           auth,
           toolName: 'create_message_type',
           args: {
             project,
-            message_board_id:
-              maybeBoardId != null ? toInt(maybeBoardId, 'Board ID') : undefined,
-            body: inputs['body'] ?? {},
+            body,
           },
         });
       }
@@ -324,8 +428,14 @@ export const messagesAction = createAction({
           toolName: 'update_message_type',
           args: {
             project,
-            message_type_id: inputs['message_type_id'],
-            body: inputs['body'] ?? {},
+            message_type_id: toInt(inputs['message_type'], 'Message type'),
+            body: (() => {
+              const body: Record<string, unknown> = { ...baseBody };
+              if (inputs['name']) {
+                body['name'] = inputs['name'];
+              }
+              return body;
+            })(),
           },
         });
       case 'delete_message_type':
@@ -334,7 +444,7 @@ export const messagesAction = createAction({
           toolName: 'delete_message_type',
           args: {
             project,
-            message_type_id: inputs['message_type_id'],
+            message_type_id: toInt(inputs['message_type'], 'Message type'),
           },
         });
       case 'pin_recording':
