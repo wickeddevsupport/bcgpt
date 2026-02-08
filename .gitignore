@@ -5,6 +5,10 @@ node_modules/
 .env.activepieces
 *.sqlite
 *.db
+*.sqlite-wal
+*.sqlite-shm
+*.db-wal
+*.db-shm
 data/
 .vscode/
 .DS_Store

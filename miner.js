@@ -39,12 +39,12 @@ async function safeFetch(token, accountId, path, { ua, delayMs } = {}) {
   }
 }
 
-function trackEntity(type, object, { projectId, titleKey = "title", userKey = null } = {}) {
+async function trackEntity(type, object, { projectId, titleKey = "title", userKey = null } = {}) {
   if (!object || object.id == null) return;
   const title = object[titleKey] || object.name || object.subject || null;
-  upsertEntityCache(type, object.id, { projectId, title, data: object, userKey });
+  await upsertEntityCache(type, object.id, { projectId, title, data: object, userKey });
   if (title || object.content) {
-    indexSearchItem(type, object.id, {
+    await indexSearchItem(type, object.id, {
       projectId,
       title: title || "",
       content: object.content || object.description || "",
@@ -91,30 +91,32 @@ export async function runMining({
   const projects = await safeFetchAll(token, accountId, "/projects.json?per_page=100", { ua, delayMs });
   if (Array.isArray(projects)) {
     for (const p of projects) {
-      trackEntity("project", p, { projectId: p.id, titleKey: "name", userKey });
+      await trackEntity("project", p, { projectId: p.id, titleKey: "name", userKey });
     }
   }
 
   const now = Math.floor(Date.now() / 1000);
   const candidates = Array.isArray(projects) ? projects : [];
-  const scored = candidates.map((p) => {
-    const state = getMineState(projectMineKey(p.id), { userKey });
-    const last = state?.updated_at || 0;
-    return { project: p, last };
-  });
+  const scored = await Promise.all(
+    candidates.map(async (p) => {
+      const state = await getMineState(projectMineKey(p.id), { userKey });
+      const last = state?.updated_at || 0;
+      return { project: p, last };
+    })
+  );
   scored.sort((a, b) => a.last - b.last);
   const toMine = scored.filter((item) => now - item.last > projectMinIntervalSec).slice(0, projectsPerRun);
 
   const allChats = await safeFetchAll(token, accountId, "/chats.json", { ua, delayMs });
   if (Array.isArray(allChats)) {
     for (const chat of allChats) {
-      trackEntity("campfire", chat, { projectId: chat?.bucket?.id, titleKey: "title", userKey });
+      await trackEntity("campfire", chat, { projectId: chat?.bucket?.id, titleKey: "title", userKey });
     }
   }
 
   const people = await safeFetchAll(token, accountId, "/people.json", { ua, delayMs });
   if (Array.isArray(people)) {
-    for (const person of people) trackEntity("person", person, { projectId: null, titleKey: "name", userKey });
+    for (const person of people) await trackEntity("person", person, { projectId: null, titleKey: "name", userKey });
   }
 
   for (const entry of toMine) {
@@ -123,11 +125,11 @@ export async function runMining({
 
     const detail = await safeFetch(token, accountId, `/projects/${projectId}.json`, { ua, delayMs });
     if (detail && !detail._error) {
-      trackEntity("project_detail", detail, { projectId, titleKey: "name", userKey });
+      await trackEntity("project_detail", detail, { projectId, titleKey: "name", userKey });
       const dock = detail.dock || [];
       for (const d of dock) {
         if (!d?.id) continue;
-        upsertEntityCache("dock_tool", d.id, { projectId, title: d.name, data: d, userKey });
+        await upsertEntityCache("dock_tool", d.id, { projectId, title: d.name, data: d, userKey });
       }
 
       const todosDock = dockFind(dock, ["todoset", "todos", "todo_set"]);
@@ -137,7 +139,7 @@ export async function runMining({
         if (todolistsUrl) {
           const lists = await safeFetchAll(token, accountId, todolistsUrl, { ua, delayMs });
           if (Array.isArray(lists)) {
-            for (const list of lists) trackEntity("todolist", list, { projectId, titleKey: "name", userKey });
+            for (const list of lists) await trackEntity("todolist", list, { projectId, titleKey: "name", userKey });
             if (includeTodos) {
               let todoCount = 0;
               for (const list of lists) {
@@ -147,7 +149,7 @@ export async function runMining({
                 if (!Array.isArray(todos)) continue;
                 for (const todo of todos) {
                   if (Number.isFinite(maxTodosPerProject) && maxTodosPerProject > 0 && todoCount >= maxTodosPerProject) break;
-                  trackEntity("todo", todo, { projectId, titleKey: "content", userKey });
+                  await trackEntity("todo", todo, { projectId, titleKey: "content", userKey });
                   todoCount += 1;
                 }
               }
@@ -158,25 +160,25 @@ export async function runMining({
 
       const mbDock = dockFind(dock, ["message_board", "message_boards"]);
       if (mbDock?.url) {
-        const boards = await safeFetchAll(token, accountId, mbDock.url, { ua, delayMs });
-        if (Array.isArray(boards)) {
-          for (const board of boards) trackEntity("message_board", board, { projectId, titleKey: "title", userKey });
-          if (includeMessages) {
-            let messageCount = 0;
-            for (const board of boards) {
+      const boards = await safeFetchAll(token, accountId, mbDock.url, { ua, delayMs });
+      if (Array.isArray(boards)) {
+        for (const board of boards) await trackEntity("message_board", board, { projectId, titleKey: "title", userKey });
+        if (includeMessages) {
+          let messageCount = 0;
+          for (const board of boards) {
               if (Number.isFinite(maxMessagesPerProject) && maxMessagesPerProject > 0 && messageCount >= maxMessagesPerProject) break;
               const messagesUrl = board?.messages_url;
               if (!messagesUrl) continue;
-              const messages = await safeFetchAll(token, accountId, messagesUrl, { ua, delayMs });
-              if (!Array.isArray(messages)) continue;
-              for (const message of messages) {
-                if (Number.isFinite(maxMessagesPerProject) && maxMessagesPerProject > 0 && messageCount >= maxMessagesPerProject) break;
-                trackEntity("message", message, { projectId, titleKey: "subject", userKey });
-                messageCount += 1;
-              }
+            const messages = await safeFetchAll(token, accountId, messagesUrl, { ua, delayMs });
+            if (!Array.isArray(messages)) continue;
+            for (const message of messages) {
+              if (Number.isFinite(maxMessagesPerProject) && maxMessagesPerProject > 0 && messageCount >= maxMessagesPerProject) break;
+              await trackEntity("message", message, { projectId, titleKey: "subject", userKey });
+              messageCount += 1;
             }
           }
         }
+      }
       }
 
       const scheduleDock = dockFind(dock, ["schedule", "schedules"]);
@@ -259,7 +261,7 @@ export async function runMining({
       for (const item of approvals) trackEntity("client_approval", item, { projectId, titleKey: "subject", userKey });
     }
 
-    setMineState(projectMineKey(projectId), "ok", { userKey });
+    await setMineState(projectMineKey(projectId), "ok", { userKey });
     summary.projects_mined += 1;
   }
 

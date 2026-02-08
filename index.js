@@ -100,15 +100,15 @@ async function resolveRequestContext(req, { apiKey: forcedApiKey, userKey: force
 
   let userKey = explicitUserKey || null;
   if (!userKey && apiKey) {
-    userKey = getUserByApiKey(apiKey);
+    userKey = await getUserByApiKey(apiKey);
   }
 
   let token = null;
   let auth = null;
 
   if (userKey) {
-    token = getUserToken(userKey);
-    auth = getUserAuthCache(userKey);
+    token = await getUserToken(userKey);
+    auth = await getUserAuthCache(userKey);
   }
 
   return {
@@ -149,7 +149,7 @@ async function ensureAuthorization({ token, userKey, force = false }) {
 
   if (!force) {
     if (userKey) {
-      const cached = getUserAuthCache(userKey);
+      const cached = await getUserAuthCache(userKey);
       if (cached) return { auth: cached, userKey };
     }
   }
@@ -158,14 +158,14 @@ async function ensureAuthorization({ token, userKey, force = false }) {
   const derivedUserKey = userKey || deriveUserKey(auth);
 
   if (derivedUserKey) {
-    setUserAuthCache(auth, derivedUserKey);
-    setUserToken(token, derivedUserKey);
+    await setUserAuthCache(auth, derivedUserKey);
+    await setUserToken(token, derivedUserKey);
   }
 
   return { auth, userKey: derivedUserKey };
 }
 
-function pickAccountId(auth, userKey) {
+async function pickAccountId(auth, userKey) {
   if (!auth?.accounts?.length) {
     const err = new Error("NO_ACCOUNTS");
     err.code = "NO_ACCOUNTS";
@@ -175,14 +175,14 @@ function pickAccountId(auth, userKey) {
   const accounts = auth.accounts || [];
 
   // 1) Use persisted selection (if valid)
-  const selected = getSelectedAccount(userKey);
+  const selected = await getSelectedAccount(userKey);
   if (selected) {
     const match = accounts.find((a) => String(a.id) === String(selected));
     if (match) return match.id;
 
     // Selection no longer valid; clear so we can fall back.
     try {
-      setSelectedAccount(userKey, null);
+      await setSelectedAccount(userKey, null);
     } catch {
       // ignore
     }
@@ -194,7 +194,7 @@ function pickAccountId(auth, userKey) {
     const match = accounts.find((a) => String(a.id) === String(defaultAccountId));
     if (match) {
       try {
-        setSelectedAccount(userKey, defaultAccountId);
+        await setSelectedAccount(userKey, defaultAccountId);
       } catch {
         // ignore
       }
@@ -206,7 +206,7 @@ function pickAccountId(auth, userKey) {
   if (accounts.length === 1 && accounts[0]?.id != null) {
     const id = accounts[0].id;
     try {
-      setSelectedAccount(userKey, String(id));
+      await setSelectedAccount(userKey, String(id));
     } catch {
       // ignore
     }
@@ -235,7 +235,7 @@ async function requireBasecampContext(req, { apiKey: forcedApiKey, forceAuth = f
     force: forceAuth,
   });
 
-  const accountId = pickAccountId(authResult.auth, authResult.userKey || ctx.userKey);
+  const accountId = await pickAccountId(authResult.auth, authResult.userKey || ctx.userKey);
 
   return {
     ...ctx,
@@ -496,11 +496,11 @@ async function startStatus(req, { apiKey: forcedApiKey } = {}) {
 
     // If no account is selected yet, try to auto-select a sensible default
     // so clients (Activepieces dropdowns) work without a manual selection step.
-    let selected = getSelectedAccount(authResult.userKey || ctx.userKey);
+    let selected = await getSelectedAccount(authResult.userKey || ctx.userKey);
     let selectedMatch = selected ? accounts.find((a) => String(a.id) === String(selected)) : null;
     if (!selectedMatch && accounts.length) {
       try {
-        const picked = pickAccountId(authResult.auth, authResult.userKey || ctx.userKey);
+        const picked = await pickAccountId(authResult.auth, authResult.userKey || ctx.userKey);
         selected = String(picked);
         selectedMatch = accounts.find((a) => String(a.id) === String(selected)) || null;
       } catch {
@@ -558,7 +558,7 @@ async function runMiningJob({ force = false, apiKey = null, userKey = null } = {
       userKey: ctx.userKey,
       force: false,
     });
-    const accountId = pickAccountId(authResult.auth, authResult.userKey || ctx.userKey);
+    const accountId = await pickAccountId(authResult.auth, authResult.userKey || ctx.userKey);
     const resolvedUserKey = authResult.userKey || ctx.userKey || "legacy";
 
     const result = await runMining({
@@ -604,7 +604,7 @@ async function buildMcpCtx(req) {
     });
     auth = authResult.auth;
     userKey = authResult.userKey || userKey;
-    accountId = pickAccountId(auth, userKey);
+    accountId = await pickAccountId(auth, userKey);
   }
 
   console.log(`[buildMcpCtx] accountId retrieved: ${accountId} (type: ${typeof accountId})`);
@@ -733,16 +733,16 @@ app.get("/auth/basecamp/callback", async (req, res) => {
       throw new Error("USER_KEY_REQUIRED");
     }
 
-    setUserToken(token, derivedUserKey);
-    setUserAuthCache(auth, derivedUserKey);
+    await setUserToken(token, derivedUserKey);
+    await setUserAuthCache(auth, derivedUserKey);
 
-    const existingKey = getApiKeyForUser(derivedUserKey);
+    const existingKey = await getApiKeyForUser(derivedUserKey);
     let apiKey = existingKey || apiKeyFromState || null;
     if (apiKey && !existingKey) {
-      bindApiKeyToUser(apiKey, derivedUserKey);
+      await bindApiKeyToUser(apiKey, derivedUserKey);
     }
     if (!apiKey) {
-      apiKey = createApiKeyForUser(derivedUserKey);
+      apiKey = await createApiKeyForUser(derivedUserKey);
     }
 
     res.redirect(`${base}/connect?api_key=${encodeURIComponent(apiKey)}`);
@@ -820,7 +820,7 @@ app.post("/select_account", async (req, res) => {
       });
     }
 
-    const selected = setSelectedAccount(authResult.userKey || ctx.userKey, accountId);
+    const selected = await setSelectedAccount(authResult.userKey || ctx.userKey, accountId);
     return res.json({
       ok: true,
       selected_account_id: selected,
@@ -998,7 +998,7 @@ app.post("/dev/api", async (req, res) => {
     const result = await runTool(name, args, req);
     try {
       const ctx = await resolveRequestContext(req);
-      setToolCache(name, args || {}, result, { userKey: ctx.userKey });
+      await setToolCache(name, args || {}, result, { userKey: ctx.userKey });
     } catch (e) {
       console.error(`[dev/api] cache error for ${name}:`, e?.message || e);
     }
@@ -1016,9 +1016,9 @@ app.get("/dev/mine/status", async (req, res) => {
     last_result: MINER_LAST_RESULT,
     user_key: ctx.userKey || null,
     api_key: ctx.apiKey || null,
-    index_stats: getIndexStats({ userKey: ctx.userKey }),
-    entity_stats: getEntityStats({ userKey: ctx.userKey }),
-    tool_cache_stats: getToolCacheStats({ userKey: ctx.userKey }),
+    index_stats: await getIndexStats({ userKey: ctx.userKey }),
+    entity_stats: await getEntityStats({ userKey: ctx.userKey }),
+    tool_cache_stats: await getToolCacheStats({ userKey: ctx.userKey }),
   });
 });
 
@@ -1032,7 +1032,7 @@ app.get("/dev/mine/entities", async (req, res) => {
   const { type, project_id, limit } = req.query || {};
   if (!type) return res.status(400).json({ error: "Missing type" });
   const ctx = await resolveRequestContext(req);
-  const items = listEntityCache(type, {
+  const items = await listEntityCache(type, {
     projectId: project_id ? Number(project_id) : null,
     limit: limit ? Number(limit) : 200,
     userKey: ctx.userKey,
@@ -1044,7 +1044,7 @@ app.get("/dev/mine/search", async (req, res) => {
   const { q, type, project_id, limit } = req.query || {};
   if (!q) return res.status(400).json({ error: "Missing q" });
   const ctx = await resolveRequestContext(req);
-  const items = searchIndex(String(q), {
+  const items = await searchIndex(String(q), {
     type: type || undefined,
     projectId: project_id ? Number(project_id) : undefined,
     limit: limit ? Number(limit) : 100,
@@ -1057,7 +1057,7 @@ app.get("/dev/cache/tool", async (req, res) => {
   const { name, limit } = req.query || {};
   if (!name) return res.status(400).json({ error: "Missing name" });
   const ctx = await resolveRequestContext(req);
-  const items = listToolCache(String(name), { limit: limit ? Number(limit) : 20, userKey: ctx.userKey });
+  const items = await listToolCache(String(name), { limit: limit ? Number(limit) : 20, userKey: ctx.userKey });
   res.json({ name, count: items.length, items });
 });
 
@@ -1065,7 +1065,7 @@ app.get("/dev/cache/tool", async (req, res) => {
 app.get("/db/info", async (req, res) => {
   try {
     const ctx = await resolveRequestContext(req);
-    const indexStats = getIndexStats({ userKey: ctx.userKey });
+    const indexStats = await getIndexStats({ userKey: ctx.userKey });
     res.json({
       status: "ok",
       database: {

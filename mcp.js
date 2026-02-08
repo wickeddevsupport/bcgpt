@@ -839,7 +839,7 @@ async function api(ctx, pathOrUrl, opts = {}) {
   const ttl = Number(process.env.IDEMPOTENCY_TTL_SEC || 86400);
 
   if (isWrite && idempotencyKey && idempotencyPath) {
-    const cached = getIdempotencyResponse(idempotencyKey, {
+    const cached = await getIdempotencyResponse(idempotencyKey, {
       method,
       path: idempotencyPath,
       userKey: ctx.userKey,
@@ -864,7 +864,7 @@ async function api(ctx, pathOrUrl, opts = {}) {
   const result = await fetcher(pathOrUrl, requestOpts);
 
   if (isWrite && idempotencyKey && idempotencyPath) {
-    setIdempotencyResponse(idempotencyKey, result, {
+    await setIdempotencyResponse(idempotencyKey, result, {
       method,
       path: idempotencyPath,
       userKey: ctx.userKey
@@ -940,7 +940,7 @@ async function listProjects(ctx, { archived = false, compact = true, limit, chun
   // Index projects in search database
   try {
     for (const p of data) {
-      indexSearchItem("project", p.id, {
+      await indexSearchItem("project", p.id, {
         title: p.name,
         content: p.description || "",
         url: p.app_url || p.url,
@@ -1133,7 +1133,7 @@ async function listTodosForProject(ctx, projectId) {
     try {
       for (const t of todos || []) {
         if (!t.completed && !t.completed_at) { // Only index incomplete todos
-          indexSearchItem("todo", t.id, {
+          await indexSearchItem("todo", t.id, {
             title: todoText(t),
             content: t.description || "",
             url: t.app_url || t.url,
@@ -2066,7 +2066,7 @@ async function listMessages(ctx, projectId, { board_id, board_title, limit } = {
   // Index messages in search database
   try {
     for (const m of arr) {
-      indexSearchItem("message", m.id, {
+      await indexSearchItem("message", m.id, {
         title: m.subject,
         content: m.content || "",
         url: m.app_url || m.url,
@@ -2137,7 +2137,7 @@ async function listDocuments(ctx, projectId, { limit } = {}) {
   // Index documents in search database
   try {
     for (const d of arr) {
-      indexSearchItem("document", d.id, {
+      await indexSearchItem("document", d.id, {
         title: d.title,
         content: d.description || "",
         url: d.app_url || d.url,
@@ -2616,7 +2616,7 @@ async function searchCards(ctx, query, {
     }
   }
 
-  const indexHits = searchIndex(q, { type: "card", projectId, limit: Math.max(50, limit), userKey: ctx.userKey });
+  const indexHits = await searchIndex(q, { type: "card", projectId, limit: Math.max(50, limit), userKey: ctx.userKey });
   if (Array.isArray(indexHits) && indexHits.length) {
     const mapped = indexHits.map((hit) => ({
       id: Number(hit.object_id),
@@ -3586,7 +3586,7 @@ async function listUploads(ctx, projectId, vaultId) {
   // Index uploads in search database
   try {
     for (const u of arr) {
-      indexSearchItem("upload", u.id, {
+      await indexSearchItem("upload", u.id, {
         title: u.title || u.filename || "",
         content: u.description || "",
         url: u.app_url || u.url,
@@ -4782,7 +4782,7 @@ export async function handleMCP(reqBody, ctx) {
           } catch (fallbackErr) {
             // Final fallback: local DB index
             try {
-              const hits = searchIndex(q, { type: "todo", userKey: ctx.userKey });
+              const hits = await searchIndex(q, { type: "todo", userKey: ctx.userKey });
               const todos = (hits || []).map((h) => ({
                 id: h.object_id,
                 title: h.title,
@@ -5243,9 +5243,9 @@ export async function handleMCP(reqBody, ctx) {
         return /(activity|recent|comment|comments|timeline)/.test(s);
       };
 
-      const searchLocalIndex = (q, { projectId = null, type = null, limit = 50 } = {}) => {
+      const searchLocalIndex = async (q, { projectId = null, type = null, limit = 50 } = {}) => {
         if (!q) return [];
-        const hits = searchIndex(q, { type, projectId, limit, userKey: ctx.userKey });
+        const hits = await searchIndex(q, { type, projectId, limit, userKey: ctx.userKey });
         return (hits || []).map((h) => ({
           id: h.object_id,
           type: h.type,
@@ -5560,7 +5560,7 @@ export async function handleMCP(reqBody, ctx) {
                   return ok(id, { query, action: "search_todos_fallback", confidence, project: { id: project.id, name: project.name }, todos, count: todos.length, dock });
                 }
               }
-              const local = searchLocalIndex(searchQuery, { projectId: project.id });
+              const local = await searchLocalIndex(searchQuery, { projectId: project.id });
               if (local.length) {
                 return ok(id, { query, action: "search_index_fallback", confidence, project: { id: project.id, name: project.name }, results: local, count: local.length, dock });
               }
@@ -5569,7 +5569,7 @@ export async function handleMCP(reqBody, ctx) {
           }
           const result = await callTool("search_recordings", { query: searchQuery, type: wantsComments ? "comment" : undefined });
           if ((result?.results || []).length === 0) {
-            const local = searchLocalIndex(searchQuery);
+            const local = await searchLocalIndex(searchQuery);
             if (local.length) {
               return ok(id, { query, action: "search_index_fallback", confidence, results: local, count: local.length });
             }
@@ -5590,7 +5590,7 @@ export async function handleMCP(reqBody, ctx) {
         // Default: global search
         const result = await callTool("search_recordings", { query: searchQuery, type: wantsComments ? "comment" : undefined });
         if ((result?.results || []).length === 0) {
-          const local = searchLocalIndex(searchQuery);
+          const local = await searchLocalIndex(searchQuery);
           if (local.length) {
             return ok(id, { query, action: "search_index_fallback", confidence, results: local, count: local.length });
           }

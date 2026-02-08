@@ -21,16 +21,38 @@ services:
       CHATGPT_API_KEY: "${CHATGPT_API_KEY}"
       OTP_SECRET: "${OTP_SECRET}"
       PAYLOAD_CACHE_TTL_SEC: "${PAYLOAD_CACHE_TTL_SEC}"
+      # Prefer Postgres when DATABASE_URL is set.
+      DATABASE_URL: "${DATABASE_URL:-postgresql://bcgpt:${BCGPT_POSTGRES_PASSWORD}@bcgpt-postgres:5432/bcgpt}"
       SQLITE_PATH: "/data/bcgpt.sqlite"
       ACTIVEPIECES_PROXY_ENABLED: "${ACTIVEPIECES_PROXY_ENABLED:-false}"
       ACTIVEPIECES_PROXY_HOST: "${ACTIVEPIECES_PROXY_HOST:-flow.wickedlab.io}"
       ACTIVEPIECES_PROXY_TARGET: "${ACTIVEPIECES_PROXY_TARGET:-https://flow.wickedlab.io}"
+    depends_on:
+      bcgpt-postgres:
+        condition: service_healthy
     volumes:
       - bcgpt-data:/data
     expose:
       - "10000"
 
+  bcgpt-postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bcgpt
+      POSTGRES_USER: bcgpt
+      POSTGRES_PASSWORD: "${BCGPT_POSTGRES_PASSWORD}"
+    volumes:
+      - bcgpt-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bcgpt -d bcgpt"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
 volumes:
   bcgpt-data:
     external: true
     name: bcgpt-data
+  bcgpt-postgres-data:
+    name: bcgpt-postgres-data
