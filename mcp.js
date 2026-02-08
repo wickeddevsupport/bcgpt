@@ -6787,7 +6787,8 @@ export async function handleMCP(reqBody, ctx) {
     // ===== NEW PEOPLE ENDPOINTS =====
     if (name === "list_all_people") {
       try {
-        const rawQuery = firstDefined(args.query, args.name, args.search, args.q);
+        // NOTE: Allow empty string to mean "list all people". `firstDefined` treats "" as missing.
+        const rawQuery = args?.query ?? args?.name ?? args?.search ?? args?.q;
         if (rawQuery === undefined || rawQuery === null) {
           return fail(id, {
             code: "MISSING_QUERY",
@@ -6832,7 +6833,7 @@ export async function handleMCP(reqBody, ctx) {
       } catch (e) {
         console.error(`[list_all_people] Error:`, e.message);
         try {
-          const rawQuery = firstDefined(args.query, args.name, args.search, args.q);
+          const rawQuery = args?.query ?? args?.name ?? args?.search ?? args?.q;
           const query = rawQuery == null ? "" : String(rawQuery);
           const includeArchivedProjects = args.include_archived_projects === true || args.include_archived === true;
           let people = [];
