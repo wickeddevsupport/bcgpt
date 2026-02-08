@@ -8,6 +8,7 @@ import { InputWithIcon } from '@/components/custom/input-with-icon';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { flowHooks } from '@/features/flows/lib/flow-hooks';
 import { piecesHooks } from '@/features/pieces/lib/pieces-hooks';
 import { templatesHooks } from '@/features/templates/hooks/templates-hook';
@@ -27,10 +28,26 @@ import { SelectedCategoryView } from './selected-category-view';
 
 const TemplatesPage = () => {
   const navigate = useNavigate();
-  const templateCategoriesQuery = templatesHooks.useTemplateCategories();
-  const templateCategories = templateCategoriesQuery.data;
   const { platform } = platformHooks.useCurrentPlatform();
-  const isShowingOfficialTemplates = !platform.plan.manageTemplatesEnabled;
+
+  const canManageTemplates = platform.plan.manageTemplatesEnabled;
+  const [selectedTemplateType, setSelectedTemplateType] = useState<TemplateType>(
+    TemplateType.OFFICIAL,
+  );
+  const isShowingOfficialTemplates =
+    selectedTemplateType === TemplateType.OFFICIAL;
+
+  useEffect(() => {
+    // Safety: if templates management is disabled, don't allow the UI to get
+    // stuck on a type that the backend will never return.
+    if (!canManageTemplates && selectedTemplateType !== TemplateType.OFFICIAL) {
+      setSelectedTemplateType(TemplateType.OFFICIAL);
+    }
+  }, [canManageTemplates, selectedTemplateType]);
+
+  const templateCategoriesQuery =
+    templatesHooks.useTemplateCategories(isShowingOfficialTemplates);
+  const templateCategories = templateCategoriesQuery.data;
   const {
     templates,
     isLoading,
@@ -41,9 +58,7 @@ const TemplatesPage = () => {
     setSearch,
     category,
     setCategory,
-  } = templatesHooks.useTemplates(
-    isShowingOfficialTemplates ? TemplateType.OFFICIAL : TemplateType.CUSTOM,
-  );
+  } = templatesHooks.useTemplates(selectedTemplateType);
   const selectedCategory = category as string;
   const {
     data: allOfficialTemplates,
@@ -51,7 +66,7 @@ const TemplatesPage = () => {
     isError: isAllTemplatesError,
     error: allTemplatesError,
     refetch: refetchAllTemplates,
-  } = templatesHooks.useAllOfficialTemplates();
+  } = templatesHooks.useAllOfficialTemplates(isShowingOfficialTemplates);
   const { mutate: createFlow, isPending: isCreateFlowPending } =
     flowHooks.useStartFromScratch(UncategorizedFolderId);
 
@@ -117,8 +132,8 @@ const TemplatesPage = () => {
 
   const showLoading =
     isLoading ||
-    templateCategoriesQuery.isLoading ||
-    (isShowingOfficialTemplates && isAllTemplatesLoading);
+    (isShowingOfficialTemplates &&
+      (templateCategoriesQuery.isLoading || isAllTemplatesLoading));
   const hasCategories = (templateCategories?.length ?? 0) > 0;
   const showAllCategories =
     isShowingOfficialTemplates &&
@@ -131,7 +146,9 @@ const TemplatesPage = () => {
     isShowingOfficialTemplates && selectedCategory !== 'All';
 
   const hasAnyLoadError =
-    templateCategoriesQuery.isError || isTemplatesError || isAllTemplatesError;
+    isTemplatesError ||
+    (isShowingOfficialTemplates &&
+      (templateCategoriesQuery.isError || isAllTemplatesError));
 
   useEffect(() => {
     if (!showLoading) {
@@ -194,6 +211,32 @@ const TemplatesPage = () => {
               </Button>
             </div>
           </div>
+
+          {canManageTemplates && (
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <Tabs
+                value={selectedTemplateType}
+                onValueChange={(value) => {
+                  const nextType = value as TemplateType;
+                  setSelectedTemplateType(nextType);
+                  if (nextType === TemplateType.CUSTOM) {
+                    // Custom templates don't use categories in the current UI.
+                    setCategory('All');
+                  }
+                }}
+              >
+                <TabsList variant="outline">
+                  <TabsTrigger variant="outline" value={TemplateType.OFFICIAL}>
+                    {t('Official')}
+                  </TabsTrigger>
+                  <TabsTrigger variant="outline" value={TemplateType.CUSTOM}>
+                    {t('Custom')}
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+          )}
+
           {isShowingOfficialTemplates && categoriesForFilter.length > 1 && (
             <CategoryFilterCarousel
               categories={categoriesForFilter}
@@ -227,9 +270,11 @@ const TemplatesPage = () => {
                     variant="outline"
                     size="sm"
                     onClick={() => {
-                      templateCategoriesQuery.refetch();
                       refetchTemplates();
-                      refetchAllTemplates();
+                      if (isShowingOfficialTemplates) {
+                        templateCategoriesQuery.refetch();
+                        refetchAllTemplates();
+                      }
                     }}
                   >
                     {t('Retry')}

@@ -7,9 +7,10 @@ import { Template, TemplateType } from '@activepieces/shared';
 import { templatesApi } from '../lib/templates-api';
 
 export const templatesHooks = {
-  useTemplateCategories: () => {
+  useTemplateCategories: (enabled = true) => {
     return useQuery<string[], Error>({
       queryKey: ['template', 'categories'],
+      enabled,
       queryFn: async () => {
         const result = await templatesApi.getCategories();
         const rawCategories: unknown = Array.isArray(result)
@@ -34,9 +35,10 @@ export const templatesHooks = {
     });
   },
 
-  useAllOfficialTemplates: () => {
+  useAllOfficialTemplates: (enabled = true) => {
     return useQuery<Template[], Error>({
       queryKey: ['templates', 'all'],
+      enabled,
       queryFn: async () => {
         const result = await templatesApi.list({
           type: TemplateType.OFFICIAL,
@@ -52,16 +54,21 @@ export const templatesHooks = {
 
     const search = searchParams.get('search') ?? '';
     const category = searchParams.get('category') ?? undefined;
+    // Categories are only used for official templates in the current UI.
+    // Leaving a category filter in the URL while browsing custom templates can
+    // accidentally hide all results.
+    const effectiveCategory =
+      type === TemplateType.CUSTOM ? undefined : category;
 
     const [debouncedSearch] = useDebounce(search, 300);
 
     const templatesQuery = useQuery<Template[], Error>({
-      queryKey: ['templates', debouncedSearch, category],
+      queryKey: ['templates', type, debouncedSearch, effectiveCategory],
       queryFn: async () => {
         const templates = await templatesApi.list({
           type,
           search: debouncedSearch || undefined,
-          category,
+          category: effectiveCategory,
         });
         return templates.data;
       },
@@ -102,7 +109,7 @@ export const templatesHooks = {
       refetch: templatesQuery.refetch,
       search,
       setSearch,
-      category: category || 'All',
+      category: type === TemplateType.CUSTOM ? 'All' : category || 'All',
       setCategory,
     };
   },
