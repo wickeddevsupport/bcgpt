@@ -66,7 +66,10 @@ export function generateTheme({
 export const defaultTheme = generateTheme({
     primaryColor: '#FF415B',
     websiteName: process.env.AP_APP_TITLE ?? 'Wicked Flow',
-    fullLogoUrl: '/branding/wicked-flow-logo.svg',
-    favIconUrl: process.env.AP_FAVICON_URL ?? '/branding/wicked-flow-icon.svg',
-    logoIconUrl: process.env.AP_FAVICON_URL ?? '/branding/wicked-flow-icon.svg',
+    // Add a simple cache-buster so existing clients don't get stuck with a year-long cached logo.
+    fullLogoUrl: '/branding/wicked-flow-logo.svg?v=20260208',
+    favIconUrl:
+        process.env.AP_FAVICON_URL ?? '/branding/wicked-flow-icon.svg?v=20260208',
+    logoIconUrl:
+        process.env.AP_FAVICON_URL ?? '/branding/wicked-flow-icon.svg?v=20260208',
 })
