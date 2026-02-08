@@ -67,11 +67,10 @@ COPY .npmrc package.json bun.lock ./
 
 # Remove local repo dependency that causes recursive node_modules in CI builds
 RUN node -e "const fs=require('fs');const p='package.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));if(j.dependencies&&j.dependencies['bcgpt-full-v3']){delete j.dependencies['bcgpt-full-v3'];fs.writeFileSync(p,JSON.stringify(j,null,2));}"
-RUN rm -f bun.lock
 
-# Install all dependencies (avoid frozen lockfile issues in CI)
+# Install all dependencies using the checked-in lockfile for faster, deterministic builds.
 RUN --mount=type=cache,target=/root/.bun/install/cache \
-    bun install
+    bun install --frozen-lockfile --no-progress
 
 # Copy source code after dependency installation
 COPY . .
