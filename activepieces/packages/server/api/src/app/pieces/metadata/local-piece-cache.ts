@@ -111,13 +111,35 @@ async function updateCache(log: FastifyBaseLogger): Promise<void> {
 
             const cacheInstance = await getOrCreateCache()
             const stored = (await cacheInstance.db.get(META_STATE_KEY)) as State | undefined
-            if (!isNil(stored) && !isNil(newestState) && stored.recentUpdate === newestState.recentUpdate && stored.count === newestState.count) {
+
+            // Normalize types for a stable comparison. Depending on the DB driver, the raw query can
+            // return `recentUpdate` as a Date and `count` as a number, while the cached state is a
+            // JSON-serialized object (strings). Without normalization, this causes false cache
+            // invalidations and expensive full cache rebuild loops.
+            const normalizeState = (state: State | undefined): State | undefined => {
+                if (isNil(state)) {
+                    return state
+                }
+                return {
+                    recentUpdate: state.recentUpdate instanceof Date
+                        ? state.recentUpdate.toISOString()
+                        : state.recentUpdate?.toString(),
+                    count: state.count?.toString(),
+                }
+            }
+
+            const normalizedNewestState = normalizeState(newestState)
+            const normalizedStoredState = normalizeState(stored)
+            if (!isNil(normalizedStoredState)
+                && !isNil(normalizedNewestState)
+                && normalizedStoredState.recentUpdate === normalizedNewestState.recentUpdate
+                && normalizedStoredState.count === normalizedNewestState.count) {
                 log.debug('[pieceKVCache] Cache is up to date, skipping refresh')
                 return
             }
             log.info({
-                newestState: JSON.stringify(newestState),
-                stored: JSON.stringify(stored),
+                newestState: JSON.stringify(normalizedNewestState),
+                stored: JSON.stringify(normalizedStoredState),
             }, '[updateCache] Cache is out of date, updating')
             const pieces = await fetchPiecesFromDB()
             await populateCache(pieces, log)

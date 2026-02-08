@@ -13,6 +13,7 @@ import {
 } from '@activepieces/shared'
 
 const TEMPLATES_SOURCE_URL = 'https://cloud.activepieces.com/api/v1/templates'
+const CLOUD_FETCH_TIMEOUT_MS = 8000
 const LOCAL_TEMPLATES: Template[] = buildLocalTemplates()
 const LOCAL_CATEGORIES = Array.from(
     new Set(LOCAL_TEMPLATES.flatMap((t) => t.categories || [])),
@@ -24,12 +25,27 @@ export const communityTemplates = {
             return local
         }
         const url = `${TEMPLATES_SOURCE_URL}/${id}`
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        })
+        let response: Response
+        try {
+            response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                signal: AbortSignal.timeout(CLOUD_FETCH_TIMEOUT_MS),
+            })
+        }
+        catch (error) {
+            // Templates are a convenience feature; avoid hanging the UI if the cloud endpoint is slow/unreachable.
+            throw new ActivepiecesError({
+                code: ErrorCode.ENTITY_NOT_FOUND,
+                params: {
+                    entityType: 'template',
+                    entityId: id,
+                    message: 'Templates service is temporarily unavailable. Please try again in a moment.',
+                },
+            })
+        }
         if (!response.ok) {
             throw new ActivepiecesError({
                 code: ErrorCode.ENTITY_NOT_FOUND,
@@ -45,12 +61,20 @@ export const communityTemplates = {
     },
     getCategories: async (): Promise<string[]> => {
         const url = `${TEMPLATES_SOURCE_URL}/categories`
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        })
+        let response: Response
+        try {
+            response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                signal: AbortSignal.timeout(CLOUD_FETCH_TIMEOUT_MS),
+            })
+        }
+        catch (error) {
+            // Templates are a convenience feature; avoid breaking the UI if the cloud endpoint is down.
+            return Array.from(new Set([...LOCAL_CATEGORIES]))
+        }
         if (!response.ok) {
             // Templates are a convenience feature; avoid breaking the UI if the cloud endpoint is down.
             return Array.from(new Set([...LOCAL_CATEGORIES]))
@@ -75,13 +99,21 @@ export const communityTemplates = {
     list: async (request: ListTemplatesRequestQuery): Promise<SeekPage<Template>> => {
         const queryString = convertToQueryString(request)
         const url = `${TEMPLATES_SOURCE_URL}?${queryString}`
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        })
-        const templates = await response.json()
+        let templates: any = null
+        try {
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                signal: AbortSignal.timeout(CLOUD_FETCH_TIMEOUT_MS),
+            })
+            templates = response.ok ? await response.json() : null
+        }
+        catch (error) {
+            // Templates are a convenience feature; avoid hanging the UI if the cloud endpoint is slow/unreachable.
+            templates = null
+        }
         const localMatches = filterTemplates(LOCAL_TEMPLATES, request)
         const data = Array.isArray(templates?.data)
             ? [...localMatches, ...templates.data]
