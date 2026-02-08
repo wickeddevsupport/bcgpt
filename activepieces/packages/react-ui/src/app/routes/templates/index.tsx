@@ -1,10 +1,11 @@
 import { t } from 'i18next';
-import { Plus, Search } from 'lucide-react';
+import { AlertTriangle, Plus, Search } from 'lucide-react';
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { ApSidebarToggle } from '@/components/custom/ap-sidebar-toggle';
 import { InputWithIcon } from '@/components/custom/input-with-icon';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { flowHooks } from '@/features/flows/lib/flow-hooks';
 import { templatesHooks } from '@/features/templates/hooks/templates-hook';
@@ -24,16 +25,31 @@ import { SelectedCategoryView } from './selected-category-view';
 
 const TemplatesPage = () => {
   const navigate = useNavigate();
-  const { data: templateCategories } = templatesHooks.useTemplateCategories();
+  const templateCategoriesQuery = templatesHooks.useTemplateCategories();
+  const templateCategories = templateCategoriesQuery.data;
   const { platform } = platformHooks.useCurrentPlatform();
   const isShowingOfficialTemplates = !platform.plan.manageTemplatesEnabled;
-  const { templates, isLoading, search, setSearch, category, setCategory } =
-    templatesHooks.useTemplates(
-      isShowingOfficialTemplates ? TemplateType.OFFICIAL : TemplateType.CUSTOM,
-    );
+  const {
+    templates,
+    isLoading,
+    isError: isTemplatesError,
+    error: templatesError,
+    refetch: refetchTemplates,
+    search,
+    setSearch,
+    category,
+    setCategory,
+  } = templatesHooks.useTemplates(
+    isShowingOfficialTemplates ? TemplateType.OFFICIAL : TemplateType.CUSTOM,
+  );
   const selectedCategory = category as string;
-  const { data: allOfficialTemplates, isLoading: isAllTemplatesLoading } =
-    templatesHooks.useAllOfficialTemplates();
+  const {
+    data: allOfficialTemplates,
+    isLoading: isAllTemplatesLoading,
+    isError: isAllTemplatesError,
+    error: allTemplatesError,
+    refetch: refetchAllTemplates,
+  } = templatesHooks.useAllOfficialTemplates();
   const { mutate: createFlow, isPending: isCreateFlowPending } =
     flowHooks.useStartFromScratch(UncategorizedFolderId);
 
@@ -57,8 +73,13 @@ const TemplatesPage = () => {
       Template[]
     >;
 
+    const templatesForGrouping =
+      isShowingOfficialTemplates && search.trim().length === 0
+        ? (allOfficialTemplates ?? templates ?? [])
+        : [];
+
     if (isShowingOfficialTemplates) {
-      allOfficialTemplates?.forEach((template: Template) => {
+      templatesForGrouping.forEach((template: Template) => {
         if (template.categories?.length) {
           template.categories?.forEach((category: string) => {
             if (!grouped[category]) {
@@ -71,26 +92,29 @@ const TemplatesPage = () => {
     }
 
     return grouped;
-  }, [allOfficialTemplates, isShowingOfficialTemplates]);
+  }, [allOfficialTemplates, isShowingOfficialTemplates, search, templates]);
 
-  const categories = useMemo(() => {
+  const categoriesForFilter = useMemo(() => {
     return ['All', ...(templateCategories || [])];
   }, [templateCategories]);
 
-  const selectedCategoryTemplates = useMemo(() => {
-    if (selectedCategory === 'All') {
-      return templates || [];
-    }
-    return templatesByCategory[selectedCategory] || [];
-  }, [selectedCategory, templates, templatesByCategory]);
-
   const showLoading =
-    isLoading || (isShowingOfficialTemplates && isAllTemplatesLoading);
+    isLoading ||
+    templateCategoriesQuery.isLoading ||
+    (isShowingOfficialTemplates && isAllTemplatesLoading);
+  const hasCategories = (templateCategories?.length ?? 0) > 0;
   const showAllCategories =
-    isShowingOfficialTemplates && selectedCategory === 'All';
-  const hasTemplates = templates && templates.length > 0;
+    isShowingOfficialTemplates &&
+    selectedCategory === 'All' &&
+    search.trim().length === 0 &&
+    hasCategories &&
+    !isAllTemplatesError;
+  const hasTemplates = (templates?.length ?? 0) > 0;
   const showCategoryTitleForOfficialTemplates =
     isShowingOfficialTemplates && selectedCategory !== 'All';
+
+  const hasAnyLoadError =
+    templateCategoriesQuery.isError || isTemplatesError || isAllTemplatesError;
 
   return (
     <div>
@@ -118,21 +142,48 @@ const TemplatesPage = () => {
               </Button>
             </div>
           </div>
-          {isShowingOfficialTemplates && categories && (
+          {isShowingOfficialTemplates && categoriesForFilter.length > 1 && (
             <CategoryFilterCarousel
-              categories={categories}
+              categories={categoriesForFilter}
               selectedCategory={selectedCategory}
               onCategorySelect={setCategory}
             />
           )}
         </div>
 
-        {!hasTemplates && !showLoading ? (
+        {hasAnyLoadError && (
+          <Alert variant="warning" className="mb-6">
+            <AlertTriangle className="h-4 w-4" />
+            <div>
+              <AlertTitle>{t("We couldn't load templates")}</AlertTitle>
+              <AlertDescription>
+                {t(
+                  'Please check your connection and try again. If this keeps happening, refresh the page.',
+                )}
+                <div className="mt-3 flex flex-row gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      templateCategoriesQuery.refetch();
+                      refetchTemplates();
+                      refetchAllTemplates();
+                    }}
+                  >
+                    {t('Retry')}
+                  </Button>
+                </div>
+              </AlertDescription>
+            </div>
+          </Alert>
+        )}
+
+        {!hasTemplates && !showLoading && !hasAnyLoadError ? (
           <EmptyTemplatesView />
         ) : showAllCategories ? (
           <AllCategoriesView
             templatesByCategory={templatesByCategory}
-            categories={categories}
+            categories={templateCategories || []}
             onCategorySelect={setCategory}
             onTemplateSelect={handleTemplateSelect}
             isLoading={showLoading}
@@ -141,7 +192,7 @@ const TemplatesPage = () => {
         ) : (
           <SelectedCategoryView
             category={selectedCategory}
-            templates={selectedCategoryTemplates}
+            templates={templates || []}
             onTemplateSelect={handleTemplateSelect}
             isLoading={showLoading}
             showCategoryTitle={showCategoryTitleForOfficialTemplates}

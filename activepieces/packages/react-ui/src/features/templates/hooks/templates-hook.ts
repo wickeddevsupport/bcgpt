@@ -12,8 +12,18 @@ export const templatesHooks = {
       queryKey: ['template', 'categories'],
       queryFn: async () => {
         const result = await templatesApi.getCategories();
-        return (result?.value ?? []) as string[];
+        const rawCategories: unknown = Array.isArray(result)
+          ? result
+          : (result as { value?: unknown })?.value;
+
+        const categories = Array.isArray(rawCategories)
+          ? rawCategories.filter((c): c is string => typeof c === 'string')
+          : [];
+
+        return Array.from(new Set(categories));
       },
+      staleTime: 10 * 60 * 1000,
+      retry: 1,
     });
   },
 
@@ -45,7 +55,7 @@ export const templatesHooks = {
 
     const [debouncedSearch] = useDebounce(search, 300);
 
-    const { data: templates, isLoading } = useQuery<Template[], Error>({
+    const templatesQuery = useQuery<Template[], Error>({
       queryKey: ['templates', debouncedSearch, category],
       queryFn: async () => {
         const templates = await templatesApi.list({
@@ -56,6 +66,7 @@ export const templatesHooks = {
         return templates.data;
       },
       staleTime: 5 * 60 * 1000,
+      retry: 1,
     });
 
     const setSearch = (newSearch: string) => {
@@ -83,8 +94,12 @@ export const templatesHooks = {
     };
 
     return {
-      templates,
-      isLoading,
+      templates: templatesQuery.data,
+      isLoading: templatesQuery.isLoading,
+      isFetching: templatesQuery.isFetching,
+      isError: templatesQuery.isError,
+      error: templatesQuery.error,
+      refetch: templatesQuery.refetch,
       search,
       setSearch,
       category: category || 'All',

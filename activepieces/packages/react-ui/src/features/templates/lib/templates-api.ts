@@ -25,6 +25,9 @@ export const templatesApi = {
     return api.delete<void>(`/v1/templates/${templateId}`);
   },
   getCategories() {
-    return api.get<Flag>(`/v1/templates/categories`);
+    // The backend response shape differs by edition:
+    // - Cloud: returns a Flag { value: string[] }
+    // - Community: may return string[] directly
+    return api.get<Flag | string[]>(`/v1/templates/categories`);
   },
 };
