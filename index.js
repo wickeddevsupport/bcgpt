@@ -756,8 +756,8 @@ app.get("/startbcgpt", async (req, res) => res.json(await startStatus(req)));
 app.post("/logout", async (req, res) => {
   const ctx = await resolveRequestContext(req);
   if (ctx.userKey) {
-    clearUserToken(ctx.userKey);
-    clearUserAuthCache(ctx.userKey);
+    await clearUserToken(ctx.userKey);
+    await clearUserAuthCache(ctx.userKey);
   }
   res.json({ ok: true, connected: false, api_key: ctx.apiKey || null, message: "Logged out." });
 });
