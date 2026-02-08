@@ -48,8 +48,8 @@ const UA = "bcgpt-full-v3";
 const BASECAMP_API = "https://3.basecampapi.com";
 const ACTIVEPIECES_PROXY_HOST = String(process.env.ACTIVEPIECES_PROXY_HOST || "").trim().toLowerCase();
 const ACTIVEPIECES_PROXY_TARGET = process.env.ACTIVEPIECES_PROXY_TARGET || "http://127.0.0.1:4200";
-const ACTIVEPIECES_PROXY_ENABLED =
-  String(process.env.ACTIVEPIECES_PROXY_ENABLED || "").toLowerCase() === "true" || Boolean(ACTIVEPIECES_PROXY_HOST);
+// Explicitly require ACTIVEPIECES_PROXY_ENABLED=true. Having a host set should not implicitly enable proxying.
+const ACTIVEPIECES_PROXY_ENABLED = String(process.env.ACTIVEPIECES_PROXY_ENABLED || "").toLowerCase() === "true";
 const ACTIVEPIECES_PROXY_ACTIVE = ACTIVEPIECES_PROXY_ENABLED && Boolean(ACTIVEPIECES_PROXY_HOST);
 
 let MINER_RUNNING = false;
