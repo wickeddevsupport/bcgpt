@@ -138,8 +138,19 @@ function normalizeUrl(raw, accountId) {
 
   let p = s.startsWith("/") ? s : `/${s}`;
 
-  // Bucket-scoped MUST NOT be prefixed with accountId
-  if (p.startsWith("/buckets/")) return `${BASE}${p}`;
+  // Bucket-scoped endpoints are still rooted at the account base URL.
+  // Basecamp's own URLs look like:
+  //   https://3.basecampapi.com/{accountId}/buckets/{bucketId}/...
+  if (p.startsWith("/buckets/")) {
+    const acct = accountId || process.env.BASECAMP_DEFAULT_ACCOUNT_ID || null;
+    if (!acct) {
+      const err = new Error("Missing accountId for Basecamp bucket-scoped path call");
+      err.code = "NO_ACCOUNT_ID";
+      err.path = p;
+      throw err;
+    }
+    return `${BASE}/${acct}${p}`;
+  }
 
   // Already account-scoped ("/<digits>/...")
   if (/^\/\d+\//.test(p)) return `${BASE}${p}`;
