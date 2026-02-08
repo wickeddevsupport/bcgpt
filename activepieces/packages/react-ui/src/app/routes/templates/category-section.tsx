@@ -18,6 +18,7 @@ type CategorySectionProps = {
   templates: Template[];
   onCategorySelect: (category: string) => void;
   onTemplateSelect: (template: Template) => void;
+  pieceLogoByName: Record<string, { displayName?: string; logoUrl?: string }>;
 };
 
 export const CategorySection = ({
@@ -25,6 +26,7 @@ export const CategorySection = ({
   templates,
   onCategorySelect,
   onTemplateSelect,
+  pieceLogoByName,
 }: CategorySectionProps) => {
   if (!templates || templates.length === 0) return null;
 
@@ -74,6 +76,7 @@ export const CategorySection = ({
               <ExploreTemplateCard
                 template={template}
                 onTemplateSelect={onTemplateSelect}
+                pieceLogoByName={pieceLogoByName}
               />
             </CarouselItem>
           ))}

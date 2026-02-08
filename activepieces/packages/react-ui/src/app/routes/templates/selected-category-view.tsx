@@ -45,6 +45,7 @@ type SelectedCategoryViewProps = {
   category?: string;
   templates: Template[];
   onTemplateSelect: (template: Template) => void;
+  pieceLogoByName: Record<string, { displayName?: string; logoUrl?: string }>;
   isLoading?: boolean;
   showCategoryTitle?: boolean;
 };
@@ -53,6 +54,7 @@ export const SelectedCategoryView = ({
   category,
   templates,
   onTemplateSelect,
+  pieceLogoByName,
   isLoading = false,
   showCategoryTitle,
 }: SelectedCategoryViewProps) => {
@@ -89,6 +91,7 @@ export const SelectedCategoryView = ({
               key={template.id}
               template={template}
               onTemplateSelect={onTemplateSelect}
+              pieceLogoByName={pieceLogoByName}
             />
           ))}
         </div>

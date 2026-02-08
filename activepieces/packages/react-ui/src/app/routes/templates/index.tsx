@@ -9,6 +9,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { flowHooks } from '@/features/flows/lib/flow-hooks';
+import { piecesHooks } from '@/features/pieces/lib/pieces-hooks';
 import { templatesHooks } from '@/features/templates/hooks/templates-hook';
 import { templatesTelemetryApi } from '@/features/templates/lib/templates-telemetry-api';
 import { platformHooks } from '@/hooks/platform-hooks';
@@ -53,6 +54,18 @@ const TemplatesPage = () => {
   } = templatesHooks.useAllOfficialTemplates();
   const { mutate: createFlow, isPending: isCreateFlowPending } =
     flowHooks.useStartFromScratch(UncategorizedFolderId);
+
+  const { pieces: availablePieces } = piecesHooks.usePieces({
+    includeHidden: false,
+    includeTags: false,
+  });
+  const pieceLogoByName = useMemo(() => {
+    const map: Record<string, { displayName?: string; logoUrl?: string }> = {};
+    for (const p of availablePieces ?? []) {
+      map[p.name] = { displayName: p.displayName, logoUrl: p.logoUrl };
+    }
+    return map;
+  }, [availablePieces]);
 
   const [loadProgress, setLoadProgress] = useState(0);
   const [loadMessage, setLoadMessage] = useState(t('Loading templates…'));
@@ -235,6 +248,7 @@ const TemplatesPage = () => {
             categories={templateCategories || []}
             onCategorySelect={setCategory}
             onTemplateSelect={handleTemplateSelect}
+            pieceLogoByName={pieceLogoByName}
             isLoading={showLoading}
             hideHeader={!isShowingOfficialTemplates}
           />
@@ -243,6 +257,7 @@ const TemplatesPage = () => {
             category={selectedCategory}
             templates={templates || []}
             onTemplateSelect={handleTemplateSelect}
+            pieceLogoByName={pieceLogoByName}
             isLoading={showLoading}
             showCategoryTitle={showCategoryTitleForOfficialTemplates}
           />

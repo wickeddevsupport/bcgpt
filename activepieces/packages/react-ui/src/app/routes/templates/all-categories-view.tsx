@@ -24,6 +24,7 @@ type AllCategoriesViewProps = {
   categories: string[];
   onCategorySelect: (category: string) => void;
   onTemplateSelect: (template: Template) => void;
+  pieceLogoByName: Record<string, { displayName?: string; logoUrl?: string }>;
   isLoading?: boolean;
   hideHeader?: boolean;
 };
@@ -33,6 +34,7 @@ export const AllCategoriesView = ({
   categories,
   onCategorySelect,
   onTemplateSelect,
+  pieceLogoByName,
   isLoading = false,
   hideHeader = false,
 }: AllCategoriesViewProps) => {
@@ -52,6 +54,7 @@ export const AllCategoriesView = ({
             templates={categoryTemplates}
             onCategorySelect={onCategorySelect}
             onTemplateSelect={onTemplateSelect}
+            pieceLogoByName={pieceLogoByName}
           />
         );
       })}

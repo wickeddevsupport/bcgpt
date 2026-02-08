@@ -1,25 +1,48 @@
 import { t } from 'i18next';
+import { useMemo } from 'react';
 
 import { Card, CardContent } from '@/components/ui/card';
 import { TagWithBright } from '@/components/ui/tag-with-bright';
-import { PieceIconList } from '@/features/pieces/components/piece-icon-list';
-import { useGradientFromPieces } from '@/features/templates/hooks/use-gradient-from-pieces';
+import { PieceIcon } from '@/features/pieces/components/piece-icon';
 import { Template } from '@activepieces/shared';
 
 type TemplateCardProps = {
   template: Template;
   onTemplateSelect: (template: Template) => void;
+  pieceLogoByName: Record<string, { displayName?: string; logoUrl?: string }>;
 };
 
 export const ExploreTemplateCard = ({
   template,
   onTemplateSelect,
+  pieceLogoByName,
 }: TemplateCardProps) => {
   const displayTags = template.tags.slice(0, 2);
-  const hasFlows = template.flows && template.flows.length > 0;
-  const gradient = useGradientFromPieces(
-    hasFlows ? template.flows![0]?.trigger : undefined,
-  );
+
+  const gradient = useMemo(() => {
+    // Deterministic, zero-network gradient based on the template's pieces.
+    // Avoids per-template API calls that caused massive request fanout.
+    const seeds = template.pieces?.slice(0, 6) ?? [];
+    const hash = seeds
+      .join('|')
+      .split('')
+      .reduce((acc, ch) => (acc * 33 + ch.charCodeAt(0)) >>> 0, 5381);
+    const palette = [
+      ['#1d4ed8', '#38bdf8'],
+      ['#0f766e', '#34d399'],
+      ['#7c3aed', '#fb7185'],
+      ['#b45309', '#f59e0b'],
+      ['#334155', '#a78bfa'],
+      ['#be123c', '#fb7185'],
+    ];
+    const [a, b] = palette[hash % palette.length];
+    return `linear-gradient(135deg, ${a}20, ${b}25)`;
+  }, [template.pieces?.join('|')]);
+
+  const visiblePieceNames = useMemo(() => {
+    const unique = Array.from(new Set(template.pieces ?? [])).slice(0, 4);
+    return unique;
+  }, [template.pieces?.join('|')]);
 
   return (
     <Card
@@ -68,17 +91,23 @@ export const ExploreTemplateCard = ({
           background: gradient || 'transparent',
         }}
       >
-        {hasFlows && template.flows![0]?.trigger && (
-          <PieceIconList
-            trigger={template.flows![0]?.trigger}
-            maxNumberOfIconsToShow={4}
-            size="md"
-            className="flex gap-0.5"
-            circle={false}
-            background="white"
-            excludeCore={true}
-          />
-        )}
+        <div className="flex gap-0.5">
+          {visiblePieceNames.map((pieceName) => {
+            const piece = pieceLogoByName[pieceName];
+            return (
+              <PieceIcon
+                key={pieceName}
+                logoUrl={piece?.logoUrl}
+                displayName={piece?.displayName ?? pieceName}
+                showTooltip={true}
+                circle={false}
+                size="md"
+                border={true}
+                background="white"
+              />
+            );
+          })}
+        </div>
       </div>
     </Card>
   );
