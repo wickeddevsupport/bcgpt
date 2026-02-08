@@ -115,6 +115,11 @@ export enum AppSystemProp {
     WEBHOOK_TIMEOUT_SECONDS = 'WEBHOOK_TIMEOUT_SECONDS',
     OPENROUTER_PROVISION_KEY = 'OPENROUTER_PROVISION_KEY',
     EVENT_DESTINATION_TIMEOUT_SECONDS = 'EVENT_DESTINATION_TIMEOUT_SECONDS',
+    /**
+     * When enabled, users can self-serve sign-up on an existing platform without requiring an invitation.
+     * Default is false for safety (keeps invitation-only behavior after initial setup).
+     */
+    SELF_SERVE_SIGN_UP_ENABLED = 'SELF_SERVE_SIGN_UP_ENABLED',
 }
 
 export enum ContainerType {

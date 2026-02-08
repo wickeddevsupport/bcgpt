@@ -1,5 +1,5 @@
 import { OtpType } from '@activepieces/ee-shared'
-import { cryptoUtils } from '@activepieces/server-shared'
+import { AppSystemProp, cryptoUtils } from '@activepieces/server-shared'
 import { ActivepiecesError, ApEdition, ApFlagId, assertNotNullOrUndefined, AuthenticationResponse, ErrorCode, isNil, PlatformRole, PlatformWithoutSensitiveData, ProjectType, User, UserIdentity, UserIdentityProvider } from '@activepieces/shared'
 import { FastifyBaseLogger } from 'fastify'
 import { otpService } from '../ee/authentication/otp/otp-service'
@@ -33,10 +33,15 @@ export const authenticationService = (log: FastifyBaseLogger) => ({
             return createUserAndPlatform(userIdentity, log)
         }
 
-        await authenticationUtils.assertUserIsInvitedToPlatformOrProject(log, {
-            email: params.email,
-            platformId: params.platformId,
-        })
+        const selfServeSignUpEnabled =
+            system.getBoolean(AppSystemProp.SELF_SERVE_SIGN_UP_ENABLED) ?? false
+
+        if (!selfServeSignUpEnabled) {
+            await authenticationUtils.assertUserIsInvitedToPlatformOrProject(log, {
+                email: params.email,
+                platformId: params.platformId,
+            })
+        }
         const userIdentity = await userIdentityService(log).create({
             ...params,
             verified: true,

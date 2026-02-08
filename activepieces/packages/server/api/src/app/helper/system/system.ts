@@ -59,6 +59,8 @@ const systemPropDefaultValues: Partial<Record<SystemProp, string>> = {
     [AppSystemProp.ENABLE_FLOW_ON_PUBLISH]: 'true',
     [AppSystemProp.ISSUE_ARCHIVE_DAYS]: '7',
     [AppSystemProp.POSTGRES_IDLE_TIMEOUT_MS]: '300000',
+    // Keep invitation-only sign-up by default; enable explicitly in self-hosted environments if desired.
+    [AppSystemProp.SELF_SERVE_SIGN_UP_ENABLED]: 'false',
 }
 
 let globalLogger: FastifyBaseLogger
