@@ -2804,7 +2804,8 @@ async function auditPerson(ctx, personQuery, {
 const DEFAULT_REGRESSION_CASES = [
   { name: "List projects", tool: "list_projects", args: {}, expect: { min_count: 1 } },
   { name: "List all people", tool: "list_all_people", args: { query: "" }, expect: { min_count: 1 } },
-  { name: "Search recordings (smoke)", tool: "search_recordings", args: { query: "test" } }
+  // Keep this query intentionally narrow so it doesn't trigger large-payload chunking.
+  { name: "Search recordings (smoke)", tool: "search_recordings", args: { query: "__bcgpt_regression_smoke__" } }
 ];
 
 async function listPersonActivity(ctx, personQuery, {
