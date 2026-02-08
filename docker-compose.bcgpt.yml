@@ -25,8 +25,10 @@ services:
       DATABASE_URL: "${DATABASE_URL:-postgresql://bcgpt:${BCGPT_POSTGRES_PASSWORD}@bcgpt-postgres:5432/bcgpt}"
       SQLITE_PATH: "/data/bcgpt.sqlite"
       ACTIVEPIECES_PROXY_ENABLED: "${ACTIVEPIECES_PROXY_ENABLED:-false}"
-      ACTIVEPIECES_PROXY_HOST: "${ACTIVEPIECES_PROXY_HOST:-flow.wickedlab.io}"
-      ACTIVEPIECES_PROXY_TARGET: "${ACTIVEPIECES_PROXY_TARGET:-https://flow.wickedlab.io}"
+      # Optional: proxy another hostname through this container (off by default).
+      # When enabled, set both ACTIVEPIECES_PROXY_HOST and ACTIVEPIECES_PROXY_TARGET explicitly.
+      ACTIVEPIECES_PROXY_HOST: "${ACTIVEPIECES_PROXY_HOST:-}"
+      ACTIVEPIECES_PROXY_TARGET: "${ACTIVEPIECES_PROXY_TARGET:-}"
     depends_on:
       bcgpt-postgres:
         condition: service_healthy

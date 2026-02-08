@@ -23,8 +23,10 @@ services:
       PAYLOAD_CACHE_TTL_SEC: "${PAYLOAD_CACHE_TTL_SEC}"
       SQLITE_PATH: "/data/bcgpt.sqlite"
       ACTIVEPIECES_PROXY_ENABLED: "${ACTIVEPIECES_PROXY_ENABLED:-false}"
-      ACTIVEPIECES_PROXY_HOST: "${ACTIVEPIECES_PROXY_HOST:-flow.wickedlab.io}"
-      ACTIVEPIECES_PROXY_TARGET: "http://activepieces:80"
+      # Optional: proxy another hostname through this container (off by default).
+      # When enabled, set ACTIVEPIECES_PROXY_HOST explicitly.
+      ACTIVEPIECES_PROXY_HOST: "${ACTIVEPIECES_PROXY_HOST:-}"
+      ACTIVEPIECES_PROXY_TARGET: "${ACTIVEPIECES_PROXY_TARGET:-http://activepieces:80}"
     volumes:
       - bcgpt-data:/data
     expose:
