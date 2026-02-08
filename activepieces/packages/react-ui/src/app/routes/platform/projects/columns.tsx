@@ -29,7 +29,8 @@ export const projectsTableColumns = ({
         <DataTableColumnHeader column={column} title={t('Name')} icon={Tag} />
       ),
       cell: ({ row }) => {
-        const locked = row.original.plan.locked;
+        // Defensive: older cached data (IndexedDB) or API mismatches could omit plan/analytics.
+        const locked = row.original.plan?.locked ?? false;
         const isPersonal = row.original.type === ProjectType.PERSONAL;
 
         return (
@@ -55,10 +56,16 @@ export const projectsTableColumns = ({
         />
       ),
       cell: ({ row }) => {
+        const analytics = row.original.analytics;
         return (
           <div className="text-left">
-            {row.original.analytics.activeUsers} /{' '}
-            {row.original.analytics.totalUsers}
+            {analytics ? (
+              <>
+                {analytics.activeUsers} / {analytics.totalUsers}
+              </>
+            ) : (
+              '-'
+            )}
           </div>
         );
       },
@@ -73,10 +80,16 @@ export const projectsTableColumns = ({
         />
       ),
       cell: ({ row }) => {
+        const analytics = row.original.analytics;
         return (
           <div className="text-left">
-            {row.original.analytics.activeFlows} /{' '}
-            {row.original.analytics.totalFlows}
+            {analytics ? (
+              <>
+                {analytics.activeFlows} / {analytics.totalFlows}
+              </>
+            ) : (
+              '-'
+            )}
           </div>
         );
       },
