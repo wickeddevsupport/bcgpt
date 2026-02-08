@@ -111,8 +111,8 @@ async function listCloudPieces(): Promise<PieceRegistryResponse[]> {
     if (!response.ok) {
         throw new Error(`Failed to fetch cloud pieces: ${response.status}`)
     }
-    const pieces: PieceRegistryResponse[] = await response.json()
-    const piecesByName = groupBy(pieces, p => p.name)
+    const registryPieces: PieceRegistryResponse[] = await response.json()
+    const piecesByName = groupBy(registryPieces, p => p.name)
     const latest = []
     const others = []
 
@@ -122,10 +122,10 @@ async function listCloudPieces(): Promise<PieceRegistryResponse[]> {
         others.push(...sortedByVersion.slice(1))
     }
 
-    const pieces = [...latest, ...others, ...EXTRA_COMPAT_PIECES]
+    const allPieces = [...latest, ...others, ...EXTRA_COMPAT_PIECES]
     // Avoid duplicates when the registry endpoint starts returning any of these again.
     const unique = new Map<string, PieceRegistryResponse>()
-    for (const p of pieces) {
+    for (const p of allPieces) {
         unique.set(`${p.name}:${p.version}`, p)
     }
     return Array.from(unique.values())
