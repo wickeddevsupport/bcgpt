@@ -116,14 +116,23 @@ async function updateCache(log: FastifyBaseLogger): Promise<void> {
             // return `recentUpdate` as a Date and `count` as a number, while the cached state is a
             // JSON-serialized object (strings). Without normalization, this causes false cache
             // invalidations and expensive full cache rebuild loops.
+            const normalizeRecentUpdate = (recentUpdate: unknown): string | undefined => {
+                if (isNil(recentUpdate)) {
+                    return undefined
+                }
+                // Prefer ISO format so cached + DB values compare stable across drivers.
+                const asDate = recentUpdate instanceof Date ? recentUpdate : new Date(recentUpdate as any)
+                if (!Number.isNaN(asDate.getTime())) {
+                    return asDate.toISOString()
+                }
+                return recentUpdate.toString()
+            }
             const normalizeState = (state: State | undefined): State | undefined => {
                 if (isNil(state)) {
                     return state
                 }
                 return {
-                    recentUpdate: state.recentUpdate instanceof Date
-                        ? state.recentUpdate.toISOString()
-                        : state.recentUpdate?.toString(),
+                    recentUpdate: normalizeRecentUpdate(state.recentUpdate),
                     count: state.count?.toString(),
                 }
             }
