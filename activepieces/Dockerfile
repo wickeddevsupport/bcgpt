@@ -83,7 +83,7 @@ RUN npx nx build react-ui --configuration production --skip-nx-cache
 RUN npx nx build server-api --configuration production --skip-nx-cache
 
 # Build custom pieces so they can be loaded via AP_DEV_PIECES at runtime
-RUN npx nx build pieces-bcgpt && npx nx build pieces-basecamp
+RUN npx nx build pieces-basecamp
 
 # Install production dependencies only for the backend API
 RUN --mount=type=cache,target=/root/.bun/install/cache \

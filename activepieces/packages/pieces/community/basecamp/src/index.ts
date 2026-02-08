@@ -1,10 +1,16 @@
 import { createPiece, PieceAuth, Property } from '@activepieces/pieces-framework';
 import { PieceCategory } from '@activepieces/shared';
-import { listProjects } from './lib/actions/list-projects';
-import { listTodosForProject } from './lib/actions/list-todos-for-project';
-import { createTodo } from './lib/actions/create-todo';
-import { listMessages } from './lib/actions/list-messages';
-import { createMessage } from './lib/actions/create-message';
+import { adminAction } from './lib/actions/admin';
+import { cardsAction } from './lib/actions/cards';
+import { commentsAction } from './lib/actions/comments';
+import { documentsAction } from './lib/actions/documents';
+import { filesAction } from './lib/actions/files';
+import { messagesAction } from './lib/actions/messages';
+import { peopleAction } from './lib/actions/people';
+import { projectsAction } from './lib/actions/projects';
+import { reportsAction } from './lib/actions/reports';
+import { scheduleAction } from './lib/actions/schedule';
+import { todosAction } from './lib/actions/todos';
 import { newTodoTrigger } from './lib/triggers/new-todo';
 
 const markdown = `
@@ -34,7 +40,19 @@ export const basecamp = createPiece({
   minimumSupportedRelease: '0.77.0',
   logoUrl: '/branding/basecamp.svg',
   categories: [PieceCategory.PRODUCTIVITY],
-  actions: [listProjects, listTodosForProject, createTodo, listMessages, createMessage],
+  actions: [
+    projectsAction,
+    todosAction,
+    cardsAction,
+    messagesAction,
+    commentsAction,
+    scheduleAction,
+    documentsAction,
+    filesAction,
+    peopleAction,
+    reportsAction,
+    adminAction,
+  ],
   triggers: [newTodoTrigger],
   authors: ['wickeddevsupport'],
 });

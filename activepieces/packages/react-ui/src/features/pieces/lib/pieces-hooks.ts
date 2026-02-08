@@ -190,7 +190,6 @@ export const piecesHooks = {
       filterOutPiecesWithNoSuggestions(metadata);
 
     const defaultPinnedPieces = [
-      '@activepieces/piece-bcgpt',
       '@activepieces/piece-basecamp',
     ];
     const pinnedPieceNames = Array.from(

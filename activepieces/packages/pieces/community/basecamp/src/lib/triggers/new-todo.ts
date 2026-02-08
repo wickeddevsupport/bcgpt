@@ -3,7 +3,6 @@ import {
   FilesService,
   Store,
   createTrigger,
-  Property,
   TriggerStrategy,
 } from '@activepieces/pieces-framework';
 import {
@@ -12,6 +11,7 @@ import {
   pollingHelper,
 } from '@activepieces/pieces-common';
 import { gatewayPost, type BasecampGatewayAuthConnection } from '../common/client';
+import { projectDropdown } from '../common/dropdowns';
 import { basecampAuth } from '../../index';
 
 type TodoItem = {
@@ -116,11 +116,7 @@ export const newTodoTrigger = createTrigger({
   description: 'Triggers when a new todo is created in a Basecamp project.',
   type: TriggerStrategy.POLLING,
   props: {
-    project: Property.ShortText({
-      displayName: 'Project',
-      description: 'Project name or ID.',
-      required: true,
-    }),
+    project: projectDropdown(true),
   },
   async onEnable(context) {
     await pollingHelper.onEnable(polling, context);

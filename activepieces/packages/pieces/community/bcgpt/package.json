@@ -1,8 +1,0 @@
-{
-  "name": "@activepieces/piece-bcgpt",
-  "version": "0.0.1",
-  "dependencies": {
-    "@activepieces/pieces-framework": "workspace:*",
-    "@activepieces/shared": "workspace:*"
-  }
-}

@@ -71,7 +71,6 @@ export const platformService = {
             federatedAuthProviders: {},
             cloudAuthEnabled: true,
             pinnedPieces: [
-                '@activepieces/piece-bcgpt',
                 '@activepieces/piece-basecamp',
             ],
         }
@@ -189,8 +188,12 @@ export const platformService = {
 
 async function ensureBrandingAndPins(platform: Platform): Promise<Platform> {
     let updated = false
-    const pins = new Set(platform.pinnedPieces ?? [])
-    for (const p of ['@activepieces/piece-bcgpt', '@activepieces/piece-basecamp']) {
+    const pins = new Set(
+        (platform.pinnedPieces ?? []).filter(
+            (p) => p !== '@activepieces/piece-bcgpt',
+        ),
+    )
+    for (const p of ['@activepieces/piece-basecamp']) {
         if (!pins.has(p)) {
             pins.add(p)
             updated = true

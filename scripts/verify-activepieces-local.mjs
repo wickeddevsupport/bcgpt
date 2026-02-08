@@ -1,6 +1,6 @@
 const baseUrl = process.env.AP_LOCAL_BASE_URL ?? 'http://localhost:8080';
 const expectedWebsiteName = process.env.AP_EXPECTED_WEBSITE_NAME ?? 'Wicked Flow';
-const requiredPieces = ['@activepieces/piece-bcgpt', '@activepieces/piece-basecamp'];
+const requiredPieces = ['@activepieces/piece-basecamp'];
 
 async function fetchJson(path) {
   const response = await fetch(`${baseUrl}${path}`);
@@ -24,7 +24,6 @@ async function main() {
   console.log(`Theme favIconUrl: ${favIcon}`);
   console.log(`Pieces count: ${pieceNames.length}`);
   console.log(`Contains ${requiredPieces[0]}: ${pieceNames.includes(requiredPieces[0])}`);
-  console.log(`Contains ${requiredPieces[1]}: ${pieceNames.includes(requiredPieces[1])}`);
 
   const errors = [];
   if (themeName !== expectedWebsiteName) {
