@@ -6,12 +6,19 @@ import fastifyMultipart, { MultipartFile } from '@fastify/multipart'
 import fastify, { FastifyInstance } from 'fastify'
 import fastifyFavicon from 'fastify-favicon'
 import { fastifyRawBody } from 'fastify-raw-body'
+import dns from 'node:dns'
 import qs from 'qs'
 import { setupApp } from './app'
 import { healthModule } from './health/health.module'
 import { errorHandler } from './helper/error-handler'
 import { system } from './helper/system/system'
 import { setupWorker } from './worker'
+
+// Prefer IPv4 for outbound HTTP(S) calls. Some Docker hosts have broken IPv6 routes,
+// which makes `fetch()` intermittently stall when DNS returns AAAA records first.
+if (typeof dns.setDefaultResultOrder === 'function') {
+    dns.setDefaultResultOrder('ipv4first')
+}
 
 
 export let app: FastifyInstance | undefined = undefined

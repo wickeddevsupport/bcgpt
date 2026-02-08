@@ -148,7 +148,6 @@
     "async-mutex": "0.4.0",
     "axios": "1.13.1",
     "axios-retry": "4.4.1",
-    "bcgpt-full-v3": "file:..",
     "bcrypt": "6.0.0",
     "boring-avatars": "1.11.2",
     "bullmq": "5.61.0",

@@ -8,9 +8,13 @@ import {
   Flag,
 } from '@activepieces/shared';
 
+const TEMPLATES_REQUEST_TIMEOUT_MS = 25_000;
+
 export const templatesApi = {
   getTemplate(templateId: string) {
-    return api.get<Template>(`/v1/templates/${templateId}`);
+    return api.get<Template>(`/v1/templates/${templateId}`, undefined, {
+      timeout: TEMPLATES_REQUEST_TIMEOUT_MS,
+    });
   },
   create(request: CreateTemplateRequestBody) {
     return api.post<Template>(`/v1/templates`, request);
@@ -19,7 +23,9 @@ export const templatesApi = {
     return api.post<Template>(`/v1/templates/${templateId}`, request);
   },
   list(request: ListTemplatesRequestQuery) {
-    return api.get<SeekPage<Template>>(`/v1/templates`, request);
+    return api.get<SeekPage<Template>>(`/v1/templates`, request, {
+      timeout: TEMPLATES_REQUEST_TIMEOUT_MS,
+    });
   },
   delete(templateId: string) {
     return api.delete<void>(`/v1/templates/${templateId}`);
@@ -28,6 +34,8 @@ export const templatesApi = {
     // The backend response shape differs by edition:
     // - Cloud: returns a Flag { value: string[] }
     // - Community: may return string[] directly
-    return api.get<Flag | string[]>(`/v1/templates/categories`);
+    return api.get<Flag | string[]>(`/v1/templates/categories`, undefined, {
+      timeout: TEMPLATES_REQUEST_TIMEOUT_MS,
+    });
   },
 };

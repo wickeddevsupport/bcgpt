@@ -13,7 +13,26 @@ import {
 } from '@activepieces/shared'
 
 const TEMPLATES_SOURCE_URL = 'https://cloud.activepieces.com/api/v1/templates'
-const CLOUD_FETCH_TIMEOUT_MS = 8000
+const CLOUD_FETCH_TIMEOUT_MS = 15000
+const LIST_CACHE_TTL_MS = 5 * 60 * 1000
+const LIST_CACHE_STALE_TTL_MS = 12 * 60 * 60 * 1000
+const TEMPLATE_CACHE_TTL_MS = 60 * 60 * 1000
+const TEMPLATE_CACHE_STALE_TTL_MS = 24 * 60 * 60 * 1000
+const CATEGORIES_CACHE_TTL_MS = 60 * 60 * 1000
+const CATEGORIES_CACHE_STALE_TTL_MS = 24 * 60 * 60 * 1000
+
+type CacheEntry<T> = {
+    value: T
+    fetchedAtMs: number
+}
+
+const listCache = new Map<string, CacheEntry<SeekPage<Template>>>()
+const listInFlight = new Map<string, Promise<void>>()
+let categoriesCache: CacheEntry<string[]> | null = null
+let categoriesInFlight: Promise<void> | null = null
+const templateCache = new Map<string, CacheEntry<Template>>()
+const templateInFlight = new Map<string, Promise<void>>()
+let lastRemoteTemplatesErrorLogAtMs = 0
 const LOCAL_TEMPLATES: Template[] = buildLocalTemplates()
 const LOCAL_CATEGORIES = Array.from(
     new Set(LOCAL_TEMPLATES.flatMap((t) => t.categories || [])),
@@ -24,19 +43,21 @@ export const communityTemplates = {
         if (local) {
             return local
         }
-        const url = `${TEMPLATES_SOURCE_URL}/${id}`
-        let response: Response
-        try {
-            response = await fetch(url, {
-                method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                signal: AbortSignal.timeout(CLOUD_FETCH_TIMEOUT_MS),
-            })
+
+        const cached = templateCache.get(id)
+        if (cached && isFresh(cached, TEMPLATE_CACHE_TTL_MS)) {
+            return cached.value
         }
-        catch (error) {
-            // Templates are a convenience feature; avoid hanging the UI if the cloud endpoint is slow/unreachable.
+        if (cached && isStaleOk(cached, TEMPLATE_CACHE_STALE_TTL_MS)) {
+            refreshTemplateAsync(id)
+            return cached.value
+        }
+
+        const remote = await fetchRemoteTemplate(id)
+        if (!remote) {
+            if (cached) {
+                return cached.value
+            }
             throw new ActivepiecesError({
                 code: ErrorCode.ENTITY_NOT_FOUND,
                 params: {
@@ -46,41 +67,24 @@ export const communityTemplates = {
                 },
             })
         }
-        if (!response.ok) {
-            throw new ActivepiecesError({
-                code: ErrorCode.ENTITY_NOT_FOUND,
-                params: {
-                    entityType: 'template',
-                    entityId: id,
-                    message: `Template ${id} not found`,
-                },
-            })
-        }
-        const template = await response.json()
-        return template
+        templateCache.set(id, { value: remote, fetchedAtMs: Date.now() })
+        return remote
     },
     getCategories: async (): Promise<string[]> => {
+        if (categoriesCache && isFresh(categoriesCache, CATEGORIES_CACHE_TTL_MS)) {
+            return categoriesCache.value
+        }
+        if (categoriesCache && isStaleOk(categoriesCache, CATEGORIES_CACHE_STALE_TTL_MS)) {
+            refreshCategoriesAsync()
+            return categoriesCache.value
+        }
+
         const url = `${TEMPLATES_SOURCE_URL}/categories`
-        let response: Response
-        try {
-            response = await fetch(url, {
-                method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                signal: AbortSignal.timeout(CLOUD_FETCH_TIMEOUT_MS),
-            })
-        }
-        catch (error) {
-            // Templates are a convenience feature; avoid breaking the UI if the cloud endpoint is down.
-            return Array.from(new Set([...LOCAL_CATEGORIES]))
-        }
-        if (!response.ok) {
-            // Templates are a convenience feature; avoid breaking the UI if the cloud endpoint is down.
+        const payload: unknown = await fetchJsonOrNull(url)
+        if (!payload) {
             return Array.from(new Set([...LOCAL_CATEGORIES]))
         }
 
-        const payload: unknown = await response.json()
         const remoteCategoriesRaw: unknown =
             Array.isArray(payload)
                 ? payload
@@ -94,34 +98,35 @@ export const communityTemplates = {
             ? remoteCategoriesRaw.filter((c): c is string => typeof c === 'string')
             : []
 
-        return Array.from(new Set([...remoteCategories, ...LOCAL_CATEGORIES]))
+        const merged = Array.from(new Set([...remoteCategories, ...LOCAL_CATEGORIES]))
+        categoriesCache = { value: merged, fetchedAtMs: Date.now() }
+        return merged
     },
     list: async (request: ListTemplatesRequestQuery): Promise<SeekPage<Template>> => {
         const queryString = convertToQueryString(request)
         const url = `${TEMPLATES_SOURCE_URL}?${queryString}`
-        let templates: any = null
-        try {
-            const response = await fetch(url, {
-                method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                signal: AbortSignal.timeout(CLOUD_FETCH_TIMEOUT_MS),
-            })
-            templates = response.ok ? await response.json() : null
+        const cached = listCache.get(queryString)
+        if (cached && isFresh(cached, LIST_CACHE_TTL_MS)) {
+            return mergeLocalTemplates(cached.value, request)
         }
-        catch (error) {
-            // Templates are a convenience feature; avoid hanging the UI if the cloud endpoint is slow/unreachable.
-            templates = null
+        if (cached && isStaleOk(cached, LIST_CACHE_STALE_TTL_MS)) {
+            refreshListAsync(queryString, url)
+            return mergeLocalTemplates(cached.value, request)
+        }
+
+        const remote = await fetchRemoteList(url)
+        if (remote) {
+            listCache.set(queryString, { value: remote, fetchedAtMs: Date.now() })
+            return mergeLocalTemplates(remote, request)
+        }
+        if (cached) {
+            return mergeLocalTemplates(cached.value, request)
         }
         const localMatches = filterTemplates(LOCAL_TEMPLATES, request)
-        const data = Array.isArray(templates?.data)
-            ? [...localMatches, ...templates.data]
-            : localMatches
         return {
-            data,
-            next: templates?.next ?? null,
-            previous: templates?.previous ?? null,
+            data: localMatches,
+            next: null,
+            previous: null,
         }
     },
 }
@@ -291,4 +296,212 @@ function convertToQueryString(params: ListTemplatesRequestQuery): string {
     })
 
     return searchParams.toString()
+}
+
+function isFresh<T>(entry: CacheEntry<T>, ttlMs: number): boolean {
+    return Date.now() - entry.fetchedAtMs < ttlMs
+}
+
+function isStaleOk<T>(entry: CacheEntry<T>, staleTtlMs: number): boolean {
+    return Date.now() - entry.fetchedAtMs < staleTtlMs
+}
+
+function logRemoteTemplatesError(message: string, error?: unknown): void {
+    const now = Date.now()
+    if (now - lastRemoteTemplatesErrorLogAtMs < 5 * 60 * 1000) {
+        return
+    }
+    lastRemoteTemplatesErrorLogAtMs = now
+    // eslint-disable-next-line no-console
+    console.error(`[communityTemplates] ${message}`, error)
+}
+
+async function fetchJsonOrNull(url: string): Promise<unknown | null> {
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            signal: AbortSignal.timeout(CLOUD_FETCH_TIMEOUT_MS),
+        })
+        if (!response.ok) {
+            return null
+        }
+        return await response.json()
+    }
+    catch (error) {
+        return null
+    }
+}
+
+function extractSeekPage(payload: unknown): SeekPage<Template> | null {
+    const candidates: unknown[] = [payload]
+    if (payload != null && typeof payload === 'object') {
+        const obj = payload as Record<string, unknown>
+        if ('value' in obj) candidates.push(obj.value)
+        if ('data' in obj) candidates.push(obj.data)
+    }
+
+    for (const candidate of candidates) {
+        if (candidate == null || typeof candidate !== 'object') {
+            continue
+        }
+        const obj = candidate as Record<string, unknown>
+        if (Array.isArray(obj.data)) {
+            return {
+                data: obj.data as Template[],
+                next: (obj.next as string | null | undefined) ?? null,
+                previous: (obj.previous as string | null | undefined) ?? null,
+            }
+        }
+    }
+    return null
+}
+
+async function fetchRemoteList(url: string): Promise<SeekPage<Template> | null> {
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            signal: AbortSignal.timeout(CLOUD_FETCH_TIMEOUT_MS),
+        })
+        if (!response.ok) {
+            logRemoteTemplatesError(`Remote templates list returned ${response.status} for ${url}`)
+            return null
+        }
+        const payload = await response.json()
+        const page = extractSeekPage(payload)
+        if (!page) {
+            logRemoteTemplatesError(`Remote templates list returned unexpected payload for ${url}`)
+            return null
+        }
+        return page
+    }
+    catch (error) {
+        logRemoteTemplatesError(`Remote templates list failed for ${url}`, error)
+        return null
+    }
+}
+
+function refreshListAsync(cacheKey: string, url: string): void {
+    if (listInFlight.has(cacheKey)) {
+        return
+    }
+    const promise = fetchRemoteList(url)
+        .then((page) => {
+            if (page) {
+                listCache.set(cacheKey, { value: page, fetchedAtMs: Date.now() })
+            }
+        })
+        .catch(() => undefined)
+        .finally(() => {
+            listInFlight.delete(cacheKey)
+        })
+    listInFlight.set(cacheKey, promise)
+}
+
+async function fetchRemoteTemplate(id: string): Promise<Template | null> {
+    const url = `${TEMPLATES_SOURCE_URL}/${id}`
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            signal: AbortSignal.timeout(CLOUD_FETCH_TIMEOUT_MS),
+        })
+        if (!response.ok) {
+            return null
+        }
+        const payload = await response.json()
+        if (payload == null || typeof payload !== 'object') {
+            return null
+        }
+        const template = payload as Template
+        return typeof template.id === 'string' ? template : null
+    }
+    catch (error) {
+        return null
+    }
+}
+
+function refreshTemplateAsync(id: string): void {
+    if (templateInFlight.has(id)) {
+        return
+    }
+    const promise = fetchRemoteTemplate(id)
+        .then((template) => {
+            if (template) {
+                templateCache.set(id, { value: template, fetchedAtMs: Date.now() })
+            }
+        })
+        .catch(() => undefined)
+        .finally(() => {
+            templateInFlight.delete(id)
+        })
+    templateInFlight.set(id, promise)
+}
+
+async function fetchRemoteCategories(): Promise<string[] | null> {
+    const url = `${TEMPLATES_SOURCE_URL}/categories`
+    const payload = await fetchJsonOrNull(url)
+    if (!payload) {
+        return null
+    }
+    const remoteCategoriesRaw: unknown =
+        Array.isArray(payload)
+            ? payload
+            : payload != null && typeof payload === 'object' && 'value' in payload
+                ? (payload as { value?: unknown }).value
+                : payload != null && typeof payload === 'object' && 'data' in payload
+                    ? (payload as { data?: unknown }).data
+                    : []
+
+    const remoteCategories = Array.isArray(remoteCategoriesRaw)
+        ? remoteCategoriesRaw.filter((c): c is string => typeof c === 'string')
+        : []
+
+    return Array.from(new Set([...remoteCategories, ...LOCAL_CATEGORIES]))
+}
+
+function refreshCategoriesAsync(): void {
+    if (categoriesInFlight) {
+        return
+    }
+    categoriesInFlight = fetchRemoteCategories()
+        .then((cats) => {
+            if (cats) {
+                categoriesCache = { value: cats, fetchedAtMs: Date.now() }
+            }
+        })
+        .catch(() => undefined)
+        .finally(() => {
+            categoriesInFlight = null
+        })
+}
+
+function mergeLocalTemplates(
+    remote: SeekPage<Template>,
+    request: ListTemplatesRequestQuery,
+): SeekPage<Template> {
+    const localMatches = filterTemplates(LOCAL_TEMPLATES, request)
+    const combined = [...localMatches, ...(remote.data ?? [])]
+
+    const seen = new Set<string>()
+    const deduped: Template[] = []
+    for (const t of combined) {
+        if (t?.id && !seen.has(t.id)) {
+            seen.add(t.id)
+            deduped.push(t)
+        }
+    }
+
+    return {
+        data: deduped,
+        next: remote.next ?? null,
+        previous: remote.previous ?? null,
+    }
 }

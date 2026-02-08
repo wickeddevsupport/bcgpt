@@ -1,12 +1,13 @@
 import { t } from 'i18next';
 import { AlertTriangle, Plus, Search } from 'lucide-react';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { ApSidebarToggle } from '@/components/custom/ap-sidebar-toggle';
 import { InputWithIcon } from '@/components/custom/input-with-icon';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
 import { flowHooks } from '@/features/flows/lib/flow-hooks';
 import { templatesHooks } from '@/features/templates/hooks/templates-hook';
 import { templatesTelemetryApi } from '@/features/templates/lib/templates-telemetry-api';
@@ -52,6 +53,9 @@ const TemplatesPage = () => {
   } = templatesHooks.useAllOfficialTemplates();
   const { mutate: createFlow, isPending: isCreateFlowPending } =
     flowHooks.useStartFromScratch(UncategorizedFolderId);
+
+  const [loadProgress, setLoadProgress] = useState(0);
+  const [loadMessage, setLoadMessage] = useState(t('Loading templates…'));
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(event.target.value);
@@ -116,6 +120,41 @@ const TemplatesPage = () => {
   const hasAnyLoadError =
     templateCategoriesQuery.isError || isTemplatesError || isAllTemplatesError;
 
+  useEffect(() => {
+    if (!showLoading) {
+      setLoadProgress(0);
+      setLoadMessage(t('Loading templates…'));
+      return;
+    }
+
+    const start = Date.now();
+    setLoadProgress(8);
+    setLoadMessage(t('Loading templates…'));
+
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - start;
+      setLoadProgress((prev) => {
+        const target = 95;
+        const next = prev + (target - prev) * 0.07;
+        return Math.min(target, Math.max(0, next));
+      });
+
+      if (elapsed > 25_000) {
+        setLoadMessage(
+          t(
+            "This is taking longer than expected. You can wait, refresh the page, or click Retry if it doesn't load.",
+          ),
+        );
+      } else if (elapsed > 10_000) {
+        setLoadMessage(
+          t('Still loading. The first load can take a bit while we fetch everything.'),
+        );
+      }
+    }, 250);
+
+    return () => clearInterval(interval);
+  }, [showLoading]);
+
   return (
     <div>
       <div>
@@ -150,6 +189,16 @@ const TemplatesPage = () => {
             />
           )}
         </div>
+
+        {showLoading && !hasAnyLoadError && (
+          <div className="mb-6">
+            <div className="flex items-center justify-between text-xs text-muted-foreground mb-2">
+              <span>{loadMessage}</span>
+              <span className="tabular-nums">{Math.round(loadProgress)}%</span>
+            </div>
+            <Progress value={loadProgress} />
+          </div>
+        )}
 
         {hasAnyLoadError && (
           <Alert variant="warning" className="mb-6">
