@@ -172,23 +172,53 @@ function pickAccountId(auth, userKey) {
     throw err;
   }
 
+  const accounts = auth.accounts || [];
+
+  // 1) Use persisted selection (if valid)
   const selected = getSelectedAccount(userKey);
-  if (!selected) {
-    const err = new Error("ACCOUNT_NOT_SELECTED");
-    err.code = "ACCOUNT_NOT_SELECTED";
-    err.accounts = auth.accounts;
-    throw err;
+  if (selected) {
+    const match = accounts.find((a) => String(a.id) === String(selected));
+    if (match) return match.id;
+
+    // Selection no longer valid; clear so we can fall back.
+    try {
+      setSelectedAccount(userKey, null);
+    } catch {
+      // ignore
+    }
   }
 
-  const match = (auth.accounts || []).find((a) => String(a.id) === String(selected));
-  if (!match) {
-    const err = new Error("SELECTED_ACCOUNT_INVALID");
-    err.code = "SELECTED_ACCOUNT_INVALID";
-    err.accounts = auth.accounts;
-    throw err;
+  // 2) Auto-select default account if configured and authorized
+  const defaultAccountId = normalizeKey(process.env.BASECAMP_DEFAULT_ACCOUNT_ID);
+  if (defaultAccountId) {
+    const match = accounts.find((a) => String(a.id) === String(defaultAccountId));
+    if (match) {
+      try {
+        setSelectedAccount(userKey, defaultAccountId);
+      } catch {
+        // ignore
+      }
+      return match.id;
+    }
   }
 
-  return match.id;
+  // 3) If only one account is authorized, auto-select it
+  if (accounts.length === 1 && accounts[0]?.id != null) {
+    const id = accounts[0].id;
+    try {
+      setSelectedAccount(userKey, String(id));
+    } catch {
+      // ignore
+    }
+    return id;
+  }
+
+  // 4) Otherwise, require explicit selection via /select_account
+  const err = new Error("ACCOUNT_NOT_SELECTED");
+  err.code = "ACCOUNT_NOT_SELECTED";
+  err.accounts = accounts;
+  if (defaultAccountId) err.default_account_id = defaultAccountId;
+  throw err;
 }
 
 async function requireBasecampContext(req, { apiKey: forcedApiKey, forceAuth = false } = {}) {
@@ -463,10 +493,20 @@ async function startStatus(req, { apiKey: forcedApiKey } = {}) {
       force: true,
     });
     const accounts = authResult.auth?.accounts || [];
-    const selected = getSelectedAccount(authResult.userKey || ctx.userKey);
-    const selectedMatch = selected
-      ? accounts.find((a) => String(a.id) === String(selected))
-      : null;
+
+    // If no account is selected yet, try to auto-select a sensible default
+    // so clients (Activepieces dropdowns) work without a manual selection step.
+    let selected = getSelectedAccount(authResult.userKey || ctx.userKey);
+    let selectedMatch = selected ? accounts.find((a) => String(a.id) === String(selected)) : null;
+    if (!selectedMatch && accounts.length) {
+      try {
+        const picked = pickAccountId(authResult.auth, authResult.userKey || ctx.userKey);
+        selected = String(picked);
+        selectedMatch = accounts.find((a) => String(a.id) === String(selected)) || null;
+      } catch {
+        // ignore; selection will be required for multi-account setups
+      }
+    }
 
     return {
       connected: true,
