@@ -106,7 +106,8 @@ export const OPEN_SOURCE_PLAN: PlatformPlanWithOnlyLimits = {
     showPoweredBy: false,
     auditLogEnabled: false,
     managePiecesEnabled: false,
-    manageTemplatesEnabled: false,
+    // Wicked Flow uses CE, but we still want user-created templates in the UI.
+    manageTemplatesEnabled: true,
     customAppearanceEnabled: false,
     teamProjectsLimit: TeamProjectsLimit.NONE,
     projectRolesEnabled: false,
