@@ -13,6 +13,16 @@ import { pieceMetadataService, pieceRepos } from './metadata/piece-metadata-serv
 const CLOUD_API_URL = 'https://cloud.activepieces.com/api/v1/pieces'
 const syncMode = system.get<PieceSyncMode>(AppSystemProp.PIECES_SYNC_MODE)
 
+// Some pieces are referenced by older flows/templates but are no longer returned by the registry
+// endpoint for newer releases (e.g. due to strict min/max supported release ranges). We still
+// need their metadata available so the UI can render existing flows without crashing.
+const EXTRA_COMPAT_PIECES: PieceRegistryResponse[] = [
+    {
+        name: '@activepieces/piece-agent',
+        version: '0.3.7',
+    },
+]
+
 export const pieceSyncService = (log: FastifyBaseLogger) => ({
     async setup(): Promise<void> {
         systemJobHandlers.registerJobHandler(SystemJobName.PIECES_SYNC, async function syncPiecesJobHandler(): Promise<void> {
@@ -112,7 +122,13 @@ async function listCloudPieces(): Promise<PieceRegistryResponse[]> {
         others.push(...sortedByVersion.slice(1))
     }
 
-    return [...latest, ...others]
+    const pieces = [...latest, ...others, ...EXTRA_COMPAT_PIECES]
+    // Avoid duplicates when the registry endpoint starts returning any of these again.
+    const unique = new Map<string, PieceRegistryResponse>()
+    for (const p of pieces) {
+        unique.set(`${p.name}:${p.version}`, p)
+    }
+    return Array.from(unique.values())
 }
 
 function sortByVersionDesc(items: PieceRegistryResponse[]) {
