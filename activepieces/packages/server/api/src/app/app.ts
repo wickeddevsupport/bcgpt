@@ -327,6 +327,9 @@ export const setupApp = async (app: FastifyInstance): Promise<FastifyInstance> =
             // (including `plan` + `analytics`). The enterprise platform project module provides that
             // API shape, and also enables team projects in CE when the plan allows it.
             await app.register(platformProjectModule)
+            // The web UI calls this API even in CE; register it so it returns a proper FEATURE_DISABLED
+            // response instead of a 404.
+            await app.register(globalConnectionModule)
             await app.register(communityPiecesModule)
             await app.register(queueMetricsModule)
             break
