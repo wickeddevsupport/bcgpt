@@ -4,7 +4,13 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DB_PATH = join(__dirname, "bcgpt.db");
+// Persist DB outside the container when SQLITE_PATH is set (e.g. /data/bcgpt.sqlite in Docker).
+// Fallback keeps local dev behavior (repo-relative db file).
+const DB_PATH = (() => {
+  const raw = process.env.SQLITE_PATH;
+  const value = raw == null ? "" : String(raw).trim();
+  return value ? value : join(__dirname, "bcgpt.db");
+})();
 
 const db = new Database(DB_PATH);
 db.pragma("journal_mode = WAL");
