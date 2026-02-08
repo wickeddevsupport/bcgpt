@@ -73,7 +73,6 @@ import { pieceSyncService } from './pieces/piece-sync-service'
 import { tagsModule } from './pieces/tags/tags-module'
 import { platformModule } from './platform/platform.module'
 import { projectHooks } from './project/project-hooks'
-import { projectModule } from './project/project-module'
 import { storeEntryModule } from './store-entry/store-entry.module'
 import { tablesModule } from './tables/tables.module'
 import { templateModule } from './template/template.module'
@@ -324,7 +323,10 @@ export const setupApp = async (app: FastifyInstance): Promise<FastifyInstance> =
             flagHooks.set(enterpriseFlagsHooks)
             break
         case ApEdition.COMMUNITY:
-            await app.register(projectModule)
+            // The web UI (and shared types) expect the /v1/projects API to return ProjectWithLimits
+            // (including `plan` + `analytics`). The enterprise platform project module provides that
+            // API shape, and also enables team projects in CE when the plan allows it.
+            await app.register(platformProjectModule)
             await app.register(communityPiecesModule)
             await app.register(queueMetricsModule)
             break
