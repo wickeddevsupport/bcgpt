@@ -1,19 +1,23 @@
 import {
-    ApiKey,
     ApplicationEvent,
     ApplicationEventName,
-    CustomDomain,
-    CustomDomainStatus,
     GitBranchType,
-    GitRepo,
-    KeyAlgorithm,
-    OAuthApp,
-    OtpModel,
-    OtpState,
-    OtpType,
-    ProjectMember,
-    SigningKey,
-} from '@activepieces/ee-shared'
+} from '@activepieces/shared'
+
+// MIT-only types (no EE equivalents in test)
+type ApiKey = any
+type ApiKeyId = string & { readonly __brand: 'ApiKeyId' }
+type CustomDomain = any
+type CustomDomainStatus = any
+type GitRepo = any
+type KeyAlgorithm = string
+type OAuthApp = any
+type OtpModel = any
+type OtpState = string
+type OtpType = string
+type ProjectMember = any
+type SigningKey = any
+type SigningKeyId = string & { readonly __brand: 'SigningKeyId' }
 import { LATEST_CONTEXT_VERSION } from '@activepieces/pieces-framework'
 import { apDayjs } from '@activepieces/server-shared'
 import {
