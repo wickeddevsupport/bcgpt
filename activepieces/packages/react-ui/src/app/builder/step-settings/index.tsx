@@ -24,7 +24,6 @@ import {
   FlowTriggerType,
   isNil,
 } from '@activepieces/shared';
-import { ActivepiecesClientEventName } from 'ee-embed-sdk';
 
 import { formUtils } from '../../../features/pieces/lib/form-utils';
 import { ActionErrorHandlingForm } from '../piece-properties/action-error-handling';
@@ -154,15 +153,7 @@ const StepSettingsContainer = () => {
   const { height, setHeight } = useResizableVerticalPanelsContext();
 
   const handleClose = () => {
-    if (location.pathname.includes('/embed/step-settings')) {
-      parentWindow.postMessage(
-        {
-          type: ActivepiecesClientEventName.CLIENT_STEP_SETTINGS_DIALOG_CLOSED,
-          data: {},
-        },
-        '*',
-      );
-    }
+    // EE feature: embed dialog notifications disabled in CE
     exitStepSettings();
   };
 

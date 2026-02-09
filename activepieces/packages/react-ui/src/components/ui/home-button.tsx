@@ -4,7 +4,6 @@ import { Link } from 'react-router-dom';
 
 import { flagsHooks } from '@/hooks/flags-hooks';
 import { authenticationSession } from '@/lib/authentication-session';
-import { ActivepiecesClientEventName } from 'ee-embed-sdk';
 
 import { useEmbedding } from '../embed-provider';
 
@@ -13,20 +12,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from './tooltip';
 
 const HomeButtonWrapper = ({ children }: { children: React.ReactNode }) => {
   const { embedState } = useEmbedding();
-  if (embedState.emitHomeButtonClickedEvent) {
-    const handleClick = () => {
-      window.parent.postMessage(
-        {
-          type: ActivepiecesClientEventName.CLIENT_BUILDER_HOME_BUTTON_CLICKED,
-          data: {
-            route: '/flows',
-          },
-        },
-        '*',
-      );
-    };
-    return <div onClick={handleClick}>{children}</div>;
-  }
+  // EE feature: embed event emission disabled in CE
   return (
     <Link to={authenticationSession.appendProjectRoutePrefix('/flows')}>
       {children}
