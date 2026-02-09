@@ -269,7 +269,7 @@ export const membersTableColumns = ({
         );
       }
 
-      const email = row.original.data.user.email;
+      const email = row.original.data.user.email || '';
       const name = `${row.original.data.user.firstName} ${row.original.data.user.lastName}`;
 
       return (

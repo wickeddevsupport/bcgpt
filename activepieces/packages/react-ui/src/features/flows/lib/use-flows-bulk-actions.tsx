@@ -113,13 +113,6 @@ export const useFlowsBulkActions = ({
                             'Are you sure you want to delete these flows? This will permanently delete the flows, all their data and any background runs.',
                           )}
                         </div>
-                        {isDevelopmentBranch && (
-                          <div className="font-bold mt-2">
-                            {t(
-                              'You are on a development branch, this will not delete the flows from the remote repository.',
-                            )}
-                          </div>
-                        )}
                       </>
                     }
                     mutationFn={async () => {
@@ -151,12 +144,9 @@ export const useFlowsBulkActions = ({
   }, [
     userHasPermissionToUpdateFlow,
     userHasPermissionToWriteFolder,
-    userHasPermissionToWriteProjectRelease,
     selectedRows,
     refresh,
-    allowPush,
     embedState.hideFolders,
-    isDevelopmentBranch,
     exportFlows,
     isExportPending,
     setRefresh,

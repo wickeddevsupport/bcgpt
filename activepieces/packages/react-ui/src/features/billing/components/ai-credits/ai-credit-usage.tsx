@@ -57,7 +57,12 @@ export function AICreditUsage({ platformSubscription }: AiCreditUsageProps) {
       setIsAutoTopUpEditing(false);
       setIsAutoTopUpDialogOpen(true);
     } else {
-      updateAutoTopUp({ state: AiCreditsAutoTopUpState.DISABLED });
+      updateAutoTopUp({
+        state: AiCreditsAutoTopUpState.DISABLED,
+        minThreshold: plan.aiCreditsAutoTopUpThreshold ?? 0,
+        creditsToAdd: plan.aiCreditsAutoTopUpCreditsToAdd ?? 0,
+        maxMonthlyLimit: plan.maxAutoTopUpCreditsMonthly ?? null,
+      });
     }
   };
 

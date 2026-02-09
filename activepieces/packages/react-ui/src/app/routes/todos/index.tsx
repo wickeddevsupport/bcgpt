@@ -73,7 +73,7 @@ function TodosPage() {
 
   const { projectMembers } = projectMembersHooks.useProjectMembers();
   const assigneeOptions = [
-    ...(currentUser
+    ...(currentUser && currentUser.email
       ? [
           {
             label: t('Me Only'),
@@ -82,10 +82,13 @@ function TodosPage() {
         ]
       : []),
     ...(projectMembers
-      ?.filter((member) => member.user.email !== currentUser?.email)
+      ?.filter(
+        (member) =>
+          member.user.email && member.user.email !== currentUser?.email,
+      )
       .map((member) => ({
         label: `${member.user.firstName} ${member.user.lastName} (${member.user.email})`,
-        value: member.user.email,
+        value: member.user.email || '',
       })) ?? []),
   ];
 

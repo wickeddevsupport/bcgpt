@@ -44,14 +44,14 @@ export function ProjectMemberCard({
       <div className="flex items-center space-x-4">
         <UserAvatar
           name={member.user.firstName + ' ' + member.user.lastName}
-          email={member.user.email}
+          email={member.user.email || ''}
           size={32}
           disableTooltip={true}
         ></UserAvatar>
         <div className="flex flex-col gap-1">
           <p className="text-sm font-medium leading-none">
-            {member.user.firstName} {member.user.lastName} (
-            {member.projectRole.name})
+            {member.user.firstName} {member.user.lastName}
+            {member.projectRole?.name && ` (${member.projectRole.name})`}
           </p>
           <p className="text-sm text-muted-foreground">{member.user.email}</p>
         </div>

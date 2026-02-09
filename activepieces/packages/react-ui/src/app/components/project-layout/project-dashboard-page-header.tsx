@@ -52,7 +52,7 @@ export const ProjectDashboardPageHeader = ({
   const location = useLocation();
   const { projectMembers } = projectMembersHooks.useProjectMembers();
   const activeProjectMembers = projectMembers?.filter(
-    (member) => member.user.status === UserStatus.ACTIVE,
+    (member) => !!member.user,
   );
   const { checkAccess } = useAuthorization();
   const { data: user } = userHooks.useCurrentUser();

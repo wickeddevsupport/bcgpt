@@ -54,12 +54,14 @@ export default function AuditLogsPage() {
       type: 'select',
       title: t('Action'),
       accessorKey: 'action',
-      options: Object.values(ApplicationEventName).map((action) => {
-        return {
-          label: formatUtils.convertEnumToHumanReadable(action),
-          value: action,
-        };
-      }),
+      options: Object.values(ApplicationEventName)
+        .filter((val) => typeof val === 'string')
+        .map((action) => {
+          return {
+            label: formatUtils.convertEnumToHumanReadable(action as string),
+            value: action as string,
+          };
+        }),
       icon: Wand,
     },
     {
@@ -109,7 +111,7 @@ export default function AuditLogsPage() {
       return auditEventsApi.list({
         cursor: cursor ?? undefined,
         limit: limit ? parseInt(limit) : undefined,
-        action: action ?? undefined,
+        action: action.filter((val) => typeof val === 'string') as ApplicationEventName[] ?? undefined,
         projectId: projectId ?? undefined,
         userId: userId ?? undefined,
         createdBefore: searchParams.get('createdBefore') ?? undefined,
@@ -310,11 +312,7 @@ function convertToIcon(event: ApplicationEvent) {
         icon: <Users className="size-4" />,
         tooltip: t('User'),
       };
-    case ApplicationEventName.SIGNING_KEY_CREATED:
-      return {
-        icon: <Key className="size-4" />,
-        tooltip: t('Signing Key'),
-      };
+
     default:
       return undefined;
   }

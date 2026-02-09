@@ -90,14 +90,14 @@ const EmbedPage = React.memo(() => {
   const { setEmbedState, embedState } = useEmbedding();
   const { mutateAsync } = useMutation({
     mutationFn: async ({
-      externalAccessToken,
+      externalToken,
       locale,
     }: {
-      externalAccessToken: string;
+      externalToken: string;
       locale: string;
     }) => {
       const data = await managedAuthApi.generateApToken({
-        externalAccessToken,
+        externalToken,
       });
       await i18n.changeLanguage(locale);
       return data;
@@ -117,7 +117,7 @@ const EmbedPage = React.memo(() => {
         }
         mutateAsync(
           {
-            externalAccessToken: event.data.data.jwtToken,
+            externalToken: event.data.data.jwtToken,
             locale: event.data.data.locale ?? 'en',
           },
           {

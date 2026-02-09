@@ -63,7 +63,7 @@ export const ProjectRoleUsersTable = () => {
     },
     {
       accessorKey: 'project',
-      accessorFn: (row) => row.project.displayName,
+      accessorFn: (row) => row.project?.displayName || '',
       header: ({ column }) => (
         <DataTableColumnHeader column={column} title={t('Project')} />
       ),
@@ -71,10 +71,12 @@ export const ProjectRoleUsersTable = () => {
         <div
           className="text-left cursor-pointer hover:underline hover:text-primary"
           onClick={() => {
-            navigate(`/projects/${row.original.project.id}/settings/team`);
+            if (row.original.project) {
+              navigate(`/projects/${row.original.project.id}/settings/team`);
+            }
           }}
         >
-          {row.original.project.displayName}
+          {row.original.project?.displayName}
         </div>
       ),
     },

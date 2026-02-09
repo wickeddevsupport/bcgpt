@@ -61,7 +61,7 @@ export function useUserSuggestions({
   );
 
   const projectMemberEmails = useMemo(
-    () => new Set(projectMembers?.map((m) => m.user.email.toLowerCase()) ?? []),
+    () => new Set(projectMembers?.map((m) => m.user.email?.toLowerCase()).filter(Boolean) ?? []),
     [projectMembers],
   );
 

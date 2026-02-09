@@ -52,8 +52,7 @@ export const MembersSettings = () => {
 
     const members: MemberRowData[] =
       projectMembers
-        ?.filter((member) => member.user.status === UserStatus.ACTIVE)
-        .map((member) => ({
+        ?.map((member) => ({
           id: member.id,
           type: 'member' as const,
           data: member,
@@ -73,7 +72,7 @@ export const MembersSettings = () => {
         })) ?? [];
 
     const projectMemberEmails = new Set(
-      projectMembers?.map((member) => member.user.email.toLowerCase()) ?? [],
+      projectMembers?.map((member) => member.user.email?.toLowerCase()).filter(Boolean) ?? [],
     );
 
     const platformAdminsAndOperators: MemberRowData[] =
@@ -103,12 +102,12 @@ export const MembersSettings = () => {
       if (row.type === 'member') {
         const fullName =
           `${row.data.user.firstName} ${row.data.user.lastName}`.toLowerCase();
-        const email = row.data.user.email.toLowerCase();
+        const email = (row.data.user.email || '').toLowerCase();
         return fullName.includes(searchValue) || email.includes(searchValue);
       } else if (row.type === 'platform-admin-operator') {
         const fullName =
           `${row.data.firstName} ${row.data.lastName}`.toLowerCase();
-        const email = row.data.email.toLowerCase();
+        const email = (row.data.email || '').toLowerCase();
         return fullName.includes(searchValue) || email.includes(searchValue);
       } else {
         const email = row.data.email.toLowerCase();

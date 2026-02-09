@@ -116,14 +116,22 @@ export const ManagePiecesDialog = React.memo(
                 e.preventDefault();
                 onSuccess();
                 setOpen(false);
-                form.handleSubmit(() => {
+                form.handleSubmit(async () => {
+                  // Note: ProjectPlan requires id, created, updated fields, 
+                  // but update handles partial ProjectPlan updates
                   projectCollectionUtils.update(
                     authenticationSession.getProjectId()!,
                     {
                       plan: {
                         piecesFilterType: PiecesFilterType.ALLOWED,
                         pieces: form.getValues().pieces,
-                      },
+                        locked: false,
+                        name: 'default',
+                        projectId: authenticationSession.getProjectId()!,
+                        id: 'unknown',
+                        created: new Date().toISOString(),
+                        updated: new Date().toISOString(),
+                      } as any,
                     },
                   );
                 })(e);
