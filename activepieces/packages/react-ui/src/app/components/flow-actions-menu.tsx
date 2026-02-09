@@ -9,8 +9,6 @@ import {
   Pencil,
   Share2,
   Trash2,
-  UploadCloud,
-  User,
 } from 'lucide-react';
 import React, { useState } from 'react';
 import { useLocation } from 'react-router-dom';
@@ -25,24 +23,16 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { LoadingSpinner } from '@/components/ui/spinner';
-import { ChangeOwnerDialog } from '@/features/flows/components/change-owner-dialog';
 import { ImportFlowDialog } from '@/features/flows/components/import-flow-dialog';
 import { RenameFlowDialog } from '@/features/flows/components/rename-flow-dialog';
 import { flowHooks } from '@/features/flows/lib/flow-hooks';
 import { flowsApi } from '@/features/flows/lib/flows-api';
-import { projectMembersHooks } from '@/features/members/lib/project-members-hooks';
-import { PublishedNeededTooltip } from '@/features/project-releases/components/published-tooltip';
-import { PushToGitDialog } from '@/features/project-releases/components/push-to-git-dialog';
-import { gitSyncHooks } from '@/features/project-releases/lib/git-sync-hooks';
 import { useAuthorization } from '@/hooks/authorization-hooks';
-import { platformHooks } from '@/hooks/platform-hooks';
 import { authenticationSession } from '@/lib/authentication-session';
 import { useNewWindow } from '@/lib/navigation-utils';
-import { GitBranchType } from '@activepieces/ee-shared';
 import {
   FlowOperationType,
   FlowVersion,
-  FlowVersionState,
   Permission,
   PopulatedFlow,
 } from '@activepieces/shared';
@@ -79,28 +69,13 @@ const FlowActionMenu: React.FC<FlowActionMenuProps> = ({
   insideBuilder,
 }) => {
   const isRunsPage = useLocation().pathname.includes('/runs');
-  const { platform } = platformHooks.useCurrentPlatform();
   const openNewWindow = useNewWindow();
-  const { gitSync } = gitSyncHooks.useGitSync(
-    authenticationSession.getProjectId()!,
-    platform.plan.environmentsEnabled,
-  );
   const { checkAccess } = useAuthorization();
   const userHasPermissionToWriteFolder = checkAccess(Permission.WRITE_FOLDER);
   const userHasPermissionToUpdateFlow = checkAccess(Permission.WRITE_FLOW);
-  const userHasPermissionToPushToGit = checkAccess(
-    Permission.WRITE_PROJECT_RELEASE,
-  );
 
   const { embedState } = useEmbedding();
-  const isDevelopmentBranch =
-    gitSync && gitSync.branchType === GitBranchType.DEVELOPMENT;
   const [open, setOpen] = useState(false);
-  const allowPush =
-    flow.publishedVersionId !== null &&
-    flow.version.state === FlowVersionState.LOCKED;
-  const { projectMembers } = projectMembersHooks.useProjectMembers();
-  const hasProjectMembers = projectMembers && projectMembers.length > 0;
 
   const { mutate: duplicateFlow, isPending: isDuplicatePending } = useMutation({
     mutationFn: async () => {
@@ -183,23 +158,6 @@ const FlowActionMenu: React.FC<FlowActionMenuProps> = ({
           </>
         )}
 
-        <PermissionNeededTooltip hasPermission={userHasPermissionToPushToGit}>
-          <PublishedNeededTooltip allowPush={allowPush}>
-            <PushToGitDialog type="flow" flows={[flow]}>
-              <DropdownMenuItem
-                disabled={!userHasPermissionToPushToGit || !allowPush}
-                onSelect={(e) => e.preventDefault()}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="flex cursor-pointer  flex-row gap-2 items-center">
-                  <UploadCloud className="h-4 w-4" />
-                  <span>{t('Push to Git')}</span>
-                </div>
-              </DropdownMenuItem>
-            </PushToGitDialog>
-          </PublishedNeededTooltip>
-        </PermissionNeededTooltip>
-
         {!embedState.hideFolders && (
           <PermissionNeededTooltip
             hasPermission={
@@ -221,27 +179,6 @@ const FlowActionMenu: React.FC<FlowActionMenuProps> = ({
                 </div>
               </DropdownMenuItem>
             </MoveFlowDialog>
-          </PermissionNeededTooltip>
-        )}
-        {!readonly && hasProjectMembers && !embedState.isEmbedded && (
-          <PermissionNeededTooltip
-            hasPermission={userHasPermissionToUpdateFlow}
-          >
-            <ChangeOwnerDialog
-              flow={flow}
-              onOwnerChange={onOwnerChange || (() => {})}
-            >
-              <DropdownMenuItem
-                disabled={!userHasPermissionToUpdateFlow}
-                onSelect={(e) => e.preventDefault()}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="flex cursor-pointer  flex-row gap-2 items-center">
-                  <User className="h-4 w-4" />
-                  <span>{t('Change Owner')}</span>
-                </div>
-              </DropdownMenuItem>
-            </ChangeOwnerDialog>
           </PermissionNeededTooltip>
         )}
         {!embedState.hideDuplicateFlow && (
@@ -330,13 +267,6 @@ const FlowActionMenu: React.FC<FlowActionMenuProps> = ({
                         'Are you sure you want to delete this flow? This will permanently delete the flow, all its data and any background runs.',
                       )}
                     </div>
-                    {isDevelopmentBranch && (
-                      <div className="font-bold mt-2">
-                        {t(
-                          'You are on a development branch, this will also delete the flow from the remote repository.',
-                        )}
-                      </div>
-                    )}
                   </>
                 }
                 mutationFn={async () => {

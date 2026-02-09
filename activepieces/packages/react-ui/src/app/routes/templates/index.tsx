@@ -185,6 +185,30 @@ const TemplatesPage = () => {
     return () => clearInterval(interval);
   }, [showLoading]);
 
+  useEffect(() => {
+    if (!isShowingOfficialTemplates) {
+      return;
+    }
+    if (selectedCategory === 'All') {
+      return;
+    }
+    // If categories have been fetched (success or error) and the current
+    // category isn't valid anymore, reset to All so the page doesn't look empty.
+    if (!templateCategoriesQuery.isFetched) {
+      return;
+    }
+    const allowed = new Set(['All', ...(templateCategories ?? [])]);
+    if (!allowed.has(selectedCategory)) {
+      setCategory('All');
+    }
+  }, [
+    isShowingOfficialTemplates,
+    selectedCategory,
+    templateCategoriesQuery.isFetched,
+    templateCategories,
+    setCategory,
+  ]);
+
   return (
     <div>
       <div>

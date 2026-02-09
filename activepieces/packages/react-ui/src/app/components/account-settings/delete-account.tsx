@@ -20,7 +20,6 @@ import {
 } from '@/components/ui/tooltip';
 import { platformHooks } from '@/hooks/platform-hooks';
 import { userHooks } from '@/hooks/user-hooks';
-import { isCloudPlanButNotEnterprise } from '@activepieces/ee-shared';
 import { isNil } from '@activepieces/shared';
 
 export const DeleteAccount = () => {
@@ -48,7 +47,7 @@ export const DeleteAccount = () => {
     !isNil(form.formState.errors.email) ||
     form.getValues('email') !== userEmail;
 
-  if (!isCloudPlanButNotEnterprise(platform.plan.plan) || isNil(userEmail)) {
+  if (isNil(userEmail)) {
     return null;
   }
 
