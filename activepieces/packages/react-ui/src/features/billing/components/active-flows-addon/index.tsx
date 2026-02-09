@@ -11,12 +11,12 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { flagsHooks } from '@/hooks/flags-hooks';
-import { PRICE_PER_EXTRA_ACTIVE_FLOWS } from '@activepieces/ee-shared';
 import {
   ApEdition,
   ApFlagId,
   isNil,
   PlanName,
+  PRICE_PER_EXTRA_ACTIVE_FLOWS,
   PlatformBillingInformation,
 } from '@activepieces/shared';
 

@@ -15,15 +15,13 @@ import { api } from '@/lib/api';
 import { authenticationSession } from '@/lib/authentication-session';
 import {
   CreatePlatformProjectRequest,
-  ListProjectRequestForPlatformQueryParams,
-  UpdateProjectPlatformRequest,
-} from '@activepieces/ee-shared';
-import {
   isNil,
+  ListProjectRequestForPlatformQueryParams,
   ProjectType,
   ProjectWithLimits,
   ProjectWithLimitsWithPlatform,
   SeekPage,
+  UpdateProjectPlatformRequest,
 } from '@activepieces/shared';
 
 const collectionQueryClient = new QueryClient();

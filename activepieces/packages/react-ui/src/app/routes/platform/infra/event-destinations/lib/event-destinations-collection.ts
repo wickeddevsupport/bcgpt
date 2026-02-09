@@ -8,7 +8,7 @@ import {
   EventDestination,
   TestPlatformEventDestinationRequestBody,
   UpdatePlatformEventDestinationRequestBody,
-} from '@activepieces/ee-shared';
+} from '@activepieces/shared';
 import { SeekPage } from '@activepieces/shared';
 
 const collectionQueryClient = new QueryClient();

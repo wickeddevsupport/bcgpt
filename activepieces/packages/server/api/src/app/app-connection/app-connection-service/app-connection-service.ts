@@ -1,7 +1,6 @@
 import { AppSystemProp } from '@activepieces/server-shared'
 import {
     ActivepiecesError,
-    ApEdition,
     ApEnvironment,
     apId,
     AppConnection,
@@ -37,7 +36,6 @@ import semver from 'semver'
 import { OperationResponse } from 'server-worker'
 import { ArrayContains, Equal, FindOperator, FindOptionsWhere, ILike, In } from 'typeorm'
 import { repoFactory } from '../../core/db/repo-factory'
-import { projectMemberService } from '../../ee/projects/project-members/project-member.service'
 import { flowService } from '../../flows/flow/flow.service'
 import { encryptUtils } from '../../helper/encryption'
 import { buildPaginator } from '../../helper/pagination/build-paginator'
@@ -356,23 +354,9 @@ export const appConnectionService = (log: FastifyBaseLogger) => ({
             lastName: user.identity.lastName,
             email: user.identity.email,
         }))
-        const edition = system.getOrThrow(AppSystemProp.EDITION)
-        if (edition === ApEdition.COMMUNITY) {
-            return platformAdmins
-        }
-        const projectMembers = await projectMemberService(log).list({
-            platformId,
-            projectId,
-            cursorRequest: null,
-            limit: 1000,
-            projectRoleId: undefined,
-        })
-        const projectMembersDetails = projectMembers.data.map(pm => ({
-            firstName: pm.user.firstName,
-            lastName: pm.user.lastName,
-            email: pm.user.email,
-        }))
-        return [...platformAdmins, ...projectMembersDetails]
+        // CE-safe: only platform admins are treated as connection owners.
+        // Team project members / RBAC are implemented separately (no EE dependencies).
+        return platformAdmins
     },
 })
 

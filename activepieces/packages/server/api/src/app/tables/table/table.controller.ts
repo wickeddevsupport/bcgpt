@@ -1,9 +1,7 @@
-import { GitPushOperationType } from '@activepieces/ee-shared'
 import { ProjectResourceType, securityAccess } from '@activepieces/server-shared'
 import { ApId, CreateTableRequest, CreateTableWebhookRequest, ExportTableResponse, ListTablesRequest, Permission, PrincipalType, SeekPage, SERVICE_KEY_SECURITY_OPENAPI, SharedTemplate, Table, UpdateTableRequest } from '@activepieces/shared'
 import { FastifyPluginAsyncTypebox, Type } from '@fastify/type-provider-typebox'
 import { StatusCodes } from 'http-status-codes'
-import { gitRepoService } from '../../ee/projects/project-release/git-sync/git-sync.service'
 import { userService } from '../../user/user-service'
 import { recordSideEffects } from '../record/record-side-effects'
 import { recordService } from '../record/record.service'
@@ -55,14 +53,7 @@ export const tablesController: FastifyPluginAsyncTypebox = async (fastify) => {
             projectId: request.projectId,
             id: request.params.id,
         })
-        await gitRepoService(request.log).onDeleted({
-            type: GitPushOperationType.DELETE_TABLE,
-            externalId: table.externalId,
-            userId: request.principal.id,
-            projectId: request.projectId,
-            platformId: request.principal.platform.id,
-            log: request.log,
-        })
+        void table
         await tableService.delete({
             projectId: request.projectId,
             id: request.params.id,

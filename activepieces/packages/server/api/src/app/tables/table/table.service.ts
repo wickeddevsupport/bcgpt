@@ -24,7 +24,6 @@ import {
 import { FastifyBaseLogger } from 'fastify'
 import { ArrayContains, ILike, In } from 'typeorm'
 import { repoFactory } from '../../core/db/repo-factory'
-import { projectStateService } from '../../ee/projects/project-release/project-state/project-state.service'
 import { buildPaginator } from '../../helper/pagination/build-paginator'
 import { paginationHelper } from '../../helper/pagination/pagination-utils'
 import { fieldService } from '../field/field.service'
@@ -135,7 +134,7 @@ export const tableService = {
             fields,
         }
 
-        const tableState = projectStateService(log).getTableState(populatedTable)
+        const tableState = getTableState(populatedTable)
 
         const records = await recordRepo().find({
             where: { tableId: table.id, projectId },
@@ -344,4 +343,29 @@ type GetTemplateParams = {
     log: FastifyBaseLogger
     userMetadata: UserWithMetaInformation | null
     projectId: string
+}
+
+function getTableState(table: PopulatedTable) {
+    return {
+        id: table.id,
+        name: table.name,
+        externalId: table.externalId,
+        status: table.status ?? null,
+        trigger: table.trigger ?? null,
+        fields: (table.fields ?? []).map((field) => {
+            const rawOptions = (field.data as { options?: unknown[] } | null)?.options
+            const options = Array.isArray(rawOptions)
+                ? rawOptions
+                      .map((o) => (typeof o === 'string' ? o : (o as { value?: unknown })?.value))
+                      .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+                      .map((value) => ({ value }))
+                : []
+            return {
+                name: field.name,
+                type: field.type,
+                externalId: field.externalId,
+                data: options.length ? { options } : null,
+            }
+        }),
+    }
 }

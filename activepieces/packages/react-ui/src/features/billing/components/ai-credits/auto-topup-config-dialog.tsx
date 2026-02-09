@@ -14,8 +14,8 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
-import { UpdateAICreditsAutoTopUpParamsSchema } from '@activepieces/ee-shared';
 import { AiCreditsAutoTopUpState } from '@activepieces/shared';
+import { UpdateAICreditsAutoTopUpParamsSchema } from '@activepieces/shared';
 
 import { billingMutations } from '../../lib/billing-hooks';
 

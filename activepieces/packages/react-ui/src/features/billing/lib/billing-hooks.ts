@@ -9,7 +9,7 @@ import {
   CreateSubscriptionParams,
   CreateAICreditCheckoutSessionParamsSchema,
   UpdateAICreditsAutoTopUpParamsSchema,
-} from '@activepieces/ee-shared';
+} from '@activepieces/shared';
 
 import { platformBillingApi } from './api';
 

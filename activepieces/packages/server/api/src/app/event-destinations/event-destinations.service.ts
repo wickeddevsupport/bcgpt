@@ -4,9 +4,8 @@ import {
     CreatePlatformEventDestinationRequestBody,
     EventDestination,
     EventDestinationScope,
-    FlowCreatedEvent,
     UpdatePlatformEventDestinationRequestBody,
-} from '@activepieces/ee-shared'
+} from '@activepieces/shared'
 import { WorkerSystemProp } from '@activepieces/server-shared'
 import { ActivepiecesError, apId, assertNotNullOrUndefined, Cursor, ErrorCode, isNil, LATEST_JOB_DATA_SCHEMA_VERSION, PlatformId, ProjectId, SeekPage, WorkerJobType } from '@activepieces/shared'
 import { FastifyBaseLogger } from 'fastify'
@@ -103,14 +102,14 @@ export const eventDestinationService = (log: FastifyBaseLogger) => ({
     trigger: async ({ platformId, projectId, event }: TriggerParams): Promise<void> => {
         const conditions: FindOptionsWhere<EventDestinationSchema>[] = [{
             platformId,
-            events: ArrayContains([event]),
+            events: ArrayContains([event.action]),
             scope: EventDestinationScope.PLATFORM,
         }]
         const broadcastToProject = !isNil(projectId) && PROJECT_SCOPE_EVENTS.includes(event.action)
         if (broadcastToProject) {
             conditions.push({
                 projectId,
-                events: ArrayContains([event]),
+                events: ArrayContains([event.action]),
                 scope: EventDestinationScope.PROJECT,
             })
         }
@@ -133,12 +132,10 @@ export const eventDestinationService = (log: FastifyBaseLogger) => ({
     },
     test: async ({ platformId, projectId, url }: TestParams): Promise<void> => {
         assertUrlIsExternal(url)
-        const mockEvent: FlowCreatedEvent = {
+        const mockEvent: ApplicationEvent = {
             id: apId(),
             created: new Date().toISOString(),
             updated: new Date().toISOString(),
-            ip: '127.0.0.1',
-            platformId,
             data: {
                 flow: {
                     id: apId(),
@@ -149,9 +146,10 @@ export const eventDestinationService = (log: FastifyBaseLogger) => ({
                     displayName: 'Dream Department',
                 },
             },
-            projectId,
+            projectId: projectId ?? null,
             userId: apId(),
             action: ApplicationEventName.FLOW_CREATED,
+            userEmail: null,
         }
         await jobQueue(log).add({
             type: JobType.ONE_TIME,

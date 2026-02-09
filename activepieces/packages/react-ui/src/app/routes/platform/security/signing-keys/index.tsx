@@ -16,7 +16,7 @@ import { internalErrorToast } from '@/components/ui/sonner';
 import { NewSigningKeyDialog } from '@/features/platform-admin/components/new-signing-key-dialog';
 import { signingKeyApi } from '@/features/platform-admin/lib/signing-key-api';
 import { platformHooks } from '@/hooks/platform-hooks';
-import { SigningKey } from '@activepieces/ee-shared';
+import { SigningKey } from '@activepieces/shared';
 
 const SigningKeysPage = () => {
   const { data, isLoading, refetch } = useQuery({

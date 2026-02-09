@@ -1,4 +1,4 @@
-import { ApplicationEvent, ApplicationEventName, FlowRunEvent } from '@activepieces/ee-shared'
+import { ApplicationEvent, ApplicationEventName } from '@activepieces/shared'
 import { BADGES, FlowRunStatus, isFailedState, isNil, RunEnvironment } from '@activepieces/shared'
 import { BadgeCheck, BadgeCheckResult } from '../badge-check'
 
@@ -9,7 +9,7 @@ export const flowRunsBadgesCheck: BadgeCheck = {
         if (event.action !== ApplicationEventName.FLOW_RUN_FINISHED) {
             return { userId: null, badges }
         }
-        const flowRunEvent = event as FlowRunEvent
+        const flowRunEvent = event as unknown as any
         if (flowRunEvent.data.flowRun.environment !== RunEnvironment.TESTING || !isNil(flowRunEvent.data.flowRun.stepNameToTest)) {
             return { userId: null, badges }
         }

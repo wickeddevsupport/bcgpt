@@ -1,7 +1,7 @@
 import { AuthorizationRouteSecurity, AuthorizationType, ProjectAuthorizationConfig, RouteKind } from '@activepieces/server-shared'
 import { ActivepiecesError, ErrorCode, isNil, PlatformRole, Principal, PrincipalType } from '@activepieces/shared'
 import { FastifyBaseLogger } from 'fastify'
-import { rbacService } from '../../../../ee/authentication/project-role/rbac-service'
+import { projectService } from '../../../../project/project-service'
 import { userService } from '../../../../user/user-service'
 
 export const authorizeOrThrow = async (principal: Principal, security: AuthorizationRouteSecurity, log: FastifyBaseLogger): Promise<void> => {
@@ -53,7 +53,31 @@ async function assertAccessToProject(principal: Principal, projectSecurity: Proj
             },
         })
     }
-    await rbacService(log).assertPrinicpalAccessToProject({ principal, permission: projectSecurity.permission, projectId: projectSecurity.projectId })
+
+    // CE-safe default authorization:
+    // - Service principals are treated as platform-scoped and allowed.
+    // - User principals must either own the project or be a privileged platform user.
+    if (principal.type === PrincipalType.SERVICE) {
+        return
+    }
+
+    const project = await projectService.getOneOrThrow(projectSecurity.projectId)
+    if (project.platformId !== principal.platform.id) {
+        throw new ActivepiecesError({
+            code: ErrorCode.AUTHORIZATION,
+            params: { message: 'User is not allowed to access this project' },
+        })
+    }
+
+    const user = await userService.getOneOrFail({ id: principal.id })
+    if (userService.isUserPrivileged(user) || project.ownerId === principal.id) {
+        return
+    }
+
+    throw new ActivepiecesError({
+        code: ErrorCode.AUTHORIZATION,
+        params: { message: 'User is not allowed to access this project' },
+    })
 }
 
 

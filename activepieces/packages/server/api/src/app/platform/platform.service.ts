@@ -1,11 +1,10 @@
-import { OPEN_SOURCE_PLAN } from '@activepieces/ee-shared'
 import {
     ActivepiecesError,
-    ApEdition,
     apId,
     ErrorCode,
     FilteredPieceBehavior,
     isNil,
+    OPEN_SOURCE_PLAN,
     Platform,
     PlatformId,
     PlatformPlanLimits,
@@ -17,7 +16,6 @@ import {
     UserStatus,
 } from '@activepieces/shared'
 import { repoFactory } from '../core/db/repo-factory'
-import { platformPlanService } from '../ee/platform/platform-plan/platform-plan.service'
 import { defaultTheme } from '../flags/theme'
 import { system } from '../helper/system/system'
 import { projectService } from '../project/project-service'
@@ -123,12 +121,6 @@ export const platformService = {
             ...spreadIfDefined('allowedAuthDomains', params.allowedAuthDomains),
             ...spreadIfDefined('pinnedPieces', params.pinnedPieces),
         }
-        if (!isNil(params.plan)) {
-            await platformPlanService(system.globalLogger()).update({
-                platformId: params.id,
-                ...params.plan,
-            })
-        }
         return platformRepo().save(updatedPlatform)
     },
     async getOneOrThrow(id: PlatformId): Promise<Platform> {
@@ -230,23 +222,17 @@ async function ensureBrandingAndPins(platform: Platform): Promise<Platform> {
 }
 
 async function getUsage(platform: Platform): Promise<PlatformUsage | undefined> {
-    const edition = system.getEdition()
-    if (edition === ApEdition.COMMUNITY) {
-        return undefined
-    }
-    return platformPlanService(system.globalLogger()).getUsage(platform.id)
+    // CE-safe: usage/billing is not supported.
+    return undefined
 }
 
 async function getPlan(platform: Platform): Promise<PlatformPlanLimits> {
-    const edition = system.getEdition()
-    if (edition === ApEdition.COMMUNITY) {
-        return {
-            ...OPEN_SOURCE_PLAN,
-            stripeSubscriptionStartDate: 0,
-            stripeSubscriptionEndDate: 0,
-        }
+    void platform
+    return {
+        ...OPEN_SOURCE_PLAN,
+        stripeSubscriptionStartDate: 0,
+        stripeSubscriptionEndDate: 0,
     }
-    return platformPlanService(system.globalLogger()).getOrCreateForPlatform(platform.id)
 }
 
 type AddParams = {

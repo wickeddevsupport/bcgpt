@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/select';
 import { internalErrorToast } from '@/components/ui/sonner';
 import { projectRoleApi } from '@/features/platform-admin/lib/project-role-api';
-import { ProjectMemberWithUser } from '@activepieces/ee-shared';
+import { ProjectMemberWithUser } from '@activepieces/shared';
 
 import { projectMembersApi } from '../lib/project-members-api';
 

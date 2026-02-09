@@ -2,7 +2,7 @@ import { api } from '@/lib/api';
 import {
   ApplicationEvent,
   ListAuditEventsRequest,
-} from '@activepieces/ee-shared';
+} from '@activepieces/shared';
 import { SeekPage } from '@activepieces/shared';
 
 export const auditEventsApi = {

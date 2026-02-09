@@ -18,8 +18,7 @@ import { DataTable, RowDataWithActions } from '@/components/ui/data-table';
 import { DataTableColumnHeader } from '@/components/ui/data-table/data-table-column-header';
 import { projectRoleApi } from '@/features/platform-admin/lib/project-role-api';
 import { platformHooks } from '@/hooks/platform-hooks';
-import { ProjectMemberWithUser } from '@activepieces/ee-shared';
-import { assertNotNullOrUndefined, isNil } from '@activepieces/shared';
+import { assertNotNullOrUndefined, isNil, ProjectMemberWithUser } from '@activepieces/shared';
 
 export const ProjectRoleUsersTable = () => {
   const { platform } = platformHooks.useCurrentPlatform();

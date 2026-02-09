@@ -1,4 +1,4 @@
-import { ApplicationEvent, ApplicationEventName, FlowUpdatedEvent } from '@activepieces/ee-shared'
+import { ApplicationEvent, ApplicationEventName } from '@activepieces/shared'
 import { BADGES, FlowOperationType, FlowStatus, isNil } from '@activepieces/shared'
 import { flowRepo } from '../../../flows/flow/flow.repo'
 import { BadgeCheck, BadgeCheckResult } from '../badge-check'
@@ -9,7 +9,7 @@ export const flowsBadgesCheck: BadgeCheck = {
         if (event.action !== ApplicationEventName.FLOW_UPDATED) {
             return { userId: null, badges: [] }
         }
-        const flowUpdatedEvent = event as FlowUpdatedEvent
+        const flowUpdatedEvent = event as unknown as any
         if (![FlowOperationType.LOCK_AND_PUBLISH, FlowOperationType.CHANGE_STATUS].includes(flowUpdatedEvent.data.request.type)) {
             return { userId: null, badges: [] }
         }

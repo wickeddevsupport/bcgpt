@@ -2,8 +2,7 @@ import { AppSystemProp, apVersionUtil, webhookSecretsUtils } from '@activepieces
 import { ApEdition, ApFlagId, ExecutionMode, Flag, isNil } from '@activepieces/shared'
 import { In } from 'typeorm'
 import { repoFactory } from '../core/db/repo-factory'
-import { federatedAuthnService } from '../ee/authentication/federated-authn/federated-authn-service'
-import { domainHelper } from '../ee/custom-domains/domain-helper'
+import { domainHelper } from '../helper/domain-helper'
 import { system } from '../helper/system/system'
 import { FlagEntity } from './flag.entity'
 import { defaultTheme } from './theme'
@@ -165,7 +164,9 @@ export const flagService = {
             },
             {
                 id: ApFlagId.THIRD_PARTY_AUTH_PROVIDER_REDIRECT_URL,
-                value: await federatedAuthnService(system.globalLogger()).getThirdPartyRedirectUrl(undefined),
+                value: await domainHelper.getPublicApiUrl({
+                    path: 'v1/authn/federated/redirect',
+                }),
                 created,
                 updated,
             },

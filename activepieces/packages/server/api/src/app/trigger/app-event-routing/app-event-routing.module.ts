@@ -21,7 +21,7 @@ import {
 import { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
 import { FastifyRequest } from 'fastify'
 import { StatusCodes } from 'http-status-codes'
-import { domainHelper } from '../../ee/custom-domains/domain-helper'
+import { domainHelper } from '../../helper/domain-helper'
 import { flowService } from '../../flows/flow/flow.service'
 import { projectService } from '../../project/project-service'
 import { WebhookFlowVersionToRun, webhookHandler } from '../../webhooks/webhook-handler'

@@ -3,7 +3,7 @@ import {
   ConfigureRepoRequest,
   GitRepo,
   PushGitRepoRequest,
-} from '@activepieces/ee-shared';
+} from '@activepieces/shared';
 import { SeekPage } from '@activepieces/shared';
 
 export const gitSyncApi = {

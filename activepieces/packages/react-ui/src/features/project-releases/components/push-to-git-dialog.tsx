@@ -29,7 +29,7 @@ import {
   PushGitRepoRequest,
   PushFlowsGitRepoRequest,
   PushTablesGitRepoRequest,
-} from '@activepieces/ee-shared';
+} from '@activepieces/shared';
 import {
   assertNotNullOrUndefined,
   PopulatedFlow,

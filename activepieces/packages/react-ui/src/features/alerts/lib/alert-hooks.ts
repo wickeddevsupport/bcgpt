@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { internalErrorToast } from '@/components/ui/sonner';
 import { api } from '@/lib/api';
 import { authenticationSession } from '@/lib/authentication-session';
-import { Alert, AlertChannel } from '@activepieces/ee-shared';
+import { Alert, AlertChannel } from '@activepieces/shared';
 
 import { alertsApi } from './api';
 

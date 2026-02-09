@@ -40,8 +40,7 @@ import { formatUtils } from '@/lib/utils';
 import {
   ApplicationEvent,
   ApplicationEventName,
-  summarizeApplicationEvent,
-} from '@activepieces/ee-shared';
+} from '@activepieces/shared';
 import { isNil } from '@activepieces/shared';
 
 export default function AuditLogsPage() {
@@ -322,3 +321,44 @@ function convertToIcon(event: ApplicationEvent) {
 }
 
 const convertToDetails = summarizeApplicationEvent;
+
+function summarizeApplicationEvent(event: ApplicationEvent): string {
+  const data = (event as { data?: unknown }).data as
+    | Record<string, unknown>
+    | undefined
+    | null;
+
+  if (!data || typeof data !== 'object') {
+    return '';
+  }
+
+  const pick = (...paths: string[]) => {
+    for (const p of paths) {
+      const parts = p.split('.');
+      let cur: unknown = data;
+      for (const part of parts) {
+        if (!cur || typeof cur !== 'object') {
+          cur = undefined;
+          break;
+        }
+        cur = (cur as Record<string, unknown>)[part];
+      }
+      if (typeof cur === 'string' && cur.trim()) {
+        return cur;
+      }
+    }
+    return '';
+  };
+
+  return (
+    pick(
+      'flow.displayName',
+      'folder.displayName',
+      'connection.displayName',
+      'project.displayName',
+      'template.name',
+      'apiKey.displayName',
+      'user.email',
+    ) || formatUtils.convertEnumToHumanReadable(event.action)
+  );
+}

@@ -15,8 +15,7 @@ import utc from 'dayjs/plugin/utc'
 import { FastifyBaseLogger } from 'fastify'
 import { websocketService } from '../../core/websockets.service'
 import { redisConnections } from '../../database/redis-connections'
-import { domainHelper } from '../../ee/custom-domains/domain-helper'
-import { dedicatedWorkers } from '../../ee/platform/platform-plan/platform-dedicated-workers'
+import { domainHelper } from '../../helper/domain-helper'
 import { jwtUtils } from '../../helper/jwt-utils'
 import { system } from '../../helper/system/system'
 import { workerMachineCache } from './machine-cache'
@@ -37,8 +36,7 @@ export const machineService = (log: FastifyBaseLogger) => {
                 id: request.workerId,
                 information: request,
             })
-            const executionMode = await getExecutionMode(log, platformIdForDedicatedWorker)
-            const isDedicatedWorker = !isNil(platformIdForDedicatedWorker)
+            const executionMode = await getExecutionMode(log)
             return {
                 JWT_SECRET: await jwtUtils.getJwtSecret(),
                 TRIGGER_TIMEOUT_SECONDS: system.getNumberOrThrow(AppSystemProp.TRIGGER_TIMEOUT_SECONDS),
@@ -64,7 +62,7 @@ export const machineService = (log: FastifyBaseLogger) => {
                 PUBLIC_URL: await domainHelper.getPublicUrl({
                     path: '',
                 }),
-                PROJECT_RATE_LIMITER_ENABLED: isDedicatedWorker ? false : system.getBooleanOrThrow(AppSystemProp.PROJECT_RATE_LIMITER_ENABLED),
+                PROJECT_RATE_LIMITER_ENABLED: system.getBooleanOrThrow(AppSystemProp.PROJECT_RATE_LIMITER_ENABLED),
                 MAX_CONCURRENT_JOBS_PER_PROJECT: system.getNumberOrThrow(AppSystemProp.MAX_CONCURRENT_JOBS_PER_PROJECT),
                 FILE_STORAGE_LOCATION: system.getOrThrow(AppSystemProp.FILE_STORAGE_LOCATION),
                 S3_USE_SIGNED_URLS: system.getOrThrow(AppSystemProp.S3_USE_SIGNED_URLS),
@@ -124,20 +122,10 @@ export const machineService = (log: FastifyBaseLogger) => {
 }
 
 
-async function getExecutionMode(log: FastifyBaseLogger, platformIdForDedicatedWorker: string | undefined): Promise<ExecutionMode> {
+async function getExecutionMode(log: FastifyBaseLogger): Promise<ExecutionMode> {
+    void log
     const executionMode = system.getOrThrow<ExecutionMode>(AppSystemProp.EXECUTION_MODE)
-    if (isNil(platformIdForDedicatedWorker)) {
-        return executionMode
-    }
-
-    const dedicatedWorkerConfig = await dedicatedWorkers(log).getWorkerConfig(platformIdForDedicatedWorker)
-    if (isNil(dedicatedWorkerConfig)) {
-        return executionMode
-    }
-    if (dedicatedWorkerConfig.trustedEnvironment) {
-        return ExecutionMode.SANDBOX_PROCESS
-    }
-    return ExecutionMode.SANDBOX_CODE_AND_PROCESS
+    return executionMode
 }
 
 type OnDisconnectParams = {

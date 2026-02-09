@@ -22,9 +22,6 @@ import dayjs from 'dayjs'
 import { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { StatusCodes } from 'http-status-codes'
 import { userIdentityService } from '../authentication/user-identity/user-identity-service'
-import { platformMustBeOwnedByCurrentUser, platformMustHaveFeatureEnabled, projectMustBeTeamType } from '../ee/authentication/ee-authorization'
-import { assertRoleHasPermission } from '../ee/authentication/project-role/rbac-middleware'
-import { projectRoleService } from '../ee/projects/project-role/project-role.service'
 import { projectService } from '../project/project-service'
 import { userService } from '../user/user-service'
 import { userInvitationsService } from './user-invitation.service'
@@ -39,15 +36,14 @@ const invitationController: FastifyPluginAsyncTypebox = async (app) => {
         const { email, type } = request.body
         switch (type) {
             case InvitationType.PROJECT:
-                await projectMustBeTeamType.call(app, request, reply)
-                await assertPrincipalHasPermissionToProject(app, request, reply, request.principal, request.body.projectId, Permission.WRITE_INVITATION)
+                await assertPrincipalHasPermissionToProject(request.principal, request.body.projectId, Permission.WRITE_INVITATION, request.log)
                 break
             case InvitationType.PLATFORM:
-                await platformMustBeOwnedByCurrentUser.call(app, request, reply)
+                await assertPlatformAdmin(request.principal, request.log)
                 break
         }
         const status = await shouldAutoAcceptInvitation(request.principal, request.body, request.log) ? InvitationStatus.ACCEPTED : InvitationStatus.PENDING
-        const projectRole = await getProjectRoleAndAssertIfFound(request.principal.platform.id, request.body)
+        const projectRole = null
         const platformId = request.principal.platform.id
 
         const invitation = await userInvitationsService(request.log).create({
@@ -64,10 +60,7 @@ const invitationController: FastifyPluginAsyncTypebox = async (app) => {
     })
 
     app.get('/', ListUserInvitationsRequestParams, async (request, reply) => {
-        if (!isNil(request.query.projectId) && request.query.type === InvitationType.PROJECT) {
-            await projectMustBeTeamType.call(app, request, reply)
-        }
-        const projectId = await getProjectIdAndAssertPermission(app, request, reply, request.principal, request.query)
+        const projectId = await getProjectIdAndAssertPermission(request.principal, request.query, request.log)
         const invitations = await userInvitationsService(request.log).list({
             platformId: request.principal.platform.id,
             projectId: request.query.type === InvitationType.PROJECT ? projectId : null,
@@ -96,11 +89,11 @@ const invitationController: FastifyPluginAsyncTypebox = async (app) => {
         switch (invitation.type) {
             case InvitationType.PROJECT: {
                 assertNotNullOrUndefined(invitation.projectId, 'projectId')
-                await assertPrincipalHasPermissionToProject(app, request, reply, request.principal, invitation.projectId, Permission.WRITE_INVITATION)
+                await assertPrincipalHasPermissionToProject(request.principal, invitation.projectId, Permission.WRITE_INVITATION, request.log)
                 break
             }
             case InvitationType.PLATFORM:
-                await platformMustBeOwnedByCurrentUser.call(app, request, reply)
+                await assertPlatformAdmin(request.principal, request.log)
                 break
         }
         await userInvitationsService(request.log).delete({
@@ -112,31 +105,16 @@ const invitationController: FastifyPluginAsyncTypebox = async (app) => {
 }
 
 
-const getProjectRoleAndAssertIfFound = async (platformId: string, request: SendUserInvitationRequest): Promise<ProjectRole | null> => {
-    const { type } = request
-    if (type === InvitationType.PLATFORM) {
-        return null
-    }
-    const projectRoleName = request.projectRole
-
-    const projectRole = await projectRoleService.getOneOrThrow({
-        name: projectRoleName,
-        platformId,
-    })
-    return projectRole
-}
 async function getProjectIdAndAssertPermission<R extends Principal>(
-    app: FastifyInstance,
-    request: FastifyRequest,
-    reply: FastifyReply,
     principal: R,
     requestQuery: ListUserInvitationsRequest,
+    log: FastifyBaseLogger,
 ): Promise<string | null> {
     if (principal.type === PrincipalType.SERVICE) {
         if (isNil(requestQuery.projectId)) {
             return null
         }
-        await assertPrincipalHasPermissionToProject(app, request, reply, principal, requestQuery.projectId, Permission.READ_INVITATION)
+        await assertPrincipalHasPermissionToProject(principal, requestQuery.projectId, Permission.READ_INVITATION, log)
         return requestQuery.projectId
     }
     return requestQuery.projectId ?? null
@@ -161,9 +139,12 @@ async function shouldAutoAcceptInvitation(principal: Principal, request: SendUse
 }
 
 async function assertPrincipalHasPermissionToProject<R extends Principal & { platform: { id: string } }>(
-    fastify: FastifyInstance,
-    request: FastifyRequest, reply: FastifyReply, principal: R,
-    projectId: string, permission: Permission): Promise<void> {
+    principal: R,
+    projectId: string,
+    _permission: Permission,
+    log: FastifyBaseLogger,
+): Promise<void> {
+    void _permission
     const project = await projectService.getOneOrThrow(projectId)
     if (isNil(project) || project.platformId !== principal.platform.id) {
         throw new ActivepiecesError({
@@ -173,8 +154,25 @@ async function assertPrincipalHasPermissionToProject<R extends Principal & { pla
             },
         })
     }
-    await platformMustHaveFeatureEnabled((platform) => platform.plan.projectRolesEnabled).call(fastify, request, reply)
-    await assertRoleHasPermission(request.principal, projectId, permission, request.log)
+
+    // CE-safe: invitations are restricted to platform admins.
+    await assertPlatformAdmin(principal, log)
+}
+
+async function assertPlatformAdmin(principal: Principal, log: FastifyBaseLogger): Promise<void> {
+    void log
+    if (principal.type !== PrincipalType.USER) {
+        return
+    }
+    const user = await userService.getOneOrFail({ id: principal.id })
+    if (!userService.isUserPrivileged(user)) {
+        throw new ActivepiecesError({
+            code: ErrorCode.AUTHORIZATION,
+            params: {
+                message: 'User is not an admin of the platform.',
+            },
+        })
+    }
 }
 
 

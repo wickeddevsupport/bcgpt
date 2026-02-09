@@ -9,17 +9,12 @@ import {
     spreadIfDefined,
     UpdateAIProviderRequest,
 } from '@activepieces/shared'
-import dayjs from 'dayjs'
 import { FastifyBaseLogger } from 'fastify'
 import cron from 'node-cron'
 import { In } from 'typeorm'
 import { repoFactory } from '../core/db/repo-factory'
-import { openRouterApi } from '../ee/platform/platform-plan/openrouter/openrouter-api'
-import { platformPlanService } from '../ee/platform/platform-plan/platform-plan.service'
 import { flagService } from '../flags/flag.service'
 import { encryptUtils } from '../helper/encryption'
-import { SystemJobName } from '../helper/system-jobs/common'
-import { systemJobsSchedule } from '../helper/system-jobs/system-job'
 import { AIProviderEntity, AIProviderSchema } from './ai-provider-entity'
 import { aiProviders } from './providers'
 
@@ -139,21 +134,14 @@ export const aiProviderService = (log: FastifyBaseLogger) => ({
         if (aiProvider.provider === AIProviderName.ACTIVEPIECES) {
             const doesHaveKeys = !isNil(auth) && !isNil(auth.apiKey) && auth.apiKey !== ''
             if (!doesHaveKeys) {
-                const { auth: activePiecesAuth } = await enrichWithKeysIfNeeded(aiProvider, platformId, log)
-
-                auth = activePiecesAuth
+                // CE-safe: do not auto-provision provider keys via third-party services.
+                throw new ActivepiecesError({
+                    code: ErrorCode.VALIDATION,
+                    params: {
+                        message: 'Activepieces AI provider is not configured. Please supply an API key.',
+                    },
+                })
             }
-
-            await systemJobsSchedule(log).upsertJob({
-                job: {
-                    name: SystemJobName.AI_CREDIT_UPDATE_CHECK,
-                    data: { apiKeyHash: (auth as ActivePiecesProviderAuthConfig).apiKeyHash, platformId },
-                },
-                schedule: {
-                    type: 'one-time',
-                    date: dayjs(),
-                },
-            })
         }
         
         
@@ -220,30 +208,6 @@ type GetOrCreateActivepiecesConfigResponse = {
     platformId: PlatformId
     provider: AIProviderName
 }
-
-async function enrichWithKeysIfNeeded(aiProvider: AIProviderSchema, platformId: PlatformId, log: FastifyBaseLogger): Promise<GetProviderConfigResponse> {
-    const platformPlan = await platformPlanService(log).getOrCreateForPlatform(platformId)
-    const limit = platformPlan.includedAiCredits / 1000
-    const { key, data } = await openRouterApi.createKey({
-        name: `Platform ${platformId}`, 
-        limit,
-    })
-    const rawAuth: ActivePiecesProviderAuthConfig = { apiKey: key, apiKeyHash: data.hash }
-    const savedAiProvider = await aiProviderRepo().save({
-        id: aiProvider.id,
-        platformId,
-        provider: AIProviderName.ACTIVEPIECES,
-        displayName: 'Activepieces',
-        config: {},
-        auth: await encryptUtils.encryptObject(rawAuth),
-    })
-    await platformPlanService(log).update({
-        platformId,
-        lastFreeAiCreditsRenewalDate: new Date().toISOString(),
-    })
-    return { provider: savedAiProvider.provider, auth: rawAuth, config: savedAiProvider.config }
-}
-
 
 async function doesActivepiecesProviderHasKeys(aiProvider: AIProviderSchema): Promise<boolean> {
     if (isNil(aiProvider) || isNil(aiProvider.auth)) {

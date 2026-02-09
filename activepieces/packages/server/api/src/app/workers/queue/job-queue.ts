@@ -1,10 +1,9 @@
-import { apDayjsDuration, AppSystemProp, getPlatformQueueName, memoryLock, QueueName } from '@activepieces/server-shared'
+import { apDayjsDuration, AppSystemProp, memoryLock, QueueName } from '@activepieces/server-shared'
 import { ApId, getDefaultJobPriority, isNil, JOB_PRIORITY, WorkerJobType } from '@activepieces/shared'
 import { Queue } from 'bullmq'
 import { BullMQOtel } from 'bullmq-otel'
 import { FastifyBaseLogger } from 'fastify'
 import { redisConnections } from '../../database/redis-connections'
-import { dedicatedWorkers } from '../../ee/platform/platform-plan/platform-dedicated-workers'
 import { system } from '../../helper/system/system'
 import { AddJobParams, JobType } from './queue-manager'
 
@@ -17,16 +16,7 @@ const dedicatedWorkersQueues = new Map<string, Queue>()
 
 export const jobQueue = (log: FastifyBaseLogger) => ({
     async init(): Promise<void> {
-        const platformIdsWithDedicatedWorkers = await dedicatedWorkers(log).getPlatformIds()
-
-        await Promise.all([
-            ...platformIdsWithDedicatedWorkers.map(async (platformId) => {
-                const queueName = await getQueueName(platformId, log)
-                const queue = await ensureQueueExists({ log, queueName })
-                dedicatedWorkersQueues.set(queueName, queue)
-            }),
-            ensureQueueExists({ log, queueName: QueueName.WORKER_JOBS }),
-        ])
+        await ensureQueueExists({ log, queueName: QueueName.WORKER_JOBS })
 
         log.info('[jobQueue#init] Dynamic queue system initialized')
     },
@@ -186,12 +176,9 @@ async function ensureQueueExists({ log, queueName }: { log: FastifyBaseLogger, q
 }
 
 async function getQueueName(platformId: string | null, log: FastifyBaseLogger): Promise<string> {
-    if (!platformId) {
-        return QueueName.WORKER_JOBS
-    }
-
-    const isDedicatedWorkersEnabled = await dedicatedWorkers(log).isEnabledForPlatform(platformId)
-    return isDedicatedWorkersEnabled ? getPlatformQueueName(platformId) : QueueName.WORKER_JOBS
+    void platformId
+    void log
+    return QueueName.WORKER_JOBS
 }
 
 

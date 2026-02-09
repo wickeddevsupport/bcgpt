@@ -1,4 +1,4 @@
-import { ApplicationEvent, ApplicationEventName, FlowUpdatedEvent } from '@activepieces/ee-shared'
+import { ApplicationEvent, ApplicationEventName } from '@activepieces/shared'
 import { BADGES, FlowActionType, FlowOperationType, flowStructureUtil, FlowTriggerType, isNil } from '@activepieces/shared'
 import { flowVersionRepo } from '../../../flows/flow-version/flow-version.service'
 import { BadgeCheck, BadgeCheckResult } from '../badge-check'
@@ -15,7 +15,7 @@ export const flowContentBadgesCheck: BadgeCheck = {
         if (event.action !== ApplicationEventName.FLOW_UPDATED) {
             return { userId, badges: [] }
         }
-        const flowUpdatedEvent = event as FlowUpdatedEvent
+        const flowUpdatedEvent = event as unknown as any
         if (flowUpdatedEvent.data.request.type !== FlowOperationType.LOCK_AND_PUBLISH) {
             return { userId, badges: [] }
         }

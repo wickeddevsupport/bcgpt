@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { DataTable, RowDataWithActions } from '@/components/ui/data-table';
 import { DataTableColumnHeader } from '@/components/ui/data-table/data-table-column-header';
 import { formatUtils } from '@/lib/utils';
-import { EventDestination } from '@activepieces/ee-shared';
+import { EventDestination } from '@activepieces/shared';
 
 import EventDestinationActions from './event-destination-actions';
 

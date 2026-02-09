@@ -27,7 +27,7 @@ import {
   ApplicationEventName,
   EventDestination,
   CreatePlatformEventDestinationRequestBody,
-} from '@activepieces/ee-shared';
+} from '@activepieces/shared';
 
 import { eventDestinationsCollectionUtils } from '../lib/event-destinations-collection';
 

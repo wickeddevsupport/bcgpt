@@ -3,13 +3,13 @@ import { toast } from 'sonner';
 
 import { UNSAVED_CHANGES_TOAST } from '@/components/ui/sonner';
 import { api } from '@/lib/api';
-import { GetFlowTemplateRequestQuery } from '@activepieces/ee-shared';
 import {
   CreateFlowRequest,
   ErrorCode,
   FlowOperationRequest,
   FlowVersion,
   FlowVersionMetadata,
+  GetFlowTemplateRequestQuery,
   GetFlowQueryParamsRequest,
   ListFlowVersionRequest,
   ListFlowsRequest,

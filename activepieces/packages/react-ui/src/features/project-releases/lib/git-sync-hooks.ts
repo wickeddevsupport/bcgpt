@@ -3,8 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuthorization } from '@/hooks/authorization-hooks';
 import { platformHooks } from '@/hooks/platform-hooks';
 import { authenticationSession } from '@/lib/authentication-session';
-import { GitBranchType } from '@activepieces/ee-shared';
 import { isNil, Permission } from '@activepieces/shared';
+import { GitBranchType } from '@activepieces/shared';
 
 import { gitSyncApi } from './git-sync-api';
 

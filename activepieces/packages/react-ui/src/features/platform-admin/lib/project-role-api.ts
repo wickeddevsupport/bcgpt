@@ -1,9 +1,9 @@
 import { api } from '@/lib/api';
-import { ProjectMemberWithUser } from '@activepieces/ee-shared';
 import {
   CreateProjectRoleRequestBody,
   UpdateProjectRoleRequestBody,
   ProjectRole,
+  ProjectMemberWithUser,
   SeekPage,
   ListProjectMembersForProjectRoleRequestQuery,
 } from '@activepieces/shared';

@@ -1,6 +1,5 @@
 import { ApEdition, isNil, PlatformId, PlatformWithoutSensitiveData, PrincipalType } from '@activepieces/shared'
 import { FastifyRequest } from 'fastify'
-import { customDomainService } from '../ee/custom-domains/custom-domain.service'
 import { system } from '../helper/system/system'
 import { platformService } from './platform.service'
 
@@ -31,11 +30,7 @@ export const platformUtils = {
 const getPlatformIdForHostname = async (
     hostname: string,
 ): Promise<string | null> => {
-    if (system.getEdition() === ApEdition.COMMUNITY) {
-        return null
-    }
-    const customDomain = await customDomainService.getOneByDomain({
-        domain: hostname,
-    })
-    return customDomain?.platformId ?? null
+    void hostname
+    // CE-safe: custom domains are not supported.
+    return null
 }

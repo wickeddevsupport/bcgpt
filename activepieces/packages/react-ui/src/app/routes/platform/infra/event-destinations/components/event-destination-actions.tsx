@@ -10,7 +10,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { EventDestination } from '@activepieces/ee-shared';
+import { EventDestination } from '@activepieces/shared';
 
 import { eventDestinationsCollectionUtils } from '../lib/event-destinations-collection';
 

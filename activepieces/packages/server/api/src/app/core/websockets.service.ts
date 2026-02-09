@@ -3,7 +3,8 @@ import { ActivepiecesError, ErrorCode, isNil, Principal, PrincipalForType, Princ
 import { FastifyBaseLogger } from 'fastify'
 import { Socket } from 'socket.io'
 import { accessTokenManager } from '../authentication/lib/access-token-manager'
-import { projectMemberService } from '../ee/projects/project-members/project-member.service'
+import { projectService } from '../project/project-service'
+import { userService } from '../user/user-service'
 import { app } from '../server'
 
 export type WebsocketListener<T, PR extends PrincipalType.USER | PrincipalType.WORKER> = (socket: Socket) => (data: T, principal: PrincipalForType<PR>, projectId: PR extends PrincipalType.USER ? string : null, callback?: (data: unknown) => void) => Promise<void>
@@ -102,12 +103,12 @@ const validateProjectId = async ({ userId, projectId, log }: ValidateProjectIdAr
             },
         })
     }
-    const role = await projectMemberService(log).getRole({
-        projectId,
-        userId,
-    })
 
-    if (isNil(role)) {
+    const project = await projectService.getOneOrThrow(projectId)
+    const user = await userService.getOneOrFail({ id: userId })
+
+    const allowed = userService.isUserPrivileged(user) || project.ownerId === userId
+    if (!allowed) {
         throw new ActivepiecesError({
             code: ErrorCode.AUTHORIZATION,
             params: {

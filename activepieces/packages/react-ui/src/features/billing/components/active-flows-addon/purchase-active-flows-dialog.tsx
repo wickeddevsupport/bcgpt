@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils';
 import {
   ApSubscriptionStatus,
   PRICE_PER_EXTRA_ACTIVE_FLOWS,
-} from '@activepieces/ee-shared';
+} from '@activepieces/shared';
 import { PlatformPlan } from '@activepieces/shared';
 
 import { useManagePlanDialogStore } from '../../lib/active-flows-addon-dialog-state';

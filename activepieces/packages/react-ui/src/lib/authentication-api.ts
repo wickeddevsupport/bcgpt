@@ -1,20 +1,18 @@
 import { api } from '@/lib/api';
 import {
-  CreateOtpRequestBody,
-  GetCurrentProjectMemberRoleQuery,
-  ResetPasswordRequestBody,
-  VerifyEmailRequestBody,
-} from '@activepieces/ee-shared';
-import {
   AuthenticationResponse,
   ClaimTokenRequest,
+  CreateOtpRequestBody,
   FederatedAuthnLoginResponse,
+  GetCurrentProjectMemberRoleQuery,
   ProjectRole,
+  ResetPasswordRequestBody,
   SignInRequest,
   SignUpRequest,
   SwitchPlatformRequest,
   ThirdPartyAuthnProviderEnum,
   UserIdentity,
+  VerifyEmailRequestBody,
 } from '@activepieces/shared';
 
 export const authenticationApi = {
