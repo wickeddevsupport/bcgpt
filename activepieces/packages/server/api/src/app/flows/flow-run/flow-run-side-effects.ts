@@ -24,12 +24,13 @@ export const flowRunSideEffects = (log: FastifyBaseLogger) => ({
         })
     },
     async onResume(flowRun: FlowRun): Promise<void> {
-        applicationEvents(log).sendWorkerEvent(flowRun.projectId, {
-            action: ApplicationEventName.FLOW_RUN_RESUMED,
-            data: {
-                flowRun,
-            },
-        })
+        // TODO: Implement flow run resumed event when ApplicationEventName.FLOW_RUN_RESUMED is available in CE
+        // applicationEvents(log).sendWorkerEvent(flowRun.projectId, {
+        //     action: ApplicationEventName.FLOW_RUN_RESUMED,
+        //     data: {
+        //         flowRun,
+        //     },
+        // })
     },
     async onStart(flowRun: FlowRun): Promise<void> {
        

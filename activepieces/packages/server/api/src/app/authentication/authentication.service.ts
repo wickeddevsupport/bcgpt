@@ -7,7 +7,6 @@ import { platformService } from '../platform/platform.service'
 import { platformUtils } from '../platform/platform.utils'
 import { projectService } from '../project/project-service'
 import { userService } from '../user/user-service'
-import { userInvitationsService } from '../user-invitations/user-invitation.service'
 import { authenticationUtils } from './authentication-utils'
 import { userIdentityService } from './user-identity/user-identity-service'
 
@@ -48,10 +47,11 @@ export const authenticationService = (log: FastifyBaseLogger) => ({
             identity: userIdentity,
             platformId: params.platformId,
         })
-        await userInvitationsService(log).provisionUserInvitation({
-            email: params.email,
-            user,
-        })
+        // TODO: Implement user invitations when available
+        // await userInvitationsService(log).provisionUserInvitation({
+        //     email: params.email,
+        //     user,
+        // })
 
         return authenticationUtils.getProjectAndToken({
             userId: user.id,
@@ -128,10 +128,11 @@ export const authenticationService = (log: FastifyBaseLogger) => ({
             identity: userIdentity,
             platformId,
         })
-        await userInvitationsService(log).provisionUserInvitation({
-            email: params.email,
-            user,
-        })
+        // TODO: Implement user invitations when available
+        // await userInvitationsService(log).provisionUserInvitation({
+        //     email: params.email,
+        //     user,
+        // })
         return authenticationUtils.getProjectAndToken({
             userId: user.id,
             platformId,

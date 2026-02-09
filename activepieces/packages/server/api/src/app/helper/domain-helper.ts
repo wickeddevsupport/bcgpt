@@ -16,9 +16,10 @@ function trimTrailingSlash(url: string): string {
 }
 
 function getFrontendUrl(): string {
-    // In CE we keep this simple and rely on AP_FRONTEND_URL.
+    // In CE we keep this simple and rely on AP_FRONTEND_URL environment variable.
     // Custom domains (EE) are intentionally not supported here.
-    return trimTrailingSlash(system.getOrThrow(AppSystemProp.FRONTEND_URL))
+    const frontendUrl = process.env['AP_FRONTEND_URL'] || ''
+    return trimTrailingSlash(frontendUrl)
 }
 
 export const domainHelper = {

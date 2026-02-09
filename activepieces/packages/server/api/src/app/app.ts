@@ -11,7 +11,6 @@ import {
     SeekPage,
     spreadIfDefined,
     Template,
-    UserInvitation,
     UserWithMetaInformation,
 } from '@activepieces/shared'
 import swagger from '@fastify/swagger'
@@ -19,7 +18,6 @@ import { createAdapter } from '@socket.io/redis-adapter'
 import { FastifyInstance, FastifyRequest, HTTPMethods } from 'fastify'
 import fastifySocketIO from 'fastify-socket'
 import { Socket } from 'socket.io'
-import { apiKeyModule } from './api-keys/api-key.module'
 import { aiProviderService } from './ai/ai-provider-service'
 import { aiProviderModule } from './ai/ai-provider.module'
 import { platformAnalyticsModule } from './analytics/platform-analytics.module'
@@ -61,7 +59,6 @@ import { appEventRoutingModule } from './trigger/app-event-routing/app-event-rou
 import { triggerModule } from './trigger/trigger.module'
 import { userBadgeModule } from './user/badges/badge-module'
 import { platformUserModule } from './user/platform/platform-user-module'
-import { invitationModule } from './user-invitations/user-invitation.module'
 import { webhookModule } from './webhooks/webhook-module'
 import { engineResponseWatcher } from './workers/engine-response-watcher'
 import { queueMetricsModule } from './workers/queue/metrics/queue-metrics.module'
@@ -96,7 +93,7 @@ export const setupApp = async (app: FastifyInstance): Promise<FastifyInstance> =
                     template: Template,
                     folder: Folder,
                     user: UserWithMetaInformation,
-                    'user-invitation': UserInvitation,
+                    // 'user-invitation': UserInvitation, // TODO: Implement when user invitations available
                     project: Project,
                     flow: Flow,
                     'flow-run': FlowRun,
@@ -162,8 +159,6 @@ export const setupApp = async (app: FastifyInstance): Promise<FastifyInstance> =
     await app.register(tagsModule)
     await app.register(mcpServerModule)
     await app.register(platformUserModule)
-    await app.register(apiKeyModule)
-    await app.register(invitationModule)
     await app.register(workerModule)
     await aiProviderService(app.log).setup()
     await app.register(aiProviderModule)

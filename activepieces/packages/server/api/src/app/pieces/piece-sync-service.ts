@@ -91,11 +91,11 @@ async function installNewPieces(cloudPieces: PieceRegistryResponse[], dbPieces: 
                 log.warn({ name: piece.name, version: piece.version, status: response.status }, 'Error reading piece metadata')
                 return
             }
-            const pieceMetadata = await response.json()
+            const pieceMetadata = await response.json() as any
             await pieceMetadataService(log).create({
                 pieceMetadata,
-                packageType: pieceMetadata.packageType,
-                pieceType: pieceMetadata.pieceType,
+                packageType: (pieceMetadata as any).packageType,
+                pieceType: (pieceMetadata as any).pieceType,
             })
         }))
     }
@@ -111,7 +111,7 @@ async function listCloudPieces(): Promise<PieceRegistryResponse[]> {
     if (!response.ok) {
         throw new Error(`Failed to fetch cloud pieces: ${response.status}`)
     }
-    const registryPieces: PieceRegistryResponse[] = await response.json()
+    const registryPieces: PieceRegistryResponse[] = (await response.json()) as PieceRegistryResponse[]
     const piecesByName = groupBy(registryPieces, p => p.name)
     const latest = []
     const others = []

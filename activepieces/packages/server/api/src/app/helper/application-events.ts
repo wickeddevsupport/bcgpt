@@ -54,14 +54,20 @@ export const applicationEvents = (log: FastifyBaseLogger) => ({
     sendWorkerEvent(projectId: string, params: RawAuditEventParam): void {
         projectService.getPlatformId(projectId).then((platformId) => {
             for (const listener of listeners.workerEventListeners) {
-                listener(projectId, {
+                // Add userId field for compatibility with auditEventService when available
+                const eventData: any = {
                     ...params,
                     projectId,
-                    platformId,
+                    // platformId is an EE feature, only add if available
+                    ...(platformId && { platformId }),
                     id: apId(),
                     created: new Date().toISOString(),
                     updated: new Date().toISOString(),
-                })
+                }
+                if ('userId' in params) {
+                    eventData.userId = (params as any).userId
+                }
+                listener(projectId, eventData)
             }
         }).catch((error) => {
             log.error(error)

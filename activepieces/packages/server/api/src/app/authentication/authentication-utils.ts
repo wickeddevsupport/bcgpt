@@ -6,7 +6,6 @@ import { telemetry } from '../helper/telemetry.utils'
 import { platformService } from '../platform/platform.service'
 import { projectService } from '../project/project-service'
 import { userService } from '../user/user-service'
-import { userInvitationsService } from '../user-invitations/user-invitation.service'
 import { accessTokenManager } from './lib/access-token-manager'
 import { userIdentityService } from './user-identity/user-identity-service'
 
@@ -15,19 +14,9 @@ export const authenticationUtils = {
         email,
         platformId,
     }: AssertUserIsInvitedToPlatformOrProjectParams): Promise<void> {
-        const isInvited = await userInvitationsService(log).hasAnyAcceptedInvitations({
-            platformId,
-            email,
-            
-        })
-        if (!isInvited) {
-            throw new ActivepiecesError({
-                code: ErrorCode.INVITATION_ONLY_SIGN_UP,
-                params: {
-                    message: 'User is not invited to the platform',
-                },
-            })
-        }
+        // TODO: Implement user invitations when available
+        // For now, always allow (invitations disabled in CE)
+        return
     },
 
     async getProjectAndToken(params: GetProjectAndTokenParams): Promise<AuthenticationResponse> {

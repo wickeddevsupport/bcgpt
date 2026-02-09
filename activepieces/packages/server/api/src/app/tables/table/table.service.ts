@@ -353,7 +353,7 @@ function getTableState(table: PopulatedTable) {
         status: table.status ?? null,
         trigger: table.trigger ?? null,
         fields: (table.fields ?? []).map((field) => {
-            const rawOptions = (field.data as { options?: unknown[] } | null)?.options
+            const rawOptions = ((field as any)?.data as { options?: unknown[] } | null)?.options
             const options = Array.isArray(rawOptions)
                 ? rawOptions
                       .map((o) => (typeof o === 'string' ? o : (o as { value?: unknown })?.value))

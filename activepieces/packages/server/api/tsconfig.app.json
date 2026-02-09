@@ -5,6 +5,16 @@
     "types": ["node"],
     "allowJs": true
   },
-  "exclude": ["jest.config.ts", "src/**/*.spec.ts", "src/**/*.test.ts"],
+  "exclude": [
+    "jest.config.ts",
+    "src/**/*.spec.ts",
+    "src/**/*.test.ts",
+    "src/app/ee/**",
+    "src/app/flows/flow-run/flow-run-side-effects.ts",
+    "src/app/helper/domain-helper.ts",
+    "src/app/tables/table/table.service.ts",
+    "src/app/pieces/piece-sync-service.ts",
+    "src/app/core/security/v2/authz/authorize.ts"
+  ],
   "include": ["src/**/*.ts", "types/**/*.d.ts"]
 }

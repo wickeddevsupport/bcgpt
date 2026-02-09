@@ -6,10 +6,8 @@ import {
 } from 'typeorm'
 import { AIProviderEntity } from '../ai/ai-provider-entity'
 import { PlatformAnalyticsReportEntity } from '../analytics/platform-analytics-report.entity'
-import { ApiKeyEntity } from '../api-keys/api-key-entity'
 import { AppConnectionEntity } from '../app-connection/app-connection.entity'
 import { UserIdentityEntity } from '../authentication/user-identity/user-identity-entity'
-import { EventDestinationEntity } from '../event-destinations/event-destinations.entity'
 import { FileEntity } from '../file/file.entity'
 import { FlagEntity } from '../flags/flag.entity'
 import { FlowEntity } from '../flows/flow/flow.entity'
@@ -37,7 +35,6 @@ import { TriggerEventEntity } from '../trigger/trigger-events/trigger-event.enti
 import { TriggerSourceEntity } from '../trigger/trigger-source/trigger-source-entity'
 import { UserBadgeEntity } from '../user/badges/badge-entity'
 import { UserEntity } from '../user/user-entity'
-import { UserInvitationEntity } from '../user-invitations/user-invitation.entity'
 import { createPGliteDataSource } from './pglite-connection'
 import { createPostgresDataSource } from './postgres-connection'
 
@@ -61,7 +58,6 @@ function getEntities(): EntitySchema<unknown>[] {
         PlatformEntity,
         TagEntity,
         PieceTagEntity,
-        UserInvitationEntity,
         AIProviderEntity,
         TableEntity,
         FieldEntity,
@@ -76,11 +72,8 @@ function getEntities(): EntitySchema<unknown>[] {
         UserBadgeEntity,
 
         // CE-supported extras
-        ApiKeyEntity,
         TemplateEntity,
         PlatformAnalyticsReportEntity,
-        EventDestinationEntity,
-
     ]
 }
 

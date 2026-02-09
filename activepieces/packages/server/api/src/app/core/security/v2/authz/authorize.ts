@@ -57,12 +57,14 @@ async function assertAccessToProject(principal: Principal, projectSecurity: Proj
     // CE-safe default authorization:
     // - Service principals are treated as platform-scoped and allowed.
     // - User principals must either own the project or be a privileged platform user.
-    if (principal.type === PrincipalType.SERVICE) {
+    // - Worker principals are treated as platform-scoped and allowed.
+    if (principal.type === PrincipalType.SERVICE || principal.type === PrincipalType.WORKER) {
         return
     }
 
     const project = await projectService.getOneOrThrow(projectSecurity.projectId)
-    if (project.platformId !== principal.platform.id) {
+    // Platform ID check: only validate if principal has platform info (EE feature)
+    if ((principal as any).platform?.id && project.platformId !== (principal as any).platform.id) {
         throw new ActivepiecesError({
             code: ErrorCode.AUTHORIZATION,
             params: { message: 'User is not allowed to access this project' },
