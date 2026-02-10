@@ -1,13 +1,17 @@
 import { securityAccess } from '@activepieces/server-shared'
 import {
+    ActivepiecesError,
     ApId,
     assertNotNullOrUndefined,
     ListUsersRequestBody,
+    PlatformRole,
     PrincipalType,
     SeekPage,
     SERVICE_KEY_SECURITY_OPENAPI,
     UpdateUserRequestBody,
+    UserWithBadges,
     UserWithMetaInformation,
+    ErrorCode,
 } from '@activepieces/shared'
 import {
     FastifyPluginAsyncTypebox,
@@ -17,6 +21,42 @@ import { StatusCodes } from 'http-status-codes'
 import { userService } from '../user-service'
 
 export const platformUserController: FastifyPluginAsyncTypebox = async (app) => {
+    // Needed by Sidebar user menu and various UI screens.
+    // NOTE: Define `/me` before `/:id` to avoid routing ambiguity.
+    app.get('/me', GetMeRequest, async (req) => {
+        const platformId = req.principal.platform.id
+        assertNotNullOrUndefined(platformId, 'platformId')
+        return userService.getOneByIdAndPlatformIdOrThrow({
+            id: req.principal.id,
+            platformId,
+        })
+    })
+
+    app.get('/:id', GetUserRequest, async (req) => {
+        const platformId = req.principal.platform.id
+        assertNotNullOrUndefined(platformId, 'platformId')
+
+        // Users can always fetch their own record. Fetching other users is for admins/operators.
+        if (req.params.id !== req.principal.id) {
+            const requester = await userService.getOrThrow({ id: req.principal.id })
+            const privileged =
+                requester.platformRole === PlatformRole.ADMIN ||
+                requester.platformRole === PlatformRole.OPERATOR
+            if (!privileged) {
+                throw new ActivepiecesError({
+                    code: ErrorCode.AUTHORIZATION,
+                    params: {
+                        message: 'Not authorized to access this user',
+                    },
+                })
+            }
+        }
+
+        return userService.getOneByIdAndPlatformIdOrThrow({
+            id: req.params.id,
+            platformId,
+        })
+    })
 
     app.get('/', ListUsersRequest, async (req) => {
         const platformId = req.principal.platform.id
@@ -71,6 +111,37 @@ const ListUsersRequest = {
     },
     config: {
         security: securityAccess.platformAdminOnly([PrincipalType.USER, PrincipalType.SERVICE]),
+    },
+}
+
+const GetMeRequest = {
+    schema: {
+        response: {
+            [StatusCodes.OK]: UserWithBadges,
+        },
+        tags: ['users'],
+        description: 'Get current user',
+        security: [SERVICE_KEY_SECURITY_OPENAPI],
+    },
+    config: {
+        security: securityAccess.publicPlatform([PrincipalType.USER]),
+    },
+}
+
+const GetUserRequest = {
+    schema: {
+        params: Type.Object({
+            id: ApId,
+        }),
+        response: {
+            [StatusCodes.OK]: UserWithBadges,
+        },
+        tags: ['users'],
+        description: 'Get user by id',
+        security: [SERVICE_KEY_SECURITY_OPENAPI],
+    },
+    config: {
+        security: securityAccess.publicPlatform([PrincipalType.USER]),
     },
 }
 

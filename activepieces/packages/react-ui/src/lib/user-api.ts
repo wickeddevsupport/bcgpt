@@ -3,6 +3,9 @@ import { UpdateMeResponse, UserWithBadges } from '@activepieces/shared';
 import { api } from './api';
 
 export const userApi = {
+  getMe() {
+    return api.get<UserWithBadges>(`/v1/users/me`);
+  },
   getUserById(id: string) {
     return api.get<UserWithBadges>(`/v1/users/${id}`);
   },

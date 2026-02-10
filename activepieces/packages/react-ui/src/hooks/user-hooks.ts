@@ -6,21 +6,20 @@ import { isNil, UserWithBadges } from '@activepieces/shared';
 
 export const userHooks = {
   useCurrentUser: () => {
-    const userId = authenticationSession.getCurrentUserId();
     const token = authenticationSession.getToken();
     const expired = authenticationSession.isJwtExpired(token!);
     return useSuspenseQuery<UserWithBadges | null, Error>({
-      queryKey: ['currentUser', userId],
+      queryKey: ['currentUser'],
       queryFn: async () => {
         // Skip user data fetch if JWT is expired to prevent redirect to sign-in page
         // This is especially important for embedding scenarios where we need to accept
         // a new JWT token rather than triggering the global error handler
 
-        if (!userId || expired) {
+        if (!token || expired) {
           return null;
         }
         try {
-          const result = await userApi.getUserById(userId);
+          const result = await userApi.getMe();
           return result;
         } catch (error) {
           console.error(error);
@@ -46,8 +45,7 @@ export const userHooks = {
     });
   },
   invalidateCurrentUser: (queryClient: QueryClient) => {
-    const userId = authenticationSession.getCurrentUserId();
-    queryClient.invalidateQueries({ queryKey: ['currentUser', userId] });
+    queryClient.invalidateQueries({ queryKey: ['currentUser'] });
   },
   getCurrentUserPlatformRole: () => {
     const { data: user } = userHooks.useCurrentUser();
