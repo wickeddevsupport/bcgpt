@@ -18,6 +18,7 @@ services:
       - "traefik.http.services.activepieces.loadbalancer.server.port=80"
     networks:
       - coolify
+      - activepieces
     environment:
       AP_EDITION: "ce"
       AP_ENVIRONMENT: "prod"
@@ -58,6 +59,8 @@ services:
       POSTGRES_DB: "${AP_POSTGRES_DATABASE}"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    networks:
+      - activepieces
 
   redis:
     image: redis:7-alpine
@@ -67,6 +70,8 @@ services:
       --requirepass ${AP_REDIS_PASSWORD}
     volumes:
       - redis-data:/data
+    networks:
+      - activepieces
 
 volumes:
   activepieces-data:
@@ -82,3 +87,5 @@ volumes:
 networks:
   coolify:
     external: true
+  activepieces:
+    internal: true
