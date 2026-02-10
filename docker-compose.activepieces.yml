@@ -2,7 +2,9 @@ version: "3.9"
 
 services:
   activepieces:
-    image: ghcr.io/wickeddevsupport/activepieces-bcgpt:latest
+    build:
+      context: ./activepieces
+      dockerfile: Dockerfile
     labels:
       - "traefik.enable=true"
       - "traefik.http.middlewares.activepieces-redirect-to-https.redirectscheme.scheme=https"
