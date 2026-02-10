@@ -67,10 +67,10 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: >
-      redis-server
-      --appendonly no
-      --requirepass ${AP_REDIS_PASSWORD}
+    env_file:
+      - .env.activepieces
+    # Use the value from env_file at runtime (avoid compose-time ${...} interpolation warnings).
+    command: ["sh", "-lc", "redis-server --appendonly no --requirepass \"$AP_REDIS_PASSWORD\""]
     volumes:
       - redis-data:/data
     networks:
