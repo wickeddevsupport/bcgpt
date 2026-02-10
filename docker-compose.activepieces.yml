@@ -17,8 +17,8 @@ services:
       - "traefik.http.routers.activepieces.tls.certresolver=letsencrypt"
       - "traefik.http.services.activepieces.loadbalancer.server.port=80"
     networks:
-      - coolify
       - activepieces
+      - coolify
     environment:
       AP_EDITION: "ce"
       AP_ENVIRONMENT: "prod"
