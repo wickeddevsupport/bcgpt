@@ -40,6 +40,8 @@ services:
       AP_DEV_PIECES: "basecamp"
     volumes:
       - activepieces-data:/var/data/activepieces
+    ports:
+      - "80:80"
     expose:
       - "80"
     depends_on:
