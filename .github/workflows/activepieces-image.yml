@@ -1,13 +1,22 @@
 name: Build Activepieces Image
 
+# Disabled - deploying directly on server
+# on:
+#   workflow_dispatch:
+#   push:
+#     branches:
+#       - main
+#     paths:
+#       - "activepieces/**"
+#       - ".github/workflows/activepieces-image.yml"
+
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - "activepieces/**"
-      - ".github/workflows/activepieces-image.yml"
+    inputs:
+      disabled:
+        description: 'Workflow disabled - use manual deployment'
+        required: false
+        default: 'true'
 
 permissions:
   contents: read
