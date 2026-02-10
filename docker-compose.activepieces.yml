@@ -2,9 +2,7 @@ version: "3.9"
 
 services:
   activepieces:
-    build:
-      context: ./activepieces
-      dockerfile: Dockerfile
+    image: ghcr.io/wickeddevsupport/activepieces-bcgpt:latest
     labels:
       - "traefik.enable=true"
       - "traefik.http.middlewares.activepieces-redirect-to-https.redirectscheme.scheme=https"
@@ -30,10 +28,10 @@ services:
       AP_POSTGRES_DATABASE: "${AP_POSTGRES_DATABASE}"
       AP_REDIS_HOST: "redis"
       AP_REDIS_PORT: "6379"
+      AP_REDIS_PASSWORD: ""
       AP_JWT_SECRET: "${AP_JWT_SECRET}"
       AP_ENCRYPTION_KEY: "${AP_ENCRYPTION_KEY}"
       AP_CONFIG_PATH: "/var/data/activepieces"
-      AP_SELF_SERVE_SIGN_UP_ENABLED: "${AP_SELF_SERVE_SIGN_UP_ENABLED:-true}"
       # Custom branding
       AP_APP_TITLE: "Wicked Flow"
       AP_FAVICON_URL: "https://flow.wickedlab.io/branding/wicked-flow-icon.svg"
