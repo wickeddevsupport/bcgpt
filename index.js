@@ -951,24 +951,31 @@ app.post("/mcp", async (req, res) => {
       "prompts/list",
       "prompts/get"
     ].includes(method)) {
+      // For unprotected methods, still resolve API key to token if it exists
+      const apiKey = extractApiKey(req);
+      const resolvedCtx = await resolveRequestContext(req, { apiKey });
       const ctx = {
-        TOKEN: null,
+        TOKEN: resolvedCtx.token,
         accountId: null,
         ua: UA,
-        userKey: null,
-        apiKey: extractApiKey(req),
-        authAccounts: [],
+        userKey: resolvedCtx.userKey,
+        apiKey: apiKey,
+        authAccounts: resolvedCtx.auth?.accounts || [],
         startStatus: async () => await startStatus(req),
-        basecampFetch: async () => {
-          const err = new Error("NOT_AUTHENTICATED");
-          err.code = "NOT_AUTHENTICATED";
-          throw err;
-        },
-        basecampFetchAll: async () => {
-          const err = new Error("NOT_AUTHENTICATED");
-          err.code = "NOT_AUTHENTICATED";
-          throw err;
-        },
+        basecampFetch: resolvedCtx.token?.access_token 
+          ? async (path, opts = {}) => basecampFetchCore(resolvedCtx.token, path, { ...opts, ua: UA, accountId: null })
+          : async () => {
+              const err = new Error("NOT_AUTHENTICATED");
+              err.code = "NOT_AUTHENTICATED";
+              throw err;
+            },
+        basecampFetchAll: resolvedCtx.token?.access_token
+          ? async (path, opts = {}) => basecampFetchAllCore(resolvedCtx.token, path, { ...opts, ua: UA, accountId: null })
+          : async () => {
+              const err = new Error("NOT_AUTHENTICATED");
+              err.code = "NOT_AUTHENTICATED";
+              throw err;
+            },
       };
       const out = await handleMCP(req.body, ctx);
       return res.json(out);
