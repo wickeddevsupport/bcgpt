@@ -26,12 +26,13 @@ services:
       AP_EXECUTION_MODE: "UNSANDBOXED"
       AP_DB_TYPE: "POSTGRES"
       AP_REDIS_TYPE: "STANDALONE"
-      AP_POSTGRES_HOST: "postgres"
+      # Use unique internal DNS names to avoid collisions on the shared Coolify network.
+      AP_POSTGRES_HOST: "activepieces-postgres"
       AP_POSTGRES_PORT: "5432"
       AP_POSTGRES_USERNAME: "${AP_POSTGRES_USERNAME}"
       AP_POSTGRES_PASSWORD: "${AP_POSTGRES_PASSWORD}"
       AP_POSTGRES_DATABASE: "${AP_POSTGRES_DATABASE}"
-      AP_REDIS_HOST: "redis"
+      AP_REDIS_HOST: "activepieces-redis"
       AP_REDIS_PORT: "6379"
       # Must match Redis `--requirepass` below, otherwise ioredis will emit NOAUTH.
       AP_REDIS_PASSWORD: "${AP_REDIS_PASSWORD}"
@@ -60,7 +61,9 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     networks:
-      - activepieces
+      activepieces:
+        aliases:
+          - activepieces-postgres
 
   redis:
     image: redis:7-alpine
@@ -71,7 +74,9 @@ services:
     volumes:
       - redis-data:/data
     networks:
-      - activepieces
+      activepieces:
+        aliases:
+          - activepieces-redis
 
 volumes:
   activepieces-data:
