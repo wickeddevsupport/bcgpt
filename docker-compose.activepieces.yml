@@ -1,8 +1,8 @@
-version: "3.9"
-
 services:
   activepieces:
     image: ghcr.io/wickeddevsupport/activepieces-bcgpt:latest
+    env_file:
+      - .env.activepieces
     labels:
       - "traefik.enable=true"
       # Ensure Traefik uses the same network it is attached to (Coolify's `coolify` network).
@@ -32,7 +32,8 @@ services:
       AP_POSTGRES_DATABASE: "${AP_POSTGRES_DATABASE}"
       AP_REDIS_HOST: "redis"
       AP_REDIS_PORT: "6379"
-      AP_REDIS_PASSWORD: ""
+      # Must match Redis `--requirepass` below, otherwise ioredis will emit NOAUTH.
+      AP_REDIS_PASSWORD: "${AP_REDIS_PASSWORD}"
       AP_JWT_SECRET: "${AP_JWT_SECRET}"
       AP_ENCRYPTION_KEY: "${AP_ENCRYPTION_KEY}"
       AP_CONFIG_PATH: "/var/data/activepieces"
@@ -60,6 +61,10 @@ services:
 
   redis:
     image: redis:7-alpine
+    command: >
+      redis-server
+      --appendonly no
+      --requirepass ${AP_REDIS_PASSWORD}
     volumes:
       - redis-data:/data
 
