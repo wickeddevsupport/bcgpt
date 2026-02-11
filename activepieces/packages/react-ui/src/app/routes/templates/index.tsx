@@ -1,8 +1,6 @@
 import { t } from 'i18next';
 import {
   AlertTriangle,
-  LayoutGrid,
-  MousePointerClick,
   Plus,
   Search,
 } from 'lucide-react';
@@ -233,27 +231,11 @@ const TemplatesPage = () => {
               <Button
                 variant="outline"
                 className="gap-2 h-full"
-                onClick={() => navigate('/apps')}
-              >
-                <LayoutGrid className="w-4 h-4" />
-                {t('Browse Apps')}
-              </Button>
-              <Button
-                variant="outline"
-                className="gap-2 h-full"
-                onClick={() => navigate('/apps/publisher')}
-              >
-                <MousePointerClick className="w-4 h-4" />
-                {t('Publish as App')}
-              </Button>
-              <Button
-                variant="outline"
-                className="gap-2 h-full"
                 onClick={() => createFlow()}
                 disabled={isCreateFlowPending}
               >
                 <Plus className="w-4 h-4" />
-                {t('Create Template')}
+                {t('Start from Scratch')}
               </Button>
             </div>
           </div>
