@@ -71,35 +71,36 @@ bcgpt/
 
 ### Prerequisites
 - Git configured with GitHub access
-- Node.js 20+ (for local builds)
-- npm/yarn/bun installed
+- Code editor (VS Code recommended)
+- SSH access to server
 
-### Build Flow-Gallery Locally
+### Edit Code Locally
 ```bash
-cd c:\Users\rjnd\Documents\GitHub\bcgpt\activepieces
+# Flow-gallery locations
+activepieces/packages/server/api/src/app/flow-gallery/flow-gallery.service.ts
+activepieces/packages/server/api/src/app/flow-gallery/flow-gallery.controller.ts
 
-# Build just flow-gallery (fast - ~30 seconds)
-npx nx build flow-gallery --skip-nx-cache
+# Basecamp piece location
+activepieces/packages/pieces/community/basecamp/src/
 
-# Build pieces
-npx nx build pieces-framework --skip-nx-cache
-npx nx build pieces-common --skip-nx-cache
-npx nx build pieces-basecamp --skip-nx-cache
-
-# Check for errors
-npx tsc --noEmit  # TypeScript verification
+# Make your changes, then push
+cd c:\Users\rjnd\Documents\GitHub\bcgpt
+git add .
+git commit -m "feat: description"
+git push origin main
 ```
 
-### Locations to Edit
-- **Flow-gallery API**: `activepieces/packages/server/api/src/app/flow-gallery/flow-gallery.service.ts`
-- **Flow-gallery UI**: `activepieces/packages/server/api/src/app/flow-gallery/flow-gallery.controller.ts`
-- **Basecamp piece**: `activepieces/packages/pieces/community/basecamp/src/`
+### Why Server-Side Builds?
+- Monorepo compiles faster on server with more CPU cores
+- No waiting for npm downloads on your machine
+- Server has better specs than local (8+ CPU cores vs your machine)
+- Just push → pull → build is much simpler
 
 ---
 
-## 4. Test in Container (2-3 minutes)
+## 4. Build & Test on Server (2-3 minutes)
 
-### On Production Server
+### Development Workflow: Push → Pull → Build
 ```bash
 # SSH first
 ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
@@ -108,25 +109,32 @@ ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
 cd /home/deploy/bcgpt
 git pull origin main
 
-# Rebuild only activepieces service (uses docker-compose build)
-# This is much faster than full Docker build
+# Rebuild only activepieces service with your changes
+# This rebuilds the Dockerfile with all your code changes
 sudo docker compose -f docker-compose.activepieces.yml up -d activepieces --build --no-deps
 
-# Watch it start
+# Watch it build and start
 sudo docker compose -f docker-compose.activepieces.yml logs -f activepieces
 
-# Test endpoint
-curl https://flow.wickedlab.io/apps/api/apps
+# Test endpoint (after it's up)
+curl https://flow.wickedlab.io/apps
 
 # View container status
 sudo docker compose -f docker-compose.activepieces.yml ps
 ```
 
-### What This Does
-1. `docker compose up... --build --no-deps` recognizes there's a Dockerfile in compose
-2. Rebuilds only the activepieces service (not postgres/redis)
-3. Uses Docker cache, so only changed layers rebuild
-4. Typically takes 2-3 minutes vs 15+ for full image
+### Why Server-Side Build is Faster
+1. **No local compilation needed** - Just push code to GitHub
+2. **Nx rebuilds only changed packages** - Server has good CPU cores
+3. **Docker layer caching** - Previous builds cached, only new changes rebuild
+4. **Faster than full image builds** - ~2-3 minutes vs 15+ minutes
+5. **Same environment as production** - Linux containers match deployment
+
+### Typical Build Flow
+```
+git push → ssh to server → git pull → docker compose build → app ready
+         (immediate)       (~30s)      (~2-3 mins)          (live)
+```
 
 ---
 
@@ -199,28 +207,50 @@ sudo docker compose -f docker-compose.activepieces.yml up -d activepieces --buil
 
 ## 7. Git Workflow
 
-### Commit Changes
+### Daily Development Cycle
 ```bash
 cd c:\Users\rjnd\Documents\GitHub\bcgpt
 
-# Stage files
-git add activepieces/packages/server/api/src/app/flow-gallery/
-git add activepieces/packages/pieces/community/basecamp/
+# 1. Edit code locally
+# activepieces/packages/server/api/src/app/flow-gallery/
+# activepieces/packages/pieces/community/basecamp/
 
-# Commit with message
+# 2. Stage and commit
+git add .
 git commit -m "feat(flow-gallery): add new feature"
 
-# Push to main
+# 3. Push to main - this triggers server rebuild
 git push origin main
+
+# 4. On server, rebuild immediately:
+# ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
+# cd /home/deploy/bcgpt
+# git pull && sudo docker compose -f docker-compose.activepieces.yml up -d activepieces --build --no-deps
 ```
 
-### Release Version (for Docker builds)
+### Production Release (Full Docker Image Build)
 ```bash
-# Create a version tag to trigger Docker build
+# When you want a complete optimized image in ghcr.io:
+
+# Tag for release (triggers GitHub Actions if manually triggered)
 git tag release-v1.1
 git push origin release-v1.1
 
-# GitHub Actions will automatically build and push to ghcr.io
+# Goes to GitHub Actions:
+# - Builds full image (15-20 minutes)
+# - All pieces, react-ui, dependencies included
+# - Pushes to ghcr.io/wickeddevsupport/activepieces-bcgpt:latest
+
+# Then on server, switch to new image (optional):
+# Edit docker-compose.activepieces.yml to use new tag
+# sudo docker compose -f docker-compose.activepieces.yml pull
+# sudo docker compose -f docker-compose.activepieces.yml up -d
+```
+
+### Workflow Summary
+```
+Local        →    git push    →    Server pulls    →    Docker rebuilds    →    Live
+(edit code)      (1 second)       (30 seconds)       (2-3 minutes)       (instant)
 ```
 
 ---
@@ -299,26 +329,29 @@ sudo docker compose -f docker-compose.activepieces.yml up -d activepieces --buil
 - Nginx reverse proxy routing to Traefik
 
 ### What's Manual 🔄
-- **Code changes** → Push to main → Test locally (30s) → Deploy to container (2-3 mins)
+- **Code changes** → Push to main → SSH and rebuild on server (2-3 mins)
 - **Docker image builds** → Manual trigger via GitHub Actions or tag release
-- **Production restart** → SSH + docker compose command
+- **Server restart** → SSH + docker compose commands
 
 ### What's Automated ⚙️
-- GitHub Actions workflow listens for git tags or manual triggers
-- Environment variables managed via `.env.activepieces`
+- GitHub Actions builds full Docker images on manual trigger or tags
+- Environment variables managed via `.env.activepieces` (server only)
 - Database migrations run on container start
 - Piece registration happens automatically
+- Nx builds only changed packages during rebuild
 
 ---
 
 ## 11. Quick Command Reference
 
 ```bash
-# Local development
-cd c:\Users\rjnd\Documents\GitHub\bcgpt\activepieces
-npx nx build flow-gallery --skip-nx-cache        # Test locally (30s)
+# Local development (your machine)
+cd c:\Users\rjnd\Documents\GitHub\bcgpt
+git add .
+git commit -m "feat: message"
+git push origin main
 
-# Deploy to staging (container)
+# Build on server (in new terminal)
 ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
 cd /home/deploy/bcgpt
 git pull origin main
@@ -326,18 +359,12 @@ sudo docker compose -f docker-compose.activepieces.yml up -d activepieces --buil
 
 # Check if working
 curl https://flow.wickedlab.io/apps
-
-# View logs
 sudo docker compose -f docker-compose.activepieces.yml logs -f activepieces
 
-# Git commit and push
-git add .
-git commit -m "message"
-git push origin main
-
-# Tag for production Docker build
+# For production Docker build (optional)
 git tag release-v1.0
 git push origin release-v1.0
+# Then manually trigger GitHub Actions or wait for auto-build
 ```
 
 ---
@@ -346,11 +373,13 @@ git push origin release-v1.0
 
 **If returning after session clear:**
 
-1. **Check status**: `ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175`
-2. **See what's running**: `sudo docker compose -f docker-compose.activepieces.yml ps`
-3. **Check logs**: `sudo docker compose -f docker-compose.activepieces.yml logs --tail 20 activepieces`
-4. **Pull latest code**: `cd /home/deploy/bcgpt && git pull origin main`
-5. **Continue development**
+1. **Check what's running**: `ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175 && sudo docker compose -f /home/deploy/bcgpt/docker-compose.activepieces.yml ps`
+2. **Check recent logs**: `sudo docker compose -f docker-compose.activepieces.yml logs --tail 30 activepieces`
+3. **Edit code locally**: Edit files, then `git push origin main`
+4. **Rebuild on server**: SSH back, git pull, docker compose build
+5. **See QUICK_START.md for immediate commands**
+
+Last known state: GitHub Actions Docker build running (or completed)
 
 Last commit (2026-02-11 08:00 UTC): `2819847e` - "fix(workflow): only build on manual trigger or tags"
 
