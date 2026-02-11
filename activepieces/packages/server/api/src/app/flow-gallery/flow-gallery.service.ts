@@ -157,8 +157,8 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
 
         return {
             flowId: primaryFlow.id,
-            version: primaryFlow.version,
-            inputSchema: primaryFlow.trigger?.inputs || {},
+            version: 1,
+            inputSchema: {},
         }
     },
 
