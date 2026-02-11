@@ -4,8 +4,7 @@ FROM node:20.19-bullseye-slim AS base
 ENV LANG=en_US.UTF-8 \
     LANGUAGE=en_US:en \
     LC_ALL=en_US.UTF-8 \
-    NX_DAEMON=false \
-    NX_NO_CLOUD=true
+    NX_DAEMON=false
 
 # Install all system dependencies in a single layer with cache mounts
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -62,6 +61,9 @@ FROM base AS build
 
 WORKDIR /usr/src/app
 
+# Optional token for Nx Cloud remote cache in CI builds.
+ARG NX_CLOUD_ACCESS_TOKEN
+
 # Copy only dependency files first for better layer caching
 COPY .npmrc package.json bun.lock ./
 
@@ -75,22 +77,22 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 # Copy source code after dependency installation
 COPY . .
 
-# Build core projects (already has NX_NO_CLOUD from base stage)
+# Build core projects with Nx cache enabled.
 # Run sequentially to reduce peak memory usage in CI
 ENV NODE_OPTIONS=--max-old-space-size=4096
 
 # Build server-api which includes flow-gallery
-RUN npx nx build server-api --configuration production --skip-nx-cache
+RUN NX_CLOUD_ACCESS_TOKEN=${NX_CLOUD_ACCESS_TOKEN} npx nx build server-api --configuration production
 
 # Build pieces framework and common first (required dependencies for all pieces)
-RUN npx nx build pieces-framework --skip-nx-cache
-RUN npx nx build pieces-common --skip-nx-cache
+RUN NX_CLOUD_ACCESS_TOKEN=${NX_CLOUD_ACCESS_TOKEN} npx nx build pieces-framework
+RUN NX_CLOUD_ACCESS_TOKEN=${NX_CLOUD_ACCESS_TOKEN} npx nx build pieces-common
 
 # Build custom pieces so they can be loaded via AP_DEV_PIECES at runtime
-RUN npx nx build pieces-basecamp --skip-nx-cache
+RUN NX_CLOUD_ACCESS_TOKEN=${NX_CLOUD_ACCESS_TOKEN} npx nx build pieces-basecamp
 
 # Build react-ui frontend
-RUN npx nx build react-ui --configuration production --skip-nx-cache
+RUN NX_CLOUD_ACCESS_TOKEN=${NX_CLOUD_ACCESS_TOKEN} npx nx build react-ui --configuration production
 
 # Install production dependencies only for the backend API
 RUN --mount=type=cache,target=/root/.bun/install/cache \

@@ -3,9 +3,14 @@ name: Build Activepieces Image
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     tags:
       - 'release-*'
       - 'v*'
+    paths:
+      - 'activepieces/**'
+      - '.github/workflows/activepieces-image.yml'
 
 permissions:
   contents: read
@@ -43,6 +48,8 @@ jobs:
           context: ./activepieces
           file: ./activepieces/Dockerfile
           push: true
+          build-args: |
+            NX_CLOUD_ACCESS_TOKEN=${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
