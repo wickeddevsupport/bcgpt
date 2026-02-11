@@ -1,5 +1,11 @@
 import { t } from 'i18next';
-import { AlertTriangle, Plus, Search } from 'lucide-react';
+import {
+  AlertTriangle,
+  LayoutGrid,
+  MousePointerClick,
+  Plus,
+  Search,
+} from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -223,7 +229,23 @@ const TemplatesPage = () => {
               className="bg-sidebar-accent w-[50%]"
               placeholder={t('Search templates by name or description')}
             />
-            <div className="flex flex-row justify-end w-[50%]">
+            <div className="flex flex-row justify-end w-[50%] gap-2">
+              <Button
+                variant="outline"
+                className="gap-2 h-full"
+                onClick={() => navigate('/apps')}
+              >
+                <LayoutGrid className="w-4 h-4" />
+                {t('Browse Apps')}
+              </Button>
+              <Button
+                variant="outline"
+                className="gap-2 h-full"
+                onClick={() => navigate('/apps/publisher')}
+              >
+                <MousePointerClick className="w-4 h-4" />
+                {t('Publish as App')}
+              </Button>
               <Button
                 variant="outline"
                 className="gap-2 h-full"
@@ -231,7 +253,7 @@ const TemplatesPage = () => {
                 disabled={isCreateFlowPending}
               >
                 <Plus className="w-4 h-4" />
-                {t('Start from scratch')}
+                {t('Create Template')}
               </Button>
             </div>
           </div>
