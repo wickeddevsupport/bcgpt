@@ -85,6 +85,31 @@ interface UpdatePublishedAppParams extends Omit<PublishTemplateAsAppParams, 'tem
     platformId: string
 }
 
+type DefaultTemplateSeed = {
+    key: string
+    name: string
+    summary: string
+    description: string
+    categories: string[]
+    pieces: string[]
+    tags: string[]
+    type: TemplateType
+}
+
+type DefaultAppSeed = {
+    key: string
+    templateKey: string
+    name: string
+    description: string
+    category: string
+    tags: string[]
+    featured: boolean
+    displayOrder: number
+    icon: string
+    outputType: AppOutputType
+    inputSchema: Record<string, unknown>
+}
+
 type AppOutputType = 'json' | 'text' | 'image' | 'markdown' | 'html'
 type AppInputType = 'text' | 'textarea' | 'number' | 'select' | 'boolean' | 'password'
 
@@ -93,6 +118,209 @@ const MAX_TAGS = 12
 const MAX_TAG_LENGTH = 40
 const ALLOWED_OUTPUT_TYPES = new Set<AppOutputType>(['json', 'text', 'image', 'markdown', 'html'])
 const ALLOWED_INPUT_TYPES = new Set<AppInputType>(['text', 'textarea', 'number', 'select', 'boolean', 'password'])
+const DEFAULT_SEED_VERSION = 1
+const DEFAULT_SEED_AUTHOR = 'Wicked Flow'
+
+const DEFAULT_TEMPLATE_SEEDS: DefaultTemplateSeed[] = [
+    {
+        key: 'app_meeting_notes_to_tasks',
+        name: 'Meeting Notes -> Basecamp Tasks',
+        summary: 'Turn Fathom call notes into assigned Basecamp tasks.',
+        description: 'Starter app template that parses meeting notes and drafts prioritized Basecamp tasks by owner and due date.',
+        categories: ['Operations', 'Project Management'],
+        pieces: ['@activepieces/piece-basecamp', '@activepieces/piece-webhook'],
+        tags: ['fathom', 'basecamp', 'meeting-notes', 'tasks'],
+        type: TemplateType.SHARED,
+    },
+    {
+        key: 'app_image_generator_with_context',
+        name: 'Image Generator with Project Context',
+        summary: 'Generate creative assets from project context and prompt.',
+        description: 'Starter app template to generate images using project context, art direction, and campaign goals.',
+        categories: ['Design', 'Creative'],
+        pieces: ['@activepieces/piece-webhook'],
+        tags: ['image-gen', 'creative', 'design'],
+        type: TemplateType.SHARED,
+    },
+    {
+        key: 'app_client_update_writer',
+        name: 'Client Update Writer',
+        summary: 'Draft weekly client updates from wins, blockers, and next steps.',
+        description: 'Starter app template to generate polished client-ready status updates in your agency voice.',
+        categories: ['Client Success', 'Communication'],
+        pieces: ['@activepieces/piece-basecamp', '@activepieces/piece-webhook'],
+        tags: ['client-update', 'weekly-report', 'basecamp'],
+        type: TemplateType.SHARED,
+    },
+    {
+        key: 'app_triage_assistant',
+        name: 'Triage App',
+        summary: 'Triage inbound requests into priority and ownership.',
+        description: 'Starter app template that classifies incoming requests by severity, urgency, and owner.',
+        categories: ['Operations', 'Support'],
+        pieces: ['@activepieces/piece-basecamp', '@activepieces/piece-webhook'],
+        tags: ['triage', 'priority', 'operations'],
+        type: TemplateType.SHARED,
+    },
+    {
+        key: 'app_kickoff_builder',
+        name: 'Kickoff Builder',
+        summary: 'Convert scope into kickoff tasks and sprint checklist.',
+        description: 'Starter app template that turns project scope and constraints into a kickoff plan and first sprint backlog.',
+        categories: ['Project Management'],
+        pieces: ['@activepieces/piece-basecamp', '@activepieces/piece-webhook'],
+        tags: ['kickoff', 'sprint', 'planning', 'basecamp'],
+        type: TemplateType.SHARED,
+    },
+    {
+        key: 'tpl_basecamp_kickoff_packet',
+        name: 'Basecamp Project Kickoff Packet Creator',
+        summary: 'Build kickoff packet sections and starter task lists.',
+        description: 'Internal template for converting discovery notes into a complete kickoff packet plus Basecamp setup checklist.',
+        categories: ['Internal', 'Project Management'],
+        pieces: ['@activepieces/piece-basecamp'],
+        tags: ['internal', 'kickoff', 'basecamp'],
+        type: TemplateType.CUSTOM,
+    },
+    {
+        key: 'tpl_lead_intake_qualification',
+        name: 'Lead Intake -> Qualification -> Basecamp Todo Set',
+        summary: 'Normalize lead intake and generate a qualification todo set.',
+        description: 'Internal template for routing leads through qualification and generating standard task bundles in Basecamp.',
+        categories: ['Internal', 'Sales'],
+        pieces: ['@activepieces/piece-basecamp'],
+        tags: ['internal', 'lead-intake', 'sales', 'basecamp'],
+        type: TemplateType.CUSTOM,
+    },
+    {
+        key: 'tpl_design_request_normalizer',
+        name: 'Design Request Normalizer + Brief Generator',
+        summary: 'Standardize design requests and output a usable creative brief.',
+        description: 'Internal template to clean noisy design requests and output a complete brief for the design team.',
+        categories: ['Internal', 'Design'],
+        pieces: ['@activepieces/piece-webhook'],
+        tags: ['internal', 'design', 'brief'],
+        type: TemplateType.CUSTOM,
+    },
+    {
+        key: 'tpl_bug_report_prioritizer',
+        name: 'Bug Report to Prioritized Task Template',
+        summary: 'Turn bug reports into prioritized engineering-ready tasks.',
+        description: 'Internal template for transforming bug reports into triaged tasks with severity, owner, and acceptance checks.',
+        categories: ['Internal', 'Engineering'],
+        pieces: ['@activepieces/piece-basecamp'],
+        tags: ['internal', 'bug', 'engineering', 'basecamp'],
+        type: TemplateType.CUSTOM,
+    },
+    {
+        key: 'tpl_campaign_brief_content_plan',
+        name: 'Campaign Brief -> Content Plan Template',
+        summary: 'Convert campaign brief into a production-ready content plan.',
+        description: 'Internal template to transform campaign goals into channel plan, asset requirements, and due-date checklist.',
+        categories: ['Internal', 'Marketing'],
+        pieces: ['@activepieces/piece-webhook'],
+        tags: ['internal', 'campaign', 'marketing', 'content-plan'],
+        type: TemplateType.CUSTOM,
+    },
+]
+
+const DEFAULT_APP_SEEDS: DefaultAppSeed[] = [
+    {
+        key: 'app_meeting_notes_to_tasks',
+        templateKey: 'app_meeting_notes_to_tasks',
+        name: 'Meeting Notes -> Basecamp Tasks',
+        description: 'Paste Fathom meeting notes and auto-generate organized Basecamp tasks.',
+        category: 'PROJECT_MANAGEMENT',
+        tags: ['fathom', 'basecamp', 'tasks'],
+        featured: true,
+        displayOrder: 10,
+        icon: '/branding/wicked-flow-icon.svg?v=20260208',
+        outputType: 'json',
+        inputSchema: {
+            fields: [
+                { name: 'meeting_notes', label: 'Meeting notes', type: 'textarea', required: true, placeholder: 'Paste notes or transcript excerpts...' },
+                { name: 'project_context', label: 'Project context', type: 'textarea', required: false, placeholder: 'Client goals, constraints, sprint focus' },
+                { name: 'default_owner', label: 'Default owner', type: 'text', required: false, placeholder: 'Optional default assignee' },
+            ],
+        },
+    },
+    {
+        key: 'app_image_generator_with_context',
+        templateKey: 'app_image_generator_with_context',
+        name: 'Image Generator with Project Context',
+        description: 'Generate ad-ready image concepts using campaign and brand context.',
+        category: 'DESIGN',
+        tags: ['image-gen', 'ads', 'design'],
+        featured: true,
+        displayOrder: 20,
+        icon: '/branding/wicked-flow-icon.svg?v=20260208',
+        outputType: 'image',
+        inputSchema: {
+            fields: [
+                { name: 'prompt', label: 'Image prompt', type: 'textarea', required: true, placeholder: 'Describe the image you want to generate' },
+                { name: 'brand_style', label: 'Brand style', type: 'text', required: false, placeholder: 'Tone, color, typography cues' },
+                { name: 'api_key', label: 'Model API key', type: 'password', required: false, placeholder: 'Optional BYOK for testing' },
+            ],
+        },
+    },
+    {
+        key: 'app_client_update_writer',
+        templateKey: 'app_client_update_writer',
+        name: 'Client Update Writer',
+        description: 'Draft polished weekly updates from wins, blockers, and next steps.',
+        category: 'CLIENT_SUCCESS',
+        tags: ['client-update', 'weekly', 'status'],
+        featured: true,
+        displayOrder: 30,
+        icon: '/branding/wicked-flow-icon.svg?v=20260208',
+        outputType: 'markdown',
+        inputSchema: {
+            fields: [
+                { name: 'wins', label: 'Wins this week', type: 'textarea', required: true, placeholder: 'Major progress highlights' },
+                { name: 'blockers', label: 'Blockers', type: 'textarea', required: false, placeholder: 'Any blockers or risks' },
+                { name: 'next_steps', label: 'Next steps', type: 'textarea', required: true, placeholder: 'Planned work for next week' },
+            ],
+        },
+    },
+    {
+        key: 'app_triage_assistant',
+        templateKey: 'app_triage_assistant',
+        name: 'Triage App',
+        description: 'Classify inbound requests by priority and assign ownership fast.',
+        category: 'OPERATIONS',
+        tags: ['triage', 'priority', 'ops'],
+        featured: false,
+        displayOrder: 40,
+        icon: '/branding/wicked-flow-icon.svg?v=20260208',
+        outputType: 'json',
+        inputSchema: {
+            fields: [
+                { name: 'request', label: 'Request details', type: 'textarea', required: true, placeholder: 'Describe the issue or request' },
+                { name: 'client_name', label: 'Client name', type: 'text', required: false, placeholder: 'Optional client name' },
+                { name: 'due_date', label: 'Due date', type: 'text', required: false, placeholder: 'Optional due date' },
+            ],
+        },
+    },
+    {
+        key: 'app_kickoff_builder',
+        templateKey: 'app_kickoff_builder',
+        name: 'Kickoff Builder',
+        description: 'Generate kickoff checklist and first sprint tasks from scope.',
+        category: 'PROJECT_MANAGEMENT',
+        tags: ['kickoff', 'sprint', 'scope'],
+        featured: false,
+        displayOrder: 50,
+        icon: '/branding/wicked-flow-icon.svg?v=20260208',
+        outputType: 'json',
+        inputSchema: {
+            fields: [
+                { name: 'scope', label: 'Scope summary', type: 'textarea', required: true, placeholder: 'What is included in this project?' },
+                { name: 'timeline', label: 'Timeline', type: 'text', required: false, placeholder: 'Target dates and milestones' },
+                { name: 'constraints', label: 'Constraints', type: 'textarea', required: false, placeholder: 'Budget, legal, or technical constraints' },
+            ],
+        },
+    },
+]
 
 function toValidationError(message: string): ActivepiecesError {
     return new ActivepiecesError({
@@ -225,6 +453,13 @@ function normalizeInputSchema(inputSchema?: Record<string, unknown>): Record<str
     return {
         fields: normalizedFields,
     }
+}
+
+function buildSeedTags(tags: string[]): Array<{ title: string, color: string }> {
+    return tags.slice(0, 6).map((tag) => ({
+        title: tag,
+        color: '#FF415B',
+    }))
 }
 
 export const flowGalleryService = (log: FastifyBaseLogger) => ({
@@ -418,6 +653,181 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
         return queryBuilder.getMany()
     },
 
+    async seedDefaultCatalog({
+        platformId,
+        publishedBy,
+        reset = false,
+    }: {
+        platformId: string
+        publishedBy: string
+        reset?: boolean
+    }): Promise<{
+        templates: { created: number, updated: number, total: number }
+        apps: { created: number, updated: number, skipped: number, total: number }
+    }> {
+        const existingTemplates = await templateRepo().findBy({
+            platformId: Equal(platformId),
+        })
+        const templateBySeedKey = new Map<string, Template>()
+        const templateByName = new Map<string, Template>()
+
+        for (const template of existingTemplates) {
+            templateByName.set(template.name.toLowerCase(), template)
+            const metadata = template.metadata as Record<string, unknown> | null
+            const seedKey = metadata?.appsSeedKey
+            if (typeof seedKey === 'string' && seedKey.length > 0) {
+                templateBySeedKey.set(seedKey, template)
+            }
+        }
+
+        let templatesCreated = 0
+        let templatesUpdated = 0
+        const seededTemplatesByKey = new Map<string, Template>()
+
+        for (const seed of DEFAULT_TEMPLATE_SEEDS) {
+            const existing = templateBySeedKey.get(seed.key) ?? templateByName.get(seed.name.toLowerCase()) ?? null
+            const nextMetadata = {
+                ...(existing?.metadata as Record<string, unknown> | null ?? {}),
+                appsSeedKey: seed.key,
+                appsSeedVersion: DEFAULT_SEED_VERSION,
+            }
+
+            if (isNil(existing)) {
+                const createdTemplateId = apId()
+                await templateRepo().save({
+                    id: createdTemplateId,
+                    name: seed.name,
+                    summary: seed.summary,
+                    description: seed.description,
+                    type: seed.type,
+                    platformId,
+                    status: TemplateStatus.PUBLISHED,
+                    tags: buildSeedTags(seed.tags),
+                    blogUrl: null,
+                    metadata: nextMetadata,
+                    author: DEFAULT_SEED_AUTHOR,
+                    categories: seed.categories,
+                    pieces: seed.pieces,
+                    flows: [],
+                    tables: [],
+                } as never)
+                const created = await templateRepo().findOneByOrFail({
+                    id: createdTemplateId,
+                })
+                seededTemplatesByKey.set(seed.key, created)
+                templatesCreated++
+                continue
+            }
+
+            const shouldPatch = reset || isNil((existing.metadata as Record<string, unknown> | null)?.appsSeedKey)
+            if (shouldPatch) {
+                await templateRepo().update({
+                    id: existing.id,
+                }, {
+                    name: seed.name,
+                    summary: seed.summary,
+                    description: seed.description,
+                    type: seed.type,
+                    status: TemplateStatus.PUBLISHED,
+                    tags: buildSeedTags(seed.tags),
+                    metadata: nextMetadata,
+                    author: DEFAULT_SEED_AUTHOR,
+                    categories: seed.categories,
+                    pieces: seed.pieces,
+                    ...(reset ? { flows: existing.flows ?? [], tables: existing.tables ?? [] } : {}),
+                } as never)
+                templatesUpdated++
+            }
+            seededTemplatesByKey.set(seed.key, {
+                ...existing,
+                metadata: nextMetadata,
+            })
+        }
+
+        const existingApps = await flowGalleryAppRepo().findBy({
+            platformId: Equal(platformId),
+        })
+        const appByTemplateId = new Map(existingApps.map((app) => [app.templateId, app]))
+        let appsCreated = 0
+        let appsUpdated = 0
+        let appsSkipped = 0
+
+        for (const seed of DEFAULT_APP_SEEDS) {
+            const template = seededTemplatesByKey.get(seed.templateKey)
+            if (isNil(template)) {
+                appsSkipped++
+                continue
+            }
+
+            const existing = appByTemplateId.get(template.id)
+            const normalizedInputSchema = normalizeInputSchema(seed.inputSchema)
+            const normalizedOutputType = normalizeOutputType(seed.outputType)
+            if (isNil(existing)) {
+                await flowGalleryAppRepo().save({
+                    id: apId(),
+                    templateId: template.id,
+                    platformId,
+                    flowId: null,
+                    description: seed.description,
+                    icon: seed.icon,
+                    category: normalizeCategory(seed.category),
+                    tags: normalizeTags(seed.tags),
+                    featured: seed.featured,
+                    displayOrder: seed.displayOrder,
+                    inputSchema: normalizedInputSchema,
+                    outputType: normalizedOutputType,
+                    outputSchema: {
+                        seedKey: seed.key,
+                        seedVersion: DEFAULT_SEED_VERSION,
+                    },
+                    publishedBy,
+                    runCount: 0,
+                    successCount: 0,
+                    failedCount: 0,
+                } as never)
+                appsCreated++
+                continue
+            }
+
+            const shouldPatch = reset || isNil(existing.outputSchema) || isNil((existing.outputSchema as Record<string, unknown>)?.seedKey)
+            if (shouldPatch) {
+                await flowGalleryAppRepo().update({
+                    id: existing.id,
+                }, {
+                    description: seed.description,
+                    icon: seed.icon,
+                    category: normalizeCategory(seed.category),
+                    tags: normalizeTags(seed.tags),
+                    featured: seed.featured,
+                    displayOrder: seed.displayOrder,
+                    inputSchema: normalizedInputSchema,
+                    outputType: normalizedOutputType,
+                    outputSchema: {
+                        seedKey: seed.key,
+                        seedVersion: DEFAULT_SEED_VERSION,
+                    },
+                    flowId: existing.flowId ?? null,
+                    publishedBy: existing.publishedBy ?? publishedBy,
+                } as never)
+                appsUpdated++
+            }
+        }
+
+        return {
+            templates: {
+                created: templatesCreated,
+                updated: templatesUpdated,
+                total: DEFAULT_TEMPLATE_SEEDS.length,
+            },
+            apps: {
+                created: appsCreated,
+                updated: appsUpdated,
+                skipped: appsSkipped,
+                total: DEFAULT_APP_SEEDS.length,
+            },
+        }
+    },
+
     async publishTemplateAsApp(params: PublishTemplateAsAppParams): Promise<FlowGalleryAppSchema> {
         const template = await templateRepo().findOneBy({
             id: params.templateId,
@@ -605,6 +1015,10 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
                     message: `Published app ${appId} not found`,
                 },
             })
+        }
+
+        if (isNil(app.flowId) || app.flowId.trim().length === 0) {
+            throw toValidationError('This app is a starter draft and is not linked to a workflow yet. Open /apps/publisher and set flowId to enable execution.')
         }
 
         const flowIdToExecute = app.flowId ?? app.templateId

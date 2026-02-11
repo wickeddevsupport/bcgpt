@@ -1,4 +1,5 @@
 import {
+    PlatformRole,
     PrincipalType,
     Template,
 } from '@activepieces/shared'
@@ -7,6 +8,7 @@ import { Static, Type } from '@sinclair/typebox'
 import { StatusCodes } from 'http-status-codes'
 import { flowGalleryService } from './flow-gallery.service'
 import { RouteKind, securityAccess } from '@activepieces/server-shared'
+import { userService } from '../user/user-service'
 
 const ListAppsQuery = Type.Object({
     cursor: Type.Optional(Type.String()),
@@ -99,6 +101,11 @@ const UpdatePublisherAppPayload = Type.Object({
 
 const PublisherTemplateParams = Type.Object({
     templateId: Type.String(),
+})
+
+const SeedDefaultsBody = Type.Object({
+    confirm: Type.String(),
+    reset: Type.Optional(Type.Boolean()),
 })
 
 type AppInputField = {
@@ -709,6 +716,37 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
         } catch (error: any) {
             fastify.log.error(error)
             return reply.code(StatusCodes.BAD_REQUEST).send({ error: error?.message ?? 'Failed to unpublish app' })
+        }
+    })
+
+    fastify.post('/api/publisher/seed-defaults', {
+        config: { security: securityAccess.publicPlatform([PrincipalType.USER]) },
+        schema: { body: SeedDefaultsBody },
+    }, async (request, reply) => {
+        const body = request.body as Static<typeof SeedDefaultsBody>
+        if (body.confirm !== 'SEED_DEFAULTS') {
+            return reply.code(StatusCodes.BAD_REQUEST).send({
+                error: 'Invalid confirmation. Send confirm=SEED_DEFAULTS',
+            })
+        }
+
+        const user = await userService.getOneOrFail({ id: request.principal.id })
+        if (user.platformRole !== PlatformRole.ADMIN) {
+            return reply.code(StatusCodes.FORBIDDEN).send({
+                error: 'Only platform admins can seed default apps/templates',
+            })
+        }
+
+        try {
+            const result = await service.seedDefaultCatalog({
+                platformId: request.principal.platform.id,
+                publishedBy: request.principal.id,
+                reset: body.reset ?? false,
+            })
+            return reply.code(StatusCodes.OK).send(result)
+        } catch (error: any) {
+            fastify.log.error(error)
+            return reply.code(StatusCodes.BAD_REQUEST).send({ error: error?.message ?? 'Failed to seed defaults' })
         }
     })
 

@@ -19,15 +19,15 @@ This is the single source of truth for the `/apps` product build.
 - Phase 2: Publisher interface and metadata contracts -> `IN PROGRESS`
 - Phase 3: App store UX (Zapier-grade polish) -> `IN PROGRESS`
 - Phase 4: App runner UX and reliability -> `DONE`
-- Phase 5: Default apps/templates seeding -> `NOT STARTED`
+- Phase 5: Default apps/templates seeding -> `DONE`
 - Phase 6: Production hardening and telemetry -> `NOT STARTED`
 - Phase 7: Release and handoff -> `NOT STARTED`
 
 ---
 
 ## Phase 0 - Foundation and Guardrails
-- [ ] Freeze baseline commit and record rollback command.
-- [ ] Add release checklist for deploy/rollback.
+- [x] Freeze baseline commit and record rollback command.
+- [x] Add release checklist for deploy/rollback.
 - [x] Verify server env parity (`.env.activepieces`, compose, proxy).
 - [x] Add smoke test checklist for every deploy (`/`, `/apps`, sign-in, run app).
 - [ ] Confirm no accidental changes in unrelated files before each release.
@@ -83,23 +83,23 @@ This is the single source of truth for the `/apps` product build.
 
 ## Phase 5 - Default Apps and Templates (Agency-first)
 ### Default Apps (first 5)
-- [ ] Meeting Notes -> Basecamp Tasks (Fathom + Basecamp).
-- [ ] Image Generator with Project Context.
-- [ ] Client Update Writer (weekly status draft).
-- [ ] Triage App (intake -> priority -> assignment).
-- [ ] Kickoff Builder (scope -> checklist -> first sprint tasks).
+- [x] Meeting Notes -> Basecamp Tasks (Fathom + Basecamp).
+- [x] Image Generator with Project Context.
+- [x] Client Update Writer (weekly status draft).
+- [x] Triage App (intake -> priority -> assignment).
+- [x] Kickoff Builder (scope -> checklist -> first sprint tasks).
 
 ### Default Internal Templates (first 5)
-- [ ] Basecamp project kickoff packet creator.
-- [ ] New lead intake -> qualification -> Basecamp todo set.
-- [ ] Design request normalizer + brief generator.
-- [ ] Bug report to prioritized task template.
-- [ ] Campaign brief -> content plan template.
+- [x] Basecamp project kickoff packet creator.
+- [x] New lead intake -> qualification -> Basecamp todo set.
+- [x] Design request normalizer + brief generator.
+- [x] Bug report to prioritized task template.
+- [x] Campaign brief -> content plan template.
 
 ### Seeding Flow
-- [ ] Script seed process for clean environments.
-- [ ] Idempotent template/app seeding.
-- [ ] Admin-only re-seed action with confirmation.
+- [x] Script seed process for clean environments.
+- [x] Idempotent template/app seeding.
+- [x] Admin-only re-seed action with confirmation.
 
 ## Phase 6 - Production Hardening
 - [ ] Rate limits for app execution.
@@ -129,8 +129,7 @@ This is the single source of truth for the `/apps` product build.
 ---
 
 ## Immediate Next Block (Execution Order)
-1. Finish remaining Phase 2 UX and tests.
-2. Build full Phase 3 gallery/detail UX.
-3. Build full Phase 4 runner and reliability path.
-4. Seed Phase 5 default apps/templates.
-5. Ship Phase 6 hardening and Phase 7 handoff.
+1. Add integration tests for publisher endpoints (Phase 2 gap).
+2. Begin Phase 6 hardening (rate limits, payload limits, BYOK masking).
+3. Add minimal telemetry for app execution success/failure buckets.
+4. Complete Phase 7 release/handoff docs and rollback drill.
