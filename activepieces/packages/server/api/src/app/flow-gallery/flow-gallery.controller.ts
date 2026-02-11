@@ -9,6 +9,7 @@ import { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
 import { Static, Type } from '@sinclair/typebox'
 import { StatusCodes } from 'http-status-codes'
 import { flowGalleryService } from './flow-gallery.service'
+import { RouteKind } from '@activepieces/server-shared'
 
 /**
  * Flow Gallery Controller
@@ -507,7 +508,13 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
     const service = flowGalleryService(fastify.log)
 
     // PUBLIC: Gallery home page
-    fastify.get('/', async (request, reply) => {
+    fastify.get('/', {
+        config: {
+            security: {
+                kind: RouteKind.PUBLIC,
+            },
+        },
+    }, async (request, reply) => {
         try {
             const apps = await service.listPublicApps({
                 cursor: null,
@@ -524,7 +531,13 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
     })
 
     // PUBLIC: JSON API - List apps
-    fastify.get('/api/apps', async (request, reply) => {
+    fastify.get('/api/apps', {
+        config: {
+            security: {
+                kind: RouteKind.PUBLIC,
+            },
+        },
+    }, async (request, reply) => {
         const query = request.query as Static<typeof ListAppsQuery>
         try {
             const apps = await service.listPublicApps({
@@ -543,7 +556,13 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
     })
 
     // PUBLIC: App runtime page
-    fastify.get('/:id', async (request, reply) => {
+    fastify.get('/:id', {
+        config: {
+            security: {
+                kind: RouteKind.PUBLIC,
+            },
+        },
+    }, async (request, reply) => {
         const { id } = request.params as { id: string }
         try {
             const app = await service.getPublicApp({
@@ -564,7 +583,13 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
     })
 
     // PUBLIC: Execute workflow
-    fastify.post('/:id/execute', async (request, reply) => {
+    fastify.post('/:id/execute', {
+        config: {
+            security: {
+                kind: RouteKind.PUBLIC,
+            },
+        },
+    }, async (request, reply) => {
         const { id } = request.params as { id: string }
         const body = request.body as Static<typeof ExecuteFlowRequest>
 
