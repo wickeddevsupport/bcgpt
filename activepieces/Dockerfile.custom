@@ -1,0 +1,21 @@
+FROM ghcr.io/activepieces/activepieces:latest
+
+WORKDIR /usr/src/app
+
+# Copy only the pieces we need to compile
+COPY package.json bun.lock .npmrc ./
+COPY packages/pieces/ ./packages/pieces/
+COPY packages/server/api/src/app/flow-gallery/ ./packages/server/api/src/app/flow-gallery/
+
+# Install dependencies
+RUN bun install --frozen-lockfile --no-progress
+
+# Build only pieces framework and common
+RUN npx nx build pieces-framework --skip-nx-cache || true
+RUN npx nx build pieces-common --skip-nx-cache || true
+RUN npx nx build pieces-basecamp --skip-nx-cache || true
+
+# Copy built pieces into place
+RUN if [ -d dist/packages/pieces ]; then cp -r dist/packages/pieces/* /usr/src/app/dist/packages/pieces/ 2>/dev/null || true; fi
+
+ENV AP_DEV_PIECES="basecamp"

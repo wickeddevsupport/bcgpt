@@ -78,7 +78,7 @@ COPY . .
 # Build core projects (already has NX_NO_CLOUD from base stage)
 # Run sequentially to reduce peak memory usage in CI
 ENV NODE_OPTIONS=--max-old-space-size=4096
-RUN npx nx build react-ui --configuration production --skip-nx-cache
+# Skip react-ui and just build server-api which includes flow-gallery
 RUN npx nx build server-api --configuration production --skip-nx-cache
 
 # Build pieces framework and common first (required dependencies for all pieces)
