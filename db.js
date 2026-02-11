@@ -61,5 +61,20 @@ export const setMineState = async (...args) => await impl.setMineState(...args);
 export const getEntityStats = async (...args) => await impl.getEntityStats(...args);
 export const getToolCacheStats = async (...args) => await impl.getToolCacheStats(...args);
 
+// Flow App Store exports
+export const getApp = async (...args) => await impl.getApp(...args);
+export const getAppBySlug = async (...args) => await impl.getAppBySlug(...args);
+export const listApps = async (...args) => await impl.listApps(...args);
+export const createApp = async (...args) => await impl.createApp(...args);
+export const updateApp = async (...args) => await impl.updateApp(...args);
+export const deleteApp = async (...args) => await impl.deleteApp(...args);
+export const recordExecution = async (...args) => await impl.recordExecution(...args);
+export const getExecutions = async (...args) => await impl.getExecutions(...args);
+export const addReview = async (...args) => await impl.addReview(...args);
+export const getReviews = async (...args) => await impl.getReviews(...args);
+export const addFavorite = async (...args) => await impl.addFavorite(...args);
+export const removeFavorite = async (...args) => await impl.removeFavorite(...args);
+export const getFavorites = async (...args) => await impl.getFavorites(...args);
+
 export default impl.default ?? null;
 
