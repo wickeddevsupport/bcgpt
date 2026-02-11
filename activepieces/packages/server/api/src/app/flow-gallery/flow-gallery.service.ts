@@ -9,15 +9,14 @@ import {
     TemplateType,
 } from '@activepieces/shared'
 import { FastifyBaseLogger } from 'fastify'
-import { ArrayContains, Equal, IsNull, Like } from 'typeorm'
+import { Equal, IsNull } from 'typeorm'
 import { repoFactory } from '../core/db/repo-factory'
-import { buildPaginator } from '../helper/pagination/build-paginator'
 import { paginationHelper } from '../helper/pagination/pagination-utils'
 import { TemplateEntity } from '../template/template.entity'
 import { FlowGalleryAppEntity } from './flow-gallery.entity'
 
-const flowGalleryAppRepo = repoFactory(FlowGalleryAppEntity)
 const templateRepo = repoFactory<Template>(TemplateEntity)
+const flowGalleryAppRepo = repoFactory(FlowGalleryAppEntity)
 
 /**
  * Flow Gallery Service
@@ -63,51 +62,46 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
      */
     async listPublicApps({
         cursor,
-        limit,
+        limit = 20,
         search,
         category,
         featured = false,
         platformId,
     }: ListPublicAppsParams): Promise<SeekPage<Template>> {
-        const query = templateRepo
-            .createQueryBuilder('template')
-            .where('template.status = :status', { status: TemplateStatus.PUBLISHED })
-            .andWhere('template.type IN (:...types)', {
-                types: [TemplateType.OFFICIAL, TemplateType.SHARED],
-            })
-
-        // Filter by platform if specified
-        if (!isNil(platformId)) {
-            query.andWhere('template.platformId = :platformId', { platformId })
-        } else {
-            query.andWhere('template.platformId IS NULL')
+        const filters: Record<string, unknown> = {
+            status: Equal(TemplateStatus.PUBLISHED),
         }
+
+        const queryBuilder = templateRepo()
+            .createQueryBuilder('template')
+            .where(filters)
+
+        // Only show OFFICIAL and SHARED templates
+        queryBuilder.andWhere(
+            "template.type IN (:...types)",
+            { types: [TemplateType.OFFICIAL, TemplateType.SHARED] }
+        )
 
         // Filter by search term
         if (search) {
-            query.andWhere(
+            queryBuilder.andWhere(
                 '(template.name ILIKE :search OR template.description ILIKE :search OR template.summary ILIKE :search)',
                 { search: `%${search}%` },
             )
         }
 
-        // Filter by category
-        if (category) {
-            query.andWhere(':category = ANY(template.categories)', { category })
-        }
+        // Sort by creation date
+        queryBuilder.orderBy('template.created', 'DESC')
 
-        // Sort by featured flag and creation date
-        query.orderBy('template.created', 'DESC')
+        const templates = await queryBuilder.getMany()
 
-        const paginator = buildPaginator({
-            query,
-            cursor,
-            limit,
-            orderByColumn: 'template.created',
-            orderByDirection: 'DESC',
-        })
+        // Simple pagination for Phase 1
+        const startIndex = cursor ? parseInt(cursor, 10) : 0
+        const endIndex = startIndex + (limit || 20)
+        const paginatedTemplates = templates.slice(startIndex, endIndex)
+        const nextCursor = endIndex < templates.length ? String(endIndex) : null
 
-        return paginator.paginate()
+        return paginationHelper.createPage(paginatedTemplates, nextCursor)
     },
 
     /**
@@ -117,22 +111,20 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
         id,
         platformId,
     }: GetAppWithTemplateParams): Promise<(Template & { galleryMetadata?: unknown }) | null> {
-        const template = await templateRepo.findOne({
-            where: {
-                id,
-                status: TemplateStatus.PUBLISHED,
-                type: In([TemplateType.OFFICIAL, TemplateType.SHARED]),
-                platformId: platformId ? Equal(platformId) : IsNull(),
-            },
-        })
+        const filters: Record<string, unknown> = {
+            id,
+            status: Equal(TemplateStatus.PUBLISHED),
+        }
+
+        const template = await templateRepo().findOneBy(filters)
 
         if (!template) {
             return null
         }
 
         // Optionally fetch gallery-specific metadata
-        const galleryApp = await flowGalleryAppRepo.findOne({
-            where: { templateId: id },
+        const galleryApp = await flowGalleryAppRepo().findOneBy({
+            templateId: id,
         })
 
         return {
@@ -150,9 +142,7 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
         version: number
         inputSchema: unknown
     } | null> {
-        const template = await templateRepo.findOne({
-            where: { id: templateId },
-        })
+        const template = await templateRepo().findOneBy({ id: templateId })
 
         if (!template || !template.flows || !Array.isArray(template.flows)) {
             return null
@@ -200,5 +190,3 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
     },
 })
 
-// Type imports for utility
-import { In } from 'typeorm'
