@@ -68,8 +68,8 @@ This is the single source of truth for the `/apps` product build.
   - [x] required inputs
   - [x] expected output format
   - [x] run history preview
-- [ ] Add empty states, loading states, and failure states with clear actions.
-- [ ] Mobile and tablet layout pass.
+- [x] Add empty states, loading states, and failure states with clear actions.
+- [x] Mobile and tablet layout pass.
 - [x] Add dashboard access points for `/apps` and `/apps/publisher`.
 
 ## Phase 4 - App Runner UX and Reliability

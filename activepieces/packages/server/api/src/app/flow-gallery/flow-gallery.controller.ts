@@ -233,10 +233,28 @@ function pageShell(title: string, body: string): string {
     .panel{background:#fff;border:1px solid var(--border);border-radius:14px;padding:14px}
     .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
     .stat{border:1px solid var(--border);background:#fafafa;border-radius:10px;padding:8px;text-align:center}.stat b{display:block}
+    .state{display:grid;gap:8px;place-items:start;background:#fff;border:1px dashed var(--border);border-radius:14px;padding:16px}
+    .state h3{margin:0;font-size:18px}
+    .state .actions{display:flex;gap:8px;flex-wrap:wrap}
+    .skeleton{display:inline-block;height:12px;border-radius:999px;background:linear-gradient(90deg,#eef2ff 25%,#f8fafc 37%,#eef2ff 63%);background-size:400% 100%;animation:sh 1.2s ease-in-out infinite}
+    @keyframes sh{0%{background-position:100% 0}100%{background-position:0 0}}
     .hidden{display:none !important}.danger{color:#dc2626}.success{color:#16a34a}
     .field-row{display:grid;grid-template-columns:1fr 1fr 120px 90px auto;gap:8px;align-items:center}
     .code{background:#0f172a;color:#dbeafe;border:1px solid #1e293b;border-radius:10px;padding:12px;overflow:auto;font-family:ui-monospace;font-size:12px}
-    @media(max-width:980px){.grid2{grid-template-columns:1fr}.field-row{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}}
+    @media(max-width:980px){
+      .container{width:min(100%,95vw);margin:14px auto}
+      .top{flex-direction:column;align-items:stretch}
+      .top .row{width:100%}
+      .top .row .btn{flex:1 1 160px;text-align:center}
+      .grid2{grid-template-columns:1fr}
+      .field-row{grid-template-columns:1fr}
+      .stats{grid-template-columns:1fr 1fr}
+    }
+    @media(max-width:640px){
+      .title h1{font-size:24px}
+      .cards,.featured-strip{grid-template-columns:1fr}
+      .stats{grid-template-columns:1fr}
+    }
   </style>
 </head>
 <body>${body}</body>
@@ -260,20 +278,77 @@ function galleryPageHtml(apps: Template[]): string {
           <h3 style="margin:0 0 8px">Featured apps</h3>
           <div id="featuredStrip" class="featured-strip"></div>
         </div>
-        <div id="cards" class="cards"></div>
+        <div id="galleryState" class="state">
+          <h3>Loading apps...</h3>
+          <div class="muted"><span class="skeleton" style="width:220px"></span></div>
+        </div>
+        <div id="cards" class="cards hidden"></div>
       </div>
       <script id="apps-data" type="application/json">${serializeForScript(apps)}</script>
       <script>
-        const apps = JSON.parse(document.getElementById('apps-data').textContent || '[]');
+        let apps = [];
+        let parseError = '';
+        try {
+          const parsed = JSON.parse(document.getElementById('apps-data').textContent || '[]');
+          if (Array.isArray(parsed)) apps = parsed;
+          else parseError = 'App data format is invalid.';
+        } catch (e) {
+          parseError = 'App data could not be loaded.';
+        }
         const state = { search:'', category:'', sort:'featured' };
+        const galleryState = document.getElementById('galleryState');
+        const cardsRoot = document.getElementById('cards');
         const meta = (a)=>{const m=a.galleryMetadata||{};return {category:m.category||'GENERAL',tags:Array.isArray(m.tags)?m.tags:[],featured:!!m.featured,runCount:Number(m.runCount||0),successCount:Number(m.successCount||0),failedCount:Number(m.failedCount||0),avg:m.averageExecutionMs==null?'-':Math.round(Number(m.averageExecutionMs)),updated:m.updated||a.updated,icon:m.icon||'',author:a.author||'Wicked Flow'};};
         const esc=(t)=>{const d=document.createElement('div');d.textContent=String(t||'');return d.innerHTML;};
+        function setGalleryState(kind,title,desc,actionLabel,actionHandler){
+          galleryState.classList.remove('hidden');
+          cardsRoot.classList.add('hidden');
+          const variant = kind === 'error' ? 'danger' : 'muted';
+          galleryState.innerHTML = '<h3>'+esc(title)+'</h3><div class="'+variant+'">'+esc(desc||'')+'</div>' + (actionLabel ? '<div class="actions"><button id="galleryStateAction" class="btn'+(kind==='error'?' primary':'')+'">'+esc(actionLabel)+'</button></div>' : '');
+          const btn = document.getElementById('galleryStateAction');
+          if (btn && typeof actionHandler === 'function') btn.addEventListener('click', actionHandler);
+        }
+        function clearGalleryState(){
+          galleryState.classList.add('hidden');
+          cardsRoot.classList.remove('hidden');
+        }
+        function resetFilters(){
+          state.search=''; state.category=''; state.sort='featured';
+          document.getElementById('search').value='';
+          document.getElementById('category').value='';
+          document.getElementById('sort').value='featured';
+          render();
+        }
         function categories(){const set=new Set(apps.map(a=>meta(a).category));document.getElementById('category').innerHTML='<option value="">All categories</option>'+Array.from(set).sort().map(c=>'<option value="'+esc(c)+'">'+esc(c)+'</option>').join('');}
         function matches(a){const m=meta(a);const t=[a.name,a.summary||'',a.description||'',...m.tags,m.category].join(' ').toLowerCase();if(state.search&&!t.includes(state.search))return false;if(state.category&&m.category!==state.category)return false;return true;}
         function sorted(list){const x=list.map(a=>({a,m:meta(a)}));if(state.sort==='name')return x.sort((p,q)=>p.a.name.localeCompare(q.a.name));if(state.sort==='runs')return x.sort((p,q)=>q.m.runCount-p.m.runCount);if(state.sort==='recent')return x.sort((p,q)=>new Date(q.m.updated)-new Date(p.m.updated));return x.sort((p,q)=>Number(q.m.featured)-Number(p.m.featured)||q.m.runCount-p.m.runCount);}
         function cardMarkup(a,m){const sr=m.runCount?Math.round((m.successCount/m.runCount)*100)+'%':'-';const icon=typeof m.icon==='string'&&m.icon.length?m.icon:'/branding/wicked-flow-icon.svg?v=20260208';const updated=new Date(m.updated||a.updated).toLocaleDateString();const creator=esc(m.author||'Wicked Flow');return '<article class="card"><div class="row" style="justify-content:space-between"><div class="row" style="gap:10px;align-items:flex-start"><img src="'+esc(icon)+'" alt="" style="width:40px;height:40px;border-radius:10px;object-fit:cover;border:1px solid var(--border)"><div><h3 style="margin:0">'+esc(a.name)+'</h3><div class="muted">'+esc(a.summary||a.description||'Workflow app')+'</div><div class="row" style="margin-top:6px"><span class="creator">By '+creator+'</span><span class="muted">Updated '+updated+'</span></div></div></div><span class="chip">'+(m.featured?'Featured':esc(m.category))+'</span></div><div class="chips" style="margin-top:8px">'+m.tags.slice(0,4).map(t=>'<span class="chip">'+esc(t)+'</span>').join('')+'</div><div class="stats" style="margin-top:10px"><div class="stat"><b>'+m.runCount+'</b><span class="muted">Runs</span></div><div class="stat"><b>'+sr+'</b><span class="muted">Success</span></div><div class="stat"><b>'+(m.avg==='-'?'-':m.avg+'ms')+'</b><span class="muted">Avg</span></div><div class="stat"><b>'+m.failedCount+'</b><span class="muted">Failed</span></div></div><div class="row" style="margin-top:10px"><a class="btn primary" href="/apps/'+a.id+'">Use app</a><a class="btn" href="/apps/'+a.id+'#details">View details</a></div></article>';}
         function renderFeatured(list){const wrap=document.getElementById('featuredWrap');const root=document.getElementById('featuredStrip');const featured=list.filter(({m})=>m.featured).slice(0,4);if(!featured.length){wrap.classList.add('hidden');root.innerHTML='';return;}wrap.classList.remove('hidden');root.innerHTML=featured.map(({a,m})=>cardMarkup(a,m)).join('');}
-        function render(){const root=document.getElementById('cards');const list=sorted(apps.filter(matches));if(!list.length){document.getElementById('featuredWrap').classList.add('hidden');root.innerHTML='<div class="panel"><h2>No apps found</h2><p class="muted">Try another filter.</p></div>';return;}renderFeatured(list);root.innerHTML=list.map(({a,m})=>cardMarkup(a,m)).join('');}
+        function render(){
+          const root = cardsRoot;
+          if (parseError) {
+            document.getElementById('featuredWrap').classList.add('hidden');
+            root.innerHTML = '';
+            setGalleryState('error', 'Failed to load apps', parseError + ' Refresh and try again.', 'Refresh', () => window.location.reload());
+            return;
+          }
+          if (!apps.length) {
+            document.getElementById('featuredWrap').classList.add('hidden');
+            root.innerHTML = '';
+            setGalleryState('empty', 'No apps published yet', 'Publish your first app from Publisher to see it here.', 'Open Publisher', () => window.location.href='/apps/publisher');
+            return;
+          }
+          const list = sorted(apps.filter(matches));
+          if (!list.length) {
+            document.getElementById('featuredWrap').classList.add('hidden');
+            root.innerHTML = '';
+            setGalleryState('empty', 'No apps found', 'Try a different search or reset filters.', 'Reset filters', resetFilters);
+            return;
+          }
+          clearGalleryState();
+          renderFeatured(list);
+          root.innerHTML = list.map(({a,m})=>cardMarkup(a,m)).join('');
+        }
         categories(); render();
         document.getElementById('search').addEventListener('input',e=>{state.search=(e.target.value||'').trim().toLowerCase();render();});
         document.getElementById('category').addEventListener('change',e=>{state.category=e.target.value;render();});
@@ -337,8 +412,44 @@ function appRuntimeHtml(app: Template & { galleryMetadata?: Record<string, unkno
         function fieldHtml(field){const n=String(field.name||'').replace(/[^a-zA-Z0-9_]/g,'_');const type=String(field.type||'text').toLowerCase();const label=field.label||n;const req=field.required?'required':'';const ph=field.placeholder||'';if(type==='textarea')return '<label class="muted">'+esc(label)+'</label><textarea class="input" name="'+esc(n)+'" placeholder="'+esc(ph)+'" '+req+'></textarea>';if(type==='number')return '<label class="muted">'+esc(label)+'</label><input class="input" type="number" name="'+esc(n)+'" placeholder="'+esc(ph)+'" '+req+' />';if(type==='boolean')return '<label class="muted" style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="'+esc(n)+'" />'+esc(label)+'</label>';if(type==='select'){const options=Array.isArray(field.options)?field.options:[];return '<label class="muted">'+esc(label)+'</label><select class="select" name="'+esc(n)+'" '+req+'><option value="">Select...</option>'+options.map((opt)=>{if(typeof opt==='string')return '<option value="'+esc(opt)+'">'+esc(opt)+'</option>';return '<option value="'+esc(opt.value||opt.label||'')+'">'+esc(opt.label||opt.value||'')+'</option>';}).join('')+'</select>';}const inputType=type==='password'?'password':'text';return '<label class="muted">'+esc(label)+'</label><input class="input" type="'+inputType+'" name="'+esc(n)+'" placeholder="'+esc(ph)+'" '+req+' />';}
         function renderForm(){const fields=normalizeFields(schema);if(!fields.length){formFields.innerHTML='<label class="muted">Input</label><textarea class="input" name="input" placeholder="Enter input"></textarea>';return;}formFields.innerHTML=fields.map((f)=>'<div>'+fieldHtml(f)+'</div>').join('');}
         function renderContract(){const fields=normalizeFields(schema);const required=fields.filter(f=>f.required).map(f=>f.label||f.name);const outputTypeLabel=(configuredOutputType||'json').toUpperCase();if(!fields.length){appContract.innerHTML='No structured inputs required. Output format: <b>'+outputTypeLabel+'</b>.';return;}appContract.innerHTML='Expected output: <b>'+outputTypeLabel+'</b>. '+(required.length?'Required inputs: <b>'+required.map(esc).join(', ')+'</b>.':'All inputs are optional.');}
-        async function loadStats(){try{const res=await fetch('/apps/api/apps/'+encodeURIComponent(appId)+'/stats');const body=await res.json();if(!res.ok){stats.textContent='Stats unavailable.';return;}const sr=body.runCount?Math.round((body.successCount/body.runCount)*100):0;stats.innerHTML='<div class="stats"><div class="stat"><b>'+body.runCount+'</b><span class="muted">Runs</span></div><div class="stat"><b>'+body.successCount+'</b><span class="muted">Success</span></div><div class="stat"><b>'+body.failedCount+'</b><span class="muted">Failed</span></div><div class="stat"><b>'+(body.averageExecutionMs?Math.round(body.averageExecutionMs)+'ms':'-')+'</b><span class="muted">Avg</span></div></div><div class="muted" style="margin-top:8px">Success rate: '+sr+'%</div>';}catch(e){stats.textContent='Stats unavailable.';}}
-        async function loadRuns(){try{const res=await fetch('/apps/api/apps/'+encodeURIComponent(appId)+'/runs?limit=8');const body=await res.json();if(!res.ok){runHistory.textContent='Run history unavailable.';return;}const rows=Array.isArray(body.data)?body.data:[];if(!rows.length){runHistory.textContent='No recent runs yet.';return;}runHistory.innerHTML='<h3 style=\"margin:0 0 8px\">Recent runs</h3>'+rows.map((r)=>{const when=new Date(r.created).toLocaleString();const status=r.status==='success'?'<span class=\"success\">success</span>':(r.status==='failed'?'<span class=\"danger\">failed</span>':'queued');const ms=r.executionTimeMs?(' · '+r.executionTimeMs+'ms'):'';const err=r.error?('<div class=\"danger\" style=\"font-size:12px\">'+esc(r.error)+'</div>'):'';return '<div style=\"border:1px solid #e4e8f3;border-radius:10px;padding:8px;margin:6px 0\"><div><b>'+status+'</b><span class=\"muted\"> · '+when+ms+'</span></div>'+err+'</div>';}).join('');}catch(e){runHistory.textContent='Run history unavailable.';}}
+        async function loadStats(){
+          stats.innerHTML='<span class="skeleton" style="width:180px"></span>';
+          try{
+            const res=await fetch('/apps/api/apps/'+encodeURIComponent(appId)+'/stats');
+            const body=await res.json();
+            if(!res.ok){
+              stats.innerHTML='<div class="danger">Stats unavailable.</div><div class="actions"><button id="statsRetryBtn" class="btn">Retry</button></div>';
+              document.getElementById('statsRetryBtn').addEventListener('click',()=>loadStats());
+              return;
+            }
+            const sr=body.runCount?Math.round((body.successCount/body.runCount)*100):0;
+            stats.innerHTML='<div class="stats"><div class="stat"><b>'+body.runCount+'</b><span class="muted">Runs</span></div><div class="stat"><b>'+body.successCount+'</b><span class="muted">Success</span></div><div class="stat"><b>'+body.failedCount+'</b><span class="muted">Failed</span></div><div class="stat"><b>'+(body.averageExecutionMs?Math.round(body.averageExecutionMs)+'ms':'-')+'</b><span class="muted">Avg</span></div></div><div class="muted" style="margin-top:8px">Success rate: '+sr+'%</div>';
+          }catch(e){
+            stats.innerHTML='<div class="danger">Stats unavailable.</div><div class="actions"><button id="statsRetryBtn" class="btn">Retry</button></div>';
+            document.getElementById('statsRetryBtn').addEventListener('click',()=>loadStats());
+          }
+        }
+        async function loadRuns(){
+          runHistory.innerHTML='<span class="skeleton" style="width:220px"></span>';
+          try{
+            const res=await fetch('/apps/api/apps/'+encodeURIComponent(appId)+'/runs?limit=8');
+            const body=await res.json();
+            if(!res.ok){
+              runHistory.innerHTML='<div class="danger">Run history unavailable.</div><div class="actions"><button id="runsRetryBtn" class="btn">Retry</button></div>';
+              document.getElementById('runsRetryBtn').addEventListener('click',()=>loadRuns());
+              return;
+            }
+            const rows=Array.isArray(body.data)?body.data:[];
+            if(!rows.length){
+              runHistory.innerHTML='<div class="muted">No recent runs yet.</div>';
+              return;
+            }
+            runHistory.innerHTML='<h3 style=\"margin:0 0 8px\">Recent runs</h3>'+rows.map((r)=>{const when=new Date(r.created).toLocaleString();const status=r.status==='success'?'<span class=\"success\">success</span>':(r.status==='failed'?'<span class=\"danger\">failed</span>':'queued');const ms=r.executionTimeMs?(' - '+r.executionTimeMs+'ms'):'';const err=r.error?('<div class=\"danger\" style=\"font-size:12px\">'+esc(r.error)+'</div>'):'';return '<div style=\"border:1px solid #e4e8f3;border-radius:10px;padding:8px;margin:6px 0\"><div><b>'+status+'</b><span class=\"muted\"> - '+when+ms+'</span></div>'+err+'</div>';}).join('');
+          }catch(e){
+            runHistory.innerHTML='<div class="danger">Run history unavailable.</div><div class="actions"><button id="runsRetryBtn" class="btn">Retry</button></div>';
+            document.getElementById('runsRetryBtn').addEventListener('click',()=>loadRuns());
+          }
+        }
         function renderOutput(data){const t=String(configuredOutputType||'json').toLowerCase();if(t==='image'){const url=typeof data==='string'?data:(data&&data.imageUrl)||((data&&data.url)||'');if(url)return '<img src="'+esc(String(url))+'" alt="Output" style="max-width:100%;border:1px solid #dce1ef;border-radius:10px" />';}if(t==='text'){const text=typeof data==='string'?data:(data&&data.text)||JSON.stringify(data);return '<div style="white-space:pre-wrap;line-height:1.5">'+esc(String(text))+'</div>';}if(t==='markdown'){const text=typeof data==='string'?data:(data&&data.markdown)||(data&&data.text)||JSON.stringify(data);return '<pre class="code" style="white-space:pre-wrap">'+esc(String(text))+'</pre>';}return '<pre class="code">'+esc(JSON.stringify(data,null,2))+'</pre>';}
         async function runApp(mode){runError.classList.add('hidden');runError.textContent='';runBtn.disabled=true;runAsyncBtn.disabled=true;runBtn.textContent=mode==='async'?'Queueing...':'Running...';output.classList.add('hidden');const fields=formFields.querySelectorAll('[name]');const inputs={};fields.forEach((el)=>{if(el.type==='checkbox')inputs[el.name]=el.checked;else if(el.type==='number')inputs[el.name]=el.value===''?null:Number(el.value);else inputs[el.name]=el.value;});const start=Date.now();try{const res=await fetch('/apps/'+encodeURIComponent(appId)+'/execute?mode='+encodeURIComponent(mode||'sync'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({inputs})});const body=await res.json();if(!res.ok)throw new Error(body.error||'Execution failed');if(body.queued){runMeta.textContent='Run queued at '+new Date().toLocaleString()+'. It will complete in background.';output.innerHTML='<div class=\"muted\">Queued successfully. Check recent runs for updates.</div>';output.classList.remove('hidden');await loadRuns();return;}const ms=body.executionTime||(Date.now()-start);runMeta.textContent='Last run: '+new Date().toLocaleString()+' ('+ms+'ms)';output.innerHTML=renderOutput(body.output);output.classList.remove('hidden');await loadStats();await loadRuns();}catch(e){runError.textContent=e.message||String(e);runError.classList.remove('hidden');}finally{runBtn.disabled=false;runAsyncBtn.disabled=false;runBtn.textContent='Run app';}}
         runBtn.addEventListener('click',(e)=>{e.preventDefault();runApp('sync');});
@@ -356,6 +467,7 @@ function publisherPageHtml(): string {
           <div class="title"><h1>Publisher</h1><p>Publish templates as apps and configure schema-driven UX.</p></div>
           <div class="row"><a class="btn" href="/">Dashboard</a><a class="btn" href="/apps">Open gallery</a><button class="btn primary" id="reloadBtn">Reload</button></div>
         </div>
+        <div id="publisherState" class="state hidden" style="margin-bottom:12px"></div>
         <div class="grid2">
           <section class="panel">
             <h2 style="margin:0 0 8px">Templates</h2>
@@ -394,10 +506,18 @@ function publisherPageHtml(): string {
       <script>
         const state = { templates: [], published: [], schemaFields: [] };
         const esc=(t)=>{const d=document.createElement('div');d.textContent=String(t||'');return d.innerHTML;};
+        const publisherState = document.getElementById('publisherState');
         const token=()=>window.localStorage.getItem('token')||window.sessionStorage.getItem('token');
         const headers=(h={})=>{const t=token();return t?{...h,Authorization:'Bearer '+t}:h;};
         async function req(url,opt={}){const r=await fetch(url,{...opt,headers:headers(opt.headers||{}),credentials:'include'});const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.error||('Request failed: '+r.status));return b;}
         function msg(text,error=false){const n=document.getElementById('publisherMessage');n.classList.remove('hidden');n.className=error?'danger':'success';n.textContent=text;}
+        function setPublisherState(kind,title,desc,actionLabel,actionHandler){
+          publisherState.classList.remove('hidden');
+          publisherState.innerHTML='<h3>'+esc(title)+'</h3><div class="'+(kind==='error'?'danger':'muted')+'">'+esc(desc||'')+'</div>'+(actionLabel?'<div class="actions"><button id="publisherStateAction" class="btn'+(kind==='error'?' primary':'')+'">'+esc(actionLabel)+'</button></div>':'');
+          const btn=document.getElementById('publisherStateAction');
+          if(btn&&typeof actionHandler==='function')btn.addEventListener('click',actionHandler);
+        }
+        function clearPublisherState(){publisherState.classList.add('hidden');publisherState.innerHTML='';}
         function normalizeTags(input){return String(input||'').split(',').map(s=>s.trim()).filter(Boolean);}
         function createField(field={}){return {name:field.name||'',label:field.label||'',type:field.type||'text',required:!!field.required,placeholder:field.placeholder||'',options:Array.isArray(field.options)?field.options:[]};}
         function renderSchema(){const root=document.getElementById('schemaFields');if(!state.schemaFields.length){root.innerHTML='<div class="muted">No fields configured.</div>';return;}root.innerHTML=state.schemaFields.map((f,i)=>'<div class="field-row"><input class="input" data-i="'+i+'" data-k="name" placeholder="name" value="'+esc(f.name)+'"/><input class="input" data-i="'+i+'" data-k="label" placeholder="label" value="'+esc(f.label)+'"/><select class="select" data-i="'+i+'" data-k="type">'+['text','textarea','number','select','boolean','password'].map(t=>'<option value="'+t+'" '+(f.type===t?'selected':'')+'>'+t+'</option>').join('')+'</select><label class="muted"><input type="checkbox" data-i="'+i+'" data-k="required" '+(f.required?'checked':'')+'> Required</label><button class="btn" data-remove="'+i+'">Remove</button><input class="input" data-i="'+i+'" data-k="placeholder" placeholder="placeholder" value="'+esc(f.placeholder||'')+'"/>'+(f.type==='select'?'<input class="input" data-i="'+i+'" data-k="options" placeholder="options: one|two|three" value="'+esc((f.options||[]).map(o=>o.value||o).join('|'))+'"/>':'<div></div>')+'</div>').join('');}
@@ -407,19 +527,33 @@ function publisherPageHtml(): string {
         window.selectTemplate=function(id){document.getElementById('templateId').value=id;document.getElementById('editorTitle').textContent='Publish '+id;msg('Template selected: '+id);}
         window.editApp=function(id){const app=state.published.find(a=>a.id===id);if(!app)return;const m=app.galleryMetadata||{};document.getElementById('templateId').value=id;document.getElementById('flowId').value=m.flowId||'';document.getElementById('description').value=m.description||'';document.getElementById('icon').value=m.icon||'';document.getElementById('category').value=m.category||'';document.getElementById('tags').value=Array.isArray(m.tags)?m.tags.join(', '):'';document.getElementById('featured').checked=!!m.featured;document.getElementById('outputType').value=m.outputType||'';const fields=Array.isArray(m.inputSchema&&m.inputSchema.fields)?m.inputSchema.fields:[];state.schemaFields=fields.map(f=>createField(f));renderSchema();msg('Loaded app for editing');}
         window.doUnpublish=async function(id){if(!confirm('Unpublish this app?'))return;await req('/apps/api/publisher/apps/'+encodeURIComponent(id),{method:'DELETE'});await load();msg('Unpublished');}
-        async function load(){if(!token()){window.location.href='/sign-in?redirectAfterLogin='+encodeURIComponent('/apps/publisher');return;}const [templates,published]=await Promise.all([req('/apps/api/publisher/templates'),req('/apps/api/publisher/apps')]);state.templates=templates.data||[];state.published=published.data||[];renderTemplates();renderPublished();}
+        async function load(){
+          if(!token()){window.location.href='/sign-in?redirectAfterLogin='+encodeURIComponent('/apps/publisher');return;}
+          setPublisherState('loading','Loading publisher data...','Fetching templates and published apps.');
+          try{
+            const [templates,published]=await Promise.all([req('/apps/api/publisher/templates'),req('/apps/api/publisher/apps')]);
+            state.templates=templates.data||[];
+            state.published=published.data||[];
+            renderTemplates();
+            renderPublished();
+            clearPublisherState();
+          }catch(e){
+            setPublisherState('error','Publisher failed to load',e.message||String(e),'Retry',()=>load());
+            msg(e.message||String(e),true);
+          }
+        }
         document.getElementById('schemaFields').addEventListener('input',e=>{const t=e.target;if(!t.dataset||t.dataset.i==null)return;const i=Number(t.dataset.i);const k=t.dataset.k;if(!state.schemaFields[i])return;if(k==='required')state.schemaFields[i][k]=t.checked;else if(k==='options')state.schemaFields[i].options=String(t.value||'').split('|').map(v=>v.trim()).filter(Boolean).map(v=>({label:v,value:v}));else state.schemaFields[i][k]=t.value;if(k==='type')renderSchema();});
         document.getElementById('schemaFields').addEventListener('click',e=>{const t=e.target;if(!t.dataset||t.dataset.remove==null)return;state.schemaFields.splice(Number(t.dataset.remove),1);renderSchema();});
         document.getElementById('addFieldBtn').addEventListener('click',()=>{state.schemaFields.push(createField());renderSchema();});
         document.getElementById('clearFieldsBtn').addEventListener('click',()=>{state.schemaFields=[];renderSchema();});
         document.getElementById('templateSearch').addEventListener('input',renderTemplates);
         document.getElementById('publishedSearch').addEventListener('input',renderPublished);
-        document.getElementById('reloadBtn').addEventListener('click',()=>load().catch(e=>msg(e.message||String(e),true)));
+        document.getElementById('reloadBtn').addEventListener('click',()=>load());
         document.getElementById('previewBtn').addEventListener('click',()=>{const id=document.getElementById('templateId').value.trim();if(!id){msg('Template ID required',true);return;}window.open('/apps/'+encodeURIComponent(id),'_blank');});
         document.getElementById('publishBtn').addEventListener('click',async()=>{try{await req('/apps/api/publisher/publish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())});await load();msg('Published successfully');}catch(e){msg(e.message||String(e),true);}});
         document.getElementById('updateBtn').addEventListener('click',async()=>{try{const p=payload();await req('/apps/api/publisher/apps/'+encodeURIComponent(p.templateId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});await load();msg('Updated successfully');}catch(e){msg(e.message||String(e),true);}});
         document.getElementById('unpublishBtn').addEventListener('click',async()=>{const id=document.getElementById('templateId').value.trim();if(!id){msg('Template ID required',true);return;}await window.doUnpublish(id);});
-        renderSchema();load().catch(e=>msg(e.message||String(e),true));
+        renderSchema();load();
       </script>`)
 }
 
