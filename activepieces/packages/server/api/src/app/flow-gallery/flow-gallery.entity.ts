@@ -32,6 +32,12 @@ export type FlowGalleryAppSchema = {
     outputType: string | null
     outputSchema: Record<string, unknown> | null
     publishedBy: string | null
+    runCount: number
+    successCount: number
+    failedCount: number
+    averageExecutionMs: number | null
+    lastExecutionAt: Date | null
+    lastError: string | null
     platform: Platform
 }
 
@@ -89,6 +95,30 @@ export const FlowGalleryAppEntity = new EntitySchema<FlowGalleryAppSchema>({
             nullable: true,
         },
         publishedBy: {
+            type: String,
+            nullable: true,
+        },
+        runCount: {
+            type: Number,
+            default: 0,
+        },
+        successCount: {
+            type: Number,
+            default: 0,
+        },
+        failedCount: {
+            type: Number,
+            default: 0,
+        },
+        averageExecutionMs: {
+            type: Number,
+            nullable: true,
+        },
+        lastExecutionAt: {
+            type: Date,
+            nullable: true,
+        },
+        lastError: {
             type: String,
             nullable: true,
         },

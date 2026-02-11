@@ -8,25 +8,16 @@ import { StatusCodes } from 'http-status-codes'
 import { flowGalleryService } from './flow-gallery.service'
 import { RouteKind, securityAccess } from '@activepieces/server-shared'
 
-/**
- * Flow Gallery Controller
- * 
- * Public API endpoints for:
- * - Browsing published workflow apps
- * - Viewing app details and documentation
- * - Executing workflows with user inputs
- * 
- * All endpoints are PUBLIC (no authentication required)
- * PRD Reference: Flow App Store - User Interface Layer
- */
-
-// Request/Response Schema Definitions
 const ListAppsQuery = Type.Object({
     cursor: Type.Optional(Type.String()),
     limit: Type.Optional(Type.Number({ default: 20 })),
     search: Type.Optional(Type.String()),
     category: Type.Optional(Type.String()),
     featured: Type.Optional(Type.Boolean()),
+})
+
+const AppIdParams = Type.Object({
+    id: Type.String(),
 })
 
 const ExecuteFlowRequest = Type.Object({
@@ -41,6 +32,36 @@ const ListPublisherTemplatesQuery = Type.Object({
     search: Type.Optional(Type.String()),
 })
 
+const InputFieldOptionSchema = Type.Object({
+    label: Type.String({ minLength: 1, maxLength: 100 }),
+    value: Type.String({ minLength: 1, maxLength: 100 }),
+})
+
+const InputFieldSchema = Type.Object({
+    name: Type.String({ minLength: 1, maxLength: 64 }),
+    label: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
+    type: Type.Optional(
+        Type.Union([
+            Type.Literal('text'),
+            Type.Literal('textarea'),
+            Type.Literal('number'),
+            Type.Literal('select'),
+            Type.Literal('boolean'),
+            Type.Literal('password'),
+        ]),
+    ),
+    required: Type.Optional(Type.Boolean()),
+    placeholder: Type.Optional(Type.String({ maxLength: 200 })),
+    options: Type.Optional(Type.Array(InputFieldOptionSchema, { maxItems: 50 })),
+})
+
+const FlexibleInputSchema = Type.Union([
+    Type.Object({
+        fields: Type.Array(InputFieldSchema, { maxItems: 30 }),
+    }),
+    Type.Record(Type.String(), Type.Unknown()),
+])
+
 const PublisherAppPayload = Type.Object({
     templateId: Type.String(),
     flowId: Type.Optional(Type.String()),
@@ -50,7 +71,7 @@ const PublisherAppPayload = Type.Object({
     tags: Type.Optional(Type.Array(Type.String())),
     featured: Type.Optional(Type.Boolean()),
     displayOrder: Type.Optional(Type.Number()),
-    inputSchema: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+    inputSchema: Type.Optional(FlexibleInputSchema),
     outputType: Type.Optional(Type.String()),
     outputSchema: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
 })
@@ -63,7 +84,7 @@ const UpdatePublisherAppPayload = Type.Object({
     tags: Type.Optional(Type.Array(Type.String())),
     featured: Type.Optional(Type.Boolean()),
     displayOrder: Type.Optional(Type.Number()),
-    inputSchema: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+    inputSchema: Type.Optional(FlexibleInputSchema),
     outputType: Type.Optional(Type.String()),
     outputSchema: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
 })
@@ -72,658 +93,12 @@ const PublisherTemplateParams = Type.Object({
     templateId: Type.String(),
 })
 
-/* HTML Template Components */
-
-const galleryPageHtml = (apps: Template[], platformUrl: string): string => `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Flow Gallery - Workflow Apps</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 40px 20px;
-        }
-        
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        
-        .header {
-            text-align: center;
-            color: white;
-            margin-bottom: 50px;
-        }
-        
-        .header h1 {
-            font-size: 2.5em;
-            margin-bottom: 10px;
-            font-weight: 700;
-        }
-        
-        .header p {
-            font-size: 1.1em;
-            opacity: 0.9;
-        }
-        
-        .search-bar {
-            max-width: 500px;
-            margin: 0 auto 40px;
-        }
-        
-        .search-bar input {
-            width: 100%;
-            padding: 12px 20px;
-            border: none;
-            border-radius: 50px;
-            font-size: 1em;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-        }
-        
-        .apps-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-            gap: 30px;
-            margin-bottom: 40px;
-        }
-        
-        .app-card {
-            background: white;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-            cursor: pointer;
-        }
-        
-        .app-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
-        }
-        
-        .app-card-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 20px;
-            color: white;
-        }
-        
-        .app-card-title {
-            font-size: 1.3em;
-            font-weight: 600;
-            margin-bottom: 5px;
-        }
-        
-        .app-card-summary {
-            font-size: 0.9em;
-            opacity: 0.9;
-        }
-        
-        .app-card-body {
-            padding: 20px;
-        }
-        
-        .app-card-description {
-            font-size: 0.95em;
-            color: #555;
-            margin-bottom: 15px;
-            line-height: 1.5;
-        }
-        
-        .app-card-tags {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 5px;
-            margin-bottom: 15px;
-        }
-        
-        .tag {
-            background: #f0f0f0;
-            padding: 4px 10px;
-            border-radius: 20px;
-            font-size: 0.8em;
-            color: #667eea;
-            font-weight: 500;
-        }
-        
-        .app-card-footer {
-            display: flex;
-            gap: 10px;
-            padding-top: 15px;
-            border-top: 1px solid #f0f0f0;
-        }
-        
-        .btn {
-            flex: 1;
-            padding: 10px 15px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: 600;
-            transition: all 0.3s ease;
-        }
-        
-        .btn-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-        }
-        
-        .btn-primary:hover {
-            transform: scale(1.02);
-        }
-        
-        .btn-secondary {
-            background: #f0f0f0;
-            color: #667eea;
-        }
-        
-        .no-apps {
-            text-align: center;
-            color: white;
-            padding: 40px 20px;
-            font-size: 1.1em;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>Workflow Apps</h1>
-            <p>Discover and run powerful automated workflows</p>
-        </div>
-        
-        <div class="search-bar">
-            <input 
-                type="text" 
-                id="searchInput" 
-                placeholder="Search apps by name or description..."
-                onkeyup="filterApps(this.value)"
-            >
-        </div>
-        
-        <div class="apps-grid" id="appsGrid">
-            ${apps.length === 0 ? '<div class="no-apps">No apps available yet. Check back soon!</div>' : apps.map(app => `
-            <div class="app-card" data-search-text="${(app.name + ' ' + app.summary + ' ' + app.description).toLowerCase()}">
-                <div class="app-card-header">
-                    <div class="app-card-title">${escapeHtml(app.name)}</div>
-                    <div class="app-card-summary">${escapeHtml(app.summary || '')}</div>
-                </div>
-                <div class="app-card-body">
-                    <div class="app-card-description">${escapeHtml(app.description || '')}</div>
-                    ${app.tags && app.tags.length > 0 ? `
-                    <div class="app-card-tags">
-                        ${app.tags.map((tag: any) => `<span class="tag">${escapeHtml(tag.title || tag)}</span>`).join('')}
-                    </div>
-                    ` : ''}
-                    <div class="app-card-footer">
-                        <button class="btn btn-primary" onclick="window.location.href = '/apps/${escapeHtml(app.id)}'">
-                            Open App
-                        </button>
-                    </div>
-                </div>
-            </div>
-            `).join('')}
-        </div>
-    </div>
-    
-    <script>
-        function filterApps(searchTerm) {
-            const cards = document.querySelectorAll('.app-card');
-            const term = searchTerm.toLowerCase();
-            
-            cards.forEach(card => {
-                const searchText = card.getAttribute('data-search-text');
-                if (searchText.includes(term)) {
-                    card.style.display = '';
-                } else {
-                    card.style.display = 'none';
-                }
-            });
-        }
-        
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-    </script>
-</body>
-</html>
-`
-
-const appRuntimeHtml = (app: Template & { galleryMetadata?: unknown }, platformUrl: string): string => {
-    const galleryMetadata = (app.galleryMetadata && typeof app.galleryMetadata === 'object'
-        ? app.galleryMetadata as Record<string, unknown>
-        : {}) as Record<string, unknown>
-    const inputSchema = (galleryMetadata.inputSchema as Record<string, unknown> | undefined) ?? {}
-    const serializedInputSchema = JSON.stringify(inputSchema)
-    return `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${escapeHtml(app.name)} - Workflow App</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 40px 20px;
-        }
-        
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-        }
-        
-        .header {
-            background: white;
-            border-radius: 12px;
-            padding: 30px;
-            margin-bottom: 30px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-        }
-        
-        .header h1 {
-            font-size: 1.8em;
-            color: #333;
-            margin-bottom: 10px;
-        }
-        
-        .header p {
-            color: #666;
-            font-size: 0.95em;
-            line-height: 1.6;
-        }
-        
-        .form-container {
-            background: white;
-            border-radius: 12px;
-            padding: 30px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-            margin-bottom: 30px;
-        }
-        
-        .form-group {
-            margin-bottom: 20px;
-        }
-        
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            color: #333;
-        }
-        
-        .form-group input,
-        .form-group textarea {
-            width: 100%;
-            padding: 10px 12px;
-            border: 2px solid #e0e0e0;
-            border-radius: 6px;
-            font-size: 0.95em;
-            font-family: inherit;
-            transition: border-color 0.3s ease;
-        }
-        
-        .form-group input:focus,
-        .form-group textarea:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        
-        .form-group textarea {
-            min-height: 100px;
-            resize: vertical;
-        }
-        
-        .btn-execute {
-            width: 100%;
-            padding: 12px 30px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            border-radius: 6px;
-            font-size: 1em;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-        
-        .btn-execute:hover {
-            transform: scale(1.02);
-        }
-        
-        .btn-execute:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: scale(1);
-        }
-        
-        .result-container {
-            background: white;
-            border-radius: 12px;
-            padding: 30px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-            display: none;
-        }
-        
-        .result-container.show {
-            display: block;
-        }
-        
-        .result-header {
-            font-size: 1.2em;
-            font-weight: 600;
-            margin-bottom: 20px;
-            color: #333;
-        }
-        
-        .result-content {
-            background: #f5f5f5;
-            padding: 20px;
-            border-radius: 6px;
-            word-break: break-all;
-            white-space: pre-wrap;
-            font-family: 'Monaco', 'Courier New', monospace;
-            font-size: 0.9em;
-        }
-        
-        .loading {
-            text-align: center;
-            color: white;
-            font-size: 1.1em;
-        }
-        
-        .error {
-            background: #fee;
-            border: 1px solid #fcc;
-            color: #c33;
-            padding: 15px;
-            border-radius: 6px;
-            margin-top: 20px;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>${escapeHtml(app.name)}</h1>
-            <p>${escapeHtml(app.description || app.summary || '')}</p>
-        </div>
-        
-        <form id="flowForm" class="form-container" onsubmit="executeFlow(event)">
-            <div id="dynamicFields"></div>
-            <button type="submit" class="btn-execute" id="executeBtn">Execute</button>
-        </form>
-        
-        <div class="result-container" id="resultContainer">
-            <div class="result-header">Output</div>
-            <div class="result-content" id="resultContent"></div>
-        </div>
-    </div>
-    
-    <script>
-        const inputSchema = ${serializedInputSchema};
-
-        function normalizeFields(schema) {
-            if (!schema || typeof schema !== 'object') return [];
-            if (Array.isArray(schema.fields)) return schema.fields;
-            return Object.entries(schema).map(([name, config]) => {
-                if (typeof config === 'string') {
-                    return { name, type: config, label: name };
-                }
-                if (config && typeof config === 'object') {
-                    return { name, label: name, ...config };
-                }
-                return { name, type: 'text', label: name };
-            });
-        }
-
-        function renderDynamicFields() {
-            const container = document.getElementById('dynamicFields');
-            const fields = normalizeFields(inputSchema);
-
-            if (!fields.length) {
-                container.innerHTML = \`
-                    <div class="form-group">
-                        <label for="input">Input</label>
-                        <textarea id="input" name="input" placeholder="Enter app input"></textarea>
-                    </div>
-                \`;
-                return;
-            }
-
-            container.innerHTML = fields.map((field) => {
-                const label = escapeHtml(field.label || field.name || 'Input');
-                const name = escapeHtml(field.name || 'input');
-                const type = (field.type || 'text').toLowerCase();
-                const required = field.required ? 'required' : '';
-                const placeholder = escapeHtml(field.placeholder || '');
-
-                if (type === 'textarea' || type === 'multiline') {
-                    return \`
-                        <div class="form-group">
-                            <label for="\${name}">\${label}</label>
-                            <textarea id="\${name}" name="\${name}" placeholder="\${placeholder}" \${required}></textarea>
-                        </div>
-                    \`;
-                }
-
-                if (type === 'number') {
-                    return \`
-                        <div class="form-group">
-                            <label for="\${name}">\${label}</label>
-                            <input id="\${name}" name="\${name}" type="number" placeholder="\${placeholder}" \${required} />
-                        </div>
-                    \`;
-                }
-
-                return \`
-                    <div class="form-group">
-                        <label for="\${name}">\${label}</label>
-                        <input id="\${name}" name="\${name}" type="text" placeholder="\${placeholder}" \${required} />
-                    </div>
-                \`;
-            }).join('');
-        }
-
-        async function executeFlow(e) {
-            e.preventDefault();
-            
-            const btn = document.getElementById('executeBtn');
-            const resultContainer = document.getElementById('resultContainer');
-            const resultContent = document.getElementById('resultContent');
-            
-            btn.disabled = true;
-            btn.textContent = 'Executing...';
-            resultContainer.classList.remove('show');
-            
-            try {
-                const formData = new FormData(document.getElementById('flowForm'));
-                const inputs = Object.fromEntries(formData);
-                
-                const response = await fetch('/apps/api/${escapeHtml(app.id)}/execute', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ inputs }),
-                });
-                
-                const data = await response.json();
-                
-                if (!response.ok) {
-                    resultContent.innerHTML = \`<div class="error">Error: \${data.error || 'Execution failed'}</div>\`;
-                } else {
-                    resultContent.textContent = JSON.stringify(data.output, null, 2);
-                }
-                
-                resultContainer.classList.add('show');
-            } catch (error) {
-                resultContent.innerHTML = \`<div class="error">Error: \${error.message}</div>\`;
-                resultContainer.classList.add('show');
-            } finally {
-                btn.disabled = false;
-                btn.textContent = 'Execute';
-            }
-        }
-        
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-
-        renderDynamicFields();
-    </script>
-</body>
-</html>
-`
+function serializeForScript(value: unknown): string {
+    return JSON.stringify(value)
+        .replace(/</g, '\\u003c')
+        .replace(/>/g, '\\u003e')
+        .replace(/&/g, '\\u0026')
 }
-
-const publisherPageHtml = (): string => `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Apps Publisher</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 24px; background: #f7f7fb; color: #111; }
-        h1 { margin: 0 0 8px 0; }
-        p { margin: 0 0 20px 0; color: #555; }
-        .card { background: #fff; border: 1px solid #e7e7ef; border-radius: 12px; padding: 16px; margin-bottom: 14px; }
-        .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-        input, textarea { width: 100%; border: 1px solid #d6d6e3; border-radius: 8px; padding: 8px 10px; }
-        textarea { min-height: 70px; }
-        .btn { border: 0; border-radius: 8px; padding: 8px 12px; cursor: pointer; font-weight: 600; }
-        .btn-primary { background: #2b6af3; color: white; }
-        .btn-danger { background: #e5484d; color: white; }
-        .meta { font-size: 12px; color: #666; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-        @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
-    </style>
-</head>
-<body>
-    <h1>Apps Publisher</h1>
-    <p>Publish your templates as apps for <code>/apps</code>.</p>
-    <div class="grid">
-        <section>
-            <h2>Templates</h2>
-            <div id="templates"></div>
-        </section>
-        <section>
-            <h2>Published Apps</h2>
-            <div id="published"></div>
-        </section>
-    </div>
-
-    <script>
-        function getStoredToken() {
-            return window.localStorage.getItem('token') || window.sessionStorage.getItem('token');
-        }
-
-        function buildAuthHeaders(existingHeaders = {}) {
-            const token = getStoredToken();
-            if (!token) return existingHeaders;
-            return { ...existingHeaders, Authorization: 'Bearer ' + token };
-        }
-
-        async function fetchJson(url, options = {}) {
-            const headers = buildAuthHeaders(options.headers || {});
-            const res = await fetch(url, { credentials: 'include', ...options, headers });
-            const body = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(body.error || ('Request failed: ' + res.status));
-            return body;
-        }
-
-        async function loadTemplates() {
-            const data = await fetchJson('/apps/api/publisher/templates');
-            const root = document.getElementById('templates');
-            const templates = data.data || [];
-            if (!templates.length) {
-                root.innerHTML = '<div class="card">No templates found.</div>';
-                return;
-            }
-            root.innerHTML = templates.map((t) => \`
-                <div class="card">
-                    <div class="row"><strong>\${t.name}</strong></div>
-                    <div class="meta">\${t.summary || ''}</div>
-                    <div class="row" style="margin-top:10px">
-                        <button class="btn btn-primary" onclick="publishTemplate('\${t.id}')">Publish as App</button>
-                    </div>
-                </div>
-            \`).join('');
-        }
-
-        async function loadPublished() {
-            const data = await fetchJson('/apps/api/publisher/apps');
-            const root = document.getElementById('published');
-            const apps = data.data || [];
-            if (!apps.length) {
-                root.innerHTML = '<div class="card">No published apps yet.</div>';
-                return;
-            }
-            root.innerHTML = apps.map((a) => \`
-                <div class="card">
-                    <div class="row"><strong>\${a.name}</strong></div>
-                    <div class="meta">templateId: \${a.id}</div>
-                    <div class="row" style="margin-top:10px">
-                        <a class="btn" href="/apps/\${a.id}" target="_blank" rel="noreferrer">Open</a>
-                        <button class="btn btn-danger" onclick="unpublishTemplate('\${a.id}')">Unpublish</button>
-                    </div>
-                </div>
-            \`).join('');
-        }
-
-        async function publishTemplate(templateId) {
-            await fetchJson('/apps/api/publisher/publish', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ templateId }),
-            });
-            await loadPublished();
-            alert('Published');
-        }
-
-        async function unpublishTemplate(templateId) {
-            await fetchJson('/apps/api/publisher/apps/' + templateId, { method: 'DELETE' });
-            await loadPublished();
-            alert('Unpublished');
-        }
-
-        (async () => {
-            try {
-                const token = getStoredToken();
-                if (!token) {
-                    window.location.href = '/sign-in?redirectAfterLogin=' + encodeURIComponent('/apps/publisher');
-                    return;
-                }
-                await Promise.all([loadTemplates(), loadPublished()]);
-            } catch (e) {
-                document.body.insertAdjacentHTML('beforeend', '<pre style="color:#e5484d">' + e.message + '</pre>');
-            }
-        })();
-    </script>
-</body>
-</html>
-`
 
 function escapeHtml(text: string): string {
     const map: Record<string, string> = {
@@ -736,49 +111,218 @@ function escapeHtml(text: string): string {
     return text.replace(/[&<>"']/g, (m) => map[m])
 }
 
-/**
- * Flow Gallery Controller
- * Registers public routes for gallery and app execution
- */
+function pageShell(title: string, body: string): string {
+    return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escapeHtml(title)}</title>
+  <style>
+    *{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui;background:#f5f7fb;color:#1f2540}
+    .container{width:min(1180px,95vw);margin:24px auto}
+    .top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}
+    .title h1{margin:0;font-size:30px}.title p{margin:6px 0 0;color:#667}
+    .btn{border:1px solid #dce1ef;background:#fff;border-radius:10px;padding:9px 12px;font-weight:600;cursor:pointer}
+    .btn.primary{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none}
+    .input,.select,textarea{width:100%;border:1px solid #dce1ef;border-radius:10px;padding:10px 12px;background:#fff}
+    .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+    .card{background:#fff;border:1px solid #e4e8f3;border-radius:14px;padding:14px}
+    .muted{color:#667;font-size:13px}.chips{display:flex;flex-wrap:wrap;gap:6px}.chip{background:#eef2ff;border:1px solid #d7defe;color:#4338ca;border-radius:999px;padding:3px 8px;font-size:12px}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.grid2{display:grid;grid-template-columns:1.1fr 1fr;gap:12px}
+    .panel{background:#fff;border:1px solid #e4e8f3;border-radius:14px;padding:14px}
+    .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+    .stat{border:1px solid #e4e8f3;background:#fafbff;border-radius:10px;padding:8px;text-align:center}.stat b{display:block}
+    .hidden{display:none !important}.danger{color:#dc2626}.success{color:#16a34a}
+    .field-row{display:grid;grid-template-columns:1fr 1fr 120px 90px auto;gap:8px;align-items:center}
+    .code{background:#0f172a;color:#dbeafe;border:1px solid #1e293b;border-radius:10px;padding:12px;overflow:auto;font-family:ui-monospace;font-size:12px}
+    @media(max-width:980px){.grid2{grid-template-columns:1fr}.field-row{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}}
+  </style>
+</head>
+<body>${body}</body>
+</html>`
+}
+
+function galleryPageHtml(apps: Template[]): string {
+    return pageShell('Apps - Wicked Flow', `
+      <div class="container">
+        <div class="top">
+          <div class="title"><h1>Apps</h1><p>Run workflow-powered apps without editing flows.</p></div>
+          <div class="row"><a class="btn" href="/apps/publisher">Publisher</a><a class="btn primary" href="/sign-in">Sign in</a></div>
+        </div>
+        <div class="row" style="margin-bottom:12px">
+          <input id="search" class="input" placeholder="Search apps" />
+          <select id="category" class="select"><option value="">All categories</option></select>
+          <select id="sort" class="select"><option value="featured">Featured</option><option value="runs">Most runs</option><option value="recent">Recent</option><option value="name">Name A-Z</option></select>
+        </div>
+        <div id="cards" class="cards"></div>
+      </div>
+      <script id="apps-data" type="application/json">${serializeForScript(apps)}</script>
+      <script>
+        const apps = JSON.parse(document.getElementById('apps-data').textContent || '[]');
+        const state = { search:'', category:'', sort:'featured' };
+        const meta = (a)=>{const m=a.galleryMetadata||{};return {category:m.category||'GENERAL',tags:Array.isArray(m.tags)?m.tags:[],featured:!!m.featured,runCount:Number(m.runCount||0),successCount:Number(m.successCount||0),failedCount:Number(m.failedCount||0),avg:m.averageExecutionMs==null?'-':Math.round(Number(m.averageExecutionMs)),updated:m.updated||a.updated};};
+        const esc=(t)=>{const d=document.createElement('div');d.textContent=String(t||'');return d.innerHTML;};
+        function categories(){const set=new Set(apps.map(a=>meta(a).category));document.getElementById('category').innerHTML='<option value="">All categories</option>'+Array.from(set).sort().map(c=>'<option value="'+esc(c)+'">'+esc(c)+'</option>').join('');}
+        function matches(a){const m=meta(a);const t=[a.name,a.summary||'',a.description||'',...m.tags,m.category].join(' ').toLowerCase();if(state.search&&!t.includes(state.search))return false;if(state.category&&m.category!==state.category)return false;return true;}
+        function sorted(list){const x=list.map(a=>({a,m:meta(a)}));if(state.sort==='name')return x.sort((p,q)=>p.a.name.localeCompare(q.a.name));if(state.sort==='runs')return x.sort((p,q)=>q.m.runCount-p.m.runCount);if(state.sort==='recent')return x.sort((p,q)=>new Date(q.m.updated)-new Date(p.m.updated));return x.sort((p,q)=>Number(q.m.featured)-Number(p.m.featured)||q.m.runCount-p.m.runCount);}
+        function render(){const root=document.getElementById('cards');const list=sorted(apps.filter(matches));if(!list.length){root.innerHTML='<div class="panel"><h2>No apps found</h2><p class="muted">Try another filter.</p></div>';return;}
+          root.innerHTML=list.map(({a,m})=>{const sr=m.runCount?Math.round((m.successCount/m.runCount)*100)+'%':'-';return '<article class="card"><div class="row" style="justify-content:space-between"><div><h3 style="margin:0">'+esc(a.name)+'</h3><div class="muted">'+esc(a.summary||a.description||'Workflow app')+'</div></div><span class="chip">'+(m.featured?'Featured':esc(m.category))+'</span></div><div class="chips" style="margin-top:8px">'+m.tags.slice(0,4).map(t=>'<span class="chip">'+esc(t)+'</span>').join('')+'</div><div class="stats" style="margin-top:10px"><div class="stat"><b>'+m.runCount+'</b><span class="muted">Runs</span></div><div class="stat"><b>'+sr+'</b><span class="muted">Success</span></div><div class="stat"><b>'+(m.avg==='-'?'-':m.avg+'ms')+'</b><span class="muted">Avg</span></div><div class="stat"><b>'+m.failedCount+'</b><span class="muted">Failed</span></div></div><div class="row" style="margin-top:10px"><a class="btn primary" href="/apps/'+a.id+'">Use app</a><a class="btn" href="/apps/'+a.id+'#details">Details</a></div></article>';}).join('');}
+        categories(); render();
+        document.getElementById('search').addEventListener('input',e=>{state.search=(e.target.value||'').trim().toLowerCase();render();});
+        document.getElementById('category').addEventListener('change',e=>{state.category=e.target.value;render();});
+        document.getElementById('sort').addEventListener('change',e=>{state.sort=e.target.value;render();});
+      </script>`)
+}
+
+function appRuntimeHtml(app: Template & { galleryMetadata?: Record<string, unknown> }): string {
+    const meta = (app.galleryMetadata ?? {}) as Record<string, unknown>
+    const schema = meta.inputSchema && typeof meta.inputSchema === 'object'
+        ? meta.inputSchema as Record<string, unknown>
+        : { fields: [] }
+    const outputType = typeof meta.outputType === 'string' ? meta.outputType : 'json'
+    return pageShell(`${app.name} - App`, `
+      <div class="container">
+        <div class="top">
+          <div class="title"><h1>${escapeHtml(app.name)}</h1><p>${escapeHtml(app.description || app.summary || 'Run this app using your own inputs.')}</p></div>
+          <div class="row"><a class="btn" href="/apps">Back</a><a class="btn" href="/apps/${escapeHtml(app.id)}#details">Details</a></div>
+        </div>
+        <div class="grid2">
+          <section class="panel" id="details">
+            <h2 style="margin:0 0 10px">Run app</h2>
+            <div id="formFields" class="row" style="display:grid;gap:10px"></div>
+            <div class="row" style="margin-top:10px"><button id="runBtn" class="btn primary">Run app</button><button id="resetBtn" class="btn">Reset</button></div>
+            <div id="runError" class="danger hidden" style="margin-top:8px"></div>
+          </section>
+          <section class="panel">
+            <h2 style="margin:0 0 10px">Output</h2>
+            <div id="runMeta" class="muted">No runs yet.</div>
+            <div id="output" class="hidden" style="margin-top:10px"></div>
+            <div id="stats" style="margin-top:12px" class="muted">Loading stats...</div>
+          </section>
+        </div>
+      </div>
+      <script id="schema-data" type="application/json">${serializeForScript(schema)}</script>
+      <script id="output-type" type="application/json">${serializeForScript(outputType)}</script>
+      <script>
+        const appId = ${serializeForScript(app.id)};
+        const schema = JSON.parse(document.getElementById('schema-data').textContent || '{"fields":[]}');
+        const configuredOutputType = JSON.parse(document.getElementById('output-type').textContent || '"json"');
+        const esc=(t)=>{const d=document.createElement('div');d.textContent=String(t||'');return d.innerHTML;};
+        const formFields=document.getElementById('formFields');
+        const runBtn=document.getElementById('runBtn');
+        const resetBtn=document.getElementById('resetBtn');
+        const runError=document.getElementById('runError');
+        const output=document.getElementById('output');
+        const runMeta=document.getElementById('runMeta');
+        const stats=document.getElementById('stats');
+
+        function normalizeFields(raw){if(!raw||typeof raw!=='object')return [];if(Array.isArray(raw.fields))return raw.fields;return Object.entries(raw).map(([name,config])=>{if(typeof config==='string')return {name,label:name,type:config};if(config&&typeof config==='object')return {name,label:name,...config};return {name,label:name,type:'text'};});}
+        function fieldHtml(field){const n=String(field.name||'').replace(/[^a-zA-Z0-9_]/g,'_');const type=String(field.type||'text').toLowerCase();const label=field.label||n;const req=field.required?'required':'';const ph=field.placeholder||'';if(type==='textarea')return '<label class="muted">'+esc(label)+'</label><textarea class="input" name="'+esc(n)+'" placeholder="'+esc(ph)+'" '+req+'></textarea>';if(type==='number')return '<label class="muted">'+esc(label)+'</label><input class="input" type="number" name="'+esc(n)+'" placeholder="'+esc(ph)+'" '+req+' />';if(type==='boolean')return '<label class="muted" style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="'+esc(n)+'" />'+esc(label)+'</label>';if(type==='select'){const options=Array.isArray(field.options)?field.options:[];return '<label class="muted">'+esc(label)+'</label><select class="select" name="'+esc(n)+'" '+req+'><option value="">Select...</option>'+options.map((opt)=>{if(typeof opt==='string')return '<option value="'+esc(opt)+'">'+esc(opt)+'</option>';return '<option value="'+esc(opt.value||opt.label||'')+'">'+esc(opt.label||opt.value||'')+'</option>';}).join('')+'</select>';}const inputType=type==='password'?'password':'text';return '<label class="muted">'+esc(label)+'</label><input class="input" type="'+inputType+'" name="'+esc(n)+'" placeholder="'+esc(ph)+'" '+req+' />';}
+        function renderForm(){const fields=normalizeFields(schema);if(!fields.length){formFields.innerHTML='<label class="muted">Input</label><textarea class="input" name="input" placeholder="Enter input"></textarea>';return;}formFields.innerHTML=fields.map((f)=>'<div>'+fieldHtml(f)+'</div>').join('');}
+        async function loadStats(){try{const res=await fetch('/apps/api/apps/'+encodeURIComponent(appId)+'/stats');const body=await res.json();if(!res.ok){stats.textContent='Stats unavailable.';return;}const sr=body.runCount?Math.round((body.successCount/body.runCount)*100):0;stats.innerHTML='<div class="stats"><div class="stat"><b>'+body.runCount+'</b><span class="muted">Runs</span></div><div class="stat"><b>'+body.successCount+'</b><span class="muted">Success</span></div><div class="stat"><b>'+body.failedCount+'</b><span class="muted">Failed</span></div><div class="stat"><b>'+(body.averageExecutionMs?Math.round(body.averageExecutionMs)+'ms':'-')+'</b><span class="muted">Avg</span></div></div><div class="muted" style="margin-top:8px">Success rate: '+sr+'%</div>';}catch(e){stats.textContent='Stats unavailable.';}}
+        function renderOutput(data){const t=String(configuredOutputType||'json').toLowerCase();if(t==='image'){const url=typeof data==='string'?data:(data&&data.imageUrl)||((data&&data.url)||'');if(url)return '<img src="'+esc(String(url))+'" alt="Output" style="max-width:100%;border:1px solid #dce1ef;border-radius:10px" />';}if(t==='text'){const text=typeof data==='string'?data:(data&&data.text)||JSON.stringify(data);return '<div style="white-space:pre-wrap;line-height:1.5">'+esc(String(text))+'</div>';}if(t==='markdown'){const text=typeof data==='string'?data:(data&&data.markdown)||(data&&data.text)||JSON.stringify(data);return '<pre class="code" style="white-space:pre-wrap">'+esc(String(text))+'</pre>';}return '<pre class="code">'+esc(JSON.stringify(data,null,2))+'</pre>';}
+        async function runApp(){runError.classList.add('hidden');runError.textContent='';runBtn.disabled=true;runBtn.textContent='Running...';output.classList.add('hidden');const fields=formFields.querySelectorAll('[name]');const inputs={};fields.forEach((el)=>{if(el.type==='checkbox')inputs[el.name]=el.checked;else if(el.type==='number')inputs[el.name]=el.value===''?null:Number(el.value);else inputs[el.name]=el.value;});const start=Date.now();try{const res=await fetch('/apps/'+encodeURIComponent(appId)+'/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({inputs})});const body=await res.json();if(!res.ok)throw new Error(body.error||'Execution failed');const ms=body.executionTime||(Date.now()-start);runMeta.textContent='Last run: '+new Date().toLocaleString()+' ('+ms+'ms)';output.innerHTML=renderOutput(body.output);output.classList.remove('hidden');await loadStats();}catch(e){runError.textContent=e.message||String(e);runError.classList.remove('hidden');}finally{runBtn.disabled=false;runBtn.textContent='Run app';}}
+        runBtn.addEventListener('click',(e)=>{e.preventDefault();runApp();});
+        resetBtn.addEventListener('click',(e)=>{e.preventDefault();document.querySelectorAll('#formFields [name]').forEach((el)=>{if(el.type==='checkbox')el.checked=false;else el.value='';});output.classList.add('hidden');runError.classList.add('hidden');});
+        renderForm();loadStats();
+      </script>`)
+}
+
+function publisherPageHtml(): string {
+    return pageShell('Apps Publisher', `
+      <div class="container">
+        <div class="top">
+          <div class="title"><h1>Publisher</h1><p>Publish templates as apps and configure schema-driven UX.</p></div>
+          <div class="row"><a class="btn" href="/apps">Open gallery</a><button class="btn primary" id="reloadBtn">Reload</button></div>
+        </div>
+        <div class="grid2">
+          <section class="panel">
+            <h2 style="margin:0 0 8px">Templates</h2>
+            <input id="templateSearch" class="input" placeholder="Search templates" />
+            <div id="templateList" style="display:grid;gap:10px;margin-top:10px"></div>
+          </section>
+          <section class="panel">
+            <h2 style="margin:0 0 8px">Published apps</h2>
+            <input id="publishedSearch" class="input" placeholder="Search published apps" />
+            <div id="publishedList" style="display:grid;gap:10px;margin-top:10px"></div>
+          </section>
+        </div>
+        <section class="panel" style="margin-top:12px">
+          <h2 id="editorTitle" style="margin:0 0 8px">Publish template as app</h2>
+          <div class="grid2">
+            <div style="display:grid;gap:10px">
+              <div><label class="muted">Template ID</label><input id="templateId" class="input" placeholder="template_xxx" /></div>
+              <div><label class="muted">Flow ID (optional)</label><input id="flowId" class="input" placeholder="flow_xxx" /></div>
+              <div><label class="muted">Description</label><textarea id="description" class="input" placeholder="What this app does"></textarea></div>
+              <div><label class="muted">Icon URL</label><input id="icon" class="input" placeholder="https://..." /></div>
+              <div><label class="muted">Category</label><input id="category" class="input" placeholder="GENERAL" /></div>
+              <div><label class="muted">Tags (comma separated)</label><input id="tags" class="input" placeholder="basecamp,agency,design" /></div>
+              <div><label class="muted">Output Type</label><select id="outputType" class="select"><option value="">Auto / JSON</option><option value="json">json</option><option value="text">text</option><option value="image">image</option><option value="markdown">markdown</option><option value="html">html</option></select></div>
+              <label class="muted" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="featured" /> Featured</label>
+            </div>
+            <div>
+              <h3 style="margin:0 0 8px">Input schema builder</h3>
+              <div id="schemaFields" style="display:grid;gap:8px"></div>
+              <div class="row" style="margin-top:8px"><button id="addFieldBtn" class="btn">Add field</button><button id="clearFieldsBtn" class="btn">Clear</button></div>
+            </div>
+          </div>
+          <div class="row" style="margin-top:12px"><button id="publishBtn" class="btn primary">Publish</button><button id="updateBtn" class="btn">Update</button><button id="previewBtn" class="btn">Preview</button><button id="unpublishBtn" class="btn">Unpublish</button></div>
+          <div id="publisherMessage" class="hidden" style="margin-top:8px"></div>
+        </section>
+      </div>
+      <script>
+        const state = { templates: [], published: [], schemaFields: [] };
+        const esc=(t)=>{const d=document.createElement('div');d.textContent=String(t||'');return d.innerHTML;};
+        const token=()=>window.localStorage.getItem('token')||window.sessionStorage.getItem('token');
+        const headers=(h={})=>{const t=token();return t?{...h,Authorization:'Bearer '+t}:h;};
+        async function req(url,opt={}){const r=await fetch(url,{...opt,headers:headers(opt.headers||{}),credentials:'include'});const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.error||('Request failed: '+r.status));return b;}
+        function msg(text,error=false){const n=document.getElementById('publisherMessage');n.classList.remove('hidden');n.className=error?'danger':'success';n.textContent=text;}
+        function normalizeTags(input){return String(input||'').split(',').map(s=>s.trim()).filter(Boolean);}
+        function createField(field={}){return {name:field.name||'',label:field.label||'',type:field.type||'text',required:!!field.required,placeholder:field.placeholder||'',options:Array.isArray(field.options)?field.options:[]};}
+        function renderSchema(){const root=document.getElementById('schemaFields');if(!state.schemaFields.length){root.innerHTML='<div class="muted">No fields configured.</div>';return;}root.innerHTML=state.schemaFields.map((f,i)=>'<div class="field-row"><input class="input" data-i="'+i+'" data-k="name" placeholder="name" value="'+esc(f.name)+'"/><input class="input" data-i="'+i+'" data-k="label" placeholder="label" value="'+esc(f.label)+'"/><select class="select" data-i="'+i+'" data-k="type">'+['text','textarea','number','select','boolean','password'].map(t=>'<option value="'+t+'" '+(f.type===t?'selected':'')+'>'+t+'</option>').join('')+'</select><label class="muted"><input type="checkbox" data-i="'+i+'" data-k="required" '+(f.required?'checked':'')+'> Required</label><button class="btn" data-remove="'+i+'">Remove</button><input class="input" data-i="'+i+'" data-k="placeholder" placeholder="placeholder" value="'+esc(f.placeholder||'')+'"/>'+(f.type==='select'?'<input class="input" data-i="'+i+'" data-k="options" placeholder="options: one|two|three" value="'+esc((f.options||[]).map(o=>o.value||o).join('|'))+'"/>':'<div></div>')+'</div>').join('');}
+        function renderTemplates(){const q=(document.getElementById('templateSearch').value||'').toLowerCase().trim();const root=document.getElementById('templateList');const items=state.templates.filter(t=>(t.name+' '+(t.summary||'')).toLowerCase().includes(q));if(!items.length){root.innerHTML='<div class="muted">No templates found.</div>';return;}root.innerHTML=items.map(t=>'<article class="card"><h3 style="margin:0">'+esc(t.name)+'</h3><div class="muted">'+esc(t.summary||'')+'</div><div class="row" style="margin-top:8px"><button class="btn primary" onclick="selectTemplate(\\''+t.id+'\\')">Select</button></div></article>').join('');}
+        function renderPublished(){const q=(document.getElementById('publishedSearch').value||'').toLowerCase().trim();const root=document.getElementById('publishedList');const items=state.published.filter(a=>(a.name+' '+(a.summary||'')).toLowerCase().includes(q));if(!items.length){root.innerHTML='<div class="muted">No published apps yet.</div>';return;}root.innerHTML=items.map(a=>{const m=a.galleryMetadata||{};return '<article class="card"><h3 style="margin:0">'+esc(a.name)+'</h3><div class="muted">'+esc(m.description||a.summary||'')+'</div><div class="row" style="margin-top:8px"><a class="btn" href="/apps/'+a.id+'" target="_blank">Open</a><button class="btn" onclick="editApp(\\''+a.id+'\\')">Edit</button><button class="btn" onclick="doUnpublish(\\''+a.id+'\\')">Unpublish</button></div></article>';}).join('');}
+        function payload(){const templateId=document.getElementById('templateId').value.trim();if(!templateId)throw new Error('Template ID is required');const fields=state.schemaFields.map(f=>({name:f.name.trim(),label:(f.label||f.name).trim(),type:f.type||'text',required:!!f.required,placeholder:(f.placeholder||'').trim(),...(f.type==='select'&&f.options.length?{options:f.options.map(o=>({label:o.label||o.value,value:o.value}))}:{})})).filter(f=>f.name.length>0);return{templateId,flowId:document.getElementById('flowId').value.trim()||undefined,description:document.getElementById('description').value.trim()||undefined,icon:document.getElementById('icon').value.trim()||undefined,category:document.getElementById('category').value.trim()||undefined,tags:normalizeTags(document.getElementById('tags').value),featured:document.getElementById('featured').checked,outputType:document.getElementById('outputType').value||undefined,inputSchema:fields.length?{fields}:undefined};}
+        window.selectTemplate=function(id){document.getElementById('templateId').value=id;document.getElementById('editorTitle').textContent='Publish '+id;msg('Template selected: '+id);}
+        window.editApp=function(id){const app=state.published.find(a=>a.id===id);if(!app)return;const m=app.galleryMetadata||{};document.getElementById('templateId').value=id;document.getElementById('flowId').value=m.flowId||'';document.getElementById('description').value=m.description||'';document.getElementById('icon').value=m.icon||'';document.getElementById('category').value=m.category||'';document.getElementById('tags').value=Array.isArray(m.tags)?m.tags.join(', '):'';document.getElementById('featured').checked=!!m.featured;document.getElementById('outputType').value=m.outputType||'';const fields=Array.isArray(m.inputSchema&&m.inputSchema.fields)?m.inputSchema.fields:[];state.schemaFields=fields.map(f=>createField(f));renderSchema();msg('Loaded app for editing');}
+        window.doUnpublish=async function(id){if(!confirm('Unpublish this app?'))return;await req('/apps/api/publisher/apps/'+encodeURIComponent(id),{method:'DELETE'});await load();msg('Unpublished');}
+        async function load(){if(!token()){window.location.href='/sign-in?redirectAfterLogin='+encodeURIComponent('/apps/publisher');return;}const [templates,published]=await Promise.all([req('/apps/api/publisher/templates'),req('/apps/api/publisher/apps')]);state.templates=templates.data||[];state.published=published.data||[];renderTemplates();renderPublished();}
+        document.getElementById('schemaFields').addEventListener('input',e=>{const t=e.target;if(!t.dataset||t.dataset.i==null)return;const i=Number(t.dataset.i);const k=t.dataset.k;if(!state.schemaFields[i])return;if(k==='required')state.schemaFields[i][k]=t.checked;else if(k==='options')state.schemaFields[i].options=String(t.value||'').split('|').map(v=>v.trim()).filter(Boolean).map(v=>({label:v,value:v}));else state.schemaFields[i][k]=t.value;if(k==='type')renderSchema();});
+        document.getElementById('schemaFields').addEventListener('click',e=>{const t=e.target;if(!t.dataset||t.dataset.remove==null)return;state.schemaFields.splice(Number(t.dataset.remove),1);renderSchema();});
+        document.getElementById('addFieldBtn').addEventListener('click',()=>{state.schemaFields.push(createField());renderSchema();});
+        document.getElementById('clearFieldsBtn').addEventListener('click',()=>{state.schemaFields=[];renderSchema();});
+        document.getElementById('templateSearch').addEventListener('input',renderTemplates);
+        document.getElementById('publishedSearch').addEventListener('input',renderPublished);
+        document.getElementById('reloadBtn').addEventListener('click',()=>load().catch(e=>msg(e.message||String(e),true)));
+        document.getElementById('previewBtn').addEventListener('click',()=>{const id=document.getElementById('templateId').value.trim();if(!id){msg('Template ID required',true);return;}window.open('/apps/'+encodeURIComponent(id),'_blank');});
+        document.getElementById('publishBtn').addEventListener('click',async()=>{try{await req('/apps/api/publisher/publish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())});await load();msg('Published successfully');}catch(e){msg(e.message||String(e),true);}});
+        document.getElementById('updateBtn').addEventListener('click',async()=>{try{const p=payload();await req('/apps/api/publisher/apps/'+encodeURIComponent(p.templateId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});await load();msg('Updated successfully');}catch(e){msg(e.message||String(e),true);}});
+        document.getElementById('unpublishBtn').addEventListener('click',async()=>{const id=document.getElementById('templateId').value.trim();if(!id){msg('Template ID required',true);return;}await window.doUnpublish(id);});
+        renderSchema();load().catch(e=>msg(e.message||String(e),true));
+      </script>`)
+}
+
 export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) => {
     const service = flowGalleryService(fastify.log)
 
-    // PUBLIC: Gallery home page
-    fastify.get('/', {
-        config: {
-            security: {
-                kind: RouteKind.PUBLIC,
-            },
-        },
-    }, async (request, reply) => {
+    fastify.get('/', { config: { security: { kind: RouteKind.PUBLIC } } }, async (_, reply) => {
         try {
-            const apps = await service.listPublicApps({
-                cursor: null,
-                limit: 100,
-                platformId: null,
-            })
-
-            const html = galleryPageHtml(apps.data, request.hostname)
-            return reply.type('text/html').send(html)
+            const apps = await service.listPublicApps({ cursor: null, limit: 200, platformId: null })
+            return reply.type('text/html').send(galleryPageHtml(apps.data))
         } catch (error) {
             fastify.log.error(error)
             return reply.code(500).send({ error: 'Failed to load gallery' })
         }
     })
 
-    // PUBLIC: JSON API - List apps
-    fastify.get('/api/apps', {
-        config: {
-            security: {
-                kind: RouteKind.PUBLIC,
-            },
-        },
-    }, async (request, reply) => {
+    fastify.get('/api/apps', { config: { security: { kind: RouteKind.PUBLIC } }, schema: { querystring: ListAppsQuery } }, async (request, reply) => {
         const query = request.query as Static<typeof ListAppsQuery>
         try {
             const apps = await service.listPublicApps({
                 cursor: query.cursor || null,
-                limit: query.limit || 20,
+                limit: Math.min(query.limit || 20, 100),
                 search: query.search,
                 category: query.category,
                 featured: query.featured,
@@ -791,32 +335,31 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
         }
     })
 
-    // PUBLIC: Publisher page shell (API calls are authenticated via bearer token)
-    fastify.get('/publisher', {
-        config: {
-            security: {
-                kind: RouteKind.PUBLIC,
-            },
-        },
-    }, async (_, reply) => {
+    fastify.get('/api/apps/:id', { config: { security: { kind: RouteKind.PUBLIC } }, schema: { params: AppIdParams } }, async (request, reply) => {
+        const params = request.params as Static<typeof AppIdParams>
+        const app = await service.getPublicApp({ id: params.id, platformId: null })
+        if (!app) return reply.code(StatusCodes.NOT_FOUND).send({ error: 'App not found' })
+        return reply.send(app)
+    })
+
+    fastify.get('/api/apps/:id/stats', { config: { security: { kind: RouteKind.PUBLIC } }, schema: { params: AppIdParams } }, async (request, reply) => {
+        const params = request.params as Static<typeof AppIdParams>
+        const stats = await service.getPublicAppStats(params.id)
+        if (!stats) return reply.code(StatusCodes.NOT_FOUND).send({ error: 'App stats not found' })
+        return reply.send(stats)
+    })
+
+    fastify.get('/publisher', { config: { security: { kind: RouteKind.PUBLIC } } }, async (_, reply) => {
         return reply.type('text/html').send(publisherPageHtml())
     })
 
-    // AUTHENTICATED: Publisher - List my published apps
     fastify.get('/api/publisher/apps', {
-        config: {
-            security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]),
-        },
-        schema: {
-            querystring: ListPublisherAppsQuery,
-        },
+        config: { security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]) },
+        schema: { querystring: ListPublisherAppsQuery },
     }, async (request, reply) => {
         const query = request.query as Static<typeof ListPublisherAppsQuery>
         try {
-            const apps = await service.listPublisherApps({
-                platformId: request.principal.platform.id,
-                search: query.search,
-            })
+            const apps = await service.listPublisherApps({ platformId: request.principal.platform.id, search: query.search })
             return reply.send({ data: apps })
         } catch (error) {
             fastify.log.error(error)
@@ -824,21 +367,13 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
         }
     })
 
-    // AUTHENTICATED: Publisher - List eligible templates for publish
     fastify.get('/api/publisher/templates', {
-        config: {
-            security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]),
-        },
-        schema: {
-            querystring: ListPublisherTemplatesQuery,
-        },
+        config: { security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]) },
+        schema: { querystring: ListPublisherTemplatesQuery },
     }, async (request, reply) => {
         const query = request.query as Static<typeof ListPublisherTemplatesQuery>
         try {
-            const templates = await service.listPublisherTemplates({
-                platformId: request.principal.platform.id,
-                search: query.search,
-            })
+            const templates = await service.listPublisherTemplates({ platformId: request.principal.platform.id, search: query.search })
             return reply.send({ data: templates })
         } catch (error) {
             fastify.log.error(error)
@@ -846,14 +381,9 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
         }
     })
 
-    // AUTHENTICATED: Publisher - Publish template as app
     fastify.post('/api/publisher/publish', {
-        config: {
-            security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]),
-        },
-        schema: {
-            body: PublisherAppPayload,
-        },
+        config: { security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]) },
+        schema: { body: PublisherAppPayload },
     }, async (request, reply) => {
         const body = request.body as Static<typeof PublisherAppPayload>
         try {
@@ -865,21 +395,13 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
             return reply.code(StatusCodes.CREATED).send(app)
         } catch (error: any) {
             fastify.log.error(error)
-            return reply.code(StatusCodes.BAD_REQUEST).send({
-                error: error?.message ?? 'Failed to publish app',
-            })
+            return reply.code(StatusCodes.BAD_REQUEST).send({ error: error?.message ?? 'Failed to publish app' })
         }
     })
 
-    // AUTHENTICATED: Publisher - Update published app metadata
     fastify.put('/api/publisher/apps/:templateId', {
-        config: {
-            security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]),
-        },
-        schema: {
-            params: PublisherTemplateParams,
-            body: UpdatePublisherAppPayload,
-        },
+        config: { security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]) },
+        schema: { params: PublisherTemplateParams, body: UpdatePublisherAppPayload },
     }, async (request, reply) => {
         const params = request.params as Static<typeof PublisherTemplateParams>
         const body = request.body as Static<typeof UpdatePublisherAppPayload>
@@ -892,20 +414,13 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
             return reply.send(app)
         } catch (error: any) {
             fastify.log.error(error)
-            return reply.code(StatusCodes.BAD_REQUEST).send({
-                error: error?.message ?? 'Failed to update app metadata',
-            })
+            return reply.code(StatusCodes.BAD_REQUEST).send({ error: error?.message ?? 'Failed to update app metadata' })
         }
     })
 
-    // AUTHENTICATED: Publisher - Unpublish app
     fastify.delete('/api/publisher/apps/:templateId', {
-        config: {
-            security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]),
-        },
-        schema: {
-            params: PublisherTemplateParams,
-        },
+        config: { security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]) },
+        schema: { params: PublisherTemplateParams },
     }, async (request, reply) => {
         const params = request.params as Static<typeof PublisherTemplateParams>
         try {
@@ -916,90 +431,52 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
             return reply.code(StatusCodes.NO_CONTENT).send()
         } catch (error: any) {
             fastify.log.error(error)
-            return reply.code(StatusCodes.BAD_REQUEST).send({
-                error: error?.message ?? 'Failed to unpublish app',
-            })
+            return reply.code(StatusCodes.BAD_REQUEST).send({ error: error?.message ?? 'Failed to unpublish app' })
         }
     })
 
-    // PUBLIC: App runtime page
-    fastify.get('/:id', {
-        config: {
-            security: {
-                kind: RouteKind.PUBLIC,
-            },
-        },
-    }, async (request, reply) => {
-        const { id } = request.params as { id: string }
+    fastify.get('/:id', { config: { security: { kind: RouteKind.PUBLIC } }, schema: { params: AppIdParams } }, async (request, reply) => {
+        const params = request.params as Static<typeof AppIdParams>
         try {
-            const app = await service.getPublicApp({
-                id,
-                platformId: null,
-            })
-
-            if (!app) {
-                return reply.code(404).send({ error: 'App not found' })
-            }
-
-            const html = appRuntimeHtml(app, request.hostname)
-            return reply.type('text/html').send(html)
+            const app = await service.getPublicApp({ id: params.id, platformId: null })
+            if (!app) return reply.code(404).send({ error: 'App not found' })
+            return reply.type('text/html').send(appRuntimeHtml(app as Template & { galleryMetadata?: Record<string, unknown> }))
         } catch (error) {
             fastify.log.error(error)
             return reply.code(500).send({ error: 'Failed to load app' })
         }
     })
 
-    // PUBLIC: Execute workflow
-    fastify.post('/:id/execute', {
-        config: {
-            security: {
-                kind: RouteKind.PUBLIC,
-            },
-        },
-    }, async (request, reply) => {
-        const { id } = request.params as { id: string }
+    fastify.post('/:id/execute', { config: { security: { kind: RouteKind.PUBLIC } }, schema: { params: AppIdParams, body: ExecuteFlowRequest } }, async (request, reply) => {
+        const params = request.params as Static<typeof AppIdParams>
         const body = request.body as Static<typeof ExecuteFlowRequest>
+        const serializedInputs = JSON.stringify(body.inputs ?? {})
+        if (Buffer.byteLength(serializedInputs, 'utf8') > 200_000) {
+            return reply.code(StatusCodes.REQUEST_TOO_LONG).send({ error: 'Inputs payload is too large. Reduce request size and retry.' })
+        }
 
-        const startTime = Date.now()
-
+        const started = Date.now()
         try {
-            const app = await service.getPublicApp({
-                id,
-                platformId: null,
-            })
-
-            if (!app) {
-                return reply.code(404).send({ error: 'App not found' })
-            }
-
-            const flowResponse = await service.executePublicApp({
-                appId: id,
-                inputs: body.inputs,
-            })
-
-            const output = flowResponse.body
-
-            const executionTime = Date.now() - startTime
+            const app = await service.getPublicApp({ id: params.id, platformId: null })
+            if (!app) return reply.code(404).send({ error: 'App not found' })
+            const flowResponse = await service.executePublicApp({ appId: params.id, inputs: body.inputs ?? {} })
+            const executionTime = Date.now() - started
             await service.logExecution({
-                templateId: id,
+                templateId: params.id,
                 executionStatus: flowResponse.status >= 200 && flowResponse.status < 300 ? 'success' : 'failed',
                 executionTimeMs: executionTime,
-                outputs: output,
+                outputs: flowResponse.body,
             })
-
-            return reply.status(flowResponse.status).send({ output, executionTime })
+            return reply.status(flowResponse.status).send({ output: flowResponse.body, executionTime })
         } catch (error: any) {
             fastify.log.error(error)
-
-            const executionTime = Date.now() - startTime
             await service.logExecution({
-                templateId: id,
+                templateId: params.id,
                 executionStatus: 'failed',
-                executionTimeMs: executionTime,
-                error: error.message,
+                executionTimeMs: Date.now() - started,
+                error: error?.message ?? 'Execution failed',
             })
-
-            return reply.code(500).send({ error: error.message || 'Execution failed' })
+            return reply.code(StatusCodes.BAD_REQUEST).send({ error: error?.message ?? 'Execution failed' })
         }
     })
 }

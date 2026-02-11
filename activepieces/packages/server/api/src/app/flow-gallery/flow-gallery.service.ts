@@ -81,6 +81,148 @@ interface UpdatePublishedAppParams extends Omit<PublishTemplateAsAppParams, 'tem
     platformId: string
 }
 
+type AppOutputType = 'json' | 'text' | 'image' | 'markdown' | 'html'
+type AppInputType = 'text' | 'textarea' | 'number' | 'select' | 'boolean' | 'password'
+
+const MAX_SCHEMA_FIELDS = 30
+const MAX_TAGS = 12
+const MAX_TAG_LENGTH = 40
+const ALLOWED_OUTPUT_TYPES = new Set<AppOutputType>(['json', 'text', 'image', 'markdown', 'html'])
+const ALLOWED_INPUT_TYPES = new Set<AppInputType>(['text', 'textarea', 'number', 'select', 'boolean', 'password'])
+
+function toValidationError(message: string): ActivepiecesError {
+    return new ActivepiecesError({
+        code: ErrorCode.VALIDATION,
+        params: {
+            message,
+        },
+    })
+}
+
+function normalizeCategory(category?: string): string {
+    if (isNil(category) || category.trim().length === 0) {
+        return 'GENERAL'
+    }
+    const normalized = category.trim().replace(/[^a-zA-Z0-9 ]/g, ' ').replace(/\s+/g, '_').toUpperCase()
+    return normalized.length ? normalized.slice(0, 40) : 'GENERAL'
+}
+
+function normalizeTags(tags?: string[]): string[] {
+    if (isNil(tags)) {
+        return []
+    }
+    return Array.from(new Set(tags
+        .map((tag) => tag.trim())
+        .filter((tag) => tag.length > 0)
+        .map((tag) => tag.slice(0, MAX_TAG_LENGTH))
+        .slice(0, MAX_TAGS)))
+}
+
+function normalizeOutputType(outputType?: string): AppOutputType | null {
+    if (isNil(outputType) || outputType.trim().length === 0) {
+        return null
+    }
+    const normalized = outputType.trim().toLowerCase() as AppOutputType
+    if (!ALLOWED_OUTPUT_TYPES.has(normalized)) {
+        throw toValidationError(`Unsupported outputType "${outputType}". Allowed: ${Array.from(ALLOWED_OUTPUT_TYPES).join(', ')}`)
+    }
+    return normalized
+}
+
+function normalizeInputSchema(inputSchema?: Record<string, unknown>): Record<string, unknown> | null {
+    if (isNil(inputSchema)) {
+        return null
+    }
+
+    const raw = inputSchema as unknown
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+        throw toValidationError('inputSchema must be an object')
+    }
+
+    let fields: Array<Record<string, unknown>> = []
+    const withFields = raw as { fields?: unknown }
+    if (Array.isArray(withFields.fields)) {
+        fields = withFields.fields as Array<Record<string, unknown>>
+    }
+    else {
+        fields = Object.entries(raw as Record<string, unknown>).map(([name, config]) => {
+            if (typeof config === 'string') {
+                return {
+                    name,
+                    type: config,
+                    label: name,
+                }
+            }
+            if (typeof config === 'object' && config !== null && !Array.isArray(config)) {
+                return {
+                    name,
+                    ...(config as Record<string, unknown>),
+                }
+            }
+            return {
+                name,
+                type: 'text',
+                label: name,
+            }
+        })
+    }
+
+    if (fields.length > MAX_SCHEMA_FIELDS) {
+        throw toValidationError(`inputSchema supports at most ${MAX_SCHEMA_FIELDS} fields`)
+    }
+
+    const normalizedFields = fields.map((field, index) => {
+        const nameValue = typeof field.name === 'string' ? field.name.trim() : ''
+        if (!nameValue.length) {
+            throw toValidationError(`inputSchema.fields[${index}].name is required`)
+        }
+        const safeName = nameValue.replace(/[^a-zA-Z0-9_]/g, '_').slice(0, 64)
+        const typeValue = typeof field.type === 'string' ? field.type.trim().toLowerCase() : 'text'
+        if (!ALLOWED_INPUT_TYPES.has(typeValue as AppInputType)) {
+            throw toValidationError(`inputSchema field "${safeName}" has unsupported type "${typeValue}"`)
+        }
+        const options = Array.isArray(field.options)
+            ? field.options
+                .map((option) => {
+                    if (typeof option === 'string') {
+                        return {
+                            label: option.slice(0, 100),
+                            value: option.slice(0, 100),
+                        }
+                    }
+                    if (typeof option === 'object' && option !== null) {
+                        const label = typeof (option as Record<string, unknown>).label === 'string'
+                            ? ((option as Record<string, unknown>).label as string).slice(0, 100)
+                            : ''
+                        const value = typeof (option as Record<string, unknown>).value === 'string'
+                            ? ((option as Record<string, unknown>).value as string).slice(0, 100)
+                            : label
+                        return {
+                            label: label || value,
+                            value: value || label,
+                        }
+                    }
+                    return null
+                })
+                .filter((option): option is { label: string, value: string } => !isNil(option) && option.label.length > 0)
+                .slice(0, 50)
+            : undefined
+
+        return {
+            name: safeName,
+            label: typeof field.label === 'string' && field.label.trim().length > 0 ? field.label.trim().slice(0, 120) : safeName,
+            type: typeValue,
+            required: Boolean(field.required),
+            placeholder: typeof field.placeholder === 'string' ? field.placeholder.slice(0, 200) : '',
+            ...(options ? { options } : {}),
+        }
+    })
+
+    return {
+        fields: normalizedFields,
+    }
+}
+
 export const flowGalleryService = (log: FastifyBaseLogger) => ({
     /**
      * List published apps in gallery
@@ -174,6 +316,28 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
         return {
             ...template,
             galleryMetadata: galleryApp,
+        }
+    },
+
+    async getPublicAppStats(appId: string): Promise<{
+        runCount: number
+        successCount: number
+        failedCount: number
+        averageExecutionMs: number | null
+        lastExecutionAt: Date | null
+    } | null> {
+        const app = await flowGalleryAppRepo().findOneBy({
+            templateId: appId,
+        })
+        if (isNil(app)) {
+            return null
+        }
+        return {
+            runCount: app.runCount ?? 0,
+            successCount: app.successCount ?? 0,
+            failedCount: app.failedCount ?? 0,
+            averageExecutionMs: app.averageExecutionMs ?? null,
+            lastExecutionAt: app.lastExecutionAt ?? null,
         }
     },
 
@@ -285,6 +449,11 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
             await templateRepo().update({ id: template.id }, templatePatch as never)
         }
 
+        const normalizedCategory = normalizeCategory(params.category)
+        const normalizedTags = normalizeTags(params.tags)
+        const normalizedInputSchema = normalizeInputSchema(params.inputSchema)
+        const normalizedOutputType = normalizeOutputType(params.outputType)
+
         const existing = await flowGalleryAppRepo().findOneBy({
             templateId: params.templateId,
             platformId: params.platformId,
@@ -295,12 +464,12 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
                 flowId: params.flowId ?? existing.flowId ?? null,
                 description: params.description ?? existing.description ?? null,
                 icon: params.icon ?? existing.icon ?? null,
-                category: params.category ?? existing.category ?? 'GENERAL',
-                tags: params.tags ?? existing.tags ?? [],
+                category: params.category ? normalizedCategory : (existing.category ?? 'GENERAL'),
+                tags: params.tags ? normalizedTags : (existing.tags ?? []),
                 featured: params.featured ?? existing.featured ?? false,
                 displayOrder: params.displayOrder ?? existing.displayOrder ?? 0,
-                inputSchema: params.inputSchema ?? existing.inputSchema ?? null,
-                outputType: params.outputType ?? existing.outputType ?? null,
+                inputSchema: params.inputSchema ? normalizedInputSchema : (existing.inputSchema ?? null),
+                outputType: params.outputType ? normalizedOutputType : (existing.outputType ?? null),
                 outputSchema: params.outputSchema ?? existing.outputSchema ?? null,
                 publishedBy: params.publishedBy ?? existing.publishedBy ?? null,
             }
@@ -328,12 +497,12 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
             flowId: params.flowId ?? null,
             description: params.description ?? null,
             icon: params.icon ?? null,
-            category: params.category ?? 'GENERAL',
-            tags: params.tags ?? [],
+            category: normalizedCategory,
+            tags: normalizedTags,
             featured: params.featured ?? false,
             displayOrder: params.displayOrder ?? 0,
-            inputSchema: params.inputSchema ?? null,
-            outputType: params.outputType ?? null,
+            inputSchema: normalizedInputSchema,
+            outputType: normalizedOutputType,
             outputSchema: params.outputSchema ?? null,
             publishedBy: params.publishedBy,
         } as never)
@@ -368,16 +537,21 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
             })
         }
 
+        const normalizedCategory = !isNil(params.category) ? normalizeCategory(params.category) : undefined
+        const normalizedTags = !isNil(params.tags) ? normalizeTags(params.tags) : undefined
+        const normalizedInputSchema = !isNil(params.inputSchema) ? normalizeInputSchema(params.inputSchema) : undefined
+        const normalizedOutputType = !isNil(params.outputType) ? normalizeOutputType(params.outputType) : undefined
+
         const updatedPatch = {
             flowId: params.flowId ?? existing.flowId,
             description: params.description ?? existing.description,
             icon: params.icon ?? existing.icon,
-            category: params.category ?? existing.category,
-            tags: params.tags ?? existing.tags,
+            category: normalizedCategory ?? existing.category,
+            tags: normalizedTags ?? existing.tags,
             featured: params.featured ?? existing.featured,
             displayOrder: params.displayOrder ?? existing.displayOrder,
-            inputSchema: params.inputSchema ?? existing.inputSchema,
-            outputType: params.outputType ?? existing.outputType,
+            inputSchema: normalizedInputSchema ?? existing.inputSchema,
+            outputType: normalizedOutputType ?? existing.outputType,
             outputSchema: params.outputSchema ?? existing.outputSchema,
         }
 
@@ -491,6 +665,28 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
         outputs?: unknown
         error?: string
     }): Promise<void> {
+        const app = await flowGalleryAppRepo().findOneBy({
+            templateId,
+        })
+        if (!isNil(app)) {
+            const nextRunCount = (app.runCount ?? 0) + 1
+            const nextSuccess = (app.successCount ?? 0) + (executionStatus === 'success' ? 1 : 0)
+            const nextFailed = (app.failedCount ?? 0) + (executionStatus === 'failed' ? 1 : 0)
+            const previousAverage = app.averageExecutionMs ?? executionTimeMs
+            const nextAverage = Math.round(((previousAverage * (nextRunCount - 1)) + executionTimeMs) / nextRunCount)
+
+            await flowGalleryAppRepo().update({
+                id: app.id,
+            }, {
+                runCount: nextRunCount,
+                successCount: nextSuccess,
+                failedCount: nextFailed,
+                averageExecutionMs: nextAverage,
+                lastExecutionAt: new Date(),
+                lastError: error ? error.slice(0, 1000) : null,
+            } as never)
+        }
+
         log.info({
             msg: 'Flow Gallery App Execution',
             templateId,
@@ -498,7 +694,6 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
             timeMs: executionTimeMs,
             hasError: !!error,
         })
-        // Future: Store in execution_log table for analytics dashboard
     },
 })
 
