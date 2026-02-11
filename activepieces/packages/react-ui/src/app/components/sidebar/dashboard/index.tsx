@@ -64,6 +64,13 @@ export function ProjectDashboardSidebar() {
   const { data: currentUser } = userHooks.useCurrentUser();
   const { platform } = platformHooks.useCurrentPlatform();
 
+  const projectsForSidebar = useMemo(() => {
+    if (currentUser?.platformRole === PlatformRole.ADMIN) {
+      return projects.filter((project) => project.ownerId === currentUser.id);
+    }
+    return projects;
+  }, [projects, currentUser?.id, currentUser?.platformRole]);
+
   useEffect(() => {
     if (!searchOpen) {
       setSearchQuery('');
@@ -86,25 +93,25 @@ export function ProjectDashboardSidebar() {
 
   const shouldDisableNewProjectButton = useMemo(() => {
     if (platform.plan.teamProjectsLimit === TeamProjectsLimit.ONE) {
-      const teamProjects = projects.filter(
+      const teamProjects = projectsForSidebar.filter(
         (project) => project.type === ProjectType.TEAM,
       );
       return teamProjects.length >= 1;
     }
     return false;
-  }, [platform.plan.teamProjectsLimit, projects]);
+  }, [platform.plan.teamProjectsLimit, projectsForSidebar]);
 
   const isSearchMode = debouncedSearchQuery.length > 0;
 
   const displayProjects = useMemo(() => {
     if (isSearchMode) {
       const query = debouncedSearchQuery.toLowerCase();
-      return projects.filter((project) =>
+      return projectsForSidebar.filter((project) =>
         project.displayName.toLowerCase().includes(query),
       );
     }
-    return projects;
-  }, [isSearchMode, debouncedSearchQuery, projects]);
+    return projectsForSidebar;
+  }, [isSearchMode, debouncedSearchQuery, projectsForSidebar]);
 
   const handleProjectSelect = useCallback(
     async (projectId: string) => {
