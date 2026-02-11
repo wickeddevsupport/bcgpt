@@ -94,14 +94,7 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
         queryBuilder.orderBy('template.created', 'DESC')
 
         const templates = await queryBuilder.getMany()
-
-        // Simple pagination for Phase 1
-        const startIndex = cursor ? parseInt(cursor, 10) : 0
-        const endIndex = startIndex + (limit || 20)
-        const paginatedTemplates = templates.slice(startIndex, endIndex)
-        const nextCursor = endIndex < templates.length ? String(endIndex) : null
-
-        return paginationHelper.createPage(paginatedTemplates, nextCursor)
+        return paginationHelper.createPage(templates, null)
     },
 
     /**
@@ -144,19 +137,12 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
     } | null> {
         const template = await templateRepo().findOneBy({ id: templateId })
 
-        if (!template || !template.flows || !Array.isArray(template.flows)) {
-            return null
-        }
-
-        // Get the first flow as the primary execution flow
-        const primaryFlow = template.flows[0]
-
-        if (!primaryFlow) {
+        if (!template || !template.flows || !Array.isArray(template.flows) || template.flows.length === 0) {
             return null
         }
 
         return {
-            flowId: primaryFlow.id,
+            flowId: templateId,
             version: 1,
             inputSchema: {},
         }
