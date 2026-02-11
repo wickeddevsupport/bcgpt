@@ -78,17 +78,19 @@ COPY . .
 # Build core projects (already has NX_NO_CLOUD from base stage)
 # Run sequentially to reduce peak memory usage in CI
 ENV NODE_OPTIONS=--max-old-space-size=4096
-# Skip react-ui and just build server-api which includes flow-gallery
-RUN npx nx build server-api --configuration production --skip-nx-cache || echo "WARNING: Server API build may have failed"
+
+# Build server-api which includes flow-gallery
+RUN npx nx build server-api --configuration production --skip-nx-cache
 
 # Build pieces framework and common first (required dependencies for all pieces)
-# Gracefully skip if not available in this version
-RUN npx nx build pieces-framework --skip-nx-cache 2>/dev/null || echo "INFO: pieces-framework not built (optional)"
-RUN npx nx build pieces-common --skip-nx-cache 2>/dev/null || echo "INFO: pieces-common not built (optional)"
+RUN npx nx build pieces-framework --skip-nx-cache
+RUN npx nx build pieces-common --skip-nx-cache
 
 # Build custom pieces so they can be loaded via AP_DEV_PIECES at runtime
-# Gracefully skip if not available
-RUN npx nx build pieces-basecamp --skip-nx-cache 2>/dev/null || echo "INFO: pieces-basecamp not built (optional)"
+RUN npx nx build pieces-basecamp --skip-nx-cache
+
+# Build react-ui frontend
+RUN npx nx build react-ui --configuration production --skip-nx-cache
 
 # Install production dependencies only for the backend API
 RUN --mount=type=cache,target=/root/.bun/install/cache \
@@ -136,31 +138,27 @@ COPY --from=build /usr/src/app/node_modules ./node_modules
 COPY --from=build /usr/src/app/dist/packages/engine/ ./dist/packages/engine/
 COPY --from=build /usr/src/app/dist/packages/server/ ./dist/packages/server/
 COPY --from=build /usr/src/app/dist/packages/shared/ ./dist/packages/shared/
+COPY --from=build /usr/src/app/dist/packages/pieces/ ./dist/packages/pieces/
+# Runtime does not require full source packages; keep image smaller and avoid deep paths
 
-# Copy pieces if they were built (optional)
-COPY --from=build /usr/src/app/dist/packages/pieces/ ./dist/packages/pieces/ || true
+# Ensure workspace packages resolve in the runtime image (avoid broken symlinks)
+RUN rm -rf node_modules/@activepieces/pieces-framework \
+    node_modules/@activepieces/pieces-common \
+    node_modules/@activepieces/shared && \
+    mkdir -p node_modules/@activepieces/pieces-framework \
+    node_modules/@activepieces/pieces-common \
+    node_modules/@activepieces/shared && \
+    cp -r dist/packages/pieces/community/framework/* node_modules/@activepieces/pieces-framework/ && \
+    cp -r dist/packages/pieces/community/common/* node_modules/@activepieces/pieces-common/ && \
+    cp -r dist/packages/shared/* node_modules/@activepieces/shared/
 
-# Symlink packages in node_modules if pieces directories exist
-RUN for dir in framework common; do \
-        if [ -d "dist/packages/pieces/community/$dir" ]; then \
-            mkdir -p "node_modules/@activepieces/pieces-$dir" && \
-            cp -r "dist/packages/pieces/community/$dir"/* "node_modules/@activepieces/pieces-$dir/" || true; \
-        fi; \
-    done && \
-    if [ -d "dist/packages/shared" ]; then \
-        mkdir -p "node_modules/@activepieces/shared" && \
-        cp -r "dist/packages/shared"/* "node_modules/@activepieces/shared/" || true; \
-    fi
+# Make custom pieces available at a stable path and default AP_DEV_PIECES
+RUN mkdir -p /usr/src/app/custom-pieces && \
+    cp -r /usr/src/app/dist/packages/pieces/community/basecamp /usr/src/app/custom-pieces/basecamp
+ENV AP_DEV_PIECES="basecamp"
 
-# Make custom basecamp piece available if it exists
-RUN if [ -d "dist/packages/pieces/community/basecamp" ]; then \
-        echo "basecamp" > /tmp/dev_pieces.txt && \
-        mkdir -p /usr/src/app/custom-pieces && \
-        cp -r dist/packages/pieces/community/basecamp /usr/src/app/custom-pieces/basecamp || true; \
-    fi
-
-# Copy frontend files to Nginx document root if available
-COPY --from=build /usr/src/app/dist/packages/react-ui /usr/share/nginx/html/ || true
+# Copy frontend files to Nginx document root
+COPY --from=build /usr/src/app/dist/packages/react-ui /usr/share/nginx/html/
 
 LABEL service=activepieces
 
