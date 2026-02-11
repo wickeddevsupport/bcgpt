@@ -1,0 +1,97 @@
+import { Platform, Template } from '@activepieces/shared'
+import { EntitySchema } from 'typeorm'
+import {
+    ApIdSchema,
+    BaseColumnSchemaPart,
+} from '../database/database-common'
+
+/**
+ * Gallery App Entity - Public-facing metadata for featured apps
+ * Extends Template system with gallery-specific properties
+ * 
+ * References PRD: Flow App Store MVP
+ * - Allows templates to be featured in public gallery
+ * - Stores custom metadata for app store presentation
+ * - Tracks execution statistics for future analytics
+ */
+
+export type FlowGalleryAppSchema = {
+    id: string
+    created: Date
+    updated: Date
+    templateId: string
+    platformId: string | null
+    featured: boolean
+    displayOrder: number
+    description: string
+    icon: string | null
+    category: string
+    tags: string[]
+    platform: Platform
+}
+
+export const FlowGalleryAppEntity = new EntitySchema<FlowGalleryAppSchema>({
+    name: 'flow_gallery_app',
+    columns: {
+        ...BaseColumnSchemaPart,
+        templateId: {
+            type: String,
+            nullable: false,
+        },
+        platformId: {
+            type: String,
+            nullable: true,
+        },
+        featured: {
+            type: 'boolean',
+            default: false,
+        },
+        displayOrder: {
+            type: 'integer',
+            default: 0,
+        },
+        description: {
+            type: String,
+            nullable: true,
+        },
+        icon: {
+            type: String,
+            nullable: true,
+        },
+        category: {
+            type: String,
+            nullable: true,
+        },
+        tags: {
+            type: String,
+            array: true,
+            nullable: true,
+        },
+    },
+    indices: [
+        {
+            name: 'idx_flow_gallery_app_platform_id_featured',
+            columns: ['platformId', 'featured'],
+        },
+        {
+            name: 'idx_flow_gallery_app_display_order',
+            columns: ['displayOrder'],
+        },
+        {
+            name: 'idx_flow_gallery_app_category',
+            columns: ['category'],
+        },
+    ],
+    relations: {
+        platform: {
+            type: 'many-to-one',
+            target: 'platform',
+            cascade: true,
+            onDelete: 'CASCADE',
+            joinColumn: {
+                name: 'platformId',
+                referencedColumnName: 'id',
+            },
+        },
+    },
+})
