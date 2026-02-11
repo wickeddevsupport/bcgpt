@@ -1,8 +1,8 @@
 services:
   activepieces:
     build:
-      context: ./activepieces
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./activepieces/Dockerfile
     image: wickeddevsupport/activepieces-bcgpt:latest
     env_file:
       - .env.activepieces
