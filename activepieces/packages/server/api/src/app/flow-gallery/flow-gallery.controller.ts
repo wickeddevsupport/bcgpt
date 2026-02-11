@@ -274,7 +274,7 @@ function galleryPageHtml(apps: Template[]): string {
         <div class="brand"><span class="dot"></span> Wicked Flow Apps</div>
         <div class="top">
           <div class="title"><h1>Apps</h1><p>Run workflow-powered apps without editing flows.</p></div>
-          <div class="row"><a class="btn" href="/">Dashboard</a><a class="btn" href="/apps/publisher">Publisher</a><a class="btn primary" href="/sign-in">Sign in</a></div>
+          <div class="row" id="topActions"></div>
         </div>
         <div class="row" style="margin-bottom:12px">
           <input id="search" class="input" placeholder="Search apps" />
@@ -305,8 +305,27 @@ function galleryPageHtml(apps: Template[]): string {
         const state = { search:'', category:'', sort:'featured' };
         const galleryState = document.getElementById('galleryState');
         const cardsRoot = document.getElementById('cards');
+        const topActions = document.getElementById('topActions');
         const meta = (a)=>{const m=a.galleryMetadata||{};return {category:m.category||'GENERAL',tags:Array.isArray(m.tags)?m.tags:[],featured:!!m.featured,runCount:Number(m.runCount||0),successCount:Number(m.successCount||0),failedCount:Number(m.failedCount||0),avg:m.averageExecutionMs==null?'-':Math.round(Number(m.averageExecutionMs)),updated:m.updated||a.updated,icon:m.icon||'',author:a.author||'Wicked Flow'};};
         const esc=(t)=>{const d=document.createElement('div');d.textContent=String(t||'');return d.innerHTML;};
+        const token=()=>window.localStorage.getItem('token')||window.sessionStorage.getItem('token');
+        const action=(href,label,primary=false)=>'<a class="btn'+(primary?' primary':'')+'" href="'+href+'">'+label+'</a>';
+        function renderTopActions(){
+          if(!topActions)return;
+          if(token()){
+            topActions.innerHTML = [
+              action('/','Dashboard'),
+              action('/templates','Templates'),
+              action('/apps/publisher','Publisher'),
+            ].join('');
+            return;
+          }
+          topActions.innerHTML = [
+            action('/templates','Templates'),
+            action('/apps/publisher','Become a publisher'),
+            action('/sign-in?redirectAfterLogin='+encodeURIComponent('/apps'),'Sign in',true),
+          ].join('');
+        }
         function setGalleryState(kind,title,desc,actionLabel,actionHandler){
           galleryState.classList.remove('hidden');
           cardsRoot.classList.add('hidden');
@@ -356,6 +375,7 @@ function galleryPageHtml(apps: Template[]): string {
           renderFeatured(list);
           root.innerHTML = list.map(({a,m})=>cardMarkup(a,m)).join('');
         }
+        renderTopActions();
         categories(); render();
         document.getElementById('search').addEventListener('input',e=>{state.search=(e.target.value||'').trim().toLowerCase();render();});
         document.getElementById('category').addEventListener('change',e=>{state.category=e.target.value;render();});

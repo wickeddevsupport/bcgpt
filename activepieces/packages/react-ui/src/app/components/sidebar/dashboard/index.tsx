@@ -169,22 +169,22 @@ export function ProjectDashboardSidebar() {
     return true;
   };
 
-  const handleExploreClick = useCallback(() => {
+  const handleTemplatesClick = useCallback(() => {
     templatesTelemetryApi.sendEvent({
       eventType: TemplateTelemetryEventType.EXPLORE_VIEW,
       userId: currentUser?.id,
     });
   }, []);
 
-  const exploreLink: SidebarItemType = {
+  const templatesLink: SidebarItemType = {
     type: 'link',
     to: '/templates',
-    label: t('Explore'),
+    label: t('Templates'),
     show: true,
     icon: Compass,
     hasPermission: true,
     isSubItem: false,
-    onClick: handleExploreClick,
+    onClick: handleTemplatesClick,
   };
 
   const impactLink: SidebarItemType = {
@@ -230,11 +230,11 @@ export function ProjectDashboardSidebar() {
   };
 
   const items = [
-    exploreLink,
-    impactLink,
-    leaderboardLink,
     appsLink,
     publisherLink,
+    templatesLink,
+    impactLink,
+    leaderboardLink,
   ].filter(permissionFilter);
 
   return (
