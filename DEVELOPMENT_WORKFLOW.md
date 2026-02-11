@@ -1,5 +1,13 @@
 # Development Workflow: Local to Production
 
+⚠️ **CRITICAL**: This guide covers **Activepieces development ONLY**.
+
+**BCGPT (the MCP server) is a separate system and should NOT be modified unless explicitly instructed.**
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) to understand the two systems and their separation.
+
+---
+
 ## Quick Status
 
 **Current Deployment (2026-02-11):**
@@ -8,6 +16,16 @@
 - ✅ Basecamp pieces available
 - ✅ Database + Redis + Nginx configured
 - ⏳ Custom Docker image builds on-demand (GitHub Actions)
+
+---
+
+## Architecture Overview
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed system separation, network diagrams, and container details.
+
+**TL;DR**: Two separate systems:
+1. **BCGPT** - MCP server (hands off)
+2. **Activepieces** - Workflow platform (your development focus)
 
 ---
 
@@ -30,49 +48,92 @@ ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
 
 ---
 
-## 2. Code Structure
+## 2. Code Structure: Two Separate Systems
 
-### Main Components
+### BCGPT (MCP Server) - DO NOT MODIFY ✋
 ```
 bcgpt/
-├── activepieces/                    # Activepieces monorepo
-│   ├── packages/
-│   │   ├── server/
-│   │   │   └── api/
-│   │   │       └── src/app/
-│   │   │           └── flow-gallery/    # ✅ Public app store
-│   │   ├── pieces/
-│   │   │   └── community/
-│   │   │       ├── framework/           # Piece SDK framework
-│   │   │       ├── common/              # Shared utilities
-│   │   │       └── basecamp/            # ✅ Custom Basecamp piece
-│   │   ├── react-ui/                    # Frontend (optional for builds)
-│   │   └── shared/                      # Shared types
-│   ├── Dockerfile                       # Multi-stage build
-│   └── docker-entrypoint.sh
-├── docker-compose.activepieces.yml      # Service orchestration
-├── .env.activepieces                    # Environment variables
-├── .github/workflows/
-│   └── activepieces-image.yml          # Docker build workflow (manual trigger)
-└── docs/
+├── index.js                     # MCP server entry
+├── basecamp.js                  # Basecamp tools for Claude AI
+├── db.js                        # Database utilities  
+├── docker-compose.bcgpt.yml     # BCGPT containers only
+├── Dockerfile.bcgpt             # BCGPT build
+└── [...other MCP files]
 ```
 
-### Key Files
-| File | Purpose |
-|------|---------|
-| `activepieces/Dockerfile` | Builds custom image with flow-gallery + pieces |
-| `docker-compose.activepieces.yml` | Runs PostgreSQL, Redis, Activepieces, Nginx |
-| `.env.activepieces` | Database, Redis, JWT secrets (on server only) |
-| `activepieces/Dockerfile` | Multi-stage: build server-api, pieces, then runtime |
+**Rule**: Never touch these files unless explicitly instructed by user.
+
+### Activepieces (Workflow) - ACTIVELY DEVELOPED ✏️
+```
+activepieces/                       # Monorepo you develop in
+├── Dockerfile                      # Build config (may contain flow-gallery)
+├── packages/
+│   ├── server/
+│   │   └── api/src/app/
+│   │       └── flow-gallery/       # 🎯 EDIT: Public app store
+│   ├── pieces/
+│   │   └── community/
+│   │       ├── basecamp/           # 🎯 EDIT: Basecamp piece
+│   │       ├── framework/
+│   │       └── common/
+│   └── react-ui/                   # UI frontend
+└── docker-entrypoint.sh
+```
+
+### Root Level (Orchestration & Docs)
+```
+bcgpt/
+├── ARCHITECTURE.md              # 📖 READ THIS FIRST: System separation
+├── DEVELOPMENT_WORKFLOW.md      # 📖 You are here
+├── QUICK_START.md              # 📖 Fast commands
+├── docker-compose.activepieces.yml  # Container orchestration
+├── docker-compose.bcgpt.yml     # ✋ MCP server - hands off
+└── .github/workflows/           # CI/CD (GitHub Actions)
+```
+
+**Navigation Rule**:
+- Files in `activepieces/` → Safe to edit
+- Files in root (`/`) → Check ARCHITECTURE.md first
+- If not sure → Ask before touching
 
 ---
 
-## 3. Local Development (Your Machine)
+## 3. Container Infrastructure
+
+### Activepieces Containers (What You Develop With)
+```
+Activepieces Service (Your focus)
+├── activepieces-1 (main application)
+│   ├── Fastify server (API)
+│   ├── Job worker (background tasks)
+│   └── Nginx (reverse proxy for UI)
+├── postgres-1 (database)
+│   └── Stores flows, templates, logs
+└── redis-1 (job queue & cache)
+    └── Handles background jobs
+```
+
+### BCGPT Container (Hands Off)
+```
+BCGPT MCP Service (separate from Activepieces)
+└── bcgpt-1 (MCP server for Claude)
+    └── Independent from Activepieces
+```
+
+**Network Separation**:
+- Activepieces uses internal network `activepieces`
+- BCGPT uses its own internal network
+- Both connect to shared `coolify` network for external access
+- **No direct container-to-container communication between systems**
+
+---
+
+## 4. Local Development (Your Machine)
 
 ### Prerequisites
 - Git configured with GitHub access
 - Code editor (VS Code recommended)
-- SSH access to server
+- SSH access to server (no local Node.js needed!)
 
 ### Edit Code Locally
 ```bash
@@ -83,75 +144,98 @@ activepieces/packages/server/api/src/app/flow-gallery/flow-gallery.controller.ts
 # Basecamp piece location
 activepieces/packages/pieces/community/basecamp/src/
 
-# Make your changes, then push
+# Make your changes locally, then commit
 cd c:\Users\rjnd\Documents\GitHub\bcgpt
 git add .
 git commit -m "feat: description"
 git push origin main
 ```
 
-### Why Server-Side Builds?
-- Monorepo compiles faster on server with more CPU cores
-- No waiting for npm downloads on your machine
-- Server has better specs than local (8+ CPU cores vs your machine)
-- Just push → pull → build is much simpler
+### Why This Approach?
+- ✅ No local compilation overhead (use server resources)
+- ✅ Just edit files and push (Git does the heavy lifting)
+- ✅ Server rebuilds in 2-3 minutes with Docker cache
+- ✅ Same Linux environment as production
 
 ---
 
-## 4. Build & Test on Server (2-3 minutes)
+## 5. Build & Test on Server (2-3 minutes)
 
 ### Development Workflow: Push → Pull → Build
 ```bash
-# SSH first
+# SSH to server
 ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
 
-# Pull latest code changes
+# Enter project directory
 cd /home/deploy/bcgpt
+
+# Pull latest code changes
 git pull origin main
 
-# Rebuild only activepieces service with your changes
+# Rebuild ONLY activepieces (not bcgpt!)
 # This rebuilds the Dockerfile with all your code changes
 sudo docker compose -f docker-compose.activepieces.yml up -d activepieces --build --no-deps
 
-# Watch it build and start
+# Watch it build and check for errors
 sudo docker compose -f docker-compose.activepieces.yml logs -f activepieces
 
-# Test endpoint (after it's up)
+# Test after it's up
 curl https://flow.wickedlab.io/apps
 
 # View container status
 sudo docker compose -f docker-compose.activepieces.yml ps
 ```
 
-### Why Server-Side Build is Faster
-1. **No local compilation needed** - Just push code to GitHub
-2. **Nx rebuilds only changed packages** - Server has good CPU cores
-3. **Docker layer caching** - Previous builds cached, only new changes rebuild
-4. **Faster than full image builds** - ~2-3 minutes vs 15+ minutes
-5. **Same environment as production** - Linux containers match deployment
+### What This Does (NOT touching BCGPT)
+1. ✅ Pulls your code changes
+2. ✅ Rebuilds activepieces container only
+3. ✅ Uses Docker cache (faster on subsequent builds)
+4. ✅ Skips postgres and redis (they're independent)
+5. ✅ Nginx loads new UI and API
+6. **Result**: Your changes live in 2-3 minutes
 
-### Typical Build Flow
-```
-git push → ssh to server → git pull → docker compose build → app ready
-         (immediate)       (~30s)      (~2-3 mins)          (live)
+### Docker Compose File Important Note
+```bash
+# CORRECT - This rebuilds activepieces
+sudo docker compose -f docker-compose.activepieces.yml up -d activepieces --build
+
+# WRONG - Don't use bcgpt compose (it's separate)
+# sudo docker compose -f docker-compose.bcgpt.yml ...
+
+# OLD - May be legacy
+# sudo docker compose -f docker-compose.yaml ...
+
+# Always use: docker-compose.activepieces.yml
 ```
 
 ---
 
-## 5. Verify Changes
+## 6. Verify Changes
 
-### Check Logs
+### Check Activepieces Logs (Your focus)
 ```bash
-# Real-time logs
+# Real-time logs from activepieces container
 sudo docker compose -f docker-compose.activepieces.yml logs -f activepieces
 
 # Last 50 lines
 sudo docker compose -f docker-compose.activepieces.yml logs --tail 50 activepieces
 ```
 
-### Test API Endpoints
+### Check BCGPT Status (Observation only - don't touch)
+```bash
+# View bcgpt container status
+sudo docker compose -f docker-compose.bcgpt.yml ps
+
+# Check bcgpt logs (read-only, don't modify)
+sudo docker compose -f docker-compose.bcgpt.yml logs --tail 20
+
+# DO NOT restart or modify bcgpt
+```
+
+### Test Activepieces API Endpoints
 ```bash
 # Flow-gallery apps
+curl https://flow.wickedlab.io/apps
 curl https://flow.wickedlab.io/apps/api/apps
 
 # Basecamp piece health
@@ -160,14 +244,13 @@ curl https://flow.wickedlab.io/api/v1/pieces/basecamp
 
 ### Container Health
 ```bash
-# Check all services
+# All Activepieces containers
 sudo docker compose -f docker-compose.activepieces.yml ps
 
-# Restart if needed
+# Restart only activepieces if needed
 sudo docker compose -f docker-compose.activepieces.yml restart activepieces
 
 # Full restart (postgres, redis, activepieces)
-sudo docker compose -f docker-compose.activepieces.yml down
 sudo docker compose -f docker-compose.activepieces.yml up -d
 ```
 
