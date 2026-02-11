@@ -59,9 +59,9 @@ This is the single source of truth for the `/apps` product build.
 ## Phase 3 - App Store UX (Zapier-grade Direction)
 - [ ] Rebuild `/apps` gallery cards for clearer app value:
   - [x] icon, title, one-line promise
-  - [ ] creator badge and updated time
+  - [x] creator badge and updated time
   - [x] categories and tags
-  - [ ] featured strip
+  - [x] featured strip
 - [x] Add "Use App" and "View Details" primary actions.
 - [ ] Improve app detail page structure:
   - [x] what this app does
