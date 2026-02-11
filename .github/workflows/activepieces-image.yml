@@ -3,11 +3,9 @@ name: Build Activepieces Image
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
-    paths:
-      - "activepieces/**"
-      - ".github/workflows/activepieces-image.yml"
+    tags:
+      - 'release-*'
+      - 'v*'
 
 permissions:
   contents: read
