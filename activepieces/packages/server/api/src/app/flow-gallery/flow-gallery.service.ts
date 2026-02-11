@@ -10,9 +10,9 @@ import {
 } from '@activepieces/shared'
 import { FastifyBaseLogger } from 'fastify'
 import { ArrayContains, Equal, IsNull, Like } from 'typeorm'
-import { repoFactory } from '../../core/db/repo-factory'
-import { buildPaginator } from '../../helper/pagination/build-paginator'
-import { paginationHelper } from '../../helper/pagination/pagination-utils'
+import { repoFactory } from '../core/db/repo-factory'
+import { buildPaginator } from '../helper/pagination/build-paginator'
+import { paginationHelper } from '../helper/pagination/pagination-utils'
 import { TemplateEntity } from '../template/template.entity'
 import { FlowGalleryAppEntity } from './flow-gallery.entity'
 

@@ -8,7 +8,6 @@ import {
 import { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
 import { Static, Type } from '@sinclair/typebox'
 import { StatusCodes } from 'http-status-codes'
-import fetch from 'node-fetch'
 import { flowGalleryService } from './flow-gallery.service'
 
 /**
