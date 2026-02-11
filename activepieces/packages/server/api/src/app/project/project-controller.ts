@@ -4,6 +4,7 @@ import { FastifyPluginAsyncTypebox, Type } from '@fastify/type-provider-typebox'
 import { StatusCodes } from 'http-status-codes'
 import { paginationHelper } from '../helper/pagination/pagination-utils'
 import { projectService } from './project-service'
+import { userService } from '../user/user-service'
 
 export const projectController: FastifyPluginAsyncTypebox = async (fastify) => {
     fastify.post('/:id', UpdateProjectRequest, async (request) => {
@@ -30,7 +31,13 @@ export const projectController: FastifyPluginAsyncTypebox = async (fastify) => {
             security: securityAccess.publicPlatform([PrincipalType.USER]),
         },
     }, async (request) => {
-        return paginationHelper.createPage([await projectService.getUserProjectOrThrow(request.principal.id)], null)
+        const user = await userService.getOneOrFail({ id: request.principal.id })
+        const projects = await projectService.getAllForUser({
+            platformId: request.principal.platform.id,
+            userId: request.principal.id,
+            isPrivileged: userService.isUserPrivileged(user),
+        })
+        return paginationHelper.createPage(projects, null)
     })
 }
 
