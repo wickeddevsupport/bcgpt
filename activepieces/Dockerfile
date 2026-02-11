@@ -81,8 +81,12 @@ ENV NODE_OPTIONS=--max-old-space-size=4096
 RUN npx nx build react-ui --configuration production --skip-nx-cache
 RUN npx nx build server-api --configuration production --skip-nx-cache
 
+# Build pieces framework and common first (required dependencies for all pieces)
+RUN npx nx build pieces-framework --skip-nx-cache
+RUN npx nx build pieces-common --skip-nx-cache
+
 # Build custom pieces so they can be loaded via AP_DEV_PIECES at runtime
-RUN npx nx build pieces-basecamp
+RUN npx nx build pieces-basecamp --skip-nx-cache
 
 # Install production dependencies only for the backend API
 RUN --mount=type=cache,target=/root/.bun/install/cache \
