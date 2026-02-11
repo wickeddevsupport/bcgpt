@@ -210,12 +210,30 @@ FOREIGN KEY ("platformId") REFERENCES "platform"("id") ON DELETE CASCADE;
 - [x] Database schema & migrations
 
 ### Milestone 2 (Next)
-- [ ] Creator authentication & dashboard
-- [ ] App publishing UI
+- [x] Creator authentication (publisher APIs are authenticated)
+- [ ] Creator dashboard UI
+- [x] App publishing API
 - [ ] Rating/review system
 - [ ] Webhook execution integration
 - [ ] Result formatting per output type
 - [ ] Execution history tracking
+
+### Milestone 2 - Publisher API (Implemented)
+
+Authenticated routes under `/apps/api/publisher`:
+
+- `GET /apps/api/publisher/apps` - list current platform's published apps
+- `GET /apps/api/publisher/templates` - list eligible templates to publish
+- `POST /apps/api/publisher/publish` - publish/update template as app metadata
+- `PUT /apps/api/publisher/apps/:templateId` - update app metadata
+- `DELETE /apps/api/publisher/apps/:templateId` - unpublish app
+
+Publisher metadata now supports:
+- `flowId`
+- `inputSchema`
+- `outputType`
+- `outputSchema`
+- `publishedBy`
 
 ### Milestone 3 (Future)
 - [ ] Analytics dashboard

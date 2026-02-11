@@ -21,12 +21,17 @@ export type FlowGalleryAppSchema = {
     updated: Date
     templateId: string
     platformId: string | null
+    flowId: string | null
     featured: boolean
     displayOrder: number
     description: string
     icon: string | null
     category: string
     tags: string[]
+    inputSchema: Record<string, unknown> | null
+    outputType: string | null
+    outputSchema: Record<string, unknown> | null
+    publishedBy: string | null
     platform: Platform
 }
 
@@ -39,6 +44,10 @@ export const FlowGalleryAppEntity = new EntitySchema<FlowGalleryAppSchema>({
             nullable: false,
         },
         platformId: {
+            type: String,
+            nullable: true,
+        },
+        flowId: {
             type: String,
             nullable: true,
         },
@@ -65,6 +74,22 @@ export const FlowGalleryAppEntity = new EntitySchema<FlowGalleryAppSchema>({
         tags: {
             type: String,
             array: true,
+            nullable: true,
+        },
+        inputSchema: {
+            type: 'jsonb',
+            nullable: true,
+        },
+        outputType: {
+            type: String,
+            nullable: true,
+        },
+        outputSchema: {
+            type: 'jsonb',
+            nullable: true,
+        },
+        publishedBy: {
+            type: String,
             nullable: true,
         },
     },

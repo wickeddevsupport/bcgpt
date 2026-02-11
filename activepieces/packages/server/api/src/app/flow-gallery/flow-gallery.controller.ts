@@ -1,15 +1,12 @@
 import {
-    isNil,
-    Principal,
     PrincipalType,
-    SeekPage,
     Template,
 } from '@activepieces/shared'
 import { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
 import { Static, Type } from '@sinclair/typebox'
 import { StatusCodes } from 'http-status-codes'
 import { flowGalleryService } from './flow-gallery.service'
-import { RouteKind } from '@activepieces/server-shared'
+import { RouteKind, securityAccess } from '@activepieces/server-shared'
 
 /**
  * Flow Gallery Controller
@@ -34,6 +31,45 @@ const ListAppsQuery = Type.Object({
 
 const ExecuteFlowRequest = Type.Object({
     inputs: Type.Record(Type.String(), Type.Unknown(), { default: {} }),
+})
+
+const ListPublisherAppsQuery = Type.Object({
+    search: Type.Optional(Type.String()),
+})
+
+const ListPublisherTemplatesQuery = Type.Object({
+    search: Type.Optional(Type.String()),
+})
+
+const PublisherAppPayload = Type.Object({
+    templateId: Type.String(),
+    flowId: Type.Optional(Type.String()),
+    description: Type.Optional(Type.String()),
+    icon: Type.Optional(Type.String()),
+    category: Type.Optional(Type.String()),
+    tags: Type.Optional(Type.Array(Type.String())),
+    featured: Type.Optional(Type.Boolean()),
+    displayOrder: Type.Optional(Type.Number()),
+    inputSchema: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+    outputType: Type.Optional(Type.String()),
+    outputSchema: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+})
+
+const UpdatePublisherAppPayload = Type.Object({
+    flowId: Type.Optional(Type.String()),
+    description: Type.Optional(Type.String()),
+    icon: Type.Optional(Type.String()),
+    category: Type.Optional(Type.String()),
+    tags: Type.Optional(Type.Array(Type.String())),
+    featured: Type.Optional(Type.Boolean()),
+    displayOrder: Type.Optional(Type.Number()),
+    inputSchema: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+    outputType: Type.Optional(Type.String()),
+    outputSchema: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+})
+
+const PublisherTemplateParams = Type.Object({
+    templateId: Type.String(),
 })
 
 /* HTML Template Components */
@@ -202,7 +238,7 @@ const galleryPageHtml = (apps: Template[], platformUrl: string): string => `
 <body>
     <div class="container">
         <div class="header">
-            <h1>⚡ Workflow Apps</h1>
+            <h1>Workflow Apps</h1>
             <p>Discover and run powerful automated workflows</p>
         </div>
         
@@ -265,7 +301,13 @@ const galleryPageHtml = (apps: Template[], platformUrl: string): string => `
 </html>
 `
 
-const appRuntimeHtml = (app: Template, platformUrl: string): string => `
+const appRuntimeHtml = (app: Template & { galleryMetadata?: unknown }, platformUrl: string): string => {
+    const galleryMetadata = (app.galleryMetadata && typeof app.galleryMetadata === 'object'
+        ? app.galleryMetadata as Record<string, unknown>
+        : {}) as Record<string, unknown>
+    const inputSchema = (galleryMetadata.inputSchema as Record<string, unknown> | undefined) ?? {}
+    const serializedInputSchema = JSON.stringify(inputSchema)
+    return `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -428,7 +470,7 @@ const appRuntimeHtml = (app: Template, platformUrl: string): string => `
         </div>
         
         <form id="flowForm" class="form-container" onsubmit="executeFlow(event)">
-            <!-- Form fields will be generated here -->
+            <div id="dynamicFields"></div>
             <button type="submit" class="btn-execute" id="executeBtn">Execute</button>
         </form>
         
@@ -439,7 +481,70 @@ const appRuntimeHtml = (app: Template, platformUrl: string): string => `
     </div>
     
     <script>
-        // Form execution logic will be injected here
+        const inputSchema = ${serializedInputSchema};
+
+        function normalizeFields(schema) {
+            if (!schema || typeof schema !== 'object') return [];
+            if (Array.isArray(schema.fields)) return schema.fields;
+            return Object.entries(schema).map(([name, config]) => {
+                if (typeof config === 'string') {
+                    return { name, type: config, label: name };
+                }
+                if (config && typeof config === 'object') {
+                    return { name, label: name, ...config };
+                }
+                return { name, type: 'text', label: name };
+            });
+        }
+
+        function renderDynamicFields() {
+            const container = document.getElementById('dynamicFields');
+            const fields = normalizeFields(inputSchema);
+
+            if (!fields.length) {
+                container.innerHTML = \`
+                    <div class="form-group">
+                        <label for="input">Input</label>
+                        <textarea id="input" name="input" placeholder="Enter app input"></textarea>
+                    </div>
+                \`;
+                return;
+            }
+
+            container.innerHTML = fields.map((field) => {
+                const label = escapeHtml(field.label || field.name || 'Input');
+                const name = escapeHtml(field.name || 'input');
+                const type = (field.type || 'text').toLowerCase();
+                const required = field.required ? 'required' : '';
+                const placeholder = escapeHtml(field.placeholder || '');
+
+                if (type === 'textarea' || type === 'multiline') {
+                    return \`
+                        <div class="form-group">
+                            <label for="\${name}">\${label}</label>
+                            <textarea id="\${name}" name="\${name}" placeholder="\${placeholder}" \${required}></textarea>
+                        </div>
+                    \`;
+                }
+
+                if (type === 'number') {
+                    return \`
+                        <div class="form-group">
+                            <label for="\${name}">\${label}</label>
+                            <input id="\${name}" name="\${name}" type="number" placeholder="\${placeholder}" \${required} />
+                        </div>
+                    \`;
+                }
+
+                return \`
+                    <div class="form-group">
+                        <label for="\${name}">\${label}</label>
+                        <input id="\${name}" name="\${name}" type="text" placeholder="\${placeholder}" \${required} />
+                    </div>
+                \`;
+            }).join('');
+        }
+
         async function executeFlow(e) {
             e.preventDefault();
             
@@ -484,6 +589,121 @@ const appRuntimeHtml = (app: Template, platformUrl: string): string => `
             div.textContent = text;
             return div.innerHTML;
         }
+
+        renderDynamicFields();
+    </script>
+</body>
+</html>
+`
+}
+
+const publisherPageHtml = (): string => `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apps Publisher</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 24px; background: #f7f7fb; color: #111; }
+        h1 { margin: 0 0 8px 0; }
+        p { margin: 0 0 20px 0; color: #555; }
+        .card { background: #fff; border: 1px solid #e7e7ef; border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+        .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        input, textarea { width: 100%; border: 1px solid #d6d6e3; border-radius: 8px; padding: 8px 10px; }
+        textarea { min-height: 70px; }
+        .btn { border: 0; border-radius: 8px; padding: 8px 12px; cursor: pointer; font-weight: 600; }
+        .btn-primary { background: #2b6af3; color: white; }
+        .btn-danger { background: #e5484d; color: white; }
+        .meta { font-size: 12px; color: #666; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <h1>Apps Publisher</h1>
+    <p>Publish your templates as apps for <code>/apps</code>.</p>
+    <div class="grid">
+        <section>
+            <h2>Templates</h2>
+            <div id="templates"></div>
+        </section>
+        <section>
+            <h2>Published Apps</h2>
+            <div id="published"></div>
+        </section>
+    </div>
+
+    <script>
+        async function fetchJson(url, options = {}) {
+            const res = await fetch(url, { credentials: 'include', ...options });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body.error || ('Request failed: ' + res.status));
+            return body;
+        }
+
+        async function loadTemplates() {
+            const data = await fetchJson('/apps/api/publisher/templates');
+            const root = document.getElementById('templates');
+            const templates = data.data || [];
+            if (!templates.length) {
+                root.innerHTML = '<div class="card">No templates found.</div>';
+                return;
+            }
+            root.innerHTML = templates.map((t) => \`
+                <div class="card">
+                    <div class="row"><strong>\${t.name}</strong></div>
+                    <div class="meta">\${t.summary || ''}</div>
+                    <div class="row" style="margin-top:10px">
+                        <button class="btn btn-primary" onclick="publishTemplate('\${t.id}')">Publish as App</button>
+                    </div>
+                </div>
+            \`).join('');
+        }
+
+        async function loadPublished() {
+            const data = await fetchJson('/apps/api/publisher/apps');
+            const root = document.getElementById('published');
+            const apps = data.data || [];
+            if (!apps.length) {
+                root.innerHTML = '<div class="card">No published apps yet.</div>';
+                return;
+            }
+            root.innerHTML = apps.map((a) => \`
+                <div class="card">
+                    <div class="row"><strong>\${a.name}</strong></div>
+                    <div class="meta">templateId: \${a.id}</div>
+                    <div class="row" style="margin-top:10px">
+                        <a class="btn" href="/apps/\${a.id}" target="_blank" rel="noreferrer">Open</a>
+                        <button class="btn btn-danger" onclick="unpublishTemplate('\${a.id}')">Unpublish</button>
+                    </div>
+                </div>
+            \`).join('');
+        }
+
+        async function publishTemplate(templateId) {
+            await fetchJson('/apps/api/publisher/publish', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ templateId }),
+            });
+            await loadPublished();
+            alert('Published');
+        }
+
+        async function unpublishTemplate(templateId) {
+            await fetchJson('/apps/api/publisher/apps/' + templateId, { method: 'DELETE' });
+            await loadPublished();
+            alert('Unpublished');
+        }
+
+        (async () => {
+            try {
+                await Promise.all([loadTemplates(), loadPublished()]);
+            } catch (e) {
+                document.body.insertAdjacentHTML('beforeend', '<pre style="color:#e5484d">' + e.message + '</pre>');
+            }
+        })();
     </script>
 </body>
 </html>
@@ -555,6 +775,135 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
         }
     })
 
+    // AUTHENTICATED: Publisher page
+    fastify.get('/publisher', {
+        config: {
+            security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]),
+        },
+    }, async (_, reply) => {
+        return reply.type('text/html').send(publisherPageHtml())
+    })
+
+    // AUTHENTICATED: Publisher - List my published apps
+    fastify.get('/api/publisher/apps', {
+        config: {
+            security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]),
+        },
+        schema: {
+            querystring: ListPublisherAppsQuery,
+        },
+    }, async (request, reply) => {
+        const query = request.query as Static<typeof ListPublisherAppsQuery>
+        try {
+            const apps = await service.listPublisherApps({
+                platformId: request.principal.platform.id,
+                search: query.search,
+            })
+            return reply.send({ data: apps })
+        } catch (error) {
+            fastify.log.error(error)
+            return reply.code(500).send({ error: 'Failed to list published apps' })
+        }
+    })
+
+    // AUTHENTICATED: Publisher - List eligible templates for publish
+    fastify.get('/api/publisher/templates', {
+        config: {
+            security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]),
+        },
+        schema: {
+            querystring: ListPublisherTemplatesQuery,
+        },
+    }, async (request, reply) => {
+        const query = request.query as Static<typeof ListPublisherTemplatesQuery>
+        try {
+            const templates = await service.listPublisherTemplates({
+                platformId: request.principal.platform.id,
+                search: query.search,
+            })
+            return reply.send({ data: templates })
+        } catch (error) {
+            fastify.log.error(error)
+            return reply.code(500).send({ error: 'Failed to list templates' })
+        }
+    })
+
+    // AUTHENTICATED: Publisher - Publish template as app
+    fastify.post('/api/publisher/publish', {
+        config: {
+            security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]),
+        },
+        schema: {
+            body: PublisherAppPayload,
+        },
+    }, async (request, reply) => {
+        const body = request.body as Static<typeof PublisherAppPayload>
+        try {
+            const app = await service.publishTemplateAsApp({
+                ...body,
+                platformId: request.principal.platform.id,
+                publishedBy: request.principal.id,
+            })
+            return reply.code(StatusCodes.CREATED).send(app)
+        } catch (error: any) {
+            fastify.log.error(error)
+            return reply.code(StatusCodes.BAD_REQUEST).send({
+                error: error?.message ?? 'Failed to publish app',
+            })
+        }
+    })
+
+    // AUTHENTICATED: Publisher - Update published app metadata
+    fastify.put('/api/publisher/apps/:templateId', {
+        config: {
+            security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]),
+        },
+        schema: {
+            params: PublisherTemplateParams,
+            body: UpdatePublisherAppPayload,
+        },
+    }, async (request, reply) => {
+        const params = request.params as Static<typeof PublisherTemplateParams>
+        const body = request.body as Static<typeof UpdatePublisherAppPayload>
+        try {
+            const app = await service.updatePublishedApp({
+                ...body,
+                templateId: params.templateId,
+                platformId: request.principal.platform.id,
+            })
+            return reply.send(app)
+        } catch (error: any) {
+            fastify.log.error(error)
+            return reply.code(StatusCodes.BAD_REQUEST).send({
+                error: error?.message ?? 'Failed to update app metadata',
+            })
+        }
+    })
+
+    // AUTHENTICATED: Publisher - Unpublish app
+    fastify.delete('/api/publisher/apps/:templateId', {
+        config: {
+            security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]),
+        },
+        schema: {
+            params: PublisherTemplateParams,
+        },
+    }, async (request, reply) => {
+        const params = request.params as Static<typeof PublisherTemplateParams>
+        try {
+            await service.unpublishTemplateApp({
+                templateId: params.templateId,
+                platformId: request.principal.platform.id,
+            })
+            return reply.code(StatusCodes.NO_CONTENT).send()
+        } catch (error: any) {
+            fastify.log.error(error)
+            return reply.code(StatusCodes.BAD_REQUEST).send({
+                error: error?.message ?? 'Failed to unpublish app',
+            })
+        }
+    })
+
     // PUBLIC: App runtime page
     fastify.get('/:id', {
         config: {
@@ -605,23 +954,22 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
                 return reply.code(404).send({ error: 'App not found' })
             }
 
-            // TODO: Integrate with Activepieces webhook execution
-            // For now, return mock response
-            let output = {
-                status: 'executed',
+            const flowResponse = await service.executePublicApp({
+                appId: id,
                 inputs: body.inputs,
-                message: 'Workflow execution in progress',
-            }
+            })
+
+            const output = flowResponse.body
 
             const executionTime = Date.now() - startTime
             await service.logExecution({
                 templateId: id,
-                executionStatus: 'success',
+                executionStatus: flowResponse.status >= 200 && flowResponse.status < 300 ? 'success' : 'failed',
                 executionTimeMs: executionTime,
                 outputs: output,
             })
 
-            return reply.send({ output, executionTime })
+            return reply.status(flowResponse.status).send({ output, executionTime })
         } catch (error: any) {
             fastify.log.error(error)
 
