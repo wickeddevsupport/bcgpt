@@ -635,8 +635,19 @@ const publisherPageHtml = (): string => `
     </div>
 
     <script>
+        function getStoredToken() {
+            return window.localStorage.getItem('token') || window.sessionStorage.getItem('token');
+        }
+
+        function buildAuthHeaders(existingHeaders = {}) {
+            const token = getStoredToken();
+            if (!token) return existingHeaders;
+            return { ...existingHeaders, Authorization: 'Bearer ' + token };
+        }
+
         async function fetchJson(url, options = {}) {
-            const res = await fetch(url, { credentials: 'include', ...options });
+            const headers = buildAuthHeaders(options.headers || {});
+            const res = await fetch(url, { credentials: 'include', ...options, headers });
             const body = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(body.error || ('Request failed: ' + res.status));
             return body;
@@ -699,6 +710,11 @@ const publisherPageHtml = (): string => `
 
         (async () => {
             try {
+                const token = getStoredToken();
+                if (!token) {
+                    window.location.href = '/sign-in?redirectAfterLogin=' + encodeURIComponent('/apps/publisher');
+                    return;
+                }
                 await Promise.all([loadTemplates(), loadPublished()]);
             } catch (e) {
                 document.body.insertAdjacentHTML('beforeend', '<pre style="color:#e5484d">' + e.message + '</pre>');
@@ -775,10 +791,12 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
         }
     })
 
-    // AUTHENTICATED: Publisher page
+    // PUBLIC: Publisher page shell (API calls are authenticated via bearer token)
     fastify.get('/publisher', {
         config: {
-            security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]),
+            security: {
+                kind: RouteKind.PUBLIC,
+            },
         },
     }, async (_, reply) => {
         return reply.type('text/html').send(publisherPageHtml())
