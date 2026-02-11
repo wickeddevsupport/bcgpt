@@ -314,6 +314,8 @@ import { RemoveUsageCountFromTemplates1768738475196 } from './migration/postgres
 import { AddTemplateIdToFlowEntity1768829135202 } from './migration/postgres/1768829135202-AddTemplateIdToFlowEntity'
 import { AddEventStreaming1769084311004 } from './migration/postgres/1769084311004-AddEventStreaming'
 import { RemoveOperatorRole1769613456917 } from './migration/postgres/1769613456917-RemoveOperatorRole'
+import { CreateFlowGalleryAppTable1769700000001 } from './migration/postgres/1769700000001-CreateFlowGalleryAppTable'
+import { AddPublisherFieldsToFlowGalleryApp1769700000002 } from './migration/postgres/1769700000002-AddPublisherFieldsToFlowGalleryApp'
 
 const getSslConfig = (): boolean | TlsOptions => {
     const useSsl = system.get(AppSystemProp.POSTGRES_USE_SSL)
@@ -644,6 +646,8 @@ export const getMigrations = (): (new () => MigrationInterface)[] => {
         AddTablesIntoTemplateEntity1768306510367,
         AddTemplateIdToFlowEntity1768829135202,
         RemoveOperatorRole1769613456917,
+        CreateFlowGalleryAppTable1769700000001,
+        AddPublisherFieldsToFlowGalleryApp1769700000002,
     ]
     return migrations
 }

@@ -10,6 +10,7 @@ import { AppConnectionEntity } from '../app-connection/app-connection.entity'
 import { UserIdentityEntity } from '../authentication/user-identity/user-identity-entity'
 import { FileEntity } from '../file/file.entity'
 import { FlagEntity } from '../flags/flag.entity'
+import { FlowGalleryAppEntity } from '../flow-gallery/flow-gallery.entity'
 import { FlowEntity } from '../flows/flow/flow.entity'
 import { FlowRunEntity } from '../flows/flow-run/flow-run-entity'
 import { FlowVersionEntity } from '../flows/flow-version/flow-version-entity'
@@ -72,6 +73,7 @@ function getEntities(): EntitySchema<unknown>[] {
         UserBadgeEntity,
 
         // CE-supported extras
+        FlowGalleryAppEntity,
         TemplateEntity,
         PlatformAnalyticsReportEntity,
     ]
