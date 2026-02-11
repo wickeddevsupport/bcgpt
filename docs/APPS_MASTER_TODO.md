@@ -18,7 +18,7 @@ This is the single source of truth for the `/apps` product build.
 - Phase 1: Proof of concept (`/apps`, public gallery, basic runner) -> `DONE`
 - Phase 2: Publisher interface and metadata contracts -> `IN PROGRESS`
 - Phase 3: App store UX (Zapier-grade polish) -> `IN PROGRESS`
-- Phase 4: App runner UX and reliability -> `IN PROGRESS`
+- Phase 4: App runner UX and reliability -> `DONE`
 - Phase 5: Default apps/templates seeding -> `NOT STARTED`
 - Phase 6: Production hardening and telemetry -> `NOT STARTED`
 - Phase 7: Release and handoff -> `NOT STARTED`
@@ -73,13 +73,13 @@ This is the single source of truth for the `/apps` product build.
 - [x] Add dashboard access points for `/apps` and `/apps/publisher`.
 
 ## Phase 4 - App Runner UX and Reliability
-- [ ] Build dynamic input form generator from `inputSchema`.
-- [ ] Validate user input before execution.
-- [ ] Execute real webhook path (`/webhooks/{flowId}/sync`) with safe timeout handling.
-- [ ] Build output renderer by `outputType` (`text`, `json`, `image`, `markdown`).
-- [ ] Add retry/cancel controls and clear error reasons.
-- [ ] Add async fallback path for long-running apps.
-- [ ] Add execution logs per run for troubleshooting.
+- [x] Build dynamic input form generator from `inputSchema`.
+- [x] Validate user input before execution.
+- [x] Execute real webhook path (`/webhooks/{flowId}/sync`) with safe timeout handling.
+- [x] Build output renderer by `outputType` (`text`, `json`, `image`, `markdown`).
+- [x] Add retry/cancel controls and clear error reasons.
+- [x] Add async fallback path for long-running apps.
+- [x] Add execution logs per run for troubleshooting.
 
 ## Phase 5 - Default Apps and Templates (Agency-first)
 ### Default Apps (first 5)

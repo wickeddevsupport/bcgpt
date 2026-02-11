@@ -377,6 +377,7 @@ function appRuntimeHtml(app: Template & { galleryMetadata?: Record<string, unkno
             <div class="row" style="margin-top:10px">
               <button id="runBtn" class="btn primary">Run app</button>
               <button id="runAsyncBtn" class="btn">Run in background</button>
+              <button id="cancelBtn" class="btn hidden">Cancel run</button>
               <button id="resetBtn" class="btn">Reset</button>
             </div>
             <div id="runError" class="danger hidden" style="margin-top:8px"></div>
@@ -400,6 +401,7 @@ function appRuntimeHtml(app: Template & { galleryMetadata?: Record<string, unkno
         const formFields=document.getElementById('formFields');
         const runBtn=document.getElementById('runBtn');
         const runAsyncBtn=document.getElementById('runAsyncBtn');
+        const cancelBtn=document.getElementById('cancelBtn');
         const resetBtn=document.getElementById('resetBtn');
         const runError=document.getElementById('runError');
         const output=document.getElementById('output');
@@ -407,6 +409,7 @@ function appRuntimeHtml(app: Template & { galleryMetadata?: Record<string, unkno
         const appContract=document.getElementById('appContract');
         const stats=document.getElementById('stats');
         const runHistory=document.getElementById('runHistory');
+        let activeRunController = null;
 
         function normalizeFields(raw){if(!raw||typeof raw!=='object')return [];if(Array.isArray(raw.fields))return raw.fields;return Object.entries(raw).map(([name,config])=>{if(typeof config==='string')return {name,label:name,type:config};if(config&&typeof config==='object')return {name,label:name,...config};return {name,label:name,type:'text'};});}
         function fieldHtml(field){const n=String(field.name||'').replace(/[^a-zA-Z0-9_]/g,'_');const type=String(field.type||'text').toLowerCase();const label=field.label||n;const req=field.required?'required':'';const ph=field.placeholder||'';if(type==='textarea')return '<label class="muted">'+esc(label)+'</label><textarea class="input" name="'+esc(n)+'" placeholder="'+esc(ph)+'" '+req+'></textarea>';if(type==='number')return '<label class="muted">'+esc(label)+'</label><input class="input" type="number" name="'+esc(n)+'" placeholder="'+esc(ph)+'" '+req+' />';if(type==='boolean')return '<label class="muted" style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="'+esc(n)+'" />'+esc(label)+'</label>';if(type==='select'){const options=Array.isArray(field.options)?field.options:[];return '<label class="muted">'+esc(label)+'</label><select class="select" name="'+esc(n)+'" '+req+'><option value="">Select...</option>'+options.map((opt)=>{if(typeof opt==='string')return '<option value="'+esc(opt)+'">'+esc(opt)+'</option>';return '<option value="'+esc(opt.value||opt.label||'')+'">'+esc(opt.label||opt.value||'')+'</option>';}).join('')+'</select>';}const inputType=type==='password'?'password':'text';return '<label class="muted">'+esc(label)+'</label><input class="input" type="'+inputType+'" name="'+esc(n)+'" placeholder="'+esc(ph)+'" '+req+' />';}
@@ -451,9 +454,18 @@ function appRuntimeHtml(app: Template & { galleryMetadata?: Record<string, unkno
           }
         }
         function renderOutput(data){const t=String(configuredOutputType||'json').toLowerCase();if(t==='image'){const url=typeof data==='string'?data:(data&&data.imageUrl)||((data&&data.url)||'');if(url)return '<img src="'+esc(String(url))+'" alt="Output" style="max-width:100%;border:1px solid #dce1ef;border-radius:10px" />';}if(t==='text'){const text=typeof data==='string'?data:(data&&data.text)||JSON.stringify(data);return '<div style="white-space:pre-wrap;line-height:1.5">'+esc(String(text))+'</div>';}if(t==='markdown'){const text=typeof data==='string'?data:(data&&data.markdown)||(data&&data.text)||JSON.stringify(data);return '<pre class="code" style="white-space:pre-wrap">'+esc(String(text))+'</pre>';}return '<pre class="code">'+esc(JSON.stringify(data,null,2))+'</pre>';}
-        async function runApp(mode){runError.classList.add('hidden');runError.textContent='';runBtn.disabled=true;runAsyncBtn.disabled=true;runBtn.textContent=mode==='async'?'Queueing...':'Running...';output.classList.add('hidden');const fields=formFields.querySelectorAll('[name]');const inputs={};fields.forEach((el)=>{if(el.type==='checkbox')inputs[el.name]=el.checked;else if(el.type==='number')inputs[el.name]=el.value===''?null:Number(el.value);else inputs[el.name]=el.value;});const start=Date.now();try{const res=await fetch('/apps/'+encodeURIComponent(appId)+'/execute?mode='+encodeURIComponent(mode||'sync'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({inputs})});const body=await res.json();if(!res.ok)throw new Error(body.error||'Execution failed');if(body.queued){runMeta.textContent='Run queued at '+new Date().toLocaleString()+'. It will complete in background.';output.innerHTML='<div class=\"muted\">Queued successfully. Check recent runs for updates.</div>';output.classList.remove('hidden');await loadRuns();return;}const ms=body.executionTime||(Date.now()-start);runMeta.textContent='Last run: '+new Date().toLocaleString()+' ('+ms+'ms)';output.innerHTML=renderOutput(body.output);output.classList.remove('hidden');await loadStats();await loadRuns();}catch(e){runError.textContent=e.message||String(e);runError.classList.remove('hidden');}finally{runBtn.disabled=false;runAsyncBtn.disabled=false;runBtn.textContent='Run app';}}
+        function setRunningState(isRunning, mode){
+          runBtn.disabled=isRunning;
+          runAsyncBtn.disabled=isRunning;
+          resetBtn.disabled=isRunning;
+          runBtn.textContent=isRunning?(mode==='async'?'Queueing...':'Running...'):'Run app';
+          cancelBtn.classList.toggle('hidden',!isRunning);
+          cancelBtn.disabled=!isRunning;
+        }
+        async function runApp(mode){runError.classList.add('hidden');runError.textContent='';setRunningState(true,mode);output.classList.add('hidden');const fields=formFields.querySelectorAll('[name]');const inputs={};fields.forEach((el)=>{if(el.type==='checkbox')inputs[el.name]=el.checked;else if(el.type==='number')inputs[el.name]=el.value===''?null:Number(el.value);else inputs[el.name]=el.value;});const start=Date.now();const controller=new AbortController();activeRunController=controller;try{const res=await fetch('/apps/'+encodeURIComponent(appId)+'/execute?mode='+encodeURIComponent(mode||'sync'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({inputs}),signal:controller.signal});const body=await res.json();if(!res.ok)throw new Error(body.error||'Execution failed');if(body.queued){runMeta.textContent='Run queued at '+new Date().toLocaleString()+'. It will complete in background.';output.innerHTML='<div class=\"muted\">Queued successfully. Check recent runs for updates.</div>';output.classList.remove('hidden');await loadRuns();return;}const ms=body.executionTime||(Date.now()-start);runMeta.textContent='Last run: '+new Date().toLocaleString()+' ('+ms+'ms)';output.innerHTML=renderOutput(body.output);output.classList.remove('hidden');await loadStats();await loadRuns();}catch(e){if(e&&e.name==='AbortError'){runError.textContent='Run cancelled.';}else{runError.textContent=e.message||String(e);}runError.classList.remove('hidden');}finally{activeRunController=null;setRunningState(false,mode);}}
         runBtn.addEventListener('click',(e)=>{e.preventDefault();runApp('sync');});
         runAsyncBtn.addEventListener('click',(e)=>{e.preventDefault();runApp('async');});
+        cancelBtn.addEventListener('click',(e)=>{e.preventDefault();if(activeRunController){activeRunController.abort();}});
         resetBtn.addEventListener('click',(e)=>{e.preventDefault();document.querySelectorAll('#formFields [name]').forEach((el)=>{if(el.type==='checkbox')el.checked=false;else el.value='';});output.classList.add('hidden');runError.classList.add('hidden');});
         renderForm();renderContract();loadStats();loadRuns();
       </script>`)
