@@ -1,6 +1,14 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { t } from 'i18next';
-import { Search, Plus, LineChart, Trophy, Compass } from 'lucide-react';
+import {
+  Search,
+  Plus,
+  LineChart,
+  Trophy,
+  Compass,
+  LayoutGrid,
+  MousePointerClick,
+} from 'lucide-react';
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useDebounce } from 'use-debounce';
@@ -199,9 +207,35 @@ export function ProjectDashboardSidebar() {
     isSubItem: false,
   };
 
-  const items = [exploreLink, impactLink, leaderboardLink].filter(
-    permissionFilter,
-  );
+  const appsLink: SidebarItemType = {
+    type: 'link',
+    to: '/apps',
+    label: t('Apps'),
+    icon: LayoutGrid,
+    show: true,
+    hasPermission: true,
+    isSubItem: false,
+    forceReload: true,
+  };
+
+  const publisherLink: SidebarItemType = {
+    type: 'link',
+    to: '/apps/publisher',
+    label: t('Publisher'),
+    icon: MousePointerClick,
+    show: true,
+    hasPermission: true,
+    isSubItem: false,
+    forceReload: true,
+  };
+
+  const items = [
+    exploreLink,
+    impactLink,
+    leaderboardLink,
+    appsLink,
+    publisherLink,
+  ].filter(permissionFilter);
 
   return (
     !embedState.hideSideNav && (

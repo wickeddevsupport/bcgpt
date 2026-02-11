@@ -16,9 +16,9 @@ This is the single source of truth for the `/apps` product build.
 ## Phase Status Snapshot
 - Phase 0: Foundation and guardrails -> `IN PROGRESS`
 - Phase 1: Proof of concept (`/apps`, public gallery, basic runner) -> `DONE`
-- Phase 2: Publisher interface and metadata contracts -> `PARTIALLY DONE`
-- Phase 3: App store UX (Zapier-grade polish) -> `NOT STARTED`
-- Phase 4: App runner UX and reliability -> `NOT STARTED`
+- Phase 2: Publisher interface and metadata contracts -> `IN PROGRESS`
+- Phase 3: App store UX (Zapier-grade polish) -> `IN PROGRESS`
+- Phase 4: App runner UX and reliability -> `IN PROGRESS`
 - Phase 5: Default apps/templates seeding -> `NOT STARTED`
 - Phase 6: Production hardening and telemetry -> `NOT STARTED`
 - Phase 7: Release and handoff -> `NOT STARTED`
@@ -43,26 +43,27 @@ This is the single source of truth for the `/apps` product build.
 - [x] Metadata model in DB (`flow_gallery_app`) and migration.
 - [x] Publish/unpublish/update metadata APIs.
 - [x] Initial publisher page route.
-- [ ] Add complete publisher UX flow (draft -> validate -> publish -> success).
-- [ ] Add inline schema builder UX for inputs/outputs.
-- [ ] Add publish validation messages that are non-technical.
-- [ ] Add app preview before publishing.
+- [x] Add complete publisher UX flow (draft -> validate -> publish -> success).
+- [x] Add inline schema builder UX for inputs/outputs.
+- [x] Add publish validation messages that are non-technical.
+- [x] Add app preview before publishing.
 - [ ] Add integration tests for publisher endpoints.
 
 ## Phase 3 - App Store UX (Zapier-grade Direction)
 - [ ] Rebuild `/apps` gallery cards for clearer app value:
-  - [ ] icon, title, one-line promise
+  - [x] icon, title, one-line promise
   - [ ] creator badge and updated time
-  - [ ] categories and tags
+  - [x] categories and tags
   - [ ] featured strip
-- [ ] Add "Use App" and "View Details" primary actions.
+- [x] Add "Use App" and "View Details" primary actions.
 - [ ] Improve app detail page structure:
-  - [ ] what this app does
-  - [ ] required inputs
-  - [ ] expected output format
-  - [ ] run history preview
+  - [x] what this app does
+  - [x] required inputs
+  - [x] expected output format
+  - [x] run history preview
 - [ ] Add empty states, loading states, and failure states with clear actions.
 - [ ] Mobile and tablet layout pass.
+- [x] Add dashboard access points for `/apps` and `/apps/publisher`.
 
 ## Phase 4 - App Runner UX and Reliability
 - [ ] Build dynamic input form generator from `inputSchema`.

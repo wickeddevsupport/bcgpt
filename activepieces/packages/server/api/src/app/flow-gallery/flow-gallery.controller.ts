@@ -212,20 +212,25 @@ function pageShell(title: string, body: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>${escapeHtml(title)}</title>
   <style>
-    *{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui;background:#f5f7fb;color:#1f2540}
-    .container{width:min(1180px,95vw);margin:24px auto}
+    :root{--bg:#f6f7f9;--card:#ffffff;--border:#e5e7eb;--text:#0f172a;--muted:#64748b;--accent:#FF415B;--accent-soft:#ffe4e9}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,system-ui;background:var(--bg);color:var(--text)}
+    .container{width:min(1240px,95vw);margin:24px auto}
+    .brand{display:inline-flex;align-items:center;gap:8px;padding:4px 10px;border:1px solid var(--border);border-radius:999px;background:#fff;color:#334155;font-size:12px;font-weight:600}
+    .brand .dot{width:8px;height:8px;border-radius:50%;background:var(--accent)}
     .top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}
-    .title h1{margin:0;font-size:30px}.title p{margin:6px 0 0;color:#667}
-    .btn{border:1px solid #dce1ef;background:#fff;border-radius:10px;padding:9px 12px;font-weight:600;cursor:pointer}
-    .btn.primary{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none}
-    .input,.select,textarea{width:100%;border:1px solid #dce1ef;border-radius:10px;padding:10px 12px;background:#fff}
+    .title h1{margin:0;font-size:30px}.title p{margin:6px 0 0;color:var(--muted)}
+    .btn{border:1px solid var(--border);background:#fff;border-radius:10px;padding:9px 12px;font-weight:600;cursor:pointer;color:#111827;text-decoration:none}
+    .btn.primary{background:var(--accent);color:#fff;border:1px solid var(--accent)}
+    .btn.primary:hover{filter:brightness(0.97)}
+    .input,.select,textarea{width:100%;border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:#fff}
     .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
-    .card{background:#fff;border:1px solid #e4e8f3;border-radius:14px;padding:14px}
-    .muted{color:#667;font-size:13px}.chips{display:flex;flex-wrap:wrap;gap:6px}.chip{background:#eef2ff;border:1px solid #d7defe;color:#4338ca;border-radius:999px;padding:3px 8px;font-size:12px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px}
+    .muted{color:var(--muted);font-size:13px}.chips{display:flex;flex-wrap:wrap;gap:6px}.chip{background:var(--accent-soft);border:1px solid #ffc7d0;color:#b4233b;border-radius:999px;padding:3px 8px;font-size:12px}
     .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.grid2{display:grid;grid-template-columns:1.1fr 1fr;gap:12px}
-    .panel{background:#fff;border:1px solid #e4e8f3;border-radius:14px;padding:14px}
+    .panel{background:#fff;border:1px solid var(--border);border-radius:14px;padding:14px}
     .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
-    .stat{border:1px solid #e4e8f3;background:#fafbff;border-radius:10px;padding:8px;text-align:center}.stat b{display:block}
+    .stat{border:1px solid var(--border);background:#fafafa;border-radius:10px;padding:8px;text-align:center}.stat b{display:block}
     .hidden{display:none !important}.danger{color:#dc2626}.success{color:#16a34a}
     .field-row{display:grid;grid-template-columns:1fr 1fr 120px 90px auto;gap:8px;align-items:center}
     .code{background:#0f172a;color:#dbeafe;border:1px solid #1e293b;border-radius:10px;padding:12px;overflow:auto;font-family:ui-monospace;font-size:12px}
@@ -239,9 +244,10 @@ function pageShell(title: string, body: string): string {
 function galleryPageHtml(apps: Template[]): string {
     return pageShell('Apps - Wicked Flow', `
       <div class="container">
+        <div class="brand"><span class="dot"></span> Wicked Flow Apps</div>
         <div class="top">
           <div class="title"><h1>Apps</h1><p>Run workflow-powered apps without editing flows.</p></div>
-          <div class="row"><a class="btn" href="/apps/publisher">Publisher</a><a class="btn primary" href="/sign-in">Sign in</a></div>
+          <div class="row"><a class="btn" href="/">Dashboard</a><a class="btn" href="/apps/publisher">Publisher</a><a class="btn primary" href="/sign-in">Sign in</a></div>
         </div>
         <div class="row" style="margin-bottom:12px">
           <input id="search" class="input" placeholder="Search apps" />
@@ -260,7 +266,7 @@ function galleryPageHtml(apps: Template[]): string {
         function matches(a){const m=meta(a);const t=[a.name,a.summary||'',a.description||'',...m.tags,m.category].join(' ').toLowerCase();if(state.search&&!t.includes(state.search))return false;if(state.category&&m.category!==state.category)return false;return true;}
         function sorted(list){const x=list.map(a=>({a,m:meta(a)}));if(state.sort==='name')return x.sort((p,q)=>p.a.name.localeCompare(q.a.name));if(state.sort==='runs')return x.sort((p,q)=>q.m.runCount-p.m.runCount);if(state.sort==='recent')return x.sort((p,q)=>new Date(q.m.updated)-new Date(p.m.updated));return x.sort((p,q)=>Number(q.m.featured)-Number(p.m.featured)||q.m.runCount-p.m.runCount);}
         function render(){const root=document.getElementById('cards');const list=sorted(apps.filter(matches));if(!list.length){root.innerHTML='<div class="panel"><h2>No apps found</h2><p class="muted">Try another filter.</p></div>';return;}
-          root.innerHTML=list.map(({a,m})=>{const sr=m.runCount?Math.round((m.successCount/m.runCount)*100)+'%':'-';return '<article class="card"><div class="row" style="justify-content:space-between"><div><h3 style="margin:0">'+esc(a.name)+'</h3><div class="muted">'+esc(a.summary||a.description||'Workflow app')+'</div></div><span class="chip">'+(m.featured?'Featured':esc(m.category))+'</span></div><div class="chips" style="margin-top:8px">'+m.tags.slice(0,4).map(t=>'<span class="chip">'+esc(t)+'</span>').join('')+'</div><div class="stats" style="margin-top:10px"><div class="stat"><b>'+m.runCount+'</b><span class="muted">Runs</span></div><div class="stat"><b>'+sr+'</b><span class="muted">Success</span></div><div class="stat"><b>'+(m.avg==='-'?'-':m.avg+'ms')+'</b><span class="muted">Avg</span></div><div class="stat"><b>'+m.failedCount+'</b><span class="muted">Failed</span></div></div><div class="row" style="margin-top:10px"><a class="btn primary" href="/apps/'+a.id+'">Use app</a><a class="btn" href="/apps/'+a.id+'#details">Details</a></div></article>';}).join('');}
+          root.innerHTML=list.map(({a,m})=>{const sr=m.runCount?Math.round((m.successCount/m.runCount)*100)+'%':'-';const icon=typeof m.icon==='string'&&m.icon.length?m.icon:'/branding/wicked-flow-icon.svg?v=20260208';const updated=new Date(m.updated||a.updated).toLocaleDateString();return '<article class="card"><div class="row" style="justify-content:space-between"><div class="row" style="gap:10px;align-items:flex-start"><img src="'+esc(icon)+'" alt="" style="width:40px;height:40px;border-radius:10px;object-fit:cover;border:1px solid var(--border)"><div><h3 style="margin:0">'+esc(a.name)+'</h3><div class="muted">'+esc(a.summary||a.description||'Workflow app')+'</div><div class="muted" style="margin-top:4px">Updated '+updated+'</div></div></div><span class="chip">'+(m.featured?'Featured':esc(m.category))+'</span></div><div class="chips" style="margin-top:8px">'+m.tags.slice(0,4).map(t=>'<span class="chip">'+esc(t)+'</span>').join('')+'</div><div class="stats" style="margin-top:10px"><div class="stat"><b>'+m.runCount+'</b><span class="muted">Runs</span></div><div class="stat"><b>'+sr+'</b><span class="muted">Success</span></div><div class="stat"><b>'+(m.avg==='-'?'-':m.avg+'ms')+'</b><span class="muted">Avg</span></div><div class="stat"><b>'+m.failedCount+'</b><span class="muted">Failed</span></div></div><div class="row" style="margin-top:10px"><a class="btn primary" href="/apps/'+a.id+'">Use app</a><a class="btn" href="/apps/'+a.id+'#details">View details</a></div></article>';}).join('');}
         categories(); render();
         document.getElementById('search').addEventListener('input',e=>{state.search=(e.target.value||'').trim().toLowerCase();render();});
         document.getElementById('category').addEventListener('change',e=>{state.category=e.target.value;render();});
@@ -276,13 +282,15 @@ function appRuntimeHtml(app: Template & { galleryMetadata?: Record<string, unkno
     const outputType = typeof meta.outputType === 'string' ? meta.outputType : 'json'
     return pageShell(`${app.name} - App`, `
       <div class="container">
+        <div class="brand"><span class="dot"></span> Wicked Flow Apps</div>
         <div class="top">
           <div class="title"><h1>${escapeHtml(app.name)}</h1><p>${escapeHtml(app.description || app.summary || 'Run this app using your own inputs.')}</p></div>
-          <div class="row"><a class="btn" href="/apps">Back</a><a class="btn" href="/apps/${escapeHtml(app.id)}#details">Details</a></div>
+          <div class="row"><a class="btn" href="/">Dashboard</a><a class="btn" href="/apps">Back</a><a class="btn" href="/apps/${escapeHtml(app.id)}#details">Details</a></div>
         </div>
         <div class="grid2">
           <section class="panel" id="details">
             <h2 style="margin:0 0 10px">Run app</h2>
+            <div id="appContract" class="muted" style="margin-bottom:10px"></div>
             <div id="formFields" class="row" style="display:grid;gap:10px"></div>
             <div class="row" style="margin-top:10px">
               <button id="runBtn" class="btn primary">Run app</button>
@@ -314,12 +322,14 @@ function appRuntimeHtml(app: Template & { galleryMetadata?: Record<string, unkno
         const runError=document.getElementById('runError');
         const output=document.getElementById('output');
         const runMeta=document.getElementById('runMeta');
+        const appContract=document.getElementById('appContract');
         const stats=document.getElementById('stats');
         const runHistory=document.getElementById('runHistory');
 
         function normalizeFields(raw){if(!raw||typeof raw!=='object')return [];if(Array.isArray(raw.fields))return raw.fields;return Object.entries(raw).map(([name,config])=>{if(typeof config==='string')return {name,label:name,type:config};if(config&&typeof config==='object')return {name,label:name,...config};return {name,label:name,type:'text'};});}
         function fieldHtml(field){const n=String(field.name||'').replace(/[^a-zA-Z0-9_]/g,'_');const type=String(field.type||'text').toLowerCase();const label=field.label||n;const req=field.required?'required':'';const ph=field.placeholder||'';if(type==='textarea')return '<label class="muted">'+esc(label)+'</label><textarea class="input" name="'+esc(n)+'" placeholder="'+esc(ph)+'" '+req+'></textarea>';if(type==='number')return '<label class="muted">'+esc(label)+'</label><input class="input" type="number" name="'+esc(n)+'" placeholder="'+esc(ph)+'" '+req+' />';if(type==='boolean')return '<label class="muted" style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="'+esc(n)+'" />'+esc(label)+'</label>';if(type==='select'){const options=Array.isArray(field.options)?field.options:[];return '<label class="muted">'+esc(label)+'</label><select class="select" name="'+esc(n)+'" '+req+'><option value="">Select...</option>'+options.map((opt)=>{if(typeof opt==='string')return '<option value="'+esc(opt)+'">'+esc(opt)+'</option>';return '<option value="'+esc(opt.value||opt.label||'')+'">'+esc(opt.label||opt.value||'')+'</option>';}).join('')+'</select>';}const inputType=type==='password'?'password':'text';return '<label class="muted">'+esc(label)+'</label><input class="input" type="'+inputType+'" name="'+esc(n)+'" placeholder="'+esc(ph)+'" '+req+' />';}
         function renderForm(){const fields=normalizeFields(schema);if(!fields.length){formFields.innerHTML='<label class="muted">Input</label><textarea class="input" name="input" placeholder="Enter input"></textarea>';return;}formFields.innerHTML=fields.map((f)=>'<div>'+fieldHtml(f)+'</div>').join('');}
+        function renderContract(){const fields=normalizeFields(schema);const required=fields.filter(f=>f.required).map(f=>f.label||f.name);const outputTypeLabel=(configuredOutputType||'json').toUpperCase();if(!fields.length){appContract.innerHTML='No structured inputs required. Output format: <b>'+outputTypeLabel+'</b>.';return;}appContract.innerHTML='Expected output: <b>'+outputTypeLabel+'</b>. '+(required.length?'Required inputs: <b>'+required.map(esc).join(', ')+'</b>.':'All inputs are optional.');}
         async function loadStats(){try{const res=await fetch('/apps/api/apps/'+encodeURIComponent(appId)+'/stats');const body=await res.json();if(!res.ok){stats.textContent='Stats unavailable.';return;}const sr=body.runCount?Math.round((body.successCount/body.runCount)*100):0;stats.innerHTML='<div class="stats"><div class="stat"><b>'+body.runCount+'</b><span class="muted">Runs</span></div><div class="stat"><b>'+body.successCount+'</b><span class="muted">Success</span></div><div class="stat"><b>'+body.failedCount+'</b><span class="muted">Failed</span></div><div class="stat"><b>'+(body.averageExecutionMs?Math.round(body.averageExecutionMs)+'ms':'-')+'</b><span class="muted">Avg</span></div></div><div class="muted" style="margin-top:8px">Success rate: '+sr+'%</div>';}catch(e){stats.textContent='Stats unavailable.';}}
         async function loadRuns(){try{const res=await fetch('/apps/api/apps/'+encodeURIComponent(appId)+'/runs?limit=8');const body=await res.json();if(!res.ok){runHistory.textContent='Run history unavailable.';return;}const rows=Array.isArray(body.data)?body.data:[];if(!rows.length){runHistory.textContent='No recent runs yet.';return;}runHistory.innerHTML='<h3 style=\"margin:0 0 8px\">Recent runs</h3>'+rows.map((r)=>{const when=new Date(r.created).toLocaleString();const status=r.status==='success'?'<span class=\"success\">success</span>':(r.status==='failed'?'<span class=\"danger\">failed</span>':'queued');const ms=r.executionTimeMs?(' · '+r.executionTimeMs+'ms'):'';const err=r.error?('<div class=\"danger\" style=\"font-size:12px\">'+esc(r.error)+'</div>'):'';return '<div style=\"border:1px solid #e4e8f3;border-radius:10px;padding:8px;margin:6px 0\"><div><b>'+status+'</b><span class=\"muted\"> · '+when+ms+'</span></div>'+err+'</div>';}).join('');}catch(e){runHistory.textContent='Run history unavailable.';}}
         function renderOutput(data){const t=String(configuredOutputType||'json').toLowerCase();if(t==='image'){const url=typeof data==='string'?data:(data&&data.imageUrl)||((data&&data.url)||'');if(url)return '<img src="'+esc(String(url))+'" alt="Output" style="max-width:100%;border:1px solid #dce1ef;border-radius:10px" />';}if(t==='text'){const text=typeof data==='string'?data:(data&&data.text)||JSON.stringify(data);return '<div style="white-space:pre-wrap;line-height:1.5">'+esc(String(text))+'</div>';}if(t==='markdown'){const text=typeof data==='string'?data:(data&&data.markdown)||(data&&data.text)||JSON.stringify(data);return '<pre class="code" style="white-space:pre-wrap">'+esc(String(text))+'</pre>';}return '<pre class="code">'+esc(JSON.stringify(data,null,2))+'</pre>';}
@@ -327,16 +337,17 @@ function appRuntimeHtml(app: Template & { galleryMetadata?: Record<string, unkno
         runBtn.addEventListener('click',(e)=>{e.preventDefault();runApp('sync');});
         runAsyncBtn.addEventListener('click',(e)=>{e.preventDefault();runApp('async');});
         resetBtn.addEventListener('click',(e)=>{e.preventDefault();document.querySelectorAll('#formFields [name]').forEach((el)=>{if(el.type==='checkbox')el.checked=false;else el.value='';});output.classList.add('hidden');runError.classList.add('hidden');});
-        renderForm();loadStats();loadRuns();
+        renderForm();renderContract();loadStats();loadRuns();
       </script>`)
 }
 
 function publisherPageHtml(): string {
     return pageShell('Apps Publisher', `
       <div class="container">
+        <div class="brand"><span class="dot"></span> Wicked Flow Publisher</div>
         <div class="top">
           <div class="title"><h1>Publisher</h1><p>Publish templates as apps and configure schema-driven UX.</p></div>
-          <div class="row"><a class="btn" href="/apps">Open gallery</a><button class="btn primary" id="reloadBtn">Reload</button></div>
+          <div class="row"><a class="btn" href="/">Dashboard</a><a class="btn" href="/apps">Open gallery</a><button class="btn primary" id="reloadBtn">Reload</button></div>
         </div>
         <div class="grid2">
           <section class="panel">

@@ -17,6 +17,7 @@ export type SidebarItemType = {
   notification?: boolean;
   locked?: boolean;
   newWindow?: boolean;
+  forceReload?: boolean;
   isActive?: (pathname: string) => boolean;
   isSubItem?: boolean;
   show?: boolean;
@@ -39,7 +40,18 @@ export const ApSidebarItem = (item: SidebarItemType) => {
           { 'bg-sidebar-accent hover:bg-sidebar-accent!': isLinkActive },
           '',
         )}
-        onClick={() => navigate(item.to)}
+        onClick={() => {
+          item.onClick?.();
+          if (item.newWindow) {
+            window.open(item.to, '_blank', 'noopener,noreferrer');
+            return;
+          }
+          if (item.forceReload) {
+            window.location.assign(item.to);
+            return;
+          }
+          navigate(item.to);
+        }}
       >
         {item.icon && <item.icon className="size-4" />}
         {!isCollapsed && <span className="text-sm">{item.label}</span>}
