@@ -1,6 +1,6 @@
 services:
   activepieces:
-    image: ghcr.io/activepieces/activepieces:latest
+    image: ghcr.io/wickeddevsupport/bcgpt/activepieces:main
     env_file:
       - .env.activepieces
     labels:
