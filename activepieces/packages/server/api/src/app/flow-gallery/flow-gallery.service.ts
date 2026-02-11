@@ -20,9 +20,11 @@ import { TemplateEntity } from '../template/template.entity'
 import { WebhookFlowVersionToRun } from '../webhooks/webhook-handler'
 import { webhookService } from '../webhooks/webhook.service'
 import { FlowGalleryAppEntity, FlowGalleryAppSchema } from './flow-gallery.entity'
+import { FlowGalleryRunEntity } from './flow-gallery-run.entity'
 
 const templateRepo = repoFactory<Template>(TemplateEntity)
 const flowGalleryAppRepo = repoFactory(FlowGalleryAppEntity)
+const flowGalleryRunRepo = repoFactory(FlowGalleryRunEntity)
 
 /**
  * Flow Gallery Service
@@ -59,6 +61,8 @@ interface ExecuteFlowParams {
     appId: string
     inputs: Record<string, unknown>
 }
+
+type ExecuteMode = 'sync' | 'async'
 
 interface PublishTemplateAsAppParams {
     templateId: string
@@ -586,7 +590,8 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
     async executePublicApp({
         appId,
         inputs,
-    }: ExecuteFlowParams): Promise<EngineHttpResponse> {
+        mode = 'sync',
+    }: ExecuteFlowParams & { mode?: ExecuteMode }): Promise<EngineHttpResponse> {
         const app = await flowGalleryAppRepo().findOneBy({
             templateId: appId,
         })
@@ -616,7 +621,7 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
         return webhookService.handleWebhook({
             logger: log,
             flowId: flowIdToExecute,
-            async: false,
+            async: mode === 'async',
             saveSampleData: false,
             flowVersionToRun: WebhookFlowVersionToRun.LOCKED_FALL_BACK_TO_LATEST,
             payload,
@@ -652,18 +657,56 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
      * Log app execution for analytics
      * Tracks usage patterns and performance
      */
+    async listRecentRuns({
+        templateId,
+        limit = 10,
+    }: {
+        templateId: string
+        limit?: number
+    }): Promise<Array<{
+        id: string
+        created: string
+        status: 'queued' | 'success' | 'failed'
+        executionTimeMs: number | null
+        outputType: string | null
+        error: string | null
+    }>> {
+        const rows = await flowGalleryRunRepo().find({
+            where: {
+                appId: templateId,
+            },
+            order: {
+                created: 'DESC',
+            },
+            take: Math.max(1, Math.min(limit, 50)),
+        })
+
+        return rows.map((row) => ({
+            id: row.id,
+            created: row.created.toISOString(),
+            status: row.status,
+            executionTimeMs: row.executionTimeMs ?? null,
+            outputType: row.outputType ?? null,
+            error: row.error ?? null,
+        }))
+    },
+
     async logExecution({
         templateId,
         executionStatus,
         executionTimeMs,
         outputs,
         error,
+        inputKeys,
+        requestId,
     }: {
         templateId: string
-        executionStatus: 'success' | 'failed'
+        executionStatus: 'queued' | 'success' | 'failed'
         executionTimeMs: number
         outputs?: unknown
         error?: string
+        inputKeys?: string[]
+        requestId?: string
     }): Promise<void> {
         const app = await flowGalleryAppRepo().findOneBy({
             templateId,
@@ -672,8 +715,16 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
             const nextRunCount = (app.runCount ?? 0) + 1
             const nextSuccess = (app.successCount ?? 0) + (executionStatus === 'success' ? 1 : 0)
             const nextFailed = (app.failedCount ?? 0) + (executionStatus === 'failed' ? 1 : 0)
+            const previousMeasuredRuns = Math.max((app.successCount ?? 0) + (app.failedCount ?? 0), 0)
+            const nextMeasuredRuns = executionStatus === 'queued' ? previousMeasuredRuns : previousMeasuredRuns + 1
             const previousAverage = app.averageExecutionMs ?? executionTimeMs
-            const nextAverage = Math.round(((previousAverage * (nextRunCount - 1)) + executionTimeMs) / nextRunCount)
+            const nextAverage = nextMeasuredRuns === 0
+                ? app.averageExecutionMs
+                : Math.round(
+                    executionStatus === 'queued'
+                        ? previousAverage
+                        : ((previousAverage * previousMeasuredRuns) + executionTimeMs) / nextMeasuredRuns,
+                )
 
             await flowGalleryAppRepo().update({
                 id: app.id,
@@ -686,6 +737,25 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
                 lastError: error ? error.slice(0, 1000) : null,
             } as never)
         }
+
+        const outputType = isNil(outputs)
+            ? null
+            : Array.isArray(outputs)
+                ? 'array'
+                : typeof outputs === 'object'
+                    ? 'json'
+                    : typeof outputs
+
+        await flowGalleryRunRepo().save({
+            id: apId(),
+            appId: templateId,
+            status: executionStatus,
+            executionTimeMs: executionTimeMs > 0 ? executionTimeMs : null,
+            inputKeys: inputKeys?.slice(0, 50) ?? null,
+            outputType,
+            error: error ? error.slice(0, 1000) : null,
+            requestId: requestId?.slice(0, 120) ?? null,
+        } as never)
 
         log.info({
             msg: 'Flow Gallery App Execution',

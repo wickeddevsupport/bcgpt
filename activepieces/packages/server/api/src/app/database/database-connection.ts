@@ -11,6 +11,7 @@ import { UserIdentityEntity } from '../authentication/user-identity/user-identit
 import { FileEntity } from '../file/file.entity'
 import { FlagEntity } from '../flags/flag.entity'
 import { FlowGalleryAppEntity } from '../flow-gallery/flow-gallery.entity'
+import { FlowGalleryRunEntity } from '../flow-gallery/flow-gallery-run.entity'
 import { FlowEntity } from '../flows/flow/flow.entity'
 import { FlowRunEntity } from '../flows/flow-run/flow-run-entity'
 import { FlowVersionEntity } from '../flows/flow-version/flow-version-entity'
@@ -74,6 +75,7 @@ function getEntities(): EntitySchema<unknown>[] {
 
         // CE-supported extras
         FlowGalleryAppEntity,
+        FlowGalleryRunEntity,
         TemplateEntity,
         PlatformAnalyticsReportEntity,
     ]

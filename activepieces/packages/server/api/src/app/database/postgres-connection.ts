@@ -317,6 +317,7 @@ import { RemoveOperatorRole1769613456917 } from './migration/postgres/1769613456
 import { CreateFlowGalleryAppTable1769700000001 } from './migration/postgres/1769700000001-CreateFlowGalleryAppTable'
 import { AddPublisherFieldsToFlowGalleryApp1769700000002 } from './migration/postgres/1769700000002-AddPublisherFieldsToFlowGalleryApp'
 import { AddExecutionStatsToFlowGalleryApp1769700000003 } from './migration/postgres/1769700000003-AddExecutionStatsToFlowGalleryApp'
+import { CreateFlowGalleryExecutionTable1769700000004 } from './migration/postgres/1769700000004-CreateFlowGalleryExecutionTable'
 
 const getSslConfig = (): boolean | TlsOptions => {
     const useSsl = system.get(AppSystemProp.POSTGRES_USE_SSL)
@@ -650,6 +651,7 @@ export const getMigrations = (): (new () => MigrationInterface)[] => {
         CreateFlowGalleryAppTable1769700000001,
         AddPublisherFieldsToFlowGalleryApp1769700000002,
         AddExecutionStatsToFlowGalleryApp1769700000003,
+        CreateFlowGalleryExecutionTable1769700000004,
     ]
     return migrations
 }

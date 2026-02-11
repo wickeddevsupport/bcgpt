@@ -24,6 +24,14 @@ const ExecuteFlowRequest = Type.Object({
     inputs: Type.Record(Type.String(), Type.Unknown(), { default: {} }),
 })
 
+const ExecuteFlowQuery = Type.Object({
+    mode: Type.Optional(Type.Union([Type.Literal('sync'), Type.Literal('async')])),
+})
+
+const AppRunsQuery = Type.Object({
+    limit: Type.Optional(Type.Number({ default: 10 })),
+})
+
 const ListPublisherAppsQuery = Type.Object({
     search: Type.Optional(Type.String()),
 })
@@ -92,6 +100,90 @@ const UpdatePublisherAppPayload = Type.Object({
 const PublisherTemplateParams = Type.Object({
     templateId: Type.String(),
 })
+
+type AppInputField = {
+    name: string
+    label: string
+    type: 'text' | 'textarea' | 'number' | 'select' | 'boolean' | 'password'
+    required: boolean
+    options?: Array<{ label: string, value: string }>
+}
+
+function extractAppInputFields(schema: unknown): AppInputField[] {
+    if (!schema || typeof schema !== 'object') {
+        return []
+    }
+    const root = schema as { fields?: unknown }
+    if (!Array.isArray(root.fields)) {
+        return []
+    }
+    return root.fields
+        .map((raw) => {
+            if (!raw || typeof raw !== 'object') return null
+            const field = raw as Record<string, unknown>
+            const name = typeof field.name === 'string' ? field.name.trim() : ''
+            if (!name.length) return null
+            const type = typeof field.type === 'string' ? field.type : 'text'
+            const label = typeof field.label === 'string' && field.label.trim().length > 0 ? field.label : name
+            const options = Array.isArray(field.options)
+                ? field.options
+                    .map((option) => {
+                        if (!option || typeof option !== 'object') return null
+                        const o = option as Record<string, unknown>
+                        const value = typeof o.value === 'string' ? o.value : ''
+                        const optLabel = typeof o.label === 'string' ? o.label : value
+                        if (!value.length) return null
+                        return { label: optLabel, value }
+                    })
+                    .filter((option): option is { label: string, value: string } => !!option)
+                : undefined
+            return {
+                name,
+                label,
+                type: (['text', 'textarea', 'number', 'select', 'boolean', 'password'].includes(type) ? type : 'text') as AppInputField['type'],
+                required: Boolean(field.required),
+                ...(options && options.length ? { options } : {}),
+            }
+        })
+        .filter((field): field is AppInputField => !!field)
+}
+
+function validateAppInputs(fields: AppInputField[], inputs: Record<string, unknown>): string[] {
+    const errors: string[] = []
+    const available = new Map(fields.map((field) => [field.name, field]))
+
+    for (const field of fields) {
+        const value = inputs[field.name]
+        const missing = value === undefined || value === null || (typeof value === 'string' && value.trim().length === 0)
+        if (field.required && missing) {
+            errors.push(`"${field.label}" is required.`)
+            continue
+        }
+        if (missing) {
+            continue
+        }
+        if (field.type === 'number' && typeof value !== 'number') {
+            errors.push(`"${field.label}" must be a number.`)
+        }
+        if (field.type === 'boolean' && typeof value !== 'boolean') {
+            errors.push(`"${field.label}" must be true or false.`)
+        }
+        if (field.type === 'select' && field.options?.length) {
+            const allowed = new Set(field.options.map((option) => option.value))
+            if (typeof value !== 'string' || !allowed.has(value)) {
+                errors.push(`"${field.label}" has an invalid option.`)
+            }
+        }
+    }
+
+    for (const inputKey of Object.keys(inputs)) {
+        if (!available.has(inputKey)) {
+            errors.push(`"${inputKey}" is not a supported input for this app.`)
+        }
+    }
+
+    return errors.slice(0, 6)
+}
 
 function serializeForScript(value: unknown): string {
     return JSON.stringify(value)
@@ -192,7 +284,11 @@ function appRuntimeHtml(app: Template & { galleryMetadata?: Record<string, unkno
           <section class="panel" id="details">
             <h2 style="margin:0 0 10px">Run app</h2>
             <div id="formFields" class="row" style="display:grid;gap:10px"></div>
-            <div class="row" style="margin-top:10px"><button id="runBtn" class="btn primary">Run app</button><button id="resetBtn" class="btn">Reset</button></div>
+            <div class="row" style="margin-top:10px">
+              <button id="runBtn" class="btn primary">Run app</button>
+              <button id="runAsyncBtn" class="btn">Run in background</button>
+              <button id="resetBtn" class="btn">Reset</button>
+            </div>
             <div id="runError" class="danger hidden" style="margin-top:8px"></div>
           </section>
           <section class="panel">
@@ -200,6 +296,7 @@ function appRuntimeHtml(app: Template & { galleryMetadata?: Record<string, unkno
             <div id="runMeta" class="muted">No runs yet.</div>
             <div id="output" class="hidden" style="margin-top:10px"></div>
             <div id="stats" style="margin-top:12px" class="muted">Loading stats...</div>
+            <div id="runHistory" style="margin-top:12px" class="muted">Loading recent runs...</div>
           </section>
         </div>
       </div>
@@ -212,21 +309,25 @@ function appRuntimeHtml(app: Template & { galleryMetadata?: Record<string, unkno
         const esc=(t)=>{const d=document.createElement('div');d.textContent=String(t||'');return d.innerHTML;};
         const formFields=document.getElementById('formFields');
         const runBtn=document.getElementById('runBtn');
+        const runAsyncBtn=document.getElementById('runAsyncBtn');
         const resetBtn=document.getElementById('resetBtn');
         const runError=document.getElementById('runError');
         const output=document.getElementById('output');
         const runMeta=document.getElementById('runMeta');
         const stats=document.getElementById('stats');
+        const runHistory=document.getElementById('runHistory');
 
         function normalizeFields(raw){if(!raw||typeof raw!=='object')return [];if(Array.isArray(raw.fields))return raw.fields;return Object.entries(raw).map(([name,config])=>{if(typeof config==='string')return {name,label:name,type:config};if(config&&typeof config==='object')return {name,label:name,...config};return {name,label:name,type:'text'};});}
         function fieldHtml(field){const n=String(field.name||'').replace(/[^a-zA-Z0-9_]/g,'_');const type=String(field.type||'text').toLowerCase();const label=field.label||n;const req=field.required?'required':'';const ph=field.placeholder||'';if(type==='textarea')return '<label class="muted">'+esc(label)+'</label><textarea class="input" name="'+esc(n)+'" placeholder="'+esc(ph)+'" '+req+'></textarea>';if(type==='number')return '<label class="muted">'+esc(label)+'</label><input class="input" type="number" name="'+esc(n)+'" placeholder="'+esc(ph)+'" '+req+' />';if(type==='boolean')return '<label class="muted" style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="'+esc(n)+'" />'+esc(label)+'</label>';if(type==='select'){const options=Array.isArray(field.options)?field.options:[];return '<label class="muted">'+esc(label)+'</label><select class="select" name="'+esc(n)+'" '+req+'><option value="">Select...</option>'+options.map((opt)=>{if(typeof opt==='string')return '<option value="'+esc(opt)+'">'+esc(opt)+'</option>';return '<option value="'+esc(opt.value||opt.label||'')+'">'+esc(opt.label||opt.value||'')+'</option>';}).join('')+'</select>';}const inputType=type==='password'?'password':'text';return '<label class="muted">'+esc(label)+'</label><input class="input" type="'+inputType+'" name="'+esc(n)+'" placeholder="'+esc(ph)+'" '+req+' />';}
         function renderForm(){const fields=normalizeFields(schema);if(!fields.length){formFields.innerHTML='<label class="muted">Input</label><textarea class="input" name="input" placeholder="Enter input"></textarea>';return;}formFields.innerHTML=fields.map((f)=>'<div>'+fieldHtml(f)+'</div>').join('');}
         async function loadStats(){try{const res=await fetch('/apps/api/apps/'+encodeURIComponent(appId)+'/stats');const body=await res.json();if(!res.ok){stats.textContent='Stats unavailable.';return;}const sr=body.runCount?Math.round((body.successCount/body.runCount)*100):0;stats.innerHTML='<div class="stats"><div class="stat"><b>'+body.runCount+'</b><span class="muted">Runs</span></div><div class="stat"><b>'+body.successCount+'</b><span class="muted">Success</span></div><div class="stat"><b>'+body.failedCount+'</b><span class="muted">Failed</span></div><div class="stat"><b>'+(body.averageExecutionMs?Math.round(body.averageExecutionMs)+'ms':'-')+'</b><span class="muted">Avg</span></div></div><div class="muted" style="margin-top:8px">Success rate: '+sr+'%</div>';}catch(e){stats.textContent='Stats unavailable.';}}
+        async function loadRuns(){try{const res=await fetch('/apps/api/apps/'+encodeURIComponent(appId)+'/runs?limit=8');const body=await res.json();if(!res.ok){runHistory.textContent='Run history unavailable.';return;}const rows=Array.isArray(body.data)?body.data:[];if(!rows.length){runHistory.textContent='No recent runs yet.';return;}runHistory.innerHTML='<h3 style=\"margin:0 0 8px\">Recent runs</h3>'+rows.map((r)=>{const when=new Date(r.created).toLocaleString();const status=r.status==='success'?'<span class=\"success\">success</span>':(r.status==='failed'?'<span class=\"danger\">failed</span>':'queued');const ms=r.executionTimeMs?(' · '+r.executionTimeMs+'ms'):'';const err=r.error?('<div class=\"danger\" style=\"font-size:12px\">'+esc(r.error)+'</div>'):'';return '<div style=\"border:1px solid #e4e8f3;border-radius:10px;padding:8px;margin:6px 0\"><div><b>'+status+'</b><span class=\"muted\"> · '+when+ms+'</span></div>'+err+'</div>';}).join('');}catch(e){runHistory.textContent='Run history unavailable.';}}
         function renderOutput(data){const t=String(configuredOutputType||'json').toLowerCase();if(t==='image'){const url=typeof data==='string'?data:(data&&data.imageUrl)||((data&&data.url)||'');if(url)return '<img src="'+esc(String(url))+'" alt="Output" style="max-width:100%;border:1px solid #dce1ef;border-radius:10px" />';}if(t==='text'){const text=typeof data==='string'?data:(data&&data.text)||JSON.stringify(data);return '<div style="white-space:pre-wrap;line-height:1.5">'+esc(String(text))+'</div>';}if(t==='markdown'){const text=typeof data==='string'?data:(data&&data.markdown)||(data&&data.text)||JSON.stringify(data);return '<pre class="code" style="white-space:pre-wrap">'+esc(String(text))+'</pre>';}return '<pre class="code">'+esc(JSON.stringify(data,null,2))+'</pre>';}
-        async function runApp(){runError.classList.add('hidden');runError.textContent='';runBtn.disabled=true;runBtn.textContent='Running...';output.classList.add('hidden');const fields=formFields.querySelectorAll('[name]');const inputs={};fields.forEach((el)=>{if(el.type==='checkbox')inputs[el.name]=el.checked;else if(el.type==='number')inputs[el.name]=el.value===''?null:Number(el.value);else inputs[el.name]=el.value;});const start=Date.now();try{const res=await fetch('/apps/'+encodeURIComponent(appId)+'/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({inputs})});const body=await res.json();if(!res.ok)throw new Error(body.error||'Execution failed');const ms=body.executionTime||(Date.now()-start);runMeta.textContent='Last run: '+new Date().toLocaleString()+' ('+ms+'ms)';output.innerHTML=renderOutput(body.output);output.classList.remove('hidden');await loadStats();}catch(e){runError.textContent=e.message||String(e);runError.classList.remove('hidden');}finally{runBtn.disabled=false;runBtn.textContent='Run app';}}
-        runBtn.addEventListener('click',(e)=>{e.preventDefault();runApp();});
+        async function runApp(mode){runError.classList.add('hidden');runError.textContent='';runBtn.disabled=true;runAsyncBtn.disabled=true;runBtn.textContent=mode==='async'?'Queueing...':'Running...';output.classList.add('hidden');const fields=formFields.querySelectorAll('[name]');const inputs={};fields.forEach((el)=>{if(el.type==='checkbox')inputs[el.name]=el.checked;else if(el.type==='number')inputs[el.name]=el.value===''?null:Number(el.value);else inputs[el.name]=el.value;});const start=Date.now();try{const res=await fetch('/apps/'+encodeURIComponent(appId)+'/execute?mode='+encodeURIComponent(mode||'sync'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({inputs})});const body=await res.json();if(!res.ok)throw new Error(body.error||'Execution failed');if(body.queued){runMeta.textContent='Run queued at '+new Date().toLocaleString()+'. It will complete in background.';output.innerHTML='<div class=\"muted\">Queued successfully. Check recent runs for updates.</div>';output.classList.remove('hidden');await loadRuns();return;}const ms=body.executionTime||(Date.now()-start);runMeta.textContent='Last run: '+new Date().toLocaleString()+' ('+ms+'ms)';output.innerHTML=renderOutput(body.output);output.classList.remove('hidden');await loadStats();await loadRuns();}catch(e){runError.textContent=e.message||String(e);runError.classList.remove('hidden');}finally{runBtn.disabled=false;runAsyncBtn.disabled=false;runBtn.textContent='Run app';}}
+        runBtn.addEventListener('click',(e)=>{e.preventDefault();runApp('sync');});
+        runAsyncBtn.addEventListener('click',(e)=>{e.preventDefault();runApp('async');});
         resetBtn.addEventListener('click',(e)=>{e.preventDefault();document.querySelectorAll('#formFields [name]').forEach((el)=>{if(el.type==='checkbox')el.checked=false;else el.value='';});output.classList.add('hidden');runError.classList.add('hidden');});
-        renderForm();loadStats();
+        renderForm();loadStats();loadRuns();
       </script>`)
 }
 
@@ -349,6 +450,18 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
         return reply.send(stats)
     })
 
+    fastify.get('/api/apps/:id/runs', { config: { security: { kind: RouteKind.PUBLIC } }, schema: { params: AppIdParams, querystring: AppRunsQuery } }, async (request, reply) => {
+        const params = request.params as Static<typeof AppIdParams>
+        const query = request.query as Static<typeof AppRunsQuery>
+        const runs = await service.listRecentRuns({
+            templateId: params.id,
+            limit: query.limit ?? 10,
+        })
+        return reply.send({
+            data: runs,
+        })
+    })
+
     fastify.get('/publisher', { config: { security: { kind: RouteKind.PUBLIC } } }, async (_, reply) => {
         return reply.type('text/html').send(publisherPageHtml())
     })
@@ -447,8 +560,9 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
         }
     })
 
-    fastify.post('/:id/execute', { config: { security: { kind: RouteKind.PUBLIC } }, schema: { params: AppIdParams, body: ExecuteFlowRequest } }, async (request, reply) => {
+    fastify.post('/:id/execute', { config: { security: { kind: RouteKind.PUBLIC } }, schema: { params: AppIdParams, querystring: ExecuteFlowQuery, body: ExecuteFlowRequest } }, async (request, reply) => {
         const params = request.params as Static<typeof AppIdParams>
+        const query = request.query as Static<typeof ExecuteFlowQuery>
         const body = request.body as Static<typeof ExecuteFlowRequest>
         const serializedInputs = JSON.stringify(body.inputs ?? {})
         if (Buffer.byteLength(serializedInputs, 'utf8') > 200_000) {
@@ -459,14 +573,59 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
         try {
             const app = await service.getPublicApp({ id: params.id, platformId: null })
             if (!app) return reply.code(404).send({ error: 'App not found' })
-            const flowResponse = await service.executePublicApp({ appId: params.id, inputs: body.inputs ?? {} })
+
+            const meta = (app.galleryMetadata ?? {}) as Record<string, unknown>
+            const fields = extractAppInputFields(meta.inputSchema)
+            const validationErrors = validateAppInputs(fields, body.inputs ?? {})
+            if (validationErrors.length > 0) {
+                return reply.code(StatusCodes.BAD_REQUEST).send({
+                    error: validationErrors[0],
+                    details: validationErrors,
+                })
+            }
+
+            const executionMode = query.mode === 'async' ? 'async' : 'sync'
+            const executionPromise = service.executePublicApp({
+                appId: params.id,
+                inputs: body.inputs ?? {},
+                mode: executionMode,
+            })
+
+            const flowResponse = executionMode === 'async'
+                ? await executionPromise
+                : await Promise.race([
+                    executionPromise,
+                    new Promise<never>((_, reject) => {
+                        setTimeout(() => reject(new Error('This app is taking longer than expected. Use "Run in background" for long tasks.')), 30_000)
+                    }),
+                ])
+
             const executionTime = Date.now() - started
+            const requestIdHeader = typeof flowResponse.headers === 'object' && flowResponse.headers
+                ? (flowResponse.headers['x-webhook-id'] ?? flowResponse.headers['X-WEBHOOK-ID'])
+                : undefined
             await service.logExecution({
                 templateId: params.id,
-                executionStatus: flowResponse.status >= 200 && flowResponse.status < 300 ? 'success' : 'failed',
+                executionStatus: executionMode === 'async'
+                    ? 'queued'
+                    : flowResponse.status >= 200 && flowResponse.status < 300
+                        ? 'success'
+                        : 'failed',
                 executionTimeMs: executionTime,
                 outputs: flowResponse.body,
+                inputKeys: Object.keys(body.inputs ?? {}),
+                requestId: typeof requestIdHeader === 'string' ? requestIdHeader : undefined,
             })
+
+            if (executionMode === 'async') {
+                return reply.status(StatusCodes.ACCEPTED).send({
+                    queued: true,
+                    requestId: requestIdHeader ?? null,
+                    executionTime,
+                    message: 'App run queued. Refresh run history to track completion.',
+                })
+            }
+
             return reply.status(flowResponse.status).send({ output: flowResponse.body, executionTime })
         } catch (error: any) {
             fastify.log.error(error)
@@ -475,6 +634,7 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
                 executionStatus: 'failed',
                 executionTimeMs: Date.now() - started,
                 error: error?.message ?? 'Execution failed',
+                inputKeys: Object.keys(body.inputs ?? {}),
             })
             return reply.code(StatusCodes.BAD_REQUEST).send({ error: error?.message ?? 'Execution failed' })
         }
