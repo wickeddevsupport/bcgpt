@@ -13,10 +13,6 @@
 ## Integrations
 - `docs/integrations/ACTIVEPIECES.md`
 
-## Product Requirements
-- `docs/FLOW_APP_STORE_PRD.md` - Custom app store for Activepieces workflows
-- `docs/MILESTONE_1_COMPLETION.md` - Milestone 1 implementation report
-
 ## Phases & Architecture
 - `docs/phases/IMPLEMENTATION_QUICKSTART.md`
 - `docs/phases/INTELLIGENT_CHAINING_ARCHITECTURE.md`

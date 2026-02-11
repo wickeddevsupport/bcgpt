@@ -10,7 +10,6 @@ import { fileURLToPath } from "url";
 
 import { handleMCP } from "./mcp.js";
 import { basecampFetch as basecampFetchCore, basecampFetchAll as basecampFetchAllCore, getCircuitStatus as getBasecampCircuitStatus } from "./basecamp.js";
-import appStoreRouter from "./apps/app-store.js";
 import {
   getUserToken,
   setUserToken,
@@ -1088,9 +1087,6 @@ app.get("/db/info", async (req, res) => {
     res.status(500).json({ error: e?.message || String(e) });
   }
 });
-
-/* ================= Flow App Store ================= */
-app.use("/apps", appStoreRouter);
 
 let server = null;
 if (ACTIVEPIECES_PROXY_ACTIVE) {
