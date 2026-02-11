@@ -28,9 +28,16 @@ This is the single source of truth for the `/apps` product build.
 ## Phase 0 - Foundation and Guardrails
 - [ ] Freeze baseline commit and record rollback command.
 - [ ] Add release checklist for deploy/rollback.
-- [ ] Verify server env parity (`.env.activepieces`, compose, proxy).
-- [ ] Add smoke test checklist for every deploy (`/`, `/apps`, sign-in, run app).
+- [x] Verify server env parity (`.env.activepieces`, compose, proxy).
+- [x] Add smoke test checklist for every deploy (`/`, `/apps`, sign-in, run app).
 - [ ] Confirm no accidental changes in unrelated files before each release.
+
+### Deploy Smoke Checklist (Current)
+- [x] `/` returns 200
+- [x] `/sign-in` returns 200
+- [x] `/apps` returns 200
+- [x] `/apps/publisher` returns 200
+- [x] `/api/v1/flags` returns 200
 
 ## Phase 1 - Proof of Concept (Already Delivered)
 - [x] `/apps` route exists.

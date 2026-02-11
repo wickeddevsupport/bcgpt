@@ -22,6 +22,7 @@ services:
     environment:
       AP_EDITION: "ce"
       AP_ENVIRONMENT: "prod"
+      AP_CONTAINER_TYPE: "APP"
       AP_FRONTEND_URL: "${AP_FRONTEND_URL}"
       AP_EXECUTION_MODE: "UNSANDBOXED"
       AP_DB_TYPE: "POSTGRES"
