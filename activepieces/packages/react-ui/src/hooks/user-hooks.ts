@@ -7,9 +7,11 @@ import { isNil, UserWithBadges } from '@activepieces/shared';
 export const userHooks = {
   useCurrentUser: () => {
     const token = authenticationSession.getToken();
-    const expired = authenticationSession.isJwtExpired(token!);
+    const expired = token
+      ? authenticationSession.isJwtExpired(token)
+      : true;
     return useSuspenseQuery<UserWithBadges | null, Error>({
-      queryKey: ['currentUser'],
+      queryKey: ['currentUser', token],
       queryFn: async () => {
         // Skip user data fetch if JWT is expired to prevent redirect to sign-in page
         // This is especially important for embedding scenarios where we need to accept
@@ -26,7 +28,8 @@ export const userHooks = {
           return null;
         }
       },
-      staleTime: Infinity,
+      staleTime: 0,
+      refetchOnMount: true,
     });
   },
   useUserById: (id: string | null) => {
