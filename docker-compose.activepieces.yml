@@ -1,6 +1,9 @@
 services:
   activepieces:
-    image: ghcr.io/wickeddevsupport/activepieces-bcgpt:latest
+    build:
+      context: ./activepieces
+      dockerfile: Dockerfile
+    image: wickeddevsupport/activepieces-bcgpt:latest
     env_file:
       - .env.activepieces
     labels:
