@@ -2,17 +2,22 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { t } from 'i18next';
 import {
   ArrowUpRight,
+  Clock3,
+  LoaderCircle,
   Play,
+  RotateCcw,
   Search,
   Sparkles,
+  Square,
   Wand2,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import { DashboardPageHeader } from '@/app/components/dashboard-page-header';
 import { ApSidebarToggle } from '@/components/custom/ap-sidebar-toggle';
 import { InputWithIcon } from '@/components/custom/input-with-icon';
+import { ApMarkdown } from '@/components/custom/markdown';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -43,14 +48,19 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import {
   AppInputField,
+  AppRun,
+  AppStatsResponse,
   AppTemplate,
   appsApi,
 } from '@/features/apps/lib/apps-api';
 import { authenticationSession } from '@/lib/authentication-session';
 import { cn } from '@/lib/utils';
+import { MarkdownVariant } from '@activepieces/shared';
 
 type AppFormState = Record<string, string | number | boolean | null>;
 type SortMode = 'featured' | 'runs' | 'name';
+type ExecuteMode = 'sync' | 'async';
+type AppOutputType = 'text' | 'json' | 'image' | 'markdown' | 'html';
 
 function getAppFields(app: AppTemplate): AppInputField[] {
   return app.galleryMetadata?.inputSchema?.fields ?? [];
@@ -81,17 +91,93 @@ function getSuccessRate(app: AppTemplate) {
   return Math.max(0, Math.min(100, Math.round((successCount / runCount) * 100)));
 }
 
+function extractImageSource(output: unknown): string | null {
+  if (typeof output === 'string') {
+    return output;
+  }
+  if (!output || typeof output !== 'object') {
+    return null;
+  }
+  const candidateKeys = ['url', 'imageUrl', 'image_url', 'image', 'src', 'dataUrl', 'data_url'];
+  for (const key of candidateKeys) {
+    const value = (output as Record<string, unknown>)[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function resolveOutputType(app: AppTemplate | null, output: unknown): AppOutputType {
+  const fromMetadata = String(app?.galleryMetadata?.outputType ?? '').toLowerCase();
+  if (fromMetadata === 'text' || fromMetadata === 'json' || fromMetadata === 'image' || fromMetadata === 'markdown' || fromMetadata === 'html') {
+    return fromMetadata as AppOutputType;
+  }
+  if (typeof output === 'string') {
+    if (output.startsWith('http') || output.startsWith('data:image/')) {
+      return 'image';
+    }
+    return 'text';
+  }
+  if (Array.isArray(output) || typeof output === 'object') {
+    return 'json';
+  }
+  return 'text';
+}
+
+function formatRuntime(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return '-';
+  }
+  return `${Math.round(value)}ms`;
+}
+
+function validateInputs(app: AppTemplate, formState: AppFormState): string[] {
+  const fields = getAppFields(app);
+  const errors: string[] = [];
+  for (const field of fields) {
+    const value = formState[field.name];
+    const missing =
+      value === undefined ||
+      value === null ||
+      (typeof value === 'string' && value.trim().length === 0);
+    const label = normalizeFieldLabel(field);
+    if (field.required && missing) {
+      errors.push(t('"{{label}}" is required', { label }));
+      continue;
+    }
+    if (missing) {
+      continue;
+    }
+    if (field.type === 'number' && typeof value !== 'number') {
+      errors.push(t('"{{label}}" must be a number', { label }));
+    }
+    if (field.type === 'boolean' && typeof value !== 'boolean') {
+      errors.push(t('"{{label}}" must be true or false', { label }));
+    }
+    if (field.type === 'select' && field.options?.length) {
+      const allowed = new Set(field.options.map((option) => option.value));
+      if (typeof value !== 'string' || !allowed.has(value)) {
+        errors.push(t('"{{label}}" has an invalid option', { label }));
+      }
+    }
+  }
+  return errors.slice(0, 5);
+}
+
 const AppsPage = () => {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<string>('ALL');
   const [sortMode, setSortMode] = useState<SortMode>('featured');
   const [selectedApp, setSelectedApp] = useState<AppTemplate | null>(null);
-  const [runMode, setRunMode] = useState<'sync' | 'async'>('sync');
+  const [runMode, setRunMode] = useState<ExecuteMode>('sync');
   const [formState, setFormState] = useState<AppFormState>({});
   const [runOutput, setRunOutput] = useState<unknown>(null);
   const [runMeta, setRunMeta] = useState<string>('');
   const [runError, setRunError] = useState<string>('');
   const queryClient = useQueryClient();
+  const activeRunController = useRef<AbortController | null>(null);
+  const lastRunContext = useRef<{ appId: string; payload: { inputs: Record<string, unknown> }; mode: ExecuteMode } | null>(null);
 
   const appsQuery = useQuery({
     queryKey: ['apps-gallery', search, category],
@@ -103,36 +189,69 @@ const AppsPage = () => {
       }),
   });
 
+  const selectedAppId = selectedApp?.id;
+
+  const appStatsQuery = useQuery({
+    queryKey: ['apps-runner-stats', selectedAppId],
+    enabled: Boolean(selectedAppId),
+    queryFn: () => appsApi.getAppStats(selectedAppId!),
+    staleTime: 10_000,
+  });
+
+  const appRunsQuery = useQuery({
+    queryKey: ['apps-runner-runs', selectedAppId],
+    enabled: Boolean(selectedAppId),
+    queryFn: () => appsApi.listAppRuns(selectedAppId!, 10),
+    staleTime: 10_000,
+  });
+
   const runMutation = useMutation({
     mutationFn: async ({
       appId,
       payload,
       mode,
+      signal,
     }: {
       appId: string;
       payload: { inputs: Record<string, unknown> };
-      mode: 'sync' | 'async';
+      mode: ExecuteMode;
+      signal: AbortSignal;
     }) => {
-      return appsApi.executeApp(appId, payload, mode);
+      return appsApi.executeApp(appId, payload, mode, signal);
     },
-    onSuccess: (result) => {
-      setRunOutput(result.output ?? result.message ?? null);
+    onSuccess: (result, variables) => {
       if (result.queued) {
-        setRunMeta(t('Run queued in background.'));
+        setRunOutput(result.message ?? t('Run queued in background.'));
+        setRunMeta(t('Run queued in background. Check recent runs for updates.'));
       } else {
-        const time = result.executionTime ? `${result.executionTime}ms` : '-';
-        setRunMeta(`${t('Execution time')}: ${time}`);
+        setRunOutput(result.output ?? result.message ?? null);
+        setRunMeta(
+          `${t('Execution time')}: ${formatRuntime(result.executionTime ?? null)}`,
+        );
       }
       setRunError('');
       queryClient.invalidateQueries({ queryKey: ['apps-gallery'] });
+      queryClient.invalidateQueries({ queryKey: ['apps-runner-stats', variables.appId] });
+      queryClient.invalidateQueries({ queryKey: ['apps-runner-runs', variables.appId] });
       toast.success(t('App executed successfully'));
     },
     onError: (error) => {
-      const message = error instanceof Error ? error.message : String(error);
+      const message =
+        error instanceof Error
+          ? error.name === 'AbortError'
+            ? t('Run cancelled')
+            : error.message
+          : String(error);
       setRunError(message);
       setRunMeta('');
-      setRunOutput(null);
-      toast.error(message);
+      if (message === t('Run cancelled')) {
+        toast.message(message);
+      } else {
+        toast.error(message);
+      }
+    },
+    onSettled: () => {
+      activeRunController.current = null;
     },
   });
 
@@ -187,10 +306,14 @@ const AppsPage = () => {
     setSelectedApp(app);
   };
 
-  const submitRun = () => {
-    if (!selectedApp) {
-      return;
-    }
+  const closeRunner = () => {
+    activeRunController.current?.abort();
+    activeRunController.current = null;
+    setSelectedApp(null);
+  };
+
+  const buildInputs = (): Record<string, unknown> => {
+    if (!selectedApp) return {};
     const inputs: Record<string, unknown> = {};
     getAppFields(selectedApp).forEach((field) => {
       const value = formState[field.name];
@@ -198,11 +321,62 @@ const AppsPage = () => {
         inputs[field.name] = value;
       }
     });
+    return inputs;
+  };
+
+  const submitRun = (mode: ExecuteMode = runMode) => {
+    if (!selectedApp) {
+      return;
+    }
+
+    const validationErrors = validateInputs(selectedApp, formState);
+    if (validationErrors.length > 0) {
+      const message = validationErrors.join(' | ');
+      setRunError(message);
+      setRunMeta('');
+      toast.error(t('Please fix input errors before running the app'));
+      return;
+    }
+
+    const payload = { inputs: buildInputs() };
+    const controller = new AbortController();
+    activeRunController.current = controller;
+    lastRunContext.current = { appId: selectedApp.id, payload, mode };
+
+    setRunError('');
+    setRunMeta(mode === 'async' ? t('Queueing run...') : t('Running app...'));
     runMutation.mutate({
       appId: selectedApp.id,
-      payload: { inputs },
-      mode: runMode,
+      payload,
+      mode,
+      signal: controller.signal,
     });
+  };
+
+  const retryLastRun = () => {
+    if (!lastRunContext.current) {
+      toast.error(t('No previous run to retry'));
+      return;
+    }
+    const { appId, payload, mode } = lastRunContext.current;
+    const controller = new AbortController();
+    activeRunController.current = controller;
+    setRunError('');
+    setRunMeta(t('Retrying...'));
+    runMutation.mutate({
+      appId,
+      payload,
+      mode,
+      signal: controller.signal,
+    });
+  };
+
+  const cancelRun = () => {
+    if (!activeRunController.current) {
+      return;
+    }
+    activeRunController.current.abort();
+    activeRunController.current = null;
   };
 
   const renderField = (field: AppInputField) => {
@@ -315,7 +489,77 @@ const AppsPage = () => {
     );
   };
 
+  const renderOutput = () => {
+    if (runOutput === null) {
+      return (
+        <div className="mt-2 text-sm text-muted-foreground">
+          {t('No run yet. Configure inputs and click Run app.')}
+        </div>
+      );
+    }
+
+    const outputType = resolveOutputType(selectedApp, runOutput);
+    if (outputType === 'markdown') {
+      return (
+        <div className="mt-2 rounded-md border p-3">
+          <ApMarkdown
+            markdown={typeof runOutput === 'string' ? runOutput : JSON.stringify(runOutput, null, 2)}
+            variant={MarkdownVariant.BORDERLESS}
+            className="text-sm"
+          />
+        </div>
+      );
+    }
+
+    if (outputType === 'image') {
+      const imageSource = extractImageSource(runOutput);
+      if (imageSource) {
+        return (
+          <div className="mt-2 space-y-2">
+            <img
+              src={imageSource}
+              alt={t('App output')}
+              className="max-h-[320px] w-full rounded-md border object-contain bg-muted"
+            />
+            <a
+              href={imageSource}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-primary underline"
+            >
+              {t('Open image in new tab')}
+            </a>
+          </div>
+        );
+      }
+    }
+
+    if (outputType === 'html') {
+      return (
+        <div className="mt-2 space-y-2">
+          <iframe
+            title={t('App HTML output')}
+            sandbox=""
+            srcDoc={typeof runOutput === 'string' ? runOutput : JSON.stringify(runOutput, null, 2)}
+            className="h-[320px] w-full rounded-md border bg-white"
+          />
+          <div className="text-xs text-muted-foreground">
+            {t('Rendered in a sandboxed frame for safety.')}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <pre className={cn('mt-2 max-h-[320px] overflow-auto rounded bg-muted p-3 text-xs')}>
+        {typeof runOutput === 'string' ? runOutput : JSON.stringify(runOutput, null, 2)}
+      </pre>
+    );
+  };
+
   const publisherPath = authenticationSession.appendProjectRoutePrefix('/apps/publisher');
+  const runs = appRunsQuery.data?.data ?? [];
+  const stats = appStatsQuery.data;
 
   return (
     <div className="space-y-4">
@@ -400,7 +644,10 @@ const AppsPage = () => {
       )}
 
       {appsQuery.isLoading && (
-        <div className="text-sm text-muted-foreground">{t('Loading apps...')}</div>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <LoaderCircle className="size-4 animate-spin" />
+          {t('Loading apps...')}
+        </div>
       )}
       {appsQuery.isError && (
         <div className="text-sm text-destructive">
@@ -500,11 +747,11 @@ const AppsPage = () => {
         open={Boolean(selectedApp)}
         onOpenChange={(open) => {
           if (!open) {
-            setSelectedApp(null);
+            closeRunner();
           }
         }}
       >
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-5xl">
           <DialogHeader>
             <DialogTitle>{selectedApp?.name ?? t('Run app')}</DialogTitle>
             <DialogDescription>
@@ -514,8 +761,8 @@ const AppsPage = () => {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-3 max-h-[55vh] overflow-y-auto pr-1">
+          <div className="grid gap-4 lg:grid-cols-[1.1fr_1fr]">
+            <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
               {selectedApp && getAppFields(selectedApp).length === 0 && (
                 <div className="text-sm text-muted-foreground">
                   {t('This app does not require any inputs.')}
@@ -525,7 +772,7 @@ const AppsPage = () => {
 
               <div className="space-y-2 pt-2">
                 <label className="text-sm font-medium">{t('Execution mode')}</label>
-                <Select value={runMode} onValueChange={(value) => setRunMode(value as 'sync' | 'async')}>
+                <Select value={runMode} onValueChange={(value) => setRunMode(value as ExecuteMode)}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -537,31 +784,137 @@ const AppsPage = () => {
               </div>
             </div>
 
-            <div className="space-y-2">
-              <div className="rounded-md border p-3">
-                <div className="text-xs text-muted-foreground">{runMeta || t('Run output will appear here.')}</div>
-                {runError && <div className="mt-2 text-sm text-destructive">{runError}</div>}
-                {runOutput !== null ? (
-                  <pre className={cn('mt-2 max-h-[320px] overflow-auto rounded bg-muted p-3 text-xs')}>
-                    {typeof runOutput === 'string'
-                      ? runOutput
-                      : JSON.stringify(runOutput, null, 2)}
-                  </pre>
-                ) : (
-                  <div className="mt-2 text-sm text-muted-foreground">
-                    {t('No run yet. Configure inputs and click Run app.')}
-                  </div>
-                )}
-              </div>
+            <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">{t('Output')}</CardTitle>
+                  <CardDescription>{runMeta || t('Run output will appear here.')}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {runError && <div className="mt-1 text-sm text-destructive">{runError}</div>}
+                  {renderOutput()}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">{t('Execution stats')}</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  {appStatsQuery.isLoading ? (
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <LoaderCircle className="size-4 animate-spin" />
+                      {t('Loading stats...')}
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between text-muted-foreground">
+                        <span>{t('Runs')}</span>
+                        <span className="font-medium text-foreground">{stats?.runCount ?? 0}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-muted-foreground">
+                        <span>{t('Success')}</span>
+                        <span className="font-medium text-foreground">{stats?.successCount ?? 0}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-muted-foreground">
+                        <span>{t('Failed')}</span>
+                        <span className="font-medium text-foreground">{stats?.failedCount ?? 0}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-muted-foreground">
+                        <span>{t('Average runtime')}</span>
+                        <span className="font-medium text-foreground">
+                          {formatRuntime(stats?.averageExecutionMs ?? null)}
+                        </span>
+                      </div>
+                      {typeof (stats as AppStatsResponse | undefined)?.medianExecutionMs === 'number' && (
+                        <div className="flex items-center justify-between text-muted-foreground">
+                          <span>{t('Median runtime')}</span>
+                          <span className="font-medium text-foreground">
+                            {formatRuntime((stats as AppStatsResponse).medianExecutionMs)}
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">{t('Recent runs')}</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  {appRunsQuery.isLoading && (
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <LoaderCircle className="size-4 animate-spin" />
+                      {t('Loading runs...')}
+                    </div>
+                  )}
+                  {!appRunsQuery.isLoading && runs.length === 0 && (
+                    <div className="text-muted-foreground">{t('No runs yet')}</div>
+                  )}
+                  {runs.map((run: AppRun) => (
+                    <div key={run.id} className="rounded-md border p-2">
+                      <div className="flex items-center justify-between">
+                        <span
+                          className={cn('text-xs font-medium uppercase', {
+                            'text-emerald-600': run.status === 'success',
+                            'text-destructive': run.status === 'failed',
+                            'text-amber-600': run.status === 'queued',
+                          })}
+                        >
+                          {run.status}
+                        </span>
+                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <Clock3 className="size-3.5" />
+                          {new Date(run.created).toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {t('Runtime')}: {formatRuntime(run.executionTimeMs)}
+                      </div>
+                      {run.error && (
+                        <div className="mt-1 text-xs text-destructive">{run.error}</div>
+                      )}
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
             </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setSelectedApp(null)}>
+          <DialogFooter className="flex-wrap gap-2">
+            <Button variant="outline" onClick={closeRunner}>
               {t('Close')}
             </Button>
-            <Button onClick={submitRun} disabled={runMutation.isPending}>
-              {runMutation.isPending ? t('Running...') : t('Run app')}
+            <Button
+              variant="outline"
+              onClick={retryLastRun}
+              disabled={runMutation.isPending || !lastRunContext.current}
+            >
+              <RotateCcw className="mr-1 size-4" />
+              {t('Retry')}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={cancelRun}
+              disabled={!runMutation.isPending}
+            >
+              <Square className="mr-1 size-4" />
+              {t('Cancel')}
+            </Button>
+            <Button onClick={() => submitRun()} disabled={runMutation.isPending}>
+              {runMutation.isPending ? (
+                <>
+                  <LoaderCircle className="mr-1 size-4 animate-spin" />
+                  {t('Running...')}
+                </>
+              ) : (
+                <>
+                  <Play className="mr-1 size-4" />
+                  {runMode === 'async' ? t('Run in background') : t('Run app')}
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -4,6 +4,7 @@ import {
     Template,
 } from '@activepieces/shared'
 import { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
+import { RateLimitOptions } from '@fastify/rate-limit'
 import { Static, Type } from '@sinclair/typebox'
 import { StatusCodes } from 'http-status-codes'
 import { flowGalleryService } from './flow-gallery.service'
@@ -108,6 +109,11 @@ const SeedDefaultsBody = Type.Object({
     reset: Type.Optional(Type.Boolean()),
 })
 
+const executeRateLimit: RateLimitOptions = {
+    max: 60,
+    timeWindow: '1 minute',
+}
+
 type AppInputField = {
     name: string
     label: string
@@ -192,6 +198,19 @@ function validateAppInputs(fields: AppInputField[], inputs: Record<string, unkno
     return errors.slice(0, 6)
 }
 
+function sanitizePublicError(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error ?? 'Execution failed')
+    return message
+        .replace(/(api[_-]?key|token|authorization|password)\s*[:=]\s*['"]?([^\s,'"]+)/gi, '$1=[REDACTED]')
+        .replace(/([A-Za-z0-9_\-]{24,})/g, (match) => {
+            if (match.startsWith('flow_') || match.startsWith('tmpl_') || match.startsWith('req_')) {
+                return match
+            }
+            return '[REDACTED]'
+        })
+        .slice(0, 1000)
+}
+
 function serializeForScript(value: unknown): string {
     return JSON.stringify(value)
         .replace(/</g, '\\u003c')
@@ -272,6 +291,23 @@ function galleryPageHtml(apps: Template[]): string {
     return pageShell('Apps - Wicked Flow', `
       <div class="container">
         <div class="brand"><span class="dot"></span> Wicked Flow Apps</div>
+        <section class="panel" style="margin:12px 0 14px;background:linear-gradient(135deg,#fff1f3 0%,#ffffff 55%,#fff5f6 100%);border-color:#ffd4dc">
+          <div class="grid2" style="align-items:center">
+            <div>
+              <h2 style="margin:0 0 8px;font-size:28px;line-height:1.1">Workflow apps your team can run without building flows</h2>
+              <p class="muted" style="margin:0 0 12px;font-size:14px">Discover ready-to-run apps for design, marketing, sales, and delivery. Powered by your existing Activepieces workflows.</p>
+              <div class="row">
+                <a class="btn primary" href="/sign-up?redirectAfterLogin=%2Fapps">Start free</a>
+                <a class="btn" href="/templates">Browse templates</a>
+              </div>
+            </div>
+            <div style="display:grid;gap:8px">
+              <div class="row" style="justify-content:space-between;border:1px solid var(--border);border-radius:10px;padding:8px;background:#fff"><span class="muted">No-code execution</span><b>For non-technical users</b></div>
+              <div class="row" style="justify-content:space-between;border:1px solid var(--border);border-radius:10px;padding:8px;background:#fff"><span class="muted">Integrated stack</span><b>Basecamp + Agency workflows</b></div>
+              <div class="row" style="justify-content:space-between;border:1px solid var(--border);border-radius:10px;padding:8px;background:#fff"><span class="muted">Team-ready output</span><b>Shareable, repeatable runs</b></div>
+            </div>
+          </div>
+        </section>
         <div class="top">
           <div class="title"><h1>Apps</h1><p>Run workflow-powered apps without editing flows.</p></div>
           <div class="row" id="topActions"></div>
@@ -308,11 +344,34 @@ function galleryPageHtml(apps: Template[]): string {
         const topActions = document.getElementById('topActions');
         const meta = (a)=>{const m=a.galleryMetadata||{};return {category:m.category||'GENERAL',tags:Array.isArray(m.tags)?m.tags:[],featured:!!m.featured,runCount:Number(m.runCount||0),successCount:Number(m.successCount||0),failedCount:Number(m.failedCount||0),avg:m.averageExecutionMs==null?'-':Math.round(Number(m.averageExecutionMs)),updated:m.updated||a.updated,icon:m.icon||'',author:a.author||'Wicked Flow'};};
         const esc=(t)=>{const d=document.createElement('div');d.textContent=String(t||'');return d.innerHTML;};
-        const token=()=>window.localStorage.getItem('token')||window.sessionStorage.getItem('token');
         const action=(href,label,primary=false)=>'<a class="btn'+(primary?' primary':'')+'" href="'+href+'">'+label+'</a>';
-        function renderTopActions(){
+        async function detectSession(){
+          const candidateTokens = [
+            null,
+            window.localStorage.getItem('token') || null,
+            window.sessionStorage.getItem('token') || null,
+          ].filter((value, index, arr) => arr.indexOf(value) === index);
+          for (const tokenValue of candidateTokens) {
+            try {
+              const headers = {};
+              if (tokenValue) {
+                headers.Authorization = 'Bearer ' + tokenValue;
+              }
+              const response = await fetch('/apps/api/session', {
+                credentials: 'same-origin',
+                headers,
+              });
+              if (response.ok) {
+                const payload = await response.json();
+                return { authenticated: true, ...payload };
+              }
+            } catch (e) {}
+          }
+          return { authenticated: false };
+        }
+        function renderTopActions(session){
           if(!topActions)return;
-          if(token()){
+          if(session && session.authenticated){
             topActions.innerHTML = [
               action('/','Dashboard'),
               action('/templates','Templates'),
@@ -323,7 +382,8 @@ function galleryPageHtml(apps: Template[]): string {
           topActions.innerHTML = [
             action('/templates','Templates'),
             action('/apps/publisher','Become a publisher'),
-            action('/sign-in?redirectAfterLogin='+encodeURIComponent('/apps'),'Sign in',true),
+            action('/sign-in?redirectAfterLogin='+encodeURIComponent('/apps'),'Sign in'),
+            action('/sign-up?redirectAfterLogin='+encodeURIComponent('/apps'),'Start free',true),
           ].join('');
         }
         function setGalleryState(kind,title,desc,actionLabel,actionHandler){
@@ -375,7 +435,8 @@ function galleryPageHtml(apps: Template[]): string {
           renderFeatured(list);
           root.innerHTML = list.map(({a,m})=>cardMarkup(a,m)).join('');
         }
-        renderTopActions();
+        renderTopActions({ authenticated:false });
+        detectSession().then((session)=>renderTopActions(session));
         categories(); render();
         document.getElementById('search').addEventListener('input',e=>{state.search=(e.target.value||'').trim().toLowerCase();render();});
         document.getElementById('category').addEventListener('change',e=>{state.category=e.target.value;render();});
@@ -502,97 +563,78 @@ function publisherPageHtml(): string {
     return pageShell('Apps Publisher', `
       <div class="container">
         <div class="brand"><span class="dot"></span> Wicked Flow Publisher</div>
-        <div class="top">
-          <div class="title"><h1>Publisher</h1><p>Publish templates as apps and configure schema-driven UX.</p></div>
-          <div class="row"><a class="btn" href="/">Dashboard</a><a class="btn" href="/apps">Open gallery</a><button class="btn primary" id="reloadBtn">Reload</button></div>
+        <div class="top" style="margin-bottom:10px">
+          <div class="title"><h1>Publish your workflow as an app</h1><p>Turn templates into no-code apps your team and clients can run in seconds.</p></div>
+          <div class="row"><a class="btn" href="/apps">Open gallery</a><a id="publisherTopCta" class="btn primary" href="/sign-in?redirectAfterLogin=%2Fapps%2Fpublisher">Sign in to publish</a></div>
         </div>
-        <div id="publisherState" class="state hidden" style="margin-bottom:12px"></div>
-        <div class="grid2">
+        <div class="grid2" style="margin-top:12px">
           <section class="panel">
-            <h2 style="margin:0 0 8px">Templates</h2>
-            <input id="templateSearch" class="input" placeholder="Search templates" />
-            <div id="templateList" style="display:grid;gap:10px;margin-top:10px"></div>
+            <h2 style="margin:0 0 8px">How it works</h2>
+            <ol class="muted" style="display:grid;gap:8px;padding-left:18px;margin:0">
+              <li>Create or pick a template in your dashboard.</li>
+              <li>Open Publisher inside your project workspace.</li>
+              <li>Define app inputs, output type, and publish.</li>
+              <li>Share your app URL from the public gallery.</li>
+            </ol>
+            <div class="row" style="margin-top:12px">
+              <a id="publisherMainCta" class="btn primary" href="/sign-in?redirectAfterLogin=%2Fapps%2Fpublisher">Go to Publisher Dashboard</a>
+            </div>
           </section>
           <section class="panel">
-            <h2 style="margin:0 0 8px">Published apps</h2>
-            <input id="publishedSearch" class="input" placeholder="Search published apps" />
-            <div id="publishedList" style="display:grid;gap:10px;margin-top:10px"></div>
+            <h2 style="margin:0 0 8px">Publisher capabilities</h2>
+            <div style="display:grid;gap:8px">
+              <div class="row" style="justify-content:space-between;border:1px solid var(--border);border-radius:10px;padding:8px;background:#fff"><span class="muted">Template to app</span><b>One-click publish</b></div>
+              <div class="row" style="justify-content:space-between;border:1px solid var(--border);border-radius:10px;padding:8px;background:#fff"><span class="muted">Input schema</span><b>Form-driven execution</b></div>
+              <div class="row" style="justify-content:space-between;border:1px solid var(--border);border-radius:10px;padding:8px;background:#fff"><span class="muted">Lifecycle</span><b>Update + unpublish</b></div>
+              <div class="row" style="justify-content:space-between;border:1px solid var(--border);border-radius:10px;padding:8px;background:#fff"><span class="muted">Catalog seeding</span><b>Admin-ready defaults</b></div>
+            </div>
           </section>
         </div>
         <section class="panel" style="margin-top:12px">
-          <h2 id="editorTitle" style="margin:0 0 8px">Publish template as app</h2>
-          <div class="grid2">
-            <div style="display:grid;gap:10px">
-              <div><label class="muted">Template ID</label><input id="templateId" class="input" placeholder="template_xxx" /></div>
-              <div><label class="muted">Flow ID (optional)</label><input id="flowId" class="input" placeholder="flow_xxx" /></div>
-              <div><label class="muted">Description</label><textarea id="description" class="input" placeholder="What this app does"></textarea></div>
-              <div><label class="muted">Icon URL</label><input id="icon" class="input" placeholder="https://..." /></div>
-              <div><label class="muted">Category</label><input id="category" class="input" placeholder="GENERAL" /></div>
-              <div><label class="muted">Tags (comma separated)</label><input id="tags" class="input" placeholder="basecamp,agency,design" /></div>
-              <div><label class="muted">Output Type</label><select id="outputType" class="select"><option value="">Auto / JSON</option><option value="json">json</option><option value="text">text</option><option value="image">image</option><option value="markdown">markdown</option><option value="html">html</option></select></div>
-              <label class="muted" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="featured" /> Featured</label>
-            </div>
-            <div>
-              <h3 style="margin:0 0 8px">Input schema builder</h3>
-              <div id="schemaFields" style="display:grid;gap:8px"></div>
-              <div class="row" style="margin-top:8px"><button id="addFieldBtn" class="btn">Add field</button><button id="clearFieldsBtn" class="btn">Clear</button></div>
-            </div>
-          </div>
-          <div class="row" style="margin-top:12px"><button id="publishBtn" class="btn primary">Publish</button><button id="updateBtn" class="btn">Update</button><button id="previewBtn" class="btn">Preview</button><button id="unpublishBtn" class="btn">Unpublish</button></div>
-          <div id="publisherMessage" class="hidden" style="margin-top:8px"></div>
+          <h2 style="margin:0 0 8px">Why this matters for agencies</h2>
+          <p class="muted" style="margin:0">Publisher lets non-technical team members run repeatable workflows as simple apps, while your builders keep logic centralized in templates.</p>
         </section>
       </div>
       <script>
-        const state = { templates: [], published: [], schemaFields: [] };
-        const esc=(t)=>{const d=document.createElement('div');d.textContent=String(t||'');return d.innerHTML;};
-        const publisherState = document.getElementById('publisherState');
-        const token=()=>window.localStorage.getItem('token')||window.sessionStorage.getItem('token');
-        const headers=(h={})=>{const t=token();return t?{...h,Authorization:'Bearer '+t}:h;};
-        async function req(url,opt={}){const r=await fetch(url,{...opt,headers:headers(opt.headers||{}),credentials:'include'});const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.error||('Request failed: '+r.status));return b;}
-        function msg(text,error=false){const n=document.getElementById('publisherMessage');n.classList.remove('hidden');n.className=error?'danger':'success';n.textContent=text;}
-        function setPublisherState(kind,title,desc,actionLabel,actionHandler){
-          publisherState.classList.remove('hidden');
-          publisherState.innerHTML='<h3>'+esc(title)+'</h3><div class="'+(kind==='error'?'danger':'muted')+'">'+esc(desc||'')+'</div>'+(actionLabel?'<div class="actions"><button id="publisherStateAction" class="btn'+(kind==='error'?' primary':'')+'">'+esc(actionLabel)+'</button></div>':'');
-          const btn=document.getElementById('publisherStateAction');
-          if(btn&&typeof actionHandler==='function')btn.addEventListener('click',actionHandler);
-        }
-        function clearPublisherState(){publisherState.classList.add('hidden');publisherState.innerHTML='';}
-        function normalizeTags(input){return String(input||'').split(',').map(s=>s.trim()).filter(Boolean);}
-        function createField(field={}){return {name:field.name||'',label:field.label||'',type:field.type||'text',required:!!field.required,placeholder:field.placeholder||'',options:Array.isArray(field.options)?field.options:[]};}
-        function renderSchema(){const root=document.getElementById('schemaFields');if(!state.schemaFields.length){root.innerHTML='<div class="muted">No fields configured.</div>';return;}root.innerHTML=state.schemaFields.map((f,i)=>'<div class="field-row"><input class="input" data-i="'+i+'" data-k="name" placeholder="name" value="'+esc(f.name)+'"/><input class="input" data-i="'+i+'" data-k="label" placeholder="label" value="'+esc(f.label)+'"/><select class="select" data-i="'+i+'" data-k="type">'+['text','textarea','number','select','boolean','password'].map(t=>'<option value="'+t+'" '+(f.type===t?'selected':'')+'>'+t+'</option>').join('')+'</select><label class="muted"><input type="checkbox" data-i="'+i+'" data-k="required" '+(f.required?'checked':'')+'> Required</label><button class="btn" data-remove="'+i+'">Remove</button><input class="input" data-i="'+i+'" data-k="placeholder" placeholder="placeholder" value="'+esc(f.placeholder||'')+'"/>'+(f.type==='select'?'<input class="input" data-i="'+i+'" data-k="options" placeholder="options: one|two|three" value="'+esc((f.options||[]).map(o=>o.value||o).join('|'))+'"/>':'<div></div>')+'</div>').join('');}
-        function renderTemplates(){const q=(document.getElementById('templateSearch').value||'').toLowerCase().trim();const root=document.getElementById('templateList');const items=state.templates.filter(t=>(t.name+' '+(t.summary||'')).toLowerCase().includes(q));if(!items.length){root.innerHTML='<div class="muted">No templates found.</div>';return;}root.innerHTML=items.map(t=>'<article class="card"><h3 style="margin:0">'+esc(t.name)+'</h3><div class="muted">'+esc(t.summary||'')+'</div><div class="row" style="margin-top:8px"><button class="btn primary" onclick="selectTemplate(\\''+t.id+'\\')">Select</button></div></article>').join('');}
-        function renderPublished(){const q=(document.getElementById('publishedSearch').value||'').toLowerCase().trim();const root=document.getElementById('publishedList');const items=state.published.filter(a=>(a.name+' '+(a.summary||'')).toLowerCase().includes(q));if(!items.length){root.innerHTML='<div class="muted">No published apps yet.</div>';return;}root.innerHTML=items.map(a=>{const m=a.galleryMetadata||{};return '<article class="card"><h3 style="margin:0">'+esc(a.name)+'</h3><div class="muted">'+esc(m.description||a.summary||'')+'</div><div class="row" style="margin-top:8px"><a class="btn" href="/apps/'+a.id+'" target="_blank">Open</a><button class="btn" onclick="editApp(\\''+a.id+'\\')">Edit</button><button class="btn" onclick="doUnpublish(\\''+a.id+'\\')">Unpublish</button></div></article>';}).join('');}
-        function payload(){const templateId=document.getElementById('templateId').value.trim();if(!templateId)throw new Error('Template ID is required');const fields=state.schemaFields.map(f=>({name:f.name.trim(),label:(f.label||f.name).trim(),type:f.type||'text',required:!!f.required,placeholder:(f.placeholder||'').trim(),...(f.type==='select'&&f.options.length?{options:f.options.map(o=>({label:o.label||o.value,value:o.value}))}:{})})).filter(f=>f.name.length>0);return{templateId,flowId:document.getElementById('flowId').value.trim()||undefined,description:document.getElementById('description').value.trim()||undefined,icon:document.getElementById('icon').value.trim()||undefined,category:document.getElementById('category').value.trim()||undefined,tags:normalizeTags(document.getElementById('tags').value),featured:document.getElementById('featured').checked,outputType:document.getElementById('outputType').value||undefined,inputSchema:fields.length?{fields}:undefined};}
-        window.selectTemplate=function(id){document.getElementById('templateId').value=id;document.getElementById('editorTitle').textContent='Publish '+id;msg('Template selected: '+id);}
-        window.editApp=function(id){const app=state.published.find(a=>a.id===id);if(!app)return;const m=app.galleryMetadata||{};document.getElementById('templateId').value=id;document.getElementById('flowId').value=m.flowId||'';document.getElementById('description').value=m.description||'';document.getElementById('icon').value=m.icon||'';document.getElementById('category').value=m.category||'';document.getElementById('tags').value=Array.isArray(m.tags)?m.tags.join(', '):'';document.getElementById('featured').checked=!!m.featured;document.getElementById('outputType').value=m.outputType||'';const fields=Array.isArray(m.inputSchema&&m.inputSchema.fields)?m.inputSchema.fields:[];state.schemaFields=fields.map(f=>createField(f));renderSchema();msg('Loaded app for editing');}
-        window.doUnpublish=async function(id){if(!confirm('Unpublish this app?'))return;await req('/apps/api/publisher/apps/'+encodeURIComponent(id),{method:'DELETE'});await load();msg('Unpublished');}
-        async function load(){
-          if(!token()){window.location.href='/sign-in?redirectAfterLogin='+encodeURIComponent('/apps/publisher');return;}
-          setPublisherState('loading','Loading publisher data...','Fetching templates and published apps.');
-          try{
-            const [templates,published]=await Promise.all([req('/apps/api/publisher/templates'),req('/apps/api/publisher/apps')]);
-            state.templates=templates.data||[];
-            state.published=published.data||[];
-            renderTemplates();
-            renderPublished();
-            clearPublisherState();
-          }catch(e){
-            setPublisherState('error','Publisher failed to load',e.message||String(e),'Retry',()=>load());
-            msg(e.message||String(e),true);
+        async function detectSession(){
+          const candidateTokens = [
+            null,
+            window.localStorage.getItem('token') || null,
+            window.sessionStorage.getItem('token') || null,
+          ].filter((value, index, arr) => arr.indexOf(value) === index);
+          for (const tokenValue of candidateTokens) {
+            try {
+              const headers = {};
+              if (tokenValue) {
+                headers.Authorization = 'Bearer ' + tokenValue;
+              }
+              const response = await fetch('/apps/api/session', {
+                credentials: 'same-origin',
+                headers,
+              });
+              if (response.ok) return true;
+            } catch (e) {}
           }
+          return false;
         }
-        document.getElementById('schemaFields').addEventListener('input',e=>{const t=e.target;if(!t.dataset||t.dataset.i==null)return;const i=Number(t.dataset.i);const k=t.dataset.k;if(!state.schemaFields[i])return;if(k==='required')state.schemaFields[i][k]=t.checked;else if(k==='options')state.schemaFields[i].options=String(t.value||'').split('|').map(v=>v.trim()).filter(Boolean).map(v=>({label:v,value:v}));else state.schemaFields[i][k]=t.value;if(k==='type')renderSchema();});
-        document.getElementById('schemaFields').addEventListener('click',e=>{const t=e.target;if(!t.dataset||t.dataset.remove==null)return;state.schemaFields.splice(Number(t.dataset.remove),1);renderSchema();});
-        document.getElementById('addFieldBtn').addEventListener('click',()=>{state.schemaFields.push(createField());renderSchema();});
-        document.getElementById('clearFieldsBtn').addEventListener('click',()=>{state.schemaFields=[];renderSchema();});
-        document.getElementById('templateSearch').addEventListener('input',renderTemplates);
-        document.getElementById('publishedSearch').addEventListener('input',renderPublished);
-        document.getElementById('reloadBtn').addEventListener('click',()=>load());
-        document.getElementById('previewBtn').addEventListener('click',()=>{const id=document.getElementById('templateId').value.trim();if(!id){msg('Template ID required',true);return;}window.open('/apps/'+encodeURIComponent(id),'_blank');});
-        document.getElementById('publishBtn').addEventListener('click',async()=>{try{await req('/apps/api/publisher/publish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())});await load();msg('Published successfully');}catch(e){msg(e.message||String(e),true);}});
-        document.getElementById('updateBtn').addEventListener('click',async()=>{try{const p=payload();await req('/apps/api/publisher/apps/'+encodeURIComponent(p.templateId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});await load();msg('Updated successfully');}catch(e){msg(e.message||String(e),true);}});
-        document.getElementById('unpublishBtn').addEventListener('click',async()=>{const id=document.getElementById('templateId').value.trim();if(!id){msg('Template ID required',true);return;}await window.doUnpublish(id);});
-        renderSchema();load();
+        detectSession().then((isSignedIn) => {
+          if (!isSignedIn) return;
+          const topCta = document.getElementById('publisherTopCta');
+          const mainCta = document.getElementById('publisherMainCta');
+          if (topCta) {
+            topCta.setAttribute('href', '/');
+            topCta.textContent = 'Open dashboard';
+          }
+          if (mainCta) {
+            mainCta.setAttribute('href', '/');
+            mainCta.textContent = 'Go to Dashboard Publisher';
+          }
+          const cta = document.createElement('div');
+          cta.className = 'panel';
+          cta.style.marginTop = '12px';
+          cta.innerHTML = '<h2 style=\"margin:0 0 8px\">Already signed in?</h2><p class=\"muted\" style=\"margin:0 0 10px\">Open your project dashboard and use Apps -> Publisher to manage app publishing in-app.</p><div class=\"row\"><a class=\"btn primary\" href=\"/\">Open dashboard</a></div>';
+          document.querySelector('.container')?.appendChild(cta);
+        });
       </script>`)
 }
 
@@ -625,6 +667,18 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
             fastify.log.error(error)
             return reply.code(500).send({ error: 'Failed to list apps' })
         }
+    })
+
+    fastify.get('/api/session', {
+        config: {
+            security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]),
+        },
+    }, async (request, reply) => {
+        return reply.send({
+            authenticated: true,
+            userId: request.principal.id,
+            platformId: request.principal.platform.id,
+        })
     })
 
     fastify.get('/api/apps/:id', { config: { security: { kind: RouteKind.PUBLIC } }, schema: { params: AppIdParams } }, async (request, reply) => {
@@ -782,7 +836,7 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
         }
     })
 
-    fastify.post('/:id/execute', { config: { security: { kind: RouteKind.PUBLIC } }, schema: { params: AppIdParams, querystring: ExecuteFlowQuery, body: ExecuteFlowRequest } }, async (request, reply) => {
+    fastify.post('/:id/execute', { config: { security: { kind: RouteKind.PUBLIC }, rateLimit: executeRateLimit }, schema: { params: AppIdParams, querystring: ExecuteFlowQuery, body: ExecuteFlowRequest } }, async (request, reply) => {
         const params = request.params as Static<typeof AppIdParams>
         const query = request.query as Static<typeof ExecuteFlowQuery>
         const body = request.body as Static<typeof ExecuteFlowRequest>
@@ -851,14 +905,15 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
             return reply.status(flowResponse.status).send({ output: flowResponse.body, executionTime })
         } catch (error: any) {
             fastify.log.error(error)
+            const safeError = sanitizePublicError(error)
             await service.logExecution({
                 templateId: params.id,
                 executionStatus: 'failed',
                 executionTimeMs: Date.now() - started,
-                error: error?.message ?? 'Execution failed',
+                error: safeError,
                 inputKeys: Object.keys(body.inputs ?? {}),
             })
-            return reply.code(StatusCodes.BAD_REQUEST).send({ error: error?.message ?? 'Execution failed' })
+            return reply.code(StatusCodes.BAD_REQUEST).send({ error: safeError })
         }
     })
 }

@@ -361,6 +361,44 @@ function normalizeOutputType(outputType?: string): AppOutputType | null {
     return normalized
 }
 
+function sanitizeExecutionError(error?: string): string | null {
+    if (isNil(error) || error.trim().length === 0) {
+        return null
+    }
+    return error
+        .replace(/(api[_-]?key|token|authorization|password)\s*[:=]\s*['"]?([^\s,'"]+)/gi, '$1=[REDACTED]')
+        .replace(/([A-Za-z0-9_\-]{24,})/g, (match) => {
+            // Preserve short IDs; redact only likely secrets.
+            if (match.startsWith('flow_') || match.startsWith('tmpl_') || match.startsWith('req_')) {
+                return match
+            }
+            return '[REDACTED]'
+        })
+        .slice(0, 1000)
+}
+
+function summarizeFailureReason(error?: string): string {
+    const safe = sanitizeExecutionError(error)
+    if (isNil(safe) || safe.length === 0) {
+        return 'unknown'
+    }
+    const firstLine = safe.split('\n')[0] ?? safe
+    const firstSentence = firstLine.split('. ')[0] ?? firstLine
+    return firstSentence.trim().slice(0, 80) || 'unknown'
+}
+
+function median(values: number[]): number | null {
+    if (values.length === 0) {
+        return null
+    }
+    const sorted = [...values].sort((a, b) => a - b)
+    const middle = Math.floor(sorted.length / 2)
+    if (sorted.length % 2 === 0) {
+        return Math.round((sorted[middle - 1] + sorted[middle]) / 2)
+    }
+    return sorted[middle]
+}
+
 function normalizeInputSchema(inputSchema?: Record<string, unknown>): Record<string, unknown> | null {
     if (isNil(inputSchema)) {
         return null
@@ -563,6 +601,8 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
         successCount: number
         failedCount: number
         averageExecutionMs: number | null
+        medianExecutionMs: number | null
+        failureBuckets: Array<{ reason: string, count: number }>
         lastExecutionAt: Date | null
     } | null> {
         const app = await flowGalleryAppRepo().findOneBy({
@@ -571,11 +611,40 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
         if (isNil(app)) {
             return null
         }
+
+        const recentRuns = await flowGalleryRunRepo().find({
+            where: {
+                appId,
+            },
+            order: {
+                created: 'DESC',
+            },
+            take: 250,
+        })
+        const measuredExecutionTimes = recentRuns
+            .filter((run) => run.status !== 'queued' && !isNil(run.executionTimeMs))
+            .map((run) => Number(run.executionTimeMs))
+            .filter((value) => Number.isFinite(value) && value >= 0)
+        const failureMap = new Map<string, number>()
+        for (const run of recentRuns) {
+            if (run.status !== 'failed') {
+                continue
+            }
+            const reason = summarizeFailureReason(run.error ?? undefined)
+            failureMap.set(reason, (failureMap.get(reason) ?? 0) + 1)
+        }
+        const failureBuckets = Array.from(failureMap.entries())
+            .map(([reason, count]) => ({ reason, count }))
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 8)
+
         return {
             runCount: app.runCount ?? 0,
             successCount: app.successCount ?? 0,
             failedCount: app.failedCount ?? 0,
             averageExecutionMs: app.averageExecutionMs ?? null,
+            medianExecutionMs: median(measuredExecutionTimes),
+            failureBuckets,
             lastExecutionAt: app.lastExecutionAt ?? null,
         }
     },
@@ -1125,6 +1194,7 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
         const app = await flowGalleryAppRepo().findOneBy({
             templateId,
         })
+        const safeError = sanitizeExecutionError(error)
         if (!isNil(app)) {
             const nextRunCount = (app.runCount ?? 0) + 1
             const nextSuccess = (app.successCount ?? 0) + (executionStatus === 'success' ? 1 : 0)
@@ -1148,7 +1218,7 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
                 failedCount: nextFailed,
                 averageExecutionMs: nextAverage,
                 lastExecutionAt: new Date(),
-                lastError: error ? error.slice(0, 1000) : null,
+                lastError: safeError,
             } as never)
         }
 
@@ -1167,7 +1237,7 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
             executionTimeMs: executionTimeMs > 0 ? executionTimeMs : null,
             inputKeys: inputKeys?.slice(0, 50) ?? null,
             outputType,
-            error: error ? error.slice(0, 1000) : null,
+            error: safeError,
             requestId: requestId?.slice(0, 120) ?? null,
         } as never)
 
@@ -1176,7 +1246,7 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
             templateId,
             status: executionStatus,
             timeMs: executionTimeMs,
-            hasError: !!error,
+            hasError: !!safeError,
         })
     },
 })

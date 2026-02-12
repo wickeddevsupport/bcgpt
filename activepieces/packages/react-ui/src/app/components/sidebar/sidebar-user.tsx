@@ -48,7 +48,6 @@ import { HelpAndFeedback } from '../help-and-feedback';
 export function SidebarUser() {
   const [accountSettingsOpen, setAccountSettingsOpen] = useState(false);
   const [inviteUserOpen, setInviteUserOpen] = useState(false);
-  const { embedState } = useEmbedding();
   const { state } = useSidebar();
   const location = useLocation();
   const { data: user } = userHooks.useCurrentUser();
@@ -60,10 +59,6 @@ export function SidebarUser() {
   const isInPlatformAdmin = location.pathname.startsWith('/platform');
   const isCollapsed = state === 'collapsed';
   const isDark = theme === 'dark';
-
-  if (embedState.isEmbedded) {
-    return null;
-  }
 
   const handleLogout = () => {
     userHooks.invalidateCurrentUser(queryClient);

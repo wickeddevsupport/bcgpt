@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { t } from 'i18next';
-import { ArrowUpRight, Plus, RefreshCcw, Trash2, Wand2 } from 'lucide-react';
+import { ArrowUpRight, Eye, Plus, RefreshCcw, Search, Trash2, Wand2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -32,7 +32,6 @@ import {
   AppInputField,
   AppTemplate,
 } from '@/features/apps/lib/apps-api';
-import { Search } from 'lucide-react';
 import { authenticationSession } from '@/lib/authentication-session';
 
 type DraftField = {
@@ -138,10 +137,52 @@ function toDraft(app: AppTemplate): PublisherDraft {
   };
 }
 
+const ALLOWED_OUTPUT_TYPES = ['', 'json', 'text', 'image', 'markdown', 'html'] as const;
+
+function validateDraft(draft: PublisherDraft): string[] {
+  const errors: string[] = [];
+  const templateId = draft.templateId.trim();
+  if (!templateId.length) {
+    errors.push(t('Template ID is required.'));
+  }
+
+  if (draft.outputType && !ALLOWED_OUTPUT_TYPES.includes(draft.outputType as (typeof ALLOWED_OUTPUT_TYPES)[number])) {
+    errors.push(t('Output type must be one of: json, text, image, markdown, html.'));
+  }
+
+  const seenFieldNames = new Set<string>();
+  for (const field of draft.fields) {
+    const name = field.name.trim();
+    if (!name.length) {
+      errors.push(t('Every input field needs a field name.'));
+      continue;
+    }
+    if (!/^[a-zA-Z0-9_]+$/.test(name)) {
+      errors.push(
+        t('Input field "{{name}}" must use only letters, numbers, and underscores.', {
+          name,
+        }),
+      );
+    }
+    if (seenFieldNames.has(name)) {
+      errors.push(t('Input field "{{name}}" is duplicated.', { name }));
+    }
+    seenFieldNames.add(name);
+    if (field.type === 'select' && field.optionsText.trim().length === 0) {
+      errors.push(
+        t('Select field "{{name}}" needs at least one option.', { name }),
+      );
+    }
+  }
+
+  return Array.from(new Set(errors)).slice(0, 6);
+}
+
 const AppsPublisherPage = () => {
   const [templateSearch, setTemplateSearch] = useState('');
   const [publishedSearch, setPublishedSearch] = useState('');
   const [draft, setDraft] = useState<PublisherDraft>(createInitialDraft);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const queryClient = useQueryClient();
 
   const templatesQuery = useQuery({
@@ -251,7 +292,18 @@ const AppsPublisherPage = () => {
 
   const templatesPath = authenticationSession.appendProjectRoutePrefix('/templates');
 
+  const runValidation = (): boolean => {
+    const errors = validateDraft(draft);
+    setValidationErrors(errors);
+    if (errors.length > 0) {
+      toast.error(t('Please resolve validation issues before publishing'));
+      return false;
+    }
+    return true;
+  };
+
   const applyTemplate = (template: AppTemplate) => {
+    setValidationErrors([]);
     setDraft((prev) => ({
       ...prev,
       templateId: template.id,
@@ -265,6 +317,7 @@ const AppsPublisherPage = () => {
   };
 
   const applyPublished = (app: AppTemplate) => {
+    setValidationErrors([]);
     setDraft(toDraft(app));
   };
 
@@ -453,7 +506,11 @@ const AppsPublisherPage = () => {
                     <Button
                       variant="destructive"
                       size="sm"
-                      onClick={() => unpublishMutation.mutate(app.id)}
+                      onClick={() => {
+                        if (window.confirm(t('Unpublish this app?'))) {
+                          unpublishMutation.mutate(app.id);
+                        }
+                      }}
                       disabled={unpublishMutation.isPending}
                     >
                       {t('Unpublish')}
@@ -533,13 +590,27 @@ const AppsPublisherPage = () => {
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">{t('Output type')}</label>
-                <Input
-                  value={draft.outputType}
-                  onChange={(event) =>
-                    setDraft((prev) => ({ ...prev, outputType: event.target.value }))
+                <Select
+                  value={draft.outputType || '__auto__'}
+                  onValueChange={(value) =>
+                    setDraft((prev) => ({
+                      ...prev,
+                      outputType: value === '__auto__' ? '' : value,
+                    }))
                   }
-                  placeholder={t('text | json | image | markdown')}
-                />
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__auto__">{t('Auto (infer from output)')}</SelectItem>
+                    <SelectItem value="json">json</SelectItem>
+                    <SelectItem value="text">text</SelectItem>
+                    <SelectItem value="image">image</SelectItem>
+                    <SelectItem value="markdown">markdown</SelectItem>
+                    <SelectItem value="html">html</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 
@@ -674,24 +745,73 @@ const AppsPublisherPage = () => {
                 </div>
               ))}
             </div>
+
+            {validationErrors.length > 0 && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+                <div className="font-medium text-destructive">
+                  {t('Fix these issues before publishing')}
+                </div>
+                <ul className="mt-2 list-disc pl-5 text-destructive">
+                  {validationErrors.map((error) => (
+                    <li key={error}>{error}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="rounded-md border bg-muted/20 p-3">
+              <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+                <Eye className="size-4" />
+                {t('Runner preview')}
+              </div>
+              <div className="space-y-2 text-xs text-muted-foreground">
+                <div>
+                  {t('Public URL')}:
+                  <span className="ml-1 font-medium text-foreground break-all">
+                    {draft.templateId.trim().length
+                      ? `${window.location.origin}/apps/${draft.templateId.trim()}`
+                      : t('Set template ID to preview URL')}
+                  </span>
+                </div>
+                <div>
+                  {t('Output')}: <span className="font-medium text-foreground">{draft.outputType || t('Auto')}</span>
+                </div>
+                <div>
+                  {t('Input fields')}: <span className="font-medium text-foreground">{normalizeFields(draft.fields).length}</span>
+                </div>
+              </div>
+            </div>
           </CardContent>
           <CardFooter className="flex flex-wrap gap-2">
             <Button
-              onClick={() => publishMutation.mutate()}
+              onClick={() => {
+                if (!runValidation()) {
+                  return;
+                }
+                publishMutation.mutate();
+              }}
               disabled={!draft.templateId.trim() || isSubmitting}
             >
               {publishMutation.isPending ? t('Publishing...') : t('Publish')}
             </Button>
             <Button
               variant="outline"
-              onClick={() => updateMutation.mutate()}
+              onClick={() => {
+                if (!runValidation()) {
+                  return;
+                }
+                updateMutation.mutate();
+              }}
               disabled={!draft.templateId.trim() || isSubmitting}
             >
               {updateMutation.isPending ? t('Updating...') : t('Update')}
             </Button>
             <Button
               variant="outline"
-              onClick={() => setDraft(createInitialDraft())}
+              onClick={() => {
+                setValidationErrors([]);
+                setDraft(createInitialDraft());
+              }}
               disabled={isSubmitting}
             >
               {t('Reset')}

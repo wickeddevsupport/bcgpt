@@ -68,12 +68,38 @@ type PublisherPayload = {
   outputSchema?: Record<string, unknown>;
 };
 
-type ExecuteAppResponse = {
+export type ExecuteAppResponse = {
   output?: unknown;
   executionTime?: number;
   queued?: boolean;
   requestId?: string | null;
   message?: string;
+};
+
+export type AppRun = {
+  id: string;
+  created: string;
+  status: 'queued' | 'success' | 'failed';
+  executionTimeMs: number | null;
+  outputType: string | null;
+  error: string | null;
+};
+
+export type AppRunsResponse = {
+  data: AppRun[];
+};
+
+export type AppStatsResponse = {
+  runCount: number;
+  successCount: number;
+  failedCount: number;
+  averageExecutionMs: number | null;
+  medianExecutionMs?: number | null;
+  failureBuckets?: Array<{
+    reason: string;
+    count: number;
+  }>;
+  lastExecutionAt: string | null;
 };
 
 const APPS_BASE_URL = `${window.location.origin}/apps`;
@@ -148,6 +174,7 @@ export const appsApi = {
     templateId: string,
     payload: { inputs: Record<string, unknown> },
     mode: 'sync' | 'async' = 'sync',
+    signal?: AbortSignal,
   ) {
     return request<ExecuteAppResponse>(
       `/${encodeURIComponent(templateId)}/execute?mode=${mode}`,
@@ -157,7 +184,22 @@ export const appsApi = {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payload),
+        signal,
       },
+    );
+  },
+
+  getAppStats(templateId: string) {
+    return request<AppStatsResponse>(
+      `/api/apps/${encodeURIComponent(templateId)}/stats`,
+    );
+  },
+
+  listAppRuns(templateId: string, limit = 10) {
+    return request<AppRunsResponse>(
+      `/api/apps/${encodeURIComponent(templateId)}/runs?${new URLSearchParams({
+        limit: String(limit),
+      }).toString()}`,
     );
   },
 
