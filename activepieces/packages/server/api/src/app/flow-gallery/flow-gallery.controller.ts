@@ -11,6 +11,7 @@ import { RateLimitOptions } from '@fastify/rate-limit'
 import { Static, Type } from '@sinclair/typebox'
 import { StatusCodes } from 'http-status-codes'
 import { flowGalleryService } from './flow-gallery.service'
+import { auditEventService } from './audit-event.service'
 import { RouteKind, securityAccess } from '@activepieces/server-shared'
 import { templateService } from '../template/template.service'
 import { userService } from '../user/user-service'
@@ -844,9 +845,41 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
                 platformId: request.principal.platform.id,
                 publishedBy: request.principal.id,
             })
+            
+            // Log audit event
+            await auditEventService.logEvent({
+                platformId: request.principal.platform.id,
+                appId: app.id,
+                userId: request.principal.id,
+                eventType: 'publish',
+                status: 'success',
+                eventMetadata: {
+                    templateId: body.templateId,
+                    description: body.description,
+                    category: body.category,
+                },
+                ipAddress: request.ip,
+                userAgent: request.headers['user-agent'],
+            })
+            
             return reply.code(StatusCodes.CREATED).send(app)
         } catch (error: any) {
             fastify.log.error(error)
+            
+            // Log failed publish attempt
+            await auditEventService.logEvent({
+                platformId: request.principal.platform.id,
+                userId: request.principal.id,
+                eventType: 'publish',
+                status: 'failed',
+                errorMessage: error?.message ?? 'Failed to publish app',
+                eventMetadata: {
+                    templateId: body.templateId,
+                },
+                ipAddress: request.ip,
+                userAgent: request.headers['user-agent'],
+            })
+            
             return reply.code(StatusCodes.BAD_REQUEST).send({ error: error?.message ?? 'Failed to publish app' })
         }
     })
@@ -878,9 +911,40 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
                 templateId: params.templateId,
                 platformId: request.principal.platform.id,
             })
+            
+            // Log audit event
+            await auditEventService.logEvent({
+                platformId: request.principal.platform.id,
+                appId: app.id,
+                userId: request.principal.id,
+                eventType: 'update',
+                status: 'success',
+                eventMetadata: {
+                    templateId: params.templateId,
+                    changes: body,
+                },
+                ipAddress: request.ip,
+                userAgent: request.headers['user-agent'],
+            })
+            
             return reply.send(app)
         } catch (error: any) {
             fastify.log.error(error)
+            
+            // Log failed update attempt
+            await auditEventService.logEvent({
+                platformId: request.principal.platform.id,
+                userId: request.principal.id,
+                eventType: 'update',
+                status: 'failed',
+                errorMessage: error?.message ?? 'Failed to update app metadata',
+                eventMetadata: {
+                    templateId: params.templateId,
+                },
+                ipAddress: request.ip,
+                userAgent: request.headers['user-agent'],
+            })
+            
             return reply.code(StatusCodes.BAD_REQUEST).send({ error: error?.message ?? 'Failed to update app metadata' })
         }
     })
@@ -906,13 +970,47 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
             }, access)) {
                 return reply.code(StatusCodes.FORBIDDEN).send({ error: 'You can only unpublish apps you published' })
             }
+            
+            // Store app ID before unpublishing
+            const appId = existingApp.id
+            
             await service.unpublishTemplateApp({
                 templateId: params.templateId,
                 platformId: request.principal.platform.id,
             })
+            
+            // Log audit event
+            await auditEventService.logEvent({
+                platformId: request.principal.platform.id,
+                appId,
+                userId: request.principal.id,
+                eventType: 'unpublish',
+                status: 'success',
+                eventMetadata: {
+                    templateId: params.templateId,
+                },
+                ipAddress: request.ip,
+                userAgent: request.headers['user-agent'],
+            })
+            
             return reply.code(StatusCodes.NO_CONTENT).send()
         } catch (error: any) {
             fastify.log.error(error)
+            
+            // Log failed unpublish attempt
+            await auditEventService.logEvent({
+                platformId: request.principal.platform.id,
+                userId: request.principal.id,
+                eventType: 'unpublish',
+                status: 'failed',
+                errorMessage: error?.message ?? 'Failed to unpublish app',
+                eventMetadata: {
+                    templateId: params.templateId,
+                },
+                ipAddress: request.ip,
+                userAgent: request.headers['user-agent'],
+            })
+            
             return reply.code(StatusCodes.BAD_REQUEST).send({ error: error?.message ?? 'Failed to unpublish app' })
         }
     })
@@ -941,9 +1039,42 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
                 publishedBy: request.principal.id,
                 reset: body.reset ?? false,
             })
+            
+            // Log audit event
+            await auditEventService.logEvent({
+                platformId: request.principal.platform.id,
+                userId: request.principal.id,
+                eventType: 'seed',
+                status: 'success',
+                eventMetadata: {
+                    reset: body.reset ?? false,
+                    appsCreated: result.apps?.created ?? 0,
+                    appsUpdated: result.apps?.updated ?? 0,
+                    templatesCreated: result.templates?.created ?? 0,
+                    templatesUpdated: result.templates?.updated ?? 0,
+                },
+                ipAddress: request.ip,
+                userAgent: request.headers['user-agent'],
+            })
+            
             return reply.code(StatusCodes.OK).send(result)
         } catch (error: any) {
             fastify.log.error(error)
+            
+            // Log failed seed attempt
+            await auditEventService.logEvent({
+                platformId: request.principal.platform.id,
+                userId: request.principal.id,
+                eventType: 'seed',
+                status: 'failed',
+                errorMessage: error?.message ?? 'Failed to seed defaults',
+                eventMetadata: {
+                    reset: body.reset ?? false,
+                },
+                ipAddress: request.ip,
+                userAgent: request.headers['user-agent'],
+            })
+            
             return reply.code(StatusCodes.BAD_REQUEST).send({ error: error?.message ?? 'Failed to seed defaults' })
         }
     })

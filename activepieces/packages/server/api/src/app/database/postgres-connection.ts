@@ -318,6 +318,7 @@ import { CreateFlowGalleryAppTable1769700000001 } from './migration/postgres/176
 import { AddPublisherFieldsToFlowGalleryApp1769700000002 } from './migration/postgres/1769700000002-AddPublisherFieldsToFlowGalleryApp'
 import { AddExecutionStatsToFlowGalleryApp1769700000003 } from './migration/postgres/1769700000003-AddExecutionStatsToFlowGalleryApp'
 import { CreateFlowGalleryExecutionTable1769700000004 } from './migration/postgres/1769700000004-CreateFlowGalleryExecutionTable'
+import { CreateAuditEventsTablePostgres1770000000001 } from './migration/postgres/1770000000001-CreateAuditEventsTablePostgres'
 
 const getSslConfig = (): boolean | TlsOptions => {
     const useSsl = system.get(AppSystemProp.POSTGRES_USE_SSL)
@@ -652,6 +653,7 @@ export const getMigrations = (): (new () => MigrationInterface)[] => {
         AddPublisherFieldsToFlowGalleryApp1769700000002,
         AddExecutionStatsToFlowGalleryApp1769700000003,
         CreateFlowGalleryExecutionTable1769700000004,
+        CreateAuditEventsTablePostgres1770000000001,
     ]
     return migrations
 }
