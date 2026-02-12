@@ -23,6 +23,9 @@ const TemplateDetailsWrapper = () => {
     error,
     refetch,
   } = templatesHooks.useTemplate(templateId!);
+  const templatesBasePath = location.pathname.startsWith('/my-templates')
+    ? '/my-templates'
+    : '/templates';
 
   if (isLoading) {
     return (
@@ -51,7 +54,7 @@ const TemplateDetailsWrapper = () => {
                 <Button variant="outline" size="sm" onClick={() => refetch()}>
                   Try again
                 </Button>
-                <Button size="sm" onClick={() => (window.location.href = '/templates')}>
+                <Button size="sm" onClick={() => (window.location.href = templatesBasePath)}>
                   Back to templates
                 </Button>
               </div>
@@ -63,7 +66,7 @@ const TemplateDetailsWrapper = () => {
   }
 
   if (!template) {
-    return <Navigate to="/templates" replace />;
+    return <Navigate to={templatesBasePath} replace />;
   }
 
   const token = authenticationSession.getToken();

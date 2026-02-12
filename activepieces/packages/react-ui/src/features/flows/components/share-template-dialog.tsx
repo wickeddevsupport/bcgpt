@@ -5,6 +5,7 @@ import { useMutation } from '@tanstack/react-query';
 import { t } from 'i18next';
 import React, { useState } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
+import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -71,7 +72,8 @@ const ShareTemplateDialog: React.FC<{
       return flowTemplate;
     },
     onSuccess: (data) => {
-      openNewIndow(`/templates/${data.id}`);
+      toast.success(t('Template created'));
+      openNewIndow(`/my-templates/${data.id}`);
       setIsShareDialogOpen(false);
     },
   });
@@ -93,16 +95,16 @@ const ShareTemplateDialog: React.FC<{
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t('Share Template')}</DialogTitle>
+          <DialogTitle>{t('Save as Template')}</DialogTitle>
           <DialogDescription className="flex flex-col gap-2">
             <span>
               {t(
-                'Generate or update a template link for the current flow to easily share it with others.',
+                'Create a reusable template from this flow so you can publish apps from it.',
               )}
             </span>
             <span>
               {t(
-                'The template will not have any credentials in connection fields, keeping sensitive information secure.',
+                'Connection credentials are removed from templates to keep sensitive information secure.',
               )}
             </span>
           </DialogDescription>
@@ -134,7 +136,7 @@ const ShareTemplateDialog: React.FC<{
                 {shareTemplateForm.formState.errors.root.serverError.message}
               </FormMessage>
             )}
-            <Button loading={isPending}>{t('Confirm')}</Button>
+            <Button loading={isPending}>{t('Create template')}</Button>
           </form>
         </Form>
       </DialogContent>

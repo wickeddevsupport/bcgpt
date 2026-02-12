@@ -246,7 +246,7 @@ const FlowActionMenu: React.FC<FlowActionMenuProps> = ({
             <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
               <div className="flex cursor-pointer  flex-row gap-2 items-center">
                 <Share2 className="h-4 w-4" />
-                <span>{t('Share')}</span>
+                <span>{t('Save as Template')}</span>
               </div>
             </DropdownMenuItem>
           </ShareTemplateDialog>

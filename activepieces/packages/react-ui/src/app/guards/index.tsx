@@ -196,6 +196,10 @@ const routes = [
     path: '/templates/:templateId',
     element: <TemplateDetailsWrapper />,
   },
+  {
+    path: '/my-templates/:templateId',
+    element: <TemplateDetailsWrapper />,
+  },
   ...ProjectRouterWrapper({
     path: routesThatRequireProjectId.singleRelease,
     element: (
