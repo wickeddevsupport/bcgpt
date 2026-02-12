@@ -588,6 +588,29 @@ const AppsPage = () => {
       );
     }
 
+    if (contract.authMode === 'workspace_connection') {
+      return (
+        <div className="space-y-4">
+          <div className="rounded-md border-l-4 border-l-blue-500 bg-blue-500/5 p-4">
+            <h3 className="font-medium text-blue-900 mb-2">{t('Workspace Connection Required')}</h3>
+            <p className="text-sm text-blue-800 mb-3">
+              {t('This app uses a workspace-level connection. An administrator must set up the connection in the workspace settings.')}
+            </p>
+            <div className="text-xs text-blue-700 space-y-1">
+              <p>{t('Connection type')}: <span className="font-medium">{contract.secretsFields.map(f => f.label).join(', ') || t('API Key')}</span></p>
+              {contract.credentialHint && (
+                <p className="mt-2">{contract.credentialHint}</p>
+              )}
+            </div>
+            <Button variant="outline" size="sm" className="mt-4" onClick={() => window.open('/settings/connections', '_blank')}>
+              <KeyRound className="mr-1 size-3.5" />
+              {t('Manage Connections')}
+            </Button>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="space-y-4">
         <div className="text-sm text-muted-foreground">
