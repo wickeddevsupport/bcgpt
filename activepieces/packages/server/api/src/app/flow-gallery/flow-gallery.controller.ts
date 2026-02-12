@@ -1,4 +1,6 @@
 import {
+    ActivepiecesError,
+    ErrorCode,
     isNil,
     PlatformRole,
     PrincipalType,
@@ -128,7 +130,12 @@ async function resolvePublisherAccessContext(principal: {
     platform: { id: string }
 }): Promise<PublisherAccessContext> {
     if (principal.type !== PrincipalType.USER) {
-        return { isAdmin: true, principalId: principal.id }
+        throw new ActivepiecesError({
+            code: ErrorCode.AUTHORIZATION,
+            params: {
+                message: 'Only authenticated users can access publisher routes',
+            },
+        })
     }
     const user = await userService.getOneOrFail({ id: principal.id })
     return {
@@ -158,13 +165,23 @@ function canManageTemplate(template: Template, access: PublisherAccessContext): 
     return isNil(ownerUserId) || ownerUserId === access.principalId
 }
 
-function canManagePublishedApp(templateWithGallery: { galleryMetadata?: Record<string, unknown> }, access: PublisherAccessContext): boolean {
+function canManagePublishedApp({
+    publishedBy,
+    fallbackOwnerUserId,
+}: {
+    publishedBy: unknown
+    fallbackOwnerUserId?: string | null
+}, access: PublisherAccessContext): boolean {
     if (access.isAdmin) {
         return true
     }
-    const metadata = (templateWithGallery.galleryMetadata ?? {}) as Record<string, unknown>
-    const publishedBy = metadata.publishedBy
-    return isNil(publishedBy) || publishedBy === access.principalId
+    if (typeof publishedBy === 'string' && publishedBy.trim().length > 0) {
+        return publishedBy === access.principalId
+    }
+    if (!isNil(fallbackOwnerUserId) && fallbackOwnerUserId.trim().length > 0) {
+        return fallbackOwnerUserId === access.principalId
+    }
+    return false
 }
 
 type AppInputField = {
@@ -302,6 +319,7 @@ function pageShell(title: string, body: string): string {
     .btn{border:1px solid var(--border);background:#fff;border-radius:10px;padding:9px 12px;font-weight:600;cursor:pointer;color:#111827;text-decoration:none}
     .btn.primary{background:var(--accent);color:#fff;border:1px solid var(--accent)}
     .btn.primary:hover{filter:brightness(0.97)}
+    .btn.icon{display:inline-flex;align-items:center;justify-content:center;min-width:40px;width:40px;height:40px;padding:0;font-size:18px;line-height:1}
     .input,.select,textarea{width:100%;border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:#fff}
     .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
     .featured-strip{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-bottom:12px}
@@ -461,7 +479,7 @@ function galleryPageHtml(apps: Template[]): string {
         function categories(){const set=new Set(apps.map(a=>meta(a).category));document.getElementById('category').innerHTML='<option value="">All categories</option>'+Array.from(set).sort().map(c=>'<option value="'+esc(c)+'">'+esc(c)+'</option>').join('');}
         function matches(a){const m=meta(a);const t=[a.name,a.summary||'',a.description||'',...m.tags,m.category].join(' ').toLowerCase();if(state.search&&!t.includes(state.search))return false;if(state.category&&m.category!==state.category)return false;return true;}
         function sorted(list){const x=list.map(a=>({a,m:meta(a)}));if(state.sort==='name')return x.sort((p,q)=>p.a.name.localeCompare(q.a.name));if(state.sort==='runs')return x.sort((p,q)=>q.m.runCount-p.m.runCount);if(state.sort==='recent')return x.sort((p,q)=>new Date(q.m.updated)-new Date(p.m.updated));return x.sort((p,q)=>Number(q.m.featured)-Number(p.m.featured)||q.m.runCount-p.m.runCount);}
-        function cardMarkup(a,m){const sr=m.runCount?Math.round((m.successCount/m.runCount)*100)+'%':'-';const icon=typeof m.icon==='string'&&m.icon.length?m.icon:'/branding/wicked-flow-icon.svg?v=20260208';const updated=new Date(m.updated||a.updated).toLocaleDateString();const creator=esc(m.author||'Wicked Flow');return '<article class="card"><div class="row" style="justify-content:space-between"><div class="row" style="gap:10px;align-items:flex-start"><img src="'+esc(icon)+'" alt="" style="width:40px;height:40px;border-radius:10px;object-fit:cover;border:1px solid var(--border)"><div><h3 style="margin:0">'+esc(a.name)+'</h3><div class="muted">'+esc(a.summary||a.description||'Workflow app')+'</div><div class="row" style="margin-top:6px"><span class="creator">By '+creator+'</span><span class="muted">Updated '+updated+'</span></div></div></div><span class="chip">'+(m.featured?'Featured':esc(m.category))+'</span></div><div class="chips" style="margin-top:8px">'+m.tags.slice(0,4).map(t=>'<span class="chip">'+esc(t)+'</span>').join('')+'</div><div class="stats" style="margin-top:10px"><div class="stat"><b>'+m.runCount+'</b><span class="muted">Runs</span></div><div class="stat"><b>'+sr+'</b><span class="muted">Success</span></div><div class="stat"><b>'+(m.avg==='-'?'-':m.avg+'ms')+'</b><span class="muted">Avg</span></div><div class="stat"><b>'+m.failedCount+'</b><span class="muted">Failed</span></div></div><div class="row" style="margin-top:10px"><a class="btn primary" href="/apps/'+a.id+'">Use app</a><a class="btn" href="/apps/'+a.id+'#details">View details</a></div></article>';}
+        function cardMarkup(a,m){const sr=m.runCount?Math.round((m.successCount/m.runCount)*100)+'%':'-';const icon=typeof m.icon==='string'&&m.icon.length?m.icon:'/branding/wicked-flow-icon.svg?v=20260208';const updated=new Date(m.updated||a.updated).toLocaleDateString();const creator=esc(m.author||'Wicked Flow');return '<article class="card"><div class="row" style="justify-content:space-between"><div class="row" style="gap:10px;align-items:flex-start"><img src="'+esc(icon)+'" alt="" style="width:40px;height:40px;border-radius:10px;object-fit:cover;border:1px solid var(--border)"><div><h3 style="margin:0">'+esc(a.name)+'</h3><div class="muted">'+esc(a.summary||a.description||'Workflow app')+'</div><div class="row" style="margin-top:6px"><span class="creator">By '+creator+'</span><span class="muted">Updated '+updated+'</span></div></div></div><span class="chip">'+(m.featured?'Featured':esc(m.category))+'</span></div><div class="chips" style="margin-top:8px">'+m.tags.slice(0,4).map(t=>'<span class="chip">'+esc(t)+'</span>').join('')+'</div><div class="stats" style="margin-top:10px"><div class="stat"><b>'+m.runCount+'</b><span class="muted">Runs</span></div><div class="stat"><b>'+sr+'</b><span class="muted">Success</span></div><div class="stat"><b>'+(m.avg==='-'?'-':m.avg+'ms')+'</b><span class="muted">Avg</span></div><div class="stat"><b>'+m.failedCount+'</b><span class="muted">Failed</span></div></div><div class="row" style="margin-top:10px;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center"><a class="btn primary" style="width:100%;text-align:center" href="/apps/'+a.id+'">Use app</a><a class="btn icon" href="/apps/'+a.id+'#details" title="View details" aria-label="View details">↗</a></div></article>';}
         function renderFeatured(list){const wrap=document.getElementById('featuredWrap');const root=document.getElementById('featuredStrip');const featured=list.filter(({m})=>m.featured).slice(0,4);if(!featured.length){wrap.classList.add('hidden');root.innerHTML='';return;}wrap.classList.remove('hidden');root.innerHTML=featured.map(({a,m})=>cardMarkup(a,m)).join('');}
         function render(){
           const root = cardsRoot;
@@ -765,7 +783,7 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
     })
 
     fastify.get('/api/publisher/apps', {
-        config: { security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]) },
+        config: { security: securityAccess.publicPlatform([PrincipalType.USER]) },
         schema: { querystring: ListPublisherAppsQuery },
     }, async (request, reply) => {
         const query = request.query as Static<typeof ListPublisherAppsQuery>
@@ -773,7 +791,10 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
             const access = await resolvePublisherAccessContext(request.principal)
             const apps = await service.listPublisherApps({ platformId: request.principal.platform.id, search: query.search })
             const filteredApps = apps
-                .filter((app) => canManagePublishedApp(app, access))
+                .filter((app) => canManagePublishedApp({
+                    publishedBy: (app.galleryMetadata as Record<string, unknown> | undefined)?.publishedBy,
+                    fallbackOwnerUserId: getTemplateOwnerUserId(app),
+                }, access))
                 .map((app) => ({
                     ...app,
                     galleryMetadata: {
@@ -789,7 +810,7 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
     })
 
     fastify.get('/api/publisher/templates', {
-        config: { security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]) },
+        config: { security: securityAccess.publicPlatform([PrincipalType.USER]) },
         schema: { querystring: ListPublisherTemplatesQuery },
     }, async (request, reply) => {
         const query = request.query as Static<typeof ListPublisherTemplatesQuery>
@@ -805,7 +826,7 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
     })
 
     fastify.post('/api/publisher/publish', {
-        config: { security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]) },
+        config: { security: securityAccess.publicPlatform([PrincipalType.USER]) },
         schema: { body: PublisherAppPayload },
     }, async (request, reply) => {
         const body = request.body as Static<typeof PublisherAppPayload>
@@ -831,7 +852,7 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
     })
 
     fastify.put('/api/publisher/apps/:templateId', {
-        config: { security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]) },
+        config: { security: securityAccess.publicPlatform([PrincipalType.USER]) },
         schema: { params: PublisherTemplateParams, body: UpdatePublisherAppPayload },
     }, async (request, reply) => {
         const params = request.params as Static<typeof PublisherTemplateParams>
@@ -845,7 +866,11 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
             if (isNil(existingApp)) {
                 return reply.code(StatusCodes.NOT_FOUND).send({ error: 'Published app not found' })
             }
-            if (!canManagePublishedApp({ galleryMetadata: existingApp as unknown as Record<string, unknown> }, access)) {
+            const template = await templateService(fastify.log).getOneOrThrow({ id: params.templateId })
+            if (!canManagePublishedApp({
+                publishedBy: existingApp.publishedBy,
+                fallbackOwnerUserId: getTemplateOwnerUserId(template),
+            }, access)) {
                 return reply.code(StatusCodes.FORBIDDEN).send({ error: 'You can only edit apps you published' })
             }
             const app = await service.updatePublishedApp({
@@ -861,7 +886,7 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
     })
 
     fastify.delete('/api/publisher/apps/:templateId', {
-        config: { security: securityAccess.publicPlatform([PrincipalType.USER, PrincipalType.SERVICE]) },
+        config: { security: securityAccess.publicPlatform([PrincipalType.USER]) },
         schema: { params: PublisherTemplateParams },
     }, async (request, reply) => {
         const params = request.params as Static<typeof PublisherTemplateParams>
@@ -874,7 +899,11 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
             if (isNil(existingApp)) {
                 return reply.code(StatusCodes.NOT_FOUND).send({ error: 'Published app not found' })
             }
-            if (!canManagePublishedApp({ galleryMetadata: existingApp as unknown as Record<string, unknown> }, access)) {
+            const template = await templateService(fastify.log).getOneOrThrow({ id: params.templateId })
+            if (!canManagePublishedApp({
+                publishedBy: existingApp.publishedBy,
+                fallbackOwnerUserId: getTemplateOwnerUserId(template),
+            }, access)) {
                 return reply.code(StatusCodes.FORBIDDEN).send({ error: 'You can only unpublish apps you published' })
             }
             await service.unpublishTemplateApp({

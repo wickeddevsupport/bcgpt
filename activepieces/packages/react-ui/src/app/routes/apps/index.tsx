@@ -631,8 +631,8 @@ const AppsPage = () => {
                     {app.galleryMetadata?.description || app.summary}
                   </CardDescription>
                 </CardHeader>
-                <CardFooter className="flex gap-2">
-                  <Button size="sm" className="flex-1" onClick={() => openRunner(app)}>
+                <CardFooter className="grid w-full grid-cols-[1fr_auto] items-center gap-2">
+                  <Button size="sm" className="w-full min-w-0" onClick={() => openRunner(app)}>
                     <Play className="mr-1 size-3.5" />
                     {t('Run')}
                   </Button>
@@ -732,8 +732,8 @@ const AppsPage = () => {
                     ))}
                   </div>
                 </CardContent>
-                <CardFooter className="mt-auto flex items-center gap-2">
-                  <Button className="flex-1" onClick={() => openRunner(app)}>
+                <CardFooter className="mt-auto grid w-full grid-cols-[1fr_auto] items-center gap-2">
+                  <Button className="w-full min-w-0" onClick={() => openRunner(app)}>
                     <Play className="mr-1 size-4" />
                     {t('Run app')}
                   </Button>
