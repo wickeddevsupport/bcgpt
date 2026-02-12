@@ -175,7 +175,7 @@ export const templateService = (log: FastifyBaseLogger) => ({
         }
     },
 
-    async list({ platformId, pieces, tags, search, type, category }: ListParams): Promise<SeekPage<Template>> {
+    async list({ platformId, pieces, tags, search, type, category, includeArchived }: ListParams): Promise<SeekPage<Template>> {
         const commonFilters: Record<string, unknown> = {}
 
         if (pieces) {
@@ -209,7 +209,9 @@ export const templateService = (log: FastifyBaseLogger) => ({
                     },
                 })
         }
-        commonFilters.status = Equal(TemplateStatus.PUBLISHED)
+        if (!includeArchived) {
+            commonFilters.status = Equal(TemplateStatus.PUBLISHED)
+        }
         const queryBuilder = templateRepo()
             .createQueryBuilder('template')
             .where(commonFilters)

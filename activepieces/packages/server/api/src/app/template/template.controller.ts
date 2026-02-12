@@ -249,7 +249,27 @@ async function loadCustomTemplatesOrReturnEmpty(
         return []
     }
     const customTemplates = await templateService(log).list({ platformId, type: TemplateType.CUSTOM, ...query })
-    return customTemplates.data
+    if (principal.type !== PrincipalType.USER) {
+        return customTemplates.data
+    }
+
+    const user = await userService.getOneOrFail({ id: principal.id })
+    const mineOnly = query.mineOnly === true
+    if (user.platformRole === PlatformRole.ADMIN) {
+        if (!mineOnly) {
+            return customTemplates.data
+        }
+        return customTemplates.data.filter((template) => {
+            const ownerUserId = getTemplateOwnerUserId(template)
+            return isNil(ownerUserId) || ownerUserId === principal.id
+        })
+    }
+
+    return customTemplates.data.filter((template) => {
+        const ownerUserId = getTemplateOwnerUserId(template)
+        // Backward compatibility for legacy templates that do not have owner metadata.
+        return isNil(ownerUserId) || ownerUserId === principal.id
+    })
 }
 
 function getTemplateOwnerUserId(template: Template): string | null {

@@ -1,8 +1,10 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { t } from 'i18next';
 import {
   AlertTriangle,
   Plus,
   Search,
+  Sparkles,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -27,11 +29,14 @@ import {
 
 import { AllCategoriesView } from './all-categories-view';
 import { CategoryFilterCarousel } from './category-filter-carousel';
+import { CreateTemplateFromFlowDialog } from './create-template-from-flow-dialog';
 import { EmptyTemplatesView } from './empty-templates-view';
+import { MyTemplatesView } from './my-templates-view';
 import { SelectedCategoryView } from './selected-category-view';
 
 const TemplatesPage = () => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { platform } = platformHooks.useCurrentPlatform();
 
   const canManageTemplates = platform.plan.manageTemplatesEnabled;
@@ -101,6 +106,17 @@ const TemplatesPage = () => {
         templateId: template.id,
       });
     }
+  };
+
+  const handleTemplateCreated = (template: Template) => {
+    queryClient.invalidateQueries({ queryKey: ['templates'] });
+    setSelectedTemplateType(TemplateType.CUSTOM);
+    navigate(`/templates/${template.id}`);
+  };
+
+  const handleTemplatesChanged = () => {
+    queryClient.invalidateQueries({ queryKey: ['templates'] });
+    refetchTemplates();
   };
 
   const templatesByCategory = useMemo(() => {
@@ -227,7 +243,15 @@ const TemplatesPage = () => {
               className="bg-sidebar-accent w-[50%]"
               placeholder={t('Search templates by name or description')}
             />
-            <div className="flex flex-row justify-end w-[50%] gap-2">
+            <div className="flex flex-row justify-end gap-2">
+              {canManageTemplates && selectedTemplateType === TemplateType.CUSTOM && (
+                <CreateTemplateFromFlowDialog onCreated={handleTemplateCreated}>
+                  <Button variant="outline" className="gap-2 h-full">
+                    <Sparkles className="w-4 h-4" />
+                    {t('Create Template')}
+                  </Button>
+                </CreateTemplateFromFlowDialog>
+              )}
               <Button
                 variant="outline"
                 className="gap-2 h-full"
@@ -258,7 +282,7 @@ const TemplatesPage = () => {
                     {t('Official')}
                   </TabsTrigger>
                   <TabsTrigger variant="outline" value={TemplateType.CUSTOM}>
-                    {t('Custom')}
+                    {t('My Templates')}
                   </TabsTrigger>
                 </TabsList>
               </Tabs>
@@ -313,8 +337,18 @@ const TemplatesPage = () => {
           </Alert>
         )}
 
-        {!hasTemplates && !showLoading && !hasAnyLoadError ? (
+        {!hasTemplates &&
+        !showLoading &&
+        !hasAnyLoadError &&
+        selectedTemplateType === TemplateType.OFFICIAL ? (
           <EmptyTemplatesView />
+        ) : selectedTemplateType === TemplateType.CUSTOM ? (
+          <MyTemplatesView
+            templates={templates || []}
+            isLoading={showLoading}
+            onTemplateSelect={handleTemplateSelect}
+            onTemplatesChanged={handleTemplatesChanged}
+          />
         ) : showAllCategories ? (
           <AllCategoriesView
             templatesByCategory={templatesByCategory}

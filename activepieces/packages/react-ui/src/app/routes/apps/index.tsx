@@ -555,24 +555,26 @@ const AppsPage = () => {
             {featuredApps.map((app) => (
               <Card key={`featured-${app.id}`} className="border-primary/25">
                 <CardHeader className="space-y-2 pb-2">
-                  <CardTitle className="text-sm">{app.name}</CardTitle>
+                  <div className="flex items-start justify-between gap-2">
+                    <CardTitle className="text-sm leading-tight">{app.name}</CardTitle>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 -mr-2 -mt-1"
+                      onClick={() => window.open(`/apps/${app.id}`, '_blank')}
+                      title={t('Open app page')}
+                    >
+                      <ArrowUpRight className="size-4" />
+                    </Button>
+                  </div>
                   <CardDescription className="line-clamp-2">
                     {app.galleryMetadata?.description || app.summary}
                   </CardDescription>
                 </CardHeader>
-                <CardFooter className="flex w-full items-center gap-2">
+                <CardFooter className="flex w-full items-center">
                   <Button size="sm" className="w-full min-w-0" onClick={() => openRunner(app)}>
                     <Play className="mr-1 size-3.5" />
                     {t('Run')}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="h-9 w-9 shrink-0"
-                    onClick={() => window.open(`/apps/${app.id}`, '_blank')}
-                    title={t('Open app page')}
-                  >
-                    <ArrowUpRight className="size-4" />
                   </Button>
                 </CardFooter>
               </Card>
@@ -631,9 +633,20 @@ const AppsPage = () => {
                         </CardDescription>
                       </div>
                     </div>
-                    <Badge variant={metadata.featured ? 'default' : 'outline'}>
-                      {metadata.featured ? t('Featured') : metadata.category ?? t('General')}
-                    </Badge>
+                    <div className="flex flex-col items-end gap-1">
+                      <Badge variant={metadata.featured ? 'default' : 'outline'}>
+                        {metadata.featured ? t('Featured') : metadata.category ?? t('General')}
+                      </Badge>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0"
+                        onClick={() => window.open(`/apps/${app.id}`, '_blank')}
+                        title={t('Open app page')}
+                      >
+                        <ArrowUpRight className="size-4" />
+                      </Button>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm">
@@ -661,19 +674,10 @@ const AppsPage = () => {
                     ))}
                   </div>
                 </CardContent>
-                <CardFooter className="mt-auto flex w-full items-center gap-2">
+                <CardFooter className="mt-auto flex w-full items-center">
                   <Button className="w-full min-w-0" onClick={() => openRunner(app)}>
                     <Play className="mr-1 size-4" />
                     {t('Run app')}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="h-10 w-10 shrink-0"
-                    onClick={() => window.open(`/apps/${app.id}`, '_blank')}
-                    title={t('Open app page')}
-                  >
-                    <ArrowUpRight className="size-4" />
                   </Button>
                 </CardFooter>
               </Card>

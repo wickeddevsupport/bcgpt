@@ -69,6 +69,8 @@ export const templatesHooks = {
           type,
           search: debouncedSearch || undefined,
           category: effectiveCategory,
+          includeArchived: type === TemplateType.CUSTOM ? true : undefined,
+          mineOnly: type === TemplateType.CUSTOM ? true : undefined,
         });
         return templates.data;
       },

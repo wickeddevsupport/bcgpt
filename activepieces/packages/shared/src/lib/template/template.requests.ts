@@ -38,6 +38,8 @@ export const ListFlowTemplatesRequestQuery = Type.Object({
     tags: Type.Optional(Type.Array(Type.String())),
     search: Type.Optional(Type.String()),
     category: Type.Optional(Type.String()),
+    includeArchived: Type.Optional(Type.Boolean()),
+    mineOnly: Type.Optional(Type.Boolean()),
 })
 export type ListFlowTemplatesRequestQuery = Static<typeof ListFlowTemplatesRequestQuery>
 
