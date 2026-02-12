@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+
 import Avatar from 'boring-avatars';
 
 import { cn } from '@/lib/utils';
@@ -22,16 +24,26 @@ export function UserAvatar({
   imageUrl,
   className,
 }: UserAvatarProps) {
+  const [hasImageError, setHasImageError] = useState(false);
+
+  useEffect(() => {
+    setHasImageError(false);
+  }, [imageUrl]);
+
   const tooltip = `${name} (${email})`;
 
-  const avatarElement = !isNil(imageUrl) ? (
+  const shouldUseImage =
+    !isNil(imageUrl) && String(imageUrl).trim().length > 0 && !hasImageError;
+
+  const avatarElement = shouldUseImage ? (
     <img
       src={imageUrl}
       alt={name}
       width={size}
       height={size}
       className={cn('rounded-full object-cover', className)}
-      style={{ width: `${size}px !important`, height: `${size}px !important` }}
+      style={{ width: `${size}px`, height: `${size}px` }}
+      onError={() => setHasImageError(true)}
     />
   ) : (
     <Avatar

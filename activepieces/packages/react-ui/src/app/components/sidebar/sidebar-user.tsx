@@ -67,9 +67,10 @@ export function SidebarUser() {
   };
 
   const fallbackName = t('Account');
-  const displayName = user ? `${user.firstName} ${user.lastName}` : fallbackName;
+  const fullName = `${user?.firstName ?? ''} ${user?.lastName ?? ''}`.trim();
   const displayEmail = user?.email ?? '';
-  const displayAvatarName = user ? `${user.firstName} ${user.lastName}` : fallbackName;
+  const displayName = fullName || displayEmail || fallbackName;
+  const displayAvatarName = fullName || displayEmail || fallbackName;
   const displayImageUrl = user?.imageUrl;
   const canShowRichUserMenu = Boolean(user);
 
