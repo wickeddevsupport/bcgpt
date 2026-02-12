@@ -395,6 +395,8 @@ export const routesThatRequireProjectId = {
   singleRun: '/runs/:runId',
   flows: '/flows',
   singleFlow: '/flows/:flowId',
+  apps: '/apps',
+  appsPublisher: '/apps/publisher',
   connections: '/connections',
   singleConnection: '/connections/:connectionId',
   tables: '/tables',

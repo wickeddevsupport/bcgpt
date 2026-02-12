@@ -42,6 +42,7 @@ import { templatesTelemetryApi } from '@/features/templates/lib/templates-teleme
 import { platformHooks } from '@/hooks/platform-hooks';
 import { projectCollectionUtils } from '@/hooks/project-collection';
 import { userHooks } from '@/hooks/user-hooks';
+import { authenticationSession } from '@/lib/authentication-session';
 import { cn } from '@/lib/utils';
 import {
   isNil,
@@ -209,24 +210,25 @@ export function ProjectDashboardSidebar() {
 
   const appsLink: SidebarItemType = {
     type: 'link',
-    to: '/apps',
+    to: authenticationSession.appendProjectRoutePrefix('/apps'),
     label: t('Apps'),
     icon: LayoutGrid,
     show: true,
     hasPermission: true,
     isSubItem: false,
-    forceReload: true,
+    isActive: (pathname) =>
+      pathname.endsWith('/apps') || pathname.includes('/apps?'),
   };
 
   const publisherLink: SidebarItemType = {
     type: 'link',
-    to: '/apps/publisher',
+    to: authenticationSession.appendProjectRoutePrefix('/apps/publisher'),
     label: t('Publisher'),
     icon: MousePointerClick,
     show: true,
     hasPermission: true,
     isSubItem: false,
-    forceReload: true,
+    isActive: (pathname) => pathname.includes('/apps/publisher'),
   };
 
   const items = [

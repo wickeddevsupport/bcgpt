@@ -16,6 +16,8 @@ import AIProvidersPage from '@/app/routes/platform/setup/ai';
 import { BrandingPage } from '@/app/routes/platform/setup/branding';
 import { PlatformPiecesPage } from '@/app/routes/platform/setup/pieces';
 import { RedirectPage } from '@/app/routes/redirect';
+import { AppsPage } from '@/app/routes/apps';
+import { AppsPublisherPage } from '@/app/routes/apps/publisher';
 import { useEmbedding } from '@/components/embed-provider';
 import { VerifyEmail } from '@/features/authentication/components/verify-email';
 import { AcceptInvitation } from '@/features/members/component/accept-invitation';
@@ -92,6 +94,26 @@ const routes = [
       </ProjectDashboardLayout>
     ),
   },
+  ...ProjectRouterWrapper({
+    path: routesThatRequireProjectId.apps,
+    element: (
+      <ProjectDashboardLayout>
+        <PageTitle title="Apps">
+          <AppsPage />
+        </PageTitle>
+      </ProjectDashboardLayout>
+    ),
+  }),
+  ...ProjectRouterWrapper({
+    path: routesThatRequireProjectId.appsPublisher,
+    element: (
+      <ProjectDashboardLayout>
+        <PageTitle title="Publisher">
+          <AppsPublisherPage />
+        </PageTitle>
+      </ProjectDashboardLayout>
+    ),
+  }),
   ...ProjectRouterWrapper({
     path: routesThatRequireProjectId.flows,
     element: (
