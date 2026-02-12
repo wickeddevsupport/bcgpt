@@ -1171,4 +1171,75 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
             return reply.code(StatusCodes.BAD_REQUEST).send({ error: safeError })
         }
     })
+
+    // Telemetry endpoints (admin only)
+    fastify.get('/api/telemetry/platform', {
+        config: { security: securityAccess.publicPlatform([PrincipalType.USER]) },
+    }, async (request, reply) => {
+        try {
+            const user = await userService.getOneOrFail({ id: request.principal.id })
+            if (user.platformRole !== PlatformRole.ADMIN) {
+                return reply.code(StatusCodes.FORBIDDEN).send({
+                    error: 'Only platform admins can access telemetry',
+                })
+            }
+
+            const telemetry = await auditEventService.getPlatformTelemetry(
+                request.principal.platform.id,
+            )
+            return reply.send(telemetry)
+        } catch (error: any) {
+            fastify.log.error(error)
+            return reply.code(StatusCodes.BAD_REQUEST).send({
+                error: error?.message ?? 'Failed to fetch telemetry',
+            })
+        }
+    })
+
+    fastify.get('/api/telemetry/top-apps', {
+        config: { security: securityAccess.publicPlatform([PrincipalType.USER]) },
+    }, async (request, reply) => {
+        try {
+            const user = await userService.getOneOrFail({ id: request.principal.id })
+            if (user.platformRole !== PlatformRole.ADMIN) {
+                return reply.code(StatusCodes.FORBIDDEN).send({
+                    error: 'Only platform admins can access telemetry',
+                })
+            }
+
+            const apps = await auditEventService.getTopAppsByUsage(
+                request.principal.platform.id,
+                10,
+            )
+            return reply.send({ apps })
+        } catch (error: any) {
+            fastify.log.error(error)
+            return reply.code(StatusCodes.BAD_REQUEST).send({
+                error: error?.message ?? 'Failed to fetch top apps',
+            })
+        }
+    })
+
+    fastify.get('/api/telemetry/execution-distribution', {
+        config: { security: securityAccess.publicPlatform([PrincipalType.USER]) },
+    }, async (request, reply) => {
+        try {
+            const user = await userService.getOneOrFail({ id: request.principal.id })
+            if (user.platformRole !== PlatformRole.ADMIN) {
+                return reply.code(StatusCodes.FORBIDDEN).send({
+                    error: 'Only platform admins can access telemetry',
+                })
+            }
+
+            const distribution = await auditEventService.getExecutionTimeDistribution(
+                request.principal.platform.id,
+            )
+            return reply.send({ distribution })
+        } catch (error: any) {
+            fastify.log.error(error)
+            return reply.code(StatusCodes.BAD_REQUEST).send({
+                error: error?.message ?? 'Failed to fetch execution distribution',
+            })
+        }
+    })
 }

@@ -175,4 +175,149 @@ export const auditEventService = {
 
         return breakdown
     },
+
+    /**
+     * Get platform-wide telemetry for dashboard
+     */
+    async getPlatformTelemetry(platformId: string): Promise<{
+        totalExecutions: number
+        successfulExecutions: number
+        failedExecutions: number
+        successRate: number
+        medianExecutionMs: number | null
+        p95ExecutionMs: number | null
+        p99ExecutionMs: number | null
+    }> {
+        const repo = auditEventRepo()
+
+        const executions = await repo.find({
+            where: {
+                platformId,
+                eventType: 'execute',
+            },
+        })
+
+        const successCount = executions.filter((e) => e.status === 'success').length
+        const failedCount = executions.filter((e) => e.status === 'failed').length
+        const totalCount = executions.length
+
+        const executionTimes = executions
+            .map((e) => e.eventMetadata.executionTimeMs as number | undefined)
+            .filter((t): t is number => typeof t === 'number')
+            .sort((a, b) => a - b)
+
+        return {
+            totalExecutions: totalCount,
+            successfulExecutions: successCount,
+            failedExecutions: failedCount,
+            successRate: totalCount > 0 ? (successCount / totalCount) * 100 : 0,
+            medianExecutionMs: executionTimes.length > 0
+                ? executionTimes[Math.floor(executionTimes.length / 2)]
+                : null,
+            p95ExecutionMs: executionTimes.length > 0
+                ? executionTimes[Math.floor(executionTimes.length * 0.95)]
+                : null,
+            p99ExecutionMs: executionTimes.length > 0
+                ? executionTimes[Math.floor(executionTimes.length * 0.99)]
+                : null,
+        }
+    },
+
+    /**
+     * Get top apps by execution count for dashboard
+     */
+    async getTopAppsByUsage(
+        platformId: string,
+        limit = 10,
+    ): Promise<Array<{
+        appId: string
+        executionCount: number
+        successCount: number
+        failureCount: number
+        successRate: number
+    }>> {
+        const repo = auditEventRepo()
+
+        const executions = await repo.find({
+            where: {
+                platformId,
+                eventType: 'execute',
+            },
+        })
+
+        const appMetrics = new Map<
+            string,
+            { success: number; failed: number }
+        >()
+
+        for (const exec of executions) {
+            if (!exec.appId) continue
+            const current = appMetrics.get(exec.appId) ?? {
+                success: 0,
+                failed: 0,
+            }
+            if (exec.status === 'success') {
+                current.success++
+            } else {
+                current.failed++
+            }
+            appMetrics.set(exec.appId, current)
+        }
+
+        return Array.from(appMetrics.entries())
+            .map(([appId, metrics]) => ({
+                appId,
+                executionCount: metrics.success + metrics.failed,
+                successCount: metrics.success,
+                failureCount: metrics.failed,
+                successRate:
+                    metrics.success + metrics.failed > 0
+                        ? (metrics.success / (metrics.success + metrics.failed)) * 100
+                        : 0,
+            }))
+            .sort((a, b) => b.executionCount - a.executionCount)
+            .slice(0, limit)
+    },
+
+    /**
+     * Get execution time distribution for histogram
+     */
+    async getExecutionTimeDistribution(
+        platformId: string,
+    ): Promise<Record<string, number>> {
+        const repo = auditEventRepo()
+
+        const executions = await repo.find({
+            where: {
+                platformId,
+                eventType: 'execute',
+                status: 'success',
+            },
+        })
+
+        const times = executions
+            .map((e) => e.eventMetadata.executionTimeMs as number | undefined)
+            .filter((t): t is number => typeof t === 'number')
+
+        // Bucket into ranges: <1s, 1-2s, 2-5s, 5-10s, >10s
+        const distribution = {
+            '<1s': 0,
+            '1-2s': 0,
+            '2-5s': 0,
+            '5-10s': 0,
+            '>10s': 0,
+        }
+
+        for (const time of times) {
+            const seconds = time / 1000
+            if (seconds < 1) distribution['<1s']++
+            else if (seconds < 2) distribution['1-2s']++
+            else if (seconds < 5) distribution['2-5s']++
+            else if (seconds < 10) distribution['5-10s']++
+            else distribution['>10s']++
+        }
+
+        return distribution
+    },
 }
+
