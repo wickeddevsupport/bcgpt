@@ -508,7 +508,18 @@ function galleryPageHtml(apps: Template[]): string {
           root.innerHTML = list.map(({a,m})=>cardMarkup(a,m)).join('');
         }
         renderTopActions({ authenticated:false });
-        detectSession().then((session)=>renderTopActions(session));
+        detectSession().then((session)=>{
+          renderTopActions(session);
+          if(session && session.authenticated){
+            const banner = document.createElement('div');
+            banner.className = 'panel';
+            banner.style.cssText = 'background:linear-gradient(135deg,#e0f2fe 0%,#fff 100%);border-color:#93c5fd;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px';
+            banner.innerHTML = '<div><b>You\\'re signed in!</b> <span class=\\"muted\\">Open the full app wizard with step-by-step execution in your dashboard.</span></div><a class=\\"btn primary\\" href=\\"/\\">Open Dashboard Apps</a>';
+            const container = document.querySelector('.container');
+            const topEl = document.querySelector('.top');
+            if(container && topEl) container.insertBefore(banner, topEl);
+          }
+        });
         categories(); render();
         document.getElementById('search').addEventListener('input',e=>{state.search=(e.target.value||'').trim().toLowerCase();render();});
         document.getElementById('category').addEventListener('change',e=>{state.category=e.target.value;render();});
@@ -628,6 +639,20 @@ function appRuntimeHtml(app: Template & { galleryMetadata?: Record<string, unkno
         cancelBtn.addEventListener('click',(e)=>{e.preventDefault();if(activeRunController){activeRunController.abort();}});
         resetBtn.addEventListener('click',(e)=>{e.preventDefault();document.querySelectorAll('#formFields [name]').forEach((el)=>{if(el.type==='checkbox')el.checked=false;else el.value='';});output.classList.add('hidden');runError.classList.add('hidden');});
         renderForm();renderContract();loadStats();loadRuns();
+        (async function(){
+          try{
+            const res=await fetch('/apps/api/session',{credentials:'same-origin'});
+            if(res.ok){
+              const banner=document.createElement('div');
+              banner.className='panel';
+              banner.style.cssText='background:linear-gradient(135deg,#e0f2fe 0%,#fff 100%);border-color:#93c5fd;margin-bottom:12px';
+              banner.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px"><div><b>Signed in</b> <span class="muted">Use the full step-by-step wizard with test runs, connection management, and rich output in your dashboard.</span></div><a class="btn primary" href="/">Open Dashboard Apps</a></div>';
+              const container=document.querySelector('.container');
+              const grid=document.querySelector('.grid2');
+              if(container&&grid)container.insertBefore(banner,grid);
+            }
+          }catch(e){}
+        })();
       </script>`)
 }
 

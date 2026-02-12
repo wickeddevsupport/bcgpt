@@ -3,7 +3,6 @@ import {
   RouterProvider,
   createBrowserRouter,
   createMemoryRouter,
-  useLocation,
 } from 'react-router-dom';
 
 import { PageTitle } from '@/app/components/page-title';
@@ -18,6 +17,7 @@ import { PlatformPiecesPage } from '@/app/routes/platform/setup/pieces';
 import { RedirectPage } from '@/app/routes/redirect';
 import { AppsPage } from '@/app/routes/apps';
 import { AppsPublisherPage } from '@/app/routes/apps/publisher';
+import { ProjectSettingsPage } from '@/app/routes/settings';
 import { useEmbedding } from '@/components/embed-provider';
 import { VerifyEmail } from '@/features/authentication/components/verify-email';
 import { AcceptInvitation } from '@/features/members/component/accept-invitation';
@@ -69,16 +69,6 @@ import {
   TokenCheckerWrapper,
 } from './project-route-wrapper';
 import { TemplateDetailsWrapper } from './template-details-wrapper';
-
-const SettingsRerouter = () => {
-  const { hash } = useLocation();
-  const fragmentWithoutHash = hash.slice(1).toLowerCase();
-  return fragmentWithoutHash ? (
-    <Navigate to={`/settings/${fragmentWithoutHash}`} replace />
-  ) : (
-    <Navigate to="/settings/team" replace />
-  );
-};
 
 const routes = [
   {
@@ -281,7 +271,9 @@ const routes = [
     path: routesThatRequireProjectId.settings,
     element: (
       <ProjectDashboardLayout>
-        <SettingsRerouter></SettingsRerouter>
+        <PageTitle title="Settings">
+          <ProjectSettingsPage />
+        </PageTitle>
       </ProjectDashboardLayout>
     ),
   }),

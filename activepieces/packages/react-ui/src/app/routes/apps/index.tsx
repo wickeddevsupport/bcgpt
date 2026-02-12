@@ -59,6 +59,7 @@ import {
   appsApi,
 } from '@/features/apps/lib/apps-api';
 import { cn } from '@/lib/utils';
+import { authenticationSession } from '@/lib/authentication-session';
 import { MarkdownVariant } from '@activepieces/shared';
 
 type AppFormState = Record<string, string | number | boolean | null>;
@@ -606,7 +607,7 @@ const AppsPage = () => {
                 <p className="mt-2">{contract.credentialHint}</p>
               )}
             </div>
-            <Button variant="outline" size="sm" className="mt-4" onClick={() => window.open('/settings/connections', '_blank')}>
+            <Button variant="outline" size="sm" className="mt-4" onClick={() => window.open(authenticationSession.appendProjectRoutePrefix('/connections'), '_blank')}>
               <KeyRound className="mr-1 size-3.5" />
               {t('Manage Connections')}
             </Button>

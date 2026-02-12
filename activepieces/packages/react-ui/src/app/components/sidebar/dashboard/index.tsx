@@ -9,6 +9,8 @@ import {
   LayoutGrid,
   MousePointerClick,
   Wand2,
+  Unplug,
+  Settings,
 } from 'lucide-react';
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -40,6 +42,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { templatesTelemetryApi } from '@/features/templates/lib/templates-telemetry-api';
+import { useAuthorization } from '@/hooks/authorization-hooks';
 import { platformHooks } from '@/hooks/platform-hooks';
 import { projectCollectionUtils } from '@/hooks/project-collection';
 import { userHooks } from '@/hooks/user-hooks';
@@ -47,6 +50,7 @@ import { authenticationSession } from '@/lib/authentication-session';
 import { cn } from '@/lib/utils';
 import {
   isNil,
+  Permission,
   PlatformRole,
   ProjectType,
   ProjectWithLimits,
@@ -65,6 +69,7 @@ export function ProjectDashboardSidebar() {
   const { data: projects } = projectCollectionUtils.useAll();
   const { embedState } = useEmbedding();
   const { state } = useSidebar();
+  const { checkAccess } = useAuthorization();
   const location = useLocation();
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearchQuery] = useDebounce(searchQuery, 300);
@@ -244,6 +249,28 @@ export function ProjectDashboardSidebar() {
       pathname === '/my-templates' || pathname.startsWith('/my-templates/'),
   };
 
+  const connectionsLink: SidebarItemType = {
+    type: 'link',
+    to: authenticationSession.appendProjectRoutePrefix('/connections'),
+    label: t('Connections'),
+    icon: Unplug,
+    show: true,
+    hasPermission: checkAccess(Permission.READ_APP_CONNECTION),
+    isSubItem: false,
+    isActive: (pathname) => pathname.includes('/connections'),
+  };
+
+  const settingsLink: SidebarItemType = {
+    type: 'link',
+    to: authenticationSession.appendProjectRoutePrefix('/settings'),
+    label: t('Settings'),
+    icon: Settings,
+    show: true,
+    hasPermission: true,
+    isSubItem: false,
+    isActive: (pathname) => pathname.includes('/settings'),
+  };
+
   const items = [
     exploreLink,
     templatesLink,
@@ -251,6 +278,8 @@ export function ProjectDashboardSidebar() {
     leaderboardLink,
     appsLink,
     publisherLink,
+    connectionsLink,
+    settingsLink,
   ].filter(permissionFilter);
 
   return (
