@@ -15,6 +15,12 @@ import { newTodoTrigger } from './lib/triggers/new-todo';
 
 const markdown = `
 Connect via your BCGPT gateway and paste your API key here.
+
+**To get your API key:**
+1. Go to [bcgpt.wickedlab.io/connect](https://bcgpt.wickedlab.io/connect)
+2. Sign in with your Basecamp account
+3. Copy the API key provided
+4. Paste it below
 `;
 
 export const basecampAuth = PieceAuth.CustomAuth({

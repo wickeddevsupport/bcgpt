@@ -4,7 +4,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUpRight,
-  CheckCircle2,
+  Check,
   Eye,
   Plus,
   RefreshCcw,
@@ -490,7 +490,7 @@ const AppsPublisherPage = () => {
     [templates, draft.templateId],
   );
 
-  const templatesPath = authenticationSession.appendProjectRoutePrefix('/my-templates');
+  const templatesPath = '/my-templates';
   const currentStepMeta =
     WIZARD_STEPS.find((item) => item.key === currentStep) ?? WIZARD_STEPS[0];
   const currentStepNumber = stepIndex(currentStep);
@@ -637,25 +637,24 @@ const AppsPublisherPage = () => {
                 onClick={() => goToStep(step.key)}
                 className={`rounded-md border p-3 text-left transition-colors ${
                   active
-                    ? 'border-primary bg-primary/5'
+                    ? 'border-primary bg-primary/5 ring-2 ring-primary/30'
                     : complete
-                      ? 'border-emerald-500/50 bg-emerald-500/5'
+                      ? 'border-border bg-muted/10'
                       : 'border-border bg-muted/30'
                 }`}
               >
                 <div className="mb-1 flex items-center gap-2">
                   <span
                     className={`inline-flex size-5 items-center justify-center rounded-full text-[11px] font-semibold ${
-                      complete
-                        ? 'bg-emerald-600 text-white'
-                        : active
-                          ? 'bg-primary text-primary-foreground'
+                      active
+                        ? 'bg-primary text-primary-foreground'
+                        : complete
+                          ? 'bg-muted-foreground/60 text-white'
                           : 'bg-muted text-muted-foreground'
                     }`}
                   >
-                    {index + 1}
+                    {complete ? <Check className="size-3" /> : index + 1}
                   </span>
-                  {complete && <CheckCircle2 className="size-4 text-emerald-600" />}
                 </div>
                 <div className="text-sm font-medium">{step.title}</div>
                 <div className="text-xs text-muted-foreground">{step.description}</div>
@@ -774,7 +773,7 @@ const AppsPublisherPage = () => {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => window.open('/apps', '_blank')}
+                      onClick={() => window.open(authenticationSession.appendProjectRoutePrefix('/apps'), '_blank')}
                     >
                       {t('Open in Gallery')}
                     </Button>
@@ -1314,7 +1313,7 @@ const AppsPublisherPage = () => {
               <Button
                 variant="outline"
                 onClick={() =>
-                  window.open('/apps', '_blank')
+                  window.open(authenticationSession.appendProjectRoutePrefix('/apps'), '_blank')
                 }
               >
                 {t('View in Gallery')}
