@@ -32,7 +32,9 @@ import {
   AppInputField,
   AppTemplate,
 } from '@/features/apps/lib/apps-api';
+import { userHooks } from '@/hooks/user-hooks';
 import { authenticationSession } from '@/lib/authentication-session';
+import { PlatformRole } from '@activepieces/shared';
 
 type DraftField = {
   id: string;
@@ -184,6 +186,7 @@ const AppsPublisherPage = () => {
   const [draft, setDraft] = useState<PublisherDraft>(createInitialDraft);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const queryClient = useQueryClient();
+  const { data: currentUser } = userHooks.useCurrentUser();
 
   const templatesQuery = useQuery({
     queryKey: ['apps-publisher-templates', templateSearch],
@@ -282,6 +285,7 @@ const AppsPublisherPage = () => {
 
   const templates = templatesQuery.data?.data ?? [];
   const publishedApps = publishedQuery.data?.data ?? [];
+  const canSeedDefaults = currentUser?.platformRole === PlatformRole.ADMIN;
 
   const isSubmitting = publishMutation.isPending || updateMutation.isPending;
 
@@ -349,7 +353,7 @@ const AppsPublisherPage = () => {
             onClick={() => (window.location.href = templatesPath)}
           >
             <Wand2 className="mr-2 size-4" />
-            {t('Create Template')}
+            {t('Open Templates')}
           </Button>
           <Button
             variant="outline"
@@ -363,13 +367,15 @@ const AppsPublisherPage = () => {
             <RefreshCcw className="mr-2 size-4" />
             {t('Reload')}
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => seedMutation.mutate(false)}
-            disabled={seedMutation.isPending}
-          >
-            {seedMutation.isPending ? t('Seeding...') : t('Seed defaults')}
-          </Button>
+          {canSeedDefaults && (
+            <Button
+              variant="outline"
+              onClick={() => seedMutation.mutate(false)}
+              disabled={seedMutation.isPending}
+            >
+              {seedMutation.isPending ? t('Seeding...') : t('Seed defaults')}
+            </Button>
+          )}
         </div>
       </DashboardPageHeader>
 
@@ -543,14 +549,27 @@ const AppsPublisherPage = () => {
           </CardHeader>
           <CardContent className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('Template ID')}</label>
+              <label className="text-sm font-medium">{t('Selected template')}</label>
               <Input
+                readOnly
                 value={draft.templateId}
-                onChange={(event) =>
-                  setDraft((prev) => ({ ...prev, templateId: event.target.value }))
-                }
-                placeholder={t('Template ID')}
+                placeholder={t('Pick a template from the left panel')}
               />
+              {!!draft.templateId && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-xs"
+                  onClick={() =>
+                    setDraft((prev) => ({
+                      ...prev,
+                      templateId: '',
+                    }))
+                  }
+                >
+                  {t('Clear selection')}
+                </Button>
+              )}
             </div>
 
             {draft.templateId.trim().length > 0 && (
@@ -562,16 +581,21 @@ const AppsPublisherPage = () => {
               </div>
             )}
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium">{t('Flow ID')}</label>
-              <Input
-                value={draft.flowId}
-                onChange={(event) =>
-                  setDraft((prev) => ({ ...prev, flowId: event.target.value }))
-                }
-                placeholder={t('Optional runtime flow ID override')}
-              />
-            </div>
+            <details className="rounded-md border bg-muted/20 p-3">
+              <summary className="cursor-pointer text-sm font-medium">
+                {t('Advanced settings')}
+              </summary>
+              <div className="mt-3 space-y-2">
+                <label className="text-sm font-medium">{t('Flow override ID (optional)')}</label>
+                <Input
+                  value={draft.flowId}
+                  onChange={(event) =>
+                    setDraft((prev) => ({ ...prev, flowId: event.target.value }))
+                  }
+                  placeholder={t('Only set if you need to override runtime flow ID')}
+                />
+              </div>
+            </details>
 
             <div className="space-y-2">
               <label className="text-sm font-medium">{t('Description')}</label>

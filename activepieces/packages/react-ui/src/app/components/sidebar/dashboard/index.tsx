@@ -8,6 +8,7 @@ import {
   Compass,
   LayoutGrid,
   MousePointerClick,
+  Wand2,
 } from 'lucide-react';
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -231,8 +232,21 @@ export function ProjectDashboardSidebar() {
     isActive: (pathname) => pathname.includes('/apps/publisher'),
   };
 
+  const templatesLink: SidebarItemType = {
+    type: 'link',
+    to: '/templates',
+    label: t('Templates'),
+    icon: Wand2,
+    show: true,
+    hasPermission: true,
+    isSubItem: false,
+    isActive: (pathname) =>
+      pathname === '/templates' || pathname.startsWith('/templates/'),
+  };
+
   const items = [
     exploreLink,
+    templatesLink,
     impactLink,
     leaderboardLink,
     appsLink,

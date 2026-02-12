@@ -2,14 +2,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { t } from 'i18next';
 import {
   ArrowUpRight,
-  Clock3,
   LoaderCircle,
   Play,
-  RotateCcw,
   Search,
   Sparkles,
   Square,
-  Wand2,
 } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -48,18 +45,14 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import {
   AppInputField,
-  AppRun,
-  AppStatsResponse,
   AppTemplate,
   appsApi,
 } from '@/features/apps/lib/apps-api';
-import { authenticationSession } from '@/lib/authentication-session';
 import { cn } from '@/lib/utils';
 import { MarkdownVariant } from '@activepieces/shared';
 
 type AppFormState = Record<string, string | number | boolean | null>;
 type SortMode = 'featured' | 'runs' | 'name';
-type ExecuteMode = 'sync' | 'async';
 type AppOutputType = 'text' | 'json' | 'image' | 'markdown' | 'html';
 
 function getAppFields(app: AppTemplate): AppInputField[] {
@@ -170,14 +163,12 @@ const AppsPage = () => {
   const [category, setCategory] = useState<string>('ALL');
   const [sortMode, setSortMode] = useState<SortMode>('featured');
   const [selectedApp, setSelectedApp] = useState<AppTemplate | null>(null);
-  const [runMode, setRunMode] = useState<ExecuteMode>('sync');
   const [formState, setFormState] = useState<AppFormState>({});
   const [runOutput, setRunOutput] = useState<unknown>(null);
   const [runMeta, setRunMeta] = useState<string>('');
   const [runError, setRunError] = useState<string>('');
   const queryClient = useQueryClient();
   const activeRunController = useRef<AbortController | null>(null);
-  const lastRunContext = useRef<{ appId: string; payload: { inputs: Record<string, unknown> }; mode: ExecuteMode } | null>(null);
 
   const appsQuery = useQuery({
     queryKey: ['apps-gallery', search, category],
@@ -189,50 +180,23 @@ const AppsPage = () => {
       }),
   });
 
-  const selectedAppId = selectedApp?.id;
-
-  const appStatsQuery = useQuery({
-    queryKey: ['apps-runner-stats', selectedAppId],
-    enabled: Boolean(selectedAppId),
-    queryFn: () => appsApi.getAppStats(selectedAppId!),
-    staleTime: 10_000,
-  });
-
-  const appRunsQuery = useQuery({
-    queryKey: ['apps-runner-runs', selectedAppId],
-    enabled: Boolean(selectedAppId),
-    queryFn: () => appsApi.listAppRuns(selectedAppId!, 10),
-    staleTime: 10_000,
-  });
-
   const runMutation = useMutation({
     mutationFn: async ({
       appId,
       payload,
-      mode,
       signal,
     }: {
       appId: string;
       payload: { inputs: Record<string, unknown> };
-      mode: ExecuteMode;
       signal: AbortSignal;
     }) => {
-      return appsApi.executeApp(appId, payload, mode, signal);
+      return appsApi.executeApp(appId, payload, 'sync', signal);
     },
-    onSuccess: (result, variables) => {
-      if (result.queued) {
-        setRunOutput(result.message ?? t('Run queued in background.'));
-        setRunMeta(t('Run queued in background. Check recent runs for updates.'));
-      } else {
-        setRunOutput(result.output ?? result.message ?? null);
-        setRunMeta(
-          `${t('Execution time')}: ${formatRuntime(result.executionTime ?? null)}`,
-        );
-      }
+    onSuccess: (result) => {
+      setRunOutput(result.output ?? result.message ?? null);
+      setRunMeta(`${t('Execution time')}: ${formatRuntime(result.executionTime ?? null)}`);
       setRunError('');
       queryClient.invalidateQueries({ queryKey: ['apps-gallery'] });
-      queryClient.invalidateQueries({ queryKey: ['apps-runner-stats', variables.appId] });
-      queryClient.invalidateQueries({ queryKey: ['apps-runner-runs', variables.appId] });
       toast.success(t('App executed successfully'));
     },
     onError: (error) => {
@@ -302,7 +266,6 @@ const AppsPage = () => {
     setRunOutput(null);
     setRunMeta('');
     setRunError('');
-    setRunMode('sync');
     setSelectedApp(app);
   };
 
@@ -324,7 +287,7 @@ const AppsPage = () => {
     return inputs;
   };
 
-  const submitRun = (mode: ExecuteMode = runMode) => {
+  const submitRun = () => {
     if (!selectedApp) {
       return;
     }
@@ -341,32 +304,12 @@ const AppsPage = () => {
     const payload = { inputs: buildInputs() };
     const controller = new AbortController();
     activeRunController.current = controller;
-    lastRunContext.current = { appId: selectedApp.id, payload, mode };
 
     setRunError('');
-    setRunMeta(mode === 'async' ? t('Queueing run...') : t('Running app...'));
+    setRunMeta(t('Running app...'));
     runMutation.mutate({
       appId: selectedApp.id,
       payload,
-      mode,
-      signal: controller.signal,
-    });
-  };
-
-  const retryLastRun = () => {
-    if (!lastRunContext.current) {
-      toast.error(t('No previous run to retry'));
-      return;
-    }
-    const { appId, payload, mode } = lastRunContext.current;
-    const controller = new AbortController();
-    activeRunController.current = controller;
-    setRunError('');
-    setRunMeta(t('Retrying...'));
-    runMutation.mutate({
-      appId,
-      payload,
-      mode,
       signal: controller.signal,
     });
   };
@@ -557,26 +500,12 @@ const AppsPage = () => {
     );
   };
 
-  const publisherPath = authenticationSession.appendProjectRoutePrefix('/apps/publisher');
-  const runs = appRunsQuery.data?.data ?? [];
-  const stats = appStatsQuery.data;
-
   return (
     <div className="space-y-4">
       <DashboardPageHeader
         title={t('Apps')}
-        description={t('Run workflow-powered apps without editing the underlying flows.')}
-      >
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => (window.location.href = '/templates')}>
-            {t('Templates')}
-          </Button>
-          <Button onClick={() => (window.location.href = publisherPath)}>
-            <Wand2 className="mr-1 size-4" />
-            {t('Open Publisher')}
-          </Button>
-        </div>
-      </DashboardPageHeader>
+        description={t('Run ready-made apps with simple inputs. Use Templates and Publisher from the left sidebar to create new apps.')}
+      />
 
       <div className="flex items-center gap-3">
         <ApSidebarToggle />
@@ -631,7 +560,7 @@ const AppsPage = () => {
                     {app.galleryMetadata?.description || app.summary}
                   </CardDescription>
                 </CardHeader>
-                <CardFooter className="grid w-full grid-cols-[1fr_auto] items-center gap-2">
+                <CardFooter className="flex w-full items-center gap-2">
                   <Button size="sm" className="w-full min-w-0" onClick={() => openRunner(app)}>
                     <Play className="mr-1 size-3.5" />
                     {t('Run')}
@@ -639,9 +568,9 @@ const AppsPage = () => {
                   <Button
                     variant="outline"
                     size="icon"
-                    className="shrink-0"
+                    className="h-9 w-9 shrink-0"
                     onClick={() => window.open(`/apps/${app.id}`, '_blank')}
-                    title={t('Open public runtime')}
+                    title={t('Open app page')}
                   >
                     <ArrowUpRight className="size-4" />
                   </Button>
@@ -732,7 +661,7 @@ const AppsPage = () => {
                     ))}
                   </div>
                 </CardContent>
-                <CardFooter className="mt-auto grid w-full grid-cols-[1fr_auto] items-center gap-2">
+                <CardFooter className="mt-auto flex w-full items-center gap-2">
                   <Button className="w-full min-w-0" onClick={() => openRunner(app)}>
                     <Play className="mr-1 size-4" />
                     {t('Run app')}
@@ -740,9 +669,9 @@ const AppsPage = () => {
                   <Button
                     variant="outline"
                     size="icon"
-                    className="shrink-0"
+                    className="h-10 w-10 shrink-0"
                     onClick={() => window.open(`/apps/${app.id}`, '_blank')}
-                    title={t('Open public runtime')}
+                    title={t('Open app page')}
                   >
                     <ArrowUpRight className="size-4" />
                   </Button>
@@ -780,18 +709,6 @@ const AppsPage = () => {
               )}
               {selectedApp && getAppFields(selectedApp).map(renderField)}
 
-              <div className="space-y-2 pt-2">
-                <label className="text-sm font-medium">{t('Execution mode')}</label>
-                <Select value={runMode} onValueChange={(value) => setRunMode(value as ExecuteMode)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="sync">{t('Sync (wait for response)')}</SelectItem>
-                    <SelectItem value="async">{t('Async (queue run)')}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
             </div>
 
             <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
@@ -805,105 +722,12 @@ const AppsPage = () => {
                   {renderOutput()}
                 </CardContent>
               </Card>
-
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">{t('Execution stats')}</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2 text-sm">
-                  {appStatsQuery.isLoading ? (
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <LoaderCircle className="size-4 animate-spin" />
-                      {t('Loading stats...')}
-                    </div>
-                  ) : (
-                    <>
-                      <div className="flex items-center justify-between text-muted-foreground">
-                        <span>{t('Runs')}</span>
-                        <span className="font-medium text-foreground">{stats?.runCount ?? 0}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-muted-foreground">
-                        <span>{t('Success')}</span>
-                        <span className="font-medium text-foreground">{stats?.successCount ?? 0}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-muted-foreground">
-                        <span>{t('Failed')}</span>
-                        <span className="font-medium text-foreground">{stats?.failedCount ?? 0}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-muted-foreground">
-                        <span>{t('Average runtime')}</span>
-                        <span className="font-medium text-foreground">
-                          {formatRuntime(stats?.averageExecutionMs ?? null)}
-                        </span>
-                      </div>
-                      {typeof (stats as AppStatsResponse | undefined)?.medianExecutionMs === 'number' && (
-                        <div className="flex items-center justify-between text-muted-foreground">
-                          <span>{t('Median runtime')}</span>
-                          <span className="font-medium text-foreground">
-                            {formatRuntime((stats as AppStatsResponse).medianExecutionMs)}
-                          </span>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">{t('Recent runs')}</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2 text-sm">
-                  {appRunsQuery.isLoading && (
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <LoaderCircle className="size-4 animate-spin" />
-                      {t('Loading runs...')}
-                    </div>
-                  )}
-                  {!appRunsQuery.isLoading && runs.length === 0 && (
-                    <div className="text-muted-foreground">{t('No runs yet')}</div>
-                  )}
-                  {runs.map((run: AppRun) => (
-                    <div key={run.id} className="rounded-md border p-2">
-                      <div className="flex items-center justify-between">
-                        <span
-                          className={cn('text-xs font-medium uppercase', {
-                            'text-emerald-600': run.status === 'success',
-                            'text-destructive': run.status === 'failed',
-                            'text-amber-600': run.status === 'queued',
-                          })}
-                        >
-                          {run.status}
-                        </span>
-                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                          <Clock3 className="size-3.5" />
-                          {new Date(run.created).toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {t('Runtime')}: {formatRuntime(run.executionTimeMs)}
-                      </div>
-                      {run.error && (
-                        <div className="mt-1 text-xs text-destructive">{run.error}</div>
-                      )}
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
             </div>
           </div>
 
           <DialogFooter className="flex-wrap gap-2">
             <Button variant="outline" onClick={closeRunner}>
               {t('Close')}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={retryLastRun}
-              disabled={runMutation.isPending || !lastRunContext.current}
-            >
-              <RotateCcw className="mr-1 size-4" />
-              {t('Retry')}
             </Button>
             <Button
               variant="outline"
@@ -922,7 +746,7 @@ const AppsPage = () => {
               ) : (
                 <>
                   <Play className="mr-1 size-4" />
-                  {runMode === 'async' ? t('Run in background') : t('Run app')}
+                  {t('Run app')}
                 </>
               )}
             </Button>
