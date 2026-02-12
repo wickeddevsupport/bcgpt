@@ -55,6 +55,8 @@ Goal: clear ownership and separation before polishing UI.
 - [ ] Enforce fail-closed publish rules:
   - no publish if required setup contract is incomplete.
 - [ ] Ensure member manage rights are owner-scoped (publish/edit/unpublish/delete own templates/apps).
+  - Templates owner-scope is enforced in API and UI.
+  - Apps owner-scope hardening remains in progress.
 
 ### Acceptance Criteria
 - [ ] App cannot be published without valid audience/auth/setup contract.
@@ -66,17 +68,17 @@ Goal: clear ownership and separation before polishing UI.
 ## Phase 2 - Member Template Lifecycle (Non-Admin First)
 Goal: members can create/manage templates without admin-only screens.
 
-- [ ] Add visible `Templates` entry in signed-in dashboard sidebar for all users.
-- [ ] Add `Create Template` CTA in member templates page.
+- [x] Add visible `Templates` entry in signed-in dashboard sidebar for all users.
+- [x] Add `Create Template` CTA in member templates page.
 - [ ] Add clear flow-to-template bridge in flow actions:
   - `Save as Template` (or equivalent) with success deep link.
-- [ ] Add member-facing template management:
+- [x] Add member-facing template management:
   - edit, publish/unpublish, delete own templates.
 - [ ] Keep Platform Admin templates page for admin operations only.
 
 ### Acceptance Criteria
 - [ ] New member can create a template without touching Platform Admin.
-- [ ] Member can manage own templates end-to-end.
+- [x] Member can manage own templates end-to-end.
 - [ ] Member cannot edit/delete others' templates.
 
 ---
@@ -215,7 +217,7 @@ Goal: production confidence and support readiness.
 ## Done Evidence (Required Before Checking Items)
 | Item | Commit | Deployed At | Verification Evidence | Status |
 |---|---|---|---|---|
-| _example_ | `abc123` | `2026-02-12` | `/apps` + logs + screenshots | done |
+| Member templates in dashboard sidebar + CTA + management view | `d7ef8daf` | `2026-02-12` | `nx build react-ui`, `nx build server-api`, `https://flow.wickedlab.io`=200, `/api/v1/flags`=200, `/apps`=200, `/apps/publisher`=200 | done |
 
 ---
 
