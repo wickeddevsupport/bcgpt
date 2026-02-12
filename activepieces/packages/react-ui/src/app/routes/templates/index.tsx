@@ -34,25 +34,54 @@ import { EmptyTemplatesView } from './empty-templates-view';
 import { MyTemplatesView } from './my-templates-view';
 import { SelectedCategoryView } from './selected-category-view';
 
-const TemplatesPage = () => {
+type TemplatesPageMode = 'all' | 'explore' | 'my';
+
+type TemplatesPageProps = {
+  mode?: TemplatesPageMode;
+};
+
+const TemplatesPage = ({ mode = 'all' }: TemplatesPageProps) => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { platform } = platformHooks.useCurrentPlatform();
 
   const canManageTemplates = platform.plan.manageTemplatesEnabled;
+  const modeIsExploreOnly = mode === 'explore';
+  const modeIsMyOnly = mode === 'my';
+  const isFixedMode = modeIsExploreOnly || modeIsMyOnly;
+  const canAccessMyTemplates = canManageTemplates && !modeIsExploreOnly;
+  const initialType = modeIsMyOnly
+    ? TemplateType.CUSTOM
+    : TemplateType.OFFICIAL;
+
   const [selectedTemplateType, setSelectedTemplateType] = useState<TemplateType>(
-    TemplateType.OFFICIAL,
+    initialType,
   );
+  const effectiveTemplateType = modeIsExploreOnly
+    ? TemplateType.OFFICIAL
+    : modeIsMyOnly
+      ? TemplateType.CUSTOM
+      : selectedTemplateType;
   const isShowingOfficialTemplates =
-    selectedTemplateType === TemplateType.OFFICIAL;
+    effectiveTemplateType === TemplateType.OFFICIAL;
+
+  useEffect(() => {
+    if (modeIsMyOnly) {
+      setSelectedTemplateType(TemplateType.CUSTOM);
+      return;
+    }
+    if (modeIsExploreOnly) {
+      setSelectedTemplateType(TemplateType.OFFICIAL);
+    }
+  }, [modeIsExploreOnly, modeIsMyOnly]);
 
   useEffect(() => {
     // Safety: if templates management is disabled, don't allow the UI to get
     // stuck on a type that the backend will never return.
-    if (!canManageTemplates && selectedTemplateType !== TemplateType.OFFICIAL) {
+    if (!canManageTemplates && effectiveTemplateType !== TemplateType.OFFICIAL) {
       setSelectedTemplateType(TemplateType.OFFICIAL);
     }
-  }, [canManageTemplates, selectedTemplateType]);
+  }, [canManageTemplates, effectiveTemplateType]);
 
   const templateCategoriesQuery =
     templatesHooks.useTemplateCategories(isShowingOfficialTemplates);
@@ -67,7 +96,7 @@ const TemplatesPage = () => {
     setSearch,
     category,
     setCategory,
-  } = templatesHooks.useTemplates(selectedTemplateType);
+  } = templatesHooks.useTemplates(effectiveTemplateType);
   const selectedCategory = category as string;
   const {
     data: allOfficialTemplates,
@@ -244,30 +273,34 @@ const TemplatesPage = () => {
               placeholder={t('Search templates by name or description')}
             />
             <div className="flex flex-row justify-end gap-2">
-              {canManageTemplates && selectedTemplateType === TemplateType.CUSTOM && (
+              {canAccessMyTemplates &&
+                effectiveTemplateType === TemplateType.CUSTOM && (
                 <CreateTemplateFromFlowDialog onCreated={handleTemplateCreated}>
                   <Button variant="outline" className="gap-2 h-full">
                     <Sparkles className="w-4 h-4" />
                     {t('Create Template')}
                   </Button>
                 </CreateTemplateFromFlowDialog>
-              )}
-              <Button
-                variant="outline"
-                className="gap-2 h-full"
-                onClick={() => createFlow()}
-                disabled={isCreateFlowPending}
-              >
-                <Plus className="w-4 h-4" />
-                {t('Start from Scratch')}
-              </Button>
+                )}
+              {canAccessMyTemplates &&
+                effectiveTemplateType === TemplateType.CUSTOM && (
+                  <Button
+                    variant="outline"
+                    className="gap-2 h-full"
+                    onClick={() => createFlow()}
+                    disabled={isCreateFlowPending}
+                  >
+                    <Plus className="w-4 h-4" />
+                    {t('Start from Scratch')}
+                  </Button>
+                )}
             </div>
           </div>
 
-          {canManageTemplates && (
+          {!isFixedMode && canManageTemplates && (
             <div className="mt-3 flex items-center justify-between gap-2">
               <Tabs
-                value={selectedTemplateType}
+                value={effectiveTemplateType}
                 onValueChange={(value) => {
                   const nextType = value as TemplateType;
                   setSelectedTemplateType(nextType);
@@ -340,9 +373,9 @@ const TemplatesPage = () => {
         {!hasTemplates &&
         !showLoading &&
         !hasAnyLoadError &&
-        selectedTemplateType === TemplateType.OFFICIAL ? (
+        effectiveTemplateType === TemplateType.OFFICIAL ? (
           <EmptyTemplatesView />
-        ) : selectedTemplateType === TemplateType.CUSTOM ? (
+        ) : effectiveTemplateType === TemplateType.CUSTOM ? (
           <MyTemplatesView
             templates={templates || []}
             isLoading={showLoading}

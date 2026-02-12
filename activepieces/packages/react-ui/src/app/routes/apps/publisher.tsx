@@ -294,7 +294,7 @@ const AppsPublisherPage = () => {
     [templates, draft.templateId],
   );
 
-  const templatesPath = authenticationSession.appendProjectRoutePrefix('/templates');
+  const templatesPath = authenticationSession.appendProjectRoutePrefix('/my-templates');
 
   const runValidation = (): boolean => {
     const errors = validateDraft(draft);

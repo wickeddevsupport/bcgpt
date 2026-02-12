@@ -89,7 +89,17 @@ const routes = [
     element: (
       <ProjectDashboardLayout>
         <PageTitle title="Templates">
-          <TemplatesPage />
+          <TemplatesPage mode="explore" />
+        </PageTitle>
+      </ProjectDashboardLayout>
+    ),
+  },
+  {
+    path: '/my-templates',
+    element: (
+      <ProjectDashboardLayout>
+        <PageTitle title="My Templates">
+          <TemplatesPage mode="my" />
         </PageTitle>
       </ProjectDashboardLayout>
     ),

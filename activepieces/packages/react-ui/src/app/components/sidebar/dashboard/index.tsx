@@ -234,14 +234,14 @@ export function ProjectDashboardSidebar() {
 
   const templatesLink: SidebarItemType = {
     type: 'link',
-    to: '/templates',
+    to: '/my-templates',
     label: t('Templates'),
     icon: Wand2,
     show: true,
     hasPermission: true,
     isSubItem: false,
     isActive: (pathname) =>
-      pathname === '/templates' || pathname.startsWith('/templates/'),
+      pathname === '/my-templates' || pathname.startsWith('/my-templates/'),
   };
 
   const items = [
