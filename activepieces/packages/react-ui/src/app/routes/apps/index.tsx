@@ -1,6 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { t } from 'i18next';
 import {
+  CheckCircle2,
+  ChevronRight,
+  KeyRound,
+  Link2,
   ArrowUpRight,
   LoaderCircle,
   Play,
@@ -54,15 +58,151 @@ import { MarkdownVariant } from '@activepieces/shared';
 type AppFormState = Record<string, string | number | boolean | null>;
 type SortMode = 'featured' | 'runs' | 'name';
 type AppOutputType = 'text' | 'json' | 'image' | 'markdown' | 'html';
+type AppAudience = 'internal' | 'external';
+type AppAuthMode = 'workspace_connection' | 'user_secret' | 'user_oauth' | 'none';
+type AppRunnerMode = 'workspace_only' | 'public_page';
+type RunnerStepKey = 'requirements' | 'connect' | 'configure' | 'test' | 'run';
+
+type RunnerStep = {
+  key: RunnerStepKey;
+  title: string;
+  description: string;
+};
+
+type AppRunnerContract = {
+  audience: AppAudience;
+  authMode: AppAuthMode;
+  runnerMode: AppRunnerMode;
+  requirements: string[];
+  credentialHint: string;
+  secretsFields: AppInputField[];
+};
+
+const RUNNER_STEPS: RunnerStep[] = [
+  {
+    key: 'requirements',
+    title: t('Requirements'),
+    description: t('Check prerequisites'),
+  },
+  {
+    key: 'connect',
+    title: t('Connect'),
+    description: t('Set credentials'),
+  },
+  {
+    key: 'configure',
+    title: t('Configure'),
+    description: t('Fill required inputs'),
+  },
+  {
+    key: 'test',
+    title: t('Test'),
+    description: t('Validate output'),
+  },
+  {
+    key: 'run',
+    title: t('Run'),
+    description: t('Execute app'),
+  },
+];
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is string => typeof item === 'string');
+}
 
 function getAppFields(app: AppTemplate): AppInputField[] {
   return app.galleryMetadata?.inputSchema?.fields ?? [];
+}
+
+function getRunnerContract(app: AppTemplate | null): AppRunnerContract {
+  const outputSchema = asRecord(app?.galleryMetadata?.outputSchema);
+  const publisherSchema = asRecord(outputSchema?.publisher);
+  const secretsSchema = asRecord(publisherSchema?.secretsSchema);
+  const secretsFieldsRaw = Array.isArray(secretsSchema?.fields)
+    ? secretsSchema?.fields
+    : [];
+  const secretsFields: AppInputField[] = secretsFieldsRaw
+    .map((item) => {
+      const field = asRecord(item);
+      const name = typeof field?.name === 'string' ? field.name.trim() : '';
+      if (!name.length) {
+        return null;
+      }
+      const type = typeof field?.type === 'string' ? field.type : 'password';
+      return {
+        name,
+        label: typeof field?.label === 'string' ? field.label : name,
+        type: ['text', 'password', 'select', 'boolean', 'number', 'textarea'].includes(type)
+          ? (type as AppInputField['type'])
+          : 'password',
+        required: field?.required !== false,
+        placeholder:
+          typeof field?.placeholder === 'string' ? field.placeholder : undefined,
+        options: Array.isArray(field?.options)
+          ? (field.options as Array<{ label: string; value: string }>)
+          : undefined,
+      } satisfies AppInputField;
+    })
+    .filter((item) => item !== null) as AppInputField[];
+
+  const audience = publisherSchema?.audience === 'external' ? 'external' : 'internal';
+  const authMode =
+    publisherSchema?.authMode === 'user_secret' ||
+    publisherSchema?.authMode === 'user_oauth' ||
+    publisherSchema?.authMode === 'none'
+      ? (publisherSchema.authMode as AppAuthMode)
+      : 'workspace_connection';
+  const runnerMode =
+    publisherSchema?.runnerMode === 'public_page' ? 'public_page' : 'workspace_only';
+  const requirements = asStringArray(publisherSchema?.requirements);
+  const credentialHint =
+    typeof publisherSchema?.credentialHint === 'string'
+      ? publisherSchema.credentialHint
+      : '';
+
+  return {
+    audience,
+    authMode,
+    runnerMode,
+    requirements,
+    credentialHint,
+    secretsFields,
+  };
 }
 
 function getDefaultValueByField(field: AppInputField) {
   if (field.type === 'boolean') return false;
   if (field.type === 'number') return null;
   return '';
+}
+
+function getSampleValueByField(field: AppInputField): string | number | boolean | null {
+  if (field.type === 'boolean') {
+    return true;
+  }
+  if (field.type === 'number') {
+    return 1;
+  }
+  if (field.type === 'select') {
+    return field.options?.[0]?.value ?? '';
+  }
+  if (field.type === 'password') {
+    return 'demo-key';
+  }
+  if (field.type === 'textarea') {
+    return field.placeholder?.trim() || t('Sample multi-line input');
+  }
+  return field.placeholder?.trim() || t('Sample value');
 }
 
 function normalizeFieldLabel(field: AppInputField) {

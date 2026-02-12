@@ -1,106 +1,112 @@
-# Quick Start: Development Workflow (TL;DR)
+# Quick Start (Activepieces)
 
-## Copy-Paste Commands by Task
+This is the fast, day-to-day workflow for Activepieces only.
 
-### 1️⃣ Make Code Changes Locally
-```bash
-# Edit files in activepieces/packages/server/api/src/app/flow-gallery/
-# Or edit pieces in activepieces/packages/pieces/community/basecamp/
-```
+- App: `https://flow.wickedlab.io`
+- Server repo: `/home/deploy/bcgpt`
+- Monorepo: `/home/deploy/bcgpt/activepieces`
 
-### 2️⃣ Push to GitHub
+Do not modify BCGPT unless explicitly requested.
+
+---
+
+## 1) Push Code
+
 ```bash
 cd c:\Users\rjnd\Documents\GitHub\bcgpt
 git add .
-git commit -m "feat: your message here"
+git commit -m "feat: your change"
 git push origin main
-```
-
-### 3️⃣ Build & Test on Server (2-3 minutes)
-```bash
-ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175 "cd /home/deploy/bcgpt && git pull origin main && sudo docker compose -f docker-compose.activepieces.yml up -d activepieces --build --no-deps"
-```
-
-### 4️⃣ Check If It's Working
-```bash
-ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175 "sudo docker compose -f /home/deploy/bcgpt/docker-compose.activepieces.yml logs --tail 30 activepieces"
-```
-
-### 5️⃣ Test API (After Build)
-```bash
-curl https://flow.wickedlab.io/apps
-curl https://flow.wickedlab.io/apps/api/apps
-```
-
-### 6️⃣ Trigger Production Docker Build (Optional)
-```bash
-# Manually trigger via GitHub Actions:
-# https://github.com/wickeddevsupport/bcgpt/actions
-# Click "Build Activepieces Image" → "Run workflow"
-
-# OR tag a release to auto-trigger:
-git tag release-v1.1
-git push origin release-v1.1
 ```
 
 ---
 
-## When Things Go Wrong
+## 2) Fast Validate with Nx on Server (Recommended)
 
-### Container won't start
+Server host does not run local `npx`, so run Nx inside the Activepieces image:
+
 ```bash
 ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
-cd /home/deploy/bcgpt
-sudo docker compose -f docker-compose.activepieces.yml logs -f activepieces
+
+sudo docker run --rm --entrypoint bash \
+  -v /home/deploy/bcgpt/activepieces:/work \
+  ghcr.io/wickeddevsupport/activepieces-bcgpt:latest \
+  -lc 'cd /work && npx nx build server-api --configuration production && npx nx build react-ui --configuration production'
 ```
 
-### Need to restart everything
+Observed timings:
+- Cold: `server-api` ~83s, `react-ui` ~30s
+- Warm: `server-api` ~4s, `react-ui` ~3s
+
+---
+
+## 3) Deploy
+
+### Preferred: deploy latest GitHub-built image
 ```bash
 ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
 cd /home/deploy/bcgpt
-sudo docker compose -f docker-compose.activepieces.yml down
-sudo docker compose -f docker-compose.activepieces.yml up -d
+git pull origin main
+sudo docker compose -f docker-compose.activepieces.yml pull activepieces
+sudo docker compose -f docker-compose.activepieces.yml up -d activepieces
 ```
 
-### Clear Docker cache and rebuild
+### Alternative: rebuild from source on server
 ```bash
 ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
 cd /home/deploy/bcgpt
-sudo docker builder prune --all -f
+git pull origin main
 sudo docker compose -f docker-compose.activepieces.yml up -d activepieces --build --no-deps
 ```
 
 ---
 
-## Key Paths
+## 4) Verify
 
-| What | Path |
-|------|------|
-| **Flow-Gallery** | `activepieces/packages/server/api/src/app/flow-gallery/` |
-| **Basecamp Piece** | `activepieces/packages/pieces/community/basecamp/` |
-| **Server** | ssh to `46.225.102.175` as `deploy` |
-| **Server Repo** | `/home/deploy/bcgpt/` |
-| **Docker Compose** | `/home/deploy/bcgpt/docker-compose.activepieces.yml` |
-| **Environment** | `/home/deploy/bcgpt/.env.activepieces` (server only) |
-
----
-
-## Status Check
 ```bash
-ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175 "sudo docker compose -f /home/deploy/bcgpt/docker-compose.activepieces.yml ps"
+ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175 \
+  "sudo docker compose -f /home/deploy/bcgpt/docker-compose.activepieces.yml ps"
+
+ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175 \
+  "sudo docker compose -f /home/deploy/bcgpt/docker-compose.activepieces.yml logs --tail 100 activepieces"
+
+curl -I https://flow.wickedlab.io
+curl https://flow.wickedlab.io/api/v1/flags
+curl https://flow.wickedlab.io/apps
 ```
 
 ---
 
-## SSH Connection Shortcut (Add to PowerShell Profile)
-```powershell
-function ssh-bcgpt {
-    ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175 -t "cd /home/deploy/bcgpt && bash"
-}
+## 5) Troubleshooting
 
-# Then just use: ssh-bcgpt
+### 502 / app unreachable
+```bash
+ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
+cd /home/deploy/bcgpt
+sudo docker compose -f docker-compose.activepieces.yml ps
+sudo docker compose -f docker-compose.activepieces.yml logs --tail 200 activepieces
+```
+
+### Redis auth errors (`NOAUTH`, `WRONGPASS`)
+```bash
+ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
+cd /home/deploy/bcgpt
+sudo docker compose -f docker-compose.activepieces.yml down
+sudo docker volume rm activepieces-redis-data
+sudo docker volume create activepieces-redis-data
+sudo docker compose -f docker-compose.activepieces.yml up -d
 ```
 
 ---
 
-See **DEVELOPMENT_WORKFLOW.md** for full details.
+## 6) Key Paths
+
+- `activepieces/packages/server/api/src/app/flow-gallery/`
+- `activepieces/packages/pieces/community/basecamp/`
+- `activepieces/packages/react-ui/`
+- `/home/deploy/bcgpt/docker-compose.activepieces.yml`
+- `/home/deploy/bcgpt/.env.activepieces` (server)
+
+---
+
+For full details, use `DEVELOPMENT_WORKFLOW.md`.
