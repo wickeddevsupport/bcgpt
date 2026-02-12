@@ -492,8 +492,18 @@ const AppsPublisherPage = () => {
                   <CardDescription>
                     {app.galleryMetadata?.description || app.summary}
                   </CardDescription>
+                  {!app.galleryMetadata?.canManage && (
+                    <Badge variant="outline" className="mt-2">
+                      {t('Read only')}
+                    </Badge>
+                  )}
                   <CardFooter className="px-0 pt-3 pb-0 flex gap-2">
-                    <Button variant="outline" size="sm" onClick={() => applyPublished(app)}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => applyPublished(app)}
+                      disabled={!app.galleryMetadata?.canManage}
+                    >
                       {t('Edit')}
                     </Button>
                     <Button
@@ -511,7 +521,7 @@ const AppsPublisherPage = () => {
                           unpublishMutation.mutate(app.id);
                         }
                       }}
-                      disabled={unpublishMutation.isPending}
+                      disabled={unpublishMutation.isPending || !app.galleryMetadata?.canManage}
                     >
                       {t('Unpublish')}
                     </Button>

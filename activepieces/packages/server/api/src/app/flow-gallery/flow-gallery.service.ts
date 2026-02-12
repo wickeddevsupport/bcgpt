@@ -759,6 +759,7 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
                 ...(existing?.metadata as Record<string, unknown> | null ?? {}),
                 appsSeedKey: seed.key,
                 appsSeedVersion: DEFAULT_SEED_VERSION,
+                createdByUserId: (existing?.metadata as Record<string, unknown> | null)?.createdByUserId ?? publishedBy,
             }
 
             if (isNil(existing)) {
@@ -1051,6 +1052,19 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
             })
         }
         return saved
+    },
+
+    async getPublishedAppByTemplate({
+        templateId,
+        platformId,
+    }: {
+        templateId: string
+        platformId: string
+    }): Promise<FlowGalleryAppSchema | null> {
+        return flowGalleryAppRepo().findOneBy({
+            templateId,
+            platformId,
+        })
     },
 
     async unpublishTemplateApp({

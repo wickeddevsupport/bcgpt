@@ -37,6 +37,8 @@ export type AppGalleryMetadata = {
   inputSchema?: {
     fields?: AppInputField[];
   };
+  publishedBy?: string | null;
+  canManage?: boolean;
   runCount?: number;
   successCount?: number;
   failedCount?: number;

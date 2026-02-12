@@ -7,6 +7,32 @@ import { templateValidator } from './template-validator'
 import { TemplateEntity } from './template.entity'
 
 const templateRepo = repoFactory<Template>(TemplateEntity)
+const TEMPLATE_OWNER_USER_ID_METADATA_KEY = 'createdByUserId'
+
+function toMetadataObject(metadata: unknown): Record<string, unknown> {
+    if (typeof metadata === 'object' && metadata !== null && !Array.isArray(metadata)) {
+        return { ...(metadata as Record<string, unknown>) }
+    }
+    return {}
+}
+
+function getTemplateOwnerUserId(metadata: unknown): string | null {
+    const metadataObject = toMetadataObject(metadata)
+    const ownerUserId = metadataObject[TEMPLATE_OWNER_USER_ID_METADATA_KEY]
+    if (typeof ownerUserId === 'string' && ownerUserId.trim().length > 0) {
+        return ownerUserId
+    }
+    return null
+}
+
+function withTemplateOwnerMetadata(metadata: unknown, ownerUserId?: string): Record<string, unknown> | null {
+    const nextMetadata = toMetadataObject(metadata)
+    const resolvedOwnerUserId = ownerUserId ?? getTemplateOwnerUserId(metadata)
+    if (!isNil(resolvedOwnerUserId) && resolvedOwnerUserId.trim().length > 0) {
+        nextMetadata[TEMPLATE_OWNER_USER_ID_METADATA_KEY] = resolvedOwnerUserId
+    }
+    return Object.keys(nextMetadata).length > 0 ? nextMetadata : null
+}
 
 export const templateService = (log: FastifyBaseLogger) => ({
     async getOne({ id }: GetParams): Promise<Template | null> {
@@ -26,7 +52,7 @@ export const templateService = (log: FastifyBaseLogger) => ({
         }
         return template
     },
-    async create({ platformId, params }: CreateParams): Promise<Template> {
+    async create({ platformId, params, createdByUserId }: CreateParams): Promise<Template> {
         const preparedTemplate = await templateValidator.validateAndPrepare({
             flows: params.flows,
             platformId,
@@ -35,6 +61,7 @@ export const templateService = (log: FastifyBaseLogger) => ({
 
         const { flows, pieces } = preparedTemplate
         const { name, summary, description, tags, blogUrl, metadata, author, categories, type } = params
+        const templateMetadata = withTemplateOwnerMetadata(metadata, createdByUserId)
 
         const newTags = tags ?? []
 
@@ -50,7 +77,7 @@ export const templateService = (log: FastifyBaseLogger) => ({
                     platformId,
                     tags: newTags,
                     blogUrl,
-                    metadata,
+                    metadata: templateMetadata,
                     author,
                     categories,
                     pieces,
@@ -77,7 +104,7 @@ export const templateService = (log: FastifyBaseLogger) => ({
                     platformId,
                     tags: newTags,
                     blogUrl,
-                    metadata,
+                    metadata: templateMetadata,
                     author,
                     categories,
                     pieces,
@@ -89,9 +116,13 @@ export const templateService = (log: FastifyBaseLogger) => ({
         }
     },
 
-    async update({ id, params }: UpdateParams): Promise<Template> {
+    async update({ id, params, actorId }: UpdateParams): Promise<Template> {
         const { name, summary, description, tags, blogUrl, metadata, categories, status } = params
         const template = await this.getOneOrThrow({ id })
+        const existingOwnerUserId = getTemplateOwnerUserId(template.metadata) ?? actorId
+        const nextMetadata = !isNil(metadata)
+            ? withTemplateOwnerMetadata(metadata, existingOwnerUserId)
+            : undefined
 
         const newTags = tags ?? []
 
@@ -116,7 +147,7 @@ export const templateService = (log: FastifyBaseLogger) => ({
                     ...spreadIfDefined('description', description),
                     ...spreadIfDefined('tags', tags),
                     ...spreadIfDefined('blogUrl', blogUrl),
-                    ...spreadIfDefined('metadata', metadata),
+                    ...spreadIfDefined('metadata', nextMetadata),
                     ...spreadIfDefined('categories', categories),
                     ...spreadIfDefined('flows', sanatizedFlows),
                     ...spreadIfDefined('pieces', pieces),
@@ -132,7 +163,7 @@ export const templateService = (log: FastifyBaseLogger) => ({
                     ...spreadIfDefined('description', description),
                     ...spreadIfDefined('tags', tags),
                     ...spreadIfDefined('blogUrl', blogUrl),
-                    ...spreadIfDefined('metadata', metadata),
+                    ...spreadIfDefined('metadata', nextMetadata),
                     ...spreadIfDefined('categories', categories),
                     ...spreadIfDefined('flows', sanatizedFlows),
                     ...spreadIfDefined('pieces', pieces),
@@ -212,6 +243,7 @@ type GetParams = {
 type CreateParams = {
     platformId: string | undefined
     params: CreateTemplateRequestBody
+    createdByUserId?: string
 }
 
 type NewTemplate = Omit<Template, 'created' | 'updated'>
@@ -228,4 +260,6 @@ type DeleteParams = {
 type UpdateParams = {
     id: string
     params: UpdateTemplateRequestBody
+    actorId?: string
 }
+

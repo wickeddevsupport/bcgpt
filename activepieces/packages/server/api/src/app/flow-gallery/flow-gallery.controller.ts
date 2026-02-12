@@ -1,4 +1,5 @@
 import {
+    isNil,
     PlatformRole,
     PrincipalType,
     Template,
@@ -9,6 +10,7 @@ import { Static, Type } from '@sinclair/typebox'
 import { StatusCodes } from 'http-status-codes'
 import { flowGalleryService } from './flow-gallery.service'
 import { RouteKind, securityAccess } from '@activepieces/server-shared'
+import { templateService } from '../template/template.service'
 import { userService } from '../user/user-service'
 
 const ListAppsQuery = Type.Object({
@@ -112,6 +114,57 @@ const SeedDefaultsBody = Type.Object({
 const executeRateLimit: RateLimitOptions = {
     max: 60,
     timeWindow: '1 minute',
+}
+const TEMPLATE_OWNER_USER_ID_METADATA_KEY = 'createdByUserId'
+
+type PublisherAccessContext = {
+    isAdmin: boolean
+    principalId: string
+}
+
+async function resolvePublisherAccessContext(principal: {
+    type: PrincipalType
+    id: string
+    platform: { id: string }
+}): Promise<PublisherAccessContext> {
+    if (principal.type !== PrincipalType.USER) {
+        return { isAdmin: true, principalId: principal.id }
+    }
+    const user = await userService.getOneOrFail({ id: principal.id })
+    return {
+        isAdmin: user.platformRole === PlatformRole.ADMIN,
+        principalId: principal.id,
+    }
+}
+
+function getTemplateOwnerUserId(template: Template): string | null {
+    const metadata = template.metadata as Record<string, unknown> | null
+    if (isNil(metadata)) {
+        return null
+    }
+    const ownerUserId = metadata[TEMPLATE_OWNER_USER_ID_METADATA_KEY]
+    if (typeof ownerUserId === 'string' && ownerUserId.trim().length > 0) {
+        return ownerUserId
+    }
+    return null
+}
+
+function canManageTemplate(template: Template, access: PublisherAccessContext): boolean {
+    if (access.isAdmin) {
+        return true
+    }
+    const ownerUserId = getTemplateOwnerUserId(template)
+    // Backward compatibility for legacy templates with no owner metadata.
+    return isNil(ownerUserId) || ownerUserId === access.principalId
+}
+
+function canManagePublishedApp(templateWithGallery: { galleryMetadata?: Record<string, unknown> }, access: PublisherAccessContext): boolean {
+    if (access.isAdmin) {
+        return true
+    }
+    const metadata = (templateWithGallery.galleryMetadata ?? {}) as Record<string, unknown>
+    const publishedBy = metadata.publishedBy
+    return isNil(publishedBy) || publishedBy === access.principalId
 }
 
 type AppInputField = {
@@ -717,8 +770,18 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
     }, async (request, reply) => {
         const query = request.query as Static<typeof ListPublisherAppsQuery>
         try {
+            const access = await resolvePublisherAccessContext(request.principal)
             const apps = await service.listPublisherApps({ platformId: request.principal.platform.id, search: query.search })
-            return reply.send({ data: apps })
+            const filteredApps = apps
+                .filter((app) => canManagePublishedApp(app, access))
+                .map((app) => ({
+                    ...app,
+                    galleryMetadata: {
+                        ...(app.galleryMetadata ?? {}),
+                        canManage: true,
+                    },
+                }))
+            return reply.send({ data: filteredApps })
         } catch (error) {
             fastify.log.error(error)
             return reply.code(500).send({ error: 'Failed to list published apps' })
@@ -731,8 +794,10 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
     }, async (request, reply) => {
         const query = request.query as Static<typeof ListPublisherTemplatesQuery>
         try {
+            const access = await resolvePublisherAccessContext(request.principal)
             const templates = await service.listPublisherTemplates({ platformId: request.principal.platform.id, search: query.search })
-            return reply.send({ data: templates })
+            const manageableTemplates = templates.filter((template) => canManageTemplate(template, access))
+            return reply.send({ data: manageableTemplates })
         } catch (error) {
             fastify.log.error(error)
             return reply.code(500).send({ error: 'Failed to list templates' })
@@ -745,6 +810,14 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
     }, async (request, reply) => {
         const body = request.body as Static<typeof PublisherAppPayload>
         try {
+            const access = await resolvePublisherAccessContext(request.principal)
+            const template = await templateService(fastify.log).getOneOrThrow({ id: body.templateId })
+            if (template.platformId !== request.principal.platform.id) {
+                return reply.code(StatusCodes.FORBIDDEN).send({ error: 'Template does not belong to this platform' })
+            }
+            if (!canManageTemplate(template, access)) {
+                return reply.code(StatusCodes.FORBIDDEN).send({ error: 'You can only publish templates you created' })
+            }
             const app = await service.publishTemplateAsApp({
                 ...body,
                 platformId: request.principal.platform.id,
@@ -764,6 +837,17 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
         const params = request.params as Static<typeof PublisherTemplateParams>
         const body = request.body as Static<typeof UpdatePublisherAppPayload>
         try {
+            const access = await resolvePublisherAccessContext(request.principal)
+            const existingApp = await service.getPublishedAppByTemplate({
+                templateId: params.templateId,
+                platformId: request.principal.platform.id,
+            })
+            if (isNil(existingApp)) {
+                return reply.code(StatusCodes.NOT_FOUND).send({ error: 'Published app not found' })
+            }
+            if (!canManagePublishedApp({ galleryMetadata: existingApp as unknown as Record<string, unknown> }, access)) {
+                return reply.code(StatusCodes.FORBIDDEN).send({ error: 'You can only edit apps you published' })
+            }
             const app = await service.updatePublishedApp({
                 ...body,
                 templateId: params.templateId,
@@ -782,6 +866,17 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
     }, async (request, reply) => {
         const params = request.params as Static<typeof PublisherTemplateParams>
         try {
+            const access = await resolvePublisherAccessContext(request.principal)
+            const existingApp = await service.getPublishedAppByTemplate({
+                templateId: params.templateId,
+                platformId: request.principal.platform.id,
+            })
+            if (isNil(existingApp)) {
+                return reply.code(StatusCodes.NOT_FOUND).send({ error: 'Published app not found' })
+            }
+            if (!canManagePublishedApp({ galleryMetadata: existingApp as unknown as Record<string, unknown> }, access)) {
+                return reply.code(StatusCodes.FORBIDDEN).send({ error: 'You can only unpublish apps you published' })
+            }
             await service.unpublishTemplateApp({
                 templateId: params.templateId,
                 platformId: request.principal.platform.id,

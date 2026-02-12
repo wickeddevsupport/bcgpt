@@ -632,9 +632,18 @@ const AppsPage = () => {
                   </CardDescription>
                 </CardHeader>
                 <CardFooter className="flex gap-2">
-                  <Button size="sm" className="w-full" onClick={() => openRunner(app)}>
+                  <Button size="sm" className="flex-1" onClick={() => openRunner(app)}>
                     <Play className="mr-1 size-3.5" />
                     {t('Run')}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="shrink-0"
+                    onClick={() => window.open(`/apps/${app.id}`, '_blank')}
+                    title={t('Open public runtime')}
+                  >
+                    <ArrowUpRight className="size-4" />
                   </Button>
                 </CardFooter>
               </Card>
@@ -724,13 +733,14 @@ const AppsPage = () => {
                   </div>
                 </CardContent>
                 <CardFooter className="mt-auto flex items-center gap-2">
-                  <Button className="w-full" onClick={() => openRunner(app)}>
+                  <Button className="flex-1" onClick={() => openRunner(app)}>
                     <Play className="mr-1 size-4" />
                     {t('Run app')}
                   </Button>
                   <Button
                     variant="outline"
                     size="icon"
+                    className="shrink-0"
                     onClick={() => window.open(`/apps/${app.id}`, '_blank')}
                     title={t('Open public runtime')}
                   >

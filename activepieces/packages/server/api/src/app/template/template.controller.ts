@@ -8,6 +8,7 @@ import {
     ErrorCode,
     isNil,
     ListTemplatesRequestQuery,
+    PlatformRole,
     Principal,
     PrincipalType,
     SERVICE_KEY_SECURITY_OPENAPI,
@@ -23,10 +24,12 @@ import { flagService } from '../flags/flag.service'
 import { migrateFlowVersionTemplateList } from '../flows/flow-version/migrations'
 import { system } from '../helper/system/system'
 import { platformService } from '../platform/platform.service'
+import { userService } from '../user/user-service'
 import { communityTemplates } from './community-templates.service'
 import { templateService } from './template.service'
 
 const edition = system.getEdition()
+const TEMPLATE_OWNER_USER_ID_METADATA_KEY = 'createdByUserId'
 
 
 export const templateController: FastifyPluginAsyncTypebox = async (app) => {
@@ -92,7 +95,11 @@ export const templateController: FastifyPluginAsyncTypebox = async (app) => {
                 })
             }
         }
-        const result = await templateService(app.log).create({ platformId, params: request.body })
+        const result = await templateService(app.log).create({
+            platformId,
+            params: request.body,
+            createdByUserId: request.principal.id,
+        })
         return reply.status(StatusCodes.CREATED).send(result)
     })
 
@@ -102,12 +109,25 @@ export const templateController: FastifyPluginAsyncTypebox = async (app) => {
             request.body.flows = migratedFlows
         },
     }, async (request, reply) => {
-        const result = await templateService(app.log).update({ id: request.params.id, params: request.body })
+        const template = await templateService(app.log).getOneOrThrow({ id: request.params.id })
+        await assertTemplateManageAccessOrThrow({
+            template,
+            principal: request.principal,
+        })
+        const result = await templateService(app.log).update({
+            id: request.params.id,
+            params: request.body,
+            actorId: request.principal.id,
+        })
         return reply.status(StatusCodes.OK).send(result)
     })
 
     app.delete('/:id', DeleteParams, async (request, reply) => {
         const template = await templateService(app.log).getOneOrThrow({ id: request.params.id })
+        await assertTemplateManageAccessOrThrow({
+            template,
+            principal: request.principal,
+        })
 
         await templateService(app.log).delete({
             id: request.params.id,
@@ -230,4 +250,62 @@ async function loadCustomTemplatesOrReturnEmpty(
     }
     const customTemplates = await templateService(log).list({ platformId, type: TemplateType.CUSTOM, ...query })
     return customTemplates.data
+}
+
+function getTemplateOwnerUserId(template: Template): string | null {
+    const metadata = template.metadata as Record<string, unknown> | null
+    if (isNil(metadata)) {
+        return null
+    }
+    const ownerUserId = metadata[TEMPLATE_OWNER_USER_ID_METADATA_KEY]
+    if (typeof ownerUserId === 'string' && ownerUserId.trim().length > 0) {
+        return ownerUserId
+    }
+    return null
+}
+
+async function assertTemplateManageAccessOrThrow({
+    template,
+    principal,
+}: {
+    template: Template
+    principal: Principal
+}): Promise<void> {
+    if (principal.type !== PrincipalType.USER && principal.type !== PrincipalType.SERVICE) {
+        throw new ActivepiecesError({
+            code: ErrorCode.AUTHORIZATION,
+            params: {
+                message: 'Only authenticated users can manage templates',
+            },
+        })
+    }
+    if (principal.type === PrincipalType.SERVICE) {
+        return
+    }
+    if (!isNil(template.platformId) && template.platformId !== principal.platform.id) {
+        throw new ActivepiecesError({
+            code: ErrorCode.AUTHORIZATION,
+            params: {
+                message: 'Template does not belong to the current platform',
+            },
+        })
+    }
+
+    const user = await userService.getOneOrFail({ id: principal.id })
+    if (user.platformRole === PlatformRole.ADMIN) {
+        return
+    }
+
+    const ownerUserId = getTemplateOwnerUserId(template)
+    // Backward compatibility: legacy templates without owner metadata remain manageable.
+    if (isNil(ownerUserId) || ownerUserId === principal.id) {
+        return
+    }
+
+    throw new ActivepiecesError({
+        code: ErrorCode.AUTHORIZATION,
+        params: {
+            message: 'You can only manage templates you created',
+        },
+    })
 }
