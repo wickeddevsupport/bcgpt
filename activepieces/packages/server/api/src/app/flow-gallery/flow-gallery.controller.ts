@@ -719,7 +719,7 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
             return reply.type('text/html').send(galleryPageHtml(apps.data))
         } catch (error) {
             fastify.log.error(error)
-            return reply.code(500).send({ error: 'Failed to load gallery' })
+            return reply.type('text/html').code(500).send(`<!DOCTYPE html><html><head><title>Error</title></head><body style="font-family:sans-serif;padding:40px;text-align:center"><h1>Something went wrong</h1><p>The gallery could not be loaded. Please try again later.</p><a href="/">Go to Dashboard</a></body></html>`)
         }
     })
 
@@ -866,19 +866,23 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
         } catch (error: any) {
             fastify.log.error(error)
             
-            // Log failed publish attempt
-            await auditEventService.logEvent({
-                platformId: request.principal.platform.id,
-                userId: request.principal.id,
-                eventType: 'publish',
-                status: 'failed',
-                errorMessage: error?.message ?? 'Failed to publish app',
-                eventMetadata: {
-                    templateId: body.templateId,
-                },
-                ipAddress: request.ip,
-                userAgent: request.headers['user-agent'],
-            })
+            // Log failed publish attempt (wrapped to prevent swallowing original error)
+            try {
+                await auditEventService.logEvent({
+                    platformId: request.principal.platform.id,
+                    userId: request.principal.id,
+                    eventType: 'publish',
+                    status: 'failed',
+                    errorMessage: error?.message ?? 'Failed to publish app',
+                    eventMetadata: {
+                        templateId: body.templateId,
+                    },
+                    ipAddress: request.ip,
+                    userAgent: request.headers['user-agent'],
+                })
+            } catch (auditError) {
+                fastify.log.error({ msg: 'Failed to log audit event', auditError })
+            }
             
             return reply.code(StatusCodes.BAD_REQUEST).send({ error: error?.message ?? 'Failed to publish app' })
         }
@@ -931,19 +935,22 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
         } catch (error: any) {
             fastify.log.error(error)
             
-            // Log failed update attempt
-            await auditEventService.logEvent({
-                platformId: request.principal.platform.id,
-                userId: request.principal.id,
-                eventType: 'update',
-                status: 'failed',
-                errorMessage: error?.message ?? 'Failed to update app metadata',
-                eventMetadata: {
-                    templateId: params.templateId,
-                },
-                ipAddress: request.ip,
-                userAgent: request.headers['user-agent'],
-            })
+            try {
+                await auditEventService.logEvent({
+                    platformId: request.principal.platform.id,
+                    userId: request.principal.id,
+                    eventType: 'update',
+                    status: 'failed',
+                    errorMessage: error?.message ?? 'Failed to update app metadata',
+                    eventMetadata: {
+                        templateId: params.templateId,
+                    },
+                    ipAddress: request.ip,
+                    userAgent: request.headers['user-agent'],
+                })
+            } catch (auditError) {
+                fastify.log.error({ msg: 'Failed to log audit event', auditError })
+            }
             
             return reply.code(StatusCodes.BAD_REQUEST).send({ error: error?.message ?? 'Failed to update app metadata' })
         }
@@ -997,19 +1004,22 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
         } catch (error: any) {
             fastify.log.error(error)
             
-            // Log failed unpublish attempt
-            await auditEventService.logEvent({
-                platformId: request.principal.platform.id,
-                userId: request.principal.id,
-                eventType: 'unpublish',
-                status: 'failed',
-                errorMessage: error?.message ?? 'Failed to unpublish app',
-                eventMetadata: {
-                    templateId: params.templateId,
-                },
-                ipAddress: request.ip,
-                userAgent: request.headers['user-agent'],
-            })
+            try {
+                await auditEventService.logEvent({
+                    platformId: request.principal.platform.id,
+                    userId: request.principal.id,
+                    eventType: 'unpublish',
+                    status: 'failed',
+                    errorMessage: error?.message ?? 'Failed to unpublish app',
+                    eventMetadata: {
+                        templateId: params.templateId,
+                    },
+                    ipAddress: request.ip,
+                    userAgent: request.headers['user-agent'],
+                })
+            } catch (auditError) {
+                fastify.log.error({ msg: 'Failed to log audit event', auditError })
+            }
             
             return reply.code(StatusCodes.BAD_REQUEST).send({ error: error?.message ?? 'Failed to unpublish app' })
         }
@@ -1061,19 +1071,22 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
         } catch (error: any) {
             fastify.log.error(error)
             
-            // Log failed seed attempt
-            await auditEventService.logEvent({
-                platformId: request.principal.platform.id,
-                userId: request.principal.id,
-                eventType: 'seed',
-                status: 'failed',
-                errorMessage: error?.message ?? 'Failed to seed defaults',
-                eventMetadata: {
-                    reset: body.reset ?? false,
-                },
-                ipAddress: request.ip,
-                userAgent: request.headers['user-agent'],
-            })
+            try {
+                await auditEventService.logEvent({
+                    platformId: request.principal.platform.id,
+                    userId: request.principal.id,
+                    eventType: 'seed',
+                    status: 'failed',
+                    errorMessage: error?.message ?? 'Failed to seed defaults',
+                    eventMetadata: {
+                        reset: body.reset ?? false,
+                    },
+                    ipAddress: request.ip,
+                    userAgent: request.headers['user-agent'],
+                })
+            } catch (auditError) {
+                fastify.log.error({ msg: 'Failed to log audit event', auditError })
+            }
             
             return reply.code(StatusCodes.BAD_REQUEST).send({ error: error?.message ?? 'Failed to seed defaults' })
         }
@@ -1161,14 +1174,19 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
         } catch (error: any) {
             fastify.log.error(error)
             const safeError = sanitizePublicError(error)
-            await service.logExecution({
-                templateId: params.id,
-                executionStatus: 'failed',
-                executionTimeMs: Date.now() - started,
-                error: safeError,
-                inputKeys: Object.keys(body.inputs ?? {}),
-            })
-            return reply.code(StatusCodes.BAD_REQUEST).send({ error: safeError })
+            try {
+                await service.logExecution({
+                    templateId: params.id,
+                    executionStatus: 'failed',
+                    executionTimeMs: Date.now() - started,
+                    error: safeError,
+                    inputKeys: Object.keys(body.inputs ?? {}),
+                })
+            } catch (logError) {
+                fastify.log.error({ msg: 'Failed to log execution', logError })
+            }
+            const isClientError = error?.message?.includes('required') || error?.message?.includes('invalid') || error?.message?.includes('too large')
+            return reply.code(isClientError ? StatusCodes.BAD_REQUEST : StatusCodes.INTERNAL_SERVER_ERROR).send({ error: safeError })
         }
     })
 

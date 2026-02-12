@@ -578,6 +578,9 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
             id,
             status: Equal(TemplateStatus.PUBLISHED),
         }
+        if (!isNil(platformId)) {
+            filters.platformId = Equal(platformId)
+        }
 
         const template = await templateRepo().findOneBy(filters)
 
@@ -1210,30 +1213,18 @@ export const flowGalleryService = (log: FastifyBaseLogger) => ({
         })
         const safeError = sanitizeExecutionError(error)
         if (!isNil(app)) {
-            const nextRunCount = (app.runCount ?? 0) + 1
-            const nextSuccess = (app.successCount ?? 0) + (executionStatus === 'success' ? 1 : 0)
-            const nextFailed = (app.failedCount ?? 0) + (executionStatus === 'failed' ? 1 : 0)
-            const previousMeasuredRuns = Math.max((app.successCount ?? 0) + (app.failedCount ?? 0), 0)
-            const nextMeasuredRuns = executionStatus === 'queued' ? previousMeasuredRuns : previousMeasuredRuns + 1
-            const previousAverage = app.averageExecutionMs ?? executionTimeMs
-            const nextAverage = nextMeasuredRuns === 0
-                ? app.averageExecutionMs
-                : Math.round(
-                    executionStatus === 'queued'
-                        ? previousAverage
-                        : ((previousAverage * previousMeasuredRuns) + executionTimeMs) / nextMeasuredRuns,
-                )
-
-            await flowGalleryAppRepo().update({
-                id: app.id,
-            }, {
-                runCount: nextRunCount,
-                successCount: nextSuccess,
-                failedCount: nextFailed,
-                averageExecutionMs: nextAverage,
-                lastExecutionAt: new Date(),
-                lastError: safeError,
-            } as never)
+            // Use atomic increments to prevent race conditions under concurrent load
+            const qb = flowGalleryAppRepo().createQueryBuilder()
+                .update()
+                .set({
+                    runCount: () => '"runCount" + 1',
+                    successCount: executionStatus === 'success' ? () => '"successCount" + 1' : undefined,
+                    failedCount: executionStatus === 'failed' ? () => '"failedCount" + 1' : undefined,
+                    lastExecutionAt: new Date(),
+                    lastError: safeError,
+                } as never)
+                .where('id = :id', { id: app.id })
+            await qb.execute()
         }
 
         const outputType = isNil(outputs)

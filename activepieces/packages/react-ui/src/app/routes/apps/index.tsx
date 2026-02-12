@@ -13,11 +13,15 @@ import {
   Sparkles,
   Square,
   Zap,
+  LayoutGrid,
+  RefreshCw,
+  AlertCircle,
+  TrendingUp,
 } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
+import { ErrorBoundary } from 'react-error-boundary';
 import { toast } from 'sonner';
 
-import { DashboardPageHeader } from '@/app/components/dashboard-page-header';
 import { ApSidebarToggle } from '@/components/custom/ap-sidebar-toggle';
 import { InputWithIcon } from '@/components/custom/input-with-icon';
 import { ApMarkdown } from '@/components/custom/markdown';
@@ -907,183 +911,279 @@ const AppsPage = () => {
     );
   };
 
-  return (
-    <div className="space-y-4">
-      <DashboardPageHeader
-        title={t('Apps')}
-        description={t('Run ready-made apps with simple inputs. Use Templates and Publisher from the left sidebar to create new apps.')}
-      />
+  const formatCategoryLabel = (cat: string) => {
+    if (cat === 'ALL') return t('All');
+    return cat.charAt(0).toUpperCase() + cat.slice(1).toLowerCase().replace(/_/g, ' ');
+  };
 
-      <div className="flex items-center gap-3">
+  return (
+    <ErrorBoundary fallback={<div className="flex flex-col items-center justify-center py-20 text-center"><AlertCircle className="size-10 text-destructive mb-4" /><h2 className="text-lg font-semibold">{t('Something went wrong')}</h2><p className="text-sm text-muted-foreground mt-1">{t('Please refresh the page to try again.')}</p></div>}>
+    <div className="space-y-6">
+      {/* Hero Section */}
+      <div className="relative overflow-hidden rounded-xl border bg-gradient-to-br from-primary/5 via-primary/10 to-primary/5 p-6 md:p-8">
+        <div className="relative z-10">
+          <div className="flex items-center gap-2 mb-2">
+            <LayoutGrid className="size-5 text-primary" />
+            <span className="text-xs font-medium uppercase tracking-wider text-primary">{t('App Gallery')}</span>
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight md:text-3xl">{t('Ready-to-Run Apps')}</h1>
+          <p className="mt-2 max-w-xl text-sm text-muted-foreground md:text-base">
+            {t('Run production-ready automation apps with simple inputs. No coding required.')}
+          </p>
+          <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
+            <TrendingUp className="size-4" />
+            <span>{t('{{count}} apps available', { count: apps.length })}</span>
+          </div>
+        </div>
+        <div className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-primary/5 blur-3xl" />
+        <div className="absolute -bottom-4 right-16 h-24 w-24 rounded-full bg-primary/10 blur-2xl" />
+      </div>
+
+      {/* Filter Bar - Responsive */}
+      <div className="flex flex-wrap items-center gap-3">
         <ApSidebarToggle />
         <InputWithIcon
           icon={<Search className="size-4 text-muted-foreground" />}
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder={t('Search apps')}
-          className="max-w-md bg-sidebar-accent"
+          placeholder={t('Search apps...')}
+          className="min-w-[200px] flex-1 max-w-md bg-sidebar-accent"
         />
         <Select value={category} onValueChange={setCategory}>
-          <SelectTrigger className="w-[220px]">
+          <SelectTrigger className="w-auto min-w-[140px]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             {categories.map((item) => (
               <SelectItem key={item} value={item}>
-                {item === 'ALL' ? t('All categories') : item}
+                {formatCategoryLabel(item)}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
         <Select value={sortMode} onValueChange={(value) => setSortMode(value as SortMode)}>
-          <SelectTrigger className="w-[180px]">
+          <SelectTrigger className="w-auto min-w-[130px]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="featured">{t('Featured')}</SelectItem>
             <SelectItem value="runs">{t('Most runs')}</SelectItem>
-            <SelectItem value="name">{t('Name')}</SelectItem>
+            <SelectItem value="name">{t('A-Z')}</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
+      {/* Featured Section */}
       {featuredApps.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Sparkles className="size-4 text-primary" />
-              {t('Featured apps')}
-            </CardTitle>
-            <CardDescription>
-              {t('Recommended production-ready apps for your team.')}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {featuredApps.map((app) => (
-              <Card key={`featured-${app.id}`} className="border-primary/25">
-                <CardHeader className="space-y-2 pb-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <CardTitle className="text-sm leading-tight">{app.name}</CardTitle>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0 -mr-2 -mt-1"
-                      onClick={() => window.open(`/apps/${app.id}`, '_blank')}
-                      title={t('Open app page')}
-                    >
-                      <ArrowUpRight className="size-4" />
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Sparkles className="size-4 text-amber-500" />
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{t('Featured')}</h2>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {featuredApps.map((app) => {
+              const icon = app.galleryMetadata?.icon?.trim() || '';
+              return (
+                <Card
+                  key={`featured-${app.id}`}
+                  className="group relative cursor-pointer border-primary/20 bg-gradient-to-br from-primary/[0.02] to-transparent transition-all duration-200 hover:border-primary/40 hover:shadow-md"
+                  onClick={() => openRunner(app)}
+                  role="article"
+                  aria-label={app.name}
+                >
+                  <CardHeader className="space-y-2 pb-2">
+                    <div className="flex items-start gap-3">
+                      {icon && (
+                        <img
+                          src={icon}
+                          alt={app.name}
+                          className="h-8 w-8 rounded-md border object-cover"
+                        />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <CardTitle className="text-sm leading-tight truncate">{app.name}</CardTitle>
+                        <CardDescription className="line-clamp-2 mt-1 text-xs">
+                          {app.galleryMetadata?.description || app.summary}
+                        </CardDescription>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardFooter className="pt-0">
+                    <Button size="sm" className="w-full" variant="default">
+                      <Play className="mr-1.5 size-3" />
+                      {t('Run')}
                     </Button>
+                  </CardFooter>
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Loading State - Skeletons */}
+      {appsQuery.isLoading && (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Card key={`skeleton-${i}`} className="animate-pulse">
+              <CardHeader className="space-y-3">
+                <div className="flex items-start gap-3">
+                  <div className="h-10 w-10 rounded-lg bg-muted" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-4 w-3/4 rounded bg-muted" />
+                    <div className="h-3 w-full rounded bg-muted" />
+                    <div className="h-3 w-2/3 rounded bg-muted" />
                   </div>
-                  <CardDescription className="line-clamp-2">
-                    {app.galleryMetadata?.description || app.summary}
-                  </CardDescription>
-                </CardHeader>
-                <CardFooter className="flex w-full items-center">
-                  <Button size="sm" className="w-full min-w-0" onClick={() => openRunner(app)}>
-                    <Play className="mr-1 size-3.5" />
-                    {t('Run')}
-                  </Button>
-                </CardFooter>
-              </Card>
-            ))}
-          </CardContent>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div className="h-3 w-1/2 rounded bg-muted" />
+                <div className="h-3 w-1/3 rounded bg-muted" />
+              </CardContent>
+              <CardFooter>
+                <div className="h-9 w-full rounded-md bg-muted" />
+              </CardFooter>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Error State */}
+      {appsQuery.isError && (
+        <Card className="border-destructive/30 bg-destructive/5">
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <AlertCircle className="size-5 text-destructive" />
+              <div>
+                <CardTitle className="text-base">{t('Failed to load apps')}</CardTitle>
+                <CardDescription className="text-destructive/80">
+                  {appsQuery.error instanceof Error
+                    ? appsQuery.error.message
+                    : t('An unexpected error occurred')}
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => appsQuery.refetch()}
+            >
+              <RefreshCw className="mr-1.5 size-3.5" />
+              {t('Retry')}
+            </Button>
+          </CardFooter>
         </Card>
       )}
 
-      {appsQuery.isLoading && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <LoaderCircle className="size-4 animate-spin" />
-          {t('Loading apps...')}
-        </div>
-      )}
-      {appsQuery.isError && (
-        <div className="text-sm text-destructive">
-          {appsQuery.error instanceof Error
-            ? appsQuery.error.message
-            : t('Failed to load apps')}
-        </div>
-      )}
-
-      {!appsQuery.isLoading && !sortedApps.length && (
-        <Card>
-          <CardHeader>
-            <CardTitle>{t('No apps found')}</CardTitle>
-            <CardDescription>
-              {t('Publish templates from Publisher to make apps available here.')}
+      {/* Empty State */}
+      {!appsQuery.isLoading && !appsQuery.isError && !sortedApps.length && (
+        <Card className="border-dashed">
+          <CardHeader className="items-center text-center py-12">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-muted">
+              <LayoutGrid className="size-6 text-muted-foreground" />
+            </div>
+            <CardTitle className="text-lg">{t('No apps yet')}</CardTitle>
+            <CardDescription className="max-w-sm">
+              {search.trim()
+                ? t('No apps match your search "{{search}}". Try different keywords.', { search })
+                : t('Publish templates from the Publisher to make apps available here.')}
             </CardDescription>
+            {search.trim() && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mt-3"
+                onClick={() => { setSearch(''); setCategory('ALL'); }}
+              >
+                {t('Clear filters')}
+              </Button>
+            )}
           </CardHeader>
         </Card>
       )}
 
+      {/* App Cards Grid */}
       {!!sortedApps.length && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {sortedApps.map((app) => {
             const metadata = app.galleryMetadata ?? {};
             const runCount = getRunCount(app);
             const successRate = getSuccessRate(app);
-            const icon = metadata.icon?.trim() || '/branding/wicked-flow-icon.svg?v=20260208';
+            const icon = metadata.icon?.trim() || '';
 
             return (
-              <Card key={app.id} className="flex flex-col">
+              <Card
+                key={app.id}
+                className="group flex flex-col transition-all duration-200 hover:shadow-md hover:border-primary/30"
+                role="article"
+                aria-label={app.name}
+              >
                 <CardHeader className="space-y-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex gap-2">
+                  <div className="flex items-start gap-3">
+                    {icon ? (
                       <img
                         src={icon}
-                        alt=""
-                        className="mt-0.5 h-9 w-9 rounded-md border object-cover"
+                        alt={app.name}
+                        className="h-10 w-10 rounded-lg border object-cover group-hover:scale-105 transition-transform"
                       />
-                      <div className="space-y-1">
-                        <CardTitle className="text-base">{app.name}</CardTitle>
-                        <CardDescription className="line-clamp-2">
-                          {metadata.description || app.summary || app.description}
-                        </CardDescription>
+                    ) : (
+                      <div className="flex h-10 w-10 items-center justify-center rounded-lg border bg-gradient-to-br from-primary/10 to-primary/5">
+                        <Zap className="size-5 text-primary" />
                       </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-1">
-                      <Badge variant={metadata.featured ? 'default' : 'outline'}>
-                        {metadata.featured ? t('Featured') : metadata.category ?? t('General')}
-                      </Badge>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0"
-                        onClick={() => window.open(`/apps/${app.id}`, '_blank')}
-                        title={t('Open app page')}
-                      >
-                        <ArrowUpRight className="size-4" />
-                      </Button>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-2">
+                        <CardTitle className="text-base leading-tight">{app.name}</CardTitle>
+                        <Badge
+                          variant={metadata.featured ? 'default' : 'outline'}
+                          className="shrink-0 text-xs"
+                        >
+                          {metadata.featured ? t('Featured') : formatCategoryLabel(metadata.category ?? 'General')}
+                        </Badge>
+                      </div>
+                      <CardDescription className="line-clamp-2 mt-1">
+                        {metadata.description || app.summary || app.description}
+                      </CardDescription>
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent className="space-y-2 text-sm">
-                  <div className="flex items-center justify-between text-muted-foreground">
-                    <span>{t('Runs')}</span>
-                    <span className="font-medium text-foreground">{runCount}</span>
+                <CardContent className="space-y-2 text-sm flex-1">
+                  <div className="grid grid-cols-3 gap-2 rounded-lg bg-muted/50 p-3 text-center">
+                    <div>
+                      <div className="text-xs text-muted-foreground">{t('Runs')}</div>
+                      <div className="font-semibold text-foreground">{runCount}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">{t('Success')}</div>
+                      <div className={cn(
+                        'font-semibold',
+                        successRate === null ? 'text-muted-foreground' : successRate >= 90 ? 'text-emerald-600' : successRate >= 70 ? 'text-amber-600' : 'text-destructive'
+                      )}>
+                        {successRate === null ? '-' : `${successRate}%`}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">{t('By')}</div>
+                      <div className="font-medium text-foreground truncate text-xs">
+                        {metadata.author || t('Team')}
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between text-muted-foreground">
-                    <span>{t('Success rate')}</span>
-                    <span className="font-medium text-foreground">
-                      {successRate === null ? '-' : `${successRate}%`}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-muted-foreground">
-                    <span>{t('Creator')}</span>
-                    <span className="font-medium text-foreground">
-                      {metadata.author || t('Wicked Flow')}
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap gap-1 pt-1">
-                    {(metadata.tags ?? []).slice(0, 4).map((tag) => (
-                      <Badge key={tag} variant="outline">
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
+                  {(metadata.tags ?? []).length > 0 && (
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      {(metadata.tags ?? []).slice(0, 3).map((tag) => (
+                        <Badge key={tag} variant="outline" className="text-xs font-normal">
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
-                <CardFooter className="mt-auto flex w-full items-center">
-                  <Button className="w-full min-w-0" onClick={() => openRunner(app)}>
-                    <Play className="mr-1 size-4" />
+                <CardFooter className="mt-auto pt-0">
+                  <Button className="w-full group-hover:bg-primary/90" onClick={() => openRunner(app)}>
+                    <Play className="mr-1.5 size-4" />
                     {t('Run app')}
                   </Button>
                 </CardFooter>
@@ -1216,6 +1316,7 @@ const AppsPage = () => {
         </DialogContent>
       </Dialog>
     </div>
+    </ErrorBoundary>
   );
 };
 

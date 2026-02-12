@@ -16,6 +16,7 @@ import {
   FileHeart,
   MousePointerClick,
   Webhook,
+  BarChart3,
 } from 'lucide-react';
 import { ComponentType, SVGProps } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -149,6 +150,11 @@ export function PlatformSidebar() {
     {
       label: t('Infrastructure'),
       items: [
+        {
+          to: '/platform/telemetry',
+          label: t('Telemetry'),
+          icon: BarChart3,
+        },
         {
           to: '/platform/infrastructure/workers',
           label: t('Workers'),

@@ -37,6 +37,7 @@ import { FlowBuilderPage } from '../routes/flows/id';
 import { ResetPasswordPage } from '../routes/forget-password';
 import { FormPage } from '../routes/forms';
 import LeaderboardPage from '../routes/leaderboard';
+import TelemetryPage from '../routes/admin/telemetry/page';
 import EventDestinationsPage from '../routes/platform/infra/event-destinations';
 import SettingsHealthPage from '../routes/platform/infra/health';
 import TriggerHealthPage from '../routes/platform/infra/triggers';
@@ -457,6 +458,16 @@ const routes = [
       <PlatformLayout>
         <PageTitle title="Audit Logs">
           <AuditLogsPage />
+        </PageTitle>
+      </PlatformLayout>
+    ),
+  },
+  {
+    path: '/platform/telemetry',
+    element: (
+      <PlatformLayout>
+        <PageTitle title="Telemetry">
+          <TelemetryPage />
         </PageTitle>
       </PlatformLayout>
     ),

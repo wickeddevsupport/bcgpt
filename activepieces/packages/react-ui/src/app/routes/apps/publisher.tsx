@@ -774,9 +774,9 @@ const AppsPublisherPage = () => {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => window.open(`/apps/${app.id}`, '_blank')}
+                      onClick={() => window.open('/apps', '_blank')}
                     >
-                      {t('Open')}
+                      {t('Open in Gallery')}
                     </Button>
                     <Button
                       variant="destructive"
@@ -1314,10 +1314,10 @@ const AppsPublisherPage = () => {
               <Button
                 variant="outline"
                 onClick={() =>
-                  window.open(`/apps/${encodeURIComponent(draft.templateId.trim())}`, '_blank')
+                  window.open('/apps', '_blank')
                 }
               >
-                {t('Open app runtime')}
+                {t('View in Gallery')}
               </Button>
             )}
           </CardFooter>
