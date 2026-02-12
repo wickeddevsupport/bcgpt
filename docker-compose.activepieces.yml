@@ -53,6 +53,40 @@ services:
       - postgres
       - redis
 
+  worker:
+    image: ghcr.io/wickeddevsupport/activepieces-bcgpt:latest
+    env_file:
+      - .env.activepieces
+    networks:
+      - activepieces
+      - coolify
+    environment:
+      AP_EDITION: "ce"
+      AP_ENVIRONMENT: "prod"
+      AP_CONTAINER_TYPE: "WORKER"
+      # Workers should connect to app socket/API over the internal docker network.
+      AP_FRONTEND_URL: "http://activepieces"
+      AP_EXECUTION_MODE: "UNSANDBOXED"
+      AP_DB_TYPE: "POSTGRES"
+      AP_REDIS_TYPE: "STANDALONE"
+      AP_POSTGRES_HOST: "activepieces-postgres"
+      AP_POSTGRES_PORT: "5432"
+      AP_POSTGRES_USERNAME: "${AP_POSTGRES_USERNAME}"
+      AP_POSTGRES_PASSWORD: "${AP_POSTGRES_PASSWORD}"
+      AP_POSTGRES_DATABASE: "${AP_POSTGRES_DATABASE}"
+      AP_REDIS_HOST: "activepieces-redis"
+      AP_REDIS_PORT: "6379"
+      AP_REDIS_PASSWORD: "${AP_REDIS_PASSWORD}"
+      AP_JWT_SECRET: "${AP_JWT_SECRET}"
+      AP_ENCRYPTION_KEY: "${AP_ENCRYPTION_KEY}"
+      AP_CONFIG_PATH: "/var/data/activepieces"
+      AP_DEV_PIECES: "basecamp"
+    volumes:
+      - activepieces-data:/var/data/activepieces
+    depends_on:
+      - postgres
+      - redis
+
   postgres:
     image: postgres:15
     environment:
