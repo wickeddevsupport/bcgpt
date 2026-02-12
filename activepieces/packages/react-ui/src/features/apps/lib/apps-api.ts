@@ -26,6 +26,7 @@ export type AppInputField = {
 export type AppGalleryMetadata = {
   description?: string;
   icon?: string;
+  author?: string;
   category?: string;
   tags?: string[];
   featured?: boolean;

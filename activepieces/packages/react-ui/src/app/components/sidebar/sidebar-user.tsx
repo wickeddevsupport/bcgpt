@@ -61,7 +61,7 @@ export function SidebarUser() {
   const isCollapsed = state === 'collapsed';
   const isDark = theme === 'dark';
 
-  if (!user || embedState.isEmbedded) {
+  if (embedState.isEmbedded) {
     return null;
   }
 
@@ -70,6 +70,13 @@ export function SidebarUser() {
     authenticationSession.logOut();
     reset();
   };
+
+  const fallbackName = t('Account');
+  const displayName = user ? `${user.firstName} ${user.lastName}` : fallbackName;
+  const displayEmail = user?.email ?? '';
+  const displayAvatarName = user ? `${user.firstName} ${user.lastName}` : fallbackName;
+  const displayImageUrl = user?.imageUrl;
+  const canShowRichUserMenu = Boolean(user);
 
   return (
     <SidebarMenu>
@@ -80,11 +87,11 @@ export function SidebarUser() {
               <div className="size-6 shrink-0 overflow-hidden flex items-center justify-center rounded-full">
                 <UserAvatar
                   className={cn('size-full object-cover', {
-                    'scale-150': isNil(user.imageUrl),
+                    'scale-150': isNil(displayImageUrl),
                   })}
-                  name={user.firstName + ' ' + user.lastName}
-                  email={user.email}
-                  imageUrl={user.imageUrl}
+                  name={displayAvatarName}
+                  email={displayEmail}
+                  imageUrl={displayImageUrl}
                   size={24}
                   disableTooltip={true}
                 />
@@ -92,9 +99,7 @@ export function SidebarUser() {
 
               {!isCollapsed && (
                 <>
-                  <span className="truncate">
-                    {user.firstName + ' ' + user.lastName}
-                  </span>
+                  <span className="truncate">{displayName}</span>
                   <ChevronsUpDown className="ml-auto size-4" />
                 </>
               )}
@@ -111,60 +116,72 @@ export function SidebarUser() {
                 <div className="size-8 shrink-0 overflow-hidden rounded-full">
                   <UserAvatar
                     className="size-full object-cover"
-                    name={user.firstName + ' ' + user.lastName}
-                    email={user.email}
-                    imageUrl={user.imageUrl}
+                    name={displayAvatarName}
+                    email={displayEmail}
+                    imageUrl={displayImageUrl}
                     size={32}
                     disableTooltip={true}
                   />
                 </div>
 
                 <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-medium">
-                    {user.firstName + ' ' + user.lastName}
+                  <span className="truncate font-medium">{displayName}</span>
+                  <span className="truncate text-xs">
+                    {displayEmail || t('Session detected')}
                   </span>
-                  <span className="truncate text-xs">{user.email}</span>
                 </div>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            {!isInPlatformAdmin && <SidebarPlatformAdminButton />}
-
-            <DropdownMenuGroup>
-              <DropdownMenuItem onClick={() => setAccountSettingsOpen(true)}>
-                <UserCogIcon className="w-4 h-4 mr-2" />
-                {t('Account Settings')}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onSelect={(event) => event.preventDefault()}
-                className="flex items-center justify-between"
-              >
-                <div className="flex items-center gap-2">
-                  {isDark ? (
-                    <Moon className="w-4 h-4 text-primary" />
-                  ) : (
-                    <Sun className="w-4 h-4 text-muted-foreground" />
+            {canShowRichUserMenu ? (
+              <>
+                {!isInPlatformAdmin && <SidebarPlatformAdminButton />}
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onClick={() => setAccountSettingsOpen(true)}>
+                    <UserCogIcon className="w-4 h-4 mr-2" />
+                    {t('Account Settings')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={(event) => event.preventDefault()}
+                    className="flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-2">
+                      {isDark ? (
+                        <Moon className="w-4 h-4 text-primary" />
+                      ) : (
+                        <Sun className="w-4 h-4 text-muted-foreground" />
+                      )}
+                      <span>{t('Dark Mode')}</span>
+                    </div>
+                    <Switch
+                      checked={isDark}
+                      onCheckedChange={(checked) =>
+                        setTheme(checked ? 'dark' : 'light')
+                      }
+                      checkedIcon={<Moon className="w-3 h-3 text-primary" />}
+                      uncheckedIcon={
+                        <Sun className="w-3 h-3 text-muted-foreground" />
+                      }
+                      aria-label="Toggle dark mode"
+                    />
+                  </DropdownMenuItem>
+                  {canInviteUsers && (
+                    <DropdownMenuItem onClick={() => setInviteUserOpen(true)}>
+                      <UserPlus className="w-4 h-4 mr-2" />
+                      {t('Invite User')}
+                    </DropdownMenuItem>
                   )}
-                  <span>{t('Dark Mode')}</span>
-                </div>
-                <Switch
-                  checked={isDark}
-                  onCheckedChange={(checked) =>
-                    setTheme(checked ? 'dark' : 'light')
-                  }
-                  checkedIcon={<Moon className="w-3 h-3 text-primary" />}
-                  uncheckedIcon={<Sun className="w-3 h-3 text-muted-foreground" />}
-                  aria-label="Toggle dark mode"
-                />
-              </DropdownMenuItem>
-              {canInviteUsers && (
-                <DropdownMenuItem onClick={() => setInviteUserOpen(true)}>
-                  <UserPlus className="w-4 h-4 mr-2" />
-                  {t('Invite User')}
+                  <HelpAndFeedback />
+                </DropdownMenuGroup>
+              </>
+            ) : (
+              <DropdownMenuGroup>
+                <DropdownMenuItem onClick={() => window.location.reload()}>
+                  <UserCogIcon className="w-4 h-4 mr-2" />
+                  {t('Refresh Session')}
                 </DropdownMenuItem>
-              )}
-              <HelpAndFeedback />
-            </DropdownMenuGroup>
+              </DropdownMenuGroup>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={handleLogout}>
               <LogOut className="w-4 h-4 mr-2" />
@@ -174,10 +191,12 @@ export function SidebarUser() {
         </DropdownMenu>
       </SidebarMenuItem>
 
-      <AccountSettingsDialog
-        open={accountSettingsOpen}
-        onClose={() => setAccountSettingsOpen(false)}
-      />
+      {canShowRichUserMenu && (
+        <AccountSettingsDialog
+          open={accountSettingsOpen}
+          onClose={() => setAccountSettingsOpen(false)}
+        />
+      )}
       <InviteUserDialog open={inviteUserOpen} setOpen={setInviteUserOpen} />
     </SidebarMenu>
   );

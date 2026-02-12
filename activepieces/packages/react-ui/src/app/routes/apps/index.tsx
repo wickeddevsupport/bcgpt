@@ -1,6 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { t } from 'i18next';
-import { ArrowUpRight, Play, Search } from 'lucide-react';
+import {
+  ArrowUpRight,
+  Play,
+  Search,
+  Sparkles,
+  Wand2,
+} from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -35,11 +41,16 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
-import { appsApi, AppInputField, AppTemplate } from '@/features/apps/lib/apps-api';
+import {
+  AppInputField,
+  AppTemplate,
+  appsApi,
+} from '@/features/apps/lib/apps-api';
 import { authenticationSession } from '@/lib/authentication-session';
 import { cn } from '@/lib/utils';
 
 type AppFormState = Record<string, string | number | boolean | null>;
+type SortMode = 'featured' | 'runs' | 'name';
 
 function getAppFields(app: AppTemplate): AppInputField[] {
   return app.galleryMetadata?.inputSchema?.fields ?? [];
@@ -55,9 +66,25 @@ function normalizeFieldLabel(field: AppInputField) {
   return field.label?.trim().length ? field.label : field.name;
 }
 
+function isFeatured(app: AppTemplate) {
+  return Boolean(app.galleryMetadata?.featured);
+}
+
+function getRunCount(app: AppTemplate) {
+  return Number(app.galleryMetadata?.runCount ?? 0);
+}
+
+function getSuccessRate(app: AppTemplate) {
+  const runCount = getRunCount(app);
+  const successCount = Number(app.galleryMetadata?.successCount ?? 0);
+  if (!runCount) return null;
+  return Math.max(0, Math.min(100, Math.round((successCount / runCount) * 100)));
+}
+
 const AppsPage = () => {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<string>('ALL');
+  const [sortMode, setSortMode] = useState<SortMode>('featured');
   const [selectedApp, setSelectedApp] = useState<AppTemplate | null>(null);
   const [runMode, setRunMode] = useState<'sync' | 'async'>('sync');
   const [formState, setFormState] = useState<AppFormState>({});
@@ -98,12 +125,14 @@ const AppsPage = () => {
       }
       setRunError('');
       queryClient.invalidateQueries({ queryKey: ['apps-gallery'] });
+      toast.success(t('App executed successfully'));
     },
     onError: (error) => {
       const message = error instanceof Error ? error.message : String(error);
       setRunError(message);
       setRunMeta('');
       setRunOutput(null);
+      toast.error(message);
     },
   });
 
@@ -119,6 +148,31 @@ const AppsPage = () => {
     });
     return ['ALL', ...Array.from(set).sort((a, b) => a.localeCompare(b))];
   }, [apps]);
+
+  const sortedApps = useMemo(() => {
+    const next = [...apps];
+    if (sortMode === 'name') {
+      next.sort((a, b) => a.name.localeCompare(b.name));
+      return next;
+    }
+    if (sortMode === 'runs') {
+      next.sort((a, b) => getRunCount(b) - getRunCount(a));
+      return next;
+    }
+    next.sort((a, b) => {
+      const featuredDelta = Number(isFeatured(b)) - Number(isFeatured(a));
+      if (featuredDelta !== 0) {
+        return featuredDelta;
+      }
+      return getRunCount(b) - getRunCount(a);
+    });
+    return next;
+  }, [apps, sortMode]);
+
+  const featuredApps = useMemo(
+    () => sortedApps.filter((app) => isFeatured(app)).slice(0, 4),
+    [sortedApps],
+  );
 
   const openRunner = (app: AppTemplate) => {
     const next: AppFormState = {};
@@ -162,9 +216,7 @@ const AppsPage = () => {
           <div className="flex flex-col">
             <span className="text-sm font-medium">{label}</span>
             {field.placeholder && (
-              <span className="text-xs text-muted-foreground">
-                {field.placeholder}
-              </span>
+              <span className="text-xs text-muted-foreground">{field.placeholder}</span>
             )}
           </div>
           <Switch
@@ -263,19 +315,23 @@ const AppsPage = () => {
     );
   };
 
-  const publisherPath = authenticationSession.appendProjectRoutePrefix(
-    '/apps/publisher',
-  );
+  const publisherPath = authenticationSession.appendProjectRoutePrefix('/apps/publisher');
 
   return (
     <div className="space-y-4">
       <DashboardPageHeader
         title={t('Apps')}
-        description={t('Run and manage published workflow apps in your dashboard.')}
+        description={t('Run workflow-powered apps without editing the underlying flows.')}
       >
-        <Button variant="outline" onClick={() => (window.location.href = publisherPath)}>
-          {t('Open Publisher')}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => (window.location.href = '/templates')}>
+            {t('Templates')}
+          </Button>
+          <Button onClick={() => (window.location.href = publisherPath)}>
+            <Wand2 className="mr-1 size-4" />
+            {t('Open Publisher')}
+          </Button>
+        </div>
       </DashboardPageHeader>
 
       <div className="flex items-center gap-3">
@@ -299,7 +355,49 @@ const AppsPage = () => {
             ))}
           </SelectContent>
         </Select>
+        <Select value={sortMode} onValueChange={(value) => setSortMode(value as SortMode)}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="featured">{t('Featured')}</SelectItem>
+            <SelectItem value="runs">{t('Most runs')}</SelectItem>
+            <SelectItem value="name">{t('Name')}</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
+
+      {featuredApps.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Sparkles className="size-4 text-primary" />
+              {t('Featured apps')}
+            </CardTitle>
+            <CardDescription>
+              {t('Recommended production-ready apps for your team.')}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {featuredApps.map((app) => (
+              <Card key={`featured-${app.id}`} className="border-primary/25">
+                <CardHeader className="space-y-2 pb-2">
+                  <CardTitle className="text-sm">{app.name}</CardTitle>
+                  <CardDescription className="line-clamp-2">
+                    {app.galleryMetadata?.description || app.summary}
+                  </CardDescription>
+                </CardHeader>
+                <CardFooter className="flex gap-2">
+                  <Button size="sm" className="w-full" onClick={() => openRunner(app)}>
+                    <Play className="mr-1 size-3.5" />
+                    {t('Run')}
+                  </Button>
+                </CardFooter>
+              </Card>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {appsQuery.isLoading && (
         <div className="text-sm text-muted-foreground">{t('Loading apps...')}</div>
@@ -312,7 +410,7 @@ const AppsPage = () => {
         </div>
       )}
 
-      {!appsQuery.isLoading && !apps.length && (
+      {!appsQuery.isLoading && !sortedApps.length && (
         <Card>
           <CardHeader>
             <CardTitle>{t('No apps found')}</CardTitle>
@@ -323,25 +421,30 @@ const AppsPage = () => {
         </Card>
       )}
 
-      {!!apps.length && (
+      {!!sortedApps.length && (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {apps.map((app) => {
+          {sortedApps.map((app) => {
             const metadata = app.galleryMetadata ?? {};
-            const runCount = metadata.runCount ?? 0;
-            const successRate =
-              runCount > 0 && typeof metadata.successCount === 'number'
-                ? Math.round((metadata.successCount / runCount) * 100)
-                : null;
+            const runCount = getRunCount(app);
+            const successRate = getSuccessRate(app);
+            const icon = metadata.icon?.trim() || '/branding/wicked-flow-icon.svg?v=20260208';
 
             return (
               <Card key={app.id} className="flex flex-col">
                 <CardHeader className="space-y-3">
                   <div className="flex items-start justify-between gap-2">
-                    <div className="space-y-1">
-                      <CardTitle className="text-base">{app.name}</CardTitle>
-                      <CardDescription>
-                        {metadata.description || app.summary || app.description}
-                      </CardDescription>
+                    <div className="flex gap-2">
+                      <img
+                        src={icon}
+                        alt=""
+                        className="mt-0.5 h-9 w-9 rounded-md border object-cover"
+                      />
+                      <div className="space-y-1">
+                        <CardTitle className="text-base">{app.name}</CardTitle>
+                        <CardDescription className="line-clamp-2">
+                          {metadata.description || app.summary || app.description}
+                        </CardDescription>
+                      </div>
                     </div>
                     <Badge variant={metadata.featured ? 'default' : 'outline'}>
                       {metadata.featured ? t('Featured') : metadata.category ?? t('General')}
@@ -357,6 +460,12 @@ const AppsPage = () => {
                     <span>{t('Success rate')}</span>
                     <span className="font-medium text-foreground">
                       {successRate === null ? '-' : `${successRate}%`}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-muted-foreground">
+                    <span>{t('Creator')}</span>
+                    <span className="font-medium text-foreground">
+                      {metadata.author || t('Wicked Flow')}
                     </span>
                   </div>
                   <div className="flex flex-wrap gap-1 pt-1">
@@ -395,7 +504,7 @@ const AppsPage = () => {
           }
         }}
       >
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-3xl">
           <DialogHeader>
             <DialogTitle>{selectedApp?.name ?? t('Run app')}</DialogTitle>
             <DialogDescription>
@@ -405,44 +514,46 @@ const AppsPage = () => {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3 max-h-[55vh] overflow-y-auto pr-1">
-            {selectedApp && getAppFields(selectedApp).length === 0 && (
-              <div className="text-sm text-muted-foreground">
-                {t('This app does not require any inputs.')}
-              </div>
-            )}
-            {selectedApp && getAppFields(selectedApp).map(renderField)}
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-3 max-h-[55vh] overflow-y-auto pr-1">
+              {selectedApp && getAppFields(selectedApp).length === 0 && (
+                <div className="text-sm text-muted-foreground">
+                  {t('This app does not require any inputs.')}
+                </div>
+              )}
+              {selectedApp && getAppFields(selectedApp).map(renderField)}
 
-            <div className="space-y-2 pt-2">
-              <label className="text-sm font-medium">{t('Execution mode')}</label>
-              <Select value={runMode} onValueChange={(value) => setRunMode(value as 'sync' | 'async')}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="sync">{t('Sync (wait for response)')}</SelectItem>
-                  <SelectItem value="async">{t('Async (queue run)')}</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="space-y-2 pt-2">
+                <label className="text-sm font-medium">{t('Execution mode')}</label>
+                <Select value={runMode} onValueChange={(value) => setRunMode(value as 'sync' | 'async')}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="sync">{t('Sync (wait for response)')}</SelectItem>
+                    <SelectItem value="async">{t('Async (queue run)')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
-            {(runMeta || runError || runOutput !== null) && (
-              <div className="rounded-md border p-3 space-y-2">
-                {runMeta && <div className="text-xs text-muted-foreground">{runMeta}</div>}
-                {runError && <div className="text-sm text-destructive">{runError}</div>}
-                {runOutput !== null && (
-                  <pre
-                    className={cn(
-                      'max-h-[240px] overflow-auto rounded bg-muted p-3 text-xs',
-                    )}
-                  >
+            <div className="space-y-2">
+              <div className="rounded-md border p-3">
+                <div className="text-xs text-muted-foreground">{runMeta || t('Run output will appear here.')}</div>
+                {runError && <div className="mt-2 text-sm text-destructive">{runError}</div>}
+                {runOutput !== null ? (
+                  <pre className={cn('mt-2 max-h-[320px] overflow-auto rounded bg-muted p-3 text-xs')}>
                     {typeof runOutput === 'string'
                       ? runOutput
                       : JSON.stringify(runOutput, null, 2)}
                   </pre>
+                ) : (
+                  <div className="mt-2 text-sm text-muted-foreground">
+                    {t('No run yet. Configure inputs and click Run app.')}
+                  </div>
                 )}
               </div>
-            )}
+            </div>
           </div>
 
           <DialogFooter>

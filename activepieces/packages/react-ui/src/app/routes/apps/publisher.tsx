@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { t } from 'i18next';
-import { Plus, RefreshCcw, Trash2 } from 'lucide-react';
+import { ArrowUpRight, Plus, RefreshCcw, Trash2, Wand2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -33,6 +33,7 @@ import {
   AppTemplate,
 } from '@/features/apps/lib/apps-api';
 import { Search } from 'lucide-react';
+import { authenticationSession } from '@/lib/authentication-session';
 
 type DraftField = {
   id: string;
@@ -248,6 +249,8 @@ const AppsPublisherPage = () => {
     [templates, draft.templateId],
   );
 
+  const templatesPath = authenticationSession.appendProjectRoutePrefix('/templates');
+
   const applyTemplate = (template: AppTemplate) => {
     setDraft((prev) => ({
       ...prev,
@@ -285,9 +288,16 @@ const AppsPublisherPage = () => {
     <div className="space-y-4">
       <DashboardPageHeader
         title={t('Publisher')}
-        description={t('Turn templates into runnable apps for your users.')}
+        description={t('Turn templates into runnable apps with a guided no-code workflow.')}
       >
         <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => (window.location.href = templatesPath)}
+          >
+            <Wand2 className="mr-2 size-4" />
+            {t('Create Template')}
+          </Button>
           <Button
             variant="outline"
             onClick={() =>
@@ -309,6 +319,38 @@ const AppsPublisherPage = () => {
           </Button>
         </div>
       </DashboardPageHeader>
+
+      <Card>
+        <CardContent className="grid grid-cols-1 gap-3 py-4 md:grid-cols-3">
+          <div className="rounded-md border bg-muted/30 p-3">
+            <div className="text-xs font-semibold uppercase text-muted-foreground">
+              {t('Step 1')}
+            </div>
+            <div className="mt-1 text-sm font-medium">{t('Select template')}</div>
+            <div className="text-xs text-muted-foreground">
+              {t('Pick an existing template or create one from Templates.')}
+            </div>
+          </div>
+          <div className="rounded-md border bg-muted/30 p-3">
+            <div className="text-xs font-semibold uppercase text-muted-foreground">
+              {t('Step 2')}
+            </div>
+            <div className="mt-1 text-sm font-medium">{t('Configure app schema')}</div>
+            <div className="text-xs text-muted-foreground">
+              {t('Define input fields, metadata, and output type.')}
+            </div>
+          </div>
+          <div className="rounded-md border bg-muted/30 p-3">
+            <div className="text-xs font-semibold uppercase text-muted-foreground">
+              {t('Step 3')}
+            </div>
+            <div className="mt-1 text-sm font-medium">{t('Publish and share')}</div>
+            <div className="text-xs text-muted-foreground">
+              {t('Publish and open your app runtime URL immediately.')}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="flex items-center gap-3">
         <ApSidebarToggle />
@@ -348,6 +390,20 @@ const AppsPublisherPage = () => {
                 >
                   <CardTitle className="text-sm">{template.name}</CardTitle>
                   <CardDescription>{template.summary}</CardDescription>
+                  <CardFooter className="px-0 pt-2 pb-0">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        window.open(`/templates/${template.id}`, '_blank');
+                      }}
+                    >
+                      {t('Preview template')}
+                      <ArrowUpRight className="ml-1 size-3.5" />
+                    </Button>
+                  </CardFooter>
                 </Card>
               ))}
             </div>
@@ -429,6 +485,15 @@ const AppsPublisherPage = () => {
                 placeholder={t('Template ID')}
               />
             </div>
+
+            {draft.templateId.trim().length > 0 && (
+              <div className="rounded-md border bg-muted/20 p-3 text-xs">
+                <div className="font-medium">{t('Runtime URL')}</div>
+                <div className="mt-1 text-muted-foreground break-all">
+                  {`${window.location.origin}/apps/${draft.templateId.trim()}`}
+                </div>
+              </div>
+            )}
 
             <div className="space-y-2">
               <label className="text-sm font-medium">{t('Flow ID')}</label>
@@ -633,6 +698,16 @@ const AppsPublisherPage = () => {
             </Button>
             {draft.templateId.trim().length > 0 && (
               <Badge variant="outline">{draft.templateId}</Badge>
+            )}
+            {draft.templateId.trim().length > 0 && (
+              <Button
+                variant="outline"
+                onClick={() =>
+                  window.open(`/apps/${encodeURIComponent(draft.templateId.trim())}`, '_blank')
+                }
+              >
+                {t('Open app runtime')}
+              </Button>
             )}
           </CardFooter>
         </Card>
