@@ -186,7 +186,7 @@ export function ProjectDashboardSidebar() {
   const exploreLink: SidebarItemType = {
     type: 'link',
     to: '/templates',
-    label: t('Explore'),
+    label: t('Discover'),
     show: true,
     icon: Compass,
     hasPermission: true,
@@ -229,7 +229,7 @@ export function ProjectDashboardSidebar() {
   const publisherLink: SidebarItemType = {
     type: 'link',
     to: authenticationSession.appendProjectRoutePrefix('/apps/publisher'),
-    label: t('Publisher'),
+    label: t('Publish'),
     icon: MousePointerClick,
     show: true,
     hasPermission: true,
@@ -240,7 +240,7 @@ export function ProjectDashboardSidebar() {
   const templatesLink: SidebarItemType = {
     type: 'link',
     to: '/my-templates',
-    label: t('Templates'),
+    label: t('My Templates'),
     icon: Wand2,
     show: true,
     hasPermission: true,
