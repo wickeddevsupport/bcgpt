@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { t } from 'i18next';
 import {
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   KeyRound,
   Link2,
@@ -11,6 +12,7 @@ import {
   Search,
   Sparkles,
   Square,
+  Zap,
 } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -307,6 +309,9 @@ const AppsPage = () => {
   const [runOutput, setRunOutput] = useState<unknown>(null);
   const [runMeta, setRunMeta] = useState<string>('');
   const [runError, setRunError] = useState<string>('');
+  const [currentRuntimeStep, setCurrentRuntimeStep] = useState<RunnerStepKey>('requirements');
+  const [credentials, setCredentials] = useState<Record<string, string>>({});
+  const [testRunResult, setTestRunResult] = useState<{ passed: boolean; message: string } | null>(null);
   const queryClient = useQueryClient();
   const activeRunController = useRef<AbortController | null>(null);
 
@@ -406,6 +411,9 @@ const AppsPage = () => {
     setRunOutput(null);
     setRunMeta('');
     setRunError('');
+    setCredentials({});
+    setTestRunResult(null);
+    setCurrentRuntimeStep('requirements');
     setSelectedApp(app);
   };
 
@@ -413,6 +421,81 @@ const AppsPage = () => {
     activeRunController.current?.abort();
     activeRunController.current = null;
     setSelectedApp(null);
+    setCurrentRuntimeStep('requirements');
+    setCredentials({});
+    setTestRunResult(null);
+  };
+
+  const getRuntimeContract = (): AppRunnerContract | null => {
+    if (!selectedApp) return null;
+    return getRunnerContract(selectedApp);
+  };
+
+  const validateStepRequirements = (step: RunnerStepKey): boolean => {
+    const contract = getRuntimeContract();
+    if (!contract) return false;
+
+    switch (step) {
+      case 'requirements':
+        return contract.requirements.length === 0 || true; // Always allow to view requirements
+      case 'connect':
+        return contract.authMode !== 'none'; // Only required if auth needed
+      case 'configure':
+        return getAppFields(selectedApp!).length > 0 || true; // Allow even if no fields
+      case 'test':
+        return true; // Optional step
+      case 'run':
+        return true;
+      default:
+        return false;
+    }
+  };
+
+  const canAdvanceFromStep = (step: RunnerStepKey): boolean => {
+    const contract = getRuntimeContract();
+    if (!contract) return false;
+
+    switch (step) {
+      case 'requirements':
+        return true; // Always allow to proceed from requirements
+      case 'connect':
+        if (contract.authMode === 'none') return true;
+        return Object.values(credentials).some((c) => c?.trim().length > 0);
+      case 'configure':
+        return true; // Validation happens at final submit
+      case 'test':
+        return true;
+      case 'run':
+        return false; // Last step
+      default:
+        return false;
+    }
+  };
+
+  const goToStep = (step: RunnerStepKey) => {
+    setCurrentRuntimeStep(step);
+    setRunError('');
+  };
+
+  const nextStep = () => {
+    const steps: RunnerStepKey[] = ['requirements', 'connect', 'configure', 'test', 'run'];
+    const currentIndex = steps.indexOf(currentRuntimeStep);
+    if (~currentIndex && currentIndex < steps.length - 1) {
+      const nextStepKey = steps[currentIndex + 1];
+      if (canAdvanceFromStep(currentRuntimeStep)) {
+        goToStep(nextStepKey);
+      } else {
+        toast.error(t('Please complete this step before continuing'));
+      }
+    }
+  };
+
+  const previousStep = () => {
+    const steps: RunnerStepKey[] = ['requirements', 'connect', 'configure', 'test', 'run'];
+    const currentIndex = steps.indexOf(currentRuntimeStep);
+    if (currentIndex > 0) {
+      goToStep(steps[currentIndex - 1]);
+    }
   };
 
   const buildInputs = (): Record<string, unknown> => {
@@ -460,6 +543,167 @@ const AppsPage = () => {
     }
     activeRunController.current.abort();
     activeRunController.current = null;
+  };
+
+  const renderRequirementsStep = () => {
+    const contract = getRuntimeContract();
+    if (!contract) return null;
+
+    return (
+      <div className="space-y-4">
+        <div className="rounded-md border bg-muted/20 p-4">
+          <h3 className="font-medium mb-3">{t('Setup requirements')}</h3>
+          {contract.requirements.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t('No setup required for this app.')}</p>
+          ) : (
+            <ul className="space-y-2">
+              {contract.requirements.map((req, idx) => (
+                <li key={idx} className="flex items-start gap-2 text-sm">
+                  <CheckCircle2 className="size-4 mt-0.5 text-emerald-600 flex-shrink-0" />
+                  <span>{req}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {contract.credentialHint && (
+            <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded text-sm text-blue-900">
+              <span className="font-medium">{t('Tip')}: </span>
+              {contract.credentialHint}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderConnectStep = () => {
+    const contract = getRuntimeContract();
+    if (!contract) return null;
+
+    if (contract.authMode === 'none') {
+      return (
+        <div className="rounded-md border bg-emerald-500/10 p-4">
+          <p className="text-sm">{t('This app does not require any credentials.')}</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        <div className="text-sm text-muted-foreground">
+          {t('Authentication mode')}: <span className="font-medium">{contract.authMode}</span>
+        </div>
+        {contract.secretsFields.length > 0 ? (
+          <div className="space-y-3">
+            {contract.secretsFields.map((field) => (
+              <div key={field.name} className="space-y-2">
+                <label className="text-sm font-medium">
+                  {normalizeFieldLabel(field)}
+                  {field.required && <span className="text-destructive ml-1">*</span>}
+                </label>
+                <Input
+                  type={field.type === 'password' ? 'password' : 'text'}
+                  placeholder={field.placeholder}
+                  value={(credentials[field.name] as string) ?? ''}
+                  onChange={(e) =>
+                    setCredentials((prev) => ({ ...prev, [field.name]: e.target.value }))
+                  }
+                />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">{t('Waiting for connection...')}</p>
+        )}
+      </div>
+    );
+  };
+
+  const renderConfigureStep = () => {
+    const fields = getAppFields(selectedApp!);
+    if (fields.length === 0) {
+      return (
+        <div className="rounded-md border bg-muted/20 p-4">
+          <p className="text-sm text-muted-foreground">{t('This app has no required inputs.')}</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-3 max-h-[40vh] overflow-y-auto pr-1">
+        {fields.map(renderField)}
+      </div>
+    );
+  };
+
+  const renderTestStep = () => {
+    return (
+      <div className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          {t('Run a test to validate setup and configuration before publishing.')}
+        </p>
+        {testRunResult && (
+          <div
+            className={cn(
+              'rounded-md border p-3 text-sm',
+              testRunResult.passed
+                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-900'
+                : 'border-destructive/40 bg-destructive/5 text-destructive',
+            )}
+          >
+            {testRunResult.message}
+          </div>
+        )}
+        {runMeta && (
+          <div className="text-xs text-muted-foreground">{runMeta}</div>
+        )}
+      </div>
+    );
+  };
+
+  const renderRunStep = () => {
+    return (
+      <div className="space-y-4">
+        <div className="rounded-md border bg-muted/20 p-4">
+          <h3 className="font-medium mb-2">{t('Ready to run')}</h3>
+          <p className="text-sm text-muted-foreground">
+            {t('Click "Execute" below to run this app and see the results.')}
+          </p>
+        </div>
+        {runOutput !== null && (
+          <div>
+            <h4 className="text-sm font-medium mb-2">{t('Output')}</h4>
+            <Card>
+              <CardContent className="pt-4">
+                {renderOutput()}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+        {runError && (
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+            {runError}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderStepContent = () => {
+    switch (currentRuntimeStep) {
+      case 'requirements':
+        return renderRequirementsStep();
+      case 'connect':
+        return renderConnectStep();
+      case 'configure':
+        return renderConfigureStep();
+      case 'test':
+        return renderTestStep();
+      case 'run':
+        return renderRunStep();
+      default:
+        return null;
+    }
   };
 
   const renderField = (field: AppInputField) => {
@@ -834,7 +1078,7 @@ const AppsPage = () => {
           }
         }}
       >
-        <DialogContent className="max-w-5xl">
+        <DialogContent className="max-w-3xl">
           <DialogHeader>
             <DialogTitle>{selectedApp?.name ?? t('Run app')}</DialogTitle>
             <DialogDescription>
@@ -844,56 +1088,107 @@ const AppsPage = () => {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 lg:grid-cols-[1.1fr_1fr]">
-            <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
-              {selectedApp && getAppFields(selectedApp).length === 0 && (
-                <div className="text-sm text-muted-foreground">
-                  {t('This app does not require any inputs.')}
+          {/* Step Indicator */}
+          <div className="flex items-center gap-2 border-b pb-4">
+            {RUNNER_STEPS.map((step, idx) => {
+              const isActive = step.key === currentRuntimeStep;
+              const isCompleted = RUNNER_STEPS.findIndex((s) => s.key === currentRuntimeStep) > idx;
+              return (
+                <div key={step.key} className="flex items-center flex-1">
+                  <button
+                    onClick={() => goToStep(step.key)}
+                    disabled={!isCompleted && !canAdvanceFromStep(RUNNER_STEPS[Math.max(0, idx - 1)]?.key ?? ('requirements' as RunnerStepKey))}
+                    className={cn(
+                      'flex items-center justify-center flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors',
+                      isActive
+                        ? 'bg-primary text-primary-foreground'
+                        : isCompleted
+                          ? 'bg-emerald-500/20 text-emerald-900 hover:bg-emerald-500/30'
+                          : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
+                    )}
+                  >
+                    <span>{step.title}</span>
+                  </button>
+                  {idx < RUNNER_STEPS.length - 1 && (
+                    <div className="h-0.5 w-2 bg-border" />
+                  )}
                 </div>
-              )}
-              {selectedApp && getAppFields(selectedApp).map(renderField)}
-
-            </div>
-
-            <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">{t('Output')}</CardTitle>
-                  <CardDescription>{runMeta || t('Run output will appear here.')}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {runError && <div className="mt-1 text-sm text-destructive">{runError}</div>}
-                  {renderOutput()}
-                </CardContent>
-              </Card>
-            </div>
+              );
+            })}
           </div>
 
+          {/* Step Content */}
+          <div className="min-h-[300px] max-h-[55vh] overflow-y-auto pr-3">
+            {renderStepContent()}
+          </div>
+
+          {/* Footer Actions */}
           <DialogFooter className="flex-wrap gap-2">
             <Button variant="outline" onClick={closeRunner}>
               {t('Close')}
             </Button>
-            <Button
-              variant="outline"
-              onClick={cancelRun}
-              disabled={!runMutation.isPending}
-            >
-              <Square className="mr-1 size-4" />
-              {t('Cancel')}
-            </Button>
-            <Button onClick={() => submitRun()} disabled={runMutation.isPending}>
-              {runMutation.isPending ? (
-                <>
-                  <LoaderCircle className="mr-1 size-4 animate-spin" />
-                  {t('Running...')}
-                </>
-              ) : (
-                <>
-                  <Play className="mr-1 size-4" />
-                  {t('Run app')}
-                </>
-              )}
-            </Button>
+            {currentRuntimeStep !== 'requirements' && (
+              <Button
+                variant="outline"
+                onClick={previousStep}
+              >
+                <ChevronLeft className="mr-1 size-4" />
+                {t('Back')}
+              </Button>
+            )}
+            {currentRuntimeStep !== 'run' && (
+              <Button
+                onClick={nextStep}
+                disabled={!canAdvanceFromStep(currentRuntimeStep)}
+              >
+                {t('Next')}
+                <ChevronRight className="ml-1 size-4" />
+              </Button>
+            )}
+            {currentRuntimeStep === 'test' && (
+              <Button
+                variant="outline"
+                onClick={() => submitRun()}
+                disabled={runMutation.isPending}
+              >
+                {runMutation.isPending ? (
+                  <>
+                    <LoaderCircle className="mr-1 size-4 animate-spin" />
+                    {t('Testing...')}
+                  </>
+                ) : (
+                  <>
+                    <Zap className="mr-1 size-4" />
+                    {t('Test')}
+                  </>
+                )}
+              </Button>
+            )}
+            {currentRuntimeStep === 'run' && (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={cancelRun}
+                  disabled={!runMutation.isPending}
+                >
+                  <Square className="mr-1 size-4" />
+                  {t('Cancel')}
+                </Button>
+                <Button onClick={() => submitRun()} disabled={runMutation.isPending}>
+                  {runMutation.isPending ? (
+                    <>
+                      <LoaderCircle className="mr-1 size-4 animate-spin" />
+                      {t('Running...')}
+                    </>
+                  ) : (
+                    <>
+                      <Play className="mr-1 size-4" />
+                      {t('Execute')}
+                    </>
+                  )}
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
