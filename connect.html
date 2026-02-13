@@ -321,7 +321,7 @@
       <div class="actions">
         <button class="btn primary" id="primaryConnect">Connect Basecamp</button>
         <button class="btn ghost" id="refreshStatus">Refresh Status</button>
-        <button class="btn ghost" id="logoutButton" style="display:none;">Logout</button>
+
       </div>
     </header>
 
@@ -376,7 +376,6 @@
     const refreshStatus = document.getElementById('refreshStatus');
     const copyKey = document.getElementById('copyKey');
     const forgetKey = document.getElementById('forgetKey');
-    const logoutButton = document.getElementById('logoutButton');
 
     let state = {
       apiKey: null,
@@ -426,7 +425,7 @@
         connectButton.href = '/auth/basecamp/start';
         reauthButton.style.display = 'none';
         primaryConnect.textContent = 'Connect Basecamp';
-        logoutButton.style.display = 'none';
+
         return;
       }
       const response = await fetch('/action/startbcgpt', {
@@ -458,7 +457,7 @@
       connectButton.href = state.connected ? state.reauthUrl : state.connectUrl;
       connectButton.textContent = state.connected ? 'Reconnect Basecamp' : 'Connect Basecamp';
       primaryConnect.textContent = state.connected ? 'Reconnect Basecamp' : 'Connect Basecamp';
-      logoutButton.style.display = state.connected ? 'inline-flex' : 'none';
+
 
       renderAccounts();
       if (state.selectedAccountId) {
@@ -513,33 +512,12 @@
       selectedAccountPill.textContent = `Selected account: ${state.selectedAccountId}`;
     }
 
-    async function logout() {
-      if (!state.apiKey) return;
-      const ok = confirm('Logout will disconnect Basecamp for this API key. You can reconnect anytime. Continue?');
-      if (!ok) return;
 
-      try {
-        const response = await fetch('/logout', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ api_key: state.apiKey }),
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!data || data.ok !== true) {
-          alert(data?.message || data?.error || 'Logout failed');
-          return;
-        }
-        await fetchStatus();
-      } catch (e) {
-        alert(e?.message || String(e));
-      }
-    }
 
     primaryConnect.addEventListener('click', () => {
       window.location.href = state.connected ? state.reauthUrl : state.connectUrl;
     });
     refreshStatus.addEventListener('click', fetchStatus);
-    logoutButton.addEventListener('click', logout);
     saveAccount.addEventListener('click', saveSelectedAccount);
 
     copyKey.addEventListener('click', async () => {
