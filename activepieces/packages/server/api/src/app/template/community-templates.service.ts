@@ -169,7 +169,7 @@ function buildLocalTemplates(): Template[] {
         description: string,
         categories: string[],
         pieces: string[],
-        tags: Array<{ title: string; color?: string; icon?: string }>,
+        tags: Array<{ title: string; color: string; icon?: string }>,
         flows: unknown[] = [],
     ): Template => ({
         id,
