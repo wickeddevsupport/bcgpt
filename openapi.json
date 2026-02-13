@@ -6,6 +6,13 @@
     "version": "1.0.0"
   },
   "x-assistant-instructions": [
+    "API Key Handling (Critical):",
+    "- The user MUST provide their API key before any Basecamp operations.",
+    "- When a user shares their API key, acknowledge it and include it as 'api_key' in EVERY subsequent request body.",
+    "- NEVER forget the API key mid-conversation. Persist it across all tool calls.",
+    "- If a response says 'No API key provided', ask the user for their key.",
+    "- The user gets their key from https://bcgpt.wickedlab.io/connect",
+    "",
     "Tool-Required Search Policy (Mandatory):",
     "- For any request that implies searching Basecamp (find, search, look up, check, verify, list, open, summarize, which projects, who is, etc.), you MUST call the relevant tool(s) before responding.",
     "- Never claim you found/confirmed anything unless you called a tool in this response and the result contained that data.",
@@ -118,11 +125,7 @@
       }
     }
   },
-  "security": [
-    {
-      "apiKey": []
-    }
-  ],
+  "security": [],
   "paths": {
     "/action/startbcgpt": {
       "post": {
@@ -140,6 +143,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
@@ -168,6 +175,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "query": {
                     "type": "string"
                   },
@@ -206,6 +217,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "person": {
                     "type": "string",
                     "description": "Name, email, or person ID."
@@ -253,6 +268,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "tool": {
                     "type": "string",
                     "description": "MCP tool name to invoke."
@@ -293,6 +312,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "path": {
                     "type": "string"
                   },
@@ -339,6 +362,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "archived": {
                     "type": "boolean"
                   },
@@ -370,6 +397,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "query": {
                     "type": "string"
                   },
@@ -410,6 +441,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "project": {
                     "type": "string"
                   },
@@ -448,6 +483,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "query": {
                     "type": "string"
                   },
@@ -509,6 +548,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "query": {
                     "type": "string"
                   },
@@ -543,6 +586,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "date": {
                     "type": "string",
                     "description": "YYYY-MM-DD (defaults today)"
@@ -578,6 +625,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "project": {
                     "type": "string"
                   },
@@ -612,6 +663,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "project": {
                     "type": "string"
                   },
@@ -681,6 +736,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "project": {
                     "type": "string"
                   },
@@ -753,6 +812,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "project": {
                     "type": "string"
                   },
@@ -791,6 +854,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "project": {
                     "type": "string"
                   },
@@ -829,6 +896,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "project": {
                     "type": "string"
                   },
@@ -872,6 +943,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "project": {
                     "type": "string"
                   },
@@ -922,6 +997,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "project": {
                     "type": "string"
                   },
@@ -986,6 +1065,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "project": {
                     "type": "string"
                   },
@@ -1052,6 +1135,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "project": {
                     "type": "string"
                   },
@@ -1102,6 +1189,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "project": {
                     "type": "string"
                   },
@@ -1136,6 +1227,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "project": {
                     "type": "string"
                   },
@@ -1174,6 +1269,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "project": {
                     "type": "string"
                   },
@@ -1228,6 +1327,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "query": {
                     "type": "string",
                     "description": "Name or email to search for. Use empty string to list all."
@@ -1271,6 +1374,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "project": {
                     "type": "string"
                   },
@@ -1312,6 +1419,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "project": {
                     "type": "string"
                   },
@@ -1370,6 +1481,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "payload_key": {
                     "type": "string"
                   },
@@ -1407,6 +1522,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "person_id": {
                     "type": "integer"
                   },
@@ -1446,6 +1565,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key from https://bcgpt.wickedlab.io/connect"
+                  },
                   "person": {
                     "type": "string",
                     "description": "Name, email, or person ID."
