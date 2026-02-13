@@ -110,27 +110,17 @@
       }
     },
     "securitySchemes": {
-      "oauth2": {
-        "type": "oauth2",
-        "flows": {
-          "authorizationCode": {
-            "authorizationUrl": "https://launchpad.37signals.com/authorization/new",
-            "tokenUrl": "https://launchpad.37signals.com/authorization/token",
-            "scopes": {
-              "read": "Read access to Basecamp",
-              "write": "Write access to Basecamp"
-            }
-          }
-        }
+      "apiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key",
+        "description": "API key from https://bcgpt.wickedlab.io/connect — paste this key when ChatGPT asks for credentials."
       }
     }
   },
   "security": [
     {
-      "oauth2": [
-        "read",
-        "write"
-      ]
+      "apiKey": []
     }
   ],
   "paths": {
@@ -154,10 +144,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "additionalProperties": false
@@ -193,10 +179,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -244,10 +226,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -288,10 +266,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -338,10 +312,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -376,10 +346,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "additionalProperties": false
@@ -417,10 +383,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -458,10 +420,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -524,10 +482,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -562,10 +516,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -604,10 +554,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "additionalProperties": false
@@ -639,10 +585,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -712,10 +654,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -787,10 +725,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -829,10 +763,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -871,10 +801,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -919,10 +845,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -973,10 +895,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -1041,10 +959,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -1109,10 +1023,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -1164,10 +1074,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -1203,10 +1109,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -1245,10 +1147,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -1302,10 +1200,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -1350,10 +1244,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -1394,10 +1284,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -1456,10 +1342,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -1498,10 +1380,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
@@ -1544,13 +1422,8 @@
                   "assignee": {
                     "type": "string",
                     "description": "Alias for person."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
-                "required": [],
                 "additionalProperties": false
               }
             }
@@ -1596,10 +1469,6 @@
                   "compact": {
                     "type": "boolean",
                     "description": "Return compact payloads to avoid large responses."
-                  },
-                  "api_key": {
-                    "type": "string",
-                    "description": "API key for multi-tenant auth."
                   }
                 },
                 "required": [
