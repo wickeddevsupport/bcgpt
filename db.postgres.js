@@ -113,10 +113,19 @@ async function ensureSchema() {
     CREATE TABLE IF NOT EXISTS user_api_keys (
       api_key TEXT PRIMARY KEY,
       user_key TEXT UNIQUE,
+      access_token TEXT,
+      token_type TEXT DEFAULT 'Bearer',
       created_at BIGINT NOT NULL,
       last_used_at BIGINT
     );
     CREATE INDEX IF NOT EXISTS idx_user_api_keys_user_key ON user_api_keys(user_key);
+
+    -- Migration: add access_token column if missing (existing installs)
+    DO $$ BEGIN
+      ALTER TABLE user_api_keys ADD COLUMN IF NOT EXISTS access_token TEXT;
+      ALTER TABLE user_api_keys ADD COLUMN IF NOT EXISTS token_type TEXT DEFAULT 'Bearer';
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END $$;
 
     CREATE TABLE IF NOT EXISTS user_preferences (
       user_key TEXT PRIMARY KEY,
@@ -302,6 +311,14 @@ export async function setUserToken(token, userKey) {
     `,
     [key, token.access_token, token.token_type || "Bearer", token.expires_in, now]
   );
+
+  // Also sync to user_api_keys so the token is never lost
+  try {
+    await pool.query(
+      "UPDATE user_api_keys SET access_token = $1, token_type = $2 WHERE user_key = $3",
+      [token.access_token, token.token_type || "Bearer", key]
+    );
+  } catch { /* ignore — api key may not exist yet */ }
 }
 
 export async function clearUserToken(userKey) {
@@ -414,19 +431,31 @@ export async function getApiKeyForUser(userKey) {
   return res.rows[0]?.api_key || null;
 }
 
-export async function createApiKeyForUser(userKey) {
+export async function createApiKeyForUser(userKey, token = null) {
   const key = normalizeUserKey(userKey);
   if (!key) return null;
-  const existing = await getApiKeyForUser(key);
-  if (existing) return existing;
 
+  // If key already exists, update the token and return existing key
+  const existing = await getApiKeyForUser(key);
+  if (existing) {
+    if (token?.access_token) {
+      await pool.query(
+        "UPDATE user_api_keys SET access_token = $1, token_type = $2 WHERE api_key = $3",
+        [token.access_token, token.token_type || "Bearer", existing]
+      );
+    }
+    return existing;
+  }
+
+  const accessToken = token?.access_token || null;
+  const tokenType = token?.token_type || "Bearer";
   const now = nowSec();
   for (let attempt = 0; attempt < 5; attempt++) {
     const apiKey = generateApiKey();
     try {
       await pool.query(
-        "INSERT INTO user_api_keys (api_key, user_key, created_at, last_used_at) VALUES ($1, $2, $3, $3)",
-        [apiKey, key, now]
+        "INSERT INTO user_api_keys (api_key, user_key, access_token, token_type, created_at, last_used_at) VALUES ($1, $2, $3, $4, $5, $5)",
+        [apiKey, key, accessToken, tokenType, now]
       );
       return apiKey;
     } catch (e) {
@@ -445,16 +474,34 @@ export async function createApiKeyForUser(userKey) {
 export async function getUserByApiKey(apiKey, { touch = true } = {}) {
   const key = normalizeApiKey(apiKey);
   if (!key) return null;
-  const res = await pool.query("SELECT user_key FROM user_api_keys WHERE api_key = $1", [key]);
-  const userKey = res.rows[0]?.user_key || null;
+  const res = await pool.query("SELECT user_key, access_token, token_type FROM user_api_keys WHERE api_key = $1", [key]);
+  const row = res.rows[0];
+  const userKey = row?.user_key || null;
   if (!userKey) return null;
   if (touch) {
     await pool.query("UPDATE user_api_keys SET last_used_at = $1 WHERE api_key = $2", [nowSec(), key]);
   }
+
+  // Auto-heal: if user_token is missing but api_key has the token, restore it
+  if (row.access_token) {
+    const existing = await pool.query("SELECT user_key FROM user_token WHERE user_key = $1", [userKey]);
+    if (!existing.rows.length) {
+      const now = nowSec();
+      await pool.query(
+        `INSERT INTO user_token (user_key, access_token, token_type, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $4)
+         ON CONFLICT (user_key) DO UPDATE SET
+           access_token = EXCLUDED.access_token,
+           token_type = EXCLUDED.token_type,
+           updated_at = EXCLUDED.updated_at`,
+        [userKey, row.access_token, row.token_type || "Bearer", now]
+      );
+    }
+  }
   return userKey;
 }
 
-export async function bindApiKeyToUser(apiKey, userKey) {
+export async function bindApiKeyToUser(apiKey, userKey, token = null) {
   const key = normalizeApiKey(apiKey);
   const ukey = normalizeUserKey(userKey);
   if (!key || !ukey) return null;
@@ -467,16 +514,20 @@ export async function bindApiKeyToUser(apiKey, userKey) {
     throw err;
   }
 
+  const accessToken = token?.access_token || null;
+  const tokenType = token?.token_type || "Bearer";
   const now = nowSec();
   await pool.query(
     `
-      INSERT INTO user_api_keys (api_key, user_key, created_at, last_used_at)
-      VALUES ($1, $2, $3, $3)
+      INSERT INTO user_api_keys (api_key, user_key, access_token, token_type, created_at, last_used_at)
+      VALUES ($1, $2, $3, $4, $5, $5)
       ON CONFLICT (api_key) DO UPDATE SET
         user_key = EXCLUDED.user_key,
+        access_token = COALESCE(EXCLUDED.access_token, user_api_keys.access_token),
+        token_type = COALESCE(EXCLUDED.token_type, user_api_keys.token_type),
         last_used_at = EXCLUDED.last_used_at
     `,
-    [key, ukey, now]
+    [key, ukey, accessToken, tokenType, now]
   );
   return key;
 }

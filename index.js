@@ -739,10 +739,13 @@ app.get("/auth/basecamp/callback", async (req, res) => {
     const existingKey = await getApiKeyForUser(derivedUserKey);
     let apiKey = existingKey || apiKeyFromState || null;
     if (apiKey && !existingKey) {
-      await bindApiKeyToUser(apiKey, derivedUserKey);
+      await bindApiKeyToUser(apiKey, derivedUserKey, token);
+    } else if (apiKey && existingKey) {
+      // Update the stored token on the API key
+      await bindApiKeyToUser(apiKey, derivedUserKey, token);
     }
     if (!apiKey) {
-      apiKey = await createApiKeyForUser(derivedUserKey);
+      apiKey = await createApiKeyForUser(derivedUserKey, token);
     }
 
     res.redirect(`${base}/connect?api_key=${encodeURIComponent(apiKey)}`);
@@ -756,10 +759,10 @@ app.get("/startbcgpt", async (req, res) => res.json(await startStatus(req)));
 app.post("/logout", async (req, res) => {
   const ctx = await resolveRequestContext(req);
   if (ctx.userKey) {
-    await clearUserToken(ctx.userKey);
+    // Only clear auth cache, NOT the token — token must persist for API key access
     await clearUserAuthCache(ctx.userKey);
   }
-  res.json({ ok: true, connected: false, api_key: ctx.apiKey || null, message: "Logged out." });
+  res.json({ ok: true, connected: false, api_key: ctx.apiKey || null, message: "Logged out. API key still works." });
 });
 
 /* ================= Actions ================= */
