@@ -133,7 +133,6 @@
             "description": "OK"
           }
         },
-        "security": [],
         "requestBody": {
           "required": false,
           "content": {
