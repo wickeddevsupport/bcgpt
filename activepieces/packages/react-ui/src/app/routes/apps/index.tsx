@@ -933,7 +933,7 @@ const AppsPage = () => {
           </p>
           <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
             <TrendingUp className="size-4" />
-            <span>{t('{{count}} apps available', { count: apps.length })}</span>
+            <span>{`${apps.length} apps available`}</span>
           </div>
         </div>
         <div className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-primary/5 blur-3xl" />

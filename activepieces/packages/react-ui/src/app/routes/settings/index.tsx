@@ -357,7 +357,7 @@ export function ProjectSettingsPage() {
               ))}
               {apps.length > 8 && (
                 <p className="text-center text-xs text-muted-foreground pt-1">
-                  {t('and {{count}} more...', { count: apps.length - 8 })}
+                  {`and ${apps.length - 8} more...`}
                 </p>
               )}
             </div>
@@ -440,9 +440,7 @@ export function ProjectSettingsPage() {
                 ))}
                 {connections.length > 10 && (
                   <p className="text-center text-xs text-muted-foreground pt-1">
-                    {t('and {{count}} more...', {
-                      count: connections.length - 10,
-                    })}
+                    {`and ${connections.length - 10} more...`}
                   </p>
                 )}
               </div>
