@@ -2,7 +2,7 @@
   "openapi": "3.1.1",
   "info": {
     "title": "BCGPT - Complete 3-Layer Platform API",
-    "description": "Complete platform with 3 layers: BCGPT (Data - Basecamp integration), Flow (Execution - Automation via Activepieces), PMOS (Intelligence - Predictions, patterns, insights). 30+ essential operations in OpenAPI, 300+ tools via mcp_call. See x-assistant-instructions for tool-usage policy.",
+    "description": "Complete platform with 3 layers: BCGPT (Data - Basecamp integration for projects/todos/messages), Flow (Execution - Activepieces automation WORKFLOWS, NOT Basecamp projects), PMOS (Intelligence - Predictions, patterns, insights). 30 essential operations in OpenAPI, 300+ tools via mcp_call. See x-assistant-instructions for tool-usage policy.",
     "version": "2.0.0"
   },
   "x-assistant-instructions": [
@@ -13,19 +13,17 @@
     "- Use mcp_call to access any tool from any layer: { \"tool\": \"pmos_health_project\", \"args\": {...} }",
     "- PMOS tools start with 'pmos_', Flow tools start with 'flow_', Basecamp tools start with 'bc_' or action names.",
     "",
-    "Flow Tools Usage:",
-    "- Check status first: flow_status - shows connection and your workspace",
-    "- List flows: flow_list - shows all your automation flows",
-    "- Get flow details: flow_get - detailed info about a specific flow",
-    "- Create flow: flow_create - create new automation (requires displayName and trigger)",
-    "- Update flow: flow_update - modify existing flow",
-    "- Delete flow: flow_delete - remove a flow",
-    "- Trigger flow: flow_trigger - manually run a flow",
-    "- View runs: flow_runs_list - see execution history",
-    "- Get run details: flow_run_get - details of a specific run",
-    "- List integrations: flow_pieces_list - 200+ services available",
-    "- Manage connections: flow_connections_list, flow_connection_create",
-    "- All flow operations are automatically scoped to your personal workspace",
+    "Understanding Flows vs Projects:",
+    "- FLOWS = Automation workflows in Activepieces (NOT Basecamp projects)",
+    "- When user asks about 'flows', 'automation', 'workflows', 'integrations' → Use flow_list or flow tools",
+    "- When user asks about 'projects', 'campaigns', 'work' → Use list_projects (Basecamp)",
+    "",
+    "Flow Tools (Automation):",
+    "- List automation flows: flow_list - shows all Activepieces automation workflows",
+    "- All other flow operations via mcp_call: { \"tool\": \"flow_status\", \"args\": {} }",
+    "- Available: flow_status, flow_get, flow_create, flow_update, flow_delete, flow_trigger",
+    "- Also: flow_runs_list, flow_run_get, flow_pieces_list, flow_connections_list",
+    "- Flows are automatically scoped to user's personal Activepieces workspace",
     "",
     "API Key Handling (Critical):",
     "- The user MUST provide their API key before any Basecamp operations.",
@@ -1769,7 +1767,7 @@
     },
     "/action/flow_list": {
       "post": {
-        "summary": "[Flow] List all automation flows (use mcp_call for: flow_status, flow_get, flow_create, flow_update, flow_delete, flow_trigger, flow_runs_list, flow_pieces_list, flow_connections_list, etc.)",
+        "summary": "[Flow] List automation WORKFLOWS in Activepieces (NOT Basecamp projects). Use mcp_call for other flow tools: flow_status, flow_get, flow_create, flow_update, flow_delete, flow_trigger, flow_runs_list, flow_pieces_list, flow_connections_list",
         "operationId": "flow_list",
         "responses": {
           "200": {
