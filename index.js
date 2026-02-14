@@ -620,6 +620,30 @@ async function runMiningJob({ force = false, apiKey = null, userKey = null } = {
 
 /* ================= ACTIVEPIECES FLOW TOOLS ================= */
 
+// Helper: query the Activepieces PostgreSQL database directly
+let _apDbPool = null;
+function getAPDbPool() {
+  if (!_apDbPool) {
+    const pg = require('pg');
+    _apDbPool = new pg.Pool({
+      host: process.env.AP_POSTGRES_HOST || 'activepieces-postgres',
+      port: parseInt(process.env.AP_POSTGRES_PORT || '5432'),
+      user: process.env.AP_POSTGRES_USER || 'ap_user',
+      password: process.env.AP_POSTGRES_PASSWORD || 'aCnuAb7TuYK4M8K62yVwYSnZ5EXl16w1',
+      database: process.env.AP_POSTGRES_DB || 'activepieces',
+      max: 3,
+      idleTimeoutMillis: 30000,
+    });
+  }
+  return _apDbPool;
+}
+
+async function queryAPDb(sql, params = []) {
+  const pool = getAPDbPool();
+  const result = await pool.query(sql, params);
+  return result.rows;
+}
+
 async function handleFlowTool(name, args, userKey = null) {
   const ACTIVEPIECES_URL = process.env.ACTIVEPIECES_URL || 'https://flow.wickedlab.io';
   const ACTIVEPIECES_API_KEY = process.env.ACTIVEPIECES_API_KEY;
@@ -683,7 +707,7 @@ async function handleFlowTool(name, args, userKey = null) {
   let mapping = await getActivepiecesProject(userKey);
   
   if (!mapping) {
-    // New user - check if they have Activepieces account
+    // No cached project mapping. Try to discover the user's project via sign-in.
     if (!activepiecesUserId) {
       // User needs to sign up first
       const signupUrl = `${ACTIVEPIECES_URL}/signup${userEmail ? `?email=${encodeURIComponent(userEmail)}` : ''}`;
@@ -701,19 +725,41 @@ async function handleFlowTool(name, args, userKey = null) {
       };
     }
 
-    // User has Activepieces account - auto-create project
-    console.log(`[handleFlowTool] Creating new Activepieces project for user: ${userKey}`);
+    // User exists in AP - discover their project via direct DB query
+    // (AP CE API doesn't support project listing via platform API key)
+    console.log(`[handleFlowTool] Discovering project for user: ${userKey} (AP userId: ${activepiecesUserId})`);
     
-    const projectName = `${userKey.replace(/^(email|name):/, '').split('@')[0]}'s Workspace`;
-    const newProject = await apiFetch('projects', {
-      method: 'POST',
-      body: JSON.stringify({ displayName: projectName })
-    });
+    let discoveredProjectId = null;
+    let discoveredProjectName = null;
     
-    await setActivepiecesProject(userKey, newProject.id, projectName);
-    mapping = { projectId: newProject.id, projectName };
+    try {
+      const rows = await queryAPDb(
+        'SELECT id, "displayName" FROM project WHERE "ownerId" = $1 ORDER BY created ASC LIMIT 1',
+        [activepiecesUserId]
+      );
+      if (rows && rows.length > 0) {
+        discoveredProjectId = rows[0].id;
+        discoveredProjectName = rows[0].displayName;
+        console.log(`[handleFlowTool] Found project ${discoveredProjectId} (${discoveredProjectName}) for ${userKey}`);
+      }
+    } catch (dbErr) {
+      console.log(`[handleFlowTool] AP DB project lookup failed: ${dbErr.message}`);
+    }
     
-    console.log(`[handleFlowTool] Created project ${newProject.id} for ${userKey}`);
+    if (!discoveredProjectId) {
+      throw {
+        code: 'PROJECT_NOT_FOUND',
+        message: `Your Activepieces account exists but we could not discover your project. ` +
+                 `Please visit ${ACTIVEPIECES_URL} and ensure you have at least one project. ` +
+                 `Contact support if this persists.`,
+        userEmail
+      };
+    }
+
+    await setActivepiecesProject(userKey, discoveredProjectId, discoveredProjectName);
+    mapping = { projectId: discoveredProjectId, projectName: discoveredProjectName };
+    
+    console.log(`[handleFlowTool] Mapped project ${discoveredProjectId} for ${userKey}`);
   }
 
   const userProjectId = mapping.projectId;
