@@ -870,6 +870,24 @@ async function runTool(op, params, req) {
 /* ================= Health ================= */
 app.get("/health", (req, res) => res.json({ ok: true, build: UA, circuit: getBasecampCircuitStatus() }));
 
+/* ================= Debug Endpoints ================= */
+app.get("/debug/tools", async (req, res) => {
+  try {
+    const { getTools } = await import("./mcp/tools.js");
+    const tools = getTools();
+    const flowTools = tools.filter(t => t.name.startsWith('flow_'));
+    res.json({
+      ok: true,
+      total_tools: tools.length,
+      flow_tools_count: flowTools.length,
+      flow_tools: flowTools.map(t => ({ name: t.name, description: t.description })),
+      sample_tools: tools.slice(0, 5).map(t => t.name)
+    });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, stack: err.stack });
+  }
+});
+
 /* ================= OpenAPI Schema ================= */
 app.get("/.well-known/openapi.json", (req, res) => {
   res.sendFile(path.join(__dirname, "openapi.json"));
