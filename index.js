@@ -789,6 +789,8 @@ async function handleFlowTool(name, args, userKey = null) {
   }
 }
 
+export { handleFlowTool };
+
 /* ================= MCP CONTEXT BUILDER ================= */
 
 async function buildMcpCtx(req) {

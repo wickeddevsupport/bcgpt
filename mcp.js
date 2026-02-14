@@ -64,7 +64,7 @@ import {
 } from "./db.js";
 import { getTools } from "./mcp/tools.js";
 import { ENDPOINT_TOOL_MAP } from "./mcp/endpoint-tools.js";
-import { handleFlowTool } from "./flow-tools.js";
+import { handleFlowTool } from "./index.js";
 
 // Intelligent chaining modules
 import { RequestContext } from './intelligent-executor.js';
