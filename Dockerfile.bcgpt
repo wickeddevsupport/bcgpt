@@ -8,15 +8,17 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ git ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-RUN git clone --quiet https://github.com/wickeddevsupport/bcgpt.git . \
-  && git config core.fileMode false \
-  && git fetch --depth=1 origin main \
-  && git reset --hard origin/main \
-  && ls -la flow-config.js
+RUN git clone --quiet https://github.com/wickeddevsupport/bcgpt.git . && \
+    git config core.fileMode false && \
+    git fetch --depth=1 origin main && \
+    git reset --hard origin/main && \
+    ls -la /app/flow-config.js /app/flow-tools.js /app/activepieces-client.js && \
+    echo "✓ Config files present" && \
+    node -e "console.log('Node test OK')"
 
 ENV npm_config_build_from_source=true
 RUN npm install --omit=dev --no-audit --no-fund || (cat /root/.npm/_logs/* || true; exit 1)
 
 EXPOSE 10000
-# Rebuild trigger v3
+# Rebuild trigger v4
 CMD ["node", "index.js"]
