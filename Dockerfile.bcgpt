@@ -13,12 +13,24 @@ RUN git clone --quiet https://github.com/wickeddevsupport/bcgpt.git . && \
     git fetch --depth=1 origin main && \
     git reset --hard origin/main && \
     ls -la /app/flow-config.js /app/flow-tools.js /app/activepieces-client.js && \
-    echo "✓ Config files present" && \
-    node -e "console.log('Node test OK')"
+    echo "✓ Config files present"
+
+# Save the app files before npm install potentially removes them
+RUN cp flow-tools.js flow-tools.js.bak && \
+    cp activepieces-client.js activepieces-client.js.bak && \
+    cp flow-config.js flow-config.js.bak
 
 ENV npm_config_build_from_source=true
 RUN npm install --omit=dev --no-audit --no-fund || (cat /root/.npm/_logs/* || true; exit 1)
 
+# Restore files if they were removed
+RUN if [ ! -f flow-tools.js ]; then cp flow-tools.js.bak flow-tools.js; fi && \
+    if [ ! -f activepieces-client.js ]; then cp activepieces-client.js.bak activepieces-client.js; fi && \
+    if [ ! -f flow-config.js ]; then cp flow-config.js.bak flow-config.js; fi && \
+    rm -f flow-tools.js.bak activepieces-client.js.bak flow-config.js.bak && \
+    echo "✓ App files restored" && \
+    ls -la /app/flow-*.js /app/activepieces-client.js
+
 EXPOSE 10000
-# Rebuild trigger v4
+# Rebuild trigger v5
 CMD ["node", "index.js"]
