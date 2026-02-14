@@ -72,6 +72,7 @@ import { handleFlowTool } from "./index.js";
 import { handleWave1Tool } from "./index.js";
 import { handleWave2Tool } from "./index.js";
 import { handleWave3Tool } from "./index.js";
+import { handleWave4Tool } from "./index.js";
 
 const WAVE1_TOOLS = new Set([
   'resolve_reference', 'what_changed_since', 'who_did_what',
@@ -87,6 +88,11 @@ const WAVE2_TOOLS = new Set([
 const WAVE3_TOOLS = new Set([
   'build_project', 'smart_assign', 'predict_deadline',
   'save_recipe', 'list_recipes', 'run_recipe', 'delete_recipe'
+]);
+
+const WAVE4_TOOLS = new Set([
+  'create_agent', 'list_agents', 'run_agent', 'pause_agent', 'delete_agent',
+  'get_alerts', 'subscribe_event', 'list_subscriptions'
 ]);
 
 /**
@@ -4652,6 +4658,36 @@ export async function handleMCP(reqBody, ctx) {
         return fail(id, {
           code: 'WAVE3_ERROR',
           message: `${name} failed: ${w3Error.message}`
+        });
+      }
+    }
+
+    // WAVE 4: Autonomy tools (agents, alerts, subscriptions)
+    if (WAVE4_TOOLS.has(name)) {
+      try {
+        console.log(`[MCP] Handling Wave 4 tool: ${name}`, { userKey });
+        const sessionId = params?.sessionId || args?.session_id || 'default';
+        const executeTool = async (toolName, toolArgs) => {
+          if (toolName.startsWith('flow_')) {
+            return handleFlowTool(toolName, toolArgs, userKey);
+          }
+          if (ENDPOINT_TOOL_MAP[toolName]) {
+            const ep = ENDPOINT_TOOL_MAP[toolName];
+            const pathResult = ep.buildPath(toolArgs);
+            const url = typeof pathResult === 'string' ? pathResult : pathResult.path;
+            const method = ep.method || 'GET';
+            const body = method !== 'GET' && method !== 'DELETE' ? ep.buildBody?.(toolArgs) : undefined;
+            return basecampFetch(req, url, { method, body: body ? JSON.stringify(body) : undefined });
+          }
+          throw new Error(`Cannot execute tool: ${toolName}`);
+        };
+        const result = await handleWave4Tool(name, args, userKey, sessionId, executeTool);
+        return ok(id, result);
+      } catch (w4Error) {
+        console.error(`[MCP] Wave 4 tool error:`, w4Error);
+        return fail(id, {
+          code: 'WAVE4_ERROR',
+          message: `${name} failed: ${w4Error.message}`
         });
       }
     }

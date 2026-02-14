@@ -93,5 +93,17 @@ export const listRecipes = async (...args) => await impl.listRecipes(...args);
 export const getRecipe = async (...args) => await impl.getRecipe(...args);
 export const deleteRecipe = async (...args) => await impl.deleteRecipe(...args);
 
+// Wave 4: Autonomy
+export const createAgent = async (...args) => await impl.createAgent(...args);
+export const listAgents = async (...args) => await impl.listAgents(...args);
+export const getAgent = async (...args) => await impl.getAgent(...args);
+export const updateAgent = async (...args) => await impl.updateAgent(...args);
+export const deleteAgent = async (...args) => await impl.deleteAgent(...args);
+export const saveAgentRun = async (...args) => await impl.saveAgentRun(...args);
+export const getAgentRuns = async (...args) => await impl.getAgentRuns(...args);
+export const subscribeEvent = async (...args) => await impl.subscribeEvent(...args);
+export const unsubscribeEvent = async (...args) => await impl.unsubscribeEvent(...args);
+export const listSubscriptions = async (...args) => await impl.listSubscriptions(...args);
+
 export default impl.default ?? null;
 

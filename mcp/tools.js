@@ -4,6 +4,7 @@ import { getFlowTools } from "../flow-tools.js";
 import { getWave1Tools } from "../wave1-tools.js";
 import { getWave2Tools } from "../wave2-tools.js";
 import { getWave3Tools } from "../wave3-tools.js";
+import { getWave4Tools } from "../wave4-tools.js";
 
 function tool(name, description, inputSchema) {
   return { name, description, inputSchema };
@@ -1643,6 +1644,11 @@ export function getTools() {
   // Append Wave 3 Construction tools
   for (const w3Tool of getWave3Tools() || []) {
     tools.push(w3Tool);
+  }
+
+  // Append Wave 4 Autonomy tools
+  for (const w4Tool of getWave4Tools() || []) {
+    tools.push(w4Tool);
   }
 
   return tools;

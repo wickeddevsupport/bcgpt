@@ -54,6 +54,17 @@ import {
   listRecipes,
   getRecipe,
   deleteRecipe,
+  // Wave 4: Autonomy
+  createAgent,
+  listAgents as listAgentsDb,
+  getAgent,
+  updateAgent,
+  deleteAgent as deleteAgentDb,
+  saveAgentRun,
+  getAgentRuns,
+  subscribeEvent,
+  unsubscribeEvent,
+  listSubscriptions,
 } from "./db.js";
 import { runMining } from "./miner.js";
 import { execSync } from "child_process";
@@ -2166,6 +2177,569 @@ function escapeRegex(str) {
 }
 
 export { handleWave3Tool };
+
+/* ================= WAVE 4: AUTONOMY HANDLER ================= */
+
+async function handleWave4Tool(name, args, userKey, sessionId, executeTool) {
+  switch (name) {
+    // ===== CREATE AGENT =====
+    case 'create_agent': {
+      if (!args.name) throw new Error('name is required');
+      if (!args.goal) throw new Error('goal is required');
+      const agent = await createAgent(userKey, {
+        name: args.name,
+        goal: args.goal,
+        type: args.type || 'custom',
+        strategy: args.strategy || null,
+        auto_execute: args.auto_execute || false,
+        schedule: args.schedule || 'on_demand'
+      });
+      return {
+        agent_id: String(agent.id),
+        name: agent.name,
+        goal: agent.goal,
+        type: agent.type,
+        auto_execute: agent.auto_execute,
+        schedule: agent.schedule,
+        status: 'active',
+        message: `Agent "${agent.name}" created. ${agent.auto_execute ? 'Will auto-execute actions.' : 'Will suggest actions for your approval.'} Run with run_agent to start an OADA cycle.`
+      };
+    }
+
+    // ===== LIST AGENTS =====
+    case 'list_agents': {
+      const agents = await listAgentsDb(userKey, args.status || 'all');
+      return {
+        agents: agents.map(a => ({
+          id: String(a.id),
+          name: a.name,
+          goal: a.goal,
+          type: a.type,
+          status: a.status,
+          auto_execute: a.auto_execute,
+          schedule: a.schedule,
+          run_count: a.run_count,
+          action_count: a.action_count,
+          last_run: a.last_run_at,
+          created: a.created_at
+        })),
+        total: agents.length
+      };
+    }
+
+    // ===== RUN AGENT (OADA CYCLE) =====
+    case 'run_agent': {
+      if (!args.agent_id) throw new Error('agent_id is required');
+      const agent = await getAgent(userKey, args.agent_id);
+      if (!agent) throw new Error(`Agent not found: ${args.agent_id}`);
+      if (agent.status === 'paused') throw new Error(`Agent "${agent.name}" is paused. Resume it first.`);
+
+      const dryRun = args.dry_run !== false; // default true for safety
+      const oada = await executeOADACycle(agent, userKey, sessionId, executeTool, dryRun);
+
+      // Save run record
+      await saveAgentRun(agent.id, userKey, {
+        phase: 'complete',
+        observations: oada.observe,
+        analysis: oada.analyze,
+        decisions: oada.decide,
+        actions: oada.act,
+        actions_taken: oada.act?.executed?.length || 0,
+        dry_run: dryRun
+      });
+
+      // Update agent stats
+      await updateAgent(userKey, agent.id, {
+        last_run_at: new Date().toISOString(),
+        run_count: (agent.run_count || 0) + 1,
+        action_count: (agent.action_count || 0) + (oada.act?.executed?.length || 0),
+        last_result: { phase: 'complete', summary: oada.analyze?.summary, actions: oada.act?.executed?.length || oada.decide?.actions?.length || 0 }
+      });
+
+      return {
+        agent: agent.name,
+        goal: agent.goal,
+        dry_run: dryRun,
+        observe: oada.observe,
+        analyze: oada.analyze,
+        decide: oada.decide,
+        act: oada.act,
+        message: dryRun
+          ? `Agent "${agent.name}" completed analysis. ${oada.decide?.actions?.length || 0} actions suggested. Set dry_run=false to execute.`
+          : `Agent "${agent.name}" executed ${oada.act?.executed?.length || 0} actions.`
+      };
+    }
+
+    // ===== PAUSE / RESUME AGENT =====
+    case 'pause_agent': {
+      if (!args.agent_id) throw new Error('agent_id is required');
+      if (!args.action) throw new Error('action is required (pause or resume)');
+      const agent = await getAgent(userKey, args.agent_id);
+      if (!agent) throw new Error(`Agent not found: ${args.agent_id}`);
+      const newStatus = args.action === 'pause' ? 'paused' : 'active';
+      await updateAgent(userKey, agent.id, { status: newStatus });
+      return {
+        agent_id: String(agent.id),
+        name: agent.name,
+        status: newStatus,
+        message: `Agent "${agent.name}" is now ${newStatus}.`
+      };
+    }
+
+    // ===== DELETE AGENT =====
+    case 'delete_agent': {
+      if (!args.agent_id) throw new Error('agent_id is required');
+      const deleted = await deleteAgentDb(userKey, args.agent_id);
+      if (!deleted) throw new Error(`Agent not found: ${args.agent_id}`);
+      return { success: true, message: 'Agent and all its run history deleted.' };
+    }
+
+    // ===== GET ALERTS (Proactive Notifications) =====
+    case 'get_alerts': {
+      const alerts = await generateAlerts(userKey, args);
+      return alerts;
+    }
+
+    // ===== SUBSCRIBE EVENT =====
+    case 'subscribe_event': {
+      if (!args.event) throw new Error('event is required');
+      const action = args.action || 'subscribe';
+      if (action === 'unsubscribe') {
+        const ok = await unsubscribeEvent(userKey, args.event, args.project || null);
+        return { success: ok, event: args.event, action: 'unsubscribed', message: ok ? `Unsubscribed from ${args.event}` : 'Subscription not found' };
+      }
+      const sub = await subscribeEvent(userKey, args.event, args.project || null);
+      return {
+        subscription_id: String(sub.id),
+        event: sub.event,
+        project_filter: sub.project_filter,
+        action: 'subscribed',
+        message: `Subscribed to ${sub.event}${sub.project_filter ? ` for project "${sub.project_filter}"` : ''}`
+      };
+    }
+
+    // ===== LIST SUBSCRIPTIONS =====
+    case 'list_subscriptions': {
+      const subs = await listSubscriptions(userKey);
+      return {
+        subscriptions: subs.map(s => ({
+          id: String(s.id),
+          event: s.event,
+          project_filter: s.project_filter,
+          created: s.created_at
+        })),
+        total: subs.length
+      };
+    }
+
+    default:
+      throw new Error(`Unknown Wave 4 tool: ${name}`);
+  }
+}
+
+/**
+ * OADA Cycle: Observe → Analyze → Decide → Act
+ * The core agent reasoning loop.
+ */
+async function executeOADACycle(agent, userKey, sessionId, executeTool, dryRun) {
+  // ===== OBSERVE =====
+  // Gather relevant data based on agent type
+  const observations = await agentObserve(agent, userKey);
+
+  // ===== ANALYZE =====
+  // Evaluate observations against the agent's goal
+  const analysis = agentAnalyze(agent, observations);
+
+  // ===== DECIDE =====
+  // Choose actions to take
+  const decisions = agentDecide(agent, analysis);
+
+  // ===== ACT =====
+  // Execute or suggest actions
+  const actions = dryRun
+    ? { mode: 'dry_run', suggested: decisions.actions, executed: [] }
+    : await agentAct(agent, decisions, userKey, executeTool);
+
+  return {
+    observe: observations,
+    analyze: analysis,
+    decide: decisions,
+    act: actions
+  };
+}
+
+async function agentObserve(agent, userKey) {
+  const obs = { timestamp: new Date().toISOString(), data: {} };
+
+  try {
+    // Get all projects, tasks, people from entity cache
+    const projects = await listEntityCache('project', { userKey, limit: 200 });
+    const todos = await listEntityCache('todo', { userKey, limit: 500 });
+    const people = await listEntityCache('person', { userKey, limit: 100 });
+    const operations = await getRecentOperations(userKey, 50);
+
+    obs.data.project_count = projects.length;
+    obs.data.task_count = todos.length;
+    obs.data.people_count = people.length;
+    obs.data.recent_operations = operations.length;
+
+    // Compute task stats
+    const completed = todos.filter(t => t.data?.completed);
+    const active = todos.filter(t => !t.data?.completed);
+    const overdue = active.filter(t => {
+      if (!t.data?.due_on) return false;
+      return new Date(t.data.due_on) < new Date();
+    });
+    const unassigned = active.filter(t => !t.data?.assignee_ids?.length);
+    const staleThreshold = Date.now() - (7 * 24 * 60 * 60 * 1000); // 7 days
+    const staleProjects = projects.filter(p => {
+      const lastUpdate = p.updated_at ? new Date(p.updated_at).getTime() : 0;
+      return lastUpdate < staleThreshold;
+    });
+
+    obs.data.completed_tasks = completed.length;
+    obs.data.active_tasks = active.length;
+    obs.data.overdue_tasks = overdue.map(t => ({ id: t.object_id, title: t.title, due: t.data?.due_on }));
+    obs.data.unassigned_tasks = unassigned.map(t => ({ id: t.object_id, title: t.title }));
+    obs.data.stale_projects = staleProjects.map(p => ({ id: p.object_id, title: p.title, last_update: p.updated_at }));
+
+    // Workload distribution
+    const workload = {};
+    for (const p of people) {
+      workload[p.object_id] = { name: p.title || p.data?.name, tasks: 0 };
+    }
+    for (const t of active) {
+      for (const aid of (t.data?.assignee_ids || [])) {
+        if (workload[aid]) workload[aid].tasks++;
+      }
+    }
+    obs.data.workload = Object.values(workload).filter(w => w.tasks > 0).sort((a, b) => b.tasks - a.tasks);
+
+    // Recent activity (last 24h operations)
+    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    obs.data.recent_activity = operations.filter(op => op.created_at > dayAgo).length;
+
+  } catch (e) {
+    obs.error = e.message;
+  }
+
+  return obs;
+}
+
+function agentAnalyze(agent, observations) {
+  const data = observations.data || {};
+  const issues = [];
+  const insights = [];
+  let riskScore = 0; // 0-100
+
+  // Check overdue tasks
+  if (data.overdue_tasks?.length > 0) {
+    issues.push({ severity: 'critical', type: 'overdue', message: `${data.overdue_tasks.length} overdue task(s)`, items: data.overdue_tasks.slice(0, 5) });
+    riskScore += Math.min(30, data.overdue_tasks.length * 10);
+  }
+
+  // Check unassigned tasks
+  if (data.unassigned_tasks?.length > 0) {
+    issues.push({ severity: 'warning', type: 'unassigned', message: `${data.unassigned_tasks.length} unassigned task(s)`, items: data.unassigned_tasks.slice(0, 5) });
+    riskScore += Math.min(15, data.unassigned_tasks.length * 3);
+  }
+
+  // Check stale projects
+  if (data.stale_projects?.length > 0) {
+    issues.push({ severity: 'warning', type: 'stale', message: `${data.stale_projects.length} project(s) with no activity in 7+ days`, items: data.stale_projects.slice(0, 5) });
+    riskScore += Math.min(20, data.stale_projects.length * 5);
+  }
+
+  // Check workload imbalance
+  if (data.workload?.length >= 2) {
+    const max = data.workload[0].tasks;
+    const min = data.workload[data.workload.length - 1].tasks;
+    if (max > 0 && max > min * 3) {
+      issues.push({ severity: 'warning', type: 'workload_imbalance', message: `Workload imbalance: ${data.workload[0].name} has ${max} tasks vs ${data.workload[data.workload.length - 1].name} with ${min}` });
+      riskScore += 10;
+    }
+  }
+
+  // Check low recent activity
+  if (data.recent_activity === 0 && data.active_tasks > 0) {
+    issues.push({ severity: 'info', type: 'low_activity', message: 'No operations in the last 24 hours despite having active tasks' });
+    riskScore += 5;
+  }
+
+  // Goal-specific analysis based on agent type
+  if (agent.type === 'triage' || agent.goal.toLowerCase().includes('triage')) {
+    if (data.unassigned_tasks?.length > 0) {
+      insights.push(`Triage needed: ${data.unassigned_tasks.length} tasks awaiting assignment`);
+    }
+  }
+  if (agent.type === 'quality' || agent.goal.toLowerCase().includes('quality')) {
+    if (data.completed_tasks > 0 && data.active_tasks > 0) {
+      const ratio = data.completed_tasks / (data.completed_tasks + data.active_tasks);
+      insights.push(`Completion ratio: ${(ratio * 100).toFixed(0)}% (${data.completed_tasks}/${data.completed_tasks + data.active_tasks})`);
+    }
+  }
+  if (agent.type === 'pm' || agent.goal.toLowerCase().includes('project')) {
+    insights.push(`Managing ${data.project_count} projects with ${data.active_tasks} active tasks across ${data.people_count} people`);
+  }
+
+  return {
+    summary: issues.length === 0 ? 'All clear — no issues detected.' : `Found ${issues.length} issue(s) requiring attention.`,
+    risk_score: Math.min(100, riskScore),
+    issues,
+    insights,
+    goal_alignment: agent.goal
+  };
+}
+
+function agentDecide(agent, analysis) {
+  const actions = [];
+
+  for (const issue of (analysis.issues || [])) {
+    switch (issue.type) {
+      case 'overdue':
+        // Suggest completing or rescheduling overdue tasks
+        for (const task of (issue.items || []).slice(0, 3)) {
+          actions.push({
+            priority: 'high',
+            type: 'notify',
+            description: `Overdue: "${task.title}" was due ${task.due}`,
+            suggestion: `Review and either complete or reschedule task ${task.id}`
+          });
+        }
+        break;
+
+      case 'unassigned':
+        // Suggest using smart_assign
+        if (issue.items?.length > 0) {
+          actions.push({
+            priority: 'medium',
+            type: 'tool_call',
+            tool: 'smart_assign',
+            description: `${issue.items.length} unassigned task(s) — recommend running smart_assign`,
+            suggestion: `Use smart_assign to find best assignees`
+          });
+        }
+        break;
+
+      case 'stale':
+        // Suggest sending update requests
+        for (const proj of (issue.items || []).slice(0, 3)) {
+          actions.push({
+            priority: 'medium',
+            type: 'notify',
+            description: `Stale: "${proj.title}" — no activity since ${proj.last_update ? new Date(proj.last_update).toLocaleDateString() : 'unknown'}`,
+            suggestion: `Post a status update or check in on this project`
+          });
+        }
+        break;
+
+      case 'workload_imbalance':
+        actions.push({
+          priority: 'low',
+          type: 'notify',
+          description: issue.message,
+          suggestion: 'Consider redistributing tasks for better balance'
+        });
+        break;
+
+      case 'low_activity':
+        actions.push({
+          priority: 'info',
+          type: 'notify',
+          description: issue.message,
+          suggestion: 'Check if there are blockers preventing progress'
+        });
+        break;
+    }
+  }
+
+  // Sort by priority
+  const priorityOrder = { high: 0, medium: 1, low: 2, info: 3 };
+  actions.sort((a, b) => (priorityOrder[a.priority] || 3) - (priorityOrder[b.priority] || 3));
+
+  return {
+    actions,
+    total: actions.length,
+    auto_executable: actions.filter(a => a.type === 'tool_call').length,
+    manual_review: actions.filter(a => a.type === 'notify').length
+  };
+}
+
+async function agentAct(agent, decisions, userKey, executeTool) {
+  const executed = [];
+  const skipped = [];
+
+  for (const action of (decisions.actions || [])) {
+    if (action.type === 'tool_call' && executeTool) {
+      try {
+        const result = await executeTool(action.tool, action.args || {});
+        executed.push({ ...action, result: 'success', output: result });
+      } catch (e) {
+        executed.push({ ...action, result: 'error', error: e.message });
+      }
+    } else {
+      // Notifications are "executed" by being surfaced to the user
+      skipped.push({ ...action, result: 'surfaced' });
+    }
+  }
+
+  return {
+    mode: agent.auto_execute ? 'auto_execute' : 'manual',
+    executed,
+    surfaced: skipped,
+    summary: `Executed ${executed.length} action(s), surfaced ${skipped.length} notification(s)`
+  };
+}
+
+/**
+ * Generate proactive alerts by scanning entity cache for issues.
+ */
+async function generateAlerts(userKey, args = {}) {
+  const severity = args.severity || 'all';
+  const categories = args.categories || null;
+  const projectFilter = args.project || null;
+  const alerts = [];
+
+  try {
+    const projects = await listEntityCache('project', { userKey, limit: 200 });
+    const todos = await listEntityCache('todo', { userKey, limit: 500 });
+    const people = await listEntityCache('person', { userKey, limit: 100 });
+
+    // Filter to specific project if requested
+    let filteredTodos = todos;
+    if (projectFilter) {
+      const proj = projects.find(p =>
+        p.title?.toLowerCase().includes(projectFilter.toLowerCase()) ||
+        String(p.object_id) === String(projectFilter));
+      if (proj) {
+        filteredTodos = todos.filter(t => String(t.data?.project_id || t.project_id) === String(proj.object_id));
+      }
+    }
+
+    const active = filteredTodos.filter(t => !t.data?.completed);
+    const now = new Date();
+
+    // OVERDUE tasks
+    if (!categories || categories.includes('overdue')) {
+      const overdue = active.filter(t => t.data?.due_on && new Date(t.data.due_on) < now);
+      for (const t of overdue) {
+        const daysLate = Math.floor((now - new Date(t.data.due_on)) / (24 * 60 * 60 * 1000));
+        alerts.push({
+          severity: daysLate > 7 ? 'critical' : 'warning',
+          category: 'overdue',
+          title: `Overdue: ${t.title}`,
+          detail: `${daysLate} day(s) late (due ${t.data.due_on})`,
+          task_id: t.object_id
+        });
+      }
+    }
+
+    // STALE projects
+    if (!categories || categories.includes('stale')) {
+      const staleThreshold = Date.now() - (7 * 24 * 60 * 60 * 1000);
+      for (const p of projects) {
+        const lastUpdate = p.updated_at ? new Date(p.updated_at).getTime() : 0;
+        if (lastUpdate < staleThreshold) {
+          const daysSinceUpdate = Math.floor((Date.now() - lastUpdate) / (24 * 60 * 60 * 1000));
+          alerts.push({
+            severity: daysSinceUpdate > 30 ? 'critical' : 'warning',
+            category: 'stale',
+            title: `Stale: ${p.title}`,
+            detail: `No activity in ${daysSinceUpdate} day(s)`,
+            project_id: p.object_id
+          });
+        }
+      }
+    }
+
+    // UNASSIGNED tasks
+    if (!categories || categories.includes('unassigned')) {
+      const unassigned = active.filter(t => !t.data?.assignee_ids?.length);
+      for (const t of unassigned.slice(0, 20)) {
+        alerts.push({
+          severity: 'warning',
+          category: 'unassigned',
+          title: `Unassigned: ${t.title}`,
+          detail: 'Task has no assignee',
+          task_id: t.object_id
+        });
+      }
+    }
+
+    // DEADLINE approaching (within 3 days)
+    if (!categories || categories.includes('deadline')) {
+      const soon = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+      const approaching = active.filter(t => {
+        if (!t.data?.due_on) return false;
+        const d = new Date(t.data.due_on);
+        return d >= now && d <= soon;
+      });
+      for (const t of approaching) {
+        const daysLeft = Math.ceil((new Date(t.data.due_on) - now) / (24 * 60 * 60 * 1000));
+        alerts.push({
+          severity: daysLeft <= 1 ? 'critical' : 'warning',
+          category: 'deadline',
+          title: `Due soon: ${t.title}`,
+          detail: `Due in ${daysLeft} day(s) (${t.data.due_on})`,
+          task_id: t.object_id
+        });
+      }
+    }
+
+    // WORKLOAD imbalance
+    if (!categories || categories.includes('workload')) {
+      const workload = {};
+      for (const p of people) {
+        workload[p.object_id] = { name: p.title || p.data?.name, tasks: 0 };
+      }
+      for (const t of active) {
+        for (const aid of (t.data?.assignee_ids || [])) {
+          if (workload[aid]) workload[aid].tasks++;
+        }
+      }
+      const loaded = Object.values(workload).filter(w => w.tasks > 0).sort((a, b) => b.tasks - a.tasks);
+      if (loaded.length >= 2) {
+        const maxTasks = loaded[0].tasks;
+        const minTasks = loaded[loaded.length - 1].tasks;
+        if (maxTasks > minTasks * 3 && maxTasks > 5) {
+          alerts.push({
+            severity: 'warning',
+            category: 'workload',
+            title: `Workload imbalance`,
+            detail: `${loaded[0].name} has ${maxTasks} tasks vs ${loaded[loaded.length - 1].name} with ${minTasks}`
+          });
+        }
+      }
+    }
+
+  } catch (e) {
+    alerts.push({ severity: 'info', category: 'error', title: 'Alert scan error', detail: e.message });
+  }
+
+  // Filter by severity
+  let filtered = alerts;
+  if (severity !== 'all') {
+    filtered = alerts.filter(a => a.severity === severity);
+  }
+
+  // Sort: critical first
+  const sevOrder = { critical: 0, warning: 1, info: 2 };
+  filtered.sort((a, b) => (sevOrder[a.severity] || 2) - (sevOrder[b.severity] || 2));
+
+  return {
+    alerts: filtered,
+    total: filtered.length,
+    by_severity: {
+      critical: filtered.filter(a => a.severity === 'critical').length,
+      warning: filtered.filter(a => a.severity === 'warning').length,
+      info: filtered.filter(a => a.severity === 'info').length
+    },
+    by_category: filtered.reduce((acc, a) => { acc[a.category] = (acc[a.category] || 0) + 1; return acc; }, {}),
+    scanned_at: new Date().toISOString()
+  };
+}
+
+export { handleWave4Tool };
 
 /* ================= MCP CONTEXT BUILDER ================= */
 

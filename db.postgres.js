@@ -290,6 +290,53 @@ async function ensureSchema() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_recipes_user ON recipes(user_key, created_at DESC);
+
+    -- ============ Wave 4: Autonomy ============
+
+    CREATE TABLE IF NOT EXISTS agents (
+      id BIGSERIAL PRIMARY KEY,
+      user_key TEXT NOT NULL,
+      name TEXT NOT NULL,
+      goal TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'custom',
+      strategy TEXT,
+      auto_execute BOOLEAN DEFAULT FALSE,
+      schedule TEXT DEFAULT 'on_demand',
+      status TEXT DEFAULT 'active',
+      last_run_at TIMESTAMPTZ,
+      run_count INTEGER DEFAULT 0,
+      action_count INTEGER DEFAULT 0,
+      last_result JSONB,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_agents_user ON agents(user_key, status);
+
+    CREATE TABLE IF NOT EXISTS agent_runs (
+      id BIGSERIAL PRIMARY KEY,
+      agent_id BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      user_key TEXT NOT NULL,
+      phase TEXT NOT NULL,
+      observations JSONB,
+      analysis JSONB,
+      decisions JSONB,
+      actions JSONB,
+      actions_taken INTEGER DEFAULT 0,
+      dry_run BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_runs_agent ON agent_runs(agent_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS event_subscriptions (
+      id BIGSERIAL PRIMARY KEY,
+      user_key TEXT NOT NULL,
+      event TEXT NOT NULL,
+      project_filter TEXT,
+      active BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_event_subs_user ON event_subscriptions(user_key, active);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_event_subs_unique ON event_subscriptions(user_key, event, COALESCE(project_filter, ''));
   `);
 }
 
@@ -1196,6 +1243,135 @@ export async function deleteRecipe(userKey, recipeIdOrName) {
   if (!recipe) return false;
   await pool.query(`DELETE FROM recipes WHERE id = $1`, [recipe.id]);
   return true;
+}
+
+// ========== Wave 4: Autonomy ==========
+
+export async function createAgent(userKey, { name, goal, type, strategy, auto_execute, schedule }) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !name || !goal) return null;
+  const res = await pool.query(
+    `INSERT INTO agents (user_key, name, goal, type, strategy, auto_execute, schedule)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING *`,
+    [userKey, name, goal, type || 'custom', strategy || null, auto_execute || false, schedule || 'on_demand']
+  );
+  return res.rows[0];
+}
+
+export async function listAgents(userKey, status = 'all') {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey) return [];
+  const where = status === 'all'
+    ? `WHERE user_key = $1`
+    : `WHERE user_key = $1 AND status = $2`;
+  const params = status === 'all' ? [userKey] : [userKey, status];
+  const res = await pool.query(
+    `SELECT * FROM agents ${where} ORDER BY created_at DESC`,
+    params
+  );
+  return res.rows;
+}
+
+export async function getAgent(userKey, agentIdOrName) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !agentIdOrName) return null;
+  const res = await pool.query(
+    `SELECT * FROM agents WHERE user_key = $1 AND (id = $2 OR LOWER(name) = LOWER($3))`,
+    [userKey, isNaN(agentIdOrName) ? -1 : Number(agentIdOrName), String(agentIdOrName)]
+  );
+  return res.rows[0] || null;
+}
+
+export async function updateAgent(userKey, agentId, updates) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !agentId) return null;
+  const fields = [];
+  const vals = [userKey, agentId];
+  let idx = 3;
+  for (const [key, val] of Object.entries(updates)) {
+    if (['status', 'last_run_at', 'run_count', 'action_count', 'last_result', 'strategy', 'auto_execute', 'schedule'].includes(key)) {
+      fields.push(`${key} = $${idx}`);
+      vals.push(key === 'last_result' ? JSON.stringify(val) : val);
+      idx++;
+    }
+  }
+  if (!fields.length) return null;
+  fields.push(`updated_at = NOW()`);
+  const res = await pool.query(
+    `UPDATE agents SET ${fields.join(', ')} WHERE user_key = $1 AND id = $2 RETURNING *`,
+    vals
+  );
+  return res.rows[0] || null;
+}
+
+export async function deleteAgent(userKey, agentIdOrName) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey) return false;
+  const agent = await getAgent(userKey, agentIdOrName);
+  if (!agent) return false;
+  await pool.query(`DELETE FROM agents WHERE id = $1`, [agent.id]);
+  return true;
+}
+
+export async function saveAgentRun(agentId, userKey, runData) {
+  userKey = normalizeUserKey(userKey);
+  const res = await pool.query(
+    `INSERT INTO agent_runs (agent_id, user_key, phase, observations, analysis, decisions, actions, actions_taken, dry_run)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     RETURNING id, created_at`,
+    [agentId, userKey, runData.phase || 'complete',
+     JSON.stringify(runData.observations || null),
+     JSON.stringify(runData.analysis || null),
+     JSON.stringify(runData.decisions || null),
+     JSON.stringify(runData.actions || null),
+     runData.actions_taken || 0,
+     runData.dry_run || false]
+  );
+  return res.rows[0];
+}
+
+export async function getAgentRuns(agentId, limit = 10) {
+  const res = await pool.query(
+    `SELECT * FROM agent_runs WHERE agent_id = $1 ORDER BY created_at DESC LIMIT $2`,
+    [agentId, limit]
+  );
+  return res.rows;
+}
+
+export async function subscribeEvent(userKey, event, projectFilter = null) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !event) return null;
+  const res = await pool.query(
+    `INSERT INTO event_subscriptions (user_key, event, project_filter)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (user_key, event, COALESCE(project_filter, ''))
+     DO UPDATE SET active = TRUE
+     RETURNING *`,
+    [userKey, event, projectFilter || null]
+  );
+  return res.rows[0];
+}
+
+export async function unsubscribeEvent(userKey, event, projectFilter = null) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !event) return false;
+  const res = await pool.query(
+    `UPDATE event_subscriptions SET active = FALSE
+     WHERE user_key = $1 AND event = $2 AND COALESCE(project_filter, '') = COALESCE($3, '')`,
+    [userKey, event, projectFilter || null]
+  );
+  return res.rowCount > 0;
+}
+
+export async function listSubscriptions(userKey) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey) return [];
+  const res = await pool.query(
+    `SELECT * FROM event_subscriptions WHERE user_key = $1 AND active = TRUE ORDER BY created_at DESC`,
+    [userKey]
+  );
+  return res.rows;
 }
 
 export default pool;
