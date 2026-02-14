@@ -35,11 +35,36 @@ import {
   clearActivepiecesProject,
 } from "./db.js";
 import { runMining } from "./miner.js";
+import { execSync } from "child_process";
+import { existsSync } from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 dotenv.config();
+
+// Initialize: Ensure code is synced on startup
+async function ensureCodeSynced() {
+  try {
+    // Only run git pull if in a git repository (not in Docker built context where .git might not exist)
+    const hasGit = existsSync(path.join(__dirname, '.git'));
+    if (hasGit && process.env.AUTO_GIT_PULL !== 'false') {
+      console.log('[INIT] Syncing code from git...');
+      try {
+        execSync('git fetch origin main 2>&1', { cwd: __dirname, stdio: 'pipe' });
+        execSync('git reset --hard origin/main 2>&1', { cwd: __dirname, stdio: 'pipe' });
+        console.log('[INIT] ✓ Code synced');
+      } catch (gitErr) {
+        console.warn('[INIT] Warning: Could not sync code:', gitErr.message);
+      }
+    }
+  } catch (err) {
+    console.warn('[INIT] Warning during code sync:', err.message);
+  }
+}
+
+// Call on startup
+await ensureCodeSynced();
 
 const app = express();
 app.set("trust proxy", 1);
