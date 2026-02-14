@@ -79,7 +79,7 @@ export const apiKeyController: FastifyPluginAsyncTypebox = async (fastify) => {
                 id: Type.String(),
             }),
             response: {
-                [StatusCodes.NO_CONTENT]: Type.Undefined(),
+                [StatusCodes.NO_CONTENT]: Type.Never(),
             },
         },
     }, async (request, reply) => {
