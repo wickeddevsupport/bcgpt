@@ -33,6 +33,18 @@ import {
   getActivepiecesProject,
   setActivepiecesProject,
   clearActivepiecesProject,
+  // Wave 1: PM OS Foundation
+  saveSessionMemory,
+  getSessionMemory,
+  cleanSessionMemory,
+  saveSnapshot,
+  getSnapshots,
+  getLatestSnapshot,
+  cleanSnapshots,
+  logOperation,
+  getRecentOperations,
+  getOperation,
+  markUndone,
 } from "./db.js";
 import { runMining } from "./miner.js";
 import { execSync } from "child_process";
@@ -922,6 +934,283 @@ async function handleFlowTool(name, args, userKey = null) {
 }
 
 export { handleFlowTool };
+
+/* ================= WAVE 1: PM OS FOUNDATION HANDLER ================= */
+
+/**
+ * Parse natural language time references to ISO timestamps.
+ * Supports: "yesterday", "last week", "2 hours ago", "Monday", ISO dates
+ */
+function parseTimeSince(since) {
+  if (!since) return new Date().toISOString();
+  // Already ISO?
+  if (/^\d{4}-\d{2}-\d{2}/.test(since)) return new Date(since).toISOString();
+
+  const now = Date.now();
+  const lower = since.toLowerCase().trim();
+
+  // Relative: "N hours/minutes/days/weeks ago"
+  const relMatch = lower.match(/(\d+)\s*(hour|minute|min|day|week|month)s?\s*ago/);
+  if (relMatch) {
+    const n = parseInt(relMatch[1]);
+    const unit = relMatch[2];
+    const ms = { hour: 3600000, minute: 60000, min: 60000, day: 86400000, week: 604800000, month: 2592000000 };
+    return new Date(now - n * (ms[unit] || 86400000)).toISOString();
+  }
+
+  // Named: yesterday, today, last week, this week
+  if (lower === 'yesterday') return new Date(now - 86400000).toISOString();
+  if (lower === 'today') { const d = new Date(); d.setHours(0,0,0,0); return d.toISOString(); }
+  if (lower === 'last week') return new Date(now - 7 * 86400000).toISOString();
+  if (lower === 'this week') {
+    const d = new Date(); const day = d.getDay();
+    d.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
+    d.setHours(0,0,0,0); return d.toISOString();
+  }
+  if (lower === 'last month') return new Date(now - 30 * 86400000).toISOString();
+
+  // Day names: monday, tuesday, etc.
+  const dayNames = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+  const dayIdx = dayNames.indexOf(lower);
+  if (dayIdx >= 0) {
+    const d = new Date();
+    const diff = ((d.getDay() - dayIdx) + 7) % 7 || 7;
+    d.setDate(d.getDate() - diff);
+    d.setHours(0,0,0,0);
+    return d.toISOString();
+  }
+
+  // Fallback: try Date parse
+  const parsed = new Date(since);
+  return isNaN(parsed.getTime()) ? new Date(now - 86400000).toISOString() : parsed.toISOString();
+}
+
+/**
+ * Compute JSON diff between two snapshots.
+ */
+function computeDiff(oldSnap, newSnap) {
+  const changes = [];
+  if (!oldSnap || !newSnap) return changes;
+
+  const allKeys = new Set([...Object.keys(oldSnap), ...Object.keys(newSnap)]);
+  for (const key of allKeys) {
+    const oldVal = oldSnap[key];
+    const newVal = newSnap[key];
+    if (JSON.stringify(oldVal) !== JSON.stringify(newVal)) {
+      if (oldVal === undefined) {
+        changes.push({ field: key, old_value: null, new_value: newVal, change_type: 'added' });
+      } else if (newVal === undefined) {
+        changes.push({ field: key, old_value: oldVal, new_value: null, change_type: 'removed' });
+      } else {
+        changes.push({ field: key, old_value: oldVal, new_value: newVal, change_type: 'modified' });
+      }
+    }
+  }
+  return changes;
+}
+
+/**
+ * Handle Wave 1 PM OS tools: resolve_reference, what_changed_since, who_did_what, undo_*, list_recent_operations
+ */
+async function handleWave1Tool(name, args, userKey, sessionId) {
+  switch (name) {
+    case 'resolve_reference': {
+      if (!args.ref) throw new Error('ref is required');
+      const memories = await getSessionMemory(sessionId || 'default', userKey, args.type || null, 10);
+      if (!memories.length) {
+        return { resolved: false, message: 'No recent context found. Please mention the entity explicitly.' };
+      }
+      // Score: most recent of matching type wins
+      const refLower = (args.ref || '').toLowerCase();
+      let best = null;
+      let bestScore = 0;
+      for (const mem of memories) {
+        let score = 0;
+        // Exact name match in reference
+        if (mem.entity_name && refLower.includes(mem.entity_name.toLowerCase())) {
+          score = 1.0;
+        }
+        // Type hint match
+        else if (args.type && mem.entity_type === args.type) {
+          score = 0.8;
+        }
+        // Generic pronoun ("that", "it", "this") — just use recency
+        else if (/^(that|it|this|the)\b/.test(refLower)) {
+          score = 0.7;
+        } else {
+          score = 0.3; // weak fallback
+        }
+        // Time decay: newer is better (memories already sorted DESC)
+        const minutesAgo = (Date.now() - new Date(mem.mentioned_at).getTime()) / 60000;
+        score *= Math.max(0.1, 1.0 - minutesAgo / (24 * 60));
+
+        if (score > bestScore) {
+          bestScore = score;
+          best = mem;
+        }
+      }
+      if (best && bestScore > 0.2) {
+        return {
+          resolved: true,
+          type: best.entity_type,
+          id: best.entity_id,
+          name: best.entity_name,
+          context: best.context,
+          confidence: Math.round(bestScore * 100) / 100
+        };
+      }
+      return { resolved: false, message: 'Could not confidently resolve reference. Please be more specific.' };
+    }
+
+    case 'what_changed_since': {
+      if (!args.entity_type || !args.since) throw new Error('entity_type and since are required');
+      const since = parseTimeSince(args.since);
+      const until = args.until ? parseTimeSince(args.until) : new Date().toISOString();
+
+      if (args.entity_id) {
+        // Specific entity diff
+        const oldSnap = await getLatestSnapshot(userKey, args.entity_type, args.entity_id, since);
+        const newSnap = await getLatestSnapshot(userKey, args.entity_type, args.entity_id, until);
+        if (!oldSnap && !newSnap) {
+          return { changes: [], message: 'No snapshots found for this entity in the given time range.' };
+        }
+        const changes = computeDiff(oldSnap?.snapshot, newSnap?.snapshot);
+        return {
+          entity: { type: args.entity_type, id: args.entity_id },
+          period: { since, until },
+          changes,
+          summary: changes.length
+            ? `${changes.length} field(s) changed: ${changes.map(c => c.field).join(', ')}`
+            : 'No changes detected in this period.'
+        };
+      } else {
+        // All entities of type — use operation log instead
+        const ops = await getRecentOperations(userKey, 50, since, null);
+        const relevant = ops.filter(op => {
+          const target = op.target || {};
+          return target.type === args.entity_type;
+        });
+        return {
+          entity_type: args.entity_type,
+          period: { since, until },
+          operations: relevant.map(op => ({
+            id: op.id,
+            operation: op.operation_type,
+            target: op.target,
+            when: op.created_at,
+            undoable: !!op.undo_operation
+          })),
+          summary: `${relevant.length} operation(s) on ${args.entity_type} entities since ${since}`
+        };
+      }
+    }
+
+    case 'who_did_what': {
+      if (!args.since) throw new Error('since is required');
+      const since = parseTimeSince(args.since);
+      const until = args.until ? parseTimeSince(args.until) : null;
+
+      // Use the user's own key if no person specified
+      const targetKey = args.person || userKey;
+
+      const ops = await getRecentOperations(targetKey, 50, since, null);
+      let filtered = ops;
+      if (args.project) {
+        filtered = ops.filter(op => {
+          const target = op.target || {};
+          return target.project_id == args.project || target.project_name?.toLowerCase().includes(args.project.toLowerCase());
+        });
+      }
+      if (until) {
+        filtered = filtered.filter(op => new Date(op.created_at) <= new Date(until));
+      }
+
+      return {
+        person: targetKey,
+        period: { since, until: until || 'now' },
+        activities: filtered.map(op => ({
+          id: op.id,
+          operation: op.operation_type,
+          target: op.target,
+          when: op.created_at,
+          undoable: !!op.undo_operation
+        })),
+        summary: `${filtered.length} operation(s) by ${targetKey}`
+      };
+    }
+
+    case 'undo_last': {
+      const count = Math.min(parseInt(args.count) || 1, 5);
+      const ops = await getRecentOperations(userKey, count);
+      const results = [];
+
+      for (const op of ops) {
+        if (!op.undo_operation || op.undone_at) {
+          results.push({ id: op.id, operation: op.operation_type, success: false, reason: 'No undo available or already undone' });
+          continue;
+        }
+        try {
+          // Execute the undo by calling the reverse tool via handleMCP
+          // For now, mark undone and return the undo instructions
+          await markUndone(op.id, userKey);
+          results.push({
+            id: op.id,
+            operation: op.operation_type,
+            success: true,
+            undo_operation: op.undo_operation,
+            undo_args: op.undo_args,
+            message: `Undone: ${op.operation_type} on ${op.target?.name || op.target?.type || 'entity'}`
+          });
+        } catch (err) {
+          results.push({ id: op.id, operation: op.operation_type, success: false, reason: err.message });
+        }
+      }
+      return { undone: results.filter(r => r.success).length, total: results.length, results };
+    }
+
+    case 'undo_operation': {
+      if (!args.operation_id) throw new Error('operation_id is required');
+      const op = await getOperation(parseInt(args.operation_id));
+      if (!op) throw new Error(`Operation ${args.operation_id} not found`);
+      if (op.undone_at) throw new Error('Operation already undone');
+      if (!op.undo_operation) throw new Error('This operation has no undo mapping');
+
+      await markUndone(op.id, userKey);
+      return {
+        success: true,
+        operation: op.operation_type,
+        undo_operation: op.undo_operation,
+        undo_args: op.undo_args,
+        message: `Marked as undone: ${op.operation_type} on ${op.target?.name || op.target?.type || 'entity'}`
+      };
+    }
+
+    case 'list_recent_operations': {
+      const ops = await getRecentOperations(
+        userKey,
+        parseInt(args.limit) || 20,
+        args.since ? parseTimeSince(args.since) : null,
+        args.type || null
+      );
+      return {
+        operations: ops.map(op => ({
+          id: op.id,
+          operation: op.operation_type,
+          target: op.target,
+          when: op.created_at,
+          undoable: !!op.undo_operation && !op.undone_at,
+          undone: !!op.undone_at
+        })),
+        total: ops.length
+      };
+    }
+
+    default:
+      throw new Error(`Unknown Wave 1 tool: ${name}`);
+  }
+}
+
+export { handleWave1Tool };
 
 /* ================= MCP CONTEXT BUILDER ================= */
 

@@ -204,6 +204,59 @@ async function ensureSchema() {
       updated_at BIGINT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_ap_user_project ON activepieces_user_projects(project_id);
+
+    -- ============ Wave 1: PM OS Foundation ============
+
+    CREATE TABLE IF NOT EXISTS session_memory (
+      id BIGSERIAL PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      user_key TEXT NOT NULL,
+      entity_type TEXT,
+      entity_id TEXT,
+      entity_name TEXT,
+      context TEXT,
+      mentioned_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_session_mem_session ON session_memory(session_id, user_key);
+    CREATE INDEX IF NOT EXISTS idx_session_mem_entity ON session_memory(entity_type, entity_id);
+
+    CREATE TABLE IF NOT EXISTS snapshots (
+      id BIGSERIAL PRIMARY KEY,
+      user_key TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      snapshot JSONB NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_snap_entity_time ON snapshots(entity_type, entity_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_snap_user_time ON snapshots(user_key, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS operation_log (
+      id BIGSERIAL PRIMARY KEY,
+      user_key TEXT NOT NULL,
+      session_id TEXT,
+      agent_id TEXT,
+      operation_type TEXT NOT NULL,
+      target JSONB NOT NULL,
+      args JSONB NOT NULL,
+      result JSONB,
+      undo_operation TEXT,
+      undo_args JSONB,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      undone_at TIMESTAMPTZ,
+      undone_by TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_oplog_user_time ON operation_log(user_key, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_oplog_session ON operation_log(session_id);
+
+    -- Extend user_preferences with Wave 1 columns
+    DO $$ BEGIN
+      ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS timezone TEXT;
+      ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS work_hours JSONB;
+      ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS notification_style TEXT;
+      ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS preferences JSONB;
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END $$;
   `);
 }
 
@@ -871,6 +924,155 @@ export async function clearActivepiecesProject(userKey) {
   userKey = normalizeUserKey(userKey);
   if (!userKey) return;
   await pool.query("DELETE FROM activepieces_user_projects WHERE user_key = $1", [userKey]);
+}
+
+/* ================= WAVE 1: SESSION MEMORY ================= */
+
+export async function saveSessionMemory(sessionId, userKey, entityType, entityId, entityName, context) {
+  userKey = normalizeUserKey(userKey);
+  if (!sessionId || !userKey) return;
+  await pool.query(
+    `INSERT INTO session_memory (session_id, user_key, entity_type, entity_id, entity_name, context)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [sessionId, userKey, entityType || null, entityId || null, entityName || null, context || null]
+  );
+}
+
+export async function getSessionMemory(sessionId, userKey, entityType = null, limit = 10) {
+  userKey = normalizeUserKey(userKey);
+  if (!sessionId || !userKey) return [];
+  let sql = `SELECT entity_type, entity_id, entity_name, context, mentioned_at
+             FROM session_memory
+             WHERE session_id = $1 AND user_key = $2`;
+  const params = [sessionId, userKey];
+  if (entityType) {
+    sql += ` AND entity_type = $3`;
+    params.push(entityType);
+  }
+  sql += ` ORDER BY mentioned_at DESC LIMIT ${parseInt(limit) || 10}`;
+  const res = await pool.query(sql, params);
+  return res.rows;
+}
+
+export async function cleanSessionMemory(sessionId, ttlHours = 24) {
+  const cutoff = new Date(Date.now() - ttlHours * 3600 * 1000).toISOString();
+  if (sessionId) {
+    await pool.query(`DELETE FROM session_memory WHERE session_id = $1 AND mentioned_at < $2`, [sessionId, cutoff]);
+  } else {
+    await pool.query(`DELETE FROM session_memory WHERE mentioned_at < $1`, [cutoff]);
+  }
+}
+
+/* ================= WAVE 1: SNAPSHOTS ================= */
+
+export async function saveSnapshot(userKey, entityType, entityId, snapshot) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !entityType || !entityId) return;
+  await pool.query(
+    `INSERT INTO snapshots (user_key, entity_type, entity_id, snapshot)
+     VALUES ($1, $2, $3, $4)`,
+    [userKey, entityType, entityId, JSON.stringify(snapshot)]
+  );
+}
+
+export async function getSnapshots(userKey, entityType, entityId, since, until = null) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !entityType || !entityId) return [];
+  let sql = `SELECT id, snapshot, created_at FROM snapshots
+             WHERE user_key = $1 AND entity_type = $2 AND entity_id = $3 AND created_at >= $4`;
+  const params = [userKey, entityType, entityId, new Date(since).toISOString()];
+  if (until) {
+    sql += ` AND created_at <= $5`;
+    params.push(new Date(until).toISOString());
+  }
+  sql += ` ORDER BY created_at ASC`;
+  const res = await pool.query(sql, params);
+  return res.rows;
+}
+
+export async function getLatestSnapshot(userKey, entityType, entityId, beforeDate = null) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !entityType || !entityId) return null;
+  let sql = `SELECT id, snapshot, created_at FROM snapshots
+             WHERE user_key = $1 AND entity_type = $2 AND entity_id = $3`;
+  const params = [userKey, entityType, entityId];
+  if (beforeDate) {
+    sql += ` AND created_at <= $4`;
+    params.push(new Date(beforeDate).toISOString());
+  }
+  sql += ` ORDER BY created_at DESC LIMIT 1`;
+  const res = await pool.query(sql, params);
+  return res.rows[0] || null;
+}
+
+export async function cleanSnapshots(retentionDays = 90) {
+  const cutoff = new Date(Date.now() - retentionDays * 86400 * 1000).toISOString();
+  const res = await pool.query(`DELETE FROM snapshots WHERE created_at < $1`, [cutoff]);
+  return res.rowCount;
+}
+
+/* ================= WAVE 1: OPERATION LOG ================= */
+
+export async function logOperation(userKey, sessionId, operationType, target, args, result, undoOperation = null, undoArgs = null) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !operationType) return null;
+  const res = await pool.query(
+    `INSERT INTO operation_log (user_key, session_id, operation_type, target, args, result, undo_operation, undo_args)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     RETURNING id, created_at`,
+    [
+      userKey,
+      sessionId || null,
+      operationType,
+      JSON.stringify(target || {}),
+      JSON.stringify(args || {}),
+      result ? JSON.stringify(result) : null,
+      undoOperation || null,
+      undoArgs ? JSON.stringify(undoArgs) : null
+    ]
+  );
+  return res.rows[0];
+}
+
+export async function getRecentOperations(userKey, limit = 20, since = null, operationType = null) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey) return [];
+  let sql = `SELECT id, session_id, agent_id, operation_type, target, args, result,
+                    undo_operation, undo_args, created_at, undone_at, undone_by
+             FROM operation_log
+             WHERE user_key = $1 AND undone_at IS NULL`;
+  const params = [userKey];
+  let paramIdx = 2;
+  if (since) {
+    sql += ` AND created_at >= $${paramIdx}`;
+    params.push(new Date(since).toISOString());
+    paramIdx++;
+  }
+  if (operationType) {
+    sql += ` AND operation_type = $${paramIdx}`;
+    params.push(operationType);
+    paramIdx++;
+  }
+  sql += ` ORDER BY created_at DESC LIMIT ${parseInt(limit) || 20}`;
+  const res = await pool.query(sql, params);
+  return res.rows;
+}
+
+export async function getOperation(operationId) {
+  const res = await pool.query(
+    `SELECT id, user_key, session_id, agent_id, operation_type, target, args, result,
+            undo_operation, undo_args, created_at, undone_at, undone_by
+     FROM operation_log WHERE id = $1`,
+    [operationId]
+  );
+  return res.rows[0] || null;
+}
+
+export async function markUndone(operationId, undoneBy) {
+  await pool.query(
+    `UPDATE operation_log SET undone_at = NOW(), undone_by = $2 WHERE id = $1`,
+    [operationId, undoneBy || null]
+  );
 }
 
 export default pool;

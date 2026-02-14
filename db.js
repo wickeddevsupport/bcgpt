@@ -65,5 +65,22 @@ export const getActivepiecesProject = async (...args) => await impl.getActivepie
 export const setActivepiecesProject = async (...args) => await impl.setActivepiecesProject(...args);
 export const clearActivepiecesProject = async (...args) => await impl.clearActivepiecesProject(...args);
 
+// Wave 1: Session Memory
+export const saveSessionMemory = async (...args) => await impl.saveSessionMemory(...args);
+export const getSessionMemory = async (...args) => await impl.getSessionMemory(...args);
+export const cleanSessionMemory = async (...args) => await impl.cleanSessionMemory(...args);
+
+// Wave 1: Snapshots
+export const saveSnapshot = async (...args) => await impl.saveSnapshot(...args);
+export const getSnapshots = async (...args) => await impl.getSnapshots(...args);
+export const getLatestSnapshot = async (...args) => await impl.getLatestSnapshot(...args);
+export const cleanSnapshots = async (...args) => await impl.cleanSnapshots(...args);
+
+// Wave 1: Operation Log
+export const logOperation = async (...args) => await impl.logOperation(...args);
+export const getRecentOperations = async (...args) => await impl.getRecentOperations(...args);
+export const getOperation = async (...args) => await impl.getOperation(...args);
+export const markUndone = async (...args) => await impl.markUndone(...args);
+
 export default impl.default ?? null;
 

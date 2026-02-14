@@ -60,11 +60,86 @@ import {
   indexSearchItem,
   searchIndex,
   getIdempotencyResponse,
-  setIdempotencyResponse
+  setIdempotencyResponse,
+  // Wave 1: implicit hooks
+  saveSessionMemory,
+  logOperation,
+  saveSnapshot,
 } from "./db.js";
 import { getTools } from "./mcp/tools.js";
 import { ENDPOINT_TOOL_MAP } from "./mcp/endpoint-tools.js";
 import { handleFlowTool } from "./index.js";
+import { handleWave1Tool } from "./index.js";
+
+const WAVE1_TOOLS = new Set([
+  'resolve_reference', 'what_changed_since', 'who_did_what',
+  'undo_last', 'undo_operation', 'list_recent_operations'
+]);
+
+/**
+ * Wave 1: Non-blocking context tracker.
+ * Extracts entity references from tool results and saves to session_memory.
+ * Also logs write operations to operation_log.
+ * Errors are silently caught — never blocks the main flow.
+ */
+const WRITE_OPS = new Set([
+  'create_task','create_project','create_todolist','create_message','create_comment',
+  'create_card','complete_task','assign_task','move_card','delete_card',
+  'flow_create','flow_delete','flow_update','flow_trigger'
+]);
+
+async function trackContext(toolName, args, result, userKey, sessionId) {
+  try {
+    if (!userKey || !result) return;
+    const sid = sessionId || 'default';
+
+    // Extract entities from result for session memory
+    if (result?.id && result?.name) {
+      const type = inferEntityType(toolName, result);
+      if (type) {
+        await saveSessionMemory(sid, userKey, type, String(result.id), result.name, toolName);
+      }
+    }
+    // Handle array results (list tools)
+    if (Array.isArray(result?.data || result)) {
+      const items = result?.data || result;
+      for (const item of items.slice(0, 5)) { // cap at 5 to avoid spamming
+        if (item?.id && item?.name) {
+          const type = inferEntityType(toolName, item);
+          if (type) {
+            await saveSessionMemory(sid, userKey, type, String(item.id), item.name, toolName);
+          }
+        }
+      }
+    }
+
+    // Log write operations
+    if (WRITE_OPS.has(toolName)) {
+      const target = {
+        type: inferEntityType(toolName, result) || 'unknown',
+        id: result?.id || result?.card?.id || args?.flow_id || args?.task_id,
+        name: result?.name || result?.card?.title || args?.displayName || toolName
+      };
+      await logOperation(userKey, sid, toolName, target, args, result);
+    }
+  } catch (e) {
+    // Never fail the main flow — just log
+    console.error('[Wave1] trackContext error (non-fatal):', e.message);
+  }
+}
+
+function inferEntityType(toolName, result) {
+  if (/project/i.test(toolName)) return 'project';
+  if (/task|todo/i.test(toolName)) return 'task';
+  if (/card/i.test(toolName)) return 'card';
+  if (/message/i.test(toolName)) return 'message';
+  if (/comment/i.test(toolName)) return 'comment';
+  if (/person|people/i.test(toolName)) return 'person';
+  if (/flow/i.test(toolName)) return 'flow';
+  if (/board|column/i.test(toolName)) return 'board';
+  if (result?.type) return result.type;
+  return null;
+}
 
 // Intelligent chaining modules
 import { RequestContext } from './intelligent-executor.js';
@@ -4418,6 +4493,7 @@ export async function handleMCP(reqBody, ctx) {
       try {
         console.log(`[MCP] Handling flow tool locally: ${name}`, { userKey });
         const result = await handleFlowTool(name, args, userKey);
+        trackContext(name, args, result, userKey).catch(() => {});
         return ok(id, result);
       } catch (flowError) {
         console.error(`[MCP] Flow tool error:`, flowError);
@@ -4440,6 +4516,22 @@ export async function handleMCP(reqBody, ctx) {
         return fail(id, {
           code: 'FLOW_ERROR',
           message: `Flow tool ${name} failed: ${flowError.message}`
+        });
+      }
+    }
+
+    // WAVE 1: PM OS Foundation tools (resolve_reference, what_changed_since, undo_*, etc.)
+    if (WAVE1_TOOLS.has(name)) {
+      try {
+        console.log(`[MCP] Handling Wave 1 tool: ${name}`, { userKey });
+        const sessionId = rpc?.params?.sessionId || 'default';
+        const result = await handleWave1Tool(name, args, userKey, sessionId);
+        return ok(id, result);
+      } catch (w1Error) {
+        console.error(`[MCP] Wave 1 tool error:`, w1Error);
+        return fail(id, {
+          code: 'WAVE1_ERROR',
+          message: `${name} failed: ${w1Error.message}`
         });
       }
     }
@@ -9154,6 +9246,9 @@ export async function handleMCP(reqBody, ctx) {
         const data = paginate
           ? await apiAllWithMeta(ctx, path)
           : await api(ctx, path, { method: httpMethod, body: args.body, idempotency_key: args.idempotency_key });
+
+        // Wave 1: track context for all endpoint tools (non-blocking)
+        trackContext(name, args, data, userKey).catch(() => {});
 
         if (paginate && Array.isArray(data?.items || data)) {
           return ok(id, {

@@ -1,6 +1,7 @@
 // mcp/tools.js
 import { ENDPOINT_TOOLS } from "./endpoint-tools.js";
 import { getFlowTools } from "../flow-tools.js";
+import { getWave1Tools } from "../wave1-tools.js";
 
 function tool(name, description, inputSchema) {
   return { name, description, inputSchema };
@@ -1625,6 +1626,11 @@ export function getTools() {
   // Append flow tools (flow_* for Activepieces integration)
   for (const flowTool of getFlowTools() || []) {
     tools.push(flowTool);
+  }
+
+  // Append Wave 1 PM OS Foundation tools
+  for (const w1Tool of getWave1Tools() || []) {
+    tools.push(w1Tool);
   }
 
   return tools;
