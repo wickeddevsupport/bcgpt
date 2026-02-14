@@ -833,12 +833,27 @@ async function handleFlowTool(name, args, userKey = null) {
       if (!args.flow_id) throw new Error('flow_id required');
       return await apiFetch(`flows/${args.flow_id}`, { method: 'DELETE' });
 
-    case 'flow_trigger':
+    case 'flow_trigger': {
       if (!args.flow_id) throw new Error('flow_id required');
-      return await apiFetch(`flows/${args.flow_id}/trigger`, {
-        method: 'POST',
-        body: JSON.stringify(args.payload || {})
-      });
+      // AP CE doesn't have a generic trigger endpoint. Check if the flow has a webhook trigger.
+      const flowDetail = await apiFetch(`flows/${args.flow_id}`);
+      const trigger = flowDetail?.version?.trigger;
+      if (trigger?.type === 'WEBHOOK' || trigger?.type === 'PIECE_TRIGGER') {
+        // Use the webhook URL for this flow
+        const webhookUrl = `${ACTIVEPIECES_URL}/api/v1/webhooks/${args.flow_id}`;
+        const resp = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(args.payload || {})
+        });
+        return { triggered: true, webhookUrl, status: resp.status };
+      }
+      throw new Error(
+        `Flow ${args.flow_id} uses trigger type "${trigger?.type || 'EMPTY'}". ` +
+        'Only flows with webhook triggers can be manually triggered. ' +
+        'Schedule-based or polling flows run automatically on their configured schedule.'
+      );
+    }
 
     case 'flow_runs_list':
       if (!args.flow_id) throw new Error('flow_id required');
