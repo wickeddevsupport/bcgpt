@@ -659,17 +659,26 @@ async function handleFlowTool(name, args, userKey = null) {
 
   async function apiFetch(endpoint, options = {}) {
     const url = `${ACTIVEPIECES_URL}/api/v1/${endpoint}`;
+    const method = (options.method || 'GET').toUpperCase();
     const headers = {
-      'Content-Type': 'application/json',
       'Authorization': `Bearer ${ACTIVEPIECES_API_KEY}`,
       ...options.headers
     };
+    // Only set Content-Type for requests with a body
+    if (options.body) {
+      headers['Content-Type'] = 'application/json';
+    }
 
     const response = await fetch(url, { ...options, headers });
     
     if (!response.ok) {
       const text = await response.text();
       throw new Error(`Activepieces API error (${response.status}): ${text}`);
+    }
+    
+    // DELETE may return no content
+    if (response.status === 204 || response.headers.get('content-length') === '0') {
+      return { success: true };
     }
     
     return await response.json();
