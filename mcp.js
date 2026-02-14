@@ -5351,6 +5351,42 @@ export async function handleMCP(reqBody, ctx) {
         });
 
         // Quick intent rules
+
+        // ── Flow / Automation intent ───────────────────────────────
+        const flowIntent = /\b(flow|flows|automation|automations|activepieces|trigger|workflow|workflows|automate)\b/i.test(query);
+        if (flowIntent) {
+          // Determine which flow tool to call based on the query
+          let flowTool = 'flow_list';
+          let flowArgs = {};
+
+          if (/\b(status|health|connected|integration status)\b/i.test(lower)) {
+            flowTool = 'flow_status';
+          } else if (/\b(create|new|add|make|build)\b/i.test(lower) && /\b(flow|automation|workflow)\b/i.test(lower)) {
+            flowTool = 'flow_create';
+            flowArgs = { name: query };
+          } else if (/\b(delete|remove)\b/i.test(lower)) {
+            flowTool = 'flow_delete';
+          } else if (/\b(run|execute|trigger|fire)\b/i.test(lower) && !/\b(list|show|get)\b/i.test(lower)) {
+            flowTool = 'flow_trigger';
+          } else if (/\b(runs|executions|history|log)\b/i.test(lower)) {
+            flowTool = 'flow_runs_list';
+          } else if (/\b(piece|pieces|integration|integrations|service|services|connector)\b/i.test(lower)) {
+            flowTool = 'flow_pieces_list';
+          } else if (/\b(connection|connections|api.?key|credential)\b/i.test(lower)) {
+            flowTool = 'flow_connections_list';
+          } else if (/\b(project|projects)\b/i.test(lower) && /\b(list|show|get|all)\b/i.test(lower)) {
+            flowTool = 'flow_projects_list';
+          }
+          // Default: flow_list (list all flows)
+
+          try {
+            const result = await callTool(flowTool, flowArgs);
+            return ok(id, { query, action: flowTool, confidence: 0.95, result });
+          } catch (flowErr) {
+            return ok(id, { query, action: flowTool, confidence: 0.95, error: flowErr.message || flowErr.code || String(flowErr) });
+          }
+        }
+
         if (lower.includes("daily report")) {
           const date = analysis.constraints.dueDate || new Date().toISOString().slice(0, 10);
           const result = await intelligent.executeDailyReport(ctx, date);
