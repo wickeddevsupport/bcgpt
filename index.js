@@ -1012,7 +1012,7 @@ function computeDiff(oldSnap, newSnap) {
 /**
  * Handle Wave 1 PM OS tools: resolve_reference, what_changed_since, who_did_what, undo_*, list_recent_operations
  */
-async function handleWave1Tool(name, args, userKey, sessionId) {
+async function handleWave1Tool(name, args, userKey, sessionId, executeTool) {
   switch (name) {
     case 'resolve_reference': {
       if (!args.ref) throw new Error('ref is required');
@@ -1150,8 +1150,10 @@ async function handleWave1Tool(name, args, userKey, sessionId) {
           continue;
         }
         try {
-          // Execute the undo by calling the reverse tool via handleMCP
-          // For now, mark undone and return the undo instructions
+          // Execute the reverse tool
+          if (executeTool && op.undo_args) {
+            await executeTool(op.undo_operation, op.undo_args);
+          }
           await markUndone(op.id, userKey);
           results.push({
             id: op.id,
@@ -1175,13 +1177,17 @@ async function handleWave1Tool(name, args, userKey, sessionId) {
       if (op.undone_at) throw new Error('Operation already undone');
       if (!op.undo_operation) throw new Error('This operation has no undo mapping');
 
+      // Execute the reverse tool
+      if (executeTool && op.undo_args) {
+        await executeTool(op.undo_operation, op.undo_args);
+      }
       await markUndone(op.id, userKey);
       return {
         success: true,
         operation: op.operation_type,
-        undo_operation: op.undo_operation,
+        undo_executed: op.undo_operation,
         undo_args: op.undo_args,
-        message: `Marked as undone: ${op.operation_type} on ${op.target?.name || op.target?.type || 'entity'}`
+        message: `Undone: ${op.operation_type} on ${op.target?.name || op.target?.type || 'entity'}`
       };
     }
 

@@ -88,6 +88,24 @@ const WRITE_OPS = new Set([
   'flow_create','flow_delete','flow_update','flow_trigger'
 ]);
 
+// Undo map: operation → reverse operation + arg builder
+const UNDO_MAP = {
+  'create_task':      { undo: 'delete_task',      argsMap: (a, r) => ({ task_id: r?.id || a?.task_id }) },
+  'create_project':   { undo: 'delete_project',   argsMap: (a, r) => ({ project_id: r?.id || a?.project_id }) },
+  'create_todolist':  { undo: 'delete_todolist',   argsMap: (a, r) => ({ todolist_id: r?.id }) },
+  'create_message':   { undo: 'delete_message',   argsMap: (a, r) => ({ message_id: r?.id, project: a?.project }) },
+  'create_comment':   { undo: 'delete_comment',   argsMap: (a, r) => ({ comment_id: r?.id }) },
+  'create_card':      { undo: 'delete_card',      argsMap: (a, r) => ({ card_id: r?.id || r?.card?.id }) },
+  'complete_task':    { undo: 'uncomplete_task',   argsMap: (a, r) => ({ task_id: a?.task_id }) },
+  'assign_task':      { undo: 'unassign_task',     argsMap: (a, r) => ({ task_id: a?.task_id, person_id: a?.person_id }) },
+  'move_card':        { undo: 'move_card',         argsMap: (a, r) => ({ card_id: a?.card_id, column_id: a?._prev_column_id || a?.column_id }) },
+  'delete_card':      { undo: null },              // destructive — no undo
+  'flow_create':      { undo: 'flow_delete',       argsMap: (a, r) => ({ flow_id: r?.id }) },
+  'flow_delete':      { undo: null },              // destructive — no undo
+  'flow_update':      { undo: null },              // would need prior state snapshot
+  'flow_trigger':     { undo: null },              // not reversible
+};
+
 async function trackContext(toolName, args, result, userKey, sessionId) {
   try {
     if (!userKey || !result) return;
@@ -120,14 +138,31 @@ async function trackContext(toolName, args, result, userKey, sessionId) {
       }
     }
 
-    // Log write operations
+    // Log write operations with undo mapping
     if (WRITE_OPS.has(toolName)) {
-      const target = {
-        type: inferEntityType(toolName, result) || 'unknown',
-        id: result?.id || result?.card?.id || args?.flow_id || args?.task_id,
-        name: extractName(result) || result?.card?.title || args?.displayName || toolName
-      };
-      await logOperation(userKey, sid, toolName, target, args, result);
+      const entityType = inferEntityType(toolName, result) || 'unknown';
+      const entityId = result?.id || result?.card?.id || args?.flow_id || args?.task_id;
+      const entityNameStr = extractName(result) || result?.card?.title || args?.displayName || toolName;
+      const target = { type: entityType, id: entityId, name: entityNameStr };
+
+      // Compute undo operation from map
+      const mapping = UNDO_MAP[toolName];
+      let undoOp = null, undoArgs = null;
+      if (mapping && mapping.undo && mapping.argsMap) {
+        try {
+          undoOp = mapping.undo;
+          undoArgs = mapping.argsMap(args, result);
+        } catch { /* leave null if argsMap fails */ }
+      }
+
+      await logOperation(userKey, sid, toolName, target, args, result, undoOp, undoArgs);
+
+      // Capture post-operation snapshot for time-machine diffs
+      if (entityId && result) {
+        try {
+          await saveSnapshot(userKey, entityType, String(entityId), result);
+        } catch { /* non-fatal */ }
+      }
     }
   } catch (e) {
     // Never fail the main flow — just log
@@ -4532,7 +4567,25 @@ export async function handleMCP(reqBody, ctx) {
       try {
         console.log(`[MCP] Handling Wave 1 tool: ${name}`, { userKey });
         const sessionId = params?.sessionId || args?.session_id || 'default';
-        const result = await handleWave1Tool(name, args, userKey, sessionId);
+        // Pass executeTool callback so undo can dispatch reverse operations
+        const executeTool = async (toolName, toolArgs) => {
+          // Route to the appropriate handler
+          if (toolName.startsWith('flow_')) {
+            return handleFlowTool(toolName, toolArgs, userKey);
+          }
+          // For Basecamp endpoint tools, re-dispatch through the endpoint handler
+          if (ENDPOINT_TOOL_MAP[toolName]) {
+            const ep = ENDPOINT_TOOL_MAP[toolName];
+            // Build path and execute
+            const pathResult = ep.buildPath(toolArgs);
+            const url = typeof pathResult === 'string' ? pathResult : pathResult.path;
+            const method = ep.method || 'GET';
+            const body = method !== 'GET' && method !== 'DELETE' ? ep.buildBody?.(toolArgs) : undefined;
+            return basecampFetch(req, url, { method, body: body ? JSON.stringify(body) : undefined });
+          }
+          throw new Error(`Cannot execute undo tool: ${toolName}`);
+        };
+        const result = await handleWave1Tool(name, args, userKey, sessionId, executeTool);
         return ok(id, result);
       } catch (w1Error) {
         console.error(`[MCP] Wave 1 tool error:`, w1Error);
