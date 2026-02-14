@@ -3,6 +3,8 @@
 
 Last Updated: 2026-02-14
 
+> Status note (2026-02-14): Wave 1 and core Wave 2 capabilities are already implemented in `index.js`, `mcp.js`, and `db.js`. The per-wave status tables below are pending refresh.
+
 ## 📚 Documentation Structure
 
 ```

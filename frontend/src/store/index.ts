@@ -38,6 +38,7 @@ interface PMOSState {
   
   // Actions
   addMessage: (message: Omit<Message, 'id' | 'timestamp'>) => void
+  setMessages: (messages: Message[]) => void
   setLoading: (loading: boolean) => void
   toggleChat: () => void
   setCurrentProject: (project: Project | null) => void
@@ -75,6 +76,8 @@ export const useStore = create<PMOSState>((set) => ({
         },
       ],
     })),
+
+  setMessages: (messages) => set({ messages }),
     
   setLoading: (loading) => set({ isLoading: loading }),
   

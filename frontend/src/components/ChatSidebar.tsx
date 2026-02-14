@@ -5,7 +5,7 @@ import {
   Clock
 } from 'lucide-react'
 import { useStore } from '../store'
-import { sendChatMessage, listChatSessions } from '../api'
+import { sendChatMessage, listChatSessions, getChatSession } from '../api'
 
 interface ChatSession {
   id: string
@@ -22,7 +22,7 @@ export default function ChatSidebar() {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   
-  const { messages, isLoading, addMessage, setLoading, clearMessages, currentProject } = useStore()
+  const { messages, isLoading, addMessage, setMessages, setLoading, clearMessages, currentProject } = useStore()
   
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -105,9 +105,30 @@ export default function ChatSidebar() {
   }
   
   const loadSession = async (session: ChatSession) => {
-    setCurrentSessionId(session.id)
-    setShowHistory(false)
-    // TODO: Load session messages
+    setLoading(true)
+    try {
+      const data = await getChatSession(session.id)
+      setCurrentSessionId(session.id)
+      setMessages(
+        (data.messages || []).map((msg) => ({
+          id: crypto.randomUUID(),
+          role: (msg.role === 'user' || msg.role === 'assistant' || msg.role === 'tool')
+            ? msg.role
+            : 'assistant',
+          content: msg.content || '',
+          timestamp: msg.created_at ? new Date(msg.created_at) : new Date(),
+        }))
+      )
+      setShowHistory(false)
+    } catch {
+      addMessage({
+        role: 'assistant',
+        content: 'Failed to load chat history for this session.',
+        error: true,
+      })
+    } finally {
+      setLoading(false)
+    }
   }
   
   if (collapsed) {

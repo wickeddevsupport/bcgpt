@@ -139,7 +139,8 @@ export async function listChatSessions(): Promise<Array<{
 }
 
 export async function getChatSession(sessionId: string): Promise<{
-  session: { id: string; title: string };
+  id: string;
+  title: string;
   messages: Array<{ role: string; content: string; created_at: string }>;
 }> {
   const response = await apiRequest(`/api/chat/sessions/${sessionId}`);
