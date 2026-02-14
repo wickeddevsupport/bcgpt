@@ -657,13 +657,23 @@ async function handleFlowTool(name, args, userKey = null) {
     ? null
     : null;
 
-  // Check if user exists in Activepieces
+  // Check if user exists in Activepieces (paginate through all users)
   let activepiecesUserId = null;
   if (userEmail) {
     try {
-      const users = await apiFetch('users');
-      const matchingUser = users.data?.find(u => u.email.toLowerCase() === userEmail.toLowerCase());
-      activepiecesUserId = matchingUser?.id || null;
+      let cursor = null;
+      let found = false;
+      do {
+        const endpoint = cursor ? `users?cursor=${cursor}` : 'users';
+        const users = await apiFetch(endpoint);
+        const matchingUser = users.data?.find(u => u.email?.toLowerCase() === userEmail.toLowerCase());
+        if (matchingUser) {
+          activepiecesUserId = matchingUser.id;
+          found = true;
+          break;
+        }
+        cursor = users.next || null;
+      } while (cursor && !found);
     } catch (e) {
       console.log(`[handleFlowTool] Could not verify Activepieces user: ${e.message}`);
     }
