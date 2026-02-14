@@ -3,6 +3,7 @@ import { ENDPOINT_TOOLS } from "./endpoint-tools.js";
 import { getFlowTools } from "../flow-tools.js";
 import { getWave1Tools } from "../wave1-tools.js";
 import { getWave2Tools } from "../wave2-tools.js";
+import { getWave3Tools } from "../wave3-tools.js";
 
 function tool(name, description, inputSchema) {
   return { name, description, inputSchema };
@@ -1637,6 +1638,11 @@ export function getTools() {
   // Append Wave 2 Intelligence tools
   for (const w2Tool of getWave2Tools() || []) {
     tools.push(w2Tool);
+  }
+
+  // Append Wave 3 Construction tools
+  for (const w3Tool of getWave3Tools() || []) {
+    tools.push(w3Tool);
   }
 
   return tools;

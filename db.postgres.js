@@ -276,6 +276,20 @@ async function ensureSchema() {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_health_unique ON health_scores(user_key, project_id);
     CREATE INDEX IF NOT EXISTS idx_health_user ON health_scores(user_key, computed_at DESC);
+
+    -- ============ Wave 3: Construction ============
+
+    CREATE TABLE IF NOT EXISTS recipes (
+      id BIGSERIAL PRIMARY KEY,
+      user_key TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      operations JSONB NOT NULL DEFAULT '[]',
+      variables JSONB DEFAULT '[]',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_recipes_user ON recipes(user_key, created_at DESC);
   `);
 }
 
@@ -1131,6 +1145,57 @@ export async function getAllHealthScores(userKey) {
     [userKey]
   );
   return res.rows;
+}
+
+/* ================= WAVE 3: RECIPES ================= */
+
+export async function saveRecipe(userKey, name, description, operations, variables) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !name) return null;
+  const res = await pool.query(
+    `INSERT INTO recipes (user_key, name, description, operations, variables)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, created_at`,
+    [userKey, name, description || null, JSON.stringify(operations || []), JSON.stringify(variables || [])]
+  );
+  return res.rows[0];
+}
+
+export async function listRecipes(userKey, limit = 20) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey) return [];
+  const res = await pool.query(
+    `SELECT id, name, description, variables, created_at, updated_at,
+            jsonb_array_length(operations) as operation_count
+     FROM recipes WHERE user_key = $1 ORDER BY updated_at DESC LIMIT $2`,
+    [userKey, limit]
+  );
+  return res.rows;
+}
+
+export async function getRecipe(userKey, recipeIdOrName) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey) return null;
+  // Try by ID first, then by name
+  const byId = await pool.query(
+    `SELECT * FROM recipes WHERE user_key = $1 AND id = $2`,
+    [userKey, parseInt(recipeIdOrName) || 0]
+  );
+  if (byId.rows[0]) return byId.rows[0];
+  const byName = await pool.query(
+    `SELECT * FROM recipes WHERE user_key = $1 AND LOWER(name) = LOWER($2) LIMIT 1`,
+    [userKey, recipeIdOrName]
+  );
+  return byName.rows[0] || null;
+}
+
+export async function deleteRecipe(userKey, recipeIdOrName) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey) return false;
+  const recipe = await getRecipe(userKey, recipeIdOrName);
+  if (!recipe) return false;
+  await pool.query(`DELETE FROM recipes WHERE id = $1`, [recipe.id]);
+  return true;
 }
 
 export default pool;

@@ -49,6 +49,11 @@ import {
   saveHealthScore,
   getHealthScore,
   getAllHealthScores,
+  // Wave 3: Construction
+  saveRecipe,
+  listRecipes,
+  getRecipe,
+  deleteRecipe,
 } from "./db.js";
 import { runMining } from "./miner.js";
 import { execSync } from "child_process";
@@ -1747,6 +1752,420 @@ function parsePeriodDays(period) {
 }
 
 export { handleWave2Tool };
+
+/**
+ * Wave 3: Construction Tools
+ * NL Project Builder, Smart Assignment, Predictive Deadlines, Recipe System
+ */
+async function handleWave3Tool(name, args, userKey, sessionId, executeTool) {
+  switch (name) {
+
+    // ===== NL PROJECT BUILDER =====
+    case 'build_project': {
+      if (!args.description) throw new Error('description is required');
+      const desc = args.description;
+
+      // Parse the NL description into a structured plan
+      const plan = parseProjectDescription(desc);
+
+      if (args.dry_run) {
+        return { status: 'dry_run', plan, message: 'Review this plan. Call again with dry_run=false to execute.' };
+      }
+
+      // Execute the plan
+      const results = { created: [], errors: [] };
+
+      // 1. Create or find the project
+      let projectId = args.project || null;
+      if (!projectId && plan.project?.name) {
+        try {
+          if (executeTool) {
+            const pResult = await executeTool('create_project', { name: plan.project.name, description: plan.project.description || '' });
+            projectId = pResult?.id;
+            results.created.push({ type: 'project', name: plan.project.name, id: projectId });
+          }
+        } catch (e) {
+          results.errors.push({ type: 'project', name: plan.project.name, error: e.message });
+        }
+      }
+
+      // 2. Create todo lists and their tasks
+      for (const list of plan.lists || []) {
+        try {
+          if (executeTool && projectId) {
+            const listResult = await executeTool('create_todolist', { project: projectId, name: list.name, description: list.description || '' });
+            results.created.push({ type: 'todolist', name: list.name, id: listResult?.id });
+
+            for (const task of list.tasks || []) {
+              try {
+                const taskResult = await executeTool('create_task', {
+                  todolist_id: listResult?.id,
+                  content: task.title,
+                  description: task.description || '',
+                  due_on: task.due_date || undefined
+                });
+                results.created.push({ type: 'task', name: task.title, id: taskResult?.id });
+              } catch (e) {
+                results.errors.push({ type: 'task', name: task.title, error: e.message });
+              }
+            }
+          }
+        } catch (e) {
+          results.errors.push({ type: 'todolist', name: list.name, error: e.message });
+        }
+      }
+
+      // 3. Create messages
+      for (const msg of plan.messages || []) {
+        try {
+          if (executeTool && projectId) {
+            await executeTool('create_message', { project: projectId, subject: msg.subject, content: msg.content || '' });
+            results.created.push({ type: 'message', name: msg.subject });
+          }
+        } catch (e) {
+          results.errors.push({ type: 'message', name: msg.subject, error: e.message });
+        }
+      }
+
+      return {
+        status: results.errors.length === 0 ? 'success' : 'partial',
+        plan,
+        created: results.created,
+        errors: results.errors,
+        summary: `Created ${results.created.length} item(s)${results.errors.length > 0 ? `, ${results.errors.length} error(s)` : ''}`
+      };
+    }
+
+    // ===== SMART ASSIGNMENT =====
+    case 'smart_assign': {
+      if (!args.project) throw new Error('project is required');
+      const projects = await listEntityCache('project', { userKey, limit: 200 });
+      const match = projects.find(p =>
+        p.title?.toLowerCase().includes(args.project.toLowerCase()) ||
+        String(p.object_id) === String(args.project)
+      );
+      if (!match) throw new Error(`Project not found: ${args.project}`);
+      const projectId = match.object_id;
+
+      const todos = await listEntityCache('todo', { projectId, userKey, limit: 500 });
+      const people = await listEntityCache('person', { userKey, limit: 100 });
+      const active = todos.filter(t => !t.data?.completed);
+
+      // Build workload map
+      const workload = {};
+      const skills = {}; // track what types of tasks each person handles
+      for (const p of people) {
+        workload[p.object_id] = { person: p.title || p.data?.name, tasks: 0, projects: new Set() };
+        skills[p.object_id] = [];
+      }
+      for (const t of active) {
+        for (const aid of (t.data?.assignee_ids || [])) {
+          if (workload[aid]) {
+            workload[aid].tasks++;
+            workload[aid].projects.add(projectId);
+            skills[aid].push(t.title?.toLowerCase().split(' ').slice(0, 3).join(' '));
+          }
+        }
+      }
+
+      const mode = args.mode || 'suggest';
+
+      if (mode === 'rebalance') {
+        // Find overloaded and underloaded people
+        const counts = Object.entries(workload).map(([id, w]) => ({ id, ...w, projects: w.projects.size }));
+        const avgTasks = counts.length > 0 ? counts.reduce((s, c) => s + c.tasks, 0) / counts.length : 0;
+        const overloaded = counts.filter(c => c.tasks > avgTasks * 1.5).sort((a, b) => b.tasks - a.tasks);
+        const underloaded = counts.filter(c => c.tasks < avgTasks * 0.5).sort((a, b) => a.tasks - b.tasks);
+
+        return {
+          mode: 'rebalance',
+          project: match.title,
+          avg_tasks: Math.round(avgTasks * 10) / 10,
+          overloaded: overloaded.map(c => ({ person: c.person, tasks: c.tasks })),
+          underloaded: underloaded.map(c => ({ person: c.person, tasks: c.tasks })),
+          unassigned_tasks: active.filter(t => !t.data?.assignee_ids?.length).length,
+          recommendations: [
+            ...(overloaded.length > 0 ? [`Move tasks from ${overloaded[0].person} (${overloaded[0].tasks} tasks) to others`] : []),
+            ...(underloaded.length > 0 ? [`${underloaded[0].person} has capacity (${underloaded[0].tasks} tasks)`] : []),
+            ...(active.filter(t => !t.data?.assignee_ids?.length).length > 0 ? ['Assign unassigned tasks to underloaded people'] : [])
+          ]
+        };
+      }
+
+      // assign or suggest — find best person for a task
+      const unassigned = args.task
+        ? active.filter(t => t.title?.toLowerCase().includes(args.task.toLowerCase()))
+        : active.filter(t => !t.data?.assignee_ids?.length);
+
+      const targetTask = unassigned[0];
+      if (!targetTask) throw new Error(args.task ? `Task not found: ${args.task}` : 'No unassigned tasks found');
+
+      // Score each person for this task
+      const candidates = Object.entries(workload).map(([id, w]) => {
+        let score = 100;
+        // Workload penalty (lower is better)
+        score -= w.tasks * 5;
+        // Skill match bonus
+        const taskWords = (targetTask.title || '').toLowerCase().split(' ');
+        const skillMatch = (skills[id] || []).some(s => taskWords.some(w => s.includes(w)));
+        if (skillMatch) score += 20;
+        // Already on this project bonus
+        if (w.projects.has(projectId)) score += 15;
+        return { id, person: w.person, score, tasks: w.tasks, has_skill_match: skillMatch };
+      }).sort((a, b) => b.score - a.score);
+
+      return {
+        mode,
+        task: targetTask.title,
+        project: match.title,
+        recommendation: candidates[0] || null,
+        alternatives: candidates.slice(1, 4),
+        reason: candidates[0]
+          ? `${candidates[0].person} has ${candidates[0].tasks} tasks${candidates[0].has_skill_match ? ' and matching skills' : ''}`
+          : 'No candidates found'
+      };
+    }
+
+    // ===== PREDICTIVE DEADLINES =====
+    case 'predict_deadline': {
+      if (!args.project) throw new Error('project is required');
+      const projects = await listEntityCache('project', { userKey, limit: 200 });
+      const match = projects.find(p =>
+        p.title?.toLowerCase().includes(args.project.toLowerCase()) ||
+        String(p.object_id) === String(args.project)
+      );
+      if (!match) throw new Error(`Project not found: ${args.project}`);
+      const projectId = match.object_id;
+
+      const todos = await listEntityCache('todo', { projectId, userKey, limit: 500 });
+      const active = todos.filter(t => !t.data?.completed);
+      const completed = todos.filter(t => t.data?.completed);
+
+      // Calculate velocity: completions per week over last 4 weeks
+      const fourWeeksAgo = Date.now() - 28 * 86400000;
+      const recentCompleted = completed.filter(t => {
+        const d = t.data?.completed_at || t.data?.updated_at;
+        return d && new Date(d).getTime() >= fourWeeksAgo;
+      });
+      const weeksOfData = Math.max(1, Math.min(4, (Date.now() - fourWeeksAgo) / (7 * 86400000)));
+      const velocityPerWeek = recentCompleted.length / weeksOfData;
+
+      // Predict remaining time
+      const remaining = active.length;
+      const confidence = args.confidence || 'likely';
+      const multiplier = confidence === 'optimistic' ? 0.7 : confidence === 'pessimistic' ? 1.5 : 1.0;
+
+      let predictedWeeks = velocityPerWeek > 0 ? (remaining / velocityPerWeek) * multiplier : null;
+      let predictedDate = predictedWeeks ? new Date(Date.now() + predictedWeeks * 7 * 86400000) : null;
+
+      return {
+        project: match.title,
+        remaining_tasks: remaining,
+        completed_tasks: completed.length,
+        velocity: { per_week: Math.round(velocityPerWeek * 10) / 10, data_weeks: Math.round(weeksOfData * 10) / 10 },
+        prediction: {
+          confidence,
+          estimated_weeks: predictedWeeks ? Math.round(predictedWeeks * 10) / 10 : null,
+          estimated_date: predictedDate ? predictedDate.toISOString().split('T')[0] : null,
+          message: predictedDate
+            ? `At current velocity (${Math.round(velocityPerWeek * 10) / 10}/week), ${remaining} remaining tasks should be done by ~${predictedDate.toISOString().split('T')[0]} (${confidence})`
+            : 'Not enough velocity data to predict — no completions in the last 4 weeks'
+        },
+        risks: [
+          ...(velocityPerWeek < 1 ? ['Very low velocity — project may stall'] : []),
+          ...(remaining > completed.length * 2 ? ['More work remaining than completed — scope may be too large'] : []),
+          ...(active.filter(t => t.data?.due_on && new Date(t.data.due_on) < Date.now()).length > 0
+            ? [`${active.filter(t => t.data?.due_on && new Date(t.data.due_on) < Date.now()).length} tasks already overdue`]
+            : [])
+        ]
+      };
+    }
+
+    // ===== RECIPE SYSTEM =====
+    case 'save_recipe': {
+      if (!args.name) throw new Error('name is required');
+      const count = Math.min(parseInt(args.operation_count) || 10, 50);
+      const ops = await getRecentOperations(userKey, count);
+
+      // Extract operations as recipe steps
+      const steps = ops.reverse().map(op => ({
+        tool: op.operation_type,
+        args: op.args || {},
+        target: op.target || {},
+        description: `${op.operation_type} on ${op.target?.name || op.target?.type || 'entity'}`
+      }));
+
+      // Auto-detect variables (project names, entity IDs)
+      const variables = [];
+      const seenVars = new Set();
+      for (const step of steps) {
+        if (step.target?.name && !seenVars.has(step.target.name)) {
+          variables.push({ key: `${step.target.type}_name`, default: step.target.name, description: `Name of ${step.target.type}` });
+          seenVars.add(step.target.name);
+        }
+      }
+
+      const result = await saveRecipe(userKey, args.name, args.description || '', steps, variables);
+      return {
+        recipe_id: result.id,
+        name: args.name,
+        steps: steps.length,
+        variables,
+        message: `Recipe "${args.name}" saved with ${steps.length} steps and ${variables.length} variables`
+      };
+    }
+
+    case 'list_recipes': {
+      const recipes = await listRecipes(userKey, parseInt(args.limit) || 20);
+      return {
+        recipes: recipes.map(r => ({
+          id: r.id, name: r.name, description: r.description,
+          steps: r.operation_count, created: r.created_at
+        })),
+        total: recipes.length
+      };
+    }
+
+    case 'run_recipe': {
+      if (!args.recipe_id) throw new Error('recipe_id is required');
+      const recipe = await getRecipe(userKey, args.recipe_id);
+      if (!recipe) throw new Error(`Recipe not found: ${args.recipe_id}`);
+
+      const steps = recipe.operations || [];
+      const vars = args.variables || {};
+
+      // Apply variable substitutions
+      const resolvedSteps = steps.map(step => {
+        let stepStr = JSON.stringify(step);
+        for (const [key, val] of Object.entries(vars)) {
+          // Find the default value for this variable and replace
+          const variable = (recipe.variables || []).find(v => v.key === key);
+          if (variable?.default) {
+            stepStr = stepStr.replace(new RegExp(escapeRegex(variable.default), 'g'), val);
+          }
+        }
+        return JSON.parse(stepStr);
+      });
+
+      if (!args.auto_execute) {
+        return {
+          status: 'preview',
+          recipe: recipe.name,
+          steps: resolvedSteps.map((s, i) => ({ step: i + 1, tool: s.tool, description: s.description, args_preview: s.args })),
+          message: `Will execute ${resolvedSteps.length} steps. Set auto_execute=true to run.`
+        };
+      }
+
+      // Execute
+      const results = [];
+      for (const step of resolvedSteps) {
+        try {
+          if (executeTool) {
+            const result = await executeTool(step.tool, step.args);
+            results.push({ step: step.tool, success: true, result_id: result?.id });
+          } else {
+            results.push({ step: step.tool, success: false, reason: 'No executor available' });
+          }
+        } catch (e) {
+          results.push({ step: step.tool, success: false, reason: e.message });
+        }
+      }
+
+      return {
+        status: 'executed',
+        recipe: recipe.name,
+        results,
+        summary: `${results.filter(r => r.success).length}/${results.length} steps completed`
+      };
+    }
+
+    case 'delete_recipe': {
+      if (!args.recipe_id) throw new Error('recipe_id is required');
+      const deleted = await deleteRecipe(userKey, args.recipe_id);
+      if (!deleted) throw new Error(`Recipe not found: ${args.recipe_id}`);
+      return { success: true, message: `Recipe deleted` };
+    }
+
+    default:
+      throw new Error(`Unknown Wave 3 tool: ${name}`);
+  }
+}
+
+// NL project description parser (rule-based, no LLM required)
+function parseProjectDescription(desc) {
+  const plan = { project: null, lists: [], messages: [], people: [] };
+
+  // Extract project name: "Create a project called 'X'" or "project named X"
+  const nameMatch = desc.match(/(?:project|workspace)\s+(?:called|named|titled)\s+['""]?([^'"",.]+)['""]?/i)
+    || desc.match(/(?:create|build|set up|make)\s+(?:a\s+)?['""]?([^'"",.]+?)['""]?\s+project/i);
+  if (nameMatch) {
+    plan.project = { name: nameMatch[1].trim(), description: '' };
+  } else {
+    // First sentence as project name
+    const firstSentence = desc.split(/[.!?\n]/)[0].trim();
+    plan.project = { name: firstSentence.length > 60 ? firstSentence.slice(0, 60) : firstSentence, description: desc };
+  }
+
+  // Extract todo lists: "todo lists: X, Y, Z" or "lists for X, Y, and Z"
+  const listPatterns = [
+    /(?:todo\s*lists?|lists?)\s*(?:for|:)\s*(.+?)(?:\.|$)/i,
+    /(?:set up|create|add)\s+(?:\d+\s+)?(?:todo\s*lists?|lists?)\s*:\s*(.+?)(?:\.|$)/i,
+    /(?:sections?|categories|areas)\s*(?:for|:)\s*(.+?)(?:\.|$)/i
+  ];
+  for (const pat of listPatterns) {
+    const m = desc.match(pat);
+    if (m) {
+      const listNames = m[1].split(/,\s*(?:and\s+)?|\s+and\s+/).map(n => n.trim()).filter(Boolean);
+      for (const ln of listNames) {
+        // Check for inline tasks: "Content (10 blog posts)"
+        const taskMatch = ln.match(/^(.+?)\s*\((.+?)\)/);
+        if (taskMatch) {
+          const listName = taskMatch[1].trim();
+          const taskDesc = taskMatch[2].trim();
+          const numMatch = taskDesc.match(/(\d+)/);
+          const tasks = [];
+          if (numMatch) {
+            const count = Math.min(parseInt(numMatch[1]), 20);
+            const taskType = taskDesc.replace(/\d+\s*/, '').trim();
+            for (let i = 1; i <= count; i++) tasks.push({ title: `${taskType} ${i}` });
+          } else {
+            tasks.push({ title: taskDesc });
+          }
+          plan.lists.push({ name: listName, tasks });
+        } else {
+          plan.lists.push({ name: ln, tasks: [] });
+        }
+      }
+      break;
+    }
+  }
+
+  // Extract messages: "post a message about X" or "kickoff message"
+  const msgMatch = desc.match(/(?:post|send|write|create)\s+(?:a\s+)?(?:kickoff\s+)?message\s+(?:about|explaining|saying)\s+(.+?)(?:\.|$)/i);
+  if (msgMatch) {
+    plan.messages.push({ subject: 'Kickoff', content: msgMatch[1].trim() });
+  }
+
+  // Extract people: "Add Sarah (PM), Mike (designer)"
+  const peopleMatch = desc.match(/(?:add|assign|include)\s+(.+?)(?:\.\s|\.$|$)/i);
+  if (peopleMatch) {
+    const names = peopleMatch[1].match(/([A-Z][a-z]+(?:\s*\([^)]+\))?)/g);
+    if (names) {
+      for (const n of names) {
+        const roleMatch = n.match(/(\w+)\s*\(([^)]+)\)/);
+        plan.people.push(roleMatch ? { name: roleMatch[1], role: roleMatch[2] } : { name: n.trim() });
+      }
+    }
+  }
+
+  return plan;
+}
+
+function escapeRegex(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export { handleWave3Tool };
 
 /* ================= MCP CONTEXT BUILDER ================= */
 

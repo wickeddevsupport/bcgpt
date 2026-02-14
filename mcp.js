@@ -71,6 +71,7 @@ import { ENDPOINT_TOOL_MAP } from "./mcp/endpoint-tools.js";
 import { handleFlowTool } from "./index.js";
 import { handleWave1Tool } from "./index.js";
 import { handleWave2Tool } from "./index.js";
+import { handleWave3Tool } from "./index.js";
 
 const WAVE1_TOOLS = new Set([
   'resolve_reference', 'what_changed_since', 'who_did_what',
@@ -81,6 +82,11 @@ const WAVE2_TOOLS = new Set([
   'get_project_pulse', 'get_portfolio_pulse',
   'my_day', 'what_should_i_work_on', 'end_of_day',
   'detect_ghost_work', 'query', 'generate_dashboard'
+]);
+
+const WAVE3_TOOLS = new Set([
+  'build_project', 'smart_assign', 'predict_deadline',
+  'save_recipe', 'list_recipes', 'run_recipe', 'delete_recipe'
 ]);
 
 /**
@@ -4615,6 +4621,37 @@ export async function handleMCP(reqBody, ctx) {
         return fail(id, {
           code: 'WAVE2_ERROR',
           message: `${name} failed: ${w2Error.message}`
+        });
+      }
+    }
+
+    // WAVE 3: Construction tools (build_project, smart_assign, recipes, etc.)
+    if (WAVE3_TOOLS.has(name)) {
+      try {
+        console.log(`[MCP] Handling Wave 3 tool: ${name}`, { userKey });
+        const sessionId = params?.sessionId || args?.session_id || 'default';
+        // Pass executeTool callback so build_project and run_recipe can dispatch operations
+        const executeTool = async (toolName, toolArgs) => {
+          if (toolName.startsWith('flow_')) {
+            return handleFlowTool(toolName, toolArgs, userKey);
+          }
+          if (ENDPOINT_TOOL_MAP[toolName]) {
+            const ep = ENDPOINT_TOOL_MAP[toolName];
+            const pathResult = ep.buildPath(toolArgs);
+            const url = typeof pathResult === 'string' ? pathResult : pathResult.path;
+            const method = ep.method || 'GET';
+            const body = method !== 'GET' && method !== 'DELETE' ? ep.buildBody?.(toolArgs) : undefined;
+            return basecampFetch(req, url, { method, body: body ? JSON.stringify(body) : undefined });
+          }
+          throw new Error(`Cannot execute tool: ${toolName}`);
+        };
+        const result = await handleWave3Tool(name, args, userKey, sessionId, executeTool);
+        return ok(id, result);
+      } catch (w3Error) {
+        console.error(`[MCP] Wave 3 tool error:`, w3Error);
+        return fail(id, {
+          code: 'WAVE3_ERROR',
+          message: `${name} failed: ${w3Error.message}`
         });
       }
     }

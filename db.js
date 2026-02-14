@@ -87,5 +87,11 @@ export const saveHealthScore = async (...args) => await impl.saveHealthScore(...
 export const getHealthScore = async (...args) => await impl.getHealthScore(...args);
 export const getAllHealthScores = async (...args) => await impl.getAllHealthScores(...args);
 
+// Wave 3: Recipes
+export const saveRecipe = async (...args) => await impl.saveRecipe(...args);
+export const listRecipes = async (...args) => await impl.listRecipes(...args);
+export const getRecipe = async (...args) => await impl.getRecipe(...args);
+export const deleteRecipe = async (...args) => await impl.deleteRecipe(...args);
+
 export default impl.default ?? null;
 
