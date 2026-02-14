@@ -821,13 +821,30 @@ async function handleFlowTool(name, args, userKey = null) {
         })
       });
 
-    case 'flow_update':
+    case 'flow_update': {
       if (!args.flow_id) throw new Error('flow_id required');
-      const { flow_id, ...updateData } = args;
-      return await apiFetch(`flows/${flow_id}`, {
-        method: 'PATCH',
-        body: JSON.stringify(updateData)
+      // AP CE uses POST /flows/:id with operation objects
+      // Determine operation type from args
+      let operation;
+      if (args.displayName) {
+        operation = { type: 'CHANGE_NAME', request: { displayName: args.displayName } };
+      } else if (args.status) {
+        operation = { type: 'CHANGE_STATUS', request: { status: args.status.toUpperCase() } };
+      } else if (args.folderId) {
+        operation = { type: 'CHANGE_FOLDER', request: { folderId: args.folderId } };
+      } else if (args.metadata) {
+        operation = { type: 'UPDATE_METADATA', request: { metadata: args.metadata } };
+      } else if (args.operation) {
+        // Allow passing raw operation for advanced use
+        operation = args.operation;
+      } else {
+        throw new Error('flow_update requires displayName, status, folderId, metadata, or operation');
+      }
+      return await apiFetch(`flows/${args.flow_id}`, {
+        method: 'POST',
+        body: JSON.stringify(operation)
       });
+    }
 
     case 'flow_delete':
       if (!args.flow_id) throw new Error('flow_id required');
