@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Sparkles, X, Maximize2, Minimize2, Loader2 } from 'lucide-react'
+import { Send, Sparkles, X, Maximize2, Minimize2, Loader2, Wrench, AlertCircle } from 'lucide-react'
 import { useStore } from '../store'
+import { sendChatMessage } from '../api'
 
 export default function AIBar() {
   const [input, setInput] = useState('')
@@ -31,21 +32,23 @@ export default function AIBar() {
     setLoading(true)
     
     try {
-      // TODO: Call actual API
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMessage }),
+      const data = await sendChatMessage(userMessage, {
+        projectContext: useStore.getState().currentProject?.name,
       })
       
-      if (!response.ok) throw new Error('Failed to send message')
-      
-      const data = await response.json()
-      addMessage({ role: 'assistant', content: data.response })
-    } catch (error) {
       addMessage({ 
         role: 'assistant', 
-        content: 'Sorry, I encountered an error. Please try again.' 
+        content: data.response,
+        toolsUsed: data.toolsUsed,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      addMessage({ 
+        role: 'assistant', 
+        content: message === 'NOT_AUTHENTICATED' 
+          ? 'Please authenticate first. Go to Settings to connect your Basecamp account or enter an API key.'
+          : `Sorry, I encountered an error: ${message}`,
+        error: true,
       })
     } finally {
       setLoading(false)
@@ -79,10 +82,28 @@ export default function AIBar() {
                   className={`max-w-[80%] px-4 py-2 rounded-2xl ${
                     msg.role === 'user'
                       ? 'bg-blue-600 text-white'
-                      : 'bg-gray-700 text-gray-100'
+                      : msg.error
+                        ? 'bg-red-900/50 text-red-200 border border-red-700'
+                        : 'bg-gray-700 text-gray-100'
                   }`}
                 >
+                  {msg.error && (
+                    <div className="flex items-center gap-1 mb-1 text-red-400">
+                      <AlertCircle className="w-4 h-4" />
+                      <span className="text-xs font-medium">Error</span>
+                    </div>
+                  )}
                   <p className="whitespace-pre-wrap">{msg.content}</p>
+                  {msg.toolsUsed && msg.toolsUsed.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t border-gray-600">
+                      <Wrench className="w-3 h-3 text-gray-400" />
+                      {msg.toolsUsed.map((tool, i) => (
+                        <span key={i} className="text-xs bg-gray-600 px-1.5 py-0.5 rounded">
+                          {tool}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <span className="text-xs opacity-60 mt-1 block">
                     {msg.timestamp.toLocaleTimeString([], { 
                       hour: '2-digit', 

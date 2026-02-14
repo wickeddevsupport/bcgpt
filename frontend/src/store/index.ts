@@ -4,7 +4,9 @@ export interface Message {
   id: string
   role: 'user' | 'assistant' | 'tool'
   content: string
+  toolsUsed?: string[]
   toolCalls?: ToolCall[]
+  error?: boolean
   timestamp: Date
 }
 

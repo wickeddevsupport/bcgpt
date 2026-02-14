@@ -1,8 +1,58 @@
-import { Settings as SettingsIcon, User, Key, Bell, Palette, Link2 } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Settings as SettingsIcon, User, Key, Bell, Palette, Link2, Save, Check } from 'lucide-react'
 import { useStore } from '../store'
+import { getApiKey, setApiKey, clearApiKey, updateUserConfig, getUserConfig } from '../api'
 
 export default function Settings() {
   const { user } = useStore()
+  const [llmProvider, setLlmProvider] = useState('gemini')
+  const [apiKeyInput, setApiKeyInput] = useState('')
+  const [bcApiKey, setBcApiKey] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  
+  // Load existing config
+  useEffect(() => {
+    const storedKey = getApiKey()
+    if (storedKey) {
+      setBcApiKey('••••••••' + storedKey.slice(-4))
+    }
+    
+    getUserConfig().then(config => {
+      if (config.llm_provider) setLlmProvider(config.llm_provider)
+    }).catch(() => {
+      // Not authenticated yet
+    })
+  }, [])
+  
+  const handleSaveLlmConfig = async () => {
+    setSaving(true)
+    try {
+      await updateUserConfig({
+        llmProvider,
+        llmApiKey: apiKeyInput || undefined,
+      })
+      setApiKeyInput('')
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (error) {
+      console.error('Failed to save config:', error)
+    } finally {
+      setSaving(false)
+    }
+  }
+  
+  const handleSaveBcApiKey = () => {
+    if (bcApiKey && !bcApiKey.startsWith('••')) {
+      setApiKey(bcApiKey)
+      setBcApiKey('••••••••' + bcApiKey.slice(-4))
+    }
+  }
+  
+  const handleClearBcApiKey = () => {
+    clearApiKey()
+    setBcApiKey('')
+  }
   
   return (
     <div className="max-w-3xl mx-auto">
@@ -52,8 +102,12 @@ export default function Settings() {
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium mb-2">LLM Provider</label>
-              <select className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 
-                               focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <select 
+                value={llmProvider}
+                onChange={(e) => setLlmProvider(e.target.value)}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 
+                               focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
                 <option value="gemini">Gemini (Free)</option>
                 <option value="anthropic">Anthropic Claude</option>
                 <option value="openai">OpenAI GPT</option>
@@ -61,9 +115,11 @@ export default function Settings() {
             </div>
             
             <div>
-              <label className="block text-sm font-medium mb-2">API Key (optional)</label>
+              <label className="block text-sm font-medium mb-2">LLM API Key (optional)</label>
               <input
                 type="password"
+                value={apiKeyInput}
+                onChange={(e) => setApiKeyInput(e.target.value)}
                 placeholder="Enter your API key..."
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 
                          focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -71,6 +127,47 @@ export default function Settings() {
               <p className="text-xs text-gray-500 mt-1">
                 Your API key is encrypted and never shared.
               </p>
+            </div>
+            
+            <button
+              onClick={handleSaveLlmConfig}
+              disabled={saving}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 
+                       transition-colors disabled:opacity-50"
+            >
+              {saved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+              {saving ? 'Saving...' : saved ? 'Saved!' : 'Save Configuration'}
+            </button>
+          </div>
+          
+          <div className="border-t border-gray-700 mt-6 pt-6">
+            <label className="block text-sm font-medium mb-2">BCGPT API Key</label>
+            <p className="text-xs text-gray-400 mb-2">
+              Use this for direct API access without Basecamp OAuth.
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={bcApiKey}
+                onChange={(e) => setBcApiKey(e.target.value)}
+                placeholder="Enter BCGPT API key..."
+                className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 
+                         focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                onClick={handleSaveBcApiKey}
+                className="px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg hover:bg-gray-600"
+              >
+                Save
+              </button>
+              {bcApiKey && (
+                <button
+                  onClick={handleClearBcApiKey}
+                  className="px-4 py-2 text-red-400 hover:text-red-300"
+                >
+                  Clear
+                </button>
+              )}
             </div>
           </div>
         </section>

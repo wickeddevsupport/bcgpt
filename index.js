@@ -92,6 +92,7 @@ import {
 import { runMining } from "./miner.js";
 import { execSync } from "child_process";
 import { existsSync } from "fs";
+import { runAgent, runAgentStreaming } from "./agent-runtime.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -4177,11 +4178,11 @@ app.delete("/api/chat/sessions/:sessionId", async (req, res) => {
   }
 });
 
-// Send chat message (simple version - no LLM yet)
+// Send chat message with AI agent
 app.post("/api/chat", async (req, res) => {
   try {
     const ctx = await requireBasecampContext(req);
-    const { message, sessionId } = req.body;
+    const { message, sessionId, projectContext } = req.body;
     
     if (!message) {
       return res.status(400).json({ error: "Message is required" });
@@ -4203,21 +4204,82 @@ app.post("/api/chat", async (req, res) => {
       content: message,
     });
     
-    // TODO: Implement actual LLM call with tool execution
-    // For now, return a placeholder response
-    const response = `I received your message: "${message}". The AI chat feature is coming soon! For now, use the MCP tools directly at /mcp.`;
+    // Get user's LLM config
+    const userConfig = await db.getPmosUserConfig(ctx.userKey) || {};
+    const provider = userConfig.llm_provider || "gemini";
+    const apiKey = userConfig.llm_api_key || process.env.GEMINI_API_KEY;
     
+    if (!apiKey) {
+      return res.status(400).json({ 
+        error: "No API key configured", 
+        hint: "Set GEMINI_API_KEY env var or configure in Settings" 
+      });
+    }
+    
+    // Run agent with tools
+    const result = await runAgent(message, ctx, {
+      provider,
+      apiKey,
+      projectContext,
+      model: userConfig.llm_model,
+    });
+    
+    if (!result.success) {
+      return res.status(500).json({ error: result.error });
+    }
+    
+    // Store assistant response
     await db.addChatMessage(session.id, {
       role: "assistant",
-      content: response,
+      content: result.response,
+      tool_calls: result.toolResults?.map(tr => ({
+        name: tr.tool,
+        arguments: tr.arguments
+      }))
     });
     
     res.json({ 
-      response,
+      response: result.response,
       sessionId: session.id,
+      toolsUsed: result.toolResults?.map(tr => tr.tool) || [],
+      iterations: result.iterations
     });
   } catch (e) {
     console.error("Chat error:", e);
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// Stream chat response with SSE
+app.get("/api/chat/stream", async (req, res) => {
+  try {
+    const ctx = await requireBasecampContext(req);
+    const { message, sessionId, projectContext } = req.query;
+    
+    if (!message) {
+      return res.status(400).json({ error: "Message is required" });
+    }
+    
+    // Get user's LLM config
+    const userConfig = await db.getPmosUserConfig(ctx.userKey) || {};
+    const provider = userConfig.llm_provider || "gemini";
+    const apiKey = userConfig.llm_api_key || process.env.GEMINI_API_KEY;
+    
+    if (!apiKey) {
+      return res.status(400).json({ 
+        error: "No API key configured" 
+      });
+    }
+    
+    // Stream agent response
+    await runAgentStreaming(message, ctx, res, {
+      provider,
+      apiKey,
+      projectContext,
+      model: userConfig.llm_model,
+    });
+  } catch (e) {
+    console.error("Stream error:", e);
     res.status(e.status || 500).json({ error: e.message });
   }
 });
