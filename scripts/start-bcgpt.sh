@@ -4,6 +4,7 @@ sudo docker run -d --name bcgptapi-bcgpt-1 --restart=unless-stopped \
   -v bcgpt-data:/data \
   --network coolify \
   -l 'traefik.enable=true' \
+  -l 'traefik.docker.network=coolify' \
   -l 'traefik.http.routers.bcgpt.rule=Host(`bcgpt.wickedlab.io`)' \
   -l 'traefik.http.routers.bcgpt.entrypoints=http,https' \
   -l 'traefik.http.routers.bcgpt.tls=true' \
