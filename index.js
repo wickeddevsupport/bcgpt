@@ -4127,6 +4127,134 @@ app.get("/projects/:projectId", async (req, res) => {
   }
 });
 
+/* ================= PMOS Chat API ================= */
+
+// Create new chat session
+app.post("/api/chat/sessions", async (req, res) => {
+  try {
+    const ctx = await requireBasecampContext(req);
+    const session = await db.createChatSession(ctx.userKey, {
+      title: req.body.title,
+      projectId: req.body.projectId,
+      personaId: req.body.personaId,
+    });
+    res.json(session);
+  } catch (e) {
+    res.status(e.status || 400).json({ error: e.message });
+  }
+});
+
+// List chat sessions
+app.get("/api/chat/sessions", async (req, res) => {
+  try {
+    const ctx = await requireBasecampContext(req);
+    const sessions = await db.listChatSessions(ctx.userKey, parseInt(req.query.limit) || 20);
+    res.json(sessions);
+  } catch (e) {
+    res.status(e.status || 400).json({ error: e.message });
+  }
+});
+
+// Get session with messages
+app.get("/api/chat/sessions/:sessionId", async (req, res) => {
+  try {
+    const session = await db.getChatSession(req.params.sessionId);
+    if (!session) return res.status(404).json({ error: "Session not found" });
+    const messages = await db.getChatMessages(req.params.sessionId);
+    res.json({ ...session, messages });
+  } catch (e) {
+    res.status(e.status || 400).json({ error: e.message });
+  }
+});
+
+// Delete session
+app.delete("/api/chat/sessions/:sessionId", async (req, res) => {
+  try {
+    await db.deleteChatSession(req.params.sessionId);
+    res.json({ deleted: true });
+  } catch (e) {
+    res.status(e.status || 400).json({ error: e.message });
+  }
+});
+
+// Send chat message (simple version - no LLM yet)
+app.post("/api/chat", async (req, res) => {
+  try {
+    const ctx = await requireBasecampContext(req);
+    const { message, sessionId } = req.body;
+    
+    if (!message) {
+      return res.status(400).json({ error: "Message is required" });
+    }
+    
+    // Create session if not provided
+    let session;
+    if (sessionId) {
+      session = await db.getChatSession(sessionId);
+    } else {
+      session = await db.createChatSession(ctx.userKey, { 
+        title: message.substring(0, 50) 
+      });
+    }
+    
+    // Store user message
+    await db.addChatMessage(session.id, {
+      role: "user",
+      content: message,
+    });
+    
+    // TODO: Implement actual LLM call with tool execution
+    // For now, return a placeholder response
+    const response = `I received your message: "${message}". The AI chat feature is coming soon! For now, use the MCP tools directly at /mcp.`;
+    
+    await db.addChatMessage(session.id, {
+      role: "assistant",
+      content: response,
+    });
+    
+    res.json({ 
+      response,
+      sessionId: session.id,
+    });
+  } catch (e) {
+    console.error("Chat error:", e);
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// Get user config
+app.get("/api/config", async (req, res) => {
+  try {
+    const ctx = await requireBasecampContext(req);
+    const config = await db.getPmosUserConfig(ctx.userKey);
+    // Don't expose API key
+    res.json({ 
+      ...config, 
+      llm_api_key: config.llm_api_key ? "***" : null 
+    });
+  } catch (e) {
+    res.status(e.status || 400).json({ error: e.message });
+  }
+});
+
+// Update user config
+app.put("/api/config", async (req, res) => {
+  try {
+    const ctx = await requireBasecampContext(req);
+    const config = await db.setPmosUserConfig(ctx.userKey, {
+      llmProvider: req.body.llmProvider,
+      llmApiKey: req.body.llmApiKey,
+      preferences: req.body.preferences,
+    });
+    res.json({ 
+      ...config, 
+      llm_api_key: config.llm_api_key ? "***" : null 
+    });
+  } catch (e) {
+    res.status(e.status || 400).json({ error: e.message });
+  }
+});
+
 /* ================= MCP ================= */
 app.post("/mcp", async (req, res) => {
   try {
@@ -4307,6 +4435,30 @@ app.get("/db/info", async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e?.message || String(e) });
   }
+});
+
+/* ================= PMOS Frontend ================= */
+const frontendPath = path.join(__dirname, "frontend", "dist");
+
+// Serve static files from frontend build
+app.use(express.static(frontendPath));
+
+// SPA fallback - serve index.html for all unmatched routes (except API routes)
+app.get("*", (req, res, next) => {
+  // Skip API and MCP routes
+  if (req.path.startsWith("/api") || 
+      req.path.startsWith("/mcp") || 
+      req.path.startsWith("/oauth") ||
+      req.path.startsWith("/connect") ||
+      req.path.startsWith("/dev") ||
+      req.path.startsWith("/db") ||
+      req.path.startsWith("/projects") ||
+      req.path.startsWith("/logout") ||
+      req.path.startsWith("/action") ||
+      req.path.startsWith("/debug")) {
+    return next();
+  }
+  res.sendFile(path.join(frontendPath, "index.html"));
 });
 
 let server = null;

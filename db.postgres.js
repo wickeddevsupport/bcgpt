@@ -441,6 +441,39 @@ async function ensureSchema() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_personas_unique ON personas(user_key, name);
+
+    -- ============ PMOS: Chat & AI ============
+
+    CREATE TABLE IF NOT EXISTS pmos_chat_sessions (
+      id BIGSERIAL PRIMARY KEY,
+      user_key TEXT NOT NULL,
+      title TEXT,
+      project_id TEXT,
+      persona_id BIGINT REFERENCES personas(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_pmos_sessions_user ON pmos_chat_sessions(user_key, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS pmos_chat_messages (
+      id BIGSERIAL PRIMARY KEY,
+      session_id BIGINT REFERENCES pmos_chat_sessions(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      tool_calls JSONB,
+      tool_results JSONB,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_pmos_messages_session ON pmos_chat_messages(session_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS pmos_user_config (
+      user_key TEXT PRIMARY KEY,
+      llm_provider TEXT DEFAULT 'gemini',
+      llm_api_key TEXT,
+      preferences JSONB DEFAULT '{}',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
   `);
 }
 
@@ -1754,6 +1787,122 @@ export async function managePersona(userKey, name, action, traits = {}) {
     return { deleted: true };
   }
   return null;
+}
+
+// ============ PMOS Chat Functions ============
+
+export async function createChatSession(userKey, { title, projectId, personaId } = {}) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey) return null;
+  const res = await pool.query(
+    `INSERT INTO pmos_chat_sessions (user_key, title, project_id, persona_id)
+     VALUES ($1, $2, $3, $4)
+     RETURNING *`,
+    [userKey, title || 'New Chat', projectId || null, personaId || null]
+  );
+  return res.rows[0];
+}
+
+export async function listChatSessions(userKey, limit = 20) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey) return [];
+  const res = await pool.query(
+    `SELECT * FROM pmos_chat_sessions 
+     WHERE user_key = $1 
+     ORDER BY updated_at DESC 
+     LIMIT $2`,
+    [userKey, limit]
+  );
+  return res.rows;
+}
+
+export async function getChatSession(sessionId) {
+  const res = await pool.query(
+    `SELECT s.*, 
+            (SELECT COUNT(*) FROM pmos_chat_messages WHERE session_id = s.id) as message_count
+     FROM pmos_chat_sessions s
+     WHERE s.id = $1`,
+    [sessionId]
+  );
+  return res.rows[0] || null;
+}
+
+export async function updateChatSessionTitle(sessionId, title) {
+  await pool.query(
+    `UPDATE pmos_chat_sessions SET title = $2, updated_at = NOW() WHERE id = $1`,
+    [sessionId, title]
+  );
+}
+
+export async function deleteChatSession(sessionId) {
+  await pool.query(`DELETE FROM pmos_chat_sessions WHERE id = $1`, [sessionId]);
+  return { deleted: true };
+}
+
+export async function addChatMessage(sessionId, { role, content, toolCalls, toolResults }) {
+  const res = await pool.query(
+    `INSERT INTO pmos_chat_messages (session_id, role, content, tool_calls, tool_results)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING *`,
+    [
+      sessionId,
+      role,
+      content,
+      toolCalls ? JSON.stringify(toolCalls) : null,
+      toolResults ? JSON.stringify(toolResults) : null
+    ]
+  );
+  // Update session's updated_at
+  await pool.query(
+    `UPDATE pmos_chat_sessions SET updated_at = NOW() WHERE id = $1`,
+    [sessionId]
+  );
+  return res.rows[0];
+}
+
+export async function getChatMessages(sessionId, limit = 100) {
+  const res = await pool.query(
+    `SELECT * FROM pmos_chat_messages 
+     WHERE session_id = $1 
+     ORDER BY created_at ASC 
+     LIMIT $2`,
+    [sessionId, limit]
+  );
+  return res.rows;
+}
+
+export async function getPmosUserConfig(userKey) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey) return null;
+  const res = await pool.query(
+    `SELECT * FROM pmos_user_config WHERE user_key = $1`,
+    [userKey]
+  );
+  if (res.rows[0]) return res.rows[0];
+  // Return default config
+  return { user_key: userKey, llm_provider: 'gemini', llm_api_key: null, preferences: {} };
+}
+
+export async function setPmosUserConfig(userKey, { llmProvider, llmApiKey, preferences }) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey) return null;
+  const res = await pool.query(
+    `INSERT INTO pmos_user_config (user_key, llm_provider, llm_api_key, preferences)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (user_key) DO UPDATE SET
+       llm_provider = COALESCE($2, pmos_user_config.llm_provider),
+       llm_api_key = COALESCE($3, pmos_user_config.llm_api_key),
+       preferences = COALESCE($4, pmos_user_config.preferences),
+       updated_at = NOW()
+     RETURNING *`,
+    [
+      userKey,
+      llmProvider || null,
+      llmApiKey || null,
+      preferences ? JSON.stringify(preferences) : null
+    ]
+  );
+  return res.rows[0];
 }
 
 export default pool;
