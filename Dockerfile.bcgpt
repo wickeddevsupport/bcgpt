@@ -5,15 +5,16 @@ ENV NODE_ENV=production \
     SKIP_ACTIVEPIECES_INSTALL=true
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 make g++ \
+  && apt-get install -y --no-install-recommends python3 make g++ git ca-certificates \
   && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth 1 https://github.com/wickeddevsupport/bcgpt.git .
 
 COPY package.json package-lock.json ./
 COPY scripts/prepare-activepieces-install.js ./scripts/prepare-activepieces-install.js
 ENV npm_config_build_from_source=true
 RUN npm install --omit=dev --no-audit --no-fund || (cat /root/.npm/_logs/* || true; exit 1)
 
-COPY . .
-
 EXPOSE 10000
+# Rebuild trigger
 CMD ["node", "index.js"]
