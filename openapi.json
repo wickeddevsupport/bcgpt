@@ -9,9 +9,23 @@
     "3-Layer Architecture:",
     "- BCGPT (Data Layer): 291 tools for Basecamp data access - projects, todos, messages, people, etc.",
     "- PMOS (Intelligence Layer): 17 tools for intelligence - health scoring, predictions, patterns, insights, memory.",
-    "- Flow (Execution Layer): 15 tools for automation - trigger flows, manage workflows, 200+ integrations.",
+    "- Flow (Execution Layer): 14 tools for automation - list/create/update/delete flows, trigger flows, manage connections, 200+ integrations.",
     "- Use mcp_call to access any tool from any layer: { \"tool\": \"pmos_health_project\", \"args\": {...} }",
     "- PMOS tools start with 'pmos_', Flow tools start with 'flow_', Basecamp tools start with 'bc_' or action names.",
+    "",
+    "Flow Tools Usage:",
+    "- Check status first: flow_status - shows connection and your workspace",
+    "- List flows: flow_list - shows all your automation flows",
+    "- Get flow details: flow_get - detailed info about a specific flow",
+    "- Create flow: flow_create - create new automation (requires displayName and trigger)",
+    "- Update flow: flow_update - modify existing flow",
+    "- Delete flow: flow_delete - remove a flow",
+    "- Trigger flow: flow_trigger - manually run a flow",
+    "- View runs: flow_runs_list - see execution history",
+    "- Get run details: flow_run_get - details of a specific run",
+    "- List integrations: flow_pieces_list - 200+ services available",
+    "- Manage connections: flow_connections_list, flow_connection_create",
+    "- All flow operations are automatically scoped to your personal workspace",
     "",
     "API Key Handling (Critical):",
     "- The user MUST provide their API key before any Basecamp operations.",
@@ -1753,9 +1767,37 @@
         }
       }
     },
+    "/action/flow_status": {
+      "post": {
+        "summary": "[Flow] Check Activepieces connection and status",
+        "operationId": "flow_status",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
     "/action/flow_list": {
       "post": {
-        "summary": "[Flow] List all automation flows",
+        "summary": "[Flow] List all automation flows in your workspace",
         "operationId": "flow_list",
         "responses": {
           "200": {
@@ -1772,12 +1814,148 @@
                   "api_key": {
                     "type": "string",
                     "description": "Your personal API key"
-                  },
-                  "project_id": {
-                    "type": "string",
-                    "description": "Optional Activepieces project ID filter"
                   }
                 },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/action/flow_get": {
+      "post": {
+        "summary": "[Flow] Get details of a specific flow",
+        "operationId": "flow_get",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key"
+                  },
+                  "flow_id": {
+                    "type": "string",
+                    "description": "Flow ID"
+                  }
+                },
+                "required": ["flow_id"],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/action/flow_create": {
+      "post": {
+        "summary": "[Flow] Create a new automation flow",
+        "operationId": "flow_create",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key"
+                  },
+                  "displayName": {
+                    "type": "string",
+                    "description": "Name of the flow"
+                  },
+                  "trigger": {
+                    "type": "object",
+                    "description": "Trigger configuration"
+                  }
+                },
+                "required": ["displayName"],
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/action/flow_update": {
+      "post": {
+        "summary": "[Flow] Update an existing flow",
+        "operationId": "flow_update",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key"
+                  },
+                  "flow_id": {
+                    "type": "string",
+                    "description": "Flow ID to update"
+                  },
+                  "displayName": {
+                    "type": "string",
+                    "description": "New name for the flow"
+                  }
+                },
+                "required": ["flow_id"],
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/action/flow_delete": {
+      "post": {
+        "summary": "[Flow] Delete a flow",
+        "operationId": "flow_delete",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key"
+                  },
+                  "flow_id": {
+                    "type": "string",
+                    "description": "Flow ID to delete"
+                  }
+                },
+                "required": ["flow_id"],
                 "additionalProperties": false
               }
             }
@@ -1814,9 +1992,138 @@
                     "description": "Data to pass to the flow"
                   }
                 },
-                "required": [
-                  "flow_id"
-                ],
+                "required": ["flow_id"],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/action/flow_runs_list": {
+      "post": {
+        "summary": "[Flow] List execution runs for a flow",
+        "operationId": "flow_runs_list",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key"
+                  },
+                  "flow_id": {
+                    "type": "string",
+                    "description": "Flow ID"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "description": "Max results to return (default 10)"
+                  }
+                },
+                "required": ["flow_id"],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/action/flow_run_get": {
+      "post": {
+        "summary": "[Flow] Get details of a specific flow run",
+        "operationId": "flow_run_get",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key"
+                  },
+                  "run_id": {
+                    "type": "string",
+                    "description": "Run ID"
+                  }
+                },
+                "required": ["run_id"],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/action/flow_projects_list": {
+      "post": {
+        "summary": "[Flow] List all Activepieces projects",
+        "operationId": "flow_projects_list",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/action/flow_project_create": {
+      "post": {
+        "summary": "[Flow] Create a new Activepieces project",
+        "operationId": "flow_project_create",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Project name"
+                  }
+                },
+                "required": ["name"],
                 "additionalProperties": false
               }
             }
@@ -1845,6 +2152,75 @@
                     "description": "Your personal API key"
                   }
                 },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/action/flow_connections_list": {
+      "post": {
+        "summary": "[Flow] List all connections in your workspace",
+        "operationId": "flow_connections_list",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/action/flow_connection_create": {
+      "post": {
+        "summary": "[Flow] Create a new connection for integrations",
+        "operationId": "flow_connection_create",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "api_key": {
+                    "type": "string",
+                    "description": "Your personal API key"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Connection name"
+                  },
+                  "piece_name": {
+                    "type": "string",
+                    "description": "Integration piece name (e.g., 'slack', 'gmail')"
+                  },
+                  "value": {
+                    "type": "object",
+                    "description": "Connection credentials"
+                  }
+                },
+                "required": ["name", "piece_name", "value"],
                 "additionalProperties": false
               }
             }
