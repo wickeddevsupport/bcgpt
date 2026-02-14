@@ -4421,6 +4421,22 @@ export async function handleMCP(reqBody, ctx) {
         return ok(id, result);
       } catch (flowError) {
         console.error(`[MCP] Flow tool error:`, flowError);
+        
+        // Special handling for account required error
+        if (flowError?.code === 'ACTIVEPIECES_ACCOUNT_REQUIRED') {
+          return fail(id, {
+            code: 'ACTIVEPIECES_ACCOUNT_REQUIRED',
+            message: flowError.message,
+            category: 'setup',
+            retryable: true,
+            action: 'signup',
+            metadata: {
+              signupUrl: flowError.signupUrl,
+              userEmail: flowError.userEmail
+            }
+          });
+        }
+        
         return fail(id, {
           code: 'FLOW_ERROR',
           message: `Flow tool ${name} failed: ${flowError.message}`

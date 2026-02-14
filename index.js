@@ -607,27 +607,6 @@ async function handleFlowTool(name, args, userKey = null) {
     throw new Error('User authentication required for flow tools');
   }
 
-  // Get or create Activepieces project for this user
-  let mapping = await getActivepiecesProject(userKey);
-  
-  if (!mapping) {
-    // Auto-create project for new user
-    console.log(`[handleFlowTool] Creating new Activepieces project for user: ${userKey}`);
-    
-    const projectName = `${userKey.replace(/^(email|name):/, '').split('@')[0]}'s Workspace`;
-    const newProject = await apiFetch('projects', {
-      method: 'POST',
-      body: JSON.stringify({ displayName: projectName })
-    });
-    
-    await setActivepiecesProject(userKey, newProject.id, projectName);
-    mapping = { projectId: newProject.id, projectName };
-    
-    console.log(`[handleFlowTool] Created project ${newProject.id} for ${userKey}`);
-  }
-
-  const userProjectId = mapping.projectId;
-
   async function apiFetch(endpoint, options = {}) {
     const url = `${ACTIVEPIECES_URL}/api/v1/${endpoint}`;
     const headers = {
@@ -645,6 +624,64 @@ async function handleFlowTool(name, args, userKey = null) {
     
     return await response.json();
   }
+
+  // Extract email from userKey
+  const userEmail = userKey.startsWith('email:') 
+    ? userKey.substring(6) 
+    : userKey.startsWith('name:')
+    ? null
+    : null;
+
+  // Check if user exists in Activepieces
+  let activepiecesUserId = null;
+  if (userEmail) {
+    try {
+      const users = await apiFetch('users');
+      const matchingUser = users.data?.find(u => u.email.toLowerCase() === userEmail.toLowerCase());
+      activepiecesUserId = matchingUser?.id || null;
+    } catch (e) {
+      console.log(`[handleFlowTool] Could not verify Activepieces user: ${e.message}`);
+    }
+  }
+
+  // Get or create Activepieces project for this user
+  let mapping = await getActivepiecesProject(userKey);
+  
+  if (!mapping) {
+    // New user - check if they have Activepieces account
+    if (!activepiecesUserId) {
+      // User needs to sign up first
+      const signupUrl = `${ACTIVEPIECES_URL}/signup${userEmail ? `?email=${encodeURIComponent(userEmail)}` : ''}`;
+      
+      throw {
+        code: 'ACTIVEPIECES_ACCOUNT_REQUIRED',
+        message: `Before creating flows, please create your Activepieces account:\n\n` +
+                 `1. Visit: ${signupUrl}\n` +
+                 `${userEmail ? `2. Use email: ${userEmail}\n` : ''}` +
+                 `${userEmail ? '3' : '2'}. Create a password\n` +
+                 `${userEmail ? '4' : '3'}. Come back and try again!\n\n` +
+                 `This is a one-time setup. After signup, all your flows will be automatically managed.`,
+        signupUrl,
+        userEmail
+      };
+    }
+
+    // User has Activepieces account - auto-create project
+    console.log(`[handleFlowTool] Creating new Activepieces project for user: ${userKey}`);
+    
+    const projectName = `${userKey.replace(/^(email|name):/, '').split('@')[0]}'s Workspace`;
+    const newProject = await apiFetch('projects', {
+      method: 'POST',
+      body: JSON.stringify({ displayName: projectName })
+    });
+    
+    await setActivepiecesProject(userKey, newProject.id, projectName);
+    mapping = { projectId: newProject.id, projectName };
+    
+    console.log(`[handleFlowTool] Created project ${newProject.id} for ${userKey}`);
+  }
+
+  const userProjectId = mapping.projectId;
 
   switch(name) {
     case 'flow_status': {
