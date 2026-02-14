@@ -622,10 +622,11 @@ async function runMiningJob({ force = false, apiKey = null, userKey = null } = {
 
 // Helper: query the Activepieces PostgreSQL database directly
 let _apDbPool = null;
-function getAPDbPool() {
+async function getAPDbPool() {
   if (!_apDbPool) {
-    const pg = require('pg');
-    _apDbPool = new pg.Pool({
+    const pg = await import('pg');
+    const Pool = pg.default?.Pool || pg.Pool;
+    _apDbPool = new Pool({
       host: process.env.AP_POSTGRES_HOST || 'activepieces-postgres',
       port: parseInt(process.env.AP_POSTGRES_PORT || '5432'),
       user: process.env.AP_POSTGRES_USER || 'ap_user',
@@ -639,7 +640,7 @@ function getAPDbPool() {
 }
 
 async function queryAPDb(sql, params = []) {
-  const pool = getAPDbPool();
+  const pool = await getAPDbPool();
   const result = await pool.query(sql, params);
   return result.rows;
 }
