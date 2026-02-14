@@ -31,11 +31,19 @@ async function createPrincipalForApiKey(apiKeyValue: string): Promise<Principal>
             },
         })
     }
+    if (isNil(apiKey.platformId)) {
+        throw new ActivepiecesError({
+            code: ErrorCode.AUTHENTICATION,
+            params: {
+                message: 'api key has no associated platform',
+            },
+        })
+    }
     return {
         id: apiKey.id,
         type: PrincipalType.SERVICE,
         platform: {
-            id: apiKey.platformId ?? undefined,
+            id: apiKey.platformId,
         },
     }
 }
