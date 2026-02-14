@@ -768,8 +768,10 @@ async function handleFlowTool(name, args, userKey = null) {
   switch(name) {
     case 'flow_status': {
       try {
-        const projects = await apiFetch('projects');
+        // Use DB for project count (API key can't list projects in CE)
+        const projectRows = await queryAPDb('SELECT COUNT(*) as count FROM project');
         const flows = await apiFetch(`flows?projectId=${userProjectId}`);
+        const connections = await apiFetch(`app-connections?projectId=${userProjectId}`);
         return {
           status: 'operational',
           activepieces: {
@@ -777,8 +779,9 @@ async function handleFlowTool(name, args, userKey = null) {
             connected: true,
             projectId: userProjectId,
             projectName: mapping.projectName,
-            projects: projects?.data?.length || 0,
-            flows: flows?.data?.length || 0
+            projects: parseInt(projectRows[0]?.count || '0'),
+            flows: flows?.data?.length || 0,
+            connections: connections?.data?.length || 0
           }
         };
       } catch (error) {
@@ -837,32 +840,38 @@ async function handleFlowTool(name, args, userKey = null) {
       if (!args.run_id) throw new Error('run_id required');
       return await apiFetch(`flow-runs/${args.run_id}`);
 
-    case 'flow_projects_list':
-      return await apiFetch('projects');
+    case 'flow_projects_list': {
+      // CE API key can't list projects — use direct DB query
+      const projects = await queryAPDb(
+        'SELECT id, "displayName", "ownerId", created, updated FROM project ORDER BY created DESC'
+      );
+      return { data: projects };
+    }
 
     case 'flow_project_create':
-      return await apiFetch('projects', {
-        method: 'POST',
-        body: JSON.stringify({
-          displayName: args.name,
-          platformId: args.platform_id || null
-        })
-      });
+      // Project creation not available in Activepieces Community Edition
+      // Projects are auto-created when users sign up
+      throw new Error(
+        'Project creation is not available via API in Activepieces CE. ' +
+        `Projects are auto-created on user signup. Visit ${ACTIVEPIECES_URL}/signup to create a new account with its own project.`
+      );
 
     case 'flow_pieces_list':
       return await apiFetch('pieces');
 
     case 'flow_connections_list':
-      return await apiFetch(`connections?projectId=${userProjectId}`);
+      return await apiFetch(`app-connections?projectId=${userProjectId}`);
 
     case 'flow_connection_create':
-      return await apiFetch('connections', {
+      return await apiFetch('app-connections', {
         method: 'POST',
         body: JSON.stringify({
-          name: args.name,
+          externalId: args.name || args.external_id,
+          displayName: args.name || args.display_name,
           pieceName: args.piece_name,
-          value: args.value,
-          projectId: userProjectId
+          projectId: userProjectId,
+          type: args.type || 'SECRET_TEXT',
+          value: args.value
         })
       });
 
