@@ -5,6 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.bcgpt
+    restart: unless-stopped
     labels:
       - "traefik.enable=true"
       # Ensure Traefik uses the same network it is attached to (Coolify's `coolify` network).
