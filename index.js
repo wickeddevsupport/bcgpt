@@ -590,6 +590,138 @@ async function runMiningJob({ force = false, apiKey = null, userKey = null } = {
   }
 }
 
+/* ================= ACTIVEPIECES FLOW TOOLS ================= */
+
+async function handleFlowTool(name, args) {
+  const ACTIVEPIECES_URL = process.env.ACTIVEPIECES_URL || 'https://flow.wickedlab.io';
+  const ACTIVEPIECES_API_KEY = process.env.ACTIVEPIECES_API_KEY;
+
+  if (!ACTIVEPIECES_API_KEY) {
+    throw new Error('ACTIVEPIECES_API_KEY not configured');
+  }
+
+  async function apiFetch(endpoint, options = {}) {
+    const url = `${ACTIVEPIECES_URL}/api/v1/${endpoint}`;
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${ACTIVEPIECES_API_KEY}`,
+      ...options.headers
+    };
+
+    const response = await fetch(url, { ...options, headers });
+    
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Activepieces API error (${response.status}): ${text}`);
+    }
+    
+    return await response.json();
+  }
+
+  switch(name) {
+    case 'flow_status': {
+      try {
+        const projects = await apiFetch('projects');
+        const flows = await apiFetch('flows');
+        return {
+          status: 'operational',
+          activepieces: {
+            url: ACTIVEPIECES_URL,
+            connected: true,
+            projects: projects?.data?.length || 0,
+            flows: flows?.data?.length || 0
+          }
+        };
+      } catch (error) {
+        return {
+          status: 'error',
+          activepieces: {
+            url: ACTIVEPIECES_URL,
+            connected: false,
+            error: error.message
+          }
+        };
+      }
+    }
+
+    case 'flow_list':
+      return await apiFetch('flows');
+
+    case 'flow_get':
+      if (!args.flow_id) throw new Error('flow_id required');
+      return await apiFetch(`flows/${args.flow_id}`);
+
+    case 'flow_create':
+      return await apiFetch('flows', {
+        method: 'POST',
+        body: JSON.stringify(args)
+      });
+
+    case 'flow_update':
+      if (!args.flow_id) throw new Error('flow_id required');
+      const { flow_id, ...updateData } = args;
+      return await apiFetch(`flows/${flow_id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(updateData)
+      });
+
+    case 'flow_delete':
+      if (!args.flow_id) throw new Error('flow_id required');
+      return await apiFetch(`flows/${args.flow_id}`, { method: 'DELETE' });
+
+    case 'flow_trigger':
+      if (!args.flow_id) throw new Error('flow_id required');
+      return await apiFetch(`flows/${args.flow_id}/trigger`, {
+        method: 'POST',
+        body: JSON.stringify(args.payload || {})
+      });
+
+    case 'flow_runs_list':
+      if (!args.flow_id) throw new Error('flow_id required');
+      const limit = args.limit || 10;
+      return await apiFetch(`flow-runs?flowId=${args.flow_id}&limit=${limit}`);
+
+    case 'flow_run_get':
+      if (!args.run_id) throw new Error('run_id required');
+      return await apiFetch(`flow-runs/${args.run_id}`);
+
+    case 'flow_projects_list':
+      return await apiFetch('projects');
+
+    case'flow_project_create':
+      return await apiFetch('projects', {
+        method: 'POST',
+        body: JSON.stringify({
+          displayName: args.name,
+          platformId: args.platform_id || null
+        })
+      });
+
+    case 'flow_pieces_list':
+      return await apiFetch('pieces');
+
+    case 'flow_connections_list':
+      const endpoint = args.project_id ? `connections?projectId=${args.project_id}` : 'connections';
+      return await apiFetch(endpoint);
+
+    case 'flow_connection_create':
+      return await apiFetch('connections', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: args.name,
+          pieceName: args.piece_name,
+          value: args.value,
+          projectId: args.project_id
+        })
+      });
+
+    default:
+      throw new Error(`Unknown flow tool: ${name}`);
+  }
+}
+
+/* ================= MCP CONTEXT BUILDER ================= */
+
 async function buildMcpCtx(req) {
   const ctx = await resolveRequestContext(req);
   let auth = ctx.auth;
