@@ -30,6 +30,9 @@ import {
   searchIndex,
   setToolCache,
   listToolCache,
+  getActivepiecesProject,
+  setActivepiecesProject,
+  clearActivepiecesProject,
 } from "./db.js";
 import { runMining } from "./miner.js";
 
@@ -592,13 +595,38 @@ async function runMiningJob({ force = false, apiKey = null, userKey = null } = {
 
 /* ================= ACTIVEPIECES FLOW TOOLS ================= */
 
-async function handleFlowTool(name, args) {
+async function handleFlowTool(name, args, userKey = null) {
   const ACTIVEPIECES_URL = process.env.ACTIVEPIECES_URL || 'https://flow.wickedlab.io';
   const ACTIVEPIECES_API_KEY = process.env.ACTIVEPIECES_API_KEY;
 
   if (!ACTIVEPIECES_API_KEY) {
     throw new Error('ACTIVEPIECES_API_KEY not configured');
   }
+
+  if (!userKey) {
+    throw new Error('User authentication required for flow tools');
+  }
+
+  // Get or create Activepieces project for this user
+  let mapping = await getActivepiecesProject(userKey);
+  
+  if (!mapping) {
+    // Auto-create project for new user
+    console.log(`[handleFlowTool] Creating new Activepieces project for user: ${userKey}`);
+    
+    const projectName = `${userKey.replace(/^(email|name):/, '').split('@')[0]}'s Workspace`;
+    const newProject = await apiFetch('projects', {
+      method: 'POST',
+      body: JSON.stringify({ displayName: projectName })
+    });
+    
+    await setActivepiecesProject(userKey, newProject.id, projectName);
+    mapping = { projectId: newProject.id, projectName };
+    
+    console.log(`[handleFlowTool] Created project ${newProject.id} for ${userKey}`);
+  }
+
+  const userProjectId = mapping.projectId;
 
   async function apiFetch(endpoint, options = {}) {
     const url = `${ACTIVEPIECES_URL}/api/v1/${endpoint}`;
@@ -622,12 +650,14 @@ async function handleFlowTool(name, args) {
     case 'flow_status': {
       try {
         const projects = await apiFetch('projects');
-        const flows = await apiFetch('flows');
+        const flows = await apiFetch(`flows?projectId=${userProjectId}`);
         return {
           status: 'operational',
           activepieces: {
             url: ACTIVEPIECES_URL,
             connected: true,
+            projectId: userProjectId,
+            projectName: mapping.projectName,
             projects: projects?.data?.length || 0,
             flows: flows?.data?.length || 0
           }
@@ -645,7 +675,7 @@ async function handleFlowTool(name, args) {
     }
 
     case 'flow_list':
-      return await apiFetch('flows');
+      return await apiFetch(`flows?projectId=${userProjectId}`);
 
     case 'flow_get':
       if (!args.flow_id) throw new Error('flow_id required');
@@ -654,7 +684,10 @@ async function handleFlowTool(name, args) {
     case 'flow_create':
       return await apiFetch('flows', {
         method: 'POST',
-        body: JSON.stringify(args)
+        body: JSON.stringify({
+          ...args,
+          projectId: userProjectId
+        })
       });
 
     case 'flow_update':
@@ -688,7 +721,7 @@ async function handleFlowTool(name, args) {
     case 'flow_projects_list':
       return await apiFetch('projects');
 
-    case'flow_project_create':
+    case 'flow_project_create':
       return await apiFetch('projects', {
         method: 'POST',
         body: JSON.stringify({
@@ -701,8 +734,7 @@ async function handleFlowTool(name, args) {
       return await apiFetch('pieces');
 
     case 'flow_connections_list':
-      const endpoint = args.project_id ? `connections?projectId=${args.project_id}` : 'connections';
-      return await apiFetch(endpoint);
+      return await apiFetch(`connections?projectId=${userProjectId}`);
 
     case 'flow_connection_create':
       return await apiFetch('connections', {
@@ -711,7 +743,7 @@ async function handleFlowTool(name, args) {
           name: args.name,
           pieceName: args.piece_name,
           value: args.value,
-          projectId: args.project_id
+          projectId: userProjectId
         })
       });
 

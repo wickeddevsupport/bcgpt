@@ -4329,7 +4329,7 @@ async function getTodoset(ctx, projectId, todosetId) {
 // ---------- MCP handler ----------
 export async function handleMCP(reqBody, ctx) {
   const { id, method, params } = reqBody || {};
-  const { TOKEN, accountId, startStatus, authAccounts } = ctx || {};
+  const { TOKEN, accountId, startStatus, authAccounts, userKey } = ctx || {};
 
   try {
     if (method === "initialize") {
@@ -4416,8 +4416,8 @@ export async function handleMCP(reqBody, ctx) {
     // FLOW TOOLS: Handle flow_* tools locally (native Activepieces integration)
     if (name.startsWith('flow_')) {
       try {
-        console.log(`[MCP] Handling flow tool locally: ${name}`);
-        const result = await handleFlowTool(name, args);
+        console.log(`[MCP] Handling flow tool locally: ${name}`, { userKey });
+        const result = await handleFlowTool(name, args, userKey);
         return ok(id, result);
       } catch (flowError) {
         console.error(`[MCP] Flow tool error:`, flowError);

@@ -61,5 +61,9 @@ export const setMineState = async (...args) => await impl.setMineState(...args);
 export const getEntityStats = async (...args) => await impl.getEntityStats(...args);
 export const getToolCacheStats = async (...args) => await impl.getToolCacheStats(...args);
 
+export const getActivepiecesProject = async (...args) => await impl.getActivepiecesProject(...args);
+export const setActivepiecesProject = async (...args) => await impl.setActivepiecesProject(...args);
+export const clearActivepiecesProject = async (...args) => await impl.clearActivepiecesProject(...args);
+
 export default impl.default ?? null;
 

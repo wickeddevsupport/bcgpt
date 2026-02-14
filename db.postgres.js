@@ -195,6 +195,15 @@ async function ensureSchema() {
       UNIQUE(user_key, idempotency_key, method, path)
     );
     CREATE INDEX IF NOT EXISTS idx_idempotency_user_key ON idempotency_cache(user_key, idempotency_key);
+
+    CREATE TABLE IF NOT EXISTS activepieces_user_projects (
+      user_key TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      project_name TEXT,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ap_user_project ON activepieces_user_projects(project_id);
   `);
 }
 
@@ -819,6 +828,49 @@ export async function getToolCacheStats({ userKey = null } = {}) {
     [key]
   );
   return res.rows;
+}
+
+/* ================= ACTIVEPIECES USER PROJECT MAPPING ================= */
+
+export async function getActivepiecesProject(userKey) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey) return null;
+
+  const result = await pool.query(
+    "SELECT project_id, project_name, updated_at FROM activepieces_user_projects WHERE user_key = $1",
+    [userKey]
+  );
+
+  if (result.rows.length === 0) return null;
+
+  return {
+    projectId: result.rows[0].project_id,
+    projectName: result.rows[0].project_name,
+    updatedAt: result.rows[0].updated_at
+  };
+}
+
+export async function setActivepiecesProject(userKey, projectId, projectName) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !projectId) return;
+
+  const now = nowSec();
+
+  await pool.query(
+    `INSERT INTO activepieces_user_projects (user_key, project_id, project_name, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (user_key)
+     DO UPDATE SET project_id = $2, project_name = $3, updated_at = $5`,
+    [userKey, projectId, projectName || null, now, now]
+  );
+
+  return { projectId, projectName };
+}
+
+export async function clearActivepiecesProject(userKey) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey) return;
+  await pool.query("DELETE FROM activepieces_user_projects WHERE user_key = $1", [userKey]);
 }
 
 export default pool;
