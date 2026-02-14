@@ -834,7 +834,7 @@ async function handleFlowTool(name, args, userKey = null) {
     case 'flow_runs_list':
       if (!args.flow_id) throw new Error('flow_id required');
       const limit = args.limit || 10;
-      return await apiFetch(`flow-runs?flowId=${args.flow_id}&limit=${limit}`);
+      return await apiFetch(`flow-runs?flowId=${args.flow_id}&projectId=${userProjectId}&limit=${limit}`);
 
     case 'flow_run_get':
       if (!args.run_id) throw new Error('run_id required');
