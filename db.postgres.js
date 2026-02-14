@@ -337,6 +337,110 @@ async function ensureSchema() {
     );
     CREATE INDEX IF NOT EXISTS idx_event_subs_user ON event_subscriptions(user_key, active);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_event_subs_unique ON event_subscriptions(user_key, event, COALESCE(project_filter, ''));
+
+    -- ============ Wave 5: Knowledge ============
+
+    CREATE TABLE IF NOT EXISTS decision_log (
+      id BIGSERIAL PRIMARY KEY,
+      user_key TEXT NOT NULL,
+      project_id TEXT,
+      project_name TEXT,
+      type TEXT NOT NULL DEFAULT 'decision',
+      content TEXT NOT NULL,
+      source_type TEXT,
+      source_id TEXT,
+      extracted_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_decision_log_user ON decision_log(user_key, project_id, type);
+
+    -- ============ Wave 6: Enterprise ============
+
+    CREATE TABLE IF NOT EXISTS policies (
+      id BIGSERIAL PRIMARY KEY,
+      user_key TEXT NOT NULL,
+      name TEXT NOT NULL,
+      rule TEXT NOT NULL,
+      type TEXT DEFAULT 'custom',
+      severity TEXT DEFAULT 'warn',
+      active BOOLEAN DEFAULT TRUE,
+      violation_count INTEGER DEFAULT 0,
+      last_checked_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_policies_user ON policies(user_key, active);
+
+    CREATE TABLE IF NOT EXISTS budgets (
+      id BIGSERIAL PRIMARY KEY,
+      user_key TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      project_name TEXT,
+      total_budget NUMERIC DEFAULT 0,
+      spent NUMERIC DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_unique ON budgets(user_key, project_id);
+
+    CREATE TABLE IF NOT EXISTS expenses (
+      id BIGSERIAL PRIMARY KEY,
+      user_key TEXT NOT NULL,
+      budget_id BIGINT REFERENCES budgets(id) ON DELETE CASCADE,
+      amount NUMERIC NOT NULL,
+      category TEXT DEFAULT 'other',
+      description TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_expenses_budget ON expenses(budget_id, created_at DESC);
+
+    -- ============ Wave 7: Platform ============
+
+    CREATE TABLE IF NOT EXISTS templates (
+      id BIGSERIAL PRIMARY KEY,
+      user_key TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      source_type TEXT NOT NULL,
+      content JSONB NOT NULL DEFAULT '{}',
+      tags JSONB DEFAULT '[]',
+      installs INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_templates_user ON templates(user_key, source_type);
+
+    CREATE TABLE IF NOT EXISTS plugins (
+      id BIGSERIAL PRIMARY KEY,
+      user_key TEXT NOT NULL,
+      plugin_id TEXT NOT NULL,
+      name TEXT,
+      description TEXT,
+      config JSONB DEFAULT '{}',
+      status TEXT DEFAULT 'installed',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_plugins_unique ON plugins(user_key, plugin_id);
+
+    -- ============ Wave 8: Expansion ============
+
+    CREATE TABLE IF NOT EXISTS platform_connections (
+      id BIGSERIAL PRIMARY KEY,
+      user_key TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      config JSONB DEFAULT '{}',
+      status TEXT DEFAULT 'connected',
+      last_sync_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_platform_conn_unique ON platform_connections(user_key, platform);
+
+    CREATE TABLE IF NOT EXISTS personas (
+      id BIGSERIAL PRIMARY KEY,
+      user_key TEXT NOT NULL,
+      name TEXT NOT NULL,
+      traits JSONB DEFAULT '{}',
+      active BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_personas_unique ON personas(user_key, name);
   `);
 }
 
@@ -1372,6 +1476,284 @@ export async function listSubscriptions(userKey) {
     [userKey]
   );
   return res.rows;
+}
+
+// ========== Wave 5: Knowledge ==========
+
+export async function saveDecision(userKey, { projectId, projectName, type, content, sourceType, sourceId }) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !content) return null;
+  const res = await pool.query(
+    `INSERT INTO decision_log (user_key, project_id, project_name, type, content, source_type, source_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+    [userKey, projectId || null, projectName || null, type || 'decision', content, sourceType || null, sourceId || null]
+  );
+  return res.rows[0];
+}
+
+export async function listDecisions(userKey, { projectId, type, limit } = {}) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey) return [];
+  let sql = `SELECT * FROM decision_log WHERE user_key = $1`;
+  const params = [userKey];
+  let idx = 2;
+  if (projectId) { sql += ` AND project_id = $${idx}`; params.push(projectId); idx++; }
+  if (type && type !== 'all') { sql += ` AND type = $${idx}`; params.push(type); idx++; }
+  sql += ` ORDER BY extracted_at DESC LIMIT $${idx}`;
+  params.push(limit || 50);
+  const res = await pool.query(sql, params);
+  return res.rows;
+}
+
+// ========== Wave 6: Enterprise ==========
+
+export async function createPolicy(userKey, { name, rule, type, severity, active }) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !name || !rule) return null;
+  const res = await pool.query(
+    `INSERT INTO policies (user_key, name, rule, type, severity, active)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+    [userKey, name, rule, type || 'custom', severity || 'warn', active !== false]
+  );
+  return res.rows[0];
+}
+
+export async function listPolicies(userKey, activeOnly = true) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey) return [];
+  const where = activeOnly ? `WHERE user_key = $1 AND active = TRUE` : `WHERE user_key = $1`;
+  const res = await pool.query(`SELECT * FROM policies ${where} ORDER BY created_at DESC`, [userKey]);
+  return res.rows;
+}
+
+export async function getPolicy(userKey, policyId) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !policyId) return null;
+  const res = await pool.query(`SELECT * FROM policies WHERE user_key = $1 AND id = $2`, [userKey, policyId]);
+  return res.rows[0] || null;
+}
+
+export async function updatePolicyViolations(policyId, count) {
+  await pool.query(
+    `UPDATE policies SET violation_count = $2, last_checked_at = NOW() WHERE id = $1`,
+    [policyId, count]
+  );
+}
+
+export async function setBudget(userKey, projectId, projectName, totalBudget) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !projectId) return null;
+  const res = await pool.query(
+    `INSERT INTO budgets (user_key, project_id, project_name, total_budget)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (user_key, project_id)
+     DO UPDATE SET total_budget = $4, project_name = COALESCE($3, budgets.project_name), updated_at = NOW()
+     RETURNING *`,
+    [userKey, projectId, projectName || null, totalBudget || 0]
+  );
+  return res.rows[0];
+}
+
+export async function getBudget(userKey, projectId) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !projectId) return null;
+  const res = await pool.query(
+    `SELECT b.*, COALESCE(SUM(e.amount), 0) as total_spent
+     FROM budgets b LEFT JOIN expenses e ON e.budget_id = b.id
+     WHERE b.user_key = $1 AND b.project_id = $2
+     GROUP BY b.id`,
+    [userKey, projectId]
+  );
+  return res.rows[0] || null;
+}
+
+export async function logExpense(userKey, budgetId, amount, category, description) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !budgetId || !amount) return null;
+  const res = await pool.query(
+    `INSERT INTO expenses (user_key, budget_id, amount, category, description)
+     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [userKey, budgetId, amount, category || 'other', description || null]
+  );
+  // Update spent total
+  await pool.query(
+    `UPDATE budgets SET spent = spent + $1, updated_at = NOW() WHERE id = $2`,
+    [amount, budgetId]
+  );
+  return res.rows[0];
+}
+
+export async function getExpenses(budgetId, limit = 20) {
+  const res = await pool.query(
+    `SELECT * FROM expenses WHERE budget_id = $1 ORDER BY created_at DESC LIMIT $2`,
+    [budgetId, limit]
+  );
+  return res.rows;
+}
+
+// ========== Wave 7: Platform ==========
+
+export async function createTemplate(userKey, { name, description, sourceType, content, tags }) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !name) return null;
+  const res = await pool.query(
+    `INSERT INTO templates (user_key, name, description, source_type, content, tags)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+    [userKey, name, description || null, sourceType || 'project', JSON.stringify(content || {}), JSON.stringify(tags || [])]
+  );
+  return res.rows[0];
+}
+
+export async function listTemplates(userKey, { category, search, limit } = {}) {
+  userKey = normalizeUserKey(userKey);
+  let sql = `SELECT * FROM templates WHERE 1=1`;
+  const params = [];
+  let idx = 1;
+  if (userKey) { sql += ` AND (user_key = $${idx} OR user_key = 'system')`; params.push(userKey); idx++; }
+  if (category && category !== 'all') { sql += ` AND source_type = $${idx}`; params.push(category); idx++; }
+  if (search) { sql += ` AND (LOWER(name) LIKE $${idx} OR LOWER(description) LIKE $${idx})`; params.push(`%${search.toLowerCase()}%`); idx++; }
+  sql += ` ORDER BY installs DESC, created_at DESC LIMIT $${idx}`;
+  params.push(limit || 50);
+  const res = await pool.query(sql, params);
+  return res.rows;
+}
+
+export async function getTemplate(userKey, templateId) {
+  userKey = normalizeUserKey(userKey);
+  const res = await pool.query(`SELECT * FROM templates WHERE id = $1`, [templateId]);
+  return res.rows[0] || null;
+}
+
+export async function incrementTemplateInstalls(templateId) {
+  await pool.query(`UPDATE templates SET installs = installs + 1 WHERE id = $1`, [templateId]);
+}
+
+export async function managePlugin(userKey, pluginId, action, config = {}) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !pluginId) return null;
+  if (action === 'install') {
+    const res = await pool.query(
+      `INSERT INTO plugins (user_key, plugin_id, name, description, config, status)
+       VALUES ($1, $2, $3, $4, $5, 'installed')
+       ON CONFLICT (user_key, plugin_id) DO UPDATE SET status = 'installed', config = $5
+       RETURNING *`,
+      [userKey, pluginId, config.name || pluginId, config.description || null, JSON.stringify(config)]
+    );
+    return res.rows[0];
+  }
+  if (action === 'uninstall') {
+    await pool.query(`DELETE FROM plugins WHERE user_key = $1 AND plugin_id = $2`, [userKey, pluginId]);
+    return { removed: true };
+  }
+  if (action === 'enable' || action === 'disable') {
+    const res = await pool.query(
+      `UPDATE plugins SET status = $3 WHERE user_key = $1 AND plugin_id = $2 RETURNING *`,
+      [userKey, pluginId, action === 'enable' ? 'installed' : 'disabled']
+    );
+    return res.rows[0];
+  }
+  if (action === 'configure') {
+    const res = await pool.query(
+      `UPDATE plugins SET config = $3 WHERE user_key = $1 AND plugin_id = $2 RETURNING *`,
+      [userKey, pluginId, JSON.stringify(config)]
+    );
+    return res.rows[0];
+  }
+  return null;
+}
+
+export async function listPlugins(userKey, status = 'all') {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey) return [];
+  let sql = `SELECT * FROM plugins WHERE user_key = $1`;
+  const params = [userKey];
+  if (status === 'installed') { sql += ` AND status = 'installed'`; }
+  else if (status === 'disabled') { sql += ` AND status = 'disabled'`; }
+  sql += ` ORDER BY created_at DESC`;
+  const res = await pool.query(sql, params);
+  return res.rows;
+}
+
+// ========== Wave 8: Expansion ==========
+
+export async function managePlatformConnection(userKey, platform, action, config = {}) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !platform) return null;
+  if (action === 'connect') {
+    const res = await pool.query(
+      `INSERT INTO platform_connections (user_key, platform, config, status)
+       VALUES ($1, $2, $3, 'connected')
+       ON CONFLICT (user_key, platform) DO UPDATE SET config = $3, status = 'connected', last_sync_at = NOW()
+       RETURNING *`,
+      [userKey, platform, JSON.stringify(config)]
+    );
+    return res.rows[0];
+  }
+  if (action === 'disconnect') {
+    await pool.query(
+      `UPDATE platform_connections SET status = 'disconnected' WHERE user_key = $1 AND platform = $2`,
+      [userKey, platform]
+    );
+    return { disconnected: true };
+  }
+  if (action === 'status') {
+    const res = await pool.query(
+      `SELECT * FROM platform_connections WHERE user_key = $1 AND platform = $2`,
+      [userKey, platform]
+    );
+    return res.rows[0] || { platform, status: 'not_connected' };
+  }
+  if (action === 'sync') {
+    await pool.query(
+      `UPDATE platform_connections SET last_sync_at = NOW() WHERE user_key = $1 AND platform = $2`,
+      [userKey, platform]
+    );
+    return { synced: true };
+  }
+  return null;
+}
+
+export async function listPlatformConnections(userKey) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey) return [];
+  const res = await pool.query(
+    `SELECT * FROM platform_connections WHERE user_key = $1 ORDER BY created_at DESC`,
+    [userKey]
+  );
+  return res.rows;
+}
+
+export async function managePersona(userKey, name, action, traits = {}) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !name) return null;
+  if (action === 'set') {
+    // Deactivate all other personas first
+    await pool.query(`UPDATE personas SET active = FALSE WHERE user_key = $1`, [userKey]);
+    const res = await pool.query(
+      `INSERT INTO personas (user_key, name, traits, active)
+       VALUES ($1, $2, $3, TRUE)
+       ON CONFLICT (user_key, name) DO UPDATE SET traits = $3, active = TRUE
+       RETURNING *`,
+      [userKey, name, JSON.stringify(traits)]
+    );
+    return res.rows[0];
+  }
+  if (action === 'get') {
+    const res = await pool.query(
+      `SELECT * FROM personas WHERE user_key = $1 AND (name = $2 OR active = TRUE) ORDER BY active DESC LIMIT 1`,
+      [userKey, name]
+    );
+    return res.rows[0] || null;
+  }
+  if (action === 'list') {
+    const res = await pool.query(`SELECT * FROM personas WHERE user_key = $1 ORDER BY active DESC, name`, [userKey]);
+    return res.rows;
+  }
+  if (action === 'delete') {
+    await pool.query(`DELETE FROM personas WHERE user_key = $1 AND name = $2`, [userKey, name]);
+    return { deleted: true };
+  }
+  return null;
 }
 
 export default pool;

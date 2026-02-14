@@ -73,6 +73,10 @@ import { handleWave1Tool } from "./index.js";
 import { handleWave2Tool } from "./index.js";
 import { handleWave3Tool } from "./index.js";
 import { handleWave4Tool } from "./index.js";
+import { handleWave5Tool } from "./index.js";
+import { handleWave6Tool } from "./index.js";
+import { handleWave7Tool } from "./index.js";
+import { handleWave8Tool } from "./index.js";
 
 const WAVE1_TOOLS = new Set([
   'resolve_reference', 'what_changed_since', 'who_did_what',
@@ -93,6 +97,26 @@ const WAVE3_TOOLS = new Set([
 const WAVE4_TOOLS = new Set([
   'create_agent', 'list_agents', 'run_agent', 'pause_agent', 'delete_agent',
   'get_alerts', 'subscribe_event', 'list_subscriptions'
+]);
+
+const WAVE5_TOOLS = new Set([
+  'search_knowledge', 'extract_decisions', 'generate_retrospective',
+  'find_expert', 'compare_snapshots'
+]);
+
+const WAVE6_TOOLS = new Set([
+  'audit_log', 'create_policy', 'list_policies', 'check_compliance',
+  'generate_report', 'track_budget'
+]);
+
+const WAVE7_TOOLS = new Set([
+  'list_templates', 'create_template', 'install_template',
+  'list_plugins', 'manage_plugin'
+]);
+
+const WAVE8_TOOLS = new Set([
+  'connect_platform', 'cross_query', 'send_notification',
+  'set_persona', 'predict_outcome'
 ]);
 
 /**
@@ -4689,6 +4713,58 @@ export async function handleMCP(reqBody, ctx) {
           code: 'WAVE4_ERROR',
           message: `${name} failed: ${w4Error.message}`
         });
+      }
+    }
+
+    // WAVE 5: Knowledge tools
+    if (WAVE5_TOOLS.has(name)) {
+      try {
+        console.log(`[MCP] Handling Wave 5 tool: ${name}`, { userKey });
+        const sessionId = params?.sessionId || args?.session_id || 'default';
+        const result = await handleWave5Tool(name, args, userKey, sessionId);
+        return ok(id, result);
+      } catch (w5Error) {
+        console.error(`[MCP] Wave 5 tool error:`, w5Error);
+        return fail(id, { code: 'WAVE5_ERROR', message: `${name} failed: ${w5Error.message}` });
+      }
+    }
+
+    // WAVE 6: Enterprise tools
+    if (WAVE6_TOOLS.has(name)) {
+      try {
+        console.log(`[MCP] Handling Wave 6 tool: ${name}`, { userKey });
+        const sessionId = params?.sessionId || args?.session_id || 'default';
+        const result = await handleWave6Tool(name, args, userKey, sessionId);
+        return ok(id, result);
+      } catch (w6Error) {
+        console.error(`[MCP] Wave 6 tool error:`, w6Error);
+        return fail(id, { code: 'WAVE6_ERROR', message: `${name} failed: ${w6Error.message}` });
+      }
+    }
+
+    // WAVE 7: Platform tools
+    if (WAVE7_TOOLS.has(name)) {
+      try {
+        console.log(`[MCP] Handling Wave 7 tool: ${name}`, { userKey });
+        const sessionId = params?.sessionId || args?.session_id || 'default';
+        const result = await handleWave7Tool(name, args, userKey, sessionId);
+        return ok(id, result);
+      } catch (w7Error) {
+        console.error(`[MCP] Wave 7 tool error:`, w7Error);
+        return fail(id, { code: 'WAVE7_ERROR', message: `${name} failed: ${w7Error.message}` });
+      }
+    }
+
+    // WAVE 8: Expansion tools
+    if (WAVE8_TOOLS.has(name)) {
+      try {
+        console.log(`[MCP] Handling Wave 8 tool: ${name}`, { userKey });
+        const sessionId = params?.sessionId || args?.session_id || 'default';
+        const result = await handleWave8Tool(name, args, userKey, sessionId);
+        return ok(id, result);
+      } catch (w8Error) {
+        console.error(`[MCP] Wave 8 tool error:`, w8Error);
+        return fail(id, { code: 'WAVE8_ERROR', message: `${name} failed: ${w8Error.message}` });
       }
     }
 

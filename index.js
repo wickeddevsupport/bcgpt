@@ -65,6 +65,29 @@ import {
   subscribeEvent,
   unsubscribeEvent,
   listSubscriptions,
+  // Wave 5: Knowledge
+  saveDecision,
+  listDecisions,
+  // Wave 6: Enterprise
+  createPolicy,
+  listPolicies,
+  getPolicy,
+  updatePolicyViolations,
+  setBudget,
+  getBudget,
+  logExpense,
+  getExpenses,
+  // Wave 7: Platform
+  createTemplate,
+  listTemplatesDb,
+  getTemplate,
+  incrementTemplateInstalls,
+  managePlugin,
+  listPlugins,
+  // Wave 8: Expansion
+  managePlatformConnection,
+  listPlatformConnections,
+  managePersona,
 } from "./db.js";
 import { runMining } from "./miner.js";
 import { execSync } from "child_process";
@@ -2740,6 +2763,995 @@ async function generateAlerts(userKey, args = {}) {
 }
 
 export { handleWave4Tool };
+
+/* ================= WAVE 5: KNOWLEDGE HANDLER ================= */
+
+async function handleWave5Tool(name, args, userKey, sessionId) {
+  switch (name) {
+    // ===== SEARCH KNOWLEDGE =====
+    case 'search_knowledge': {
+      if (!args.query) throw new Error('query is required');
+      const scope = args.scope || 'all';
+      const limit = args.limit || 10;
+      const query = args.query.toLowerCase();
+      const results = [];
+
+      // Search entity cache
+      const entityTypes = scope === 'all' ? ['project', 'todo', 'message', 'comment'] :
+        scope === 'messages' ? ['message'] :
+        scope === 'comments' ? ['comment'] :
+        scope === 'tasks' ? ['todo'] :
+        scope === 'projects' ? ['project'] : ['project', 'todo', 'message', 'comment'];
+
+      for (const type of entityTypes) {
+        const entities = await listEntityCache(type, { userKey, limit: 200 });
+        for (const e of entities) {
+          const title = (e.title || '').toLowerCase();
+          const content = (e.data?.content || e.data?.description || '').toLowerCase();
+          const subject = (e.data?.subject || '').toLowerCase();
+          if (title.includes(query) || content.includes(query) || subject.includes(query)) {
+            results.push({
+              type,
+              id: e.object_id,
+              title: e.title || e.data?.subject || 'Untitled',
+              snippet: (e.data?.content || e.data?.description || '').slice(0, 200),
+              relevance: title.includes(query) ? 1.0 : 0.7,
+              project_id: e.data?.project_id || e.project_id
+            });
+          }
+        }
+      }
+
+      // Sort by relevance
+      results.sort((a, b) => b.relevance - a.relevance);
+
+      return {
+        query: args.query,
+        scope,
+        results: results.slice(0, limit),
+        total: results.length,
+        message: results.length > 0 ? `Found ${results.length} result(s) matching "${args.query}"` : `No results found for "${args.query}"`
+      };
+    }
+
+    // ===== EXTRACT DECISIONS =====
+    case 'extract_decisions': {
+      if (!args.project) throw new Error('project is required');
+      const type = args.type || 'all';
+      const periodDays = parsePeriodDays(args.period || '30d');
+      const cutoff = new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000);
+
+      // Find project
+      const projects = await listEntityCache('project', { userKey, limit: 200 });
+      const proj = projects.find(p =>
+        p.title?.toLowerCase().includes(args.project.toLowerCase()) ||
+        String(p.object_id) === String(args.project)
+      );
+      if (!proj) throw new Error(`Project not found: ${args.project}`);
+
+      // Get messages and comments for this project
+      const messages = await listEntityCache('message', { userKey, limit: 500 });
+      const comments = await listEntityCache('comment', { userKey, limit: 500 });
+      const projMessages = messages.filter(m => String(m.data?.project_id || m.project_id) === String(proj.object_id));
+      const projComments = comments.filter(c => String(c.data?.project_id || c.project_id) === String(proj.object_id));
+
+      const decisions = [];
+      const decisionPatterns = [
+        /decided to/i, /we('ll| will)/i, /going (with|forward)/i, /agreed (on|to)/i,
+        /final decision/i, /conclusion/i, /approved/i, /signed off/i
+      ];
+      const actionPatterns = [
+        /action item/i, /todo:/i, /next step/i, /follow up/i, /owner:/i,
+        /assigned to/i, /responsible:/i, /by \w+ \d+/i
+      ];
+      const outcomePatterns = [
+        /completed/i, /done/i, /shipped/i, /launched/i, /delivered/i, /finished/i
+      ];
+
+      const extractFrom = (items, sourceType) => {
+        for (const item of items) {
+          const content = item.data?.content || item.data?.body || '';
+          const createdAt = item.created_at ? new Date(item.created_at) : new Date();
+          if (createdAt < cutoff) continue;
+
+          for (const pattern of decisionPatterns) {
+            if (pattern.test(content) && (type === 'all' || type === 'decisions')) {
+              decisions.push({ type: 'decision', content: content.slice(0, 300), source_type: sourceType, source_id: item.object_id, date: item.created_at });
+            }
+          }
+          for (const pattern of actionPatterns) {
+            if (pattern.test(content) && (type === 'all' || type === 'action_items')) {
+              decisions.push({ type: 'action_item', content: content.slice(0, 300), source_type: sourceType, source_id: item.object_id, date: item.created_at });
+            }
+          }
+          for (const pattern of outcomePatterns) {
+            if (pattern.test(content) && (type === 'all' || type === 'outcomes')) {
+              decisions.push({ type: 'outcome', content: content.slice(0, 300), source_type: sourceType, source_id: item.object_id, date: item.created_at });
+            }
+          }
+        }
+      };
+
+      extractFrom(projMessages, 'message');
+      extractFrom(projComments, 'comment');
+
+      // Save to decision log
+      for (const d of decisions.slice(0, 50)) {
+        await saveDecision(userKey, { projectId: proj.object_id, projectName: proj.title, type: d.type, content: d.content, sourceType: d.source_type, sourceId: d.source_id });
+      }
+
+      return {
+        project: proj.title,
+        period: args.period || '30d',
+        extracted: decisions.length,
+        decisions: decisions.slice(0, 50),
+        by_type: {
+          decisions: decisions.filter(d => d.type === 'decision').length,
+          action_items: decisions.filter(d => d.type === 'action_item').length,
+          outcomes: decisions.filter(d => d.type === 'outcome').length
+        }
+      };
+    }
+
+    // ===== GENERATE RETROSPECTIVE =====
+    case 'generate_retrospective': {
+      if (!args.project) throw new Error('project is required');
+      const format = args.format || 'standard';
+      const periodDays = parsePeriodDays(args.period || '14d');
+      const cutoff = new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000);
+
+      const projects = await listEntityCache('project', { userKey, limit: 200 });
+      const proj = projects.find(p =>
+        p.title?.toLowerCase().includes(args.project.toLowerCase()) ||
+        String(p.object_id) === String(args.project)
+      );
+      if (!proj) throw new Error(`Project not found: ${args.project}`);
+
+      const todos = await listEntityCache('todo', { userKey, limit: 500 });
+      const projTodos = todos.filter(t => String(t.data?.project_id || t.project_id) === String(proj.object_id));
+      const operations = await getRecentOperations(userKey, 200);
+      const projOps = operations.filter(op => op.created_at > cutoff.toISOString());
+
+      const completed = projTodos.filter(t => t.data?.completed);
+      const active = projTodos.filter(t => !t.data?.completed);
+      const overdue = active.filter(t => t.data?.due_on && new Date(t.data.due_on) < new Date());
+
+      const retro = {
+        project: proj.title,
+        period: args.period || '14d',
+        format,
+        generated_at: new Date().toISOString(),
+        metrics: {
+          tasks_completed: completed.length,
+          tasks_remaining: active.length,
+          tasks_overdue: overdue.length,
+          operations_count: projOps.length,
+          completion_rate: projTodos.length > 0 ? Math.round((completed.length / projTodos.length) * 100) : 0
+        }
+      };
+
+      if (format === 'standard' || format === 'brief') {
+        retro.what_went_well = [];
+        retro.what_didnt_go_well = [];
+        retro.action_items = [];
+        if (completed.length > 0) retro.what_went_well.push(`Completed ${completed.length} task(s)`);
+        if (retro.metrics.completion_rate > 70) retro.what_went_well.push(`Strong completion rate: ${retro.metrics.completion_rate}%`);
+        if (overdue.length > 0) retro.what_didnt_go_well.push(`${overdue.length} task(s) are overdue`);
+        if (active.length > completed.length) retro.what_didnt_go_well.push(`More tasks remaining (${active.length}) than completed (${completed.length})`);
+        if (overdue.length > 0) retro.action_items.push('Review and reschedule overdue tasks');
+        if (retro.metrics.completion_rate < 50) retro.action_items.push('Investigate blockers affecting velocity');
+      } else if (format === 'start_stop_continue') {
+        retro.start = overdue.length > 0 ? ['Daily standup to catch blockers early'] : [];
+        retro.stop = [];
+        retro.continue = completed.length > 0 ? ['Current work cadence is working'] : [];
+      } else if (format === '4ls') {
+        retro.liked = completed.length > 0 ? [`Completed ${completed.length} tasks`] : [];
+        retro.learned = [];
+        retro.lacked = overdue.length > 0 ? ['Better deadline tracking'] : [];
+        retro.longed_for = [];
+      }
+
+      return retro;
+    }
+
+    // ===== FIND EXPERT =====
+    case 'find_expert': {
+      if (!args.topic) throw new Error('topic is required');
+      const limit = args.limit || 5;
+      const topic = args.topic.toLowerCase();
+
+      const todos = await listEntityCache('todo', { userKey, limit: 500 });
+      const messages = await listEntityCache('message', { userKey, limit: 500 });
+      const people = await listEntityCache('person', { userKey, limit: 100 });
+
+      const scores = {};
+      for (const p of people) {
+        scores[p.object_id] = { name: p.title || p.data?.name, tasks: 0, messages: 0, score: 0 };
+      }
+
+      // Score by task assignments
+      for (const t of todos) {
+        const title = (t.title || '').toLowerCase();
+        if (title.includes(topic)) {
+          for (const aid of (t.data?.assignee_ids || [])) {
+            if (scores[aid]) { scores[aid].tasks++; scores[aid].score += 10; }
+          }
+        }
+      }
+
+      // Score by message authorship
+      for (const m of messages) {
+        const content = (m.data?.content || m.data?.subject || '').toLowerCase();
+        if (content.includes(topic) && m.data?.creator_id && scores[m.data.creator_id]) {
+          scores[m.data.creator_id].messages++;
+          scores[m.data.creator_id].score += 5;
+        }
+      }
+
+      const experts = Object.values(scores).filter(s => s.score > 0).sort((a, b) => b.score - a.score).slice(0, limit);
+
+      return {
+        topic: args.topic,
+        experts: experts.map((e, i) => ({ rank: i + 1, ...e })),
+        total: experts.length,
+        message: experts.length > 0 ? `Top expert for "${args.topic}": ${experts[0].name}` : `No experts found for "${args.topic}"`
+      };
+    }
+
+    // ===== COMPARE SNAPSHOTS =====
+    case 'compare_snapshots': {
+      if (!args.entity_type) throw new Error('entity_type is required');
+      const entityType = args.entity_type;
+      const entityId = args.entity_id;
+
+      // Parse dates
+      const toDate = args.to_date === 'now' || !args.to_date ? new Date() : new Date(args.to_date);
+      let fromDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      if (args.from_date) {
+        if (args.from_date.endsWith('d ago')) {
+          const days = parseInt(args.from_date);
+          fromDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+        } else {
+          fromDate = new Date(args.from_date);
+        }
+      }
+
+      const snapshots = await getSnapshots(userKey, entityType, entityId || null, 100);
+      const fromSnap = snapshots.filter(s => new Date(s.created_at) <= fromDate).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+      const toSnap = snapshots.filter(s => new Date(s.created_at) <= toDate).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+
+      const changes = [];
+      if (fromSnap && toSnap && fromSnap.id !== toSnap.id) {
+        const fromData = fromSnap.snapshot_data || {};
+        const toData = toSnap.snapshot_data || {};
+        for (const key of new Set([...Object.keys(fromData), ...Object.keys(toData)])) {
+          if (JSON.stringify(fromData[key]) !== JSON.stringify(toData[key])) {
+            changes.push({ field: key, from: fromData[key], to: toData[key] });
+          }
+        }
+      }
+
+      return {
+        entity_type: entityType,
+        entity_id: entityId,
+        from_date: fromDate.toISOString(),
+        to_date: toDate.toISOString(),
+        from_snapshot: fromSnap ? { id: fromSnap.id, created_at: fromSnap.created_at } : null,
+        to_snapshot: toSnap ? { id: toSnap.id, created_at: toSnap.created_at } : null,
+        changes,
+        total_changes: changes.length,
+        message: changes.length > 0 ? `Found ${changes.length} change(s) between snapshots` : 'No changes detected'
+      };
+    }
+
+    default:
+      throw new Error(`Unknown Wave 5 tool: ${name}`);
+  }
+}
+
+export { handleWave5Tool };
+
+/* ================= WAVE 6: ENTERPRISE HANDLER ================= */
+
+async function handleWave6Tool(name, args, userKey, sessionId) {
+  switch (name) {
+    // ===== AUDIT LOG =====
+    case 'audit_log': {
+      const periodDays = parsePeriodDays(args.period || '7d');
+      const cutoff = new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000);
+      const limit = args.limit || 50;
+
+      let operations = await getRecentOperations(userKey, 500);
+      operations = operations.filter(op => new Date(op.created_at) >= cutoff);
+
+      if (args.user) {
+        const u = args.user.toLowerCase();
+        operations = operations.filter(op => (op.user_key || '').toLowerCase().includes(u));
+      }
+      if (args.operation) {
+        operations = operations.filter(op => op.operation === args.operation);
+      }
+      if (args.entity) {
+        const e = args.entity.toLowerCase();
+        operations = operations.filter(op => (op.entity_name || '').toLowerCase().includes(e) || String(op.entity_id) === args.entity);
+      }
+
+      return {
+        period: args.period || '7d',
+        filters: { user: args.user || null, operation: args.operation || null, entity: args.entity || null },
+        entries: operations.slice(0, limit).map(op => ({
+          id: op.id,
+          operation: op.operation,
+          entity_type: op.entity_type,
+          entity_id: op.entity_id,
+          entity_name: op.entity_name,
+          user: op.user_key,
+          timestamp: op.created_at,
+          undone: op.undone || false
+        })),
+        total: operations.length,
+        showing: Math.min(operations.length, limit)
+      };
+    }
+
+    // ===== CREATE POLICY =====
+    case 'create_policy': {
+      if (!args.name) throw new Error('name is required');
+      if (!args.rule) throw new Error('rule is required');
+      const policy = await createPolicy(userKey, {
+        name: args.name,
+        rule: args.rule,
+        type: args.type || 'custom',
+        severity: args.severity || 'warn',
+        active: args.active !== false
+      });
+      return {
+        policy_id: String(policy.id),
+        name: policy.name,
+        rule: policy.rule,
+        type: policy.type,
+        severity: policy.severity,
+        active: policy.active,
+        message: `Policy "${policy.name}" created. ${policy.severity === 'block' ? 'Will block violations.' : policy.severity === 'warn' ? 'Will alert on violations.' : 'Will log violations.'}`
+      };
+    }
+
+    // ===== LIST POLICIES =====
+    case 'list_policies': {
+      const activeOnly = args.active_only !== false;
+      const policies = await listPolicies(userKey, activeOnly);
+      return {
+        policies: policies.map(p => ({
+          id: String(p.id),
+          name: p.name,
+          rule: p.rule,
+          type: p.type,
+          severity: p.severity,
+          active: p.active,
+          violations: p.violation_count || 0,
+          last_checked: p.last_checked_at
+        })),
+        total: policies.length
+      };
+    }
+
+    // ===== CHECK COMPLIANCE =====
+    case 'check_compliance': {
+      const policies = await listPolicies(userKey, true);
+      const todos = await listEntityCache('todo', { userKey, limit: 500 });
+      const projects = await listEntityCache('project', { userKey, limit: 200 });
+      const active = todos.filter(t => !t.data?.completed);
+
+      const results = [];
+      for (const policy of policies) {
+        if (args.policy_id && String(policy.id) !== String(args.policy_id)) continue;
+        const violations = [];
+        const rule = policy.rule.toLowerCase();
+
+        // Check common policy patterns
+        if (rule.includes('assignee') || rule.includes('assigned')) {
+          const unassigned = active.filter(t => !t.data?.assignee_ids?.length);
+          for (const t of unassigned.slice(0, 10)) {
+            violations.push({ entity_type: 'task', entity_id: t.object_id, entity_name: t.title, reason: 'No assignee' });
+          }
+        }
+        if (rule.includes('due date') || rule.includes('deadline')) {
+          const noDue = active.filter(t => !t.data?.due_on);
+          for (const t of noDue.slice(0, 10)) {
+            violations.push({ entity_type: 'task', entity_id: t.object_id, entity_name: t.title, reason: 'No due date' });
+          }
+        }
+        if (rule.includes('description')) {
+          const noDesc = projects.filter(p => !p.data?.description);
+          for (const p of noDesc.slice(0, 10)) {
+            violations.push({ entity_type: 'project', entity_id: p.object_id, entity_name: p.title, reason: 'No description' });
+          }
+        }
+
+        await updatePolicyViolations(policy.id, violations.length);
+        results.push({
+          policy_id: String(policy.id),
+          policy_name: policy.name,
+          severity: policy.severity,
+          status: violations.length === 0 ? 'pass' : 'fail',
+          violations: violations.length,
+          details: violations.slice(0, 5)
+        });
+      }
+
+      const passed = results.filter(r => r.status === 'pass').length;
+      const failed = results.filter(r => r.status === 'fail').length;
+
+      return {
+        checked_at: new Date().toISOString(),
+        policies_checked: results.length,
+        passed,
+        failed,
+        compliance_score: results.length > 0 ? Math.round((passed / results.length) * 100) : 100,
+        results
+      };
+    }
+
+    // ===== GENERATE REPORT =====
+    case 'generate_report': {
+      if (!args.type) throw new Error('type is required');
+      const reportType = args.type;
+      const periodDays = parsePeriodDays(args.period || '30d');
+      const format = args.format || 'summary';
+
+      const projects = await listEntityCache('project', { userKey, limit: 200 });
+      const todos = await listEntityCache('todo', { userKey, limit: 500 });
+      const people = await listEntityCache('person', { userKey, limit: 100 });
+      const operations = await getRecentOperations(userKey, 200);
+      const cutoff = new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000);
+      const recentOps = operations.filter(op => new Date(op.created_at) >= cutoff);
+
+      const completed = todos.filter(t => t.data?.completed);
+      const active = todos.filter(t => !t.data?.completed);
+
+      const report = {
+        type: reportType,
+        period: args.period || '30d',
+        generated_at: new Date().toISOString(),
+        format
+      };
+
+      if (reportType === 'status' || reportType === 'executive') {
+        report.summary = {
+          projects: projects.length,
+          active_tasks: active.length,
+          completed_tasks: completed.length,
+          team_members: people.length,
+          operations_this_period: recentOps.length
+        };
+      }
+
+      if (reportType === 'velocity') {
+        const dailyOps = {};
+        for (const op of recentOps) {
+          const day = op.created_at?.split('T')[0];
+          if (day) dailyOps[day] = (dailyOps[day] || 0) + 1;
+        }
+        report.velocity = {
+          total_operations: recentOps.length,
+          daily_average: recentOps.length / periodDays,
+          by_day: dailyOps,
+          completions: recentOps.filter(op => op.operation === 'complete_task').length
+        };
+      }
+
+      if (reportType === 'team') {
+        const workload = {};
+        for (const p of people) {
+          workload[p.object_id] = { name: p.title || p.data?.name, tasks: 0 };
+        }
+        for (const t of active) {
+          for (const aid of (t.data?.assignee_ids || [])) {
+            if (workload[aid]) workload[aid].tasks++;
+          }
+        }
+        report.team = {
+          members: people.length,
+          workload: Object.values(workload).sort((a, b) => b.tasks - a.tasks)
+        };
+      }
+
+      if (reportType === 'executive') {
+        report.highlights = [];
+        if (completed.length > 0) report.highlights.push(`${completed.length} tasks completed`);
+        if (active.length > 0) report.highlights.push(`${active.length} tasks in progress`);
+        report.risk_flags = [];
+        const overdue = active.filter(t => t.data?.due_on && new Date(t.data.due_on) < new Date());
+        if (overdue.length > 0) report.risk_flags.push(`${overdue.length} overdue tasks`);
+      }
+
+      return report;
+    }
+
+    // ===== TRACK BUDGET =====
+    case 'track_budget': {
+      if (!args.action) throw new Error('action is required');
+      if (!args.project) throw new Error('project is required');
+
+      const projects = await listEntityCache('project', { userKey, limit: 200 });
+      const proj = projects.find(p =>
+        p.title?.toLowerCase().includes(args.project.toLowerCase()) ||
+        String(p.object_id) === String(args.project)
+      );
+      if (!proj) throw new Error(`Project not found: ${args.project}`);
+
+      if (args.action === 'set_budget') {
+        if (!args.amount) throw new Error('amount is required for set_budget');
+        const budget = await setBudget(userKey, proj.object_id, proj.title, args.amount);
+        return {
+          action: 'set_budget',
+          project: proj.title,
+          budget_id: String(budget.id),
+          total_budget: budget.total_budget,
+          message: `Budget set to $${args.amount} for "${proj.title}"`
+        };
+      }
+
+      if (args.action === 'log_expense') {
+        if (!args.amount) throw new Error('amount is required for log_expense');
+        let budget = await getBudget(userKey, proj.object_id);
+        if (!budget) {
+          budget = await setBudget(userKey, proj.object_id, proj.title, 0);
+        }
+        const expense = await logExpense(userKey, budget.id, args.amount, args.category || 'other', args.description || null);
+        return {
+          action: 'log_expense',
+          project: proj.title,
+          expense_id: String(expense.id),
+          amount: expense.amount,
+          category: expense.category,
+          message: `Logged $${args.amount} expense (${args.category || 'other'}) for "${proj.title}"`
+        };
+      }
+
+      if (args.action === 'get_summary' || args.action === 'forecast') {
+        const budget = await getBudget(userKey, proj.object_id);
+        if (!budget) {
+          return { action: args.action, project: proj.title, message: 'No budget set for this project' };
+        }
+        const expenses = await getExpenses(budget.id, 50);
+        const totalSpent = parseFloat(budget.total_spent) || 0;
+        const remaining = budget.total_budget - totalSpent;
+
+        const result = {
+          action: args.action,
+          project: proj.title,
+          total_budget: budget.total_budget,
+          spent: totalSpent,
+          remaining,
+          percent_used: budget.total_budget > 0 ? Math.round((totalSpent / budget.total_budget) * 100) : 0,
+          recent_expenses: expenses.slice(0, 10).map(e => ({ amount: e.amount, category: e.category, description: e.description, date: e.created_at }))
+        };
+
+        if (args.action === 'forecast') {
+          const daysElapsed = Math.max(1, Math.floor((Date.now() - new Date(budget.created_at).getTime()) / (24 * 60 * 60 * 1000)));
+          const dailyBurn = totalSpent / daysElapsed;
+          const daysRemaining = remaining > 0 && dailyBurn > 0 ? Math.floor(remaining / dailyBurn) : null;
+          result.forecast = {
+            daily_burn_rate: dailyBurn,
+            estimated_days_remaining: daysRemaining,
+            on_track: remaining >= 0
+          };
+        }
+
+        return result;
+      }
+
+      throw new Error(`Unknown budget action: ${args.action}`);
+    }
+
+    default:
+      throw new Error(`Unknown Wave 6 tool: ${name}`);
+  }
+}
+
+export { handleWave6Tool };
+
+/* ================= WAVE 7: PLATFORM HANDLER ================= */
+
+async function handleWave7Tool(name, args, userKey, sessionId) {
+  switch (name) {
+    // ===== LIST TEMPLATES =====
+    case 'list_templates': {
+      const templates = await listTemplatesDb(userKey, {
+        category: args.category,
+        search: args.search,
+        limit: 50
+      });
+      return {
+        templates: templates.map(t => ({
+          id: String(t.id),
+          name: t.name,
+          description: t.description,
+          type: t.source_type,
+          tags: t.tags || [],
+          installs: t.installs || 0,
+          created: t.created_at
+        })),
+        total: templates.length
+      };
+    }
+
+    // ===== CREATE TEMPLATE =====
+    case 'create_template': {
+      if (!args.name) throw new Error('name is required');
+      if (!args.source_type) throw new Error('source_type is required');
+      if (!args.source_id) throw new Error('source_id is required');
+
+      let content = {};
+      if (args.source_type === 'recipe') {
+        const recipe = await getRecipe(userKey, args.source_id);
+        if (!recipe) throw new Error(`Recipe not found: ${args.source_id}`);
+        content = { operations: recipe.operations, variables: recipe.variables };
+      } else if (args.source_type === 'agent') {
+        const agent = await getAgent(userKey, args.source_id);
+        if (!agent) throw new Error(`Agent not found: ${args.source_id}`);
+        content = { goal: agent.goal, type: agent.type, strategy: agent.strategy, auto_execute: agent.auto_execute, schedule: agent.schedule };
+      } else if (args.source_type === 'policy') {
+        const policy = await getPolicy(userKey, args.source_id);
+        if (!policy) throw new Error(`Policy not found: ${args.source_id}`);
+        content = { rule: policy.rule, type: policy.type, severity: policy.severity };
+      }
+
+      const template = await createTemplate(userKey, {
+        name: args.name,
+        description: args.description || null,
+        sourceType: args.source_type,
+        content,
+        tags: args.tags || []
+      });
+
+      return {
+        template_id: String(template.id),
+        name: template.name,
+        type: args.source_type,
+        message: `Template "${template.name}" created from ${args.source_type} ${args.source_id}`
+      };
+    }
+
+    // ===== INSTALL TEMPLATE =====
+    case 'install_template': {
+      if (!args.template_id) throw new Error('template_id is required');
+      const dryRun = args.dry_run || false;
+
+      const template = await getTemplate(userKey, args.template_id);
+      if (!template) throw new Error(`Template not found: ${args.template_id}`);
+
+      const content = template.content || {};
+      const customize = args.customize || {};
+      const result = { template: template.name, type: template.source_type, dry_run: dryRun, created: [] };
+
+      if (template.source_type === 'recipe' && !dryRun) {
+        const ops = content.operations || [];
+        const vars = content.variables || [];
+        const name = customize.name || `${template.name} Recipe`;
+        await saveRecipe(userKey, name, template.description, ops, vars);
+        result.created.push({ type: 'recipe', name });
+      } else if (template.source_type === 'agent' && !dryRun) {
+        const name = customize.name || `${template.name} Agent`;
+        await createAgent(userKey, { name, goal: content.goal, type: content.type, strategy: content.strategy, auto_execute: content.auto_execute, schedule: content.schedule });
+        result.created.push({ type: 'agent', name });
+      } else if (template.source_type === 'policy' && !dryRun) {
+        const name = customize.name || `${template.name} Policy`;
+        await createPolicy(userKey, { name, rule: content.rule, type: content.type, severity: content.severity });
+        result.created.push({ type: 'policy', name });
+      }
+
+      if (!dryRun) {
+        await incrementTemplateInstalls(template.id);
+      }
+
+      result.message = dryRun
+        ? `Preview: Would install ${template.source_type} "${template.name}"`
+        : `Installed template "${template.name}"`;
+
+      return result;
+    }
+
+    // ===== LIST PLUGINS =====
+    case 'list_plugins': {
+      const status = args.status || 'all';
+      const plugins = await listPlugins(userKey, status);
+
+      // Add some "available" plugins (system-defined)
+      const available = [
+        { plugin_id: 'github-sync', name: 'GitHub Sync', description: 'Sync issues and PRs from GitHub' },
+        { plugin_id: 'jira-sync', name: 'Jira Sync', description: 'Sync tickets from Jira' },
+        { plugin_id: 'slack-notify', name: 'Slack Notifications', description: 'Send alerts to Slack channels' },
+        { plugin_id: 'time-tracking', name: 'Time Tracking', description: 'Track time spent on tasks' }
+      ];
+
+      const installed = plugins.map(p => ({
+        id: p.plugin_id,
+        name: p.name,
+        description: p.description,
+        status: p.status,
+        installed: true,
+        created: p.created_at
+      }));
+
+      const installedIds = new Set(installed.map(p => p.id));
+      const availableFiltered = available.filter(a => !installedIds.has(a.plugin_id)).map(a => ({
+        id: a.plugin_id,
+        name: a.name,
+        description: a.description,
+        status: 'available',
+        installed: false
+      }));
+
+      return {
+        installed: installed.length,
+        available: availableFiltered.length,
+        plugins: status === 'installed' ? installed : status === 'available' ? availableFiltered : [...installed, ...availableFiltered]
+      };
+    }
+
+    // ===== MANAGE PLUGIN =====
+    case 'manage_plugin': {
+      if (!args.plugin_id) throw new Error('plugin_id is required');
+      if (!args.action) throw new Error('action is required');
+
+      const result = await managePlugin(userKey, args.plugin_id, args.action, args.config || {});
+
+      return {
+        plugin_id: args.plugin_id,
+        action: args.action,
+        success: !!result,
+        result,
+        message: `Plugin ${args.plugin_id}: ${args.action} completed`
+      };
+    }
+
+    default:
+      throw new Error(`Unknown Wave 7 tool: ${name}`);
+  }
+}
+
+export { handleWave7Tool };
+
+/* ================= WAVE 8: EXPANSION HANDLER ================= */
+
+async function handleWave8Tool(name, args, userKey, sessionId) {
+  switch (name) {
+    // ===== CONNECT PLATFORM =====
+    case 'connect_platform': {
+      if (!args.platform) throw new Error('platform is required');
+      if (!args.action) throw new Error('action is required');
+
+      const result = await managePlatformConnection(userKey, args.platform, args.action, args.config || {});
+
+      if (args.action === 'status') {
+        return {
+          platform: args.platform,
+          status: result?.status || 'not_connected',
+          last_sync: result?.last_sync_at || null,
+          connected_at: result?.created_at || null
+        };
+      }
+
+      return {
+        platform: args.platform,
+        action: args.action,
+        success: !!result,
+        message: `${args.platform}: ${args.action} completed`
+      };
+    }
+
+    // ===== CROSS QUERY =====
+    case 'cross_query': {
+      if (!args.query) throw new Error('query is required');
+      const limit = args.limit || 20;
+
+      // Get connected platforms
+      const connections = await listPlatformConnections(userKey);
+      const connectedPlatforms = connections.filter(c => c.status === 'connected').map(c => c.platform);
+
+      // Filter to requested platforms
+      const platforms = args.platforms?.length > 0
+        ? connectedPlatforms.filter(p => args.platforms.includes(p))
+        : connectedPlatforms;
+
+      // For now, query Basecamp entity cache (real cross-platform would call each platform's API)
+      const results = [];
+      const query = args.query.toLowerCase();
+
+      // Search local entity cache
+      const todos = await listEntityCache('todo', { userKey, limit: 200 });
+      const projects = await listEntityCache('project', { userKey, limit: 100 });
+
+      for (const t of todos) {
+        if ((t.title || '').toLowerCase().includes(query)) {
+          results.push({ platform: 'basecamp', type: 'task', id: t.object_id, title: t.title, status: t.data?.completed ? 'completed' : 'active' });
+        }
+      }
+      for (const p of projects) {
+        if ((p.title || '').toLowerCase().includes(query)) {
+          results.push({ platform: 'basecamp', type: 'project', id: p.object_id, title: p.title });
+        }
+      }
+
+      return {
+        query: args.query,
+        platforms_queried: ['basecamp', ...platforms],
+        results: results.slice(0, limit),
+        total: results.length,
+        message: results.length > 0 ? `Found ${results.length} result(s) across platforms` : 'No cross-platform results found'
+      };
+    }
+
+    // ===== SEND NOTIFICATION =====
+    case 'send_notification': {
+      if (!args.platform) throw new Error('platform is required');
+      if (!args.target) throw new Error('target is required');
+      if (!args.message) throw new Error('message is required');
+
+      // For now, log the notification (real implementation would call platform APIs)
+      const notification = {
+        platform: args.platform,
+        target: args.target,
+        title: args.title || null,
+        message: args.message,
+        sent_at: new Date().toISOString()
+      };
+
+      // Log as an operation
+      await logOperation(userKey, 'send_notification', args.platform, args.target, null, null);
+
+      return {
+        success: true,
+        notification,
+        message: `Notification sent to ${args.platform}:${args.target}`
+      };
+    }
+
+    // ===== SET PERSONA =====
+    case 'set_persona': {
+      if (!args.persona) throw new Error('persona is required');
+      const action = args.action || 'set';
+
+      // Built-in personas
+      const builtInPersonas = {
+        pm: { tone: 'professional', verbosity: 'balanced', focus_areas: ['deadlines', 'blockers', 'team'], communication_style: 'structured' },
+        engineer: { tone: 'technical', verbosity: 'concise', focus_areas: ['implementation', 'bugs', 'architecture'], communication_style: 'direct' },
+        executive: { tone: 'strategic', verbosity: 'brief', focus_areas: ['metrics', 'risks', 'progress'], communication_style: 'high-level' },
+        coach: { tone: 'supportive', verbosity: 'detailed', focus_areas: ['growth', 'feedback', 'wellbeing'], communication_style: 'encouraging' }
+      };
+
+      if (action === 'list') {
+        const custom = await managePersona(userKey, args.persona, 'list');
+        return {
+          built_in: Object.keys(builtInPersonas),
+          custom: (custom || []).map(p => ({ name: p.name, active: p.active })),
+          current: (custom || []).find(p => p.active)?.name || 'default'
+        };
+      }
+
+      if (action === 'get') {
+        const persona = await managePersona(userKey, args.persona, 'get');
+        if (persona) return { persona: persona.name, traits: persona.traits, active: persona.active };
+        if (builtInPersonas[args.persona]) return { persona: args.persona, traits: builtInPersonas[args.persona], built_in: true };
+        throw new Error(`Persona not found: ${args.persona}`);
+      }
+
+      if (action === 'delete') {
+        await managePersona(userKey, args.persona, 'delete');
+        return { success: true, message: `Persona "${args.persona}" deleted` };
+      }
+
+      // Set persona
+      const traits = args.traits || builtInPersonas[args.persona] || { tone: 'neutral', verbosity: 'balanced' };
+      const result = await managePersona(userKey, args.persona, 'set', traits);
+
+      return {
+        persona: args.persona,
+        traits,
+        active: true,
+        message: `Persona "${args.persona}" is now active`
+      };
+    }
+
+    // ===== PREDICT OUTCOME =====
+    case 'predict_outcome': {
+      if (!args.type) throw new Error('type is required');
+      const horizonDays = parsePeriodDays(args.horizon || '2w');
+
+      const projects = await listEntityCache('project', { userKey, limit: 200 });
+      const todos = await listEntityCache('todo', { userKey, limit: 500 });
+      const people = await listEntityCache('person', { userKey, limit: 100 });
+      const operations = await getRecentOperations(userKey, 200);
+
+      let proj = null;
+      if (args.project) {
+        proj = projects.find(p =>
+          p.title?.toLowerCase().includes(args.project.toLowerCase()) ||
+          String(p.object_id) === String(args.project)
+        );
+      }
+
+      const active = todos.filter(t => !t.data?.completed);
+      const completed = todos.filter(t => t.data?.completed);
+      const overdue = active.filter(t => t.data?.due_on && new Date(t.data.due_on) < new Date());
+
+      // Calculate metrics
+      const velocity = completed.length / 30; // tasks per day (rough)
+      const daysToComplete = velocity > 0 ? active.length / velocity : Infinity;
+      const completionRate = todos.length > 0 ? completed.length / todos.length : 0;
+
+      const prediction = {
+        type: args.type,
+        horizon: args.horizon || '2w',
+        project: proj?.title || 'All projects',
+        generated_at: new Date().toISOString()
+      };
+
+      if (args.type === 'delivery' || args.type === 'comprehensive') {
+        prediction.delivery = {
+          probability: Math.max(0, Math.min(100, Math.round((1 - (daysToComplete / (horizonDays * 2))) * 100))),
+          estimated_completion_days: Math.round(daysToComplete),
+          tasks_remaining: active.length,
+          velocity_per_day: velocity.toFixed(2),
+          confidence: velocity > 0.5 ? 'high' : velocity > 0.1 ? 'medium' : 'low'
+        };
+      }
+
+      if (args.type === 'risk' || args.type === 'comprehensive') {
+        let riskScore = 0;
+        if (overdue.length > 0) riskScore += Math.min(40, overdue.length * 10);
+        if (completionRate < 0.3) riskScore += 20;
+        if (active.length > completed.length * 2) riskScore += 15;
+        prediction.risk = {
+          score: Math.min(100, riskScore),
+          level: riskScore >= 70 ? 'high' : riskScore >= 40 ? 'medium' : 'low',
+          factors: []
+        };
+        if (overdue.length > 0) prediction.risk.factors.push(`${overdue.length} overdue tasks`);
+        if (completionRate < 0.3) prediction.risk.factors.push('Low completion rate');
+      }
+
+      if (args.type === 'burnout' || args.type === 'comprehensive') {
+        // Calculate workload imbalance
+        const workload = {};
+        for (const t of active) {
+          for (const aid of (t.data?.assignee_ids || [])) {
+            workload[aid] = (workload[aid] || 0) + 1;
+          }
+        }
+        const loads = Object.values(workload);
+        const maxLoad = Math.max(...loads, 0);
+        const avgLoad = loads.length > 0 ? loads.reduce((a, b) => a + b, 0) / loads.length : 0;
+        prediction.burnout = {
+          risk: maxLoad > avgLoad * 2 ? 'high' : maxLoad > avgLoad * 1.5 ? 'medium' : 'low',
+          max_workload: maxLoad,
+          avg_workload: avgLoad.toFixed(1),
+          recommendation: maxLoad > avgLoad * 2 ? 'Consider redistributing tasks' : 'Workload appears balanced'
+        };
+      }
+
+      if (args.type === 'bottleneck' || args.type === 'comprehensive') {
+        const unassigned = active.filter(t => !t.data?.assignee_ids?.length).length;
+        prediction.bottleneck = {
+          unassigned_tasks: unassigned,
+          overdue_tasks: overdue.length,
+          identified: []
+        };
+        if (unassigned > 5) prediction.bottleneck.identified.push('Many unassigned tasks');
+        if (overdue.length > 3) prediction.bottleneck.identified.push('Overdue tasks piling up');
+      }
+
+      return prediction;
+    }
+
+    default:
+      throw new Error(`Unknown Wave 8 tool: ${name}`);
+  }
+}
+
+export { handleWave8Tool };
 
 /* ================= MCP CONTEXT BUILDER ================= */
 

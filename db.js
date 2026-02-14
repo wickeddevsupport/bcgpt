@@ -105,5 +105,32 @@ export const subscribeEvent = async (...args) => await impl.subscribeEvent(...ar
 export const unsubscribeEvent = async (...args) => await impl.unsubscribeEvent(...args);
 export const listSubscriptions = async (...args) => await impl.listSubscriptions(...args);
 
+// Wave 5: Knowledge
+export const saveDecision = async (...args) => await impl.saveDecision(...args);
+export const listDecisions = async (...args) => await impl.listDecisions(...args);
+
+// Wave 6: Enterprise
+export const createPolicy = async (...args) => await impl.createPolicy(...args);
+export const listPolicies = async (...args) => await impl.listPolicies(...args);
+export const getPolicy = async (...args) => await impl.getPolicy(...args);
+export const updatePolicyViolations = async (...args) => await impl.updatePolicyViolations(...args);
+export const setBudget = async (...args) => await impl.setBudget(...args);
+export const getBudget = async (...args) => await impl.getBudget(...args);
+export const logExpense = async (...args) => await impl.logExpense(...args);
+export const getExpenses = async (...args) => await impl.getExpenses(...args);
+
+// Wave 7: Platform
+export const createTemplate = async (...args) => await impl.createTemplate(...args);
+export const listTemplatesDb = async (...args) => await impl.listTemplates(...args);
+export const getTemplate = async (...args) => await impl.getTemplate(...args);
+export const incrementTemplateInstalls = async (...args) => await impl.incrementTemplateInstalls(...args);
+export const managePlugin = async (...args) => await impl.managePlugin(...args);
+export const listPlugins = async (...args) => await impl.listPlugins(...args);
+
+// Wave 8: Expansion
+export const managePlatformConnection = async (...args) => await impl.managePlatformConnection(...args);
+export const listPlatformConnections = async (...args) => await impl.listPlatformConnections(...args);
+export const managePersona = async (...args) => await impl.managePersona(...args);
+
 export default impl.default ?? null;
 

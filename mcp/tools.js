@@ -5,6 +5,10 @@ import { getWave1Tools } from "../wave1-tools.js";
 import { getWave2Tools } from "../wave2-tools.js";
 import { getWave3Tools } from "../wave3-tools.js";
 import { getWave4Tools } from "../wave4-tools.js";
+import { getWave5Tools } from "../wave5-tools.js";
+import { getWave6Tools } from "../wave6-tools.js";
+import { getWave7Tools } from "../wave7-tools.js";
+import { getWave8Tools } from "../wave8-tools.js";
 
 function tool(name, description, inputSchema) {
   return { name, description, inputSchema };
@@ -1649,6 +1653,26 @@ export function getTools() {
   // Append Wave 4 Autonomy tools
   for (const w4Tool of getWave4Tools() || []) {
     tools.push(w4Tool);
+  }
+
+  // Append Wave 5 Knowledge tools
+  for (const w5Tool of getWave5Tools() || []) {
+    tools.push(w5Tool);
+  }
+
+  // Append Wave 6 Enterprise tools
+  for (const w6Tool of getWave6Tools() || []) {
+    tools.push(w6Tool);
+  }
+
+  // Append Wave 7 Platform tools
+  for (const w7Tool of getWave7Tools() || []) {
+    tools.push(w7Tool);
+  }
+
+  // Append Wave 8 Expansion tools
+  for (const w8Tool of getWave8Tools() || []) {
+    tools.push(w8Tool);
   }
 
   return tools;
