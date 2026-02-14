@@ -18,6 +18,7 @@ services:
     networks:
       - coolify
       - bcgpt_activepieces
+      - bcgpt_internal
     environment:
       PORT: "10000"
       APP_BASE_URL: "${APP_BASE_URL}"
@@ -54,6 +55,8 @@ services:
       POSTGRES_PASSWORD: "${BCGPT_POSTGRES_PASSWORD}"
     volumes:
       - bcgpt-postgres-data:/var/lib/postgresql/data
+    networks:
+      - bcgpt_internal
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U bcgpt -d bcgpt"]
       interval: 5s
@@ -72,3 +75,5 @@ networks:
     external: true
   bcgpt_activepieces:
     external: true
+  bcgpt_internal:
+    internal: true

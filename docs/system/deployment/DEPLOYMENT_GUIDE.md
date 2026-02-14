@@ -220,6 +220,25 @@ UPDATE flow_apps SET flow_id = 'actual-flow-id' WHERE slug = 'ai-image-generator
 3. Kill the process if needed: `kill -9 [pid]`
 4. Restart container via Coolify dashboard
 
+### Issue: Intermittent 502/504 Bad Gateway (service looks up but route fails)
+**Symptoms:**
+- `bcgpt.wickedlab.io` sometimes returns `502`/`504`
+- Container is still running and `http://<container-ip>:10000/health` returns `200`
+
+**Root Cause:**
+- Traefik and app containers are on multiple Docker networks, and Traefik selects an IP on a network it is not attached to.
+
+**Fix (permanent):**
+1. Set `traefik.docker.network=coolify` on the routed services.
+2. Ensure the service is attached to `coolify` network.
+3. Redeploy so labels are applied to the running container.
+
+**Emergency live mitigation:**
+```bash
+sudo docker network connect bcgptapi_default coolify-proxy
+```
+Use mitigation only as a stop-gap; keep the label-based pin as the long-term fix.
+
 ---
 
 ## Performance Notes

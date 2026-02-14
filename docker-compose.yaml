@@ -7,6 +7,7 @@ services:
       dockerfile: Dockerfile.bcgpt
     labels:
       - "traefik.enable=true"
+      - "traefik.docker.network=coolify"
       - "traefik.http.routers.bcgpt.rule=Host(`bcgpt.wickedlab.io`)"
       - "traefik.http.routers.bcgpt.entrypoints=http,https"
       - "traefik.http.routers.bcgpt.tls=true"
@@ -31,6 +32,9 @@ services:
       - bcgpt-data:/data
     expose:
       - "10000"
+    networks:
+      - coolify
+      - app
     depends_on:
       - activepieces
 
@@ -38,6 +42,7 @@ services:
     image: ghcr.io/wickeddevsupport/activepieces-bcgpt:latest
     labels:
       - "traefik.enable=true"
+      - "traefik.docker.network=coolify"
       - "traefik.http.middlewares.activepieces-redirect-to-https.redirectscheme.scheme=https"
       - "traefik.http.routers.activepieces-http.entrypoints=http"
       - "traefik.http.routers.activepieces-http.rule=Host(`flow.wickedlab.io`) || Host(`cpanel.wickedlab.io`)"
@@ -72,6 +77,9 @@ services:
       - activepieces-data:/var/data/activepieces
     expose:
       - "80"
+    networks:
+      - coolify
+      - app
     depends_on:
       - postgres
       - redis
@@ -85,11 +93,15 @@ services:
       POSTGRES_DB: "${AP_POSTGRES_DATABASE}"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    networks:
+      - app
 
   redis:
     image: redis:7-alpine
     volumes:
       - redis-data:/data
+    networks:
+      - app
 
 volumes:
   bcgpt-data:
@@ -104,3 +116,9 @@ volumes:
   redis-data:
     external: true
     name: activepieces-redis-data
+
+networks:
+  coolify:
+    external: true
+  app:
+    internal: true
