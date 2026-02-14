@@ -64,10 +64,14 @@ import {
 } from "./db.js";
 import { getTools } from "./mcp/tools.js";
 import { ENDPOINT_TOOL_MAP } from "./mcp/endpoint-tools.js";
+import { handleFlowTool } from "./flow-tools.js";
 
 // Intelligent chaining modules
 import { RequestContext } from './intelligent-executor.js';
 import * as intelligent from './intelligent-integration.js';
+
+// Gateway router for cross-layer operations
+import { routeToolCall, shouldRoute } from './gateway-router.js';
 
 // ---------- JSON-RPC helpers ----------
 function ok(id, result) { return { jsonrpc: "2.0", id, result }; }
@@ -4386,6 +4390,43 @@ export async function handleMCP(reqBody, ctx) {
 
     // Debug logging
     console.log(`[MCP] Tool called: ${name}`, { args, authenticated: !!TOKEN?.access_token, accountId });
+
+    // GATEWAY ROUTING: Route pmos_* and flow_* tools to appropriate services
+    if (shouldRoute(name)) {
+      try {
+        const routedResponse = await routeToolCall(name, args);
+        
+        if (routedResponse.error) {
+          return fail(id, {
+            code: routedResponse.error.code || 'GATEWAY_ERROR',
+            message: routedResponse.error.message || 'Routed service error'
+          });
+        }
+        
+        // Forward the result from the routed service
+        return ok(id, routedResponse.result || routedResponse);
+      } catch (routeError) {
+        return fail(id, {
+          code: 'GATEWAY_ERROR',
+          message: `Failed to route ${name}: ${routeError.message}`
+        });
+      }
+    }
+
+    // FLOW TOOLS: Handle flow_* tools locally (native Activepieces integration)
+    if (name.startsWith('flow_')) {
+      try {
+        console.log(`[MCP] Handling flow tool locally: ${name}`);
+        const result = await handleFlowTool(name, args);
+        return ok(id, result);
+      } catch (flowError) {
+        console.error(`[MCP] Flow tool error:`, flowError);
+        return fail(id, {
+          code: 'FLOW_ERROR',
+          message: `Flow tool ${name} failed: ${flowError.message}`
+        });
+      }
+    }
 
     // startbcgpt always returns auth link info (even when disconnected)
     if (name === "startbcgpt") {

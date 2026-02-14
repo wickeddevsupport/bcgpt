@@ -20,6 +20,7 @@ import fastifySocketIO from 'fastify-socket'
 import { Socket } from 'socket.io'
 import { aiProviderService } from './ai/ai-provider-service'
 import { aiProviderModule } from './ai/ai-provider.module'
+import { apiKeyModule } from './api-key/api-key-module'
 import { platformAnalyticsModule } from './analytics/platform-analytics.module'
 import { appConnectionModule } from './app-connection/app-connection.module'
 import { authenticationModule } from './authentication/authentication.module'
@@ -153,6 +154,7 @@ export const setupApp = async (app: FastifyInstance): Promise<FastifyInstance> =
     await app.register(openapiModule)
     await app.register(appEventRoutingModule)
     await app.register(authenticationModule)
+    await app.register(apiKeyModule)
     await app.register(triggerModule)
     await app.register(projectModule)
     await app.register(platformModule)

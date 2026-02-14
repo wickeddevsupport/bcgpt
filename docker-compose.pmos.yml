@@ -1,0 +1,37 @@
+version: "3.9"
+
+services:
+  pmos:
+    build:
+      context: .
+      dockerfile: Dockerfile.pmos
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=coolify"
+      - "traefik.http.routers.pmos.rule=Host(`pmos.wickedlab.io`)"
+      - "traefik.http.routers.pmos.entrypoints=http,https"
+      - "traefik.http.routers.pmos.tls=true"
+      - "traefik.http.routers.pmos.tls.certresolver=letsencrypt"
+      - "traefik.http.services.pmos.loadbalancer.server.port=10001"
+    networks:
+      - coolify
+    environment:
+      PMOS_PORT: "10001"
+      PMOS_HOST: "0.0.0.0"
+      PMOS_DB_PATH: "/data/pmos-data.json"
+      BCGPT_URL: "${BCGPT_URL:-http://bcgpt:10000}"
+      FLOW_URL: "${FLOW_URL:-https://flow.wickedlab.io}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+    volumes:
+      - pmos-data:/data
+    expose:
+      - "10001"
+    restart: unless-stopped
+
+networks:
+  coolify:
+    external: true
+
+volumes:
+  pmos-data:
+    driver: local

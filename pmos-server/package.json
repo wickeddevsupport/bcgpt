@@ -1,0 +1,29 @@
+{
+  "name": "pmos-server",
+  "version": "1.0.0",
+  "description": "PMOS Intelligence Layer - The Brain of BCGPT",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "pmos",
+    "intelligence",
+    "mcp",
+    "ai",
+    "automation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

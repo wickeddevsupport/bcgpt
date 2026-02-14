@@ -1,0 +1,19 @@
+FROM node:20.19-bullseye-slim
+
+WORKDIR /app
+ENV NODE_ENV=production
+
+# Copy PMOS server files
+COPY pmos-server/package.json pmos-server/package-lock.json ./
+
+# Install dependencies
+RUN npm install --omit=dev --no-audit --no-fund
+
+# Copy all source files
+COPY pmos-server/ ./
+
+# Create data directory for JSON database
+RUN mkdir -p /data
+
+EXPOSE 10001
+CMD ["node", "index.js"]

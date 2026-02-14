@@ -1,5 +1,6 @@
 // mcp/tools.js
 import { ENDPOINT_TOOLS } from "./endpoint-tools.js";
+import { getFlowTools } from "../flow-tools.js";
 
 function tool(name, description, inputSchema) {
   return { name, description, inputSchema };
@@ -1619,6 +1620,11 @@ export function getTools() {
   // Append auto-generated endpoint tools (api_* wrappers)
   for (const endpoint of ENDPOINT_TOOLS || []) {
     tools.push(tool(endpoint.name, endpoint.description, sanitizeSchema(endpoint.inputSchema)));
+  }
+
+  // Append flow tools (flow_* for Activepieces integration)
+  for (const flowTool of getFlowTools() || []) {
+    tools.push(flowTool);
   }
 
   return tools;

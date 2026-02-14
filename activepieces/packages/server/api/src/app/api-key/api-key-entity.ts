@@ -1,0 +1,46 @@
+import { EntitySchema } from 'typeorm'
+import { BaseColumnSchemaPart } from '../database/database-common'
+
+export interface ApiKey {
+    id: string
+    created: string
+    updated: string
+    displayName: string
+    value: string
+    platformId: string | null
+    lastUsedAt: string | null
+}
+
+export const ApiKeyEntity = new EntitySchema<ApiKey>({
+    name: 'api_key',
+    columns: {
+        ...BaseColumnSchemaPart,
+        displayName: {
+            type: String,
+            nullable: false,
+        },
+        value: {
+            type: String,
+            nullable: false,
+        },
+        platformId: {
+            type: String,
+            nullable: true,
+        },
+        lastUsedAt: {
+            type: 'timestamp with time zone',
+            nullable: true,
+        },
+    },
+    indices: [
+        {
+            name: 'idx_api_key_value',
+            columns: ['value'],
+            unique: true,
+        },
+        {
+            name: 'idx_api_key_platform_id',
+            columns: ['platformId'],
+        },
+    ],
+})
