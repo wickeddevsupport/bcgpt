@@ -5,6 +5,7 @@ import {
     EntitySchema,
 } from 'typeorm'
 import { AIProviderEntity } from '../ai/ai-provider-entity'
+import { ApiKeyEntity } from '../api-key/api-key-entity'
 import { PlatformAnalyticsReportEntity } from '../analytics/platform-analytics-report.entity'
 import { AppConnectionEntity } from '../app-connection/app-connection.entity'
 import { UserIdentityEntity } from '../authentication/user-identity/user-identity-entity'
@@ -61,6 +62,7 @@ function getEntities(): EntitySchema<unknown>[] {
         TagEntity,
         PieceTagEntity,
         AIProviderEntity,
+        ApiKeyEntity,
         TableEntity,
         FieldEntity,
         RecordEntity,
