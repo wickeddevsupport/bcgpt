@@ -1144,6 +1144,8 @@ app.get("/projects/:projectId", async (req, res) => {
 app.post("/mcp", async (req, res) => {
   try {
     const method = req.body?.method;
+    const toolName = req.body?.params?.name;
+    
     if ([
       "initialize",
       "tools/list",
@@ -1180,6 +1182,34 @@ app.post("/mcp", async (req, res) => {
               err.code = "NOT_AUTHENTICATED";
               throw err;
             },
+      };
+      const out = await handleMCP(req.body, ctx);
+      return res.json(out);
+    }
+
+    // FLOW TOOLS: Can work with just API key (no Basecamp auth required)
+    if (method === "tools/call" && toolName && toolName.startsWith("flow_")) {
+      const apiKey = extractApiKey(req);
+      const resolvedCtx = await resolveRequestContext(req, { apiKey });
+      
+      const ctx = {
+        TOKEN: resolvedCtx.token,
+        accountId: null,
+        ua: UA,
+        userKey: resolvedCtx.userKey,
+        apiKey: apiKey,
+        authAccounts: resolvedCtx.auth?.accounts || [],
+        startStatus: async () => await startStatus(req),
+        basecampFetch: async () => {
+          const err = new Error("NOT_AUTHENTICATED");
+          err.code = "NOT_AUTHENTICATED";
+          throw err;
+        },
+        basecampFetchAll: async () => {
+          const err = new Error("NOT_AUTHENTICATED");
+          err.code = "NOT_AUTHENTICATED";
+          throw err;
+        },
       };
       const out = await handleMCP(req.body, ctx);
       return res.json(out);
