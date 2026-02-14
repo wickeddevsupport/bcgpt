@@ -913,6 +913,11 @@ app.get("/debug/tools", async (req, res) => {
   }
 });
 
+app.post("/debug/restart", async (req, res) => {
+  res.json({ ok: true, message: "Restarting in 1 second..." });
+  setTimeout(() => process.exit(0), 1000);
+});
+
 /* ================= OpenAPI Schema ================= */
 app.get("/.well-known/openapi.json", (req, res) => {
   res.sendFile(path.join(__dirname, "openapi.json"));
