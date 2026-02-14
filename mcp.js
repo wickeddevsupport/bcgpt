@@ -93,21 +93,28 @@ async function trackContext(toolName, args, result, userKey, sessionId) {
     if (!userKey || !result) return;
     const sid = sessionId || 'default';
 
+    // Helper to extract name from various entity shapes
+    const extractName = (obj) =>
+      obj?.name || obj?.title || obj?.displayName || obj?.version?.displayName ||
+      obj?.display_name || obj?.subject || null;
+
     // Extract entities from result for session memory
-    if (result?.id && result?.name) {
+    const entityName = extractName(result);
+    if (result?.id && entityName) {
       const type = inferEntityType(toolName, result);
       if (type) {
-        await saveSessionMemory(sid, userKey, type, String(result.id), result.name, toolName);
+        await saveSessionMemory(sid, userKey, type, String(result.id), entityName, toolName);
       }
     }
     // Handle array results (list tools)
-    if (Array.isArray(result?.data || result)) {
-      const items = result?.data || result;
-      for (const item of items.slice(0, 5)) { // cap at 5 to avoid spamming
-        if (item?.id && item?.name) {
+    const items = Array.isArray(result?.data) ? result.data : Array.isArray(result) ? result : null;
+    if (items) {
+      for (const item of items.slice(0, 5)) {
+        const itemName = extractName(item);
+        if (item?.id && itemName) {
           const type = inferEntityType(toolName, item);
           if (type) {
-            await saveSessionMemory(sid, userKey, type, String(item.id), item.name, toolName);
+            await saveSessionMemory(sid, userKey, type, String(item.id), itemName, toolName);
           }
         }
       }
@@ -118,7 +125,7 @@ async function trackContext(toolName, args, result, userKey, sessionId) {
       const target = {
         type: inferEntityType(toolName, result) || 'unknown',
         id: result?.id || result?.card?.id || args?.flow_id || args?.task_id,
-        name: result?.name || result?.card?.title || args?.displayName || toolName
+        name: extractName(result) || result?.card?.title || args?.displayName || toolName
       };
       await logOperation(userKey, sid, toolName, target, args, result);
     }
@@ -4524,7 +4531,7 @@ export async function handleMCP(reqBody, ctx) {
     if (WAVE1_TOOLS.has(name)) {
       try {
         console.log(`[MCP] Handling Wave 1 tool: ${name}`, { userKey });
-        const sessionId = rpc?.params?.sessionId || 'default';
+        const sessionId = params?.sessionId || args?.session_id || 'default';
         const result = await handleWave1Tool(name, args, userKey, sessionId);
         return ok(id, result);
       } catch (w1Error) {
