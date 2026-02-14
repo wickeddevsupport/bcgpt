@@ -6,7 +6,8 @@ export interface ApiKey {
     created: string
     updated: string
     displayName: string
-    value: string
+    hashedValue: string
+    truncatedValue: string
     platformId: string | null
     lastUsedAt: string | null
 }
@@ -19,7 +20,11 @@ export const ApiKeyEntity = new EntitySchema<ApiKey>({
             type: String,
             nullable: false,
         },
-        value: {
+        hashedValue: {
+            type: String,
+            nullable: false,
+        },
+        truncatedValue: {
             type: String,
             nullable: false,
         },
@@ -34,8 +39,8 @@ export const ApiKeyEntity = new EntitySchema<ApiKey>({
     },
     indices: [
         {
-            name: 'idx_api_key_value',
-            columns: ['value'],
+            name: 'idx_api_key_hashed_value',
+            columns: ['hashedValue'],
             unique: true,
         },
         {

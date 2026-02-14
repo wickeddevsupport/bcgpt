@@ -22,11 +22,13 @@ export const apiKeyService = (log: FastifyBaseLogger) => ({
         
         const value = generateApiKey()
         const hashedValue = hashApiKey(value)
+        const truncatedValue = value.slice(-4) // Last 4 characters for display
         
         const apiKey = {
             id: apId(),
             displayName: params.displayName,
-            value: hashedValue,
+            hashedValue: hashedValue,
+            truncatedValue: truncatedValue,
             platformId: params.platformId ?? null,
             lastUsedAt: null,
         }
@@ -101,7 +103,7 @@ export const apiKeyService = (log: FastifyBaseLogger) => ({
         const hashedValue = hashApiKey(value)
         
         const apiKey = await apiKeyRepo().findOneBy({
-            value: hashedValue,
+            hashedValue: hashedValue,
         })
         
         if (isNil(apiKey)) {
