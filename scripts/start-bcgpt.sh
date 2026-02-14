@@ -2,7 +2,7 @@
 sudo docker rm -f bcgptapi-bcgpt-1 2>/dev/null
 sudo docker run -d --name bcgptapi-bcgpt-1 --restart=unless-stopped \
   -v bcgpt-data:/data \
-  --network coolify \
+  --network bcgptapi_default \
   -l 'traefik.enable=true' \
   -l 'traefik.docker.network=coolify' \
   -l 'traefik.http.routers.bcgpt.rule=Host(`bcgpt.wickedlab.io`)' \
@@ -22,5 +22,5 @@ sudo docker run -d --name bcgptapi-bcgpt-1 --restart=unless-stopped \
   -e ACTIVEPIECES_API_KEY=ap_fmeLRfVrVbKcqqC_8v2AeVvzBefgwvFv9P7E-7fpNG4 \
   bcgptapi-bcgpt:latest
 
-sudo docker network connect bcgptapi_default bcgptapi-bcgpt-1 2>/dev/null || true
+sudo docker network connect coolify bcgptapi-bcgpt-1 2>/dev/null || true
 echo "Container started"
