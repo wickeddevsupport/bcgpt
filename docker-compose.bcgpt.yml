@@ -17,6 +17,7 @@ services:
       - "traefik.http.services.bcgpt.loadbalancer.server.port=10000"
     networks:
       - coolify
+      - bcgpt_activepieces
     environment:
       PORT: "10000"
       APP_BASE_URL: "${APP_BASE_URL}"
@@ -68,4 +69,6 @@ volumes:
 
 networks:
   coolify:
+    external: true
+  bcgpt_activepieces:
     external: true
