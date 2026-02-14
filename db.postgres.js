@@ -257,6 +257,25 @@ async function ensureSchema() {
       ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS preferences JSONB;
     EXCEPTION WHEN OTHERS THEN NULL;
     END $$;
+
+    -- ============ Wave 2: Intelligence ============
+
+    CREATE TABLE IF NOT EXISTS health_scores (
+      id BIGSERIAL PRIMARY KEY,
+      user_key TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      project_name TEXT,
+      score INTEGER NOT NULL,
+      grade TEXT NOT NULL,
+      trend TEXT DEFAULT 'stable',
+      breakdown JSONB NOT NULL,
+      risks JSONB DEFAULT '[]',
+      insights JSONB DEFAULT '[]',
+      recommendations JSONB DEFAULT '[]',
+      computed_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_health_unique ON health_scores(user_key, project_id);
+    CREATE INDEX IF NOT EXISTS idx_health_user ON health_scores(user_key, computed_at DESC);
   `);
 }
 
@@ -1073,6 +1092,45 @@ export async function markUndone(operationId, undoneBy) {
     `UPDATE operation_log SET undone_at = NOW(), undone_by = $2 WHERE id = $1`,
     [operationId, undoneBy || null]
   );
+}
+
+/* ================= WAVE 2: HEALTH SCORES CACHE ================= */
+
+export async function saveHealthScore(userKey, projectId, projectName, score, grade, trend, breakdown, risks, insights, recommendations) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !projectId) return null;
+  const res = await pool.query(
+    `INSERT INTO health_scores (user_key, project_id, project_name, score, grade, trend, breakdown, risks, insights, recommendations, computed_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+     ON CONFLICT (user_key, project_id)
+     DO UPDATE SET project_name = $3, score = $4, grade = $5, trend = $6, breakdown = $7,
+                   risks = $8, insights = $9, recommendations = $10, computed_at = NOW()
+     RETURNING id, computed_at`,
+    [userKey, projectId, projectName || null, score, grade, trend || 'stable',
+     JSON.stringify(breakdown), JSON.stringify(risks || []),
+     JSON.stringify(insights || []), JSON.stringify(recommendations || [])]
+  );
+  return res.rows[0];
+}
+
+export async function getHealthScore(userKey, projectId) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey || !projectId) return null;
+  const res = await pool.query(
+    `SELECT * FROM health_scores WHERE user_key = $1 AND project_id = $2`,
+    [userKey, projectId]
+  );
+  return res.rows[0] || null;
+}
+
+export async function getAllHealthScores(userKey) {
+  userKey = normalizeUserKey(userKey);
+  if (!userKey) return [];
+  const res = await pool.query(
+    `SELECT * FROM health_scores WHERE user_key = $1 ORDER BY score ASC`,
+    [userKey]
+  );
+  return res.rows;
 }
 
 export default pool;

@@ -2,6 +2,7 @@
 import { ENDPOINT_TOOLS } from "./endpoint-tools.js";
 import { getFlowTools } from "../flow-tools.js";
 import { getWave1Tools } from "../wave1-tools.js";
+import { getWave2Tools } from "../wave2-tools.js";
 
 function tool(name, description, inputSchema) {
   return { name, description, inputSchema };
@@ -1631,6 +1632,11 @@ export function getTools() {
   // Append Wave 1 PM OS Foundation tools
   for (const w1Tool of getWave1Tools() || []) {
     tools.push(w1Tool);
+  }
+
+  // Append Wave 2 Intelligence tools
+  for (const w2Tool of getWave2Tools() || []) {
+    tools.push(w2Tool);
   }
 
   return tools;

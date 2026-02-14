@@ -70,10 +70,17 @@ import { getTools } from "./mcp/tools.js";
 import { ENDPOINT_TOOL_MAP } from "./mcp/endpoint-tools.js";
 import { handleFlowTool } from "./index.js";
 import { handleWave1Tool } from "./index.js";
+import { handleWave2Tool } from "./index.js";
 
 const WAVE1_TOOLS = new Set([
   'resolve_reference', 'what_changed_since', 'who_did_what',
   'undo_last', 'undo_operation', 'list_recent_operations'
+]);
+
+const WAVE2_TOOLS = new Set([
+  'get_project_pulse', 'get_portfolio_pulse',
+  'my_day', 'what_should_i_work_on', 'end_of_day',
+  'detect_ghost_work', 'query', 'generate_dashboard'
 ]);
 
 /**
@@ -4592,6 +4599,22 @@ export async function handleMCP(reqBody, ctx) {
         return fail(id, {
           code: 'WAVE1_ERROR',
           message: `${name} failed: ${w1Error.message}`
+        });
+      }
+    }
+
+    // WAVE 2: Intelligence tools (project_pulse, my_day, ghost_work, query, dashboard)
+    if (WAVE2_TOOLS.has(name)) {
+      try {
+        console.log(`[MCP] Handling Wave 2 tool: ${name}`, { userKey });
+        const sessionId = params?.sessionId || args?.session_id || 'default';
+        const result = await handleWave2Tool(name, args, userKey, sessionId);
+        return ok(id, result);
+      } catch (w2Error) {
+        console.error(`[MCP] Wave 2 tool error:`, w2Error);
+        return fail(id, {
+          code: 'WAVE2_ERROR',
+          message: `${name} failed: ${w2Error.message}`
         });
       }
     }

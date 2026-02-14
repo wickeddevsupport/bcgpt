@@ -45,6 +45,10 @@ import {
   getRecentOperations,
   getOperation,
   markUndone,
+  // Wave 2: Intelligence
+  saveHealthScore,
+  getHealthScore,
+  getAllHealthScores,
 } from "./db.js";
 import { runMining } from "./miner.js";
 import { execSync } from "child_process";
@@ -1217,6 +1221,532 @@ async function handleWave1Tool(name, args, userKey, sessionId, executeTool) {
 }
 
 export { handleWave1Tool };
+
+/**
+ * Wave 2: Intelligence Tools
+ * Project Pulse, Focus Mode, Ghost Work Detector, NL Query, Smart Dashboards
+ */
+async function handleWave2Tool(name, args, userKey, sessionId) {
+  switch (name) {
+
+    // ===== PROJECT PULSE =====
+    case 'get_project_pulse': {
+      if (!args.project) throw new Error('project is required');
+      const projects = await listEntityCache('project', { userKey, limit: 200 });
+      const match = projects.find(p =>
+        p.title?.toLowerCase().includes(args.project.toLowerCase()) ||
+        String(p.object_id) === String(args.project)
+      );
+      if (!match) throw new Error(`Project not found: ${args.project}`);
+
+      const projectId = match.object_id;
+      const todos = await listEntityCache('todo', { projectId, userKey, limit: 500 });
+      const messages = await listEntityCache('message', { projectId, userKey, limit: 200 });
+      const people = await listEntityCache('person', { userKey, limit: 100 });
+
+      // ---- Velocity Score (0-25) ----
+      const periodDays = parsePeriodDays(args.period || '2 weeks');
+      const cutoff = new Date(Date.now() - periodDays * 86400000);
+      const completed = todos.filter(t => t.data?.completed === true && new Date(t.data?.completed_at || t.data?.updated_at) >= cutoff);
+      const created = todos.filter(t => new Date(t.data?.created_at) >= cutoff);
+      const active = todos.filter(t => !t.data?.completed);
+      const completionRate = todos.length > 0 ? completed.length / Math.max(created.length, 1) : 0;
+      let velocity = Math.min(25, Math.round(completionRate * 25));
+      if (created.length > completed.length * 1.5) velocity = Math.round(velocity * 0.7);
+
+      // ---- Risk Score (0-25) ----
+      const now = Date.now();
+      const overdue = active.filter(t => t.data?.due_on && new Date(t.data.due_on) < now);
+      const staleDays = 7;
+      const stale = active.filter(t => {
+        const lastAct = t.data?.updated_at || t.data?.created_at;
+        return lastAct && (now - new Date(lastAct).getTime()) > staleDays * 86400000;
+      });
+      const unassigned = active.filter(t => !t.data?.assignee_ids?.length);
+      let risk = 25;
+      risk -= Math.min(10, overdue.length * 2);
+      risk -= Math.min(8, active.length > 0 ? Math.round((stale.length / active.length) * 8) : 0);
+      risk -= Math.min(5, active.length > 0 ? Math.round((unassigned.length / active.length) * 5) : 0);
+      risk = Math.max(0, risk);
+
+      // ---- Communication Score (0-25) ----
+      const recentMsgs = messages.filter(m => new Date(m.data?.created_at) >= cutoff);
+      const msgCount = recentMsgs.length;
+      let communication = msgCount >= 5 ? 25 : msgCount >= 2 ? 20 : msgCount >= 1 ? 15 : 5;
+
+      // ---- Balance Score (0-25) ----
+      const assigneeCounts = {};
+      for (const t of active) {
+        for (const aid of (t.data?.assignee_ids || [])) {
+          assigneeCounts[aid] = (assigneeCounts[aid] || 0) + 1;
+        }
+      }
+      const counts = Object.values(assigneeCounts);
+      const balance = counts.length > 1 ? Math.round(25 * (1 - gini(counts))) : (counts.length === 1 ? 15 : 20);
+
+      const score = velocity + risk + communication + balance;
+      const grade = score >= 90 ? 'A' : score >= 80 ? 'B' : score >= 70 ? 'C' : score >= 60 ? 'D' : 'F';
+
+      // Risks
+      const risks = [];
+      if (overdue.length > 0) risks.push({ type: 'deadline', severity: overdue.length > 3 ? 'high' : 'medium', description: `${overdue.length} overdue task(s)`, items: overdue.slice(0, 5).map(t => t.title) });
+      if (stale.length > 0) risks.push({ type: 'stalled', severity: stale.length > 5 ? 'high' : 'medium', description: `${stale.length} stale task(s) (no activity ${staleDays}+ days)`, items: stale.slice(0, 5).map(t => t.title) });
+      if (unassigned.length > 0) risks.push({ type: 'unassigned', severity: 'low', description: `${unassigned.length} unassigned task(s)`, items: unassigned.slice(0, 5).map(t => t.title) });
+
+      // Insights
+      const insights = [];
+      insights.push(`${completed.length} tasks completed in last ${periodDays} days`);
+      insights.push(`${created.length} new tasks created`);
+      insights.push(`${active.length} tasks still active`);
+      if (msgCount > 0) insights.push(`${msgCount} messages in the period`);
+
+      // Recommendations
+      const recommendations = [];
+      if (overdue.length > 0) recommendations.push(`Address ${overdue.length} overdue tasks`);
+      if (stale.length > 3) recommendations.push(`Review ${stale.length} stale tasks — close or update them`);
+      if (unassigned.length > 3) recommendations.push(`Assign ${unassigned.length} orphaned tasks`);
+      if (velocity < 10) recommendations.push('Velocity is low — consider reducing scope or unblocking work');
+      if (communication < 10) recommendations.push('Communication is quiet — consider a team check-in');
+
+      // Cache the result
+      await saveHealthScore(userKey, String(projectId), match.title, score, grade, 'stable',
+        { velocity, risk, communication, balance }, risks, insights, recommendations);
+
+      return {
+        project: match.title,
+        project_id: projectId,
+        score, grade, trend: 'stable',
+        breakdown: { velocity, risk, communication, balance },
+        risks, insights, recommendations,
+        period: `${periodDays} days`,
+        computed_at: new Date().toISOString()
+      };
+    }
+
+    case 'get_portfolio_pulse': {
+      const projects = await listEntityCache('project', { userKey, limit: 200 });
+      const results = [];
+      for (const proj of projects.slice(0, 20)) { // cap at 20
+        try {
+          const pulse = await handleWave2Tool('get_project_pulse', { project: String(proj.object_id), period: args.period || '2 weeks' }, userKey, sessionId);
+          results.push(pulse);
+        } catch { /* skip projects with errors */ }
+      }
+      const sortField = args.sort_by || 'score';
+      results.sort((a, b) => {
+        if (sortField === 'risk') return (a.breakdown?.risk || 0) - (b.breakdown?.risk || 0);
+        if (sortField === 'name') return (a.project || '').localeCompare(b.project || '');
+        return (a.score || 0) - (b.score || 0);
+      });
+      const limited = args.limit ? results.slice(0, args.limit) : results;
+      return {
+        projects: limited.map(p => ({
+          project: p.project, score: p.score, grade: p.grade, trend: p.trend,
+          breakdown: p.breakdown, top_risk: p.risks?.[0]?.description || 'None'
+        })),
+        total: limited.length,
+        avg_score: limited.length > 0 ? Math.round(limited.reduce((s, p) => s + p.score, 0) / limited.length) : 0
+      };
+    }
+
+    // ===== FOCUS MODE =====
+    case 'my_day': {
+      const projects = await listEntityCache('project', { userKey, limit: 50 });
+      const allTodos = [];
+      for (const proj of projects.slice(0, 10)) {
+        const todos = await listEntityCache('todo', { projectId: proj.object_id, userKey, limit: 200 });
+        allTodos.push(...todos.map(t => ({ ...t, projectName: proj.title, projectId: proj.object_id })));
+      }
+      const active = allTodos.filter(t => !t.data?.completed);
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+
+      // Priority tasks: due today/overdue, or recently created
+      const dueToday = active.filter(t => {
+        if (!t.data?.due_on) return false;
+        const d = new Date(t.data.due_on);
+        return d <= tomorrow;
+      });
+      const overdue = active.filter(t => t.data?.due_on && new Date(t.data.due_on) < today);
+      const recentlyCreated = active.filter(t => new Date(t.data?.created_at) >= new Date(Date.now() - 86400000));
+
+      // What changed overnight (last 12 hours of operations)
+      const ops = await getRecentOperations(userKey, 20, new Date(Date.now() - 12 * 3600000).toISOString(), null);
+
+      return {
+        date: today.toISOString().split('T')[0],
+        priority_tasks: dueToday.slice(0, 10).map(t => ({
+          title: t.title, project: t.projectName,
+          due: t.data?.due_on, reason: new Date(t.data?.due_on) < today ? 'Overdue' : 'Due today'
+        })),
+        overdue_count: overdue.length,
+        active_tasks: active.length,
+        recently_created: recentlyCreated.length,
+        overnight_changes: ops.map(o => ({ operation: o.operation_type, target: o.target, when: o.created_at })),
+        suggested_focus: dueToday.length > 0
+          ? `Focus on ${dueToday.length} task(s) due today/overdue`
+          : active.length > 0
+            ? `${active.length} active tasks — pick the most impactful one`
+            : 'All caught up! Consider reviewing project health.'
+      };
+    }
+
+    case 'what_should_i_work_on': {
+      const limit = parseInt(args.limit) || 5;
+      const projects = await listEntityCache('project', { userKey, limit: 50 });
+      let allTodos = [];
+      for (const proj of projects.slice(0, 10)) {
+        if (args.project && !proj.title?.toLowerCase().includes(args.project.toLowerCase()) && String(proj.object_id) !== args.project) continue;
+        const todos = await listEntityCache('todo', { projectId: proj.object_id, userKey, limit: 200 });
+        allTodos.push(...todos.map(t => ({ ...t, projectName: proj.title, projectId: proj.object_id })));
+      }
+      const active = allTodos.filter(t => !t.data?.completed);
+
+      // Score each task
+      const scored = active.map(t => {
+        const now = Date.now();
+        // Urgency (0-25)
+        let urgency = 10;
+        if (t.data?.due_on) {
+          const daysUntil = (new Date(t.data.due_on).getTime() - now) / 86400000;
+          urgency = daysUntil < 0 ? 25 : daysUntil < 1 ? 22 : daysUntil < 3 ? 18 : daysUntil < 7 ? 12 : 5;
+        }
+        // Impact (0-25) — tasks with descriptions suggesting importance
+        const desc = (t.data?.description || '').toLowerCase();
+        const impact = desc.includes('block') ? 20 : desc.includes('urgent') ? 18 : desc.includes('important') ? 15 : 10;
+        // Effort match (0-25) — shorter descriptions = smaller tasks
+        const descLen = (t.data?.description || '').length;
+        let effort = 15;
+        if (args.energy_level === 'low' && descLen < 100) effort = 25;
+        else if (args.energy_level === 'high' && descLen > 200) effort = 25;
+        else if (args.energy_level === 'medium') effort = 20;
+        // Context (0-25) — recency bonus
+        const age = (now - new Date(t.data?.created_at || 0).getTime()) / 86400000;
+        const context = age < 1 ? 25 : age < 3 ? 20 : age < 7 ? 15 : 10;
+
+        return {
+          title: t.title, project: t.projectName, due: t.data?.due_on,
+          score: urgency + impact + effort + context,
+          factors: { urgency, impact, effort, context },
+          reason: urgency >= 22 ? 'Due soon' : impact >= 18 ? 'High impact' : effort >= 22 ? 'Good fit for your energy' : 'Recent'
+        };
+      });
+
+      scored.sort((a, b) => b.score - a.score);
+      return { tasks: scored.slice(0, limit), total_active: active.length };
+    }
+
+    case 'end_of_day': {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const ops = await getRecentOperations(userKey, 100, today.toISOString(), null);
+
+      // Group by operation type
+      const byType = {};
+      const byProject = {};
+      for (const op of ops) {
+        byType[op.operation_type] = (byType[op.operation_type] || 0) + 1;
+        const proj = op.target?.project_name || op.target?.name || 'Unknown';
+        byProject[proj] = (byProject[proj] || 0) + 1;
+      }
+
+      const creates = ops.filter(o => o.operation_type.includes('create'));
+      const completes = ops.filter(o => o.operation_type.includes('complete'));
+
+      return {
+        date: today.toISOString().split('T')[0],
+        total_operations: ops.length,
+        summary: {
+          tasks_created: creates.filter(o => o.operation_type.includes('task')).length,
+          tasks_completed: completes.length,
+          messages_sent: (byType['create_message'] || 0) + (byType['create_comment'] || 0),
+          flows_managed: (byType['flow_create'] || 0) + (byType['flow_update'] || 0) + (byType['flow_trigger'] || 0)
+        },
+        by_project: Object.entries(byProject).map(([name, count]) => ({ project: name, operations: count })),
+        activities: ops.slice(0, 20).map(o => ({
+          operation: o.operation_type, target: o.target?.name || o.target?.type, when: o.created_at
+        })),
+        wins: completes.length > 0 ? [`Completed ${completes.length} task(s)`] : [],
+        message: ops.length > 0
+          ? `Productive day! ${ops.length} operations across ${Object.keys(byProject).length} project(s).`
+          : 'Quiet day — no tracked operations.'
+      };
+    }
+
+    // ===== GHOST WORK DETECTOR =====
+    case 'detect_ghost_work': {
+      const staleDaysThreshold = args.stale_days || 7;
+      const projects = await listEntityCache('project', { userKey, limit: 50 });
+      const ghostItems = { stale: [], unassigned: [], overdue: [], blocked: [] };
+      const now = Date.now();
+
+      for (const proj of projects.slice(0, 15)) {
+        if (args.project && !proj.title?.toLowerCase().includes(args.project.toLowerCase()) && String(proj.object_id) !== args.project) continue;
+        const todos = await listEntityCache('todo', { projectId: proj.object_id, userKey, limit: 300 });
+        const active = todos.filter(t => !t.data?.completed || args.include_completed);
+
+        for (const t of active) {
+          const lastAct = t.data?.updated_at || t.data?.created_at;
+          const daysSinceActivity = lastAct ? (now - new Date(lastAct).getTime()) / 86400000 : 999;
+
+          if (daysSinceActivity > staleDaysThreshold) {
+            ghostItems.stale.push({ title: t.title, project: proj.title, days_inactive: Math.round(daysSinceActivity), due: t.data?.due_on });
+          }
+          if (!t.data?.assignee_ids?.length && !t.data?.completed) {
+            ghostItems.unassigned.push({ title: t.title, project: proj.title, created: t.data?.created_at });
+          }
+          if (t.data?.due_on && new Date(t.data.due_on) < now && !t.data?.completed) {
+            ghostItems.overdue.push({ title: t.title, project: proj.title, due: t.data.due_on, days_overdue: Math.round((now - new Date(t.data.due_on).getTime()) / 86400000) });
+          }
+          const desc = (t.data?.description || '').toLowerCase();
+          const hasBlockedComment = t.data?.comments_count > 0 && desc.includes('block');
+          if (desc.includes('blocked') || hasBlockedComment) {
+            ghostItems.blocked.push({ title: t.title, project: proj.title });
+          }
+        }
+      }
+
+      const totalGhosts = ghostItems.stale.length + ghostItems.unassigned.length + ghostItems.overdue.length + ghostItems.blocked.length;
+      return {
+        total_ghost_items: totalGhosts,
+        stale: { count: ghostItems.stale.length, items: ghostItems.stale.slice(0, 15) },
+        unassigned: { count: ghostItems.unassigned.length, items: ghostItems.unassigned.slice(0, 15) },
+        overdue: { count: ghostItems.overdue.length, items: ghostItems.overdue.slice(0, 15) },
+        blocked: { count: ghostItems.blocked.length, items: ghostItems.blocked.slice(0, 10) },
+        severity: totalGhosts > 20 ? 'critical' : totalGhosts > 10 ? 'high' : totalGhosts > 5 ? 'medium' : 'low',
+        recommendations: [
+          ...(ghostItems.overdue.length > 0 ? [`Address ${ghostItems.overdue.length} overdue tasks immediately`] : []),
+          ...(ghostItems.stale.length > 5 ? [`Review and close/update ${ghostItems.stale.length} stale tasks`] : []),
+          ...(ghostItems.unassigned.length > 3 ? [`Assign ${ghostItems.unassigned.length} orphaned tasks to owners`] : []),
+          ...(ghostItems.blocked.length > 0 ? [`Unblock ${ghostItems.blocked.length} stuck task(s)`] : [])
+        ]
+      };
+    }
+
+    // ===== NL QUERY ENGINE =====
+    case 'query': {
+      if (!args.q) throw new Error('q is required');
+      const q = args.q.toLowerCase();
+
+      // Pattern matching for common queries
+      if (/how many (tasks?|todos?)/i.test(q)) {
+        const projects = await listEntityCache('project', { userKey, limit: 50 });
+        let total = 0, completed = 0, active = 0;
+        for (const p of projects.slice(0, 10)) {
+          if (args.project && !p.title?.toLowerCase().includes(args.project.toLowerCase())) continue;
+          const todos = await listEntityCache('todo', { projectId: p.object_id, userKey, limit: 500 });
+          total += todos.length;
+          completed += todos.filter(t => t.data?.completed).length;
+          active += todos.filter(t => !t.data?.completed).length;
+        }
+        const overdue = /overdue/.test(q);
+        if (overdue) {
+          const now = Date.now();
+          let overdueCount = 0;
+          for (const p of projects.slice(0, 10)) {
+            if (args.project && !p.title?.toLowerCase().includes(args.project.toLowerCase())) continue;
+            const todos = await listEntityCache('todo', { projectId: p.object_id, userKey, limit: 500 });
+            overdueCount += todos.filter(t => !t.data?.completed && t.data?.due_on && new Date(t.data.due_on) < now).length;
+          }
+          return { answer: `${overdueCount} overdue task(s)`, overdue: overdueCount };
+        }
+        return { answer: `${total} total tasks: ${active} active, ${completed} completed`, total, active, completed };
+      }
+
+      if (/who has the most (tasks?|work)/i.test(q)) {
+        const projects = await listEntityCache('project', { userKey, limit: 50 });
+        const people = await listEntityCache('person', { userKey, limit: 100 });
+        const personMap = {};
+        for (const p of people) personMap[p.object_id] = p.title || p.data?.name || 'Unknown';
+        const workload = {};
+        for (const proj of projects.slice(0, 10)) {
+          const todos = await listEntityCache('todo', { projectId: proj.object_id, userKey, limit: 300 });
+          for (const t of todos.filter(td => !td.data?.completed)) {
+            for (const aid of (t.data?.assignee_ids || [])) {
+              workload[aid] = (workload[aid] || 0) + 1;
+            }
+          }
+        }
+        const sorted = Object.entries(workload).sort((a, b) => b[1] - a[1]);
+        const top = sorted.slice(0, 5).map(([id, count]) => ({ person: personMap[id] || id, tasks: count }));
+        return { answer: top.length > 0 ? `${top[0].person} has the most with ${top[0].tasks} tasks` : 'No assigned tasks found', workload: top };
+      }
+
+      if (/stale|inactive|abandoned/i.test(q)) {
+        return handleWave2Tool('detect_ghost_work', { stale_days: 7, ...args }, userKey, sessionId);
+      }
+
+      if (/due (this|next) week/i.test(q)) {
+        const projects = await listEntityCache('project', { userKey, limit: 50 });
+        const now = new Date();
+        const weekEnd = new Date(now);
+        weekEnd.setDate(weekEnd.getDate() + (/next/.test(q) ? 14 : 7));
+        const dueThisWeek = [];
+        for (const proj of projects.slice(0, 10)) {
+          if (args.project && !proj.title?.toLowerCase().includes(args.project.toLowerCase())) continue;
+          const todos = await listEntityCache('todo', { projectId: proj.object_id, userKey, limit: 300 });
+          for (const t of todos.filter(td => !td.data?.completed && td.data?.due_on)) {
+            const due = new Date(t.data.due_on);
+            if (due >= now && due <= weekEnd) {
+              dueThisWeek.push({ title: t.title, project: proj.title, due: t.data.due_on });
+            }
+          }
+        }
+        return { answer: `${dueThisWeek.length} task(s) due ${/next/.test(q) ? 'next' : 'this'} week`, tasks: dueThisWeek.slice(0, 20) };
+      }
+
+      if (/messages?|comments?/i.test(q) && /last|recent|today|yesterday/i.test(q)) {
+        const projects = await listEntityCache('project', { userKey, limit: 50 });
+        let recentMsgs = [];
+        const cutoff = /today/.test(q) ? new Date(new Date().setHours(0, 0, 0, 0)) : new Date(Date.now() - 3 * 86400000);
+        for (const proj of projects.slice(0, 10)) {
+          const msgs = await listEntityCache('message', { projectId: proj.object_id, userKey, limit: 100 });
+          recentMsgs.push(...msgs.filter(m => new Date(m.data?.created_at) >= cutoff).map(m => ({ title: m.title, project: proj.title, created: m.data?.created_at })));
+        }
+        return { answer: `${recentMsgs.length} recent message(s)`, messages: recentMsgs.slice(0, 20) };
+      }
+
+      if (/projects?/i.test(q) && /how many|count|list|all/i.test(q)) {
+        const projects = await listEntityCache('project', { userKey, limit: 200 });
+        return { answer: `${projects.length} project(s)`, projects: projects.map(p => ({ name: p.title, id: p.object_id })) };
+      }
+
+      if (/people|team|members?/i.test(q)) {
+        const people = await listEntityCache('person', { userKey, limit: 200 });
+        return { answer: `${people.length} team member(s)`, people: people.map(p => ({ name: p.title || p.data?.name, id: p.object_id })) };
+      }
+
+      // Fallback: search
+      const searchResults = await searchIndex(args.q, { userKey, limit: 20 });
+      return {
+        answer: `Found ${searchResults.length} matching items for "${args.q}"`,
+        results: searchResults.slice(0, 15).map(r => ({ type: r.type, title: r.title, project_id: r.project_id }))
+      };
+    }
+
+    // ===== SMART DASHBOARDS =====
+    case 'generate_dashboard': {
+      if (!args.type) throw new Error('type is required');
+
+      switch (args.type) {
+        case 'overview': {
+          const pulse = await handleWave2Tool('get_portfolio_pulse', { sort_by: 'score', ...args }, userKey, sessionId);
+          const ghosts = await handleWave2Tool('detect_ghost_work', {}, userKey, sessionId);
+          return {
+            dashboard: 'Portfolio Overview',
+            portfolio: pulse,
+            ghost_work: { total: ghosts.total_ghost_items, severity: ghosts.severity, top_issues: ghosts.recommendations },
+            generated_at: new Date().toISOString()
+          };
+        }
+        case 'project': {
+          if (!args.project) throw new Error('project is required for project dashboard');
+          const pulse = await handleWave2Tool('get_project_pulse', { project: args.project, period: args.period }, userKey, sessionId);
+          const ghosts = await handleWave2Tool('detect_ghost_work', { project: args.project }, userKey, sessionId);
+          return {
+            dashboard: `Project: ${pulse.project}`,
+            health: { score: pulse.score, grade: pulse.grade, breakdown: pulse.breakdown },
+            risks: pulse.risks,
+            ghost_work: ghosts,
+            insights: pulse.insights,
+            recommendations: pulse.recommendations,
+            generated_at: new Date().toISOString()
+          };
+        }
+        case 'team': {
+          const people = await listEntityCache('person', { userKey, limit: 100 });
+          const projects = await listEntityCache('project', { userKey, limit: 50 });
+          const workload = {};
+          for (const proj of projects.slice(0, 10)) {
+            const todos = await listEntityCache('todo', { projectId: proj.object_id, userKey, limit: 300 });
+            for (const t of todos.filter(td => !td.data?.completed)) {
+              for (const aid of (t.data?.assignee_ids || [])) {
+                if (!workload[aid]) workload[aid] = { tasks: 0, projects: new Set() };
+                workload[aid].tasks++;
+                workload[aid].projects.add(proj.title);
+              }
+            }
+          }
+          const personMap = {};
+          for (const p of people) personMap[p.object_id] = p.title || p.data?.name || 'Unknown';
+          const team = Object.entries(workload).map(([id, w]) => ({
+            person: personMap[id] || id, tasks: w.tasks, projects: w.projects.size
+          })).sort((a, b) => b.tasks - a.tasks);
+
+          const taskCounts = team.map(t => t.tasks);
+          return {
+            dashboard: 'Team Workload',
+            members: team,
+            balance: { gini: taskCounts.length > 1 ? Math.round(gini(taskCounts) * 100) / 100 : 0, assessment: taskCounts.length > 1 && gini(taskCounts) > 0.4 ? 'Imbalanced' : 'OK' },
+            total_people: people.length,
+            generated_at: new Date().toISOString()
+          };
+        }
+        case 'velocity': {
+          const projects = await listEntityCache('project', { userKey, limit: 20 });
+          const velocities = [];
+          const periodDays = parsePeriodDays(args.period || '2 weeks');
+          const cutoff = new Date(Date.now() - periodDays * 86400000);
+          for (const proj of projects.slice(0, 10)) {
+            const todos = await listEntityCache('todo', { projectId: proj.object_id, userKey, limit: 300 });
+            const completed = todos.filter(t => t.data?.completed && new Date(t.data?.completed_at || t.data?.updated_at) >= cutoff).length;
+            const created = todos.filter(t => new Date(t.data?.created_at) >= cutoff).length;
+            velocities.push({ project: proj.title, completed, created, net: completed - created, ratio: created > 0 ? Math.round(completed / created * 100) / 100 : 0 });
+          }
+          velocities.sort((a, b) => b.ratio - a.ratio);
+          return {
+            dashboard: 'Velocity Trends',
+            period: `${periodDays} days`,
+            projects: velocities,
+            totals: { completed: velocities.reduce((s, v) => s + v.completed, 0), created: velocities.reduce((s, v) => s + v.created, 0) },
+            generated_at: new Date().toISOString()
+          };
+        }
+        case 'risk': {
+          const ghosts = await handleWave2Tool('detect_ghost_work', {}, userKey, sessionId);
+          const pulse = await handleWave2Tool('get_portfolio_pulse', { sort_by: 'risk' }, userKey, sessionId);
+          const atRisk = pulse.projects?.filter(p => p.score < 60) || [];
+          return {
+            dashboard: 'Risk Assessment',
+            at_risk_projects: atRisk,
+            ghost_work: ghosts,
+            overall_severity: ghosts.severity,
+            action_items: [...ghosts.recommendations, ...(atRisk.length > 0 ? [`${atRisk.length} project(s) scoring below 60`] : [])],
+            generated_at: new Date().toISOString()
+          };
+        }
+        default: throw new Error(`Unknown dashboard type: ${args.type}`);
+      }
+    }
+
+    default:
+      throw new Error(`Unknown Wave 2 tool: ${name}`);
+  }
+}
+
+// Helper: Gini coefficient for workload balance
+function gini(values) {
+  const sorted = values.filter(v => v > 0).sort((a, b) => a - b);
+  if (sorted.length < 2) return 0;
+  const n = sorted.length;
+  const sum = sorted.reduce((a, b) => a + b, 0);
+  if (sum === 0) return 0;
+  let numerator = 0;
+  for (let i = 0; i < n; i++) numerator += (i + 1) * sorted[i];
+  return (2 * numerator) / (n * sum) - (n + 1) / n;
+}
+
+// Helper: parse period like "2 weeks", "1 month" to days
+function parsePeriodDays(period) {
+  const m = String(period).match(/(\d+)\s*(day|week|month)/i);
+  if (!m) return 14;
+  const num = parseInt(m[1]);
+  if (/month/i.test(m[2])) return num * 30;
+  if (/week/i.test(m[2])) return num * 7;
+  return num;
+}
+
+export { handleWave2Tool };
 
 /* ================= MCP CONTEXT BUILDER ================= */
 

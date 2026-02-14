@@ -82,5 +82,10 @@ export const getRecentOperations = async (...args) => await impl.getRecentOperat
 export const getOperation = async (...args) => await impl.getOperation(...args);
 export const markUndone = async (...args) => await impl.markUndone(...args);
 
+// Wave 2: Health Scores
+export const saveHealthScore = async (...args) => await impl.saveHealthScore(...args);
+export const getHealthScore = async (...args) => await impl.getHealthScore(...args);
+export const getAllHealthScores = async (...args) => await impl.getAllHealthScores(...args);
+
 export default impl.default ?? null;
 
