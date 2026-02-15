@@ -3,23 +3,38 @@ version: "3.9"
 services:
   pmos:
     build:
-      context: .
-      dockerfile: Dockerfile.pmos
+      context: ./openclaw
+      dockerfile: Dockerfile
     environment:
-      PMOS_PORT: "10001"
-      PMOS_HOST: "0.0.0.0"
-      PMOS_DB_PATH: "/data/pmos-data.json"
-      BCGPT_URL: "${BCGPT_URL:-https://bcgpt.wickedlab.io}"
-      BCGPT_API_KEY: "${BCGPT_API_KEY:-}"
-      FLOW_URL: "${FLOW_URL:-https://flow.wickedlab.io}"
-      PMOS_SHELL_TOKEN: "${PMOS_SHELL_TOKEN:-}"
-      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      # Keep OpenClaw config/workspace in a named volume by pinning HOME into /app.
+      HOME: /app
+      TERM: xterm-256color
+
+      # Required when binding to LAN (0.0.0.0) behind Traefik.
+      OPENCLAW_GATEWAY_TOKEN: "${OPENCLAW_GATEWAY_TOKEN}"
+
+      # Optional model auth (add in Coolify env vars if/when needed).
+      CLAUDE_AI_SESSION_KEY: "${CLAUDE_AI_SESSION_KEY:-}"
+      CLAUDE_WEB_SESSION_KEY: "${CLAUDE_WEB_SESSION_KEY:-}"
+      CLAUDE_WEB_COOKIE: "${CLAUDE_WEB_COOKIE:-}"
     volumes:
-      - pmos-data:/data
+      - openclaw-data:/app/.openclaw
     expose:
       - "10001"
+    init: true
     restart: unless-stopped
+    command:
+      [
+        "node",
+        "dist/index.js",
+        "gateway",
+        "--allow-unconfigured",
+        "--bind",
+        "lan",
+        "--port",
+        "10001"
+      ]
 
 volumes:
-  pmos-data:
+  openclaw-data:
     driver: local
