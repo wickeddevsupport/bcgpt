@@ -4793,7 +4793,8 @@ export async function handleMCP(reqBody, ctx) {
         if (toolName === "mcp_call") return fail(id, { code: "INVALID_TOOL", message: "Nested mcp_call is not allowed." });
 
         const toolList = getTools().map(t => t.name);
-        if (!toolList.includes(toolName)) {
+        const isRoutedNamespaceTool = toolName.startsWith("pmos_") || toolName.startsWith("flow_");
+        if (!toolList.includes(toolName) && !isRoutedNamespaceTool) {
           return fail(id, { code: "UNKNOWN_TOOL", message: `Unknown tool: ${toolName}` });
         }
 
