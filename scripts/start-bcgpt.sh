@@ -18,6 +18,7 @@ sudo docker run -d --name bcgptapi-bcgpt-1 --restart=unless-stopped \
   -e PORT=10000 \
   -e 'DATABASE_URL=postgresql://bcgpt:RZ5m7nQxW4vK8dY2tL9p@bcgptapi-bcgpt-postgres-1:5432/bcgpt' \
   -e SQLITE_PATH=/data/bcgpt.sqlite \
+  -e PMOS_URL=https://os.wickedlab.io \
   -e ACTIVEPIECES_URL=https://flow.wickedlab.io \
   -e ACTIVEPIECES_API_KEY=ap_fmeLRfVrVbKcqqC_8v2AeVvzBefgwvFv9P7E-7fpNG4 \
   bcgptapi-bcgpt:latest
