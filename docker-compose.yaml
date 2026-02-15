@@ -24,6 +24,7 @@ services:
       PAYLOAD_CACHE_TTL_SEC: "${PAYLOAD_CACHE_TTL_SEC}"
       SQLITE_PATH: "/data/bcgpt.sqlite"
       ACTIVEPIECES_PROXY_ENABLED: "${ACTIVEPIECES_PROXY_ENABLED:-false}"
+      PMOS_URL: "${PMOS_URL:-https://os.wickedlab.io}"
       # Optional: proxy another hostname through this container (off by default).
       # When enabled, set ACTIVEPIECES_PROXY_HOST explicitly.
       ACTIVEPIECES_PROXY_HOST: "${ACTIVEPIECES_PROXY_HOST:-}"

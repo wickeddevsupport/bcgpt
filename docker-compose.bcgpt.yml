@@ -34,6 +34,7 @@ services:
       ACTIVEPIECES_PROXY_ENABLED: "${ACTIVEPIECES_PROXY_ENABLED:-false}"
       ACTIVEPIECES_API_KEY: "${ACTIVEPIECES_API_KEY:-}"
       ACTIVEPIECES_URL: "${ACTIVEPIECES_URL:-https://flow.wickedlab.io}"
+      PMOS_URL: "${PMOS_URL:-https://os.wickedlab.io}"
       # Optional: proxy another hostname through this container (off by default).
       # When enabled, set both ACTIVEPIECES_PROXY_HOST and ACTIVEPIECES_PROXY_TARGET explicitly.
       ACTIVEPIECES_PROXY_HOST: "${ACTIVEPIECES_PROXY_HOST:-}"
