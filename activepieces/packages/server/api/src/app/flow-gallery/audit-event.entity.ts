@@ -1,7 +1,6 @@
 import { EntitySchema } from 'typeorm'
 import {
     ApIdSchema,
-    BaseColumnSchemaPart,
 } from '../database/database-common'
 
 /**
@@ -32,7 +31,10 @@ export type AuditEventSchema = {
 export const AuditEventEntity = new EntitySchema<AuditEventSchema>({
     name: 'audit_events',
     columns: {
-        ...ApIdSchema,
+        id: {
+            ...ApIdSchema,
+            primary: true,
+        },
         created: {
             type: 'timestamp with time zone',
             default: 'now()',
