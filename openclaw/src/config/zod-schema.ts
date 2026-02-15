@@ -91,6 +91,36 @@ const MemorySchema = z
   .strict()
   .optional();
 
+// PMOS (OpenClaw-based product shell) connector configuration.
+// Stored in OpenClaw config so the PMOS UI can manage it via config.set/config.get.
+const PmosConnectorActivepiecesSchema = z
+  .object({
+    url: z.string().optional(),
+    apiKey: z.string().optional(),
+    projectId: z.string().optional(),
+  })
+  .strict();
+
+const PmosConnectorBcgptSchema = z
+  .object({
+    url: z.string().optional(),
+    apiKey: z.string().optional(),
+  })
+  .strict();
+
+const PmosSchema = z
+  .object({
+    connectors: z
+      .object({
+        activepieces: PmosConnectorActivepiecesSchema.optional(),
+        bcgpt: PmosConnectorBcgptSchema.optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .optional();
+
 export const OpenClawSchema = z
   .object({
     meta: z
@@ -513,6 +543,7 @@ export const OpenClawSchema = z
       .strict()
       .optional(),
     memory: MemorySchema,
+    pmos: PmosSchema,
     skills: z
       .object({
         allowBundled: z.array(z.string()).optional(),
