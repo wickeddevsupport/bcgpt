@@ -23,17 +23,23 @@ Critical deploy note:
   2. `docker build --no-cache -t bcgptapi-bcgpt:latest -f Dockerfile.bcgpt .`
   3. `bash scripts/start-bcgpt.sh`
 
-## Active Sprint Progress (2026-02-15, local code)
+## Active Sprint Progress (2026-02-15, production)
 
-- Completed (code level):
+- Completed (code + deploy):
   - Added execution audit event logging for `/apps/:id/execute` paths (success, failed, validation failure, payload-too-large, runtime failure).
-  - Registered `AuditEventEntity` in DB entity wiring so audit repository works with the runtime entity map.
+  - Fixed `AuditEventEntity` schema primary key definition and registered it in DB entity wiring.
   - Fixed telemetry dashboard API paths to use `/apps/api/telemetry/*` endpoints.
 - Verified locally:
   - `npx nx build server-api` passed.
   - `npx nx build react-ui` passed.
+- Verified on production:
+  - `https://flow.wickedlab.io/` returns `200`.
+  - `https://flow.wickedlab.io/api/v1/flags` returns `200`.
+  - `https://flow.wickedlab.io/apps` returns `200`.
+  - `https://flow.wickedlab.io/apps/api/apps?limit=1` returns `200`.
+  - `https://flow.wickedlab.io/apps/api/telemetry/platform` returns `403` unauthenticated (expected auth gate).
+  - `audit_events` table receives `execute` events from `/apps/:id/execute` requests.
 - Pending before declaring Phase D complete:
-  - Deploy to server and verify telemetry panels populate from live execute events.
   - Implement Playwright E2E + CI integration.
   - Complete security hardening pass (rate limits/CORS/secret masking checks).
 
@@ -121,7 +127,7 @@ Reference: `frontend/src/api.ts:173`, `index.js:4338`
 - Action: complete flow tool coverage map and missing operations.
 
 3. Release hardening still pending in code
-- Audit/telemetry implementation is now partially landed in code; E2E automation and deployment verification remain pending.
+- Audit/telemetry implementation is deployed and verified; E2E automation and security hardening remain pending.
 
 Reference: `docs/flow/apps-platform/APPS_MASTER_TODO.md`, `docs/system/operations/summaries/NEXT_STEPS.md`
 
@@ -201,7 +207,7 @@ Any meaningful platform change must update:
 | System architecture | `docs/system/architecture/SYSTEM_ARCHITECTURE.md`, `docs/system/architecture/CROSS_LAYER_INTERFACE_STATE.md` | Architecture contracts | Yes | Reconciled |
 | OpenClaw strategy | `docs/OPENCLAW_ANALYSIS.md` | Pattern-extraction reference | Yes, for strategy only | Reconciled |
 | PMOS vision/spec | `docs/pmos/vision/PROJECT_MANAGEMENT_OS.md`, `docs/pmos/vision/VISION_SUMMARY.md`, `docs/pmos/vision/FEATURES_CATALOG.md`, `docs/pmos/vision/INTELLIGENCE_PATTERNS.md`, `docs/pmos/vision/ROADMAP_VISUAL.md`, `docs/pmos/vision/README.md` | Target-state product design and roadmap intent | No (unless mirrored here) | Reconciled with explicit "vision-only" status notes |
-| Flow implementation backlog | `docs/flow/apps-platform/APPS_MASTER_TODO.md`, `docs/flow/apps-platform/APPS_PLATFORM_PRD.md`, `docs/flow/apps-platform/APPS_RELEASE_CHECKLIST.md`, `docs/flow/apps-platform/PRD_APPS_PHASE2.md` | Activepieces execution backlog | Yes, for flow layer delivery | Partially complete (Phase 8 code tasks remain) |
+| Flow implementation backlog | `docs/flow/apps-platform/APPS_MASTER_TODO.md`, `docs/flow/apps-platform/APPS_PLATFORM_PRD.md`, `docs/flow/apps-platform/APPS_RELEASE_CHECKLIST.md`, `docs/flow/apps-platform/PRD_APPS_PHASE2.md` | Activepieces execution backlog | Yes, for flow layer delivery | Partially complete (Phase 8 E2E + security tasks remain) |
 | BCGPT audits/phases/coverage | `docs/bcgpt/audits/*`, `docs/bcgpt/phases/*`, `docs/bcgpt/coverage/*`, `docs/system/operations/summaries/SESSION_SUMMARY_COMPREHENSIVE_AUDIT.md`, `docs/system/operations/summaries/COMPLETION_REPORT.md` | Historical evidence and point-in-time reports | No | Reconciled as historical-only |
 | Deployment/ops hardening | `docs/system/deployment/DEPLOYMENT_GUIDE.md`, `docs/system/deployment/PRODUCTION_HARDENING.md` | Operational runbooks | Yes | Reconciled (compose collision warning anchored in this file) |
 

@@ -208,9 +208,9 @@ Goal: production confidence and support readiness.
 - [x] Rollback procedures documented. ✅
 
 ### Remaining Implementation (Code)
-- [ ] Implement audit events table and logging in flow-gallery service. ⚠️ (Code landed locally on 2026-02-15; pending production deploy + verification)
-- [ ] Wire up execution telemetry collection in runtime. ⚠️ (Code landed locally on 2026-02-15; pending production deploy + verification)
-- [ ] Build telemetry dashboard UI (success trends, runtime histogram, failure breakdown). ⚠️ (UI exists; telemetry endpoint path fix landed locally on 2026-02-15; pending production verification)
+- [x] Implement audit events table and logging in flow-gallery service. (Deployed and verified on production 2026-02-15; `audit_events` receives `execute` records.)
+- [x] Wire up execution telemetry collection in runtime. (Deployed and verified on production 2026-02-15; telemetry reads measured executions and excludes queued runs.)
+- [x] Build telemetry dashboard UI (success trends, runtime histogram, failure breakdown). (Deployed and verified on production 2026-02-15; frontend now calls `/apps/api/telemetry/*`.)
 - [ ] Implement Playwright E2E suite and GitHub Actions CI integration.
 - [ ] Security audit pass (secrets masking, rate limits, CORS/CSP).
 
@@ -234,6 +234,7 @@ Goal: production confidence and support readiness.
 | Phase 6: Storefront UX (partial) | (merged into 4b) | `2026-02-12` | Modal gallery with search, filters, featured section working; detail pages wip | partial ⚠️ |
 | Phase 7: Default catalog seeding | (existing) | (existing) | DEFAULT_APP_SEEDS (5 apps) + DEFAULT_TEMPLATE_SEEDS (5 templates) defined; seedDefaultCatalog() service; admin UI button | done ✅ |
 | Phase 8: Hardening & production readiness | (this commit) | `2026-02-12` | PRODUCTION_HARDENING_GUIDE.md (security, audit, monitoring, playbooks); E2E_TEST_SUITE.md (all critical flows) | doc done ✅ |
+| Phase 8: Audit + telemetry code rollout | `750b4315` | `2026-02-15` | `/apps`, `/api/v1/flags`, `/apps/api/apps` return 200; telemetry endpoints auth-gate at 403 unauthenticated; `audit_events` contains `execute` events from live run attempts | done |
 | Flow → Template bridge | `ca644867` | `2026-02-12` | CreateTemplateFromFlowDialog component in Templates route | done ✅ |
 
 ---
@@ -241,14 +242,12 @@ Goal: production confidence and support readiness.
 ## Immediate Execution Order (Next Priorities)
 **Completed phases** (1-4b, 5, 7): Core model, member templates, publisher wizard, runtime wizard, credential resolver, and seeding all live and production-deployed.
 
-**Phase 8 Status**: Hardening documentation complete. Ready for implementation backlog.
+**Phase 8 Status**: Audit + telemetry code deployed and verified. E2E automation and security hardening remain.
 
 **Next Steps** (Priority Order):
 
-1. **Phase 8 Implementation** (Code)
-   - Audit events table and logging integration
-   - Telemetry collection and dashboard
-   - E2E test suite in Playwright + GitHub Actions 
+1. **Phase 8 Completion** (Code)
+   - E2E test suite in Playwright + GitHub Actions
    - Security audit pass (rate limits, secrets masking, CORS)
 
 2. **Phase 6 Refinement** (Storefront polish)
@@ -293,8 +292,6 @@ Goal: production confidence and support readiness.
 - On-call runbook and customer support guide
 
 ### What Still Needs Code ⚠️
-- Audit events implementation (table + logging)
-- Telemetry dashboard (UI for metrics visualization)
 - E2E test implementation (Playwright automation)
 - Security hardening pass (rate limits, CORS improvements)
 
@@ -309,12 +306,12 @@ Goal: production confidence and support readiness.
 
 1. **Check latest status**: Look at Phase 1-8 checkboxes. ✅ = done, ⚠️ = partial, [ ] = not started.
 2. **Verify completion**: Check Done Evidence table for commit hashes and deployment verification.
-3. **Plan next sprint**: Start with Phase 8 code implementation items (audit/telemetry/E2E).
+3. **Plan next sprint**: Start with remaining Phase 8 items (E2E + security hardening).
 4. **Deploy changes**: Always merging to `main` triggers Coolify auto-deploy within 5 min.
 5. **Rollback if needed**: Reference "Deployment > Rollback" section in PRODUCTION_HARDENING_GUIDE.md.
 
 ---
 
-**Last Updated**: 2026-02-12  
+**Last Updated**: 2026-02-15  
 **Owner**: Wicked Flow - Apps Team  
-**Status**: Core functionality live. Hardening documentation complete. Ready for Phase 8 code sprint.
+**Status**: Core functionality live. Audit + telemetry hardening deployed. Final Phase 8 items are E2E + security.

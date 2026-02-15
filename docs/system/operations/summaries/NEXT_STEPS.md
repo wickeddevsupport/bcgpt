@@ -15,7 +15,6 @@ Canonical status and execution context now live in:
 
 ## Next Phase (Post-Gateway)
 1) Start Phase 8 implementation backlog (hardening code, not docs):
-   - Deploy and verify newly landed audit + telemetry code paths in production (`/apps/:id/execute` -> `audit_events`, `/apps/api/telemetry/*`).
    - Playwright E2E suite + CI integration.
    - Security hardening pass (rate limits, CORS, secret masking verification).
 
