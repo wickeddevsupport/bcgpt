@@ -171,7 +171,7 @@ export async function updateUserConfig(config: {
   defaultProjectId?: string;
 }): Promise<void> {
   const response = await apiRequest('/api/config', {
-    method: 'POST',
+    method: 'PUT',
     body: JSON.stringify(config),
   });
   if (!response.ok) {

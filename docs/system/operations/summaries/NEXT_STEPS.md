@@ -1,6 +1,9 @@
 # Next Steps (True MCP Path)
 
-This is the short, actionable backlog to finish the transition to a **true MCP server** (see `docs/phases/TRUE_MCP_ROADMAP.md`).
+This is the short, actionable backlog to finish the transition to a **true MCP server** (see `docs/bcgpt/phases/TRUE_MCP_ROADMAP.md`).
+
+Canonical status and execution context now live in:
+- `docs/system/operations/summaries/CURRENT_STATE_AND_EXECUTION_PLAN.md`
 
 ## Operational Gate (2026-02-14)
 1) ✅ Resolved intermittent `bcgpt.wickedlab.io` gateway failures.
@@ -33,4 +36,4 @@ This is the short, actionable backlog to finish the transition to a **true MCP s
 
 ## Notes
 - The most reliable interface is `/mcp` (JSON-RPC). `/action` is best-effort compatibility.
-- Use `docs/phases/TRUE_MCP_ROADMAP.md` as the canonical plan.
+- Use `docs/bcgpt/phases/TRUE_MCP_ROADMAP.md` as the canonical plan.

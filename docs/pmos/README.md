@@ -46,33 +46,35 @@ PMOS (Project Management Operating System) is the **intelligence layer** - the b
 
 ---
 
-## 📂 Documentation
+## Documentation
+> Status note (2026-02-14): Canonical PMOS docs currently live under `vision/`. Some section labels below reference planned split-out docs.
+> Execution status and active build order are tracked in `../system/operations/summaries/CURRENT_STATE_AND_EXECUTION_PLAN.md`.
 
 ### Vision & Strategy
 - **[vision/PROJECT_MANAGEMENT_OS.md](vision/PROJECT_MANAGEMENT_OS.md)** - Master vision doc (10,500 words)
 - **[vision/VISION_SUMMARY.md](vision/VISION_SUMMARY.md)** - Quick overview & navigation
-- **[vision/WHY_THIS_WINS.md](vision/WHY_THIS_WINS.md)** - Competitive advantages
+- **[vision/VISION_SUMMARY.md](vision/VISION_SUMMARY.md)** - Competitive advantages
 
 ### Features
-- **[features/FEATURES_CATALOG.md](features/FEATURES_CATALOG.md)** - All 100+ features with specs
-- **[features/FEATURE_INDEX.md](features/FEATURE_INDEX.md)** - Searchable feature index
-- **[features/PRIORITY_MATRIX.md](features/PRIORITY_MATRIX.md)** - Feature priorities
+- **[vision/FEATURES_CATALOG.md](vision/FEATURES_CATALOG.md)** - All 100+ features with specs
+- **[vision/FEATURES_CATALOG.md](vision/FEATURES_CATALOG.md)** - Searchable feature index
+- **[vision/ROADMAP_VISUAL.md](vision/ROADMAP_VISUAL.md)** - Feature priorities
 
 ### Intelligence Patterns
-- **[patterns/INTELLIGENCE_PATTERNS.md](patterns/INTELLIGENCE_PATTERNS.md)** - 20+ reusable algorithms
-- **[patterns/SCORING_PATTERNS.md](patterns/SCORING_PATTERNS.md)** - Health, priority, quality scoring
-- **[patterns/PREDICTION_PATTERNS.md](patterns/PREDICTION_PATTERNS.md)** - Velocity, burnout, risk prediction
-- **[patterns/AGENT_PATTERNS.md](patterns/AGENT_PATTERNS.md)** - Agent coordination, OADA loop
+- **[vision/INTELLIGENCE_PATTERNS.md](vision/INTELLIGENCE_PATTERNS.md)** - 20+ reusable algorithms
+- **[vision/INTELLIGENCE_PATTERNS.md](vision/INTELLIGENCE_PATTERNS.md)** - Health, priority, quality scoring
+- **[vision/INTELLIGENCE_PATTERNS.md](vision/INTELLIGENCE_PATTERNS.md)** - Velocity, burnout, risk prediction
+- **[vision/INTELLIGENCE_PATTERNS.md](vision/INTELLIGENCE_PATTERNS.md)** - Agent coordination, OADA loop
 
 ### Roadmap
-- **[roadmap/ROADMAP_VISUAL.md](roadmap/ROADMAP_VISUAL.md)** - 8-wave implementation plan
-- **[roadmap/MILESTONES.md](roadmap/MILESTONES.md)** - Key milestones & deliverables
-- **[roadmap/PROGRESS_TRACKER.md](roadmap/PROGRESS_TRACKER.md)** - Current progress
+- **[vision/ROADMAP_VISUAL.md](vision/ROADMAP_VISUAL.md)** - 8-wave implementation plan
+- **[vision/ROADMAP_VISUAL.md](vision/ROADMAP_VISUAL.md)** - Key milestones & deliverables
+- **[vision/ROADMAP_VISUAL.md](vision/ROADMAP_VISUAL.md)** - Current progress
 
 ### Implementation
-- **[implementation/DATABASE_SCHEMA.md](implementation/DATABASE_SCHEMA.md)** - All table schemas
-- **[implementation/MCP_TOOLS.md](implementation/MCP_TOOLS.md)** - New MCP tools for PMOS
-- **[implementation/API_DESIGN.md](implementation/API_DESIGN.md)** - API contracts
+- **[../system/implementation/IMPLEMENTATION_SUMMARY.md](../system/implementation/IMPLEMENTATION_SUMMARY.md)** - All table schemas
+- **[../system/implementation/IMPLEMENTATION_SUMMARY.md](../system/implementation/IMPLEMENTATION_SUMMARY.md)** - New MCP tools for PMOS
+- **[../system/architecture/SYSTEM_ARCHITECTURE.md](../system/architecture/SYSTEM_ARCHITECTURE.md)** - API contracts
 
 ---
 
@@ -157,7 +159,7 @@ PMOS (Project Management Operating System) is the **intelligence layer** - the b
 24. **Multi-Tenant SaaS** - Enterprise deployment
 25. **API Ecosystem** - Build on PMOS
 
-See [features/FEATURES_CATALOG.md](features/FEATURES_CATALOG.md) for all 100+ features.
+See [vision/FEATURES_CATALOG.md](vision/FEATURES_CATALOG.md) for all 100+ features.
 
 ---
 
@@ -188,7 +190,7 @@ See [features/FEATURES_CATALOG.md](features/FEATURES_CATALOG.md) for all 100+ fe
 - **Multi-Agent Coordination** - Agents collaborate
 - **Human-in-the-Loop** - Approval workflows
 
-See [patterns/INTELLIGENCE_PATTERNS.md](patterns/INTELLIGENCE_PATTERNS.md) for complete code.
+See [vision/INTELLIGENCE_PATTERNS.md](vision/INTELLIGENCE_PATTERNS.md) for complete code.
 
 ---
 
@@ -213,16 +215,16 @@ See [patterns/INTELLIGENCE_PATTERNS.md](patterns/INTELLIGENCE_PATTERNS.md) for c
    - Quick overview: [vision/VISION_SUMMARY.md](vision/VISION_SUMMARY.md)
 
 2. **Explore Features**
-   - Browse [features/FEATURES_CATALOG.md](features/FEATURES_CATALOG.md)
-   - Check [features/PRIORITY_MATRIX.md](features/PRIORITY_MATRIX.md)
+   - Browse [vision/FEATURES_CATALOG.md](vision/FEATURES_CATALOG.md)
+   - Check [vision/ROADMAP_VISUAL.md](vision/ROADMAP_VISUAL.md)
 
 3. **Study Patterns**
-   - Review [patterns/INTELLIGENCE_PATTERNS.md](patterns/INTELLIGENCE_PATTERNS.md)
+   - Review [vision/INTELLIGENCE_PATTERNS.md](vision/INTELLIGENCE_PATTERNS.md)
    - Understand algorithms before implementing
 
 4. **Plan Implementation**
-   - Follow [roadmap/ROADMAP_VISUAL.md](roadmap/ROADMAP_VISUAL.md)
-   - Track [roadmap/PROGRESS_TRACKER.md](roadmap/PROGRESS_TRACKER.md)
+   - Follow [vision/ROADMAP_VISUAL.md](vision/ROADMAP_VISUAL.md)
+   - Track [vision/ROADMAP_VISUAL.md](vision/ROADMAP_VISUAL.md)
 
 ---
 
@@ -242,7 +244,7 @@ PMOS orchestrates Flow:
 - **Agents → Flows**: Autonomous execution
 - **Learning Loop**: Flow results improve predictions
 
-See [../system/architecture/LAYER_INTEGRATION.md](../system/architecture/LAYER_INTEGRATION.md)
+See [../system/architecture/SYSTEM_ARCHITECTURE.md](../system/architecture/SYSTEM_ARCHITECTURE.md)
 
 ---
 
@@ -251,20 +253,20 @@ See [../system/architecture/LAYER_INTEGRATION.md](../system/architecture/LAYER_I
 ### Implementing a New Feature
 
 1. **Find in Catalog**
-   - Check [features/FEATURES_CATALOG.md](features/FEATURES_CATALOG.md)
+   - Check [vision/FEATURES_CATALOG.md](vision/FEATURES_CATALOG.md)
    - Review spec, database schema, MCP tools
 
 2. **Implement Pattern**
-   - Use patterns from [patterns/INTELLIGENCE_PATTERNS.md](patterns/INTELLIGENCE_PATTERNS.md)
+   - Use patterns from [vision/INTELLIGENCE_PATTERNS.md](vision/INTELLIGENCE_PATTERNS.md)
    - Adapt to your feature
 
 3. **Create Database Tables**
    - Use schemas from feature spec
-   - See [implementation/DATABASE_SCHEMA.md](implementation/DATABASE_SCHEMA.md)
+   - See [../system/implementation/IMPLEMENTATION_SUMMARY.md](../system/implementation/IMPLEMENTATION_SUMMARY.md)
 
 4. **Build MCP Tools**
    - Add tools to BCGPT mcp.js
-   - Follow [implementation/MCP_TOOLS.md](implementation/MCP_TOOLS.md)
+   - Follow [../system/implementation/IMPLEMENTATION_SUMMARY.md](../system/implementation/IMPLEMENTATION_SUMMARY.md)
 
 5. **Test & Iterate**
    - Test with Claude/ChatGPT
@@ -300,7 +302,7 @@ See [../system/architecture/LAYER_INTEGRATION.md](../system/architecture/LAYER_I
 - 🔜 Multi-Tenant SaaS
 - 🔜 Multi-Platform Bridges
 
-See [roadmap/ROADMAP_VISUAL.md](roadmap/ROADMAP_VISUAL.md) for details.
+See [vision/ROADMAP_VISUAL.md](vision/ROADMAP_VISUAL.md) for details.
 
 ---
 
@@ -315,7 +317,7 @@ See [roadmap/ROADMAP_VISUAL.md](roadmap/ROADMAP_VISUAL.md) for details.
 7. **Learning system** - Gets smarter over time
 8. **Community leverage** - Network effects via marketplace
 
-See [vision/WHY_THIS_WINS.md](vision/WHY_THIS_WINS.md)
+See [vision/VISION_SUMMARY.md](vision/VISION_SUMMARY.md)
 
 ---
 
@@ -325,18 +327,20 @@ See [vision/WHY_THIS_WINS.md](vision/WHY_THIS_WINS.md)
 → Read [vision/PROJECT_MANAGEMENT_OS.md](vision/PROJECT_MANAGEMENT_OS.md)
 
 **How do I implement a feature?**
-→ Check [features/FEATURES_CATALOG.md](features/FEATURES_CATALOG.md) for spec
+→ Check [vision/FEATURES_CATALOG.md](vision/FEATURES_CATALOG.md) for spec
 
 **Need an algorithm?**
-→ See [patterns/INTELLIGENCE_PATTERNS.md](patterns/INTELLIGENCE_PATTERNS.md)
+→ See [vision/INTELLIGENCE_PATTERNS.md](vision/INTELLIGENCE_PATTERNS.md)
 
 **What's the priority?**
-→ Follow [roadmap/ROADMAP_VISUAL.md](roadmap/ROADMAP_VISUAL.md)
+→ Follow [vision/ROADMAP_VISUAL.md](vision/ROADMAP_VISUAL.md)
 
 ---
 
 ## 📚 Learn More
 
 - **System Architecture:** [../system/architecture/SYSTEM_ARCHITECTURE.md](../system/architecture/SYSTEM_ARCHITECTURE.md)
-- **BCGPT Integration:** [../system/architecture/BCGPT_PMOS_INTEGRATION.md](../system/architecture/BCGPT_PMOS_INTEGRATION.md)
-- **Flow Integration:** [../flow/integration/PMOS_ORCHESTRATION.md](../flow/integration/PMOS_ORCHESTRATION.md)
+- **BCGPT Integration:** [../system/architecture/SYSTEM_ARCHITECTURE.md](../system/architecture/SYSTEM_ARCHITECTURE.md)
+- **Flow Integration:** [../flow/README.md](../flow/README.md)
+
+

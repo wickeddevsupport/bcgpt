@@ -2,7 +2,10 @@
 
 ## Summary
 
-OpenClaw is a sophisticated agent operating system with multi-model support, WebSocket-based communication, and a Lit-based web UI. This document analyzes patterns we can extract for PMOS (PM Operating System).
+
+
+> Status note (2026-02-14): This is a strategy/reference document. Some implementation-phase checklist items below are historical and may already be completed in the current codebase.
+> Canonical implementation status is tracked in `docs/system/operations/summaries/CURRENT_STATE_AND_EXECUTION_PLAN.md`.
 
 ---
 
@@ -90,7 +93,6 @@ function createMyTool(options): AnyAgentTool {
 **Location:** `src/agents/skills.ts`, `skills/*/SKILL.md`
 
 **Pattern:** Markdown files with YAML frontmatter:
-```markdown
 ```skill
 ---
 name: github
@@ -200,7 +202,7 @@ async function sendChatMessage(content: string) {
 ├─────────────────────────────────────────────────────────────┤
 │  POST /api/chat         - Send message, get response         │
 │  GET  /api/chat/stream  - SSE for streaming responses        │
-│  GET  /api/sessions     - List chat sessions                 │
+│  GET  /api/chat/sessions     - List chat sessions                 │
 │  POST /api/personas     - Create custom personas             │
 │  *    /mcp/*            - Existing 50 MCP tools              │
 └─────────────────────────────────────────────────────────────┘
@@ -356,3 +358,4 @@ INSERT INTO pmos_personas (name, description, system_prompt, emoji, is_default) 
 ---
 
 *Document created: Analysis of OpenClaw for PMOS hybrid approach*
+

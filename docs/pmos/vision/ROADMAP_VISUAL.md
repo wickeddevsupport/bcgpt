@@ -4,6 +4,7 @@
 Last Updated: 2026-02-14
 
 > Status note (2026-02-14): Wave 1 and core Wave 2 capabilities are already implemented in `index.js`, `mcp.js`, and `db.js`. The per-wave status tables below are pending refresh.
+> Canonical current-state tracker: `docs/system/operations/summaries/CURRENT_STATE_AND_EXECUTION_PLAN.md`.
 
 ## 📚 Documentation Structure
 
@@ -36,7 +37,7 @@ docs/
 ## 🎯 Quick Start Guide
 
 **If you're new to this project:**
-1. Read [PROJECT_MANAGEMENT_OS.md](../PROJECT_MANAGEMENT_OS.md) for the big picture
+1. Read [PROJECT_MANAGEMENT_OS.md](PROJECT_MANAGEMENT_OS.md) for the big picture
 2. Review [FEATURES_CATALOG.md](FEATURES_CATALOG.md) for specific features you care about
 3. Check [INTELLIGENCE_PATTERNS.md](INTELLIGENCE_PATTERNS.md) for implementation patterns
 4. Follow the waves below for implementation order
@@ -346,16 +347,16 @@ relationships:       # Collaboration & dependencies
 ## 🎓 Learning Resources
 
 ### For New Contributors
-1. **Start Here:** [PROJECT_MANAGEMENT_OS.md](../PROJECT_MANAGEMENT_OS.md)
+1. **Start Here:** [PROJECT_MANAGEMENT_OS.md](PROJECT_MANAGEMENT_OS.md)
 2. **Understand Features:** [FEATURES_CATALOG.md](FEATURES_CATALOG.md)
 3. **Learn Patterns:** [INTELLIGENCE_PATTERNS.md](INTELLIGENCE_PATTERNS.md)
-4. **Current Architecture:** [ARCHITECTURE.md](../ARCHITECTURE.md)
-5. **Basecamp API:** [bc3-api docs](../reference/bc3-api/)
+4. **Current Architecture:** [SYSTEM_ARCHITECTURE.md](../../system/architecture/SYSTEM_ARCHITECTURE.md)
+5. **Basecamp API:** [Basecamp API reference](../../bcgpt/reference/BASECAMP_API_ENDPOINTS_REFERENCE.md)
 
 ### For AI Assistants
 - **Context Docs:** All of the above, especially FEATURES_CATALOG and INTELLIGENCE_PATTERNS
-- **Current State:** Check [mcp.js](../../mcp.js) for existing tools
-- **Data Layer:** Review [db.js](../../db.js) and [miner.js](../../miner.js)
+- **Current State:** Check [mcp.js](../../../mcp.js) for existing tools
+- **Data Layer:** Review [db.js](../../../db.js) and [miner.js](../../../miner.js)
 - **Pattern Reference:** Use INTELLIGENCE_PATTERNS.md for algorithms
 
 ### For Product Managers
@@ -444,3 +445,4 @@ relationships:       # Collaboration & dependencies
 **Remember: This isn't just a tool. This is an operating system for the future of work.**
 
 *Every idea preserved. Every pattern documented. Every decision tracked. Nothing lost.*
+
