@@ -4,6 +4,25 @@ Last updated: 2026-02-15
 Owner: PM OS core repo (`bcgpt`)
 Purpose: single source of truth for "where we are now" and "what to do next" in fresh sessions.
 
+## Latest Rollout (2026-02-15)
+
+- Deployed commits:
+  - `7a4d5b2f` (canonical docs + frontend API method alignment)
+  - `20802b14` (updated `frontend/dist` production bundle)
+- Production verification passed:
+  - `https://bcgpt.wickedlab.io/health` returns `ok=true`
+  - frontend bundle hash updated to `/assets/index-tn4jd_Jq.js`
+  - `/mcp` tool listing works
+  - `flow_*` tools still available and return expected auth-gated errors when unauthenticated
+
+Critical deploy note:
+- Do not use `docker compose -f docker-compose.bcgpt.yml up/down` on the production host for normal BCGPT deploys.
+- That stack shares `bcgpt-postgres-data` volume naming and can collide with the running production Postgres container.
+- Safe production path:
+  1. `git pull` on server
+  2. `docker build --no-cache -t bcgptapi-bcgpt:latest -f Dockerfile.bcgpt .`
+  3. `bash scripts/start-bcgpt.sh`
+
 ## 0. Non-Negotiable Guardrails
 
 1. Existing `flow_*` integration remains operational and unchanged during migration work.
