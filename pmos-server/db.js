@@ -11,6 +11,7 @@ class PMOSDatabase {
   constructor() {
     this.dbPath = config.dbPath.replace('.db', '.json');
     this.data = this.loadData();
+    this.ensureShape();
     
     // Auto-save every 30 seconds
     setInterval(() => this.saveData(), 30000);
@@ -32,8 +33,27 @@ class PMOSDatabase {
       patterns: [],
       context: [],
       insights: [],
-      memory: []
+      memory: [],
+      operations: []
     };
+  }
+
+  ensureShape() {
+    const defaults = {
+      health_scores: {},
+      predictions: [],
+      patterns: [],
+      context: [],
+      insights: [],
+      memory: [],
+      operations: []
+    };
+
+    for (const [key, fallback] of Object.entries(defaults)) {
+      if (this.data[key] === undefined || this.data[key] === null) {
+        this.data[key] = fallback;
+      }
+    }
   }
 
   saveData() {
@@ -196,6 +216,49 @@ class PMOSDatabase {
     return { success: true };
   }
 
+  // Operations timeline
+  createOperation(operation) {
+    const entry = {
+      id: this.data.operations.length + 1,
+      created_at: Date.now(),
+      updated_at: Date.now(),
+      status: 'queued',
+      risk: 'low',
+      approval_required: false,
+      ...operation
+    };
+    this.data.operations.push(entry);
+    return entry;
+  }
+
+  updateOperation(operationId, patch) {
+    const id = parseInt(operationId, 10);
+    const operation = this.data.operations.find((item) => item.id === id);
+    if (!operation) {
+      return null;
+    }
+
+    Object.assign(operation, patch, { updated_at: Date.now() });
+    return operation;
+  }
+
+  getOperation(operationId) {
+    const id = parseInt(operationId, 10);
+    return this.data.operations.find((item) => item.id === id) || null;
+  }
+
+  getOperations(limit = 50, status = null) {
+    const normalizedLimit = Math.max(1, Math.min(parseInt(limit, 10) || 50, 200));
+    const filtered = status
+      ? this.data.operations.filter((item) => item.status === status)
+      : this.data.operations;
+
+    return filtered
+      .slice()
+      .sort((a, b) => b.created_at - a.created_at)
+      .slice(0, normalizedLimit);
+  }
+
   // Cleanup old data
   cleanupOldData(daysToKeep = 90) {
     const cutoff = Date.now() - (daysToKeep * 24 * 60 * 60 * 1000);
@@ -236,6 +299,7 @@ class PMOSDatabase {
             if (query.includes('insights')) return { count: this.data.insights.filter(i => !i.acknowledged).length };
             if (query.includes('patterns')) return { count: this.data.patterns.length };
             if (query.includes('memory')) return { count: this.data.memory.length };
+            if (query.includes('operations')) return { count: this.data.operations.length };
           }
           return { count: 0 };
         },

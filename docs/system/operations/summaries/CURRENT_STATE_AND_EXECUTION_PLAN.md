@@ -50,6 +50,20 @@ Purpose: single source of truth for "where we are now" and "what to do next" in 
   - Initial command center supports:
     - `status`, `insights`, `cleanup`
     - `health_project`, `predict_completion`, `context_analyze`, `patterns_work`
+- PMOS web shell (Wave-2 start) now includes agentic control primitives:
+  - Added authenticated chat and approvals/timeline APIs:
+    - `POST /api/chat` (NL intent -> PMOS command execution)
+    - `GET /api/operations` (operation timeline)
+    - `POST /api/operations/:operationId/approve` (approval gate execution)
+  - High-risk command gating enabled for `cleanup`:
+    - first call returns `pending_approval`
+    - explicit approve call executes and records result
+  - PMOS status/readiness now surfaces:
+    - `bcgpt_api_key_configured`
+    - `shell_auth_configured`
+  - PMOS deployment env now supports:
+    - `BCGPT_API_KEY` for authenticated BCGPT project intelligence calls
+    - `PMOS_SHELL_TOKEN` for optional shell API auth (`/api/chat`, `/api/command`, `/api/operations`)
 
 Critical deploy note:
 - Do not use `docker compose -f docker-compose.bcgpt.yml up/down` on the production host for normal BCGPT deploys.
@@ -78,7 +92,7 @@ Critical deploy note:
 - Pending before declaring Phase D complete:
   - Implement Playwright E2E + CI integration.
   - Complete security hardening pass (rate limits/CORS/secret masking checks).
-  - Add PMOS web shell on `os.wickedlab.io/` (currently API-first deployment).
+  - Expand PMOS chat intent layer to orchestrate multi-step plans (beyond single-command mapping).
 
 ## 0. Non-Negotiable Guardrails
 

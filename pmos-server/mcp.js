@@ -14,7 +14,7 @@ import { config } from './config.js';
 export class PMOSMCPServer {
   constructor() {
     this.db = new PMOSDatabase();
-    this.bcgpt = new BCGPTClient(config.bcgptUrl);
+    this.bcgpt = new BCGPTClient(config.bcgptUrl, config.bcgptApiKey);
     this.healthScorer = new HealthScorer(this.db, this.bcgpt);
     this.predictions = new PredictionEngine(this.db, this.bcgpt);
     this.contextAnalyzer = new ContextAnalyzer(this.db, this.bcgpt);
@@ -390,6 +390,7 @@ export class PMOSMCPServer {
     const insightCount = this.db.db.prepare('SELECT COUNT(*) as count FROM insights WHERE acknowledged = 0').get();
     const patternCount = this.db.db.prepare('SELECT COUNT(*) as count FROM patterns').get();
     const memoryCount = this.db.db.prepare('SELECT COUNT(*) as count FROM memory').get();
+    const operationCount = this.db.db.prepare('SELECT COUNT(*) as count FROM operations').get();
     
     return {
       status: 'operational',
@@ -400,11 +401,14 @@ export class PMOSMCPServer {
         active_predictions: predictionCount.count,
         unacknowledged_insights: insightCount.count,
         patterns: patternCount.count,
-        memories: memoryCount.count
+        memories: memoryCount.count,
+        operations: operationCount.count
       },
       config: {
         bcgpt_url: config.bcgptUrl,
-        flow_url: config.flowUrl
+        flow_url: config.flowUrl,
+        bcgpt_api_key_configured: !!config.bcgptApiKey,
+        shell_auth_configured: !!config.shellToken
       },
       timestamp: Date.now()
     };

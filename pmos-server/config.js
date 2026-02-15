@@ -10,9 +10,13 @@ export const config = {
   
   // BCGPT integration
   bcgptUrl: process.env.BCGPT_URL || 'http://localhost:10000',
+  bcgptApiKey: process.env.BCGPT_API_KEY || '',
   
   // Flow integration
   flowUrl: process.env.FLOW_URL || 'https://flow.wickedlab.io',
+
+  // Optional shell auth for PMOS interactive APIs
+  shellToken: process.env.PMOS_SHELL_TOKEN || '',
   
   // Database
   dbPath: process.env.PMOS_DB_PATH || './pmos-data.db',

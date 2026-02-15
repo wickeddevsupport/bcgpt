@@ -10,7 +10,9 @@ services:
       PMOS_HOST: "0.0.0.0"
       PMOS_DB_PATH: "/data/pmos-data.json"
       BCGPT_URL: "${BCGPT_URL:-https://bcgpt.wickedlab.io}"
+      BCGPT_API_KEY: "${BCGPT_API_KEY:-}"
       FLOW_URL: "${FLOW_URL:-https://flow.wickedlab.io}"
+      PMOS_SHELL_TOKEN: "${PMOS_SHELL_TOKEN:-}"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
     volumes:
       - pmos-data:/data

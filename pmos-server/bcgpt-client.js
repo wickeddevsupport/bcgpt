@@ -4,15 +4,21 @@
  */
 
 export class BCGPTClient {
-  constructor(baseUrl) {
+  constructor(baseUrl, apiKey = '') {
     this.baseUrl = baseUrl;
+    this.apiKey = apiKey;
   }
 
   async request(toolName, args = {}) {
     try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (this.apiKey) {
+        headers['x-api-key'] = this.apiKey;
+      }
+
       const response = await fetch(`${this.baseUrl}/mcp`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           jsonrpc: '2.0',
           id: Date.now(),

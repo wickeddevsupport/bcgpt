@@ -46,12 +46,43 @@
           <p id="flowStatusValue" class="value">Loading...</p>
           <p id="flowStatusHint" class="hint"></p>
         </article>
+        <article class="status-card">
+          <p class="label">Readiness</p>
+          <p id="readinessValue" class="value">Loading...</p>
+          <p id="readinessHint" class="hint"></p>
+        </article>
       </div>
     </section>
 
+    <section class="panel auth-panel">
+      <h2>Shell Access</h2>
+      <p class="subtext">If PMOS shell auth is enabled, enter your token once. It stays in this browser only.</p>
+      <div class="auth-row">
+        <input id="pmosTokenInput" type="password" placeholder="PMOS shell token (optional)" />
+        <button id="saveTokenBtn" class="btn btn-small">Save Token</button>
+        <button id="clearTokenBtn" class="btn btn-small btn-ghost">Clear Token</button>
+      </div>
+      <p id="tokenStatusHint" class="hint"></p>
+    </section>
+
+    <section class="panel chat-panel">
+      <div class="panel-head">
+        <h2>PMOS Chat Commander</h2>
+        <button id="clearChatBtn" class="btn btn-small btn-ghost">Clear Chat</button>
+      </div>
+      <p class="subtext">Natural-language command surface with approval gates for high-risk actions.</p>
+      <div id="chatLog" class="chat-log">
+        <div class="chat-item chat-assistant">PMOS ready. Ask for status, insights, or project analysis.</div>
+      </div>
+      <form id="chatForm" class="chat-form">
+        <textarea id="chatInput" rows="3" placeholder="Example: predict completion for project 123456"></textarea>
+        <button id="sendChatBtn" class="btn btn-primary" type="submit">Send</button>
+      </form>
+    </section>
+
     <section class="panel commands-panel">
-      <h2>Wave-1 Command Center</h2>
-      <p class="subtext">Start with deterministic commands while we expand full autonomy orchestration.</p>
+      <h2>Command Center</h2>
+      <p class="subtext">Deterministic command path for direct PMOS control.</p>
       <div class="command-grid">
         <button class="btn btn-small quick-command" data-command="status">PMOS Status</button>
         <button class="btn btn-small quick-command" data-command="insights">List Insights</button>
@@ -68,6 +99,16 @@
           <button class="btn btn-small project-command" data-command="patterns_work">Work Patterns</button>
         </div>
       </div>
+    </section>
+
+    <section class="panel operations-panel">
+      <div class="panel-head">
+        <h2>Operation Timeline</h2>
+        <button id="refreshOperationsBtn" class="btn btn-small btn-ghost">Refresh</button>
+      </div>
+      <ul id="operationsList" class="operations-list">
+        <li class="insight-empty">No operations yet.</li>
+      </ul>
     </section>
 
     <section class="panel output-panel">
