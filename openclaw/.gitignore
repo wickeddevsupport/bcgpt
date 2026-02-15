@@ -80,4 +80,4 @@ USER.md
 /memory/
 .agent/*.json
 !.agent/workflows/
-local/
+/local/

@@ -18,9 +18,10 @@ activepieces/.nx/
 activepieces/tmp/
 activepieces/.env
 activepieces/package-lock.json
-local/
+/local/
 
 
 
 .nx/cache
 .nx/workspace-data
+docs/pmos/vision/temp log
