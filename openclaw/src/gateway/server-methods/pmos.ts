@@ -102,7 +102,9 @@ export const pmosHandlers: GatewayRequestHandlers = {
         reachable: null,
         authOk: apKey ? null : false,
         flagsUrl: `${apUrl}/api/v1/flags`,
-        authUrl: apKey ? `${apUrl}/api/v1/flows?limit=1` : null,
+        // Use an auth-gated endpoint that does not require workspace/project params.
+        // (Flows listing typically requires a projectId query param.)
+        authUrl: apKey ? `${apUrl}/api/v1/users/me` : null,
         error: null,
       };
 
@@ -181,4 +183,3 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 };
-
