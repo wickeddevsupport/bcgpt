@@ -40,6 +40,16 @@ Purpose: single source of truth for "where we are now" and "what to do next" in 
   - `bcgpt.wickedlab.io` now serves MCP landing page (`mcp-landing.html`) with primary CTA to `/connect`.
   - PMOS frontend/product surface continues on `https://os.wickedlab.io`.
   - `https://bcgpt.wickedlab.io/connect` remains the API key + Basecamp auth entrypoint.
+- PMOS web shell (Wave-1 execution start) implemented in code:
+  - PMOS root now serves a native shell UI from `pmos-server/public/index.html`.
+  - Added PMOS orchestration endpoints:
+    - `GET /api/dashboard` (status + integrations + insights snapshot)
+    - `POST /api/command` (deterministic command runner for Wave-1 actions)
+    - `POST /api/mcp-call` (direct PMOS tool execution bridge)
+    - `GET /api/info` (service metadata)
+  - Initial command center supports:
+    - `status`, `insights`, `cleanup`
+    - `health_project`, `predict_completion`, `context_analyze`, `patterns_work`
 
 Critical deploy note:
 - Do not use `docker compose -f docker-compose.bcgpt.yml up/down` on the production host for normal BCGPT deploys.

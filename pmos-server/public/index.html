@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PMOS Control Surface</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="bg-shape bg-shape-1"></div>
+  <div class="bg-shape bg-shape-2"></div>
+
+  <main class="page">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">PMOS</p>
+        <h1>Project Management Operating System</h1>
+        <p class="subtext">
+          Native PMOS surface on <strong>os.wickedlab.io</strong>. This shell drives PMOS intelligence, BCGPT data access, and Flow execution.
+        </p>
+      </div>
+      <div class="hero-actions">
+        <button id="refreshDashboardBtn" class="btn btn-primary">Refresh Dashboard</button>
+        <a class="btn btn-ghost" href="https://bcgpt.wickedlab.io/connect" target="_blank" rel="noopener noreferrer">MCP Connect</a>
+      </div>
+    </header>
+
+    <section class="panel status-panel">
+      <h2>System Status</h2>
+      <div class="status-grid">
+        <article class="status-card">
+          <p class="label">PMOS</p>
+          <p id="pmosStatusValue" class="value">Loading...</p>
+          <p id="pmosToolsValue" class="hint"></p>
+        </article>
+        <article class="status-card">
+          <p class="label">BCGPT Integration</p>
+          <p id="bcgptStatusValue" class="value">Loading...</p>
+          <p id="bcgptStatusHint" class="hint"></p>
+        </article>
+        <article class="status-card">
+          <p class="label">Flow Integration</p>
+          <p id="flowStatusValue" class="value">Loading...</p>
+          <p id="flowStatusHint" class="hint"></p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel commands-panel">
+      <h2>Wave-1 Command Center</h2>
+      <p class="subtext">Start with deterministic commands while we expand full autonomy orchestration.</p>
+      <div class="command-grid">
+        <button class="btn btn-small quick-command" data-command="status">PMOS Status</button>
+        <button class="btn btn-small quick-command" data-command="insights">List Insights</button>
+        <button class="btn btn-small quick-command" data-command="cleanup">Cleanup</button>
+      </div>
+
+      <div class="project-actions">
+        <label for="projectIdInput">Project ID</label>
+        <input id="projectIdInput" type="text" placeholder="Basecamp project ID" />
+        <div class="command-grid">
+          <button class="btn btn-small project-command" data-command="health_project">Health Score</button>
+          <button class="btn btn-small project-command" data-command="predict_completion">Predict Completion</button>
+          <button class="btn btn-small project-command" data-command="context_analyze">Analyze Context</button>
+          <button class="btn btn-small project-command" data-command="patterns_work">Work Patterns</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel output-panel">
+      <div class="panel-head">
+        <h2>Execution Output</h2>
+        <button id="clearOutputBtn" class="btn btn-small btn-ghost">Clear</button>
+      </div>
+      <pre id="outputArea" class="output">{ "message": "Ready. Run a command." }</pre>
+    </section>
+
+    <section class="panel insights-panel">
+      <div class="panel-head">
+        <h2>Latest Insights</h2>
+        <button id="refreshInsightsBtn" class="btn btn-small btn-ghost">Refresh</button>
+      </div>
+      <ul id="insightsList" class="insights-list">
+        <li class="insight-empty">Loading insights...</li>
+      </ul>
+    </section>
+  </main>
+
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

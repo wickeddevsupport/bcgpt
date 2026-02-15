@@ -32,6 +32,10 @@ Canonical status and execution context now live in:
    - status config must not contain internal hostnames for `bcgpt_url`
    - `POST /mcp` with `tools/call -> pmos_status` must succeed from `bcgpt.wickedlab.io`
    - `GET /` on `bcgpt.wickedlab.io` must render MCP landing message with `/connect` CTA
+6) Expand PMOS shell from deterministic commands to full agentic execution:
+   - Add authenticated PMOS chat session surface.
+   - Add operation timeline (action log + undo where supported).
+   - Add approvals for high-risk actions before execution.
 
 ## Must do (Search + Correctness)
 1) Enforce query requirements for all search-like tools (return `MISSING_QUERY` for missing inputs).
