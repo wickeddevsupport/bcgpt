@@ -187,6 +187,20 @@ export async function refreshActiveTab(host: SettingsHost) {
   }
   if (host.tab === "integrations") {
     await (host as unknown as OpenClawApp).handlePmosIntegrationsLoad();
+    // Phase 2: native embed panels (safe even if projectId isn't set yet; controllers show a helpful error).
+    await Promise.all([
+      (host as unknown as OpenClawApp).handlePmosApPiecesLoad(),
+      (host as unknown as OpenClawApp).handlePmosApConnectionsLoad(),
+    ]);
+  }
+  if (host.tab === "automations") {
+    // Ensure connector config is hydrated before trying to load flows.
+    await (host as unknown as OpenClawApp).handlePmosIntegrationsLoad();
+    await (host as unknown as OpenClawApp).handlePmosApFlowsLoad();
+  }
+  if (host.tab === "runs") {
+    await (host as unknown as OpenClawApp).handlePmosIntegrationsLoad();
+    await (host as unknown as OpenClawApp).handlePmosApRunsLoad();
   }
   if (host.tab === "overview") {
     await loadOverview(host);

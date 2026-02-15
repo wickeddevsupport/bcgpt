@@ -86,6 +86,24 @@ import {
   savePmosConnectorsConfig,
   type PmosConnectorsStatus,
 } from "./controllers/pmos-connectors.ts";
+import {
+  applyActivepiecesFlowOperationDraft,
+  createActivepiecesConnection,
+  createActivepiecesFlow,
+  deleteActivepiecesConnection,
+  deleteActivepiecesFlow,
+  loadActivepiecesConnections,
+  loadActivepiecesFlows,
+  loadActivepiecesFlowDetails,
+  loadActivepiecesPieces,
+  loadActivepiecesRunDetails,
+  loadActivepiecesRuns,
+  publishActivepiecesFlow,
+  renameActivepiecesFlow,
+  retryActivepiecesRun,
+  setActivepiecesFlowStatus,
+  triggerActivepiecesFlowWebhook,
+} from "./controllers/pmos-activepieces.ts";
 import { loadConfig } from "./controllers/config.ts";
 
 declare global {
@@ -203,6 +221,62 @@ export class OpenClawApp extends LitElement {
   @state() pmosConnectorsStatus: PmosConnectorsStatus | null = null;
   @state() pmosConnectorsError: string | null = null;
   @state() pmosConnectorsLastChecked: number | null = null;
+
+  // PMOS Activepieces native embed (Phase 2)
+  @state() apPiecesLoading = false;
+  @state() apPiecesError: string | null = null;
+  @state() apPiecesQuery = "";
+  @state() apPieces: import("./controllers/pmos-activepieces.ts").ActivepiecesPieceSummary[] = [];
+  @state() apPieceSelectedName: string | null = null;
+  @state() apPieceDetailsLoading = false;
+  @state() apPieceDetailsError: string | null = null;
+  @state() apPieceDetails: unknown | null = null;
+
+  @state() apConnectionsLoading = false;
+  @state() apConnectionsError: string | null = null;
+  @state() apConnections: import("./controllers/pmos-activepieces.ts").ActivepiecesConnectionSummary[] =
+    [];
+  @state() apConnectionsCursor: string | null = null;
+  @state() apConnectionsHasNext = false;
+  @state() apConnectionCreateSaving = false;
+  @state() apConnectionCreateError: string | null = null;
+  @state() apConnectionCreatePieceName = "";
+  @state() apConnectionCreateDisplayName = "";
+  @state() apConnectionCreateType: "secret_text" | "basic_auth" | "no_auth" = "secret_text";
+  @state() apConnectionCreateSecretText = "";
+  @state() apConnectionCreateBasicUser = "";
+  @state() apConnectionCreateBasicPass = "";
+
+  @state() apFlowsLoading = false;
+  @state() apFlowsError: string | null = null;
+  @state() apFlowsQuery = "";
+  @state() apFlows: import("./controllers/pmos-activepieces.ts").ActivepiecesFlowSummary[] = [];
+  @state() apFlowsCursor: string | null = null;
+  @state() apFlowsHasNext = false;
+  @state() apFlowCreateName = "";
+  @state() apFlowCreateSaving = false;
+  @state() apFlowCreateError: string | null = null;
+  @state() apFlowSelectedId: string | null = null;
+  @state() apFlowDetailsLoading = false;
+  @state() apFlowDetailsError: string | null = null;
+  @state() apFlowDetails: unknown | null = null;
+  @state() apFlowRenameDraft = "";
+  @state() apFlowOperationDraft = "";
+  @state() apFlowTriggerPayloadDraft = "{\n  \n}\n";
+  @state() apFlowMutating = false;
+  @state() apFlowMutateError: string | null = null;
+
+  @state() apRunsLoading = false;
+  @state() apRunsError: string | null = null;
+  @state() apRuns: import("./controllers/pmos-activepieces.ts").ActivepiecesRunSummary[] = [];
+  @state() apRunsCursor: string | null = null;
+  @state() apRunsHasNext = false;
+  @state() apRunSelectedId: string | null = null;
+  @state() apRunDetailsLoading = false;
+  @state() apRunDetailsError: string | null = null;
+  @state() apRunDetails: unknown | null = null;
+  @state() apRunRetrying = false;
+  @state() apRunRetryError: string | null = null;
 
   @state() channelsLoading = false;
   @state() channelsSnapshot: ChannelsStatusSnapshot | null = null;
@@ -483,6 +557,96 @@ export class OpenClawApp extends LitElement {
     await loadConfig(this);
     hydratePmosConnectorDraftsFromConfig(this);
     await loadPmosConnectorsStatus(this);
+  }
+
+  async handlePmosApPiecesLoad() {
+    await loadActivepiecesPieces(this as unknown as Parameters<typeof loadActivepiecesPieces>[0]);
+  }
+
+  async handlePmosApConnectionsLoad() {
+    await loadActivepiecesConnections(
+      this as unknown as Parameters<typeof loadActivepiecesConnections>[0],
+    );
+  }
+
+  async handlePmosApConnectionCreate() {
+    await createActivepiecesConnection(
+      this as unknown as Parameters<typeof createActivepiecesConnection>[0],
+    );
+  }
+
+  async handlePmosApConnectionDelete(connectionId: string) {
+    await deleteActivepiecesConnection(
+      this as unknown as Parameters<typeof deleteActivepiecesConnection>[0],
+      connectionId,
+    );
+  }
+
+  async handlePmosApFlowsLoad() {
+    await loadActivepiecesFlows(this as unknown as Parameters<typeof loadActivepiecesFlows>[0]);
+  }
+
+  async handlePmosApFlowCreate() {
+    await createActivepiecesFlow(this as unknown as Parameters<typeof createActivepiecesFlow>[0]);
+  }
+
+  async handlePmosApFlowSelect(flowId: string) {
+    await loadActivepiecesFlowDetails(
+      this as unknown as Parameters<typeof loadActivepiecesFlowDetails>[0],
+      flowId,
+    );
+  }
+
+  async handlePmosApFlowRename() {
+    await renameActivepiecesFlow(this as unknown as Parameters<typeof renameActivepiecesFlow>[0]);
+  }
+
+  async handlePmosApFlowSetStatus(status: "ENABLED" | "DISABLED") {
+    await setActivepiecesFlowStatus(
+      this as unknown as Parameters<typeof setActivepiecesFlowStatus>[0],
+      status,
+    );
+  }
+
+  async handlePmosApFlowPublish() {
+    await publishActivepiecesFlow(
+      this as unknown as Parameters<typeof publishActivepiecesFlow>[0],
+    );
+  }
+
+  async handlePmosApFlowDelete() {
+    await deleteActivepiecesFlow(this as unknown as Parameters<typeof deleteActivepiecesFlow>[0]);
+  }
+
+  async handlePmosApFlowApplyOperation() {
+    await applyActivepiecesFlowOperationDraft(
+      this as unknown as Parameters<typeof applyActivepiecesFlowOperationDraft>[0],
+    );
+  }
+
+  async handlePmosApFlowTriggerWebhook(opts?: { draft?: boolean; sync?: boolean }) {
+    await triggerActivepiecesFlowWebhook(
+      this as unknown as Parameters<typeof triggerActivepiecesFlowWebhook>[0],
+      opts,
+    );
+  }
+
+  async handlePmosApRunsLoad() {
+    await loadActivepiecesRuns(this as unknown as Parameters<typeof loadActivepiecesRuns>[0]);
+  }
+
+  async handlePmosApRunSelect(runId: string) {
+    await loadActivepiecesRunDetails(
+      this as unknown as Parameters<typeof loadActivepiecesRunDetails>[0],
+      runId,
+    );
+  }
+
+  async handlePmosApRunRetry(strategy: "FROM_FAILED_STEP" | "ON_LATEST_VERSION") {
+    await retryActivepiecesRun(
+      this as unknown as Parameters<typeof retryActivepiecesRun>[0],
+      strategy,
+    );
   }
 
   removeQueuedMessage(id: string) {

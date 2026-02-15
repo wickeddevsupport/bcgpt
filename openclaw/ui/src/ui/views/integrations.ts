@@ -1,5 +1,9 @@
 import { html, nothing } from "lit";
 import type { PmosConnectorsStatus } from "../controllers/pmos-connectors.ts";
+import type {
+  ActivepiecesConnectionSummary,
+  ActivepiecesPieceSummary,
+} from "../controllers/pmos-activepieces.ts";
 
 export type IntegrationsProps = {
   connected: boolean;
@@ -22,6 +26,35 @@ export type IntegrationsProps = {
   onClearActivepiecesKey: () => void;
   onClearBcgptKey: () => void;
   onRefreshConnectors: () => void;
+
+  // Phase 2: Activepieces native embed
+  apPiecesLoading: boolean;
+  apPiecesError: string | null;
+  apPiecesQuery: string;
+  apPieces: ActivepiecesPieceSummary[];
+  onApPiecesQueryChange: (next: string) => void;
+  onApPiecesRefresh: () => void;
+
+  apConnectionsLoading: boolean;
+  apConnectionsError: string | null;
+  apConnections: ActivepiecesConnectionSummary[];
+  apConnectionCreateSaving: boolean;
+  apConnectionCreateError: string | null;
+  apConnectionCreatePieceName: string;
+  apConnectionCreateDisplayName: string;
+  apConnectionCreateType: "secret_text" | "basic_auth" | "no_auth";
+  apConnectionCreateSecretText: string;
+  apConnectionCreateBasicUser: string;
+  apConnectionCreateBasicPass: string;
+  onApConnectionsRefresh: () => void;
+  onApConnectionCreate: () => void;
+  onApConnectionDelete: (connectionId: string) => void;
+  onApConnectionCreatePieceNameChange: (next: string) => void;
+  onApConnectionCreateDisplayNameChange: (next: string) => void;
+  onApConnectionCreateTypeChange: (next: "secret_text" | "basic_auth" | "no_auth") => void;
+  onApConnectionCreateSecretTextChange: (next: string) => void;
+  onApConnectionCreateBasicUserChange: (next: string) => void;
+  onApConnectionCreateBasicPassChange: (next: string) => void;
 };
 
 function renderConnectorStatus(label: string, ok: boolean | null, detail?: string | null) {
@@ -197,6 +230,189 @@ export function renderIntegrations(props: IntegrationsProps) {
             </div>`
           : nothing
       }
+    </section>
+
+    <section class="grid grid-cols-2" style="margin-top: 18px;">
+      <div class="card">
+        <div class="card-title">Pieces Catalog</div>
+        <div class="card-sub">Browse Activepieces integrations (200+).</div>
+
+        <div class="form-grid" style="margin-top: 14px;">
+          <label class="field full">
+            <span>Search</span>
+            <input
+              .value=${props.apPiecesQuery}
+              @input=${(e: Event) => props.onApPiecesQueryChange((e.target as HTMLInputElement).value)}
+              placeholder="e.g. Slack, Gmail, Notion"
+              ?disabled=${!props.connected}
+            />
+          </label>
+        </div>
+
+        <div class="row" style="margin-top: 12px;">
+          <button
+            class="btn"
+            ?disabled=${!props.connected || props.apPiecesLoading}
+            @click=${() => props.onApPiecesRefresh()}
+          >
+            ${props.apPiecesLoading ? "Loading..." : "Load pieces"}
+          </button>
+        </div>
+
+        ${props.apPiecesError ? html`<div class="callout danger" style="margin-top: 12px;">${props.apPiecesError}</div>` : nothing}
+
+        <div class="list" style="margin-top: 14px; max-height: 420px; overflow: auto;">
+          ${props.apPieces.map((piece) => {
+            const title = piece.displayName || piece.name || "Piece";
+            const sub = piece.name || "";
+            const desc = piece.description || "";
+            return html`
+              <div class="list-item">
+                <div class="list-main">
+                  <div class="list-title">${title}</div>
+                  <div class="list-sub mono">${sub}</div>
+                  ${desc ? html`<div class="list-sub">${desc}</div>` : nothing}
+                </div>
+              </div>
+            `;
+          })}
+          ${props.apPieces.length === 0 && !props.apPiecesLoading ? html`<div class="muted">No pieces loaded.</div>` : nothing}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Connections</div>
+        <div class="card-sub">Create and manage Activepieces app connections for your project.</div>
+
+        <div class="form-grid" style="margin-top: 14px;">
+          <label class="field">
+            <span>Piece name</span>
+            <input
+              .value=${props.apConnectionCreatePieceName}
+              @input=${(e: Event) => props.onApConnectionCreatePieceNameChange((e.target as HTMLInputElement).value)}
+              placeholder="e.g. slack"
+              ?disabled=${!props.connected}
+            />
+          </label>
+          <label class="field">
+            <span>Display name</span>
+            <input
+              .value=${props.apConnectionCreateDisplayName}
+              @input=${(e: Event) => props.onApConnectionCreateDisplayNameChange((e.target as HTMLInputElement).value)}
+              placeholder="e.g. Slack (Prod)"
+              ?disabled=${!props.connected}
+            />
+          </label>
+          <label class="field">
+            <span>Auth type</span>
+            <select
+              .value=${props.apConnectionCreateType}
+              @change=${(e: Event) =>
+                props.onApConnectionCreateTypeChange((e.target as HTMLSelectElement).value as any)}
+              ?disabled=${!props.connected}
+            >
+              <option value="secret_text">Secret Text</option>
+              <option value="basic_auth">Basic Auth</option>
+              <option value="no_auth">No Auth</option>
+            </select>
+          </label>
+
+          ${
+            props.apConnectionCreateType === "secret_text"
+              ? html`
+                  <label class="field full">
+                    <span>Secret</span>
+                    <input
+                      type="password"
+                      .value=${props.apConnectionCreateSecretText}
+                      @input=${(e: Event) =>
+                        props.onApConnectionCreateSecretTextChange((e.target as HTMLInputElement).value)}
+                      placeholder="token / api key"
+                      autocomplete="off"
+                      ?disabled=${!props.connected}
+                    />
+                  </label>
+                `
+              : nothing
+          }
+
+          ${
+            props.apConnectionCreateType === "basic_auth"
+              ? html`
+                  <label class="field">
+                    <span>Username</span>
+                    <input
+                      .value=${props.apConnectionCreateBasicUser}
+                      @input=${(e: Event) =>
+                        props.onApConnectionCreateBasicUserChange((e.target as HTMLInputElement).value)}
+                      placeholder="username"
+                      ?disabled=${!props.connected}
+                    />
+                  </label>
+                  <label class="field">
+                    <span>Password</span>
+                    <input
+                      type="password"
+                      .value=${props.apConnectionCreateBasicPass}
+                      @input=${(e: Event) =>
+                        props.onApConnectionCreateBasicPassChange((e.target as HTMLInputElement).value)}
+                      placeholder="password"
+                      autocomplete="off"
+                      ?disabled=${!props.connected}
+                    />
+                  </label>
+                `
+              : nothing
+          }
+        </div>
+
+        <div class="row" style="margin-top: 12px;">
+          <button
+            class="btn primary"
+            ?disabled=${!props.connected || props.apConnectionCreateSaving}
+            @click=${() => props.onApConnectionCreate()}
+          >
+            ${props.apConnectionCreateSaving ? "Creating..." : "Create connection"}
+          </button>
+          <button
+            class="btn btn--secondary"
+            ?disabled=${!props.connected || props.apConnectionsLoading}
+            @click=${() => props.onApConnectionsRefresh()}
+          >
+            ${props.apConnectionsLoading ? "Loading..." : "Refresh"}
+          </button>
+        </div>
+
+        ${props.apConnectionCreateError ? html`<div class="callout danger" style="margin-top: 12px;">${props.apConnectionCreateError}</div>` : nothing}
+        ${props.apConnectionsError ? html`<div class="callout danger" style="margin-top: 12px;">${props.apConnectionsError}</div>` : nothing}
+
+        <div class="list" style="margin-top: 14px; max-height: 420px; overflow: auto;">
+          ${props.apConnections.map((conn) => {
+            const title = conn.displayName || conn.id;
+            const sub = [conn.pieceName ? `piece ${conn.pieceName}` : null, conn.status ? conn.status : null]
+              .filter(Boolean)
+              .join(" · ");
+            return html`
+              <div class="list-item">
+                <div class="list-main">
+                  <div class="list-title">${title}</div>
+                  <div class="list-sub mono">${conn.id}</div>
+                  ${sub ? html`<div class="list-sub">${sub}</div>` : nothing}
+                </div>
+                <div class="list-meta">
+                  <div></div>
+                  <div>
+                    <button class="btn btn--sm danger" @click=${() => props.onApConnectionDelete(conn.id)}>
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            `;
+          })}
+          ${props.apConnections.length === 0 && !props.apConnectionsLoading ? html`<div class="muted">No connections loaded.</div>` : nothing}
+        </div>
+      </div>
     </section>
   `;
 }

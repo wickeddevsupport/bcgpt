@@ -35,6 +35,12 @@ import type { ChatAttachment, ChatQueueItem, CronFormState } from "./ui-types.ts
 import type { NostrProfileFormState } from "./views/channels.nostr-profile-form.ts";
 import type { SessionLogEntry } from "./views/usage.ts";
 import type { PmosConnectorsStatus } from "./controllers/pmos-connectors.ts";
+import type {
+  ActivepiecesConnectionSummary,
+  ActivepiecesFlowSummary,
+  ActivepiecesPieceSummary,
+  ActivepiecesRunSummary,
+} from "./controllers/pmos-activepieces.ts";
 
 export type AppViewState = {
   settings: UiSettings;
@@ -123,6 +129,61 @@ export type AppViewState = {
   pmosConnectorsStatus: PmosConnectorsStatus | null;
   pmosConnectorsError: string | null;
   pmosConnectorsLastChecked: number | null;
+
+  // PMOS Activepieces native embed (Phase 2)
+  apPiecesLoading: boolean;
+  apPiecesError: string | null;
+  apPiecesQuery: string;
+  apPieces: ActivepiecesPieceSummary[];
+  apPieceSelectedName: string | null;
+  apPieceDetailsLoading: boolean;
+  apPieceDetailsError: string | null;
+  apPieceDetails: unknown | null;
+
+  apConnectionsLoading: boolean;
+  apConnectionsError: string | null;
+  apConnections: ActivepiecesConnectionSummary[];
+  apConnectionsCursor: string | null;
+  apConnectionsHasNext: boolean;
+  apConnectionCreateSaving: boolean;
+  apConnectionCreateError: string | null;
+  apConnectionCreatePieceName: string;
+  apConnectionCreateDisplayName: string;
+  apConnectionCreateType: "secret_text" | "basic_auth" | "no_auth";
+  apConnectionCreateSecretText: string;
+  apConnectionCreateBasicUser: string;
+  apConnectionCreateBasicPass: string;
+
+  apFlowsLoading: boolean;
+  apFlowsError: string | null;
+  apFlowsQuery: string;
+  apFlows: ActivepiecesFlowSummary[];
+  apFlowsCursor: string | null;
+  apFlowsHasNext: boolean;
+  apFlowCreateName: string;
+  apFlowCreateSaving: boolean;
+  apFlowCreateError: string | null;
+  apFlowSelectedId: string | null;
+  apFlowDetailsLoading: boolean;
+  apFlowDetailsError: string | null;
+  apFlowDetails: unknown | null;
+  apFlowRenameDraft: string;
+  apFlowOperationDraft: string;
+  apFlowTriggerPayloadDraft: string;
+  apFlowMutating: boolean;
+  apFlowMutateError: string | null;
+
+  apRunsLoading: boolean;
+  apRunsError: string | null;
+  apRuns: ActivepiecesRunSummary[];
+  apRunsCursor: string | null;
+  apRunsHasNext: boolean;
+  apRunSelectedId: string | null;
+  apRunDetailsLoading: boolean;
+  apRunDetailsError: string | null;
+  apRunDetails: unknown | null;
+  apRunRetrying: boolean;
+  apRunRetryError: string | null;
   channelsLoading: boolean;
   channelsSnapshot: ChannelsStatusSnapshot | null;
   channelsError: string | null;
@@ -293,6 +354,22 @@ export type AppViewState = {
   handlePmosIntegrationsSave: () => Promise<void>;
   handlePmosIntegrationsClearActivepiecesKey: () => Promise<void>;
   handlePmosIntegrationsClearBcgptKey: () => Promise<void>;
+  handlePmosApPiecesLoad: () => Promise<void>;
+  handlePmosApConnectionsLoad: () => Promise<void>;
+  handlePmosApConnectionCreate: () => Promise<void>;
+  handlePmosApConnectionDelete: (connectionId: string) => Promise<void>;
+  handlePmosApFlowsLoad: () => Promise<void>;
+  handlePmosApFlowCreate: () => Promise<void>;
+  handlePmosApFlowSelect: (flowId: string) => Promise<void>;
+  handlePmosApFlowRename: () => Promise<void>;
+  handlePmosApFlowSetStatus: (status: "ENABLED" | "DISABLED") => Promise<void>;
+  handlePmosApFlowPublish: () => Promise<void>;
+  handlePmosApFlowDelete: () => Promise<void>;
+  handlePmosApFlowApplyOperation: () => Promise<void>;
+  handlePmosApFlowTriggerWebhook: (opts?: { draft?: boolean; sync?: boolean }) => Promise<void>;
+  handlePmosApRunsLoad: () => Promise<void>;
+  handlePmosApRunSelect: (runId: string) => Promise<void>;
+  handlePmosApRunRetry: (strategy: "FROM_FAILED_STEP" | "ON_LATEST_VERSION") => Promise<void>;
   removeQueuedMessage: (id: string) => void;
   handleChatScroll: (event: Event) => void;
   resetToolStream: () => void;

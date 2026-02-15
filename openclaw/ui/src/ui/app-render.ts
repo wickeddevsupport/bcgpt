@@ -252,7 +252,44 @@ export function renderApp(state: AppViewState) {
         ${
           state.tab === "automations"
             ? renderAutomations({
+                connected: state.connected,
                 integrationsHref: pathForTab("integrations", state.basePath),
+                projectId: state.pmosActivepiecesProjectId,
+
+                loading: state.apFlowsLoading,
+                error: state.apFlowsError,
+                flowsQuery: state.apFlowsQuery,
+                flows: state.apFlows,
+
+                createName: state.apFlowCreateName,
+                creating: state.apFlowCreateSaving,
+                createError: state.apFlowCreateError,
+
+                selectedFlowId: state.apFlowSelectedId,
+                flowDetailsLoading: state.apFlowDetailsLoading,
+                flowDetailsError: state.apFlowDetailsError,
+                flowDetails: state.apFlowDetails,
+
+                renameDraft: state.apFlowRenameDraft,
+                operationDraft: state.apFlowOperationDraft,
+                triggerPayloadDraft: state.apFlowTriggerPayloadDraft,
+                mutating: state.apFlowMutating,
+                mutateError: state.apFlowMutateError,
+
+                onFlowsQueryChange: (next) => (state.apFlowsQuery = next),
+                onRefresh: () => state.handlePmosApFlowsLoad(),
+                onCreateNameChange: (next) => (state.apFlowCreateName = next),
+                onCreate: () => state.handlePmosApFlowCreate(),
+                onSelectFlow: (flowId) => state.handlePmosApFlowSelect(flowId),
+                onRenameDraftChange: (next) => (state.apFlowRenameDraft = next),
+                onRename: () => state.handlePmosApFlowRename(),
+                onSetStatus: (status) => state.handlePmosApFlowSetStatus(status),
+                onPublish: () => state.handlePmosApFlowPublish(),
+                onDelete: () => state.handlePmosApFlowDelete(),
+                onOperationDraftChange: (next) => (state.apFlowOperationDraft = next),
+                onApplyOperation: () => state.handlePmosApFlowApplyOperation(),
+                onTriggerPayloadDraftChange: (next) => (state.apFlowTriggerPayloadDraft = next),
+                onTriggerWebhook: (opts) => state.handlePmosApFlowTriggerWebhook(opts),
               })
             : nothing
         }
@@ -260,7 +297,23 @@ export function renderApp(state: AppViewState) {
         ${
           state.tab === "runs"
             ? renderRuns({
+                connected: state.connected,
                 integrationsHref: pathForTab("integrations", state.basePath),
+                projectId: state.pmosActivepiecesProjectId,
+
+                loading: state.apRunsLoading,
+                error: state.apRunsError,
+                runs: state.apRuns,
+                selectedRunId: state.apRunSelectedId,
+                runDetailsLoading: state.apRunDetailsLoading,
+                runDetailsError: state.apRunDetailsError,
+                runDetails: state.apRunDetails,
+                retrying: state.apRunRetrying,
+                retryError: state.apRunRetryError,
+
+                onRefresh: () => state.handlePmosApRunsLoad(),
+                onSelectRun: (runId) => state.handlePmosApRunSelect(runId),
+                onRetry: (strategy) => state.handlePmosApRunRetry(strategy),
               })
             : nothing
         }
@@ -289,6 +342,34 @@ export function renderApp(state: AppViewState) {
                 onClearActivepiecesKey: () => state.handlePmosIntegrationsClearActivepiecesKey(),
                 onClearBcgptKey: () => state.handlePmosIntegrationsClearBcgptKey(),
                 onRefreshConnectors: () => state.handlePmosRefreshConnectors(),
+
+                apPiecesLoading: state.apPiecesLoading,
+                apPiecesError: state.apPiecesError,
+                apPiecesQuery: state.apPiecesQuery,
+                apPieces: state.apPieces,
+                onApPiecesQueryChange: (next) => (state.apPiecesQuery = next),
+                onApPiecesRefresh: () => state.handlePmosApPiecesLoad(),
+
+                apConnectionsLoading: state.apConnectionsLoading,
+                apConnectionsError: state.apConnectionsError,
+                apConnections: state.apConnections,
+                apConnectionCreateSaving: state.apConnectionCreateSaving,
+                apConnectionCreateError: state.apConnectionCreateError,
+                apConnectionCreatePieceName: state.apConnectionCreatePieceName,
+                apConnectionCreateDisplayName: state.apConnectionCreateDisplayName,
+                apConnectionCreateType: state.apConnectionCreateType,
+                apConnectionCreateSecretText: state.apConnectionCreateSecretText,
+                apConnectionCreateBasicUser: state.apConnectionCreateBasicUser,
+                apConnectionCreateBasicPass: state.apConnectionCreateBasicPass,
+                onApConnectionsRefresh: () => state.handlePmosApConnectionsLoad(),
+                onApConnectionCreate: () => state.handlePmosApConnectionCreate(),
+                onApConnectionDelete: (connectionId) => state.handlePmosApConnectionDelete(connectionId),
+                onApConnectionCreatePieceNameChange: (next) => (state.apConnectionCreatePieceName = next),
+                onApConnectionCreateDisplayNameChange: (next) => (state.apConnectionCreateDisplayName = next),
+                onApConnectionCreateTypeChange: (next) => (state.apConnectionCreateType = next),
+                onApConnectionCreateSecretTextChange: (next) => (state.apConnectionCreateSecretText = next),
+                onApConnectionCreateBasicUserChange: (next) => (state.apConnectionCreateBasicUser = next),
+                onApConnectionCreateBasicPassChange: (next) => (state.apConnectionCreateBasicPass = next),
               })
             : nothing
         }
