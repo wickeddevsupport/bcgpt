@@ -18,6 +18,17 @@ Canonical status and execution context now live in:
    - Playwright E2E suite + CI integration.
    - Security hardening pass (rate limits, CORS, secret masking verification).
 
+## PMOS Immediate Build Track (2026-02-15)
+1) Add PMOS web shell on `https://os.wickedlab.io/` so root is a product entrypoint (not API-only behavior).
+2) Keep PMOS runtime wired to:
+   - `BCGPT_URL=https://bcgpt.wickedlab.io`
+   - `FLOW_URL=https://flow.wickedlab.io`
+3) Add startup/runtime guard that logs effective PMOS integration URLs at boot.
+4) Add smoke checks in deploy workflow:
+   - `GET /health` must be `200`
+   - `GET /api/status` must be `200`
+   - status config must not contain internal hostnames for `bcgpt_url`
+
 ## Must do (Search + Correctness)
 1) Enforce query requirements for all search-like tools (return `MISSING_QUERY` for missing inputs).
 2) Ensure chunk integrity: never return partial arrays without `payload_key` + `chunk_count`.

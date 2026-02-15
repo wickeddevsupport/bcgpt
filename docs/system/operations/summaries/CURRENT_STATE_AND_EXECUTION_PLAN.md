@@ -15,6 +15,23 @@ Purpose: single source of truth for "where we are now" and "what to do next" in 
   - `/mcp` tool listing works
   - `flow_*` tools still available and return expected auth-gated errors when unauthenticated
 
+### PMOS Deployment Track (2026-02-15)
+
+- Separate PMOS application deployed in Coolify:
+  - App: `pmos`
+  - Domain: `https://os.wickedlab.io`
+  - Compose source: `docker-compose.pmos.yml`
+  - Runtime image commit: `283098eb651aa553fbd62d924e99de700abb84cd`
+- Live verification passed:
+  - `https://os.wickedlab.io/health` returns `200`
+  - `https://os.wickedlab.io/api/status` returns `200`
+  - PMOS status config now reports:
+    - `bcgpt_url: https://bcgpt.wickedlab.io`
+    - `flow_url: https://flow.wickedlab.io`
+- Incident fix applied:
+  - Removed stale generated PMOS app env key `BCGPT_URL=http://bcgpt:10000` from Coolify app runtime env file (`/data/coolify/applications/vg88kok000o8csg8occgcskg/.env`) and recreated PMOS container.
+  - This eliminated wrong internal URL routing and aligned PMOS to public BCGPT endpoint.
+
 Critical deploy note:
 - Do not use `docker compose -f docker-compose.bcgpt.yml up/down` on the production host for normal BCGPT deploys.
 - That stack shares `bcgpt-postgres-data` volume naming and can collide with the running production Postgres container.
@@ -42,6 +59,7 @@ Critical deploy note:
 - Pending before declaring Phase D complete:
   - Implement Playwright E2E + CI integration.
   - Complete security hardening pass (rate limits/CORS/secret masking checks).
+  - Add PMOS web shell on `os.wickedlab.io/` (currently API-first deployment).
 
 ## 0. Non-Negotiable Guardrails
 

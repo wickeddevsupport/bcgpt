@@ -35,6 +35,21 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Root endpoint so domain root shows service availability instead of 404
+app.get('/', (req, res) => {
+  res.json({
+    service: 'pmos-server',
+    status: 'operational',
+    version: '1.0.0',
+    endpoints: {
+      health: '/health',
+      status: '/api/status',
+      tools: '/api/tools',
+      mcp: '/mcp'
+    }
+  });
+});
+
 // MCP Protocol endpoint
 app.post('/mcp', async (req, res) => {
   try {
@@ -237,6 +252,7 @@ const PORT = config.port;
 const HOST = config.host;
 
 app.listen(PORT, HOST, () => {
+  console.log(`PMOS integrations: BCGPT_URL=${config.bcgptUrl} FLOW_URL=${config.flowUrl}`);
   console.log(`
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
