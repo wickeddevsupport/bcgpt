@@ -15,16 +15,27 @@ Canonical plan: `docs/system/operations/summaries/CURRENT_STATE_AND_EXECUTION_PL
 2. Do not change Activepieces behavior on `flow.wickedlab.io` unless explicitly approved.
 3. PMOS work happens in `openclaw/` (UI + extensions) and PMOS glue modules.
 
-## Immediate Work Queue (Start Here)
+## Phase 1 (Complete): OpenClaw UX + Connector Onboarding
 
-1. PMOS UX simplification (OpenClaw Control UI rework):
-   - Define the PMOS nav: Dashboard, Flows, Runs, Integrations, Admin, Settings.
-   - Replace confusing OpenClaw jargon with PMOS terms (without breaking core engine features).
-   - Add a "Connect" screen that supports:
-     - BCGPT connect link + API key paste/store
-     - Activepieces API key paste/store
+Shipped + deployed to `os.wickedlab.io`:
 
-2. Activepieces native embed (no app switching):
+1. Simplified OpenClaw Control UI into a PMOS shell:
+   - PMOS-first navigation (Dashboard, Automations, Runs, Integrations, Chat).
+   - Legacy panels moved under "Admin (Advanced)" and collapsed by default.
+2. Added connector onboarding + health checks:
+   - Activepieces: reachability + auth probe via flows list.
+   - BCGPT: reachability + auth probe via MCP `tools/list` (API key required).
+3. Added gateway method: `pmos.connectors.status`.
+
+Smoke validation:
+
+1. `https://os.wickedlab.io/api/health` returns 200.
+2. From inside the PMOS container:
+   - `node openclaw.mjs gateway call pmos.connectors.status --json`
+
+## Immediate Work Queue (Phase 2 Start)
+
+1. Activepieces native embed (no app switching):
    - Implement Flows view in PMOS UI:
      - list flows
      - open flow editor inside PMOS (graph + step config)
@@ -33,12 +44,12 @@ Canonical plan: `docs/system/operations/summaries/CURRENT_STATE_AND_EXECUTION_PL
      - list pieces catalog
      - list connections + create/update/delete
 
-3. PMOS identity + admin:
+2. PMOS identity + admin:
    - Add PMOS native auth (email first).
    - Add workspaces + roles (`system_admin`, `workspace_admin`, `member`, `viewer`).
    - Add admin screens: users/invites/roles + audit/events.
 
-4. AI-assisted flow creation (the "watch it build" experience):
+3. AI-assisted flow creation (the "watch it build" experience):
    - Chat -> graph-ops stream (`add_node`, `add_edge`, `update_mapping`)
    - Live canvas updates in PMOS
    - Commit to Activepieces, show result immediately

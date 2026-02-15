@@ -13,17 +13,33 @@ The earlier React PMOS prototype (`frontend/`) is not the PMOS product surface g
 
 1. `os.wickedlab.io` runs OpenClaw (vendored under `openclaw/`) via `docker-compose.pmos.yml`.
 2. OpenClaw is started in container mode (LAN bind) with `OPENCLAW_GATEWAY_TOKEN` set in Coolify env.
-3. `flow.wickedlab.io` (Activepieces) remains a separate running service and is treated as the automation engine.
-4. `bcgpt.wickedlab.io` remains the MCP/connect surface (Basecamp OAuth, MCP tools) and is treated as a connector.
+3. Phase 1 PMOS shell is live in the OpenClaw Control UI:
+   - PMOS-first navigation (Dashboard, Automations, Runs, Integrations, Chat).
+   - Legacy OpenClaw panels grouped under "Admin (Advanced)" and collapsed by default.
+4. Connector onboarding + health checks are live:
+   - UI: Integrations screen stores connector config in OpenClaw config (secrets redacted on read).
+   - Gateway method: `pmos.connectors.status` (Activepieces + BCGPT reachability + auth probes).
+5. `flow.wickedlab.io` (Activepieces) remains a separate running service and is treated as the automation engine.
+6. `bcgpt.wickedlab.io` remains the MCP/connect surface (Basecamp OAuth, MCP tools) and is treated as a connector.
+
+### Production verification (Phase 1)
+
+1. `https://os.wickedlab.io/` loads.
+2. Run the gateway check from inside the PMOS container:
+   - `node openclaw.mjs gateway call pmos.connectors.status --json`
+   - Expect `activepieces.reachable=true` and `activepieces.authOk=true`.
+   - `bcgpt.authOk` becomes true after setting a BCGPT API key in Integrations.
 
 ### What is next (the actual build)
 
-1. Streamline/rebrand OpenClaw Control UI into the PMOS UX (dashboard + flows + integrations + admin).
-2. Embed Activepieces functionality natively in PMOS UI (no "switch apps", no iframe-first dependency):
+1. Native Activepieces embed inside PMOS UI (no app switching, no iframe-first dependency):
    - flows list/create/edit/run
-   - connections/pieces catalog
    - runs timeline + logs + retries
-3. Add PMOS native auth + RBAC/admin and treat BCGPT/Activepieces as linked connectors.
+   - pieces catalog + connections management
+2. PMOS native auth + RBAC/admin:
+   - email auth first, then optional OAuth
+   - workspaces + roles + admin UI shell + audit feed
+3. Live AI flow building + execution trace stream in chat sidebar (model-agnostic).
 
 ## 1. Core Product Direction
 

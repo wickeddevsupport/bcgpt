@@ -4,6 +4,15 @@ Last updated: 2026-02-15
 
 This repo includes OpenClaw under `openclaw/`. PMOS is now built directly on OpenClaw (engine + Control UI). This doc explains where to change things and how OpenClaw fits with Activepieces and BCGPT.
 
+## Phase 1 Status (Completed)
+
+As of 2026-02-15, Phase 1 is deployed to `os.wickedlab.io` (OpenClaw image tag `openclaw-afb4abc1`):
+
+1. PMOS shell navigation + new PMOS-first pages (Dashboard, Integrations, etc).
+2. Connector onboarding + health checks:
+   - Activepieces + BCGPT status probes and configuration storage.
+   - Gateway method: `pmos.connectors.status` (implemented under `openclaw/src/gateway/server-methods/pmos.ts`).
+
 ## What OpenClaw Provides For PMOS
 
 1. A gateway/runtime (sessions, orchestration loop, tool execution patterns).
@@ -97,4 +106,3 @@ Notes:
 2. Add Activepieces connector tools (HTTP adapter) + PMOS Flows/Integrations screens.
 3. Add PMOS identity (email auth) + RBAC/admin.
 4. Add AI-assisted flow creation (graph-ops streaming and commit to Activepieces).
-
