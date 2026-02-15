@@ -1,5 +1,8 @@
 # BCGPT Project Management OS Vision
 
+> Status note (2026-02-15): This document is the master PMOS vision/spec narrative.
+> Canonical implementation status and build sequence are tracked in `docs/system/operations/summaries/CURRENT_STATE_AND_EXECUTION_PLAN.md`.
+
 ## Executive Summary
 BCGPT is no longer just a Basecamp MCP server. It is the seed of the **world's first full Project Management Operating System (PM OS)** — a data layer that can plug into any platform, an intelligence engine that reasons, and an autonomy layer that acts. Basecamp + Activepieces + Claude/ChatGPT/Others are the **first tenant** of that OS. The goal is to document every insight, every idea, and every diagram so nothing is lost while we continue building.
 
@@ -150,7 +153,7 @@ timeline
 | 8 | Expansion | Multi-platform bridges (GitHub, Slack, etc.), AI personas |
 
 ## 6. Documentation Mandate
-Record every idea, diagram, and discovery so the PM OS intellect stays intact: use this doc as the **single source of truth**, append new sections, and keep diagrams updated. Every feature in the catalog should have follow-up sub-docs (flowcharts, API contracts, UX sketches) ideally linked from here.
+Record every idea, diagram, and discovery so the PM OS intellect stays intact: use this doc as the **single source of truth for PMOS vision**, append new sections, and keep diagrams updated. Every feature in the catalog should have follow-up sub-docs (flowcharts, API contracts, UX sketches) ideally linked from here. Use the canonical tracker for live execution status.
 
 ## 7. Multi-Platform Vision: PM OS as Universal Layer
 

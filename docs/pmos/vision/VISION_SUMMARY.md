@@ -3,6 +3,9 @@
 
 Created: 2026-02-14
 
+> Status note (2026-02-15): This is a vision/specification document.
+> Canonical implementation status and execution order are tracked in `docs/system/operations/summaries/CURRENT_STATE_AND_EXECUTION_PLAN.md`.
+
 ---
 
 ## 🎯 What We're Building

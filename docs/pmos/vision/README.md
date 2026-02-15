@@ -2,6 +2,10 @@
 
 Welcome to the complete vision for the **Project Management Operating System**.
 
+> Status note (2026-02-15): This `vision/` folder defines target-state product direction and specs.
+> Live execution status and active build order are tracked in `docs/system/operations/summaries/CURRENT_STATE_AND_EXECUTION_PLAN.md`.
+> If a roadmap table here conflicts with current implementation status, follow the canonical tracker.
+
 ## Start Here
 📖 **[VISION_SUMMARY.md](VISION_SUMMARY.md)** - Quick overview of everything
 

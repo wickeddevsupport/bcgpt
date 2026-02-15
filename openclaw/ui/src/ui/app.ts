@@ -80,6 +80,13 @@ import { resolveInjectedAssistantIdentity } from "./assistant-identity.ts";
 import { loadAssistantIdentity as loadAssistantIdentityInternal } from "./controllers/assistant-identity.ts";
 import { loadSettings, type UiSettings } from "./storage.ts";
 import { type ChatAttachment, type ChatQueueItem, type CronFormState } from "./ui-types.ts";
+import {
+  hydratePmosConnectorDraftsFromConfig,
+  loadPmosConnectorsStatus,
+  savePmosConnectorsConfig,
+  type PmosConnectorsStatus,
+} from "./controllers/pmos-connectors.ts";
+import { loadConfig } from "./controllers/config.ts";
 
 declare global {
   interface Window {
@@ -106,7 +113,7 @@ function resolveOnboardingMode(): boolean {
 export class OpenClawApp extends LitElement {
   @state() settings: UiSettings = loadSettings();
   @state() password = "";
-  @state() tab: Tab = "chat";
+  @state() tab: Tab = "dashboard";
   @state() onboarding = resolveOnboardingMode();
   @state() connected = false;
   @state() theme: ThemeMode = this.settings.theme ?? "system";
@@ -182,6 +189,19 @@ export class OpenClawApp extends LitElement {
   @state() configSearchQuery = "";
   @state() configActiveSection: string | null = null;
   @state() configActiveSubsection: string | null = null;
+
+  // PMOS connector onboarding (Phase 1)
+  @state() pmosConnectorDraftsInitialized = false;
+  @state() pmosActivepiecesUrl = "https://flow.wickedlab.io";
+  @state() pmosActivepiecesApiKeyDraft = "";
+  @state() pmosBcgptUrl = "https://bcgpt.wickedlab.io";
+  @state() pmosBcgptApiKeyDraft = "";
+  @state() pmosIntegrationsSaving = false;
+  @state() pmosIntegrationsError: string | null = null;
+  @state() pmosConnectorsLoading = false;
+  @state() pmosConnectorsStatus: PmosConnectorsStatus | null = null;
+  @state() pmosConnectorsError: string | null = null;
+  @state() pmosConnectorsLastChecked: number | null = null;
 
   @state() channelsLoading = false;
   @state() channelsSnapshot: ChannelsStatusSnapshot | null = null;
@@ -431,6 +451,37 @@ export class OpenClawApp extends LitElement {
 
   async handleAbortChat() {
     await handleAbortChatInternal(this as unknown as Parameters<typeof handleAbortChatInternal>[0]);
+  }
+
+  async handlePmosRefreshConnectors() {
+    await loadPmosConnectorsStatus(this);
+  }
+
+  async handlePmosIntegrationsLoad() {
+    await loadConfig(this);
+    hydratePmosConnectorDraftsFromConfig(this);
+    await loadPmosConnectorsStatus(this);
+  }
+
+  async handlePmosIntegrationsSave() {
+    await savePmosConnectorsConfig(this);
+    await loadConfig(this);
+    hydratePmosConnectorDraftsFromConfig(this);
+    await loadPmosConnectorsStatus(this);
+  }
+
+  async handlePmosIntegrationsClearActivepiecesKey() {
+    await savePmosConnectorsConfig(this, { clearActivepiecesKey: true });
+    await loadConfig(this);
+    hydratePmosConnectorDraftsFromConfig(this);
+    await loadPmosConnectorsStatus(this);
+  }
+
+  async handlePmosIntegrationsClearBcgptKey() {
+    await savePmosConnectorsConfig(this, { clearBcgptKey: true });
+    await loadConfig(this);
+    hydratePmosConnectorDraftsFromConfig(this);
+    await loadPmosConnectorsStatus(this);
   }
 
   removeQueuedMessage(id: string) {

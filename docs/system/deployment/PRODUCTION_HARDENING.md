@@ -185,6 +185,7 @@ logger.error({
 - [ ] Audit events table created and working
 - [ ] Rate limits deployed and tested against production traffic
 - [ ] Error logging verified (100% of errors captured)
+- [ ] Validate Traefik router label syntax (run `npm run lint:traefik`)
 - [ ] Credentials are never logged (audit payload == no secrets)
 - [ ] HTTPS enforced on all routes
 - [ ] Database backups automated (daily, 30-day retention)

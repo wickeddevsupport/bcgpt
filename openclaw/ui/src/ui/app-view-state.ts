@@ -34,6 +34,7 @@ import type {
 import type { ChatAttachment, ChatQueueItem, CronFormState } from "./ui-types.ts";
 import type { NostrProfileFormState } from "./views/channels.nostr-profile-form.ts";
 import type { SessionLogEntry } from "./views/usage.ts";
+import type { PmosConnectorsStatus } from "./controllers/pmos-connectors.ts";
 
 export type AppViewState = {
   settings: UiSettings;
@@ -108,6 +109,19 @@ export type AppViewState = {
   configSearchQuery: string;
   configActiveSection: string | null;
   configActiveSubsection: string | null;
+
+  // PMOS connector onboarding (Phase 1)
+  pmosConnectorDraftsInitialized: boolean;
+  pmosActivepiecesUrl: string;
+  pmosActivepiecesApiKeyDraft: string;
+  pmosBcgptUrl: string;
+  pmosBcgptApiKeyDraft: string;
+  pmosIntegrationsSaving: boolean;
+  pmosIntegrationsError: string | null;
+  pmosConnectorsLoading: boolean;
+  pmosConnectorsStatus: PmosConnectorsStatus | null;
+  pmosConnectorsError: string | null;
+  pmosConnectorsLastChecked: number | null;
   channelsLoading: boolean;
   channelsSnapshot: ChannelsStatusSnapshot | null;
   channelsError: string | null;
@@ -273,6 +287,11 @@ export type AppViewState = {
   setChatMessage: (next: string) => void;
   handleSendChat: (messageOverride?: string, opts?: { restoreDraft?: boolean }) => Promise<void>;
   handleAbortChat: () => Promise<void>;
+  handlePmosRefreshConnectors: () => Promise<void>;
+  handlePmosIntegrationsLoad: () => Promise<void>;
+  handlePmosIntegrationsSave: () => Promise<void>;
+  handlePmosIntegrationsClearActivepiecesKey: () => Promise<void>;
+  handlePmosIntegrationsClearBcgptKey: () => Promise<void>;
   removeQueuedMessage: (id: string) => void;
   handleChatScroll: (event: Event) => void;
   resetToolStream: () => void;

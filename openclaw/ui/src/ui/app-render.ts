@@ -52,7 +52,7 @@ import {
 } from "./controllers/skills.ts";
 import { loadUsage, loadSessionTimeSeries, loadSessionLogs } from "./controllers/usage.ts";
 import { icons } from "./icons.ts";
-import { normalizeBasePath, TAB_GROUPS, subtitleForTab, titleForTab } from "./navigation.ts";
+import { normalizeBasePath, pathForTab, TAB_GROUPS, subtitleForTab, titleForTab } from "./navigation.ts";
 
 // Module-scope debounce for usage date changes (avoids type-unsafe hacks on state object)
 let usageDateDebounceTimeout: number | null = null;
@@ -63,6 +63,8 @@ const debouncedLoadUsage = (state: UsageState) => {
   usageDateDebounceTimeout = window.setTimeout(() => void loadUsage(state), 400);
 };
 import { renderAgents } from "./views/agents.ts";
+import { renderAutomations } from "./views/automations.ts";
+import { renderDashboard } from "./views/dashboard.ts";
 import { renderChannels } from "./views/channels.ts";
 import { renderChat } from "./views/chat.ts";
 import { renderConfig } from "./views/config.ts";
@@ -70,10 +72,12 @@ import { renderCron } from "./views/cron.ts";
 import { renderDebug } from "./views/debug.ts";
 import { renderExecApprovalPrompt } from "./views/exec-approval.ts";
 import { renderGatewayUrlConfirmation } from "./views/gateway-url-confirmation.ts";
+import { renderIntegrations } from "./views/integrations.ts";
 import { renderInstances } from "./views/instances.ts";
 import { renderLogs } from "./views/logs.ts";
 import { renderNodes } from "./views/nodes.ts";
 import { renderOverview } from "./views/overview.ts";
+import { renderRuns } from "./views/runs.ts";
 import { renderSessions } from "./views/sessions.ts";
 import { renderSkills } from "./views/skills.ts";
 import { renderUsage } from "./views/usage.ts";
@@ -185,10 +189,30 @@ export function renderApp(state: AppViewState) {
           <div class="nav-group__items">
             <a
               class="nav-item nav-item--external"
-              href="https://docs.openclaw.ai"
+              href=${state.pmosBcgptUrl.replace(/\/$/, "") + "/connect"}
               target="_blank"
               rel="noreferrer"
-              title="Docs (opens in new tab)"
+              title="Connect Basecamp via BCGPT (opens in new tab)"
+            >
+              <span class="nav-item__icon" aria-hidden="true">${icons.book}</span>
+              <span class="nav-item__text">Basecamp Connect</span>
+            </a>
+            <a
+              class="nav-item nav-item--external"
+              href=${state.pmosActivepiecesUrl}
+              target="_blank"
+              rel="noreferrer"
+              title="Open Activepieces (opens in new tab)"
+            >
+              <span class="nav-item__icon" aria-hidden="true">${icons.link}</span>
+              <span class="nav-item__text">Activepieces</span>
+            </a>
+            <a
+              class="nav-item nav-item--external"
+              href=${state.pmosBcgptUrl}
+              target="_blank"
+              rel="noreferrer"
+              title="Project docs (opens in new tab)"
             >
               <span class="nav-item__icon" aria-hidden="true">${icons.book}</span>
               <span class="nav-item__text">Docs</span>
@@ -207,6 +231,65 @@ export function renderApp(state: AppViewState) {
             ${isChat ? renderChatControls(state) : nothing}
           </div>
         </section>
+
+        ${
+          state.tab === "dashboard"
+            ? renderDashboard({
+                connected: state.connected,
+                settings: state.settings,
+                lastError: state.lastError,
+                connectorsLoading: state.pmosConnectorsLoading,
+                connectorsError: state.pmosConnectorsError,
+                connectorsStatus: state.pmosConnectorsStatus,
+                integrationsHref: pathForTab("integrations", state.basePath),
+                onSettingsChange: (next) => state.applySettings(next),
+                onConnect: () => state.connect(),
+                onRefreshConnectors: () => state.handlePmosRefreshConnectors(),
+              })
+            : nothing
+        }
+
+        ${
+          state.tab === "automations"
+            ? renderAutomations({
+                integrationsHref: pathForTab("integrations", state.basePath),
+              })
+            : nothing
+        }
+
+        ${
+          state.tab === "runs"
+            ? renderRuns({
+                integrationsHref: pathForTab("integrations", state.basePath),
+              })
+            : nothing
+        }
+
+        ${
+          state.tab === "integrations"
+            ? renderIntegrations({
+                connected: state.connected,
+                saving: state.pmosIntegrationsSaving,
+                error: state.pmosIntegrationsError,
+                activepiecesUrl: state.pmosActivepiecesUrl,
+                activepiecesApiKeyDraft: state.pmosActivepiecesApiKeyDraft,
+                bcgptUrl: state.pmosBcgptUrl,
+                bcgptApiKeyDraft: state.pmosBcgptApiKeyDraft,
+                connectorsLoading: state.pmosConnectorsLoading,
+                connectorsStatus: state.pmosConnectorsStatus,
+                connectorsError: state.pmosConnectorsError,
+                onActivepiecesUrlChange: (next) => (state.pmosActivepiecesUrl = next),
+                onActivepiecesApiKeyDraftChange: (next) =>
+                  (state.pmosActivepiecesApiKeyDraft = next),
+                onBcgptUrlChange: (next) => (state.pmosBcgptUrl = next),
+                onBcgptApiKeyDraftChange: (next) => (state.pmosBcgptApiKeyDraft = next),
+                onSave: () => state.handlePmosIntegrationsSave(),
+                onClearActivepiecesKey: () => state.handlePmosIntegrationsClearActivepiecesKey(),
+                onClearBcgptKey: () => state.handlePmosIntegrationsClearBcgptKey(),
+                onRefreshConnectors: () => state.handlePmosRefreshConnectors(),
+              })
+            : nothing
+        }
 
         ${
           state.tab === "overview"

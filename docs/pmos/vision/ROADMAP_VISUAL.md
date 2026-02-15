@@ -1,9 +1,9 @@
 # PM OS Vision Index & Roadmap
 **Complete navigation for the Project Management OS documentation**
 
-Last Updated: 2026-02-14
+Last Updated: 2026-02-15
 
-> Status note (2026-02-14): Wave 1 and core Wave 2 capabilities are already implemented in `index.js`, `mcp.js`, and `db.js`. The per-wave status tables below are pending refresh.
+> Status note (2026-02-15): This roadmap is planning-oriented. Per-wave "Not Started" tables are not the canonical live implementation status.
 > Canonical current-state tracker: `docs/system/operations/summaries/CURRENT_STATE_AND_EXECUTION_PLAN.md`.
 
 ## 📚 Documentation Structure

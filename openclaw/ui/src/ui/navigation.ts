@@ -1,16 +1,33 @@
 import type { IconName } from "./icons.js";
 
 export const TAB_GROUPS = [
-  { label: "Chat", tabs: ["chat"] },
+  // PMOS simplified experience (regular users)
+  { label: "PMOS", tabs: ["dashboard", "automations", "runs", "integrations", "chat"] },
+  // Everything else stays available, but is hidden behind the Advanced admin section.
   {
-    label: "Control",
-    tabs: ["overview", "channels", "instances", "sessions", "usage", "cron"],
+    label: "Admin (Advanced)",
+    tabs: [
+      "overview",
+      "channels",
+      "instances",
+      "sessions",
+      "usage",
+      "cron",
+      "agents",
+      "skills",
+      "nodes",
+      "config",
+      "debug",
+      "logs",
+    ],
   },
-  { label: "Agent", tabs: ["agents", "skills", "nodes"] },
-  { label: "Settings", tabs: ["config", "debug", "logs"] },
 ] as const;
 
 export type Tab =
+  | "dashboard"
+  | "automations"
+  | "runs"
+  | "integrations"
   | "agents"
   | "overview"
   | "channels"
@@ -26,6 +43,10 @@ export type Tab =
   | "logs";
 
 const TAB_PATHS: Record<Tab, string> = {
+  dashboard: "/",
+  automations: "/automations",
+  runs: "/runs",
+  integrations: "/integrations",
   agents: "/agents",
   overview: "/overview",
   channels: "/channels",
@@ -95,7 +116,7 @@ export function tabFromPath(pathname: string, basePath = ""): Tab | null {
     normalized = "/";
   }
   if (normalized === "/") {
-    return "chat";
+    return "dashboard";
   }
   return PATH_TO_TAB.get(normalized) ?? null;
 }
@@ -124,6 +145,14 @@ export function inferBasePathFromPathname(pathname: string): string {
 
 export function iconForTab(tab: Tab): IconName {
   switch (tab) {
+    case "dashboard":
+      return "barChart";
+    case "automations":
+      return "zap";
+    case "runs":
+      return "scrollText";
+    case "integrations":
+      return "link";
     case "agents":
       return "folder";
     case "chat":
@@ -157,6 +186,14 @@ export function iconForTab(tab: Tab): IconName {
 
 export function titleForTab(tab: Tab) {
   switch (tab) {
+    case "dashboard":
+      return "Dashboard";
+    case "automations":
+      return "Automations";
+    case "runs":
+      return "Runs";
+    case "integrations":
+      return "Integrations";
     case "agents":
       return "Agents";
     case "overview":
@@ -190,6 +227,14 @@ export function titleForTab(tab: Tab) {
 
 export function subtitleForTab(tab: Tab) {
   switch (tab) {
+    case "dashboard":
+      return "Your automation OS at a glance: health, integrations, and what is running now.";
+    case "automations":
+      return "Build and manage automations (flows + scheduled jobs).";
+    case "runs":
+      return "Live and historical executions across agents and automations.";
+    case "integrations":
+      return "Connect engines and apps (Activepieces, BCGPT/Basecamp, and more).";
     case "agents":
       return "Manage agent workspaces, tools, and identities.";
     case "overview":

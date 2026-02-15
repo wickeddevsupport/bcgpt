@@ -31,7 +31,8 @@ export function loadSettings(): UiSettings {
     chatShowThinking: true,
     splitRatio: 0.6,
     navCollapsed: false,
-    navGroupsCollapsed: {},
+    // Keep power-user surfaces out of the way for regular users by default.
+    navGroupsCollapsed: { "Admin (Advanced)": true },
   };
 
   try {

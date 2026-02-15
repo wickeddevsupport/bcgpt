@@ -15,20 +15,21 @@ Then use `docs/DOCS_INDEX.md` for deep navigation.
 
 ## What we are building
 
-PM OS is a 3-layer system in one repo:
+PM OS is one product built from 3 engines/layers in one repo:
 
 1. `docs/bcgpt/` - Data layer (Basecamp + MCP)
 2. `docs/flow/` - Execution layer (Activepieces integration)
-3. `docs/pmos/` - Intelligence layer (agent/chat/reasoning)
+3. `docs/pmos/` - Product layer (PMOS UX, orchestration, admin)
 
-Goal: OpenClaw-level capability with native code, faster execution, and no iframe dependency.
+Key decision: PMOS is now built directly on OpenClaw (vendored under `openclaw/`) and embeds Activepieces functionality in-app.
 
 ## Current code anchors
 
 - Backend entrypoint: `index.js`
 - MCP/tool orchestration: `mcp.js`
 - Activepieces native tools: `flow-tools.js`
-- Frontend shell/chat: `frontend/src/components/Layout.tsx`, `frontend/src/components/ChatSidebar.tsx`
+- OpenClaw base engine + Control UI: `openclaw/`
+- PMOS deployment compose: `docker-compose.pmos.yml`
 
 ## Fresh-session rule
 
