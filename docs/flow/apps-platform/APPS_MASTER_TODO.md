@@ -208,9 +208,9 @@ Goal: production confidence and support readiness.
 - [x] Rollback procedures documented. ✅
 
 ### Remaining Implementation (Code)
-- [ ] Implement audit events table and logging in flow-gallery service.
-- [ ] Wire up execution telemetry collection in runtime.
-- [ ] Build telemetry dashboard UI (success trends, runtime histogram, failure breakdown).
+- [ ] Implement audit events table and logging in flow-gallery service. ⚠️ (Code landed locally on 2026-02-15; pending production deploy + verification)
+- [ ] Wire up execution telemetry collection in runtime. ⚠️ (Code landed locally on 2026-02-15; pending production deploy + verification)
+- [ ] Build telemetry dashboard UI (success trends, runtime histogram, failure breakdown). ⚠️ (UI exists; telemetry endpoint path fix landed locally on 2026-02-15; pending production verification)
 - [ ] Implement Playwright E2E suite and GitHub Actions CI integration.
 - [ ] Security audit pass (secrets masking, rate limits, CORS/CSP).
 

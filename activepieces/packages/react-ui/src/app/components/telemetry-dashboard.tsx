@@ -48,7 +48,7 @@ export function TelemetryDashboard(): React.JSX.Element {
         useQuery<PlatformTelemetry>({
             queryKey: ['telemetry', 'platform'],
             queryFn: async () => {
-                const res = await fetch('/api/flow-gallery/telemetry/platform')
+                const res = await fetch('/apps/api/telemetry/platform')
                 if (!res.ok) throw new Error('Failed to fetch telemetry')
                 return res.json()
             },
@@ -61,7 +61,7 @@ export function TelemetryDashboard(): React.JSX.Element {
     }>({
         queryKey: ['telemetry', 'top-apps'],
         queryFn: async () => {
-            const res = await fetch('/api/flow-gallery/telemetry/top-apps')
+            const res = await fetch('/apps/api/telemetry/top-apps')
             if (!res.ok) throw new Error('Failed to fetch top apps')
             return res.json()
         },
@@ -74,7 +74,7 @@ export function TelemetryDashboard(): React.JSX.Element {
             queryKey: ['telemetry', 'execution-distribution'],
             queryFn: async () => {
                 const res = await fetch(
-                    '/api/flow-gallery/telemetry/execution-distribution',
+                    '/apps/api/telemetry/execution-distribution',
                 )
                 if (!res.ok) throw new Error('Failed to fetch distribution')
                 return res.json()

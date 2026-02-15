@@ -23,6 +23,20 @@ Critical deploy note:
   2. `docker build --no-cache -t bcgptapi-bcgpt:latest -f Dockerfile.bcgpt .`
   3. `bash scripts/start-bcgpt.sh`
 
+## Active Sprint Progress (2026-02-15, local code)
+
+- Completed (code level):
+  - Added execution audit event logging for `/apps/:id/execute` paths (success, failed, validation failure, payload-too-large, runtime failure).
+  - Registered `AuditEventEntity` in DB entity wiring so audit repository works with the runtime entity map.
+  - Fixed telemetry dashboard API paths to use `/apps/api/telemetry/*` endpoints.
+- Verified locally:
+  - `npx nx build server-api` passed.
+  - `npx nx build react-ui` passed.
+- Pending before declaring Phase D complete:
+  - Deploy to server and verify telemetry panels populate from live execute events.
+  - Implement Playwright E2E + CI integration.
+  - Complete security hardening pass (rate limits/CORS/secret masking checks).
+
 ## 0. Non-Negotiable Guardrails
 
 1. Existing `flow_*` integration remains operational and unchanged during migration work.
@@ -88,24 +102,26 @@ Reference: `flow-tools.js`, `mcp.js:4576`
 
 Reference: `index.js:111`, `index.js:124`, `index.js:132`
 
+### Recently closed (2026-02-15)
+
+- Frontend/backend config contract alignment is complete:
+  - Frontend `updateUserConfig` uses `PUT /api/config`.
+  - Backend handler is `PUT /api/config`.
+
+Reference: `frontend/src/api.ts:173`, `index.js:4338`
+
 ## 4. Known Gaps (Must Be Closed)
 
 1. Status docs drift
-- Some roadmap tables still say "not started" even though core pieces exist in code.
-- Action: update roadmap status from code truth before new feature work.
+- Vision docs and historical phase docs still contain point-in-time status tables.
+- Action: enforce canonical tracker precedence and keep reconciliation matrix (Section 9) updated.
 
-2. Frontend/backend config method mismatch
-- Backend uses `PUT /api/config`; frontend update currently sends `POST`.
-- Action: align frontend method with backend contract.
-
-Reference: `index.js:4338`, `frontend/src/api.ts:173`
-
-3. Activepieces coverage is partial
+2. Activepieces coverage is partial
 - Core flow tools are present, but not full platform/credential/runtime coverage.
 - Action: complete flow tool coverage map and missing operations.
 
-4. Release hardening still pending in code
-- Audit events, telemetry dashboards, and E2E automation are documented but not fully implemented.
+3. Release hardening still pending in code
+- Audit/telemetry implementation is now partially landed in code; E2E automation and deployment verification remain pending.
 
 Reference: `docs/flow/apps-platform/APPS_MASTER_TODO.md`, `docs/system/operations/summaries/NEXT_STEPS.md`
 
@@ -114,8 +130,11 @@ Reference: `docs/flow/apps-platform/APPS_MASTER_TODO.md`, `docs/system/operation
 ### Phase A - Source of truth + interface alignment (no MCP/Flow behavior changes)
 
 1. Update roadmap/status docs to match real code state.
-2. Fix `PUT/POST` config mismatch.
-3. Publish a canonical API/tool contract table used by frontend + agent runtime.
+2. Publish a canonical API/tool contract table used by frontend + agent runtime.
+3. Keep doc-role boundaries explicit (canonical vs vision vs historical) across PMOS docs.
+
+Completed in Phase A:
+- `PUT /api/config` contract alignment (`frontend/src/api.ts` + backend `index.js`).
 
 ### Phase B - OpenClaw parity, native stack (parallel v2 runtime only)
 
@@ -173,3 +192,21 @@ Any meaningful platform change must update:
 1. This file (`CURRENT_STATE_AND_EXECUTION_PLAN.md`)
 2. `docs/system/operations/summaries/NEXT_STEPS.md`
 3. Relevant layer doc (`docs/bcgpt/`, `docs/flow/`, or `docs/pmos/`)
+
+## 9. Documentation Reconciliation Matrix (2026-02-15)
+
+| Scope | Primary docs | Role | Use for live execution decisions? | Reconciliation status |
+|---|---|---|---|---|
+| Session boot + current execution | `docs/00-START-HERE.md`, `docs/DOCS_INDEX.md`, `docs/NAVIGATION_MAP.md`, `docs/system/operations/summaries/CURRENT_STATE_AND_EXECUTION_PLAN.md`, `docs/system/operations/summaries/NEXT_STEPS.md` | Canonical navigation and active backlog | Yes | Reconciled |
+| System architecture | `docs/system/architecture/SYSTEM_ARCHITECTURE.md`, `docs/system/architecture/CROSS_LAYER_INTERFACE_STATE.md` | Architecture contracts | Yes | Reconciled |
+| OpenClaw strategy | `docs/OPENCLAW_ANALYSIS.md` | Pattern-extraction reference | Yes, for strategy only | Reconciled |
+| PMOS vision/spec | `docs/pmos/vision/PROJECT_MANAGEMENT_OS.md`, `docs/pmos/vision/VISION_SUMMARY.md`, `docs/pmos/vision/FEATURES_CATALOG.md`, `docs/pmos/vision/INTELLIGENCE_PATTERNS.md`, `docs/pmos/vision/ROADMAP_VISUAL.md`, `docs/pmos/vision/README.md` | Target-state product design and roadmap intent | No (unless mirrored here) | Reconciled with explicit "vision-only" status notes |
+| Flow implementation backlog | `docs/flow/apps-platform/APPS_MASTER_TODO.md`, `docs/flow/apps-platform/APPS_PLATFORM_PRD.md`, `docs/flow/apps-platform/APPS_RELEASE_CHECKLIST.md`, `docs/flow/apps-platform/PRD_APPS_PHASE2.md` | Activepieces execution backlog | Yes, for flow layer delivery | Partially complete (Phase 8 code tasks remain) |
+| BCGPT audits/phases/coverage | `docs/bcgpt/audits/*`, `docs/bcgpt/phases/*`, `docs/bcgpt/coverage/*`, `docs/system/operations/summaries/SESSION_SUMMARY_COMPREHENSIVE_AUDIT.md`, `docs/system/operations/summaries/COMPLETION_REPORT.md` | Historical evidence and point-in-time reports | No | Reconciled as historical-only |
+| Deployment/ops hardening | `docs/system/deployment/DEPLOYMENT_GUIDE.md`, `docs/system/deployment/PRODUCTION_HARDENING.md` | Operational runbooks | Yes | Reconciled (compose collision warning anchored in this file) |
+
+### Interpretation rules (mandatory)
+
+1. If any doc conflicts with current code or this tracker, this tracker wins until docs are updated.
+2. Vision docs define target capability; they do not assert deployment completion.
+3. Historical audits/phases are references, not current sprint status.

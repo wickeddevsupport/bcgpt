@@ -40,6 +40,15 @@ interface GetAuditLogsParams {
     cursor?: string
 }
 
+function isQueuedExecution(event: AuditEventSchema): boolean {
+    const executionStatus = event.eventMetadata?.executionStatus
+    return executionStatus === 'queued'
+}
+
+function toMeasuredExecutions(events: AuditEventSchema[]): AuditEventSchema[] {
+    return events.filter((event) => !isQueuedExecution(event))
+}
+
 export const auditEventService = {
     /**
      * Log an audit event
@@ -127,13 +136,14 @@ export const auditEventService = {
                 eventType: 'execute',
             },
         })
+        const measuredExecutions = toMeasuredExecutions(executions)
 
-        const successCount = executions.filter((e) => e.status === 'success').length
-        const failedCount = executions.filter((e) => e.status === 'failed').length
-        const runCount = executions.length
+        const successCount = measuredExecutions.filter((e) => e.status === 'success').length
+        const failedCount = measuredExecutions.filter((e) => e.status === 'failed').length
+        const runCount = measuredExecutions.length
 
         // Extract execution times from metadata
-        const executionTimes = executions
+        const executionTimes = measuredExecutions
             .map((e) => e.eventMetadata.executionTimeMs as number | undefined)
             .filter((t): t is number => typeof t === 'number')
             .sort((a, b) => a - b)
@@ -166,9 +176,10 @@ export const auditEventService = {
                 status: 'failed',
             },
         })
+        const measuredFailures = toMeasuredExecutions(failures)
 
         const breakdown: Record<string, number> = {}
-        for (const failure of failures) {
+        for (const failure of measuredFailures) {
             const errorType = (failure.eventMetadata.errorType as string) ?? 'unknown'
             breakdown[errorType] = (breakdown[errorType] ?? 0) + 1
         }
@@ -196,12 +207,13 @@ export const auditEventService = {
                 eventType: 'execute',
             },
         })
+        const measuredExecutions = toMeasuredExecutions(executions)
 
-        const successCount = executions.filter((e) => e.status === 'success').length
-        const failedCount = executions.filter((e) => e.status === 'failed').length
-        const totalCount = executions.length
+        const successCount = measuredExecutions.filter((e) => e.status === 'success').length
+        const failedCount = measuredExecutions.filter((e) => e.status === 'failed').length
+        const totalCount = measuredExecutions.length
 
-        const executionTimes = executions
+        const executionTimes = measuredExecutions
             .map((e) => e.eventMetadata.executionTimeMs as number | undefined)
             .filter((t): t is number => typeof t === 'number')
             .sort((a, b) => a - b)
@@ -244,13 +256,14 @@ export const auditEventService = {
                 eventType: 'execute',
             },
         })
+        const measuredExecutions = toMeasuredExecutions(executions)
 
         const appMetrics = new Map<
             string,
             { success: number; failed: number }
         >()
 
-        for (const exec of executions) {
+        for (const exec of measuredExecutions) {
             if (!exec.appId) continue
             const current = appMetrics.get(exec.appId) ?? {
                 success: 0,
@@ -294,8 +307,9 @@ export const auditEventService = {
                 status: 'success',
             },
         })
+        const measuredExecutions = toMeasuredExecutions(executions)
 
-        const times = executions
+        const times = measuredExecutions
             .map((e) => e.eventMetadata.executionTimeMs as number | undefined)
             .filter((t): t is number => typeof t === 'number')
 

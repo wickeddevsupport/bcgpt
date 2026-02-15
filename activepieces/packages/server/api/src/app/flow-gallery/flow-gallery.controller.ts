@@ -1133,27 +1133,100 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
         const params = request.params as Static<typeof AppIdParams>
         const query = request.query as Static<typeof ExecuteFlowQuery>
         const body = request.body as Static<typeof ExecuteFlowRequest>
+        const inputKeys = Object.keys(body.inputs ?? {})
+        const executionMode = query.mode === 'async' ? 'async' : 'sync'
         const serializedInputs = JSON.stringify(body.inputs ?? {})
+
+        let auditPlatformId: string | null = null
+        let auditAppId: string | null = params.id
+
         if (Buffer.byteLength(serializedInputs, 'utf8') > 200_000) {
+            try {
+                await auditEventService.logEvent({
+                    platformId: auditPlatformId,
+                    appId: auditAppId,
+                    eventType: 'execute',
+                    status: 'failed',
+                    errorMessage: 'Inputs payload is too large. Reduce request size and retry.',
+                    eventMetadata: {
+                        templateId: params.id,
+                        executionMode,
+                        executionStatus: 'failed',
+                        errorType: 'payload_too_large',
+                        inputKeyCount: inputKeys.length,
+                    },
+                    ipAddress: request.ip,
+                    userAgent: request.headers['user-agent'],
+                })
+            } catch (auditError) {
+                fastify.log.error({ msg: 'Failed to log audit event', auditError })
+            }
+
             return reply.code(StatusCodes.REQUEST_TOO_LONG).send({ error: 'Inputs payload is too large. Reduce request size and retry.' })
         }
 
         const started = Date.now()
         try {
             const app = await service.getPublicApp({ id: params.id, platformId: null })
-            if (!app) return reply.code(404).send({ error: 'App not found' })
+            if (!app) {
+                try {
+                    await auditEventService.logEvent({
+                        platformId: auditPlatformId,
+                        appId: auditAppId,
+                        eventType: 'execute',
+                        status: 'failed',
+                        errorMessage: 'App not found',
+                        eventMetadata: {
+                            templateId: params.id,
+                            executionMode,
+                            executionStatus: 'failed',
+                            errorType: 'app_not_found',
+                            inputKeyCount: inputKeys.length,
+                        },
+                        ipAddress: request.ip,
+                        userAgent: request.headers['user-agent'],
+                    })
+                } catch (auditError) {
+                    fastify.log.error({ msg: 'Failed to log audit event', auditError })
+                }
+                return reply.code(StatusCodes.NOT_FOUND).send({ error: 'App not found' })
+            }
 
             const meta = (app.galleryMetadata ?? {}) as Record<string, unknown>
+            auditPlatformId = app.platformId ?? null
+            auditAppId = typeof meta.id === 'string' && meta.id.trim().length > 0 ? meta.id : params.id
+
             const fields = extractAppInputFields(meta.inputSchema)
             const validationErrors = validateAppInputs(fields, body.inputs ?? {})
             if (validationErrors.length > 0) {
+                try {
+                    await auditEventService.logEvent({
+                        platformId: auditPlatformId,
+                        appId: auditAppId,
+                        eventType: 'execute',
+                        status: 'failed',
+                        errorMessage: validationErrors[0],
+                        eventMetadata: {
+                            templateId: params.id,
+                            executionMode,
+                            executionStatus: 'failed',
+                            errorType: 'input_validation',
+                            inputKeyCount: inputKeys.length,
+                            validationErrors,
+                        },
+                        ipAddress: request.ip,
+                        userAgent: request.headers['user-agent'],
+                    })
+                } catch (auditError) {
+                    fastify.log.error({ msg: 'Failed to log audit event', auditError })
+                }
+
                 return reply.code(StatusCodes.BAD_REQUEST).send({
                     error: validationErrors[0],
                     details: validationErrors,
                 })
             }
 
-            const executionMode = query.mode === 'async' ? 'async' : 'sync'
             const executionPromise = service.executePublicApp({
                 appId: params.id,
                 inputs: body.inputs ?? {},
@@ -1173,18 +1246,43 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
             const requestIdHeader = typeof flowResponse.headers === 'object' && flowResponse.headers
                 ? (flowResponse.headers['x-webhook-id'] ?? flowResponse.headers['X-WEBHOOK-ID'])
                 : undefined
+            const executionStatus = executionMode === 'async'
+                ? 'queued'
+                : flowResponse.status >= 200 && flowResponse.status < 300
+                    ? 'success'
+                    : 'failed'
+
             await service.logExecution({
                 templateId: params.id,
-                executionStatus: executionMode === 'async'
-                    ? 'queued'
-                    : flowResponse.status >= 200 && flowResponse.status < 300
-                        ? 'success'
-                        : 'failed',
+                executionStatus,
                 executionTimeMs: executionTime,
                 outputs: flowResponse.body,
-                inputKeys: Object.keys(body.inputs ?? {}),
+                inputKeys,
                 requestId: typeof requestIdHeader === 'string' ? requestIdHeader : undefined,
             })
+
+            try {
+                await auditEventService.logEvent({
+                    platformId: auditPlatformId,
+                    appId: auditAppId,
+                    eventType: 'execute',
+                    status: executionStatus === 'failed' ? 'failed' : 'success',
+                    errorMessage: executionStatus === 'failed' ? `Execution returned HTTP ${flowResponse.status}` : null,
+                    eventMetadata: {
+                        templateId: params.id,
+                        executionMode,
+                        executionStatus,
+                        httpStatus: flowResponse.status,
+                        executionTimeMs: executionTime,
+                        inputKeyCount: inputKeys.length,
+                        requestId: typeof requestIdHeader === 'string' ? requestIdHeader : null,
+                    },
+                    ipAddress: request.ip,
+                    userAgent: request.headers['user-agent'],
+                })
+            } catch (auditError) {
+                fastify.log.error({ msg: 'Failed to log audit event', auditError })
+            }
 
             if (executionMode === 'async') {
                 return reply.status(StatusCodes.ACCEPTED).send({
@@ -1205,10 +1303,31 @@ export const flowGalleryController: FastifyPluginAsyncTypebox = async (fastify) 
                     executionStatus: 'failed',
                     executionTimeMs: Date.now() - started,
                     error: safeError,
-                    inputKeys: Object.keys(body.inputs ?? {}),
+                    inputKeys,
                 })
             } catch (logError) {
                 fastify.log.error({ msg: 'Failed to log execution', logError })
+            }
+            try {
+                await auditEventService.logEvent({
+                    platformId: auditPlatformId,
+                    appId: auditAppId,
+                    eventType: 'execute',
+                    status: 'failed',
+                    errorMessage: safeError,
+                    eventMetadata: {
+                        templateId: params.id,
+                        executionMode,
+                        executionStatus: 'failed',
+                        errorType: 'runtime_error',
+                        executionTimeMs: Date.now() - started,
+                        inputKeyCount: inputKeys.length,
+                    },
+                    ipAddress: request.ip,
+                    userAgent: request.headers['user-agent'],
+                })
+            } catch (auditError) {
+                fastify.log.error({ msg: 'Failed to log audit event', auditError })
             }
             const isClientError = error?.message?.includes('required') || error?.message?.includes('invalid') || error?.message?.includes('too large')
             return reply.code(isClientError ? StatusCodes.BAD_REQUEST : StatusCodes.INTERNAL_SERVER_ERROR).send({ error: safeError })
