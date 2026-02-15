@@ -4,6 +4,30 @@ Last updated: 2026-02-15
 
 This repo includes OpenClaw under `openclaw/`. PMOS is now built directly on OpenClaw (engine + Control UI). This doc explains where to change things and how OpenClaw fits with Activepieces and BCGPT.
 
+## Setup (Production Quickstart)
+
+1. Open `https://os.wickedlab.io` (PMOS).
+2. Dashboard -> System:
+   - Paste **PMOS Access Key** = `OPENCLAW_GATEWAY_TOKEN` (from Coolify app `pmos` env vars).
+   - Click **Connect**.
+3. If you see **`disconnected (1008): pairing required`** (first-time browser/device):
+   - Approve the browser device from the server:
+     - `openclaw devices list`
+     - `openclaw devices approve <requestId>`
+   - Then refresh the page and click **Connect** again.
+4. Go to **Integrations**:
+   - Activepieces:
+     - Base URL: `https://flow.wickedlab.io`
+     - API Key: `ap_...`
+     - Project ID: required for flows/runs/connections in Phase 2
+   - BCGPT:
+     - Base URL: `https://bcgpt.wickedlab.io`
+     - API Key: from `https://bcgpt.wickedlab.io/connect`
+5. Validate:
+   - Automations (Flows) loads a flow list
+   - Runs loads recent runs
+   - Integrations shows pieces + connections
+
 ## Phase 1 Status (Completed)
 
 Phase 1 shipped the PMOS shell + connector onboarding on top of OpenClaw.
