@@ -91,6 +91,7 @@ import {
 } from "./db.js";
 import { runMining } from "./miner.js";
 import { execSync } from "child_process";
+import crypto from "crypto";
 import { existsSync } from "fs";
 import { runAgent, runAgentStreaming } from "./agent-runtime.js";
 
@@ -125,7 +126,41 @@ await ensureCodeSynced();
 const app = express();
 app.set("trust proxy", 1);
 app.use(cors());
-app.use(express.json({ limit: "2mb" }));
+// capture raw body for diagnostics (never log full payload to stdout)
+app.use(express.json({
+  limit: process.env.JSON_BODY_LIMIT || "2mb",
+  verify: (req, res, buf, encoding) => {
+    if (buf && buf.length) {
+      req.rawBody = buf.toString(encoding || "utf8");
+    }
+  }
+}));
+
+// ensure each request has a traceable request id
+app.use((req, res, next) => {
+  const incoming = req.get && (req.get("X-Request-Id") || req.get("Idempotency-Key"));
+  req.requestId = incoming || (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2,8)}`);
+  res.set("X-Request-Id", req.requestId);
+  next();
+});
+
+// JSON parse errors — return standardized 400 and log minimal metadata (no payload)
+app.use((err, req, res, next) => {
+  if (err && (err.type === "entity.parse.failed" || (err instanceof SyntaxError && err.status === 400 && "body" in err))) {
+    console.warn(JSON.stringify({
+      event: "BAD_JSON_REQUEST",
+      requestId: req.requestId,
+      ip: req.ip,
+      method: req.method,
+      url: req.originalUrl,
+      contentLength: (req.get && req.get("content-length")) || null,
+      contentType: (req.get && req.get("content-type")) || null,
+      timestamp: new Date().toISOString()
+    }));
+    return res.status(400).json({ ok: false, error: "INVALID_JSON" });
+  }
+  next(err);
+});
 
 const PORT = process.env.PORT || 10000;
 const UA = "bcgpt-full-v3";
@@ -4499,28 +4534,35 @@ app.get("/db/info", async (req, res) => {
   }
 });
 
-/* ================= PMOS Frontend ================= */
-const frontendPath = path.join(__dirname, "frontend", "dist");
+/* ================= BCGPT MCP Landing ================= */
+const mcpLandingPath = path.join(__dirname, "mcp-landing.html");
 
-// Serve static files from frontend build
-app.use(express.static(frontendPath));
+// Root now serves MCP landing (PMOS frontend moved to os.wickedlab.io).
+app.get("/", (req, res) => {
+  res.sendFile(mcpLandingPath);
+});
 
-// SPA fallback - serve index.html for all unmatched routes (except API routes)
+// Fallback for non-API, non-auth routes.
 app.get("*", (req, res, next) => {
-  // Skip API and MCP routes
-  if (req.path.startsWith("/api") || 
-      req.path.startsWith("/mcp") || 
-      req.path.startsWith("/oauth") ||
-      req.path.startsWith("/connect") ||
-      req.path.startsWith("/dev") ||
-      req.path.startsWith("/db") ||
-      req.path.startsWith("/projects") ||
-      req.path.startsWith("/logout") ||
-      req.path.startsWith("/action") ||
-      req.path.startsWith("/debug")) {
+  if (
+    req.path.startsWith("/api") ||
+    req.path.startsWith("/mcp") ||
+    req.path.startsWith("/oauth") ||
+    req.path.startsWith("/auth") ||
+    req.path.startsWith("/connect") ||
+    req.path.startsWith("/dev") ||
+    req.path.startsWith("/db") ||
+    req.path.startsWith("/projects") ||
+    req.path.startsWith("/logout") ||
+    req.path.startsWith("/action") ||
+    req.path.startsWith("/debug") ||
+    req.path.startsWith("/health") ||
+    req.path.startsWith("/openapi.json") ||
+    req.path.startsWith("/.well-known")
+  ) {
     return next();
   }
-  res.sendFile(path.join(frontendPath, "index.html"));
+  res.sendFile(mcpLandingPath);
 });
 
 let server = null;

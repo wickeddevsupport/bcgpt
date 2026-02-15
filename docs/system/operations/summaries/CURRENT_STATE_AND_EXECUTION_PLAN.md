@@ -36,6 +36,10 @@ Purpose: single source of truth for "where we are now" and "what to do next" in 
   - Direct MCP call works: `tools/call` with `pmos_status`.
   - Proxy MCP call works: `tools/call` with `mcp_call` targeting `pmos_status`.
   - `mcp_call` now accepts routed namespace tools (`pmos_*`, `flow_*`) even if not listed in static `getTools()` output.
+- Frontend/domain split applied:
+  - `bcgpt.wickedlab.io` now serves MCP landing page (`mcp-landing.html`) with primary CTA to `/connect`.
+  - PMOS frontend/product surface continues on `https://os.wickedlab.io`.
+  - `https://bcgpt.wickedlab.io/connect` remains the API key + Basecamp auth entrypoint.
 
 Critical deploy note:
 - Do not use `docker compose -f docker-compose.bcgpt.yml up/down` on the production host for normal BCGPT deploys.

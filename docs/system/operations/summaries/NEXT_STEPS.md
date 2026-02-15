@@ -19,7 +19,7 @@ Canonical status and execution context now live in:
    - Security hardening pass (rate limits, CORS, secret masking verification).
 
 ## PMOS Immediate Build Track (2026-02-15)
-1) Add PMOS web shell on `https://os.wickedlab.io/` so root is a product entrypoint (not API-only behavior).
+1) Continue PMOS web shell on `https://os.wickedlab.io/` as the primary product frontend.
 2) Keep PMOS runtime wired to:
    - `BCGPT_URL=https://bcgpt.wickedlab.io`
    - `FLOW_URL=https://flow.wickedlab.io`
@@ -31,6 +31,7 @@ Canonical status and execution context now live in:
    - `GET /api/status` must be `200`
    - status config must not contain internal hostnames for `bcgpt_url`
    - `POST /mcp` with `tools/call -> pmos_status` must succeed from `bcgpt.wickedlab.io`
+   - `GET /` on `bcgpt.wickedlab.io` must render MCP landing message with `/connect` CTA
 
 ## Must do (Search + Correctness)
 1) Enforce query requirements for all search-like tools (return `MISSING_QUERY` for missing inputs).
