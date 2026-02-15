@@ -113,6 +113,7 @@ export type AppViewState = {
   // PMOS connector onboarding (Phase 1)
   pmosConnectorDraftsInitialized: boolean;
   pmosActivepiecesUrl: string;
+  pmosActivepiecesProjectId: string;
   pmosActivepiecesApiKeyDraft: string;
   pmosBcgptUrl: string;
   pmosBcgptApiKeyDraft: string;

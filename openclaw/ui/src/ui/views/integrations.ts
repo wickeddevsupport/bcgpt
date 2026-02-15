@@ -6,6 +6,7 @@ export type IntegrationsProps = {
   saving: boolean;
   error: string | null;
   activepiecesUrl: string;
+  activepiecesProjectId: string;
   activepiecesApiKeyDraft: string;
   bcgptUrl: string;
   bcgptApiKeyDraft: string;
@@ -13,6 +14,7 @@ export type IntegrationsProps = {
   connectorsStatus: PmosConnectorsStatus | null;
   connectorsError: string | null;
   onActivepiecesUrlChange: (next: string) => void;
+  onActivepiecesProjectIdChange: (next: string) => void;
   onActivepiecesApiKeyDraftChange: (next: string) => void;
   onBcgptUrlChange: (next: string) => void;
   onBcgptApiKeyDraftChange: (next: string) => void;
@@ -65,6 +67,15 @@ export function renderIntegrations(props: IntegrationsProps) {
               .value=${props.activepiecesUrl}
               @input=${(e: Event) => props.onActivepiecesUrlChange((e.target as HTMLInputElement).value)}
               placeholder="https://flow.wickedlab.io"
+              ?disabled=${!props.connected}
+            />
+          </label>
+          <label class="field">
+            <span>Project ID (optional)</span>
+            <input
+              .value=${props.activepiecesProjectId}
+              @input=${(e: Event) => props.onActivepiecesProjectIdChange((e.target as HTMLInputElement).value)}
+              placeholder="Used for flow CRUD later"
               ?disabled=${!props.connected}
             />
           </label>

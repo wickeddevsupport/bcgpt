@@ -5,6 +5,7 @@ import { formatForLog } from "../ws-log.js";
 
 type ConnectorResult = {
   url: string | null;
+  projectId?: string | null;
   configured: boolean;
   reachable: boolean | null;
   authOk: boolean | null;
@@ -85,6 +86,10 @@ export const pmosHandlers: GatewayRequestHandlers = {
       const apKey =
         readConfigString(cfg, ["pmos", "connectors", "activepieces", "apiKey"]) ??
         (process.env.ACTIVEPIECES_API_KEY?.trim() || null);
+      const apProjectId =
+        readConfigString(cfg, ["pmos", "connectors", "activepieces", "projectId"]) ??
+        (process.env.ACTIVEPIECES_PROJECT_ID?.trim() || null);
+      const apProjectProbe = apProjectId || "probe";
 
       const bcgptUrl = normalizeBaseUrl(
         readConfigString(cfg, ["pmos", "connectors", "bcgpt", "url"]) ??
@@ -98,13 +103,16 @@ export const pmosHandlers: GatewayRequestHandlers = {
 
       const ap: ConnectorResult = {
         url: apUrl,
+        projectId: apProjectId,
         configured: Boolean(apKey),
         reachable: null,
         authOk: apKey ? null : false,
         flagsUrl: `${apUrl}/api/v1/flags`,
-        // Use an auth-gated endpoint that does not require workspace/project params.
-        // (Flows listing typically requires a projectId query param.)
-        authUrl: apKey ? `${apUrl}/api/v1/users/me` : null,
+        // Use a project-gated endpoint and include a probe projectId.
+        // This avoids false negatives when the stored principal isn't allowed on /users/me.
+        authUrl: apKey
+          ? `${apUrl}/api/v1/flows?projectId=${encodeURIComponent(apProjectProbe)}&limit=1`
+          : null,
         error: null,
       };
 

@@ -5,6 +5,7 @@ export type PmosConnectorsStatus = {
   checkedAtMs: number;
   activepieces: {
     url: string | null;
+    projectId?: string | null;
     configured: boolean;
     reachable: boolean | null;
     authOk: boolean | null;
@@ -30,6 +31,7 @@ export type PmosConnectorsState = {
 
   // Draft fields (UI inputs)
   pmosActivepiecesUrl: string;
+  pmosActivepiecesProjectId: string;
   pmosActivepiecesApiKeyDraft: string;
   pmosBcgptUrl: string;
   pmosBcgptApiKeyDraft: string;
@@ -111,9 +113,14 @@ export function hydratePmosConnectorDraftsFromConfig(state: PmosConnectorsState)
     (typeof getPath(cfg, ["pmos", "connectors", "bcgpt", "url"]) === "string"
       ? (getPath(cfg, ["pmos", "connectors", "bcgpt", "url"]) as string)
       : "") || "https://bcgpt.wickedlab.io";
+  const apProjectId =
+    (typeof getPath(cfg, ["pmos", "connectors", "activepieces", "projectId"]) === "string"
+      ? (getPath(cfg, ["pmos", "connectors", "activepieces", "projectId"]) as string)
+      : "") || "";
 
   state.pmosActivepiecesUrl = normalizeUrl(apUrl, "https://flow.wickedlab.io");
   state.pmosBcgptUrl = normalizeUrl(bcgptUrl, "https://bcgpt.wickedlab.io");
+  state.pmosActivepiecesProjectId = apProjectId.trim();
   state.pmosConnectorDraftsInitialized = true;
 }
 
@@ -158,6 +165,13 @@ export async function savePmosConnectorsConfig(
     setPath(nextConfig, ["pmos", "connectors", "activepieces", "url"], apUrl);
     setPath(nextConfig, ["pmos", "connectors", "bcgpt", "url"], bcgptUrl);
 
+    const apProjectId = state.pmosActivepiecesProjectId.trim();
+    if (apProjectId) {
+      setPath(nextConfig, ["pmos", "connectors", "activepieces", "projectId"], apProjectId);
+    } else {
+      deletePath(nextConfig, ["pmos", "connectors", "activepieces", "projectId"]);
+    }
+
     const apKey = state.pmosActivepiecesApiKeyDraft.trim();
     const bcgptKey = state.pmosBcgptApiKeyDraft.trim();
 
@@ -187,4 +201,3 @@ export async function savePmosConnectorsConfig(
     state.pmosIntegrationsSaving = false;
   }
 }
-

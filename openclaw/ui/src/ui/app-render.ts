@@ -272,6 +272,7 @@ export function renderApp(state: AppViewState) {
                 saving: state.pmosIntegrationsSaving,
                 error: state.pmosIntegrationsError,
                 activepiecesUrl: state.pmosActivepiecesUrl,
+                activepiecesProjectId: state.pmosActivepiecesProjectId,
                 activepiecesApiKeyDraft: state.pmosActivepiecesApiKeyDraft,
                 bcgptUrl: state.pmosBcgptUrl,
                 bcgptApiKeyDraft: state.pmosBcgptApiKeyDraft,
@@ -279,6 +280,7 @@ export function renderApp(state: AppViewState) {
                 connectorsStatus: state.pmosConnectorsStatus,
                 connectorsError: state.pmosConnectorsError,
                 onActivepiecesUrlChange: (next) => (state.pmosActivepiecesUrl = next),
+                onActivepiecesProjectIdChange: (next) => (state.pmosActivepiecesProjectId = next),
                 onActivepiecesApiKeyDraftChange: (next) =>
                   (state.pmosActivepiecesApiKeyDraft = next),
                 onBcgptUrlChange: (next) => (state.pmosBcgptUrl = next),

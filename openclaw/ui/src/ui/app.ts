@@ -193,6 +193,7 @@ export class OpenClawApp extends LitElement {
   // PMOS connector onboarding (Phase 1)
   @state() pmosConnectorDraftsInitialized = false;
   @state() pmosActivepiecesUrl = "https://flow.wickedlab.io";
+  @state() pmosActivepiecesProjectId = "";
   @state() pmosActivepiecesApiKeyDraft = "";
   @state() pmosBcgptUrl = "https://bcgpt.wickedlab.io";
   @state() pmosBcgptApiKeyDraft = "";
