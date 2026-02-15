@@ -56,13 +56,19 @@
 
     <section class="panel auth-panel">
       <h2>Shell Access</h2>
-      <p class="subtext">If PMOS shell auth is enabled, enter your token once. It stays in this browser only.</p>
+      <p class="subtext">Store local credentials for PMOS shell auth and BCGPT command execution. Keys remain in this browser only.</p>
       <div class="auth-row">
         <input id="pmosTokenInput" type="password" placeholder="PMOS shell token (optional)" />
         <button id="saveTokenBtn" class="btn btn-small">Save Token</button>
         <button id="clearTokenBtn" class="btn btn-small btn-ghost">Clear Token</button>
       </div>
       <p id="tokenStatusHint" class="hint"></p>
+      <div class="auth-row">
+        <input id="bcgptApiKeyInput" type="password" placeholder="BCGPT API key from /connect (for project commands)" />
+        <button id="saveBCGPTKeyBtn" class="btn btn-small">Save BCGPT Key</button>
+        <button id="clearBCGPTKeyBtn" class="btn btn-small btn-ghost">Clear Key</button>
+      </div>
+      <p id="bcgptKeyStatusHint" class="hint"></p>
     </section>
 
     <section class="panel chat-panel">

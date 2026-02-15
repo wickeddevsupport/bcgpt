@@ -14,13 +14,17 @@ const readinessHint = document.getElementById('readinessHint');
 
 const tokenInput = document.getElementById('pmosTokenInput');
 const tokenStatusHint = document.getElementById('tokenStatusHint');
+const bcgptApiKeyInput = document.getElementById('bcgptApiKeyInput');
+const bcgptKeyStatusHint = document.getElementById('bcgptKeyStatusHint');
 const chatInput = document.getElementById('chatInput');
 const projectIdInput = document.getElementById('projectIdInput');
 
 const TOKEN_KEY = 'pmos_shell_token';
+const BCGPT_KEY = 'pmos_bcgpt_api_key';
 const SESSION_KEY = 'pmos_shell_session_id';
 
 let shellToken = localStorage.getItem(TOKEN_KEY) || '';
+let bcgptApiKey = localStorage.getItem(BCGPT_KEY) || '';
 let sessionId = localStorage.getItem(SESSION_KEY) || `ui-${Date.now().toString(36)}`;
 localStorage.setItem(SESSION_KEY, sessionId);
 
@@ -40,15 +44,24 @@ function setTokenHint(message) {
   tokenStatusHint.textContent = message;
 }
 
+function setBCGPTKeyHint(message) {
+  bcgptKeyStatusHint.textContent = message;
+}
+
 function updateTokenUI() {
   tokenInput.value = shellToken;
-  setTokenHint(shellToken ? 'Token loaded from this browser session.' : 'No token set. Only needed when PMOS_SHELL_TOKEN is enabled.');
+  bcgptApiKeyInput.value = bcgptApiKey;
+  setTokenHint(shellToken ? 'PMOS token loaded from this browser session.' : 'No PMOS shell token set.');
+  setBCGPTKeyHint(bcgptApiKey ? 'BCGPT API key loaded from this browser session.' : 'No BCGPT API key set. Project commands may fail.');
 }
 
 function authHeaders(base = {}) {
   const headers = { ...base };
   if (shellToken) {
     headers['x-pmos-token'] = shellToken;
+  }
+  if (bcgptApiKey) {
+    headers['x-bcgpt-api-key'] = bcgptApiKey;
   }
   return headers;
 }
@@ -147,7 +160,8 @@ function renderOperations(items = []) {
 
 function renderReadiness(readiness = {}) {
   const parts = [];
-  if (readiness.bcgpt_api_key_configured) {
+  const hasBCGPTKey = readiness.bcgpt_api_key_configured || Boolean(bcgptApiKey);
+  if (hasBCGPTKey) {
     parts.push('BCGPT key ok');
   } else {
     parts.push('BCGPT key missing');
@@ -158,7 +172,7 @@ function renderReadiness(readiness = {}) {
     parts.push('Shell auth off');
   }
 
-  const healthy = readiness.bcgpt_api_key_configured;
+  const healthy = hasBCGPTKey;
   readinessValue.textContent = healthy ? 'Ready' : 'Partial';
   readinessValue.className = `value ${healthy ? 'status-ok' : 'status-bad'}`;
   readinessHint.textContent = parts.join(' | ');
@@ -327,6 +341,20 @@ document.getElementById('clearTokenBtn').addEventListener('click', () => {
   localStorage.removeItem(TOKEN_KEY);
   updateTokenUI();
   writeOutput({ ok: true, message: 'Token cleared' });
+});
+
+document.getElementById('saveBCGPTKeyBtn').addEventListener('click', () => {
+  bcgptApiKey = bcgptApiKeyInput.value.trim();
+  localStorage.setItem(BCGPT_KEY, bcgptApiKey);
+  updateTokenUI();
+  writeOutput({ ok: true, message: 'BCGPT API key saved in browser storage' });
+});
+
+document.getElementById('clearBCGPTKeyBtn').addEventListener('click', () => {
+  bcgptApiKey = '';
+  localStorage.removeItem(BCGPT_KEY);
+  updateTokenUI();
+  writeOutput({ ok: true, message: 'BCGPT API key cleared' });
 });
 
 document.getElementById('chatForm').addEventListener('submit', async (event) => {

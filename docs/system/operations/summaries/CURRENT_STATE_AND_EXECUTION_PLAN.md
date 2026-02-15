@@ -64,6 +64,9 @@ Purpose: single source of truth for "where we are now" and "what to do next" in 
   - PMOS deployment env now supports:
     - `BCGPT_API_KEY` for authenticated BCGPT project intelligence calls
     - `PMOS_SHELL_TOKEN` for optional shell API auth (`/api/chat`, `/api/command`, `/api/operations`)
+  - PMOS now also supports per-request BCGPT API key passthrough:
+    - `x-bcgpt-api-key` header (or `bcgpt_api_key` body field) for chat/command/approval calls
+    - enables project intelligence without server-wide `BCGPT_API_KEY`
 
 Critical deploy note:
 - Do not use `docker compose -f docker-compose.bcgpt.yml up/down` on the production host for normal BCGPT deploys.

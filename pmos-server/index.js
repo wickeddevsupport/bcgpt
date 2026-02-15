@@ -55,6 +55,7 @@ app.get('/api/info', (req, res) => {
       bcgpt_url: config.bcgptUrl,
       flow_url: config.flowUrl,
       bcgpt_api_key_configured: !!config.bcgptApiKey,
+      per_request_bcgpt_api_key_supported: true,
       shell_auth_configured: !!config.shellToken
     },
     endpoints: {
@@ -103,8 +104,33 @@ const commandMap = {
   patterns_work: { tool: 'pmos_patterns_work', requiresProjectId: true }
 };
 
+function normalizeKey(value) {
+  if (!value) return null;
+  const trimmed = String(value).trim();
+  return trimmed ? trimmed : null;
+}
+
+function getHeaderValue(req, name) {
+  if (!req) return null;
+  const direct = req.get?.(name);
+  const fallback = req.headers?.[String(name || '').toLowerCase()];
+  const value = direct ?? fallback;
+  if (Array.isArray(value)) return value[0];
+  return value ?? null;
+}
+
 function getAuthToken(req) {
   return req.get('x-pmos-token') || req.body?.token || req.query?.token || '';
+}
+
+function getBCGPTApiKey(req) {
+  return normalizeKey(
+    getHeaderValue(req, 'x-bcgpt-api-key') ||
+      req.body?.bcgpt_api_key ||
+      req.body?.bcgptApiKey ||
+      req.query?.bcgpt_api_key ||
+      req.query?.bcgptApiKey
+  );
 }
 
 function requireShellAuth(req, res, next) {
@@ -140,7 +166,7 @@ function summarizeResult(result) {
   return `${text.slice(0, 220)}...`;
 }
 
-function buildCommandInvocation(command, args = {}, projectIdRaw = null) {
+function buildCommandInvocation(command, args = {}, projectIdRaw = null, bcgptApiKey = null) {
   const selected = commandMap[command];
   if (!selected) {
     throw createHttpError(400, {
@@ -156,10 +182,10 @@ function buildCommandInvocation(command, args = {}, projectIdRaw = null) {
     });
   }
 
-  if (selected.requiresProjectId && !config.bcgptApiKey) {
+  if (selected.requiresProjectId && !(config.bcgptApiKey || bcgptApiKey)) {
     throw createHttpError(400, {
       error: 'BCGPT_API_KEY is not configured on PMOS server',
-      hint: 'Set BCGPT_API_KEY in PMOS environment so project intelligence calls can authenticate against bcgpt.wickedlab.io'
+      hint: 'Set BCGPT_API_KEY in PMOS env or provide x-bcgpt-api-key from your /connect key when calling PMOS APIs'
     });
   }
 
@@ -223,6 +249,7 @@ async function executeMappedCommand({
   command,
   args = {},
   projectId = null,
+  bcgptApiKey = null,
   source = 'api',
   sessionId = null,
   actor = 'system',
@@ -230,7 +257,7 @@ async function executeMappedCommand({
   operationId = null,
   approved = false
 }) {
-  const invocation = buildCommandInvocation(command, args, projectId);
+  const invocation = buildCommandInvocation(command, args, projectId, bcgptApiKey);
   const approvalRequired = Boolean(requireApproval || invocation.selected.highRisk);
 
   let operation = operationId ? mcpServer.db.getOperation(operationId) : null;
@@ -271,6 +298,10 @@ async function executeMappedCommand({
     approved_at: Date.now()
   });
 
+  const activeBCGPTApiKey = bcgptApiKey || config.bcgptApiKey || '';
+  const previousBCGPTApiKey = mcpServer.bcgpt.apiKey;
+  mcpServer.bcgpt.apiKey = activeBCGPTApiKey;
+
   const start = Date.now();
   try {
     const result = await mcpServer.handleToolCall(invocation.selected.tool, invocation.toolArgs);
@@ -298,6 +329,8 @@ async function executeMappedCommand({
       error: error.message
     });
     throw error;
+  } finally {
+    mcpServer.bcgpt.apiKey = previousBCGPTApiKey;
   }
 }
 
@@ -479,6 +512,7 @@ app.post('/api/command', requireShellAuth, async (req, res) => {
     const approved = req.body.approved === true;
     const requireApproval = req.body.require_approval === true;
     const operationId = req.body.operation_id || req.body.operationId || null;
+    const bcgptApiKey = getBCGPTApiKey(req);
 
     if (!command) {
       return res.status(400).json({
@@ -490,6 +524,7 @@ app.post('/api/command', requireShellAuth, async (req, res) => {
       command,
       args,
       projectId,
+      bcgptApiKey,
       source: 'command_api',
       actor: 'api',
       requireApproval,
@@ -516,6 +551,7 @@ app.post('/api/chat', requireShellAuth, async (req, res) => {
     const message = String(req.body.message || '').trim();
     const sessionId = req.body.session_id ? String(req.body.session_id) : null;
     const projectHint = req.body.project_id ? String(req.body.project_id) : null;
+    const bcgptApiKey = getBCGPTApiKey(req);
 
     if (!message) {
       return res.status(400).json({
@@ -536,6 +572,7 @@ app.post('/api/chat', requireShellAuth, async (req, res) => {
     const result = await executeMappedCommand({
       command: intent.command,
       projectId: intent.projectId,
+      bcgptApiKey,
       source: 'chat',
       sessionId,
       actor: 'chat',
@@ -579,6 +616,7 @@ app.get('/api/operations', requireShellAuth, (req, res) => {
 app.post('/api/operations/:operationId/approve', requireShellAuth, async (req, res) => {
   try {
     const operationId = req.params.operationId;
+    const bcgptApiKey = getBCGPTApiKey(req);
     const operation = mcpServer.db.getOperation(operationId);
     if (!operation) {
       return res.status(404).json({
@@ -597,6 +635,7 @@ app.post('/api/operations/:operationId/approve', requireShellAuth, async (req, r
       command: operation.command,
       args: operation.arguments || {},
       projectId: operation.project_id || null,
+      bcgptApiKey,
       source: 'approval',
       sessionId: operation.session_id || null,
       actor: 'approver',
@@ -645,16 +684,24 @@ app.post('/api/mcp-call', async (req, res) => {
 // Quick health score endpoint
 app.get('/api/health/project/:projectId', async (req, res) => {
   try {
-    if (!config.bcgptApiKey) {
+    const bcgptApiKey = getBCGPTApiKey(req);
+    if (!(config.bcgptApiKey || bcgptApiKey)) {
       return res.status(400).json({
         error: 'BCGPT_API_KEY is not configured on PMOS server',
-        hint: 'Set BCGPT_API_KEY in PMOS environment so project intelligence calls can authenticate against bcgpt.wickedlab.io'
+        hint: 'Set BCGPT_API_KEY in PMOS env or provide x-bcgpt-api-key from your /connect key when calling PMOS APIs'
       });
     }
 
-    const result = await mcpServer.handleToolCall('pmos_health_project', {
-      project_id: req.params.projectId
-    });
+    const previousBCGPTApiKey = mcpServer.bcgpt.apiKey;
+    mcpServer.bcgpt.apiKey = bcgptApiKey || config.bcgptApiKey || '';
+    let result;
+    try {
+      result = await mcpServer.handleToolCall('pmos_health_project', {
+        project_id: req.params.projectId
+      });
+    } finally {
+      mcpServer.bcgpt.apiKey = previousBCGPTApiKey;
+    }
     res.json(result);
   } catch (error) {
     res.status(500).json({
@@ -666,16 +713,24 @@ app.get('/api/health/project/:projectId', async (req, res) => {
 // Quick predictions endpoint
 app.get('/api/predict/completion/:projectId', async (req, res) => {
   try {
-    if (!config.bcgptApiKey) {
+    const bcgptApiKey = getBCGPTApiKey(req);
+    if (!(config.bcgptApiKey || bcgptApiKey)) {
       return res.status(400).json({
         error: 'BCGPT_API_KEY is not configured on PMOS server',
-        hint: 'Set BCGPT_API_KEY in PMOS environment so project intelligence calls can authenticate against bcgpt.wickedlab.io'
+        hint: 'Set BCGPT_API_KEY in PMOS env or provide x-bcgpt-api-key from your /connect key when calling PMOS APIs'
       });
     }
 
-    const result = await mcpServer.handleToolCall('pmos_predict_completion', {
-      project_id: req.params.projectId
-    });
+    const previousBCGPTApiKey = mcpServer.bcgpt.apiKey;
+    mcpServer.bcgpt.apiKey = bcgptApiKey || config.bcgptApiKey || '';
+    let result;
+    try {
+      result = await mcpServer.handleToolCall('pmos_predict_completion', {
+        project_id: req.params.projectId
+      });
+    } finally {
+      mcpServer.bcgpt.apiKey = previousBCGPTApiKey;
+    }
     res.json(result);
   } catch (error) {
     res.status(500).json({
