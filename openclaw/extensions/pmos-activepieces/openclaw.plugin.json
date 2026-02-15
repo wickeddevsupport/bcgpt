@@ -1,0 +1,30 @@
+{
+  "id": "pmos-activepieces",
+  "name": "PMOS Activepieces",
+  "description": "Activepieces automation tools for PMOS (flows, runs, connections, pieces).",
+  "version": "0.0.1",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "baseUrl": {
+        "type": "string"
+      },
+      "apiKey": {
+        "type": "string"
+      }
+    }
+  },
+  "uiHints": {
+    "baseUrl": {
+      "label": "Activepieces URL",
+      "placeholder": "https://flow.wickedlab.io"
+    },
+    "apiKey": {
+      "label": "Activepieces API Key",
+      "sensitive": true,
+      "placeholder": "ap_..."
+    }
+  }
+}
+
