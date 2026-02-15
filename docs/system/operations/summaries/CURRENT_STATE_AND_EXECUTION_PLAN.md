@@ -31,6 +31,11 @@ Purpose: single source of truth for "where we are now" and "what to do next" in 
 - Incident fix applied:
   - Removed stale generated PMOS app env key `BCGPT_URL=http://bcgpt:10000` from Coolify app runtime env file (`/data/coolify/applications/vg88kok000o8csg8occgcskg/.env`) and recreated PMOS container.
   - This eliminated wrong internal URL routing and aligned PMOS to public BCGPT endpoint.
+- BCGPT -> PMOS gateway bridge now verified live:
+  - BCGPT runtime env includes `PMOS_URL=https://os.wickedlab.io` (from `scripts/start-bcgpt.sh` + compose defaults).
+  - Direct MCP call works: `tools/call` with `pmos_status`.
+  - Proxy MCP call works: `tools/call` with `mcp_call` targeting `pmos_status`.
+  - `mcp_call` now accepts routed namespace tools (`pmos_*`, `flow_*`) even if not listed in static `getTools()` output.
 
 Critical deploy note:
 - Do not use `docker compose -f docker-compose.bcgpt.yml up/down` on the production host for normal BCGPT deploys.

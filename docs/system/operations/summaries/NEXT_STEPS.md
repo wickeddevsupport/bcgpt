@@ -23,11 +23,14 @@ Canonical status and execution context now live in:
 2) Keep PMOS runtime wired to:
    - `BCGPT_URL=https://bcgpt.wickedlab.io`
    - `FLOW_URL=https://flow.wickedlab.io`
-3) Add startup/runtime guard that logs effective PMOS integration URLs at boot.
-4) Add smoke checks in deploy workflow:
+3) Keep BCGPT runtime wired to:
+   - `PMOS_URL=https://os.wickedlab.io`
+4) Add startup/runtime guard that logs effective PMOS integration URLs at boot.
+5) Add smoke checks in deploy workflow:
    - `GET /health` must be `200`
    - `GET /api/status` must be `200`
    - status config must not contain internal hostnames for `bcgpt_url`
+   - `POST /mcp` with `tools/call -> pmos_status` must succeed from `bcgpt.wickedlab.io`
 
 ## Must do (Search + Correctness)
 1) Enforce query requirements for all search-like tools (return `MISSING_QUERY` for missing inputs).
