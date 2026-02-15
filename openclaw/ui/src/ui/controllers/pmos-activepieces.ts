@@ -375,7 +375,21 @@ export async function loadActivepiecesFlows(state: PmosActivepiecesState, opts?:
       state.apFlowsHasNext = false;
       return;
     }
-    state.apFlows = page.data ?? [];
+    // Activepieces flow summaries often nest the human name under `version.displayName`.
+    // Normalize so the UI can display `flow.displayName` consistently.
+    const flows = (page.data ?? []) as unknown[];
+    state.apFlows = flows.map((flowUnknown) => {
+      if (!flowUnknown || typeof flowUnknown !== "object" || Array.isArray(flowUnknown)) {
+        return flowUnknown as ActivepiecesFlowSummary;
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const flow: any = flowUnknown;
+      const rawTop = typeof flow.displayName === "string" ? flow.displayName.trim() : "";
+      const rawNested =
+        typeof flow?.version?.displayName === "string" ? String(flow.version.displayName).trim() : "";
+      const displayName = rawTop || rawNested || undefined;
+      return displayName ? ({ ...flow, displayName } as ActivepiecesFlowSummary) : (flow as ActivepiecesFlowSummary);
+    });
     state.apFlowsCursor = page.next;
     state.apFlowsHasNext = Boolean(page.next);
   } catch (err) {

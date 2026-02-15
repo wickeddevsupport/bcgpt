@@ -51,7 +51,7 @@ function formatFlowMeta(flow: ActivepiecesFlowSummary) {
   if (flow.status) parts.push(flow.status);
   if (flow.updated) parts.push(`updated ${flow.updated}`);
   if (flow.created) parts.push(`created ${flow.created}`);
-  return parts.join(" · ");
+  return parts.join(" | ");
 }
 
 export function renderAutomations(props: AutomationsProps) {
@@ -177,7 +177,7 @@ export function renderAutomations(props: AutomationsProps) {
               : nothing
           }
 
-          ${props.flowDetailsError ? html`<div class="callout danger" style="margin-top: 12px;">${props.flowDetailsError}</div>` : nothing}
+          ${props.flowDetailsError && props.selectedFlowId ? html`<div class="callout danger" style="margin-top: 12px;">${props.flowDetailsError}</div>` : nothing}
           ${props.mutateError ? html`<div class="callout danger" style="margin-top: 12px;">${props.mutateError}</div>` : nothing}
 
           ${

@@ -73,6 +73,10 @@ IDENTITY.md
 USER.md
 .tgz
 
+# Allow shipping workspace templates (these are not user workspace files).
+!docs/reference/templates/IDENTITY.md
+!docs/reference/templates/USER.md
+
 # local tooling
 .serena/
 

@@ -276,11 +276,21 @@ export function renderApp(state: AppViewState) {
                 mutating: state.apFlowMutating,
                 mutateError: state.apFlowMutateError,
 
-                onFlowsQueryChange: (next) => (state.apFlowsQuery = next),
+                onFlowsQueryChange: (next) => {
+                  state.apFlowsQuery = next;
+                  state.apFlowsError = null;
+                },
                 onRefresh: () => state.handlePmosApFlowsLoad(),
-                onCreateNameChange: (next) => (state.apFlowCreateName = next),
+                onCreateNameChange: (next) => {
+                  state.apFlowCreateName = next;
+                  state.apFlowCreateError = null;
+                },
                 onCreate: () => state.handlePmosApFlowCreate(),
-                onSelectFlow: (flowId) => state.handlePmosApFlowSelect(flowId),
+                onSelectFlow: (flowId) => {
+                  state.apFlowDetailsError = null;
+                  state.apFlowMutateError = null;
+                  state.handlePmosApFlowSelect(flowId);
+                },
                 onRenameDraftChange: (next) => (state.apFlowRenameDraft = next),
                 onRename: () => state.handlePmosApFlowRename(),
                 onSetStatus: (status) => state.handlePmosApFlowSetStatus(status),
