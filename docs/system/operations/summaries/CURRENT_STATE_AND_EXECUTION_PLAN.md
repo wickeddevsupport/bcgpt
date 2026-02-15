@@ -26,7 +26,7 @@ The earlier React PMOS prototype (`frontend/`) is not the PMOS product surface g
 6. `flow.wickedlab.io` (Activepieces) remains a separate running service and is treated as the automation engine.
 7. `bcgpt.wickedlab.io` remains the MCP/connect surface (Basecamp OAuth, MCP tools) and is treated as a connector.
 
-Production image tag (PMOS / OpenClaw): `openclaw-e5cdc472`.
+Production image tag (PMOS / OpenClaw): `openclaw-dde11a1d`.
 
 ### Production verification (Phase 1 + Phase 2)
 
