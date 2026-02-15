@@ -6,12 +6,38 @@ This repo includes OpenClaw under `openclaw/`. PMOS is now built directly on Ope
 
 ## Phase 1 Status (Completed)
 
-As of 2026-02-15, Phase 1 is deployed to `os.wickedlab.io` (OpenClaw image tag `openclaw-afb4abc1`):
+Phase 1 shipped the PMOS shell + connector onboarding on top of OpenClaw.
+
+Originally deployed: OpenClaw image tag `openclaw-afb4abc1`.
 
 1. PMOS shell navigation + new PMOS-first pages (Dashboard, Integrations, etc).
 2. Connector onboarding + health checks:
    - Activepieces + BCGPT status probes and configuration storage.
    - Gateway method: `pmos.connectors.status` (implemented under `openclaw/src/gateway/server-methods/pmos.ts`).
+
+## Phase 2 Status (Completed)
+
+Phase 2 shipped **native Activepieces embed inside PMOS** (no app-switching):
+
+1. Integrations:
+   - Pieces catalog (search + browse)
+   - Connections CRUD (create/list/delete)
+2. Automations (Flows):
+   - List + create flows
+   - Open flow details
+   - Basic mutations (rename, enable/disable, publish, delete)
+   - Webhook trigger with payload JSON
+   - Advanced FlowOperationRequest editor (raw operation JSON)
+3. Runs:
+   - List runs + view run details
+   - Retry (supported strategies)
+
+Deployed to production: `os.wickedlab.io` (OpenClaw image tag `openclaw-e5cdc472`).
+
+Important: many Activepieces APIs require `projectId`.
+Set it in PMOS:
+- PMOS -> Integrations -> Activepieces -> Project ID, then Save; or
+- CLI: `openclaw config set pmos.connectors.activepieces.projectId <id>`
 
 ## What OpenClaw Provides For PMOS
 

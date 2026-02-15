@@ -33,26 +33,38 @@ Smoke validation:
 2. From inside the PMOS container:
    - `node openclaw.mjs gateway call pmos.connectors.status --json`
 
-## Immediate Work Queue (Phase 2 Start)
+## Phase 2 (Complete): Native Activepieces Embed
 
-1. Activepieces native embed (no app switching):
-   - Implement Flows view in PMOS UI:
-     - list flows
-     - open flow editor inside PMOS (graph + step config)
-     - run flow + show live runs/logs
-   - Implement Integrations view:
-     - list pieces catalog
-     - list connections + create/update/delete
+Shipped + deployed to `os.wickedlab.io`:
 
-2. PMOS identity + admin:
-   - Add PMOS native auth (email first).
-   - Add workspaces + roles (`system_admin`, `workspace_admin`, `member`, `viewer`).
-   - Add admin screens: users/invites/roles + audit/events.
+1. Integrations view includes:
+   - pieces catalog (search + browse)
+   - connections CRUD (create/list/delete)
+2. Automations (Flows) view includes:
+   - list + create flows
+   - open flow details
+   - basic mutations (rename, enable/disable, publish, delete)
+   - webhook trigger + payload JSON
+   - advanced FlowOperationRequest editor (raw op JSON)
+3. Runs view includes:
+   - list runs + view details
+   - retry (supported strategies)
 
-3. AI-assisted flow creation (the "watch it build" experience):
-   - Chat -> graph-ops stream (`add_node`, `add_edge`, `update_mapping`)
-   - Live canvas updates in PMOS
-   - Commit to Activepieces, show result immediately
+Prerequisite: set Activepieces `projectId` (many APIs require it).
+- PMOS -> Integrations -> Activepieces -> Project ID, then Save
+- Stored at `pmos.connectors.activepieces.projectId`
+
+## Immediate Work Queue (Phase 3 Start)
+
+1. PMOS identity + admin (OpenClaw-first, PMOS UX):
+   - email auth
+   - workspaces + roles (`system_admin`, `workspace_admin`, `member`, `viewer`)
+   - admin screens (users/invites/roles) + audit/activity feed
+
+2. AI-assisted flow creation (the "watch it build" experience):
+   - chat -> graph-ops stream (`add_node`, `add_edge`, `update_mapping`)
+   - live canvas updates in PMOS
+   - commit/sync to Activepieces, show result immediately
 
 ## Deployment / Smoke Checklist (Every Deploy)
 

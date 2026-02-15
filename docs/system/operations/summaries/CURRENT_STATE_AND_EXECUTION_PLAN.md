@@ -19,27 +19,30 @@ The earlier React PMOS prototype (`frontend/`) is not the PMOS product surface g
 4. Connector onboarding + health checks are live:
    - UI: Integrations screen stores connector config in OpenClaw config (secrets redacted on read).
    - Gateway method: `pmos.connectors.status` (Activepieces + BCGPT reachability + auth probes).
-5. `flow.wickedlab.io` (Activepieces) remains a separate running service and is treated as the automation engine.
-6. `bcgpt.wickedlab.io` remains the MCP/connect surface (Basecamp OAuth, MCP tools) and is treated as a connector.
+5. Phase 2 native Activepieces embed is live inside the PMOS UI (no app-switching):
+   - Integrations: pieces catalog + connections CRUD
+   - Automations: flows list/create/edit/run (incl. webhook trigger)
+   - Runs: list/details + retry
+6. `flow.wickedlab.io` (Activepieces) remains a separate running service and is treated as the automation engine.
+7. `bcgpt.wickedlab.io` remains the MCP/connect surface (Basecamp OAuth, MCP tools) and is treated as a connector.
 
-### Production verification (Phase 1)
+Production image tag (PMOS / OpenClaw): `openclaw-e5cdc472`.
+
+### Production verification (Phase 1 + Phase 2)
 
 1. `https://os.wickedlab.io/` loads.
 2. Run the gateway check from inside the PMOS container:
    - `node openclaw.mjs gateway call pmos.connectors.status --json`
    - Expect `activepieces.reachable=true` and `activepieces.authOk=true`.
+   - For Phase 2 screens to work, `activepieces.projectId` must be set (many APIs require it).
    - `bcgpt.authOk` becomes true after setting a BCGPT API key in Integrations.
 
 ### What is next (the actual build)
 
-1. Native Activepieces embed inside PMOS UI (no app switching, no iframe-first dependency):
-   - flows list/create/edit/run
-   - runs timeline + logs + retries
-   - pieces catalog + connections management
-2. PMOS native auth + RBAC/admin:
+1. PMOS native auth + RBAC/admin:
    - email auth first, then optional OAuth
    - workspaces + roles + admin UI shell + audit feed
-3. Live AI flow building + execution trace stream in chat sidebar (model-agnostic).
+2. Live AI flow building + execution trace stream in chat sidebar (model-agnostic).
 
 ## 1. Core Product Direction
 
