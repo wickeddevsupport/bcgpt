@@ -23,6 +23,7 @@ Canonical status and execution context now live in:
 2) Keep PMOS runtime wired to:
    - `BCGPT_URL=https://bcgpt.wickedlab.io`
    - `FLOW_URL=https://flow.wickedlab.io`
+   - PMOS accepts BCGPT auth either from server env (`BCGPT_API_KEY`) or per request (`x-bcgpt-api-key`)
 3) Keep BCGPT runtime wired to:
    - `PMOS_URL=https://os.wickedlab.io`
 4) Add startup/runtime guard that logs effective PMOS integration URLs at boot.
