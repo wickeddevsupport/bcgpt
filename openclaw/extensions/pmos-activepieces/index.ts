@@ -153,6 +153,12 @@ function readOptionalNumber(params: unknown, key: string): number | undefined {
   return undefined;
 }
 
+function resolveToolParams(toolCallIdOrParams: unknown, maybeParams?: unknown): unknown {
+  // OpenClaw runtime invokes tools as execute(toolCallId, args).
+  // Keep compatibility with any older single-arg call sites.
+  return maybeParams === undefined ? toolCallIdOrParams : maybeParams;
+}
+
 export default {
   id: "pmos-activepieces",
   name: "PMOS Activepieces",
@@ -184,7 +190,8 @@ export default {
           limit: { type: "number" },
         },
       },
-      async execute(params: unknown) {
+      async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
+        const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         // projectId is optional for pieces list, but including it can unlock scoped pieces for some installs.
         const projectId = readOptionalString(params, "projectId");
         const searchQuery = readOptionalString(params, "searchQuery");
@@ -224,7 +231,8 @@ export default {
           cursor: { type: "string" },
         },
       },
-      async execute(params: unknown) {
+      async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
+        const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const projectId = resolveProjectIdOrThrow(api, params);
         const pieceName = readOptionalString(params, "pieceName");
         const displayName = readOptionalString(params, "displayName");
@@ -256,7 +264,8 @@ export default {
           name: { type: "string" },
         },
       },
-      async execute(params: unknown) {
+      async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
+        const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const projectId = resolveProjectIdOrThrow(api, params);
         const limit = readOptionalNumber(params, "limit");
         const cursor = readOptionalString(params, "cursor");
@@ -284,7 +293,8 @@ export default {
         },
         required: ["flowId"],
       },
-      async execute(params: unknown) {
+      async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
+        const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const flowId = readOptionalString(params, "flowId");
         if (!flowId) {
           throw new Error("flowId required");
@@ -309,7 +319,8 @@ export default {
         },
         required: ["displayName"],
       },
-      async execute(params: unknown) {
+      async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
+        const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const projectId = resolveProjectIdOrThrow(api, params);
         const displayName = readOptionalString(params, "displayName");
         if (!displayName) {
@@ -342,7 +353,8 @@ export default {
         },
         required: ["flowId", "operation"],
       },
-      async execute(params: unknown) {
+      async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
+        const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const flowId = readOptionalString(params, "flowId");
         if (!flowId) {
           throw new Error("flowId required");
@@ -375,7 +387,8 @@ export default {
         },
         required: ["flowId"],
       },
-      async execute(params: unknown) {
+      async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
+        const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const flowId = readOptionalString(params, "flowId");
         if (!flowId) {
           throw new Error("flowId required");
@@ -404,7 +417,8 @@ export default {
         },
         required: ["flowId"],
       },
-      async execute(params: unknown) {
+      async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
+        const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const flowId = readOptionalString(params, "flowId");
         if (!flowId) {
           throw new Error("flowId required");
@@ -446,7 +460,8 @@ export default {
           cursor: { type: "string" },
         },
       },
-      async execute(params: unknown) {
+      async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
+        const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const projectId = resolveProjectIdOrThrow(api, params);
         const flowId = readOptionalString(params, "flowId");
         const limit = readOptionalNumber(params, "limit");
@@ -478,7 +493,8 @@ export default {
         },
         required: ["runId"],
       },
-      async execute(params: unknown) {
+      async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
+        const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const runId = readOptionalString(params, "runId");
         if (!runId) {
           throw new Error("runId required");
@@ -501,7 +517,8 @@ export default {
         },
         required: ["runId", "strategy"],
       },
-      async execute(params: unknown) {
+      async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
+        const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const runId = readOptionalString(params, "runId");
         if (!runId) {
           throw new Error("runId required");
@@ -533,7 +550,8 @@ export default {
         },
         required: ["connection"],
       },
-      async execute(params: unknown) {
+      async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
+        const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         if (!params || typeof params !== "object" || Array.isArray(params)) {
           throw new Error("connection required");
         }
@@ -564,7 +582,8 @@ export default {
         },
         required: ["connectionId"],
       },
-      async execute(params: unknown) {
+      async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
+        const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const connectionId = readOptionalString(params, "connectionId");
         if (!connectionId) {
           throw new Error("connectionId required");
@@ -592,7 +611,8 @@ export default {
         },
         required: ["connectionId", "displayName"],
       },
-      async execute(params: unknown) {
+      async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
+        const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const connectionId = readOptionalString(params, "connectionId");
         const displayName = readOptionalString(params, "displayName");
         if (!connectionId) {
