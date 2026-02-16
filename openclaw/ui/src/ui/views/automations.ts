@@ -77,11 +77,11 @@ function formatFlowMeta(flow: ActivepiecesFlowSummary) {
 
 export function renderAutomations(props: AutomationsProps) {
   const connectedReason = !props.connected
-    ? "Connect to PMOS first (Dashboard -> Access Key -> Connect)."
+    ? "Connect to Wicked OS first (Dashboard -> Access Key -> Connect)."
     : null;
   const projectReason = props.projectId.trim()
     ? null
-    : "Activepieces Project ID is required. Set it in Integrations -> Activepieces -> Project ID, then Save.";
+    : "Flow Pieces Project ID is required. Set it in Integrations -> Flow Pieces -> Project ID, then Save.";
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const flowStatus = props.flowDetails ? String((props.flowDetails as any).status ?? "") : "";
@@ -92,7 +92,7 @@ export function renderAutomations(props: AutomationsProps) {
       <div class="agents-sidebar">
         <div class="card">
           <div class="card-title">Create flow</div>
-          <div class="card-sub">Create a new Activepieces flow in your configured project.</div>
+          <div class="card-sub">Create a new Flow Pieces flow in your configured project.</div>
 
           <div class="form-grid" style="margin-top: 14px;">
             <label class="field full">
@@ -124,7 +124,7 @@ export function renderAutomations(props: AutomationsProps) {
 
         <div class="card">
           <div class="card-title">Flows</div>
-          <div class="card-sub">Your Activepieces flows (native inside PMOS).</div>
+          <div class="card-sub">Your Flow Pieces flows (native inside Wicked OS).</div>
 
           <div class="form-grid" style="margin-top: 14px;">
             <label class="field full">
@@ -189,7 +189,7 @@ export function renderAutomations(props: AutomationsProps) {
           <div class="card" style="margin-top: 16px;">
             <div class="card-title">AI Flow Builder (Live)</div>
             <div class="card-sub">
-              Describe your automation and watch PMOS stream graph operations before committing a flow shell.
+              Describe your automation and watch Wicked OS stream graph operations before committing a flow shell.
             </div>
 
             <label class="field" style="margin-top: 12px;">
@@ -348,7 +348,7 @@ export function renderAutomations(props: AutomationsProps) {
                   <div class="card" style="margin-top: 16px;">
                     <div class="card-title">Webhook Trigger</div>
                     <div class="card-sub">
-                      Triggers via Activepieces webhook endpoint (works for webhook-triggered flows).
+                      Triggers via Flow Pieces webhook endpoint (works for webhook-triggered flows).
                     </div>
                     <label class="field" style="margin-top: 12px;">
                       <span>Payload (JSON)</span>

@@ -105,7 +105,7 @@ async function invokeTool<T = unknown>(
 ): Promise<T> {
   const token = state.settings.token?.trim() ?? "";
   if (!token) {
-    throw new Error("PMOS access key missing. Go to Dashboard -> System -> paste key -> Connect.");
+    throw new Error("Wicked OS access key missing. Go to Dashboard -> System -> paste key -> Connect.");
   }
   const res = await fetch(resolveToolsInvokeUrl(state), {
     method: "POST",
@@ -162,7 +162,7 @@ function parsePrompt(promptRaw: string): PmosCommandPlanStep[] {
       `Create flow: ${displayName || "Untitled"}`,
       { displayName: displayName || "Untitled Flow" },
       "low",
-      "Creates a new draft flow in Activepieces.",
+      "Creates a new draft flow in Flow Pieces.",
     );
   }
 
@@ -257,7 +257,7 @@ async function executePlanStep(
     case "list_flows": {
       const projectId = state.pmosActivepiecesProjectId.trim();
       if (!projectId) {
-        throw new Error("Activepieces Project ID missing (set it in Integrations).");
+        throw new Error("Flow Pieces Project ID missing (set it in Integrations).");
       }
       const details = await invokeTool(state, "flow_flows_list", {
         projectId,
@@ -268,7 +268,7 @@ async function executePlanStep(
     case "create_flow": {
       const projectId = state.pmosActivepiecesProjectId.trim();
       if (!projectId) {
-        throw new Error("Activepieces Project ID missing (set it in Integrations).");
+        throw new Error("Flow Pieces Project ID missing (set it in Integrations).");
       }
       const displayName =
         typeof step.args.displayName === "string" && step.args.displayName.trim()

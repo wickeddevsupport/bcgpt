@@ -88,7 +88,7 @@ async function invokeTool<T = unknown>(
 ): Promise<T> {
   const token = state.settings.token?.trim() ?? "";
   if (!token) {
-    throw new Error("PMOS access key missing. Go to Dashboard -> System -> paste key -> Connect.");
+    throw new Error("Wicked OS access key missing. Go to Dashboard -> System -> paste key -> Connect.");
   }
   const res = await fetch(resolveToolsInvokeUrl(state), {
     method: "POST",
@@ -283,7 +283,7 @@ export async function commitPmosFlowBuilderPlan(state: PmosFlowBuilderState) {
   const projectId = state.pmosActivepiecesProjectId.trim();
   if (!projectId) {
     state.pmosFlowBuilderError =
-      "Activepieces Project ID is required. Set it in Integrations -> Activepieces -> Project ID.";
+      "Flow Pieces Project ID is required. Set it in Integrations -> Flow Pieces -> Project ID.";
     return;
   }
   const flowName = state.pmosFlowBuilderFlowName.trim() || state.apFlowCreateName.trim() || "New Automation";

@@ -143,7 +143,7 @@ async function invokeTool<T = unknown>(
 ): Promise<T> {
   const token = state.settings.token?.trim() ?? "";
   if (!token) {
-    throw new Error("PMOS access key missing. Go to Dashboard -> System -> paste key -> Connect.");
+    throw new Error("Wicked OS access key missing. Go to Dashboard -> System -> paste key -> Connect.");
   }
 
   const res = await fetch(resolveToolsInvokeUrl(state), {
@@ -238,7 +238,7 @@ export async function loadActivepiecesConnections(state: PmosActivepiecesState, 
   const projectId = resolveProjectId(state);
   if (!projectId) {
     state.apConnectionsError =
-      "Activepieces Project ID is required. Set it in Integrations -> Activepieces -> Project ID, then Save.";
+      "Flow Pieces Project ID is required. Set it in Integrations -> Flow Pieces -> Project ID, then Save.";
     state.apConnections = [];
     return;
   }
@@ -274,7 +274,7 @@ export async function createActivepiecesConnection(state: PmosActivepiecesState)
   const projectId = resolveProjectId(state);
   if (!projectId) {
     state.apConnectionCreateError =
-      "Activepieces Project ID is required. Set it in Integrations -> Activepieces -> Project ID, then Save.";
+      "Flow Pieces Project ID is required. Set it in Integrations -> Flow Pieces -> Project ID, then Save.";
     return;
   }
   const pieceName = state.apConnectionCreatePieceName.trim();
@@ -355,7 +355,7 @@ export async function loadActivepiecesFlows(state: PmosActivepiecesState, opts?:
   const projectId = resolveProjectId(state);
   if (!projectId) {
     state.apFlowsError =
-      "Activepieces Project ID is required. Set it in Integrations -> Activepieces -> Project ID, then Save.";
+      "Flow Pieces Project ID is required. Set it in Integrations -> Flow Pieces -> Project ID, then Save.";
     state.apFlows = [];
     return;
   }
@@ -406,7 +406,7 @@ export async function createActivepiecesFlow(state: PmosActivepiecesState) {
   const projectId = resolveProjectId(state);
   if (!projectId) {
     state.apFlowCreateError =
-      "Activepieces Project ID is required. Set it in Integrations -> Activepieces -> Project ID, then Save.";
+      "Flow Pieces Project ID is required. Set it in Integrations -> Flow Pieces -> Project ID, then Save.";
     return;
   }
   const name = state.apFlowCreateName.trim();
@@ -599,7 +599,7 @@ export async function loadActivepiecesRuns(state: PmosActivepiecesState, opts?: 
   const projectId = resolveProjectId(state);
   if (!projectId) {
     state.apRunsError =
-      "Activepieces Project ID is required. Set it in Integrations -> Activepieces -> Project ID, then Save.";
+      "Flow Pieces Project ID is required. Set it in Integrations -> Flow Pieces -> Project ID, then Save.";
     state.apRuns = [];
     return;
   }

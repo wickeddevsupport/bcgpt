@@ -125,13 +125,13 @@ export function renderDashboard(props: DashboardProps) {
   const focusItems = [
     !projectConfigured
       ? {
-          title: "Set Activepieces project",
-          detail: "Integrations -> Activepieces -> Project ID",
+          title: "Set Flow Pieces project",
+          detail: "Integrations -> Flow Pieces -> Project ID",
           href: props.integrationsHref,
         }
       : null,
     apStatus.tone !== "ok"
-      ? { title: "Fix Activepieces connector", detail: "Resolve auth or URL issues", href: props.integrationsHref }
+      ? { title: "Fix Flow Pieces connector", detail: "Resolve auth or URL issues", href: props.integrationsHref }
       : null,
     bcgptStatus.tone !== "ok"
       ? { title: "Fix BCGPT connector", detail: "Restore MCP auth for project actions", href: props.integrationsHref }
@@ -143,7 +143,7 @@ export function renderDashboard(props: DashboardProps) {
       ? { title: "Create first automation", detail: "Build a flow in Automations", href: props.automationsHref }
       : null,
     {
-      title: "Ask PMOS to execute",
+      title: "Ask Wicked OS to execute",
       detail: "Use chat to plan and run multi-step automation",
       href: props.chatHref,
     },
@@ -153,11 +153,11 @@ export function renderDashboard(props: DashboardProps) {
     <section class="grid grid-cols-2">
       <div class="card">
         <div class="card-title">Integration Health</div>
-        <div class="card-sub">Connector state for Activepieces and BCGPT.</div>
+        <div class="card-sub">Connector state for Flow Pieces and BCGPT.</div>
 
         <div class="stat-grid" style="margin-top: 16px;">
           <div class="stat">
-            <div class="stat-label">Activepieces</div>
+            <div class="stat-label">Flow Pieces</div>
             <div class="stat-value ${apStatus.tone === "ok" ? "ok" : "warn"}">${apStatus.label}</div>
             <div class="muted mono">${ap?.url ?? "https://flow.wickedlab.io"}</div>
           </div>
@@ -291,7 +291,7 @@ export function renderDashboard(props: DashboardProps) {
     <section class="grid grid-cols-2" style="margin-top: 18px;">
       <div class="card">
         <div class="card-title">Agent Timeline</div>
-        <div class="card-sub">Live PMOS execution trace (model-agnostic schema).</div>
+        <div class="card-sub">Live Wicked OS execution trace (model-agnostic schema).</div>
         ${
           trace.length
             ? html`
@@ -324,14 +324,14 @@ export function renderDashboard(props: DashboardProps) {
 
       <div class="card">
         <div class="card-title">System</div>
-        <div class="card-sub">PMOS access and gateway connection.</div>
+        <div class="card-sub">Wicked OS access and gateway connection.</div>
 
         ${
           showAccessCard
             ? html`
                 <div class="form-grid" style="margin-top: 16px;">
                   <label class="field">
-                    <span>PMOS Access Key</span>
+                    <span>Wicked OS Access Key</span>
                     <input
                       type="password"
                       .value=${props.settings.token}
@@ -363,7 +363,7 @@ export function renderDashboard(props: DashboardProps) {
           !projectConfigured
             ? html`
                 <div class="callout" style="margin-top: 14px;">
-                  Activepieces Project ID is not set. Configure it in Integrations to enable flow/runs widgets.
+                  Flow Pieces Project ID is not set. Configure it in Integrations to enable flow/runs widgets.
                 </div>
               `
             : nothing

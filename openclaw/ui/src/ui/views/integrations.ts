@@ -78,19 +78,19 @@ export function renderIntegrations(props: IntegrationsProps) {
 
   const activepiecesKeyPlaceholder = apConfigured
     ? "Stored (leave blank to keep)"
-    : "Paste Activepieces API key (ap_...)";
+    : "Paste Flow Pieces API key (ap_...)";
   const bcgptKeyPlaceholder = bcgptConfigured
     ? "Stored (leave blank to keep)"
     : "Paste BCGPT API key";
 
   const disabledReason = !props.connected
-    ? "Connect to PMOS first (Dashboard -> Access Key -> Connect)."
+    ? "Connect to Wicked OS first (Dashboard -> Access Key -> Connect)."
     : null;
 
   return html`
     <section class="grid grid-cols-2">
       <div class="card">
-        <div class="card-title">Activepieces (Flow Engine)</div>
+        <div class="card-title">Flow Pieces (Flow Engine)</div>
         <div class="card-sub">Used for flows, pieces, connections, and run logs.</div>
 
         <div class="form-grid" style="margin-top: 16px;">
@@ -134,7 +134,7 @@ export function renderIntegrations(props: IntegrationsProps) {
             class="btn btn--secondary"
             ?disabled=${props.saving || !props.connected}
             @click=${() => props.onClearActivepiecesKey()}
-            title="Remove the stored Activepieces API key"
+            title="Remove the stored Flow Pieces API key"
           >
             Clear key
           </button>
@@ -152,7 +152,7 @@ export function renderIntegrations(props: IntegrationsProps) {
 
       <div class="card">
         <div class="card-title">BCGPT (MCP Connector)</div>
-        <div class="card-sub">Basecamp OAuth + MCP tool surface. PMOS uses it as a connector.</div>
+        <div class="card-sub">Basecamp OAuth + MCP tool surface. Wicked OS uses it as a connector.</div>
 
         <div class="form-grid" style="margin-top: 16px;">
           <label class="field">
@@ -209,8 +209,8 @@ export function renderIntegrations(props: IntegrationsProps) {
       <div class="card-sub">Server-side checks (no browser CORS issues).</div>
 
       <div class="stat-grid" style="margin-top: 16px;">
-        ${renderConnectorStatus("Activepieces reachable", ap?.reachable ?? null, ap?.flagsUrl ?? null)}
-        ${renderConnectorStatus("Activepieces auth", ap?.authOk ?? null, ap?.authUrl ?? null)}
+        ${renderConnectorStatus("Flow Pieces reachable", ap?.reachable ?? null, ap?.flagsUrl ?? null)}
+        ${renderConnectorStatus("Flow Pieces auth", ap?.authOk ?? null, ap?.authUrl ?? null)}
         ${renderConnectorStatus("BCGPT reachable", bcgpt?.reachable ?? null, bcgpt?.healthUrl ?? null)}
         ${renderConnectorStatus("BCGPT auth", bcgpt?.authOk ?? null, bcgpt?.mcpUrl ?? null)}
       </div>
@@ -235,7 +235,7 @@ export function renderIntegrations(props: IntegrationsProps) {
     <section class="grid grid-cols-2" style="margin-top: 18px;">
       <div class="card">
         <div class="card-title">Pieces Catalog</div>
-        <div class="card-sub">Browse Activepieces integrations (200+).</div>
+        <div class="card-sub">Browse Flow Pieces integrations (200+).</div>
 
         <div class="form-grid" style="margin-top: 14px;">
           <label class="field full">
@@ -302,7 +302,7 @@ export function renderIntegrations(props: IntegrationsProps) {
 
       <div class="card">
         <div class="card-title">Connections</div>
-        <div class="card-sub">Create and manage Activepieces app connections for your project.</div>
+        <div class="card-sub">Create and manage Flow Pieces app connections for your project.</div>
 
         <div class="form-grid" style="margin-top: 14px;">
           <label class="field">

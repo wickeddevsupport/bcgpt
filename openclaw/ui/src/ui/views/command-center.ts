@@ -33,14 +33,14 @@ function stepStatusClass(status: PmosCommandPlanStep["status"]) {
 
 export function renderCommandCenter(props: CommandCenterProps) {
   const disabledReason = !props.connected
-    ? "Connect to PMOS first (Dashboard -> Access Key -> Connect)."
+    ? "Connect to Wicked OS first (Dashboard -> Access Key -> Connect)."
     : null;
 
   return html`
     <section class="grid grid-cols-2">
       <div class="card">
         <div class="card-title">Objective</div>
-        <div class="card-sub">Ask PMOS to plan and execute multi-step operations.</div>
+        <div class="card-sub">Ask Wicked OS to plan and execute multi-step operations.</div>
 
         <label class="field" style="margin-top: 14px;">
           <span>Command</span>

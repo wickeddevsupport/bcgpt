@@ -66,6 +66,11 @@
     min-width: 0;
   }
 
+  .brand-logo--wordmark {
+    width: 112px;
+    height: 26px;
+  }
+
   .brand-title {
     font-size: 14px;
   }

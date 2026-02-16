@@ -122,6 +122,11 @@
   flex-shrink: 0;
 }
 
+.brand-logo--wordmark {
+  width: 132px;
+  height: 30px;
+}
+
 .brand-logo img {
   width: 100%;
   height: 100%;

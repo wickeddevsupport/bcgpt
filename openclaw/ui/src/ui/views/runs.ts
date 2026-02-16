@@ -23,18 +23,18 @@ export type RunsProps = {
 
 export function renderRuns(props: RunsProps) {
   const connectedReason = !props.connected
-    ? "Connect to PMOS first (Dashboard -> Access Key -> Connect)."
+    ? "Connect to Wicked OS first (Dashboard -> Access Key -> Connect)."
     : null;
   const projectReason = props.projectId.trim()
     ? null
-    : "Activepieces Project ID is required. Set it in Integrations -> Activepieces -> Project ID, then Save.";
+    : "Flow Pieces Project ID is required. Set it in Integrations -> Flow Pieces -> Project ID, then Save.";
 
   return html`
     <section class="agents-layout">
       <div class="agents-sidebar">
         <div class="card">
           <div class="card-title">Runs</div>
-          <div class="card-sub">Recent Activepieces executions (project scoped).</div>
+          <div class="card-sub">Recent Flow Pieces executions (project scoped).</div>
 
           <div class="row" style="margin-top: 12px;">
             <button class="btn" @click=${() => props.onRefresh()} ?disabled=${!props.connected || !props.projectId.trim() || props.loading}>

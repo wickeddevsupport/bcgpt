@@ -1,9 +1,9 @@
 import type { IconName } from "./icons.js";
 
 export const TAB_GROUPS = [
-  // PMOS simplified experience (regular users)
+  // Wicked OS simplified experience (regular users)
   {
-    label: "PMOS",
+    label: "Wicked OS",
     tabs: ["dashboard", "automations", "runs", "integrations", "command-center", "admin", "chat"],
   },
   // Everything else stays available, but is hidden behind the Advanced admin section.
@@ -249,11 +249,11 @@ export function subtitleForTab(tab: Tab) {
     case "runs":
       return "Live and historical executions across agents and automations.";
     case "integrations":
-      return "Connect engines and apps (Activepieces, BCGPT/Basecamp, and more).";
+      return "Connect engines and apps (Flow Pieces, BCGPT/Basecamp, and more).";
     case "command-center":
       return "Plan and execute multi-step operations with approvals and history.";
     case "admin":
-      return "Workspace identity, roles, members, and PMOS audit feed.";
+      return "Workspace identity, roles, members, and Wicked OS audit feed.";
     case "agents":
       return "Manage agent workspaces, tools, and identities.";
     case "overview":

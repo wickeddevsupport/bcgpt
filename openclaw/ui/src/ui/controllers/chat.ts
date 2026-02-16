@@ -29,7 +29,7 @@ export type ChatEventPayload = {
 
 async function resolveChatReadinessError(state: ChatState): Promise<string | null> {
   if (!state.client || !state.connected) {
-    return "Connect to PMOS first, then try again.";
+    return "Connect to Wicked OS first, then try again.";
   }
   try {
     const res = await state.client.request<{ models?: Array<Record<string, unknown>> }>(

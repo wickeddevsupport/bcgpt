@@ -140,12 +140,8 @@ export function renderApp(state: AppViewState) {
             <span class="nav-collapse-toggle__icon">${icons.menu}</span>
           </button>
           <div class="brand">
-            <div class="brand-logo">
-              <img src=${basePath ? `${basePath}/favicon.svg` : "/favicon.svg"} alt="PMOS" />
-            </div>
-            <div class="brand-text">
-              <div class="brand-title">PMOS</div>
-              <div class="brand-sub">Automation OS</div>
+            <div class="brand-logo brand-logo--wordmark">
+              <img src=${basePath ? `${basePath}/wicked-os-logo.svg` : "/wicked-os-logo.svg"} alt="Wicked OS" />
             </div>
           </div>
         </div>
@@ -177,7 +173,7 @@ export function renderApp(state: AppViewState) {
                 aria-expanded=${!isGroupCollapsed}
               >
                 <span class="nav-label__text">${group.label}</span>
-                <span class="nav-label__chevron">${isGroupCollapsed ? "+" : "−"}</span>
+                <span class="nav-label__chevron">${isGroupCollapsed ? "+" : "-"}</span>
               </button>
               <div class="nav-group__items">
                 ${group.tabs.map((tab) => renderTab(state, tab))}
@@ -205,10 +201,10 @@ export function renderApp(state: AppViewState) {
               href=${state.pmosActivepiecesUrl}
               target="_blank"
               rel="noreferrer"
-              title="Open Activepieces (opens in new tab)"
+              title="Open Flow Pieces (opens in new tab)"
             >
               <span class="nav-item__icon" aria-hidden="true">${icons.link}</span>
-              <span class="nav-item__text">Activepieces</span>
+              <span class="nav-item__text">Flow Pieces</span>
             </a>
             <a
               class="nav-item nav-item--external"

@@ -56,13 +56,13 @@ function roleLabel(role: PmosRole): string {
 
 export function renderAdmin(props: AdminProps) {
   const disabledReason = !props.connected
-    ? "Connect to PMOS first (Dashboard -> Access Key -> Connect)."
+    ? "Connect to Wicked OS first (Dashboard -> Access Key -> Connect)."
     : null;
   return html`
     <section class="grid grid-cols-2">
       <div class="card">
         <div class="card-title">Workspace Identity</div>
-        <div class="card-sub">PMOS workspace profile, owner identity, and role defaults.</div>
+        <div class="card-sub">Wicked OS workspace profile, owner identity, and role defaults.</div>
 
         <div class="form-grid" style="margin-top: 14px;">
           <label class="field">
@@ -127,7 +127,7 @@ export function renderAdmin(props: AdminProps) {
 
       <div class="card">
         <div class="card-title">Workspace Members</div>
-        <div class="card-sub">Role-based access controls for PMOS operations.</div>
+        <div class="card-sub">Role-based access controls for Wicked OS operations.</div>
 
         <div class="form-grid" style="margin-top: 14px;">
           <label class="field">
@@ -220,7 +220,7 @@ export function renderAdmin(props: AdminProps) {
 
     <section class="card" style="margin-top: 18px;">
       <div class="card-title">Audit Feed</div>
-      <div class="card-sub">Admin-level PMOS changes and command-center actions.</div>
+      <div class="card-sub">Admin-level Wicked OS changes and command-center actions.</div>
       <div class="list" style="margin-top: 12px; max-height: 320px; overflow: auto;">
         ${props.auditEvents.slice(0, 80).map(
           (event) => html`
