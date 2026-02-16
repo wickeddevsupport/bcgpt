@@ -1,0 +1,6 @@
+credentials/**/*.ts
+nodes/**/*.ts
+!dist/**
+tsconfig.json
+.prettierrc.js
+gulpfile.js
