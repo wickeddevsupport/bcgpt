@@ -74,14 +74,18 @@ async function apRequest(params: {
   const endpoint = params.endpoint.replace(/^\/+/, "");
   const url = `${baseUrl}/api/v1/${endpoint}`;
   const method = (params.method ?? "GET").toUpperCase();
+  const hasBody = params.body !== undefined;
+  const headers: Record<string, string> = {
+    authorization: `Bearer ${apiKey}`,
+  };
+  if (hasBody) {
+    headers["content-type"] = "application/json";
+  }
 
   const res = await fetch(url, {
     method,
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${apiKey}`,
-    },
-    body: params.body === undefined ? undefined : JSON.stringify(params.body),
+    headers,
+    body: hasBody ? JSON.stringify(params.body) : undefined,
   });
 
   if (!res.ok) {
