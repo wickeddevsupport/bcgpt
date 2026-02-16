@@ -108,7 +108,7 @@ export function renderDashboard(props: DashboardProps) {
     return { label: "Checking", tone: "warn" as const };
   })();
 
-  const showAccessCard = !props.connected || !props.settings.token.trim();
+  const showAccessCard = !props.connected;
   const flows = props.flows ?? [];
   const runs = props.runs ?? [];
   const trace = props.traceEvents ?? [];
@@ -472,7 +472,7 @@ export function renderDashboard(props: DashboardProps) {
             ? html`
                 <div class="form-grid" style="margin-top: 16px;">
                   <label class="field">
-                    <span>Wicked OS Access Key</span>
+                    <span>Wicked OS Access Key (optional)</span>
                     <input
                       type="password"
                       .value=${props.settings.token}
@@ -486,10 +486,10 @@ export function renderDashboard(props: DashboardProps) {
                   </label>
                 </div>
                 <div class="row" style="margin-top: 14px;">
-                  <button class="btn" @click=${() => props.onConnect()} ?disabled=${!props.settings.token.trim()}>
+                  <button class="btn" @click=${() => props.onConnect()} ?disabled=${props.connected}>
                     Connect
                   </button>
-                  <span class="muted">Your key is stored locally in this browser only.</span>
+                  <span class="muted">Needed only for legacy/manual gateway access.</span>
                 </div>
               `
             : html`

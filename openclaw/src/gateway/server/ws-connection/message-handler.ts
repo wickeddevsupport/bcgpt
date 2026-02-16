@@ -342,6 +342,7 @@ export function attachGatewayWsMessageHandler(params: {
             ? await resolvePmosSessionFromRequest(upgradeReq)
             : { ok: false as const, status: 401, error: "not webchat" };
         const pmosRole = pmosSession.ok ? pmosSession.user.role : null;
+        const hasPmosSession = pmosSession.ok;
 
         const roleRaw = connectParams.role ?? "operator";
         const roleCandidate = roleRaw === "operator" || roleRaw === "node" ? roleRaw : null;
@@ -419,7 +420,7 @@ export function attachGatewayWsMessageHandler(params: {
         const allowControlUiBypass = allowInsecureControlUi || disableControlUiDeviceAuth;
         const device = disableControlUiDeviceAuth ? null : deviceRaw;
 
-        const authResult = pmosSession.ok
+        const authResult = hasPmosSession
           ? { ok: true as const, method: "pmos-session" as const }
           : await authorizeGatewayConnect({
               auth: resolvedAuth,
@@ -686,7 +687,9 @@ export function attachGatewayWsMessageHandler(params: {
           return;
         }
 
-        const skipPairing = allowControlUiBypass && sharedAuthOk;
+        // PMOS-authenticated web users should not need manual gateway pairing/token entry.
+        // Shared-token bypass is still retained for legacy/manual access patterns.
+        const skipPairing = hasPmosSession || (allowControlUiBypass && sharedAuthOk);
         if (device && devicePublicKey && !skipPairing) {
           const requirePairing = async (reason: string, _paired?: { deviceId: string }) => {
             const pairing = await requestDevicePairing({
