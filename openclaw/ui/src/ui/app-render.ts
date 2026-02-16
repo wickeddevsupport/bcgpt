@@ -125,6 +125,43 @@ function canAccessTab(state: AppViewState, tab: Tab): boolean {
   return true;
 }
 
+function getObjectAtPath(source: unknown, path: string[]): unknown {
+  let cursor: unknown = source;
+  for (const part of path) {
+    if (!cursor || typeof cursor !== "object" || Array.isArray(cursor)) {
+      return undefined;
+    }
+    cursor = (cursor as Record<string, unknown>)[part];
+  }
+  return cursor;
+}
+
+function hasConfiguredModelAuth(config: unknown): boolean {
+  const explicitPaths = [
+    ["providers", "openai", "apiKey"],
+    ["providers", "anthropic", "apiKey"],
+    ["providers", "google", "apiKey"],
+    ["providers", "gemini", "apiKey"],
+    ["providers", "glm", "apiKey"],
+    ["providers", "openrouter", "apiKey"],
+    ["providers", "kilo", "apiKey"],
+    ["llm", "providers", "openai", "apiKey"],
+    ["llm", "providers", "anthropic", "apiKey"],
+    ["llm", "providers", "google", "apiKey"],
+    ["llm", "providers", "gemini", "apiKey"],
+    ["llm", "providers", "glm", "apiKey"],
+    ["llm", "providers", "openrouter", "apiKey"],
+    ["model", "apiKey"],
+  ];
+  for (const path of explicitPaths) {
+    const value = getObjectAtPath(config, path);
+    if (typeof value === "string" && value.trim().length > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function renderAuthScreen(state: AppViewState) {
   const loading = state.pmosAuthLoading;
   const isSignup = state.pmosAuthMode === "signup";
@@ -397,6 +434,8 @@ export function renderApp(state: AppViewState) {
                 automationsHref: pathForTab("automations", state.basePath),
                 runsHref: pathForTab("runs", state.basePath),
                 chatHref: pathForTab("chat", state.basePath),
+                configHref: pathForTab("config", state.basePath),
+                modelAuthConfigured: hasConfiguredModelAuth(state.configSnapshot?.config ?? null),
                 onSettingsChange: (next) => state.applySettings(next),
                 onConnect: () => state.connect(),
                 onRefreshConnectors: () => state.handlePmosRefreshConnectors(),
