@@ -40,7 +40,14 @@ async function resolveChatReadinessError(state: ChatState): Promise<string | nul
     if (models.length === 0) {
       return "No AI model is configured for this workspace. Configure one in Admin (Advanced) -> Config.";
     }
-    const hasAvailable = models.some((model) => model?.available === true);
+    // Newer gateways may return model catalog entries without an explicit
+    // `available` boolean. In that case, treat listed models as usable.
+    const hasExplicitAvailability = models.some(
+      (model) => typeof model?.available === "boolean",
+    );
+    const hasAvailable = hasExplicitAvailability
+      ? models.some((model) => model?.available === true)
+      : models.length > 0;
     if (!hasAvailable) {
       return (
         "No model auth is configured for the active session. " +
