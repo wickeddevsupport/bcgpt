@@ -27,9 +27,12 @@ This repo includes OpenClaw under `openclaw/`. PMOS is now built directly on Ope
    - Automations (Flows) loads a flow list
    - Runs loads recent runs
    - Integrations shows pieces + connections
-6. If Chat shows **Missing workspace template** errors:
+6. For Chat:
+   - Configure at least one model/provider key in PMOS (`Admin (Advanced) -> Config`).
+   - Without model auth, Chat will not execute turns.
+7. If Chat shows **Missing workspace template** errors:
    - Ensure the OpenClaw image includes `openclaw/docs/reference/templates/IDENTITY.md` and `USER.md`.
-   - Fixed in production as of image tag `openclaw-dde11a1d`.
+   - Fixed in production as of image tag `openclaw-5ac669cd`.
 
 ## Phase 1 Status (Completed)
 
@@ -59,7 +62,7 @@ Phase 2 shipped **native Activepieces embed inside PMOS** (no app-switching):
    - List runs + view run details
    - Retry (supported strategies)
 
-Deployed to production: `os.wickedlab.io` (OpenClaw image tag `openclaw-dde11a1d`).
+Deployed to production: `os.wickedlab.io` (OpenClaw image tag `openclaw-5ac669cd`).
 
 Important: many Activepieces APIs require `projectId`.
 Set it in PMOS:
