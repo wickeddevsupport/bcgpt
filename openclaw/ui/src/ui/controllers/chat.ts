@@ -38,7 +38,7 @@ async function resolveChatReadinessError(state: ChatState): Promise<string | nul
     );
     const models = Array.isArray(res.models) ? res.models : [];
     if (models.length === 0) {
-      return "No AI model is configured for this workspace. Configure one in Admin (Advanced) -> Config.";
+      return "No AI model is configured for this workspace. Configure one in Integrations -> AI Model Setup.";
     }
     // Newer gateways may return model catalog entries without an explicit
     // `available` boolean. In that case, treat listed models as usable.
@@ -51,7 +51,7 @@ async function resolveChatReadinessError(state: ChatState): Promise<string | nul
     if (!hasAvailable) {
       return (
         "No model auth is configured for the active session. " +
-        "Add a provider API key in Admin (Advanced) -> Config, then try Chat again."
+        "Add a provider API key in Integrations -> AI Model Setup, then try Chat again."
       );
     }
     return null;

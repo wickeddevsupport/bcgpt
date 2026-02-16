@@ -210,6 +210,8 @@ export function renderChat(props: ChatProps) {
   const activeSession = props.sessions?.sessions?.find((row) => row.key === props.sessionKey);
   const reasoningLevel = activeSession?.reasoningLevel ?? "off";
   const showReasoning = props.showThinking && reasoningLevel !== "off";
+  const traceCount = props.traceEvents?.length ?? 0;
+  const traceHasError = Boolean(props.traceEvents?.some((event) => event.status === "error"));
   const assistantIdentity = {
     name: props.assistantName,
     avatar: props.assistantAvatar ?? props.assistantAvatarUrl ?? null,
@@ -371,47 +373,55 @@ export function renderChat(props: ChatProps) {
 
       ${renderCompactionIndicator(props.compactionStatus)}
 
-      <div class="chat-trace">
-        <div class="chat-trace__header">
-          <div class="chat-trace__title">Execution Trace</div>
-          <div class="chat-trace__actions">
+      <details class="chat-trace" ?open=${traceHasError}>
+        <summary class="chat-trace__summary">
+          <span class="chat-trace__title">Trace</span>
+          <span class="chat-trace__summary-meta mono muted">
+            ${traceCount ? `${traceCount} event${traceCount === 1 ? "" : "s"}` : "none"}
+          </span>
+        </summary>
+        <div class="chat-trace__content">
+          <div class="chat-trace__header">
+            <div class="chat-trace__title">Execution Trace</div>
+            <div class="chat-trace__actions">
+              ${
+                props.onTraceClear
+                  ? html`
+                      <button
+                        class="btn btn--sm"
+                        type="button"
+                        @click=${() => props.onTraceClear?.()}
+                        ?disabled=${!props.traceEvents?.length}
+                      >
+                        Clear
+                      </button>
+                    `
+                  : nothing
+              }
+            </div>
+          </div>
+          <div class="chat-trace__list">
             ${
-              props.onTraceClear
-                ? html`
-                    <button
-                      class="btn btn--sm"
-                      type="button"
-                      @click=${() => props.onTraceClear?.()}
-                      ?disabled=${!props.traceEvents?.length}
-                    >
-                      Clear
-                    </button>
-                  `
-                : nothing
+              props.traceEvents && props.traceEvents.length > 0
+                ? props.traceEvents.slice(0, 8).map(
+                    (event) => html`
+                      <div class="chat-trace__item">
+                        <div class="chat-trace__main">
+                          <div class="chat-trace__name">${event.title}</div>
+                          <div class="chat-trace__detail">${event.detail ?? `${event.source}:${event.kind}`}</div>
+                        </div>
+                        <div class="chat-trace__meta">
+                          <span class=${traceClassForStatus(event.status)}>${event.status}</span>
+                          <span class="mono muted">${formatTraceTime(event.ts)}</span>
+                        </div>
+                      </div>
+                    `,
+                  )
+                : html`<div class="muted">No trace events yet.</div>`
             }
           </div>
         </div>
-        <div class="chat-trace__list">
-          ${
-            props.traceEvents && props.traceEvents.length > 0
-              ? props.traceEvents.slice(0, 8).map(
-                  (event) => html`
-                    <div class="chat-trace__item">
-                      <div class="chat-trace__main">
-                        <div class="chat-trace__name">${event.title}</div>
-                        <div class="chat-trace__detail">${event.detail ?? `${event.source}:${event.kind}`}</div>
-                      </div>
-                      <div class="chat-trace__meta">
-                        <span class=${traceClassForStatus(event.status)}>${event.status}</span>
-                        <span class="mono muted">${formatTraceTime(event.ts)}</span>
-                      </div>
-                    </div>
-                  `,
-                )
-              : html`<div class="muted">No trace events yet.</div>`
-          }
-        </div>
-      </div>
+      </details>
 
       ${
         props.showNewMessages

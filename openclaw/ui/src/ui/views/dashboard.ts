@@ -113,7 +113,8 @@ export function renderDashboard(props: DashboardProps) {
   const flows = props.flows ?? [];
   const runs = props.runs ?? [];
   const trace = props.traceEvents ?? [];
-  const projectConfigured = Boolean(props.projectId.trim());
+  const configuredProjectId = String(ap?.projectId ?? props.projectId ?? "").trim();
+  const projectConfigured = Boolean(configuredProjectId);
   const enabledFlows = flows.filter((flow) => String(flow.status ?? "").toUpperCase() === "ENABLED").length;
 
   const runBuckets = runs.reduce(
@@ -171,10 +172,10 @@ export function renderDashboard(props: DashboardProps) {
     {
       id: "model-auth",
       title: "Add AI Model Key",
-      detail: "Set at least one provider API key and default model in Config.",
+      detail: "Integrations -> AI Model Setup",
       done: Boolean(props.modelAuthConfigured),
-      href: props.configHref ?? props.integrationsHref,
-      actionLabel: "Open config",
+      href: props.integrationsHref,
+      actionLabel: "Configure model",
     },
     {
       id: "first-flow",
@@ -207,6 +208,7 @@ export function renderDashboard(props: DashboardProps) {
   ];
   const setupCompleted = setupSteps.filter((step) => step.done).length;
   const nextSetupStep = setupSteps.find((step) => !step.done) ?? null;
+  const wizardOpen = setupCompleted !== setupSteps.length;
   const focusItems = [
     !projectConfigured
       ? {
@@ -235,89 +237,96 @@ export function renderDashboard(props: DashboardProps) {
   ].filter((item): item is { title: string; detail: string; href: string } => Boolean(item));
 
   return html`
-    <section class="card" style="margin-bottom: 18px;">
-      <div class="card-title">Quick Setup Wizard</div>
-      <div class="card-sub">
-        Follow these steps once. After setup, your team can run nearly everything by chat.
-      </div>
-
-      <div class="row" style="margin-top: 12px; align-items: center;">
+    <details class="card setup-wizard" style="margin-bottom: 18px;" ?open=${wizardOpen}>
+      <summary class="setup-wizard__summary">
+        <div class="setup-wizard__summary-main">
+          <div class="card-title">Quick Setup Wizard</div>
+          <div class="card-sub">
+            Follow these steps once. After setup, your team can run nearly everything by chat.
+          </div>
+        </div>
         <span class="chip ${setupCompleted === setupSteps.length ? "chip-ok" : "chip-warn"}">
-          ${setupCompleted}/${setupSteps.length} completed
+          ${setupCompleted}/${setupSteps.length}
         </span>
-        <button class="btn btn--secondary" @click=${() => props.onRefreshDashboard()} ?disabled=${refreshBusy || !props.connected}>
-          ${refreshBusy ? "Checking..." : "Run setup check"}
-        </button>
-        ${nextSetupStep
-          ? html`
-              <span class="muted">
-                Next: <strong>${nextSetupStep.title}</strong>
-              </span>
-            `
-          : html`<span class="muted">Setup complete. Use Chat to run workflows.</span>`}
-      </div>
+      </summary>
 
-      <div class="list" style="margin-top: 12px;">
-        ${setupSteps.map((step, index) => {
-          const chipClass = step.done ? "chip chip-ok" : "chip chip-warn";
-          return html`
-            <div class="list-item">
-              <div class="list-main">
-                <div class="list-title">${index + 1}. ${step.title}</div>
-                <div class="list-sub">${step.detail}</div>
-              </div>
-              <div class="list-meta">
-                <span class=${chipClass}>${step.done ? "Done" : "Pending"}</span>
-                ${
-                  step.done
-                    ? nothing
-                    : step.actionKind === "connect"
-                      ? html`
-                          <button
-                            class="btn btn--sm"
-                            @click=${() => props.onConnect()}
-                            ?disabled=${props.connected}
-                          >
-                            ${step.actionLabel ?? "Connect"}
-                          </button>
-                        `
-                      : step.href
+      <div class="setup-wizard__body">
+        <div class="row" style="margin-top: 12px; align-items: center;">
+          <button class="btn btn--secondary" @click=${() => props.onRefreshDashboard()} ?disabled=${refreshBusy || !props.connected}>
+            ${refreshBusy ? "Checking..." : "Run setup check"}
+          </button>
+          ${nextSetupStep
+            ? html`
+                <span class="muted">
+                  Next: <strong>${nextSetupStep.title}</strong>
+                </span>
+              `
+            : html`<span class="muted">Setup complete. Use Chat to run workflows.</span>`}
+        </div>
+
+        <div class="list" style="margin-top: 12px;">
+          ${setupSteps.map((step, index) => {
+            const chipClass = step.done ? "chip chip-ok" : "chip chip-warn";
+            return html`
+              <div class="list-item">
+                <div class="list-main">
+                  <div class="list-title">${index + 1}. ${step.title}</div>
+                  <div class="list-sub">${step.detail}</div>
+                </div>
+                <div class="list-meta">
+                  <span class=${chipClass}>${step.done ? "Done" : "Pending"}</span>
+                  ${
+                    step.done
+                      ? nothing
+                      : step.actionKind === "connect"
                         ? html`
                             <button
                               class="btn btn--sm"
-                              @click=${() => {
-                                if (step.id === "flowpieces" || step.id === "bcgpt" || step.id === "project") {
-                                  props.onNavigateTab("integrations");
-                                  return;
-                                }
-                                if (step.id === "model-auth") {
-                                  props.onNavigateTab("config");
-                                  return;
-                                }
-                                if (step.id === "first-flow") {
-                                  props.onNavigateTab("automations");
-                                  return;
-                                }
-                                if (step.id === "first-run") {
-                                  props.onNavigateTab("runs");
-                                  return;
-                                }
-                                if (step.id === "chat-ready") {
-                                  props.onNavigateTab("chat");
-                                }
-                              }}
+                              @click=${() => props.onConnect()}
+                              ?disabled=${props.connected}
                             >
-                              ${step.actionLabel ?? "Open"}
+                              ${step.actionLabel ?? "Connect"}
                             </button>
                           `
-                        : nothing
-                }
+                        : step.href
+                          ? html`
+                              <button
+                                class="btn btn--sm"
+                                @click=${() => {
+                                  if (
+                                    step.id === "flowpieces" ||
+                                    step.id === "bcgpt" ||
+                                    step.id === "project" ||
+                                    step.id === "model-auth"
+                                  ) {
+                                    props.onNavigateTab("integrations");
+                                    return;
+                                  }
+                                  if (step.id === "first-flow") {
+                                    props.onNavigateTab("automations");
+                                    return;
+                                  }
+                                  if (step.id === "first-run") {
+                                    props.onNavigateTab("runs");
+                                    return;
+                                  }
+                                  if (step.id === "chat-ready") {
+                                    props.onNavigateTab("chat");
+                                  }
+                                }}
+                              >
+                                ${step.actionLabel ?? "Open"}
+                              </button>
+                            `
+                          : nothing
+                  }
+                </div>
               </div>
-            </div>
-          `;
-        })}
+            `;
+          })}
+        </div>
       </div>
-    </section>
+    </details>
 
     <section class="grid grid-cols-2">
       <div class="card">

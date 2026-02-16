@@ -40,6 +40,32 @@
   line-height: 1.5;
 }
 
+/* Collapsible card patterns (used by PMOS dashboard wizard, etc.) */
+.setup-wizard__summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.setup-wizard__summary::-webkit-details-marker {
+  display: none;
+}
+
+.setup-wizard__summary::marker {
+  content: "";
+}
+
+.setup-wizard__summary-main {
+  min-width: 0;
+}
+
+.setup-wizard__body {
+  margin-top: 12px;
+}
+
 /* ===========================================
    Stats - Bold values, subtle labels
    =========================================== */
@@ -1211,6 +1237,37 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--card);
+  padding: 0;
+}
+
+.chat-trace__summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chat-trace__summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-trace__summary::marker {
+  content: "";
+}
+
+.chat-trace__summary-meta {
+  opacity: 0.75;
+  font-size: 12px;
+}
+
+.chat-trace[open] .chat-trace__summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-trace__content {
   padding: 12px;
   display: grid;
   gap: 10px;

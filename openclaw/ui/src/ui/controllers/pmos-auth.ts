@@ -30,6 +30,7 @@ type PmosAuthState = {
 
 type AuthResponse = {
   ok: boolean;
+  status?: number;
   error?: string;
   authenticated?: boolean;
   user?: PmosAuthUser;
@@ -72,17 +73,20 @@ async function requestAuth(
   if (!response.ok) {
     return {
       ok: false,
+      status: response.status,
       error: parsed?.error || `Auth request failed (${response.status})`,
       authenticated: false,
     };
   }
-  return parsed && typeof parsed === "object"
-    ? parsed
-    : {
-        ok: false,
-        error: "Invalid auth response.",
-        authenticated: false,
-      };
+  const base =
+    parsed && typeof parsed === "object"
+      ? parsed
+      : {
+          ok: false,
+          error: "Invalid auth response.",
+          authenticated: false,
+        };
+  return { ...base, status: response.status };
 }
 
 function applyAuthenticatedUser(state: PmosAuthState, user: PmosAuthUser): void {
@@ -113,10 +117,21 @@ export async function loadPmosAuthSession(state: PmosAuthState): Promise<void> {
       applyAuthenticatedUser(state, result.user);
       return;
     }
-    clearAuthState(state);
+    // Only clear auth state on explicit auth failures. If the server is temporarily
+    // unavailable, keep the last known user to avoid UI flicker on navigation.
+    if (result.status === 401 || result.status === 403) {
+      clearAuthState(state);
+    } else {
+      state.pmosAuthError = result.error || "Failed to restore session.";
+      if (!state.pmosAuthAuthenticated) {
+        clearAuthState(state);
+      }
+    }
   } catch (err) {
-    clearAuthState(state);
     state.pmosAuthError = String(err);
+    if (!state.pmosAuthAuthenticated) {
+      clearAuthState(state);
+    }
   } finally {
     state.pmosAuthLoading = false;
   }

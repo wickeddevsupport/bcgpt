@@ -119,7 +119,7 @@ function canAccessTab(state: AppViewState, tab: Tab): boolean {
   if (role === "super_admin") {
     return true;
   }
-  if (tab === "nodes" || tab === "debug" || tab === "logs") {
+  if (tab === "nodes" || tab === "debug" || tab === "logs" || tab === "config") {
     return false;
   }
   return true;
