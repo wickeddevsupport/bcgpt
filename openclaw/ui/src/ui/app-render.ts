@@ -241,10 +241,28 @@ export function renderApp(state: AppViewState) {
                 connectorsLoading: state.pmosConnectorsLoading,
                 connectorsError: state.pmosConnectorsError,
                 connectorsStatus: state.pmosConnectorsStatus,
+                projectId: state.pmosActivepiecesProjectId,
+                flowsLoading: state.apFlowsLoading,
+                flowsError: state.apFlowsError,
+                flows: state.apFlows,
+                runsLoading: state.apRunsLoading,
+                runsError: state.apRunsError,
+                runs: state.apRuns,
+                traceEvents: state.pmosTraceEvents,
                 integrationsHref: pathForTab("integrations", state.basePath),
+                automationsHref: pathForTab("automations", state.basePath),
+                runsHref: pathForTab("runs", state.basePath),
+                chatHref: pathForTab("chat", state.basePath),
                 onSettingsChange: (next) => state.applySettings(next),
                 onConnect: () => state.connect(),
                 onRefreshConnectors: () => state.handlePmosRefreshConnectors(),
+                onRefreshDashboard: () =>
+                  Promise.all([
+                    state.handlePmosRefreshConnectors(),
+                    state.handlePmosApFlowsLoad(),
+                    state.handlePmosApRunsLoad(),
+                  ]).then(() => undefined),
+                onClearTrace: () => state.handlePmosTraceClear(),
               })
             : nothing
         }
@@ -1323,6 +1341,8 @@ export function renderApp(state: AppViewState) {
                 sidebarContent: state.sidebarContent,
                 sidebarError: state.sidebarError,
                 splitRatio: state.splitRatio,
+                traceEvents: state.pmosTraceEvents,
+                onTraceClear: () => state.handlePmosTraceClear(),
                 onOpenSidebar: (content: string) => state.handleOpenSidebar(content),
                 onCloseSidebar: () => state.handleCloseSidebar(),
                 onSplitRatioChange: (ratio: number) => state.handleSplitRatioChange(ratio),

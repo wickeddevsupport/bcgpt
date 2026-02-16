@@ -2,6 +2,8 @@ import type { OpenClawApp } from "./app.ts";
 import type { AgentsListResult } from "./types.ts";
 import { refreshChat } from "./app-chat.ts";
 import {
+  startDashboardPolling,
+  stopDashboardPolling,
   startLogsPolling,
   stopLogsPolling,
   startDebugPolling,
@@ -45,6 +47,7 @@ type SettingsHost = {
   connected: boolean;
   chatHasAutoScrolled: boolean;
   logsAtBottom: boolean;
+  dashboardPollInterval: number | null;
   eventLog: unknown[];
   eventLogBuffer: unknown[];
   basePath: string;
@@ -153,6 +156,11 @@ export function setTab(host: SettingsHost, next: Tab) {
   if (next === "chat") {
     host.chatHasAutoScrolled = false;
   }
+  if (next === "dashboard") {
+    startDashboardPolling(host as unknown as Parameters<typeof startDashboardPolling>[0]);
+  } else {
+    stopDashboardPolling(host as unknown as Parameters<typeof stopDashboardPolling>[0]);
+  }
   if (next === "logs") {
     startLogsPolling(host as unknown as Parameters<typeof startLogsPolling>[0]);
   } else {
@@ -183,7 +191,11 @@ export function setTheme(host: SettingsHost, next: ThemeMode, context?: ThemeTra
 
 export async function refreshActiveTab(host: SettingsHost) {
   if (host.tab === "dashboard") {
-    await (host as unknown as OpenClawApp).handlePmosRefreshConnectors();
+    await Promise.all([
+      (host as unknown as OpenClawApp).handlePmosRefreshConnectors(),
+      (host as unknown as OpenClawApp).handlePmosApFlowsLoad(),
+      (host as unknown as OpenClawApp).handlePmosApRunsLoad(),
+    ]);
   }
   if (host.tab === "integrations") {
     await (host as unknown as OpenClawApp).handlePmosIntegrationsLoad();
@@ -371,6 +383,11 @@ export function setTabFromRoute(host: SettingsHost, next: Tab) {
   }
   if (next === "chat") {
     host.chatHasAutoScrolled = false;
+  }
+  if (next === "dashboard") {
+    startDashboardPolling(host as unknown as Parameters<typeof startDashboardPolling>[0]);
+  } else {
+    stopDashboardPolling(host as unknown as Parameters<typeof stopDashboardPolling>[0]);
   }
   if (next === "logs") {
     startLogsPolling(host as unknown as Parameters<typeof startLogsPolling>[0]);

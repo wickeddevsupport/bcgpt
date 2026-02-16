@@ -86,6 +86,7 @@ import {
   savePmosConnectorsConfig,
   type PmosConnectorsStatus,
 } from "./controllers/pmos-connectors.ts";
+import type { PmosExecutionTraceEvent } from "./controllers/pmos-trace.ts";
 import {
   applyActivepiecesFlowOperationDraft,
   createActivepiecesConnection,
@@ -221,6 +222,7 @@ export class OpenClawApp extends LitElement {
   @state() pmosConnectorsStatus: PmosConnectorsStatus | null = null;
   @state() pmosConnectorsError: string | null = null;
   @state() pmosConnectorsLastChecked: number | null = null;
+  @state() pmosTraceEvents: PmosExecutionTraceEvent[] = [];
 
   // PMOS Activepieces native embed (Phase 2)
   @state() apPiecesLoading = false;
@@ -426,6 +428,7 @@ export class OpenClawApp extends LitElement {
   private chatUserNearBottom = true;
   @state() chatNewMessagesBelow = false;
   private nodesPollInterval: number | null = null;
+  dashboardPollInterval: number | null = null;
   private logsPollInterval: number | null = null;
   private debugPollInterval: number | null = null;
   private logsScrollFrame: number | null = null;
@@ -530,6 +533,10 @@ export class OpenClawApp extends LitElement {
 
   async handlePmosRefreshConnectors() {
     await loadPmosConnectorsStatus(this);
+  }
+
+  handlePmosTraceClear() {
+    this.pmosTraceEvents = [];
   }
 
   async handlePmosIntegrationsLoad() {

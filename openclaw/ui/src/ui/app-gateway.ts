@@ -25,6 +25,11 @@ import {
   removeExecApproval,
 } from "./controllers/exec-approval.ts";
 import { loadNodes } from "./controllers/nodes.ts";
+import {
+  appendPmosTraceEvent,
+  summarizeTraceValue,
+  type PmosExecutionTraceEvent,
+} from "./controllers/pmos-trace.ts";
 import { loadSessions } from "./controllers/sessions.ts";
 import { GatewayBrowserClient } from "./gateway.ts";
 
@@ -52,6 +57,7 @@ type GatewayHost = {
   sessionKey: string;
   chatRunId: string | null;
   refreshSessionsAfterChat: Set<string>;
+  pmosTraceEvents: PmosExecutionTraceEvent[];
   execApprovalQueue: ExecApprovalRequest[];
   execApprovalError: string | null;
 };
@@ -113,6 +119,96 @@ function applySessionDefaults(host: GatewayHost, defaults?: SessionDefaultsSnaps
   if (shouldUpdateSettings) {
     applySettings(host as unknown as Parameters<typeof applySettings>[0], nextSettings);
   }
+}
+
+function recordAgentTraceEvent(host: GatewayHost, payload?: AgentEventPayload) {
+  if (!payload) {
+    return;
+  }
+  if (payload.sessionKey && payload.sessionKey !== host.sessionKey) {
+    return;
+  }
+  if (payload.stream === "compaction") {
+    const phase = typeof payload.data?.phase === "string" ? payload.data.phase : "";
+    appendPmosTraceEvent(host, {
+      id: `compaction:${payload.runId}`,
+      ts: payload.ts,
+      source: "system",
+      kind: "compaction",
+      status: phase === "start" ? "running" : "info",
+      title: phase === "start" ? "Context compaction started" : "Context compaction completed",
+      runId: payload.runId,
+      sessionKey: payload.sessionKey,
+    });
+    return;
+  }
+  if (payload.stream !== "tool") {
+    return;
+  }
+  const data = payload.data ?? {};
+  const toolCallId = typeof data.toolCallId === "string" ? data.toolCallId : "";
+  const name = typeof data.name === "string" ? data.name : "tool";
+  const phase = typeof data.phase === "string" ? data.phase : "";
+  const id = toolCallId
+    ? `tool:${payload.runId}:${toolCallId}`
+    : `tool:${payload.runId}:${payload.seq}`;
+  const detail =
+    phase === "start"
+      ? summarizeTraceValue(data.args)
+      : phase === "update"
+        ? summarizeTraceValue(data.partialResult)
+        : phase === "result"
+          ? summarizeTraceValue(data.result)
+          : null;
+
+  appendPmosTraceEvent(host, {
+    id,
+    ts: payload.ts,
+    source: "tool",
+    kind: "tool.call",
+    status: phase === "result" ? "success" : "running",
+    title: `Tool: ${name}`,
+    detail: detail ?? undefined,
+    runId: payload.runId,
+    sessionKey: payload.sessionKey,
+  });
+}
+
+function recordChatTraceEvent(host: GatewayHost, payload?: ChatEventPayload) {
+  if (!payload) {
+    return;
+  }
+  if (payload.sessionKey && payload.sessionKey !== host.sessionKey) {
+    return;
+  }
+  const id = `chat:${payload.runId}`;
+  const status =
+    payload.state === "final"
+      ? "success"
+      : payload.state === "error"
+        ? "error"
+        : payload.state === "aborted"
+          ? "info"
+          : "running";
+  const detail =
+    payload.state === "error"
+      ? payload.errorMessage ?? "Chat run failed."
+      : payload.state === "aborted"
+        ? "Run aborted."
+        : payload.state === "final"
+          ? "Response complete."
+          : "Generating response...";
+
+  appendPmosTraceEvent(host, {
+    id,
+    source: "chat",
+    kind: "chat.run",
+    status,
+    title: "Assistant run",
+    detail,
+    runId: payload.runId,
+    sessionKey: payload.sessionKey,
+  });
 }
 
 export function connectGateway(host: GatewayHost) {
@@ -179,18 +275,18 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
   }
 
   if (evt.event === "agent") {
+    const payload = evt.payload as AgentEventPayload | undefined;
     if (host.onboarding) {
       return;
     }
-    handleAgentEvent(
-      host as unknown as Parameters<typeof handleAgentEvent>[0],
-      evt.payload as AgentEventPayload | undefined,
-    );
+    recordAgentTraceEvent(host, payload);
+    handleAgentEvent(host as unknown as Parameters<typeof handleAgentEvent>[0], payload);
     return;
   }
 
   if (evt.event === "chat") {
     const payload = evt.payload as ChatEventPayload | undefined;
+    recordChatTraceEvent(host, payload);
     if (payload?.sessionKey) {
       setLastActiveSessionKey(
         host as unknown as Parameters<typeof setLastActiveSessionKey>[0],

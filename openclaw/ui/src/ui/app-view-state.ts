@@ -41,6 +41,7 @@ import type {
   ActivepiecesPieceSummary,
   ActivepiecesRunSummary,
 } from "./controllers/pmos-activepieces.ts";
+import type { PmosExecutionTraceEvent } from "./controllers/pmos-trace.ts";
 
 export type AppViewState = {
   settings: UiSettings;
@@ -129,6 +130,7 @@ export type AppViewState = {
   pmosConnectorsStatus: PmosConnectorsStatus | null;
   pmosConnectorsError: string | null;
   pmosConnectorsLastChecked: number | null;
+  pmosTraceEvents: PmosExecutionTraceEvent[];
 
   // PMOS Activepieces native embed (Phase 2)
   apPiecesLoading: boolean;
@@ -350,6 +352,7 @@ export type AppViewState = {
   handleSendChat: (messageOverride?: string, opts?: { restoreDraft?: boolean }) => Promise<void>;
   handleAbortChat: () => Promise<void>;
   handlePmosRefreshConnectors: () => Promise<void>;
+  handlePmosTraceClear: () => void;
   handlePmosIntegrationsLoad: () => Promise<void>;
   handlePmosIntegrationsSave: () => Promise<void>;
   handlePmosIntegrationsClearActivepiecesKey: () => Promise<void>;

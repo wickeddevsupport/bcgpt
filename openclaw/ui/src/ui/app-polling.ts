@@ -5,9 +5,14 @@ import { loadNodes } from "./controllers/nodes.ts";
 
 type PollingHost = {
   nodesPollInterval: number | null;
+  dashboardPollInterval: number | null;
   logsPollInterval: number | null;
   debugPollInterval: number | null;
+  connected?: boolean;
   tab: string;
+  handlePmosRefreshConnectors?: () => Promise<void>;
+  handlePmosApFlowsLoad?: () => Promise<void>;
+  handlePmosApRunsLoad?: () => Promise<void>;
 };
 
 export function startNodesPolling(host: PollingHost) {
@@ -26,6 +31,30 @@ export function stopNodesPolling(host: PollingHost) {
   }
   clearInterval(host.nodesPollInterval);
   host.nodesPollInterval = null;
+}
+
+export function startDashboardPolling(host: PollingHost) {
+  if (host.dashboardPollInterval != null) {
+    return;
+  }
+  host.dashboardPollInterval = window.setInterval(() => {
+    if (host.tab !== "dashboard" || host.connected === false) {
+      return;
+    }
+    void Promise.all([
+      host.handlePmosRefreshConnectors?.(),
+      host.handlePmosApFlowsLoad?.(),
+      host.handlePmosApRunsLoad?.(),
+    ]);
+  }, 8000);
+}
+
+export function stopDashboardPolling(host: PollingHost) {
+  if (host.dashboardPollInterval == null) {
+    return;
+  }
+  clearInterval(host.dashboardPollInterval);
+  host.dashboardPollInterval = null;
 }
 
 export function startLogsPolling(host: PollingHost) {

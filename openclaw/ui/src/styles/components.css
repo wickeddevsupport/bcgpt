@@ -1206,6 +1206,70 @@
   line-height: 1;
 }
 
+.chat-trace {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.chat-trace__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chat-trace__title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.chat-trace__list {
+  display: grid;
+  gap: 8px;
+}
+
+.chat-trace__item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--secondary);
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.chat-trace__main {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.chat-trace__name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.chat-trace__detail {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.chat-trace__meta {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+  align-content: start;
+}
+
 /* Chat lines */
 .chat-line {
   display: flex;

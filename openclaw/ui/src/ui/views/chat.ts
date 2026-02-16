@@ -4,6 +4,7 @@ import { repeat } from "lit/directives/repeat.js";
 import type { SessionsListResult } from "../types.ts";
 import type { ChatItem, MessageGroup } from "../types/chat-types.ts";
 import type { ChatAttachment, ChatQueueItem } from "../ui-types.ts";
+import type { PmosExecutionTraceEvent } from "../controllers/pmos-trace.ts";
 import {
   renderMessageGroup,
   renderReadingIndicatorGroup,
@@ -48,6 +49,8 @@ export type ChatProps = {
   sidebarContent?: string | null;
   sidebarError?: string | null;
   splitRatio?: number;
+  traceEvents?: PmosExecutionTraceEvent[];
+  onTraceClear?: () => void;
   assistantName: string;
   assistantAvatar: string | null;
   // Image attachments
@@ -108,6 +111,21 @@ function renderCompactionIndicator(status: CompactionIndicatorStatus | null | un
 
 function generateAttachmentId(): string {
   return `att-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function traceClassForStatus(status: PmosExecutionTraceEvent["status"]) {
+  if (status === "success") return "chip chip-ok";
+  if (status === "error") return "chip chip-danger";
+  if (status === "running") return "chip chip-warn";
+  return "chip";
+}
+
+function formatTraceTime(ts: number) {
+  try {
+    return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return "n/a";
+  }
 }
 
 function handlePaste(e: ClipboardEvent, props: ChatProps) {
@@ -352,6 +370,48 @@ export function renderChat(props: ChatProps) {
       }
 
       ${renderCompactionIndicator(props.compactionStatus)}
+
+      <div class="chat-trace">
+        <div class="chat-trace__header">
+          <div class="chat-trace__title">Execution Trace</div>
+          <div class="chat-trace__actions">
+            ${
+              props.onTraceClear
+                ? html`
+                    <button
+                      class="btn btn--sm"
+                      type="button"
+                      @click=${() => props.onTraceClear?.()}
+                      ?disabled=${!props.traceEvents?.length}
+                    >
+                      Clear
+                    </button>
+                  `
+                : nothing
+            }
+          </div>
+        </div>
+        <div class="chat-trace__list">
+          ${
+            props.traceEvents && props.traceEvents.length > 0
+              ? props.traceEvents.slice(0, 8).map(
+                  (event) => html`
+                    <div class="chat-trace__item">
+                      <div class="chat-trace__main">
+                        <div class="chat-trace__name">${event.title}</div>
+                        <div class="chat-trace__detail">${event.detail ?? `${event.source}:${event.kind}`}</div>
+                      </div>
+                      <div class="chat-trace__meta">
+                        <span class=${traceClassForStatus(event.status)}>${event.status}</span>
+                        <span class="mono muted">${formatTraceTime(event.ts)}</span>
+                      </div>
+                    </div>
+                  `,
+                )
+              : html`<div class="muted">No trace events yet.</div>`
+          }
+        </div>
+      </div>
 
       ${
         props.showNewMessages
