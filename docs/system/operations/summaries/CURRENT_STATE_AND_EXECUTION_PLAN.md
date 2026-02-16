@@ -1,10 +1,10 @@
 # PMOS Unified Platform Plan (OpenClaw + Activepieces)
 
-Last updated: 2026-02-15
+Last updated: 2026-02-16
 Owner: `bcgpt` monorepo
 Purpose: single canonical plan so fresh sessions do not drift.
 
-## Implementation Snapshot (2026-02-15)
+## Implementation Snapshot (2026-02-16)
 
 Reality check: PMOS is now the **OpenClaw gateway + Control UI** deployed at `os.wickedlab.io`.
 The earlier React PMOS prototype (`frontend/`) is not the PMOS product surface going forward.
@@ -23,26 +23,31 @@ The earlier React PMOS prototype (`frontend/`) is not the PMOS product surface g
    - Integrations: pieces catalog + connections CRUD
    - Automations: flows list/create/edit/run (incl. webhook trigger)
    - Runs: list/details + retry
-6. `flow.wickedlab.io` (Activepieces) remains a separate running service and is treated as the automation engine.
-7. `bcgpt.wickedlab.io` remains the MCP/connect surface (Basecamp OAuth, MCP tools) and is treated as a connector.
+6. Phase 3 reimagined dashboard foundation is live:
+   - Dashboard widgets now use real data (Portfolio Pulse, Automation Live, Focus Today).
+   - Actionable drill-downs to Automations, Runs, Integrations, and Chat.
+   - Standardized, model-agnostic PMOS execution trace is live in Dashboard and Chat.
+   - Dashboard polling refreshes connectors/flows/runs while the Dashboard tab is active.
+7. `flow.wickedlab.io` (Activepieces) remains a separate running service and is treated as the automation engine.
+8. `bcgpt.wickedlab.io` remains the MCP/connect surface (Basecamp OAuth, MCP tools) and is treated as a connector.
 
-Production image tag (PMOS / OpenClaw): `openclaw-5ac669cd`.
+Production image tag (PMOS / OpenClaw): `331392da`.
 
-### Production verification (Phase 1 + Phase 2)
+### Production verification (Phase 1 + Phase 2 + Phase 3)
 
 1. `https://os.wickedlab.io/` loads.
-2. Run the gateway check from inside the PMOS container:
-   - `node openclaw.mjs gateway call pmos.connectors.status --json`
-   - Expect `activepieces.reachable=true` and `activepieces.authOk=true`.
-   - For Phase 2 screens to work, `activepieces.projectId` must be set (many APIs require it).
-   - `bcgpt.authOk` becomes true after setting a BCGPT API key in Integrations.
+2. PMOS build asset on `os.wickedlab.io` includes Phase 3 markers:
+   - `Portfolio Pulse`, `Focus Today`, `Execution Trace`, `Refresh all`.
+3. `POST https://os.wickedlab.io/tools/invoke` succeeds with PMOS access key for `flow_flows_list`.
+4. For native flow/runs screens and dashboard stats, `activepieces.projectId` must be set.
 
 ### What is next (the actual build)
 
-1. PMOS native auth + RBAC/admin:
+1. Phase 4: PMOS native auth + RBAC/admin:
    - email auth first, then optional OAuth
    - workspaces + roles + admin UI shell + audit feed
-2. Live AI flow building + execution trace stream in chat sidebar (model-agnostic).
+2. Phase 5: Live AI flow building (graph ops stream + commit/sync to Activepieces).
+3. Phase 6: Unified command center (multi-step orchestration + approvals + history).
 
 ## 1. Core Product Direction
 

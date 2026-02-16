@@ -1,6 +1,6 @@
 # NEXT STEPS - PMOS (OpenClaw Base + Activepieces Engine)
 
-Last updated: 2026-02-15
+Last updated: 2026-02-16
 Canonical plan: `docs/system/operations/summaries/CURRENT_STATE_AND_EXECUTION_PLAN.md`
 
 ## Current Reality (Keep This Straight)
@@ -54,7 +54,19 @@ Prerequisite: set Activepieces `projectId` (many APIs require it).
 - PMOS -> Integrations -> Activepieces -> Project ID, then Save
 - Stored at `pmos.connectors.activepieces.projectId`
 
-## Immediate Work Queue (Phase 3 Start)
+## Phase 3 (Complete): Reimagined Dashboard Foundation
+
+Shipped + deployed to `os.wickedlab.io`:
+
+1. Dashboard now uses real PMOS data:
+   - Portfolio Pulse (flows/runs/connector risk)
+   - Automation Live (recent runs + status counters)
+   - Focus Today (prioritized action cards with drill-down links)
+2. Agent Timeline uses standardized PMOS execution trace schema.
+3. Chat view now shows the same live execution trace stream.
+4. Dashboard polling refreshes connectors/flows/runs while dashboard is open.
+
+## Immediate Work Queue (Phase 4 Start)
 
 1. PMOS identity + admin (OpenClaw-first, PMOS UX):
    - email auth
@@ -70,9 +82,11 @@ Prerequisite: set Activepieces `projectId` (many APIs require it).
 
 1. `https://os.wickedlab.io/` loads (OpenClaw Control UI).
 2. `OPENCLAW_GATEWAY_TOKEN` is present in PMOS env (required for LAN bind behind Traefik).
-3. `https://flow.wickedlab.io/api/v1/flags` returns 200.
-4. `https://bcgpt.wickedlab.io/connect` returns 200.
-5. From PMOS UI, verify:
+3. PMOS tool invoke works with token:
+   - `POST https://os.wickedlab.io/tools/invoke` with `flow_flows_list` returns `ok: true`.
+4. `https://flow.wickedlab.io/api/v1/flags` returns 200.
+5. `https://bcgpt.wickedlab.io/connect` returns 200.
+6. From PMOS UI, verify:
    - can reach Activepieces (API 200 with key)
    - can reach BCGPT MCP tools (API 200 with key)
 
