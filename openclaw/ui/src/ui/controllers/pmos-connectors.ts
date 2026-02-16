@@ -194,7 +194,7 @@ export async function savePmosConnectorsConfig(
     const raw = JSON.stringify(nextConfig, null, 2).trimEnd().concat("\n");
     await state.client.request("config.set", { raw, baseHash });
     // Keep the UI state in sync with what is persisted.
-    state.configSnapshot = snapshot;
+    state.configSnapshot = await state.client.request<ConfigSnapshot>("config.get", {});
   } catch (err) {
     state.pmosIntegrationsError = String(err);
   } finally {

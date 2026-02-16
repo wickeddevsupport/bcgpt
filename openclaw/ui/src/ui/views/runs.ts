@@ -5,6 +5,7 @@ export type RunsProps = {
   connected: boolean;
   integrationsHref: string;
   projectId: string;
+  onOpenIntegrations: () => void;
 
   loading: boolean;
   error: string | null;
@@ -23,7 +24,7 @@ export type RunsProps = {
 
 export function renderRuns(props: RunsProps) {
   const connectedReason = !props.connected
-    ? "Connect to Wicked OS first (Dashboard -> Access Key -> Connect)."
+    ? "Sign in first, then wait for the Wicked OS gateway to connect."
     : null;
   const projectReason = props.projectId.trim()
     ? null
@@ -40,7 +41,9 @@ export function renderRuns(props: RunsProps) {
             <button class="btn" @click=${() => props.onRefresh()} ?disabled=${!props.connected || !props.projectId.trim() || props.loading}>
               ${props.loading ? "Loading..." : "Refresh"}
             </button>
-            <a class="btn btn--secondary" href=${props.integrationsHref}>Integrations</a>
+            <button class="btn btn--secondary" @click=${() => props.onOpenIntegrations()}>
+              Integrations
+            </button>
           </div>
 
           ${connectedReason ? html`<div class="muted" style="margin-top: 12px;">${connectedReason}</div>` : nothing}
@@ -118,4 +121,3 @@ export function renderRuns(props: RunsProps) {
     </section>
   `;
 }
-

@@ -36,6 +36,7 @@ import type { NostrProfileFormState } from "./views/channels.nostr-profile-form.
 import type { SessionLogEntry } from "./views/usage.ts";
 import type { PmosAuthUser } from "./controllers/pmos-auth.ts";
 import type { PmosConnectorsStatus } from "./controllers/pmos-connectors.ts";
+import type { PmosModelProvider } from "./controllers/pmos-model-auth.ts";
 import type {
   ActivepiecesConnectionSummary,
   ActivepiecesFlowSummary,
@@ -156,6 +157,13 @@ export type AppViewState = {
   pmosConnectorsError: string | null;
   pmosConnectorsLastChecked: number | null;
   pmosTraceEvents: PmosExecutionTraceEvent[];
+  pmosModelProvider: PmosModelProvider;
+  pmosModelId: string;
+  pmosModelAlias: string;
+  pmosModelApiKeyDraft: string;
+  pmosModelSaving: boolean;
+  pmosModelError: string | null;
+  pmosModelConfigured: boolean;
 
   // PMOS identity/admin (Phase 4)
   pmosAdminDraftsInitialized: boolean;
@@ -426,6 +434,9 @@ export type AppViewState = {
   handlePmosIntegrationsSave: () => Promise<void>;
   handlePmosIntegrationsClearActivepiecesKey: () => Promise<void>;
   handlePmosIntegrationsClearBcgptKey: () => Promise<void>;
+  handlePmosModelProviderChange: (next: PmosModelProvider) => void;
+  handlePmosModelSave: () => Promise<void>;
+  handlePmosModelClearKey: () => Promise<void>;
   handlePmosApPiecesLoad: () => Promise<void>;
   handlePmosApConnectionsLoad: () => Promise<void>;
   handlePmosApConnectionCreate: () => Promise<void>;

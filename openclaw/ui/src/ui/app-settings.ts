@@ -191,6 +191,7 @@ export function setTheme(host: SettingsHost, next: ThemeMode, context?: ThemeTra
 
 export async function refreshActiveTab(host: SettingsHost) {
   if (host.tab === "dashboard") {
+    await loadConfig(host as unknown as OpenClawApp);
     await Promise.all([
       (host as unknown as OpenClawApp).handlePmosRefreshConnectors(),
       (host as unknown as OpenClawApp).handlePmosApFlowsLoad(),

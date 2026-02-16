@@ -87,6 +87,13 @@ import {
   type PmosConnectorsStatus,
 } from "./controllers/pmos-connectors.ts";
 import {
+  clearPmosModelApiKey,
+  hydratePmosModelDraftFromConfig,
+  savePmosModelConfig,
+  setPmosModelProvider,
+  type PmosModelProvider,
+} from "./controllers/pmos-model-auth.ts";
+import {
   loadPmosAuthSession,
   loginPmosAuth,
   logoutPmosAuth,
@@ -266,6 +273,15 @@ export class OpenClawApp extends LitElement {
   @state() pmosConnectorsError: string | null = null;
   @state() pmosConnectorsLastChecked: number | null = null;
   @state() pmosTraceEvents: PmosExecutionTraceEvent[] = [];
+
+  // PMOS model auth quick setup (admin UX)
+  @state() pmosModelProvider: PmosModelProvider = "google";
+  @state() pmosModelId = "gemini-3-flash-preview";
+  @state() pmosModelAlias = "gemini";
+  @state() pmosModelApiKeyDraft = "";
+  @state() pmosModelSaving = false;
+  @state() pmosModelError: string | null = null;
+  @state() pmosModelConfigured = false;
 
   // PMOS identity/admin (Phase 4)
   @state() pmosAdminDraftsInitialized = false;
@@ -690,28 +706,49 @@ export class OpenClawApp extends LitElement {
   async handlePmosIntegrationsLoad() {
     await loadConfig(this);
     hydratePmosConnectorDraftsFromConfig(this);
+    hydratePmosModelDraftFromConfig(this);
     await loadPmosConnectorsStatus(this);
   }
 
   async handlePmosIntegrationsSave() {
     await savePmosConnectorsConfig(this);
     await loadConfig(this);
+    this.pmosConnectorDraftsInitialized = false;
     hydratePmosConnectorDraftsFromConfig(this);
+    hydratePmosModelDraftFromConfig(this);
     await loadPmosConnectorsStatus(this);
   }
 
   async handlePmosIntegrationsClearActivepiecesKey() {
     await savePmosConnectorsConfig(this, { clearActivepiecesKey: true });
     await loadConfig(this);
+    this.pmosConnectorDraftsInitialized = false;
     hydratePmosConnectorDraftsFromConfig(this);
+    hydratePmosModelDraftFromConfig(this);
     await loadPmosConnectorsStatus(this);
   }
 
   async handlePmosIntegrationsClearBcgptKey() {
     await savePmosConnectorsConfig(this, { clearBcgptKey: true });
     await loadConfig(this);
+    this.pmosConnectorDraftsInitialized = false;
     hydratePmosConnectorDraftsFromConfig(this);
+    hydratePmosModelDraftFromConfig(this);
     await loadPmosConnectorsStatus(this);
+  }
+
+  handlePmosModelProviderChange(next: PmosModelProvider) {
+    setPmosModelProvider(this, next);
+  }
+
+  async handlePmosModelSave() {
+    await savePmosModelConfig(this);
+    hydratePmosModelDraftFromConfig(this);
+  }
+
+  async handlePmosModelClearKey() {
+    await clearPmosModelApiKey(this);
+    hydratePmosModelDraftFromConfig(this);
   }
 
   async handlePmosApPiecesLoad() {

@@ -4,6 +4,7 @@ import type {
   ActivepiecesConnectionSummary,
   ActivepiecesPieceSummary,
 } from "../controllers/pmos-activepieces.ts";
+import type { PmosModelProvider } from "../controllers/pmos-model-auth.ts";
 
 export type IntegrationsProps = {
   connected: boolean;
@@ -17,6 +18,13 @@ export type IntegrationsProps = {
   connectorsLoading: boolean;
   connectorsStatus: PmosConnectorsStatus | null;
   connectorsError: string | null;
+  modelProvider: PmosModelProvider;
+  modelId: string;
+  modelAlias: string;
+  modelApiKeyDraft: string;
+  modelSaving: boolean;
+  modelConfigured: boolean;
+  modelError: string | null;
   onActivepiecesUrlChange: (next: string) => void;
   onActivepiecesProjectIdChange: (next: string) => void;
   onActivepiecesApiKeyDraftChange: (next: string) => void;
@@ -26,6 +34,12 @@ export type IntegrationsProps = {
   onClearActivepiecesKey: () => void;
   onClearBcgptKey: () => void;
   onRefreshConnectors: () => void;
+  onModelProviderChange: (next: PmosModelProvider) => void;
+  onModelIdChange: (next: string) => void;
+  onModelAliasChange: (next: string) => void;
+  onModelApiKeyDraftChange: (next: string) => void;
+  onModelSave: () => void;
+  onModelClearKey: () => void;
 
   // Phase 2: Activepieces native embed
   apPiecesLoading: boolean;
@@ -84,10 +98,93 @@ export function renderIntegrations(props: IntegrationsProps) {
     : "Paste BCGPT API key";
 
   const disabledReason = !props.connected
-    ? "Connect to Wicked OS first (Dashboard -> Access Key -> Connect)."
+    ? "Sign in first, then wait for the Wicked OS gateway to connect."
     : null;
+  const modelKeyPlaceholder = props.modelConfigured
+    ? "Stored (leave blank to keep current key)"
+    : "Paste provider API key";
+  const modelProviderOptions: Array<{ value: PmosModelProvider; label: string }> = [
+    { value: "google", label: "Google Gemini" },
+    { value: "openai", label: "OpenAI" },
+    { value: "anthropic", label: "Anthropic" },
+    { value: "zai", label: "GLM (Z.AI)" },
+    { value: "openrouter", label: "OpenRouter" },
+  ];
 
   return html`
+    <section class="card" style="margin-bottom: 18px;">
+      <div class="card-title">AI Model Setup</div>
+      <div class="card-sub">
+        Simple workspace setup: choose provider, model, optional nickname, and paste one API key.
+      </div>
+
+      <div class="form-grid" style="margin-top: 16px;">
+        <label class="field">
+          <span>Provider</span>
+          <select
+            .value=${props.modelProvider}
+            @change=${(e: Event) =>
+              props.onModelProviderChange((e.target as HTMLSelectElement).value as PmosModelProvider)}
+            ?disabled=${!props.connected || props.modelSaving}
+          >
+            ${modelProviderOptions.map(
+              (opt) => html`<option value=${opt.value}>${opt.label}</option>`,
+            )}
+          </select>
+        </label>
+        <label class="field">
+          <span>Model ID</span>
+          <input
+            .value=${props.modelId}
+            @input=${(e: Event) => props.onModelIdChange((e.target as HTMLInputElement).value)}
+            placeholder="e.g. gemini-3-flash-preview"
+            ?disabled=${!props.connected || props.modelSaving}
+          />
+        </label>
+        <label class="field">
+          <span>Nickname (optional)</span>
+          <input
+            .value=${props.modelAlias}
+            @input=${(e: Event) => props.onModelAliasChange((e.target as HTMLInputElement).value)}
+            placeholder="e.g. support-assistant"
+            ?disabled=${!props.connected || props.modelSaving}
+          />
+        </label>
+        <label class="field full">
+          <span>Provider API Key</span>
+          <input
+            type="password"
+            .value=${props.modelApiKeyDraft}
+            @input=${(e: Event) =>
+              props.onModelApiKeyDraftChange((e.target as HTMLInputElement).value)}
+            placeholder=${modelKeyPlaceholder}
+            autocomplete="off"
+            ?disabled=${!props.connected || props.modelSaving}
+          />
+        </label>
+      </div>
+
+      <div class="row" style="margin-top: 14px;">
+        <button class="btn primary" ?disabled=${!props.connected || props.modelSaving} @click=${() => props.onModelSave()}>
+          ${props.modelSaving ? "Saving..." : "Save model config"}
+        </button>
+        <button
+          class="btn btn--secondary"
+          ?disabled=${!props.connected || props.modelSaving}
+          @click=${() => props.onModelClearKey()}
+          title="Remove stored key for selected provider"
+        >
+          Clear selected provider key
+        </button>
+        <span class="chip ${props.modelConfigured ? "chip-ok" : "chip-warn"}">
+          ${props.modelConfigured ? "Model auth configured" : "Model auth pending"}
+        </span>
+      </div>
+
+      ${props.modelError ? html`<div class="callout danger" style="margin-top: 12px;">${props.modelError}</div>` : nothing}
+      ${disabledReason ? html`<div class="muted" style="margin-top: 10px;">${disabledReason}</div>` : nothing}
+    </section>
+
     <section class="grid grid-cols-2">
       <div class="card">
         <div class="card-title">Flow Pieces (Flow Engine)</div>
@@ -436,4 +533,3 @@ export function renderIntegrations(props: IntegrationsProps) {
     </section>
   `;
 }
-

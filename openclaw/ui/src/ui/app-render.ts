@@ -137,6 +137,9 @@ function getObjectAtPath(source: unknown, path: string[]): unknown {
 }
 
 function hasConfiguredModelAuth(config: unknown): boolean {
+  const hasSecret = (value: unknown): boolean =>
+    typeof value === "string" && value.trim().length > 0;
+
   const explicitPaths = [
     ["providers", "openai", "apiKey"],
     ["providers", "anthropic", "apiKey"],
@@ -145,6 +148,16 @@ function hasConfiguredModelAuth(config: unknown): boolean {
     ["providers", "glm", "apiKey"],
     ["providers", "openrouter", "apiKey"],
     ["providers", "kilo", "apiKey"],
+    ["env", "OPENAI_API_KEY"],
+    ["env", "ANTHROPIC_API_KEY"],
+    ["env", "GEMINI_API_KEY"],
+    ["env", "ZAI_API_KEY"],
+    ["env", "OPENROUTER_API_KEY"],
+    ["env", "vars", "OPENAI_API_KEY"],
+    ["env", "vars", "ANTHROPIC_API_KEY"],
+    ["env", "vars", "GEMINI_API_KEY"],
+    ["env", "vars", "ZAI_API_KEY"],
+    ["env", "vars", "OPENROUTER_API_KEY"],
     ["llm", "providers", "openai", "apiKey"],
     ["llm", "providers", "anthropic", "apiKey"],
     ["llm", "providers", "google", "apiKey"],
@@ -155,8 +168,19 @@ function hasConfiguredModelAuth(config: unknown): boolean {
   ];
   for (const path of explicitPaths) {
     const value = getObjectAtPath(config, path);
-    if (typeof value === "string" && value.trim().length > 0) {
+    if (hasSecret(value)) {
       return true;
+    }
+  }
+  const modelProviders = getObjectAtPath(config, ["models", "providers"]);
+  if (modelProviders && typeof modelProviders === "object" && !Array.isArray(modelProviders)) {
+    for (const providerConfig of Object.values(modelProviders as Record<string, unknown>)) {
+      if (!providerConfig || typeof providerConfig !== "object" || Array.isArray(providerConfig)) {
+        continue;
+      }
+      if (hasSecret((providerConfig as Record<string, unknown>).apiKey)) {
+        return true;
+      }
     }
   }
   return false;
@@ -452,16 +476,18 @@ export function renderApp(state: AppViewState) {
                 runsHref: pathForTab("runs", state.basePath),
                 chatHref: pathForTab("chat", state.basePath),
                 configHref: pathForTab("config", state.basePath),
-                modelAuthConfigured: hasConfiguredModelAuth(state.configSnapshot?.config ?? null),
+                modelAuthConfigured: hasConfiguredModelAuth(configValue),
                 onSettingsChange: (next) => state.applySettings(next),
                 onConnect: () => state.connect(),
                 onRefreshConnectors: () => state.handlePmosRefreshConnectors(),
                 onRefreshDashboard: () =>
                   Promise.all([
+                    loadConfig(state),
                     state.handlePmosRefreshConnectors(),
                     state.handlePmosApFlowsLoad(),
                     state.handlePmosApRunsLoad(),
                   ]).then(() => undefined),
+                onNavigateTab: (tab) => state.setTab(tab),
                 onClearTrace: () => state.handlePmosTraceClear(),
               })
             : nothing
@@ -471,8 +497,9 @@ export function renderApp(state: AppViewState) {
           state.tab === "automations"
             ? renderAutomations({
                 connected: state.connected,
-                integrationsHref: pathForTab("integrations", state.basePath),
-                projectId: state.pmosActivepiecesProjectId,
+              integrationsHref: pathForTab("integrations", state.basePath),
+              projectId: state.pmosActivepiecesProjectId,
+              onOpenIntegrations: () => state.setTab("integrations"),
 
                 loading: state.apFlowsLoading,
                 error: state.apFlowsError,
@@ -540,8 +567,9 @@ export function renderApp(state: AppViewState) {
           state.tab === "runs"
             ? renderRuns({
                 connected: state.connected,
-                integrationsHref: pathForTab("integrations", state.basePath),
-                projectId: state.pmosActivepiecesProjectId,
+              integrationsHref: pathForTab("integrations", state.basePath),
+              projectId: state.pmosActivepiecesProjectId,
+              onOpenIntegrations: () => state.setTab("integrations"),
 
                 loading: state.apRunsLoading,
                 error: state.apRunsError,
@@ -578,6 +606,13 @@ export function renderApp(state: AppViewState) {
                 connectorsLoading: state.pmosConnectorsLoading,
                 connectorsStatus: state.pmosConnectorsStatus,
                 connectorsError: state.pmosConnectorsError,
+                modelProvider: state.pmosModelProvider,
+                modelId: state.pmosModelId,
+                modelAlias: state.pmosModelAlias,
+                modelApiKeyDraft: state.pmosModelApiKeyDraft,
+                modelSaving: state.pmosModelSaving,
+                modelConfigured: state.pmosModelConfigured,
+                modelError: state.pmosModelError,
                 onActivepiecesUrlChange: (next) => (state.pmosActivepiecesUrl = next),
                 onActivepiecesProjectIdChange: (next) => (state.pmosActivepiecesProjectId = next),
                 onActivepiecesApiKeyDraftChange: (next) =>
@@ -588,6 +623,21 @@ export function renderApp(state: AppViewState) {
                 onClearActivepiecesKey: () => state.handlePmosIntegrationsClearActivepiecesKey(),
                 onClearBcgptKey: () => state.handlePmosIntegrationsClearBcgptKey(),
                 onRefreshConnectors: () => state.handlePmosRefreshConnectors(),
+                onModelProviderChange: (next) => state.handlePmosModelProviderChange(next),
+                onModelIdChange: (next) => {
+                  state.pmosModelId = next;
+                  state.pmosModelError = null;
+                },
+                onModelAliasChange: (next) => {
+                  state.pmosModelAlias = next;
+                  state.pmosModelError = null;
+                },
+                onModelApiKeyDraftChange: (next) => {
+                  state.pmosModelApiKeyDraft = next;
+                  state.pmosModelError = null;
+                },
+                onModelSave: () => state.handlePmosModelSave(),
+                onModelClearKey: () => state.handlePmosModelClearKey(),
 
                 apPiecesLoading: state.apPiecesLoading,
                 apPiecesError: state.apPiecesError,

@@ -10,6 +10,7 @@ export type AutomationsProps = {
   connected: boolean;
   integrationsHref: string;
   projectId: string;
+  onOpenIntegrations: () => void;
 
   loading: boolean;
   error: string | null;
@@ -77,7 +78,7 @@ function formatFlowMeta(flow: ActivepiecesFlowSummary) {
 
 export function renderAutomations(props: AutomationsProps) {
   const connectedReason = !props.connected
-    ? "Connect to Wicked OS first (Dashboard -> Access Key -> Connect)."
+    ? "Sign in first, then wait for the Wicked OS gateway to connect."
     : null;
   const projectReason = props.projectId.trim()
     ? null
@@ -114,7 +115,9 @@ export function renderAutomations(props: AutomationsProps) {
             >
               ${props.creating ? "Creating..." : "Create flow"}
             </button>
-            <a class="btn btn--secondary" href=${props.integrationsHref}>Integrations</a>
+            <button class="btn btn--secondary" @click=${() => props.onOpenIntegrations()}>
+              Integrations
+            </button>
           </div>
 
           ${props.createError ? html`<div class="callout danger" style="margin-top: 12px;">${props.createError}</div>` : nothing}

@@ -29,6 +29,7 @@ export type DashboardProps = {
   chatHref: string;
   configHref?: string;
   modelAuthConfigured?: boolean;
+  onNavigateTab: (tab: "integrations" | "automations" | "runs" | "chat" | "config") => void;
   onSettingsChange: (next: UiSettings) => void;
   onConnect: () => void;
   onRefreshConnectors: () => void;
@@ -138,8 +139,8 @@ export function renderDashboard(props: DashboardProps) {
     {
       id: "gateway",
       title: "Connect Wicked OS",
-      detail: "Paste your access key once, then connect this browser to the gateway.",
-      done: props.connected && Boolean(props.settings.token.trim()),
+      detail: "Sign in and connect once. Access key is only needed for legacy/manual pairing.",
+      done: props.connected,
       actionKind: "connect",
       actionLabel: "Connect now",
     },
@@ -275,13 +276,40 @@ export function renderDashboard(props: DashboardProps) {
                           <button
                             class="btn btn--sm"
                             @click=${() => props.onConnect()}
-                            ?disabled=${!props.settings.token.trim() || props.connected}
+                            ?disabled=${props.connected}
                           >
                             ${step.actionLabel ?? "Connect"}
                           </button>
                         `
                       : step.href
-                        ? html`<a class="btn btn--sm" href=${step.href}>${step.actionLabel ?? "Open"}</a>`
+                        ? html`
+                            <button
+                              class="btn btn--sm"
+                              @click=${() => {
+                                if (step.id === "flowpieces" || step.id === "bcgpt" || step.id === "project") {
+                                  props.onNavigateTab("integrations");
+                                  return;
+                                }
+                                if (step.id === "model-auth") {
+                                  props.onNavigateTab("config");
+                                  return;
+                                }
+                                if (step.id === "first-flow") {
+                                  props.onNavigateTab("automations");
+                                  return;
+                                }
+                                if (step.id === "first-run") {
+                                  props.onNavigateTab("runs");
+                                  return;
+                                }
+                                if (step.id === "chat-ready") {
+                                  props.onNavigateTab("chat");
+                                }
+                              }}
+                            >
+                              ${step.actionLabel ?? "Open"}
+                            </button>
+                          `
                         : nothing
                 }
               </div>
@@ -318,7 +346,9 @@ export function renderDashboard(props: DashboardProps) {
           >
             ${props.connectorsLoading ? "Checking..." : "Refresh status"}
           </button>
-          <a class="btn btn--secondary" href=${props.integrationsHref}>Open integrations</a>
+          <button class="btn btn--secondary" @click=${() => props.onNavigateTab("integrations")}>
+            Open integrations
+          </button>
           <span class="muted">Last check: ${checkedLabel}</span>
         </div>
 
@@ -348,9 +378,9 @@ export function renderDashboard(props: DashboardProps) {
         </div>
 
         <div class="row" style="margin-top: 14px;">
-          <a class="btn" href=${props.automationsHref}>Automations</a>
-          <a class="btn" href=${props.runsHref}>Runs</a>
-          <a class="btn btn--secondary" href=${props.chatHref}>Chat</a>
+          <button class="btn" @click=${() => props.onNavigateTab("automations")}>Automations</button>
+          <button class="btn" @click=${() => props.onNavigateTab("runs")}>Runs</button>
+          <button class="btn btn--secondary" @click=${() => props.onNavigateTab("chat")}>Chat</button>
         </div>
       </div>
     </section>
@@ -404,7 +434,7 @@ export function renderDashboard(props: DashboardProps) {
           <button class="btn" @click=${() => props.onRefreshDashboard()} ?disabled=${refreshBusy || !props.connected}>
             ${refreshBusy ? "Refreshing..." : "Refresh all"}
           </button>
-          <a class="btn btn--secondary" href=${props.runsHref}>Open runs</a>
+          <button class="btn btn--secondary" @click=${() => props.onNavigateTab("runs")}>Open runs</button>
         </div>
       </div>
 
@@ -420,7 +450,26 @@ export function renderDashboard(props: DashboardProps) {
                   <div class="list-sub">${item.detail}</div>
                 </div>
                 <div class="list-meta">
-                  <a class="btn btn--sm" href=${item.href}>Open</a>
+                  <button
+                    class="btn btn--sm"
+                    @click=${() => {
+                      if (item.href === props.integrationsHref) {
+                        props.onNavigateTab("integrations");
+                        return;
+                      }
+                      if (item.href === props.automationsHref) {
+                        props.onNavigateTab("automations");
+                        return;
+                      }
+                      if (item.href === props.runsHref) {
+                        props.onNavigateTab("runs");
+                        return;
+                      }
+                      props.onNavigateTab("chat");
+                    }}
+                  >
+                    Open
+                  </button>
                 </div>
               </div>
             `,
@@ -456,7 +505,7 @@ export function renderDashboard(props: DashboardProps) {
             : html`<div class="muted" style="margin-top: 12px;">No execution trace yet. Use Chat to start a run.</div>`
         }
         <div class="row" style="margin-top: 12px;">
-          <a class="btn" href=${props.chatHref}>Open chat</a>
+          <button class="btn" @click=${() => props.onNavigateTab("chat")}>Open chat</button>
           <button class="btn btn--secondary" @click=${() => props.onClearTrace()} ?disabled=${trace.length === 0}>
             Clear trace
           </button>
