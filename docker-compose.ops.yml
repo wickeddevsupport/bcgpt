@@ -1,0 +1,120 @@
+version: "3.9"
+
+services:
+  ops:
+    image: n8nio/n8n:latest
+    container_name: wicked-ops
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      # Ensure Traefik uses the same network it is attached to (Coolify's `coolify` network).
+      - "traefik.docker.network=coolify"
+      - "traefik.http.middlewares.ops-redirect-to-https.redirectscheme.scheme=https"
+      - "traefik.http.routers.ops-http.entrypoints=http"
+      - "traefik.http.routers.ops-http.rule=Host(`ops.wickedlab.io`)"
+      - "traefik.http.routers.ops-http.middlewares=ops-redirect-to-https"
+      - "traefik.http.routers.ops.rule=Host(`ops.wickedlab.io`)"
+      - "traefik.http.routers.ops.entrypoints=http,https"
+      - "traefik.http.routers.ops.tls=true"
+      - "traefik.http.routers.ops.tls.certresolver=letsencrypt"
+      - "traefik.http.services.ops.loadbalancer.server.port=5678"
+    networks:
+      - coolify
+      - ops_internal
+    environment:
+      # Basic config
+      N8N_HOST: "ops.wickedlab.io"
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: "https"
+      WEBHOOK_URL: "https://ops.wickedlab.io/"
+
+      # Database
+      DB_TYPE: "postgresdb"
+      DB_POSTGRESDB_HOST: "ops-postgres"
+      DB_POSTGRESDB_PORT: "5432"
+      DB_POSTGRESDB_DATABASE: "wicked_ops"
+      DB_POSTGRESDB_USER: "ops_user"
+      DB_POSTGRESDB_PASSWORD: "${OPS_POSTGRES_PASSWORD}"
+
+      # Security
+      N8N_ENCRYPTION_KEY: "${OPS_ENCRYPTION_KEY}"
+
+      # Execution mode (queue for multi-workspace scaling)
+      EXECUTIONS_MODE: "queue"
+      QUEUE_BULL_REDIS_HOST: "ops-redis"
+      QUEUE_BULL_REDIS_PORT: "6379"
+      QUEUE_BULL_REDIS_PASSWORD: "${OPS_REDIS_PASSWORD}"
+
+      # Disable n8n branding (white-label as "Wicked Ops")
+      N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_TEMPLATES_ENABLED: "false"
+      N8N_HIRING_BANNER_ENABLED: "false"
+
+      # Timezone
+      GENERIC_TIMEZONE: "America/New_York"
+      TZ: "America/New_York"
+
+      # Logs
+      N8N_LOG_LEVEL: "info"
+      N8N_LOG_OUTPUT: "console"
+
+      # Custom editor UI settings (optional, for simplified UX)
+      N8N_EDITOR_BASE_URL: "https://ops.wickedlab.io/"
+    volumes:
+      - ops-data:/home/node/.n8n
+    depends_on:
+      ops-postgres:
+        condition: service_healthy
+      ops-redis:
+        condition: service_healthy
+    expose:
+      - "5678"
+
+  ops-postgres:
+    image: postgres:16-alpine
+    container_name: wicked-ops-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "wicked_ops"
+      POSTGRES_USER: "ops_user"
+      POSTGRES_PASSWORD: "${OPS_POSTGRES_PASSWORD}"
+    volumes:
+      - ops-postgres-data:/var/lib/postgresql/data
+    networks:
+      - ops_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ops_user -d wicked_ops"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ops-redis:
+    image: redis:7-alpine
+    container_name: wicked-ops-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass "${OPS_REDIS_PASSWORD}"
+    volumes:
+      - ops-redis-data:/data
+    networks:
+      - ops_internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "--pass", "${OPS_REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  ops-data:
+    external: true
+    name: ops-data
+  ops-postgres-data:
+    name: ops-postgres-data
+  ops-redis-data:
+    name: ops-redis-data
+
+networks:
+  coolify:
+    external: true
+  ops_internal:
+    internal: true
