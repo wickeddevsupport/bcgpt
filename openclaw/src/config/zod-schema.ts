@@ -108,6 +108,91 @@ const PmosConnectorBcgptSchema = z
   })
   .strict();
 
+const PmosRoleSchema = z.union([
+  z.literal("system_admin"),
+  z.literal("workspace_admin"),
+  z.literal("member"),
+  z.literal("viewer"),
+]);
+
+const PmosMemberSchema = z
+  .object({
+    id: z.string().optional(),
+    email: z.string().optional(),
+    name: z.string().optional(),
+    role: PmosRoleSchema.optional(),
+    status: z.union([z.literal("active"), z.literal("invited"), z.literal("disabled")]).optional(),
+    createdAt: z.string().optional(),
+    updatedAt: z.string().optional(),
+  })
+  .strict();
+
+const PmosIdentitySchema = z
+  .object({
+    workspace: z
+      .object({
+        id: z.string().optional(),
+        name: z.string().optional(),
+      })
+      .strict()
+      .optional(),
+    currentUser: z
+      .object({
+        email: z.string().optional(),
+        name: z.string().optional(),
+        role: PmosRoleSchema.optional(),
+      })
+      .strict()
+      .optional(),
+    members: z.array(PmosMemberSchema).optional(),
+  })
+  .strict();
+
+const PmosAuditEventSchema = z
+  .object({
+    id: z.string().optional(),
+    ts: z.number().optional(),
+    actor: z.string().optional(),
+    action: z.string().optional(),
+    target: z.string().optional(),
+    detail: z.string().optional(),
+    status: z.union([z.literal("info"), z.literal("success"), z.literal("error")]).optional(),
+  })
+  .strict();
+
+const PmosAuditSchema = z
+  .object({
+    events: z.array(PmosAuditEventSchema).optional(),
+  })
+  .strict();
+
+const PmosCommandHistoryEntrySchema = z
+  .object({
+    id: z.string().optional(),
+    ts: z.number().optional(),
+    command: z.string().optional(),
+    summary: z.string().optional(),
+    status: z.union([z.literal("planned"), z.literal("executed"), z.literal("failed")]).optional(),
+  })
+  .strict();
+
+const PmosCommandPendingApprovalSchema = z
+  .object({
+    id: z.string().optional(),
+    ts: z.number().optional(),
+    command: z.string().optional(),
+    action: z.string().optional(),
+    payload: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
+
+const PmosCommandCenterSchema = z
+  .object({
+    history: z.array(PmosCommandHistoryEntrySchema).optional(),
+    pendingApprovals: z.array(PmosCommandPendingApprovalSchema).optional(),
+  })
+  .strict();
+
 const PmosSchema = z
   .object({
     connectors: z
@@ -117,6 +202,9 @@ const PmosSchema = z
       })
       .strict()
       .optional(),
+    identity: PmosIdentitySchema.optional(),
+    audit: PmosAuditSchema.optional(),
+    commandCenter: PmosCommandCenterSchema.optional(),
   })
   .strict()
   .optional();

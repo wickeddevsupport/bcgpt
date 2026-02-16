@@ -1,5 +1,10 @@
 import { html, nothing } from "lit";
 import type { ActivepiecesFlowSummary } from "../controllers/pmos-activepieces.ts";
+import type {
+  PmosFlowGraphEdge,
+  PmosFlowGraphNode,
+  PmosFlowGraphOp,
+} from "../controllers/pmos-flow-builder.ts";
 
 export type AutomationsProps = {
   connected: boolean;
@@ -26,6 +31,17 @@ export type AutomationsProps = {
   mutating: boolean;
   mutateError: string | null;
 
+  // Phase 5: AI flow builder stream
+  builderPrompt: string;
+  builderGenerating: boolean;
+  builderCommitting: boolean;
+  builderError: string | null;
+  builderFlowName: string;
+  builderNodes: PmosFlowGraphNode[];
+  builderEdges: PmosFlowGraphEdge[];
+  builderOps: PmosFlowGraphOp[];
+  builderLastCommittedFlowId: string | null;
+
   onFlowsQueryChange: (next: string) => void;
   onRefresh: () => void;
   onCreateNameChange: (next: string) => void;
@@ -40,6 +56,11 @@ export type AutomationsProps = {
   onApplyOperation: () => void;
   onTriggerPayloadDraftChange: (next: string) => void;
   onTriggerWebhook: (opts?: { draft?: boolean; sync?: boolean }) => void;
+
+  onBuilderPromptChange: (next: string) => void;
+  onBuilderGenerate: () => void;
+  onBuilderCommit: () => void;
+  onBuilderReset: () => void;
 };
 
 function formatFlowTitle(flow: ActivepiecesFlowSummary) {
@@ -164,6 +185,110 @@ export function renderAutomations(props: AutomationsProps) {
         <div class="card">
           <div class="card-title">Flow Editor</div>
           <div class="card-sub">Rename, enable/disable, publish, and apply operations.</div>
+
+          <div class="card" style="margin-top: 16px;">
+            <div class="card-title">AI Flow Builder (Live)</div>
+            <div class="card-sub">
+              Describe your automation and watch PMOS stream graph operations before committing a flow shell.
+            </div>
+
+            <label class="field" style="margin-top: 12px;">
+              <span>Prompt</span>
+              <textarea
+                .value=${props.builderPrompt}
+                @input=${(e: Event) => props.onBuilderPromptChange((e.target as HTMLTextAreaElement).value)}
+                placeholder="e.g. Create a lead intake flow that posts to Slack and writes rows to Google Sheets."
+                ?disabled=${props.builderGenerating || props.builderCommitting}
+              ></textarea>
+            </label>
+
+            <div class="row" style="margin-top: 12px;">
+              <button class="btn" @click=${() => props.onBuilderGenerate()} ?disabled=${props.builderGenerating || !props.builderPrompt.trim()}>
+                ${props.builderGenerating ? "Generating..." : "Generate graph"}
+              </button>
+              <button
+                class="btn primary"
+                @click=${() => props.onBuilderCommit()}
+                ?disabled=${props.builderCommitting || props.builderNodes.length === 0}
+              >
+                ${props.builderCommitting ? "Committing..." : "Commit draft flow"}
+              </button>
+              <button class="btn btn--secondary" @click=${() => props.onBuilderReset()} ?disabled=${props.builderGenerating || props.builderCommitting}>
+                Reset
+              </button>
+            </div>
+
+            ${
+              props.builderFlowName
+                ? html`<div class="muted" style="margin-top: 10px;">Draft flow name: <span class="mono">${props.builderFlowName}</span></div>`
+                : nothing
+            }
+            ${
+              props.builderLastCommittedFlowId
+                ? html`
+                    <div class="callout" style="margin-top: 10px;">
+                      Flow shell created: <span class="mono">${props.builderLastCommittedFlowId}</span>
+                    </div>
+                  `
+                : nothing
+            }
+            ${props.builderError ? html`<div class="callout danger" style="margin-top: 10px;">${props.builderError}</div>` : nothing}
+
+            <div class="grid grid-cols-2" style="margin-top: 12px;">
+              <div class="card">
+                <div class="card-title">Graph Nodes</div>
+                <div class="list" style="margin-top: 8px;">
+                  ${props.builderNodes.map(
+                    (node) => html`
+                      <div class="list-item">
+                        <div class="list-main">
+                          <div class="list-title">${node.label}</div>
+                          <div class="list-sub mono">${node.id}</div>
+                          ${node.piece ? html`<div class="list-sub mono">${node.piece}</div>` : nothing}
+                        </div>
+                        <div class="list-meta">
+                          <span class="chip">${node.type}</span>
+                        </div>
+                      </div>
+                    `,
+                  )}
+                  ${props.builderNodes.length === 0 ? html`<div class="muted">No nodes yet.</div>` : nothing}
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-title">Graph Edges</div>
+                <div class="list" style="margin-top: 8px;">
+                  ${props.builderEdges.map(
+                    (edge) => html`
+                      <div class="list-item">
+                        <div class="list-main">
+                          <div class="list-title mono">${edge.from} -> ${edge.to}</div>
+                          <div class="list-sub">${edge.label ?? "then"}</div>
+                        </div>
+                      </div>
+                    `,
+                  )}
+                  ${props.builderEdges.length === 0 ? html`<div class="muted">No edges yet.</div>` : nothing}
+                </div>
+              </div>
+            </div>
+
+            <details style="margin-top: 12px;">
+              <summary class="muted" style="cursor: pointer;">Builder operation stream (${props.builderOps.length})</summary>
+              <div class="list" style="margin-top: 10px; max-height: 220px; overflow: auto;">
+                ${props.builderOps.map(
+                  (op) => html`
+                    <div class="list-item">
+                      <div class="list-main">
+                        <div class="list-title">${op.kind}</div>
+                        <div class="list-sub">${op.detail}</div>
+                      </div>
+                    </div>
+                  `,
+                )}
+              </div>
+            </details>
+          </div>
 
           ${
             !props.selectedFlowId

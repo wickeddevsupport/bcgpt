@@ -2,7 +2,10 @@ import type { IconName } from "./icons.js";
 
 export const TAB_GROUPS = [
   // PMOS simplified experience (regular users)
-  { label: "PMOS", tabs: ["dashboard", "automations", "runs", "integrations", "chat"] },
+  {
+    label: "PMOS",
+    tabs: ["dashboard", "automations", "runs", "integrations", "command-center", "admin", "chat"],
+  },
   // Everything else stays available, but is hidden behind the Advanced admin section.
   {
     label: "Admin (Advanced)",
@@ -28,6 +31,8 @@ export type Tab =
   | "automations"
   | "runs"
   | "integrations"
+  | "command-center"
+  | "admin"
   | "agents"
   | "overview"
   | "channels"
@@ -47,6 +52,8 @@ const TAB_PATHS: Record<Tab, string> = {
   automations: "/automations",
   runs: "/runs",
   integrations: "/integrations",
+  "command-center": "/command-center",
+  admin: "/admin",
   agents: "/agents",
   overview: "/overview",
   channels: "/channels",
@@ -153,6 +160,10 @@ export function iconForTab(tab: Tab): IconName {
       return "scrollText";
     case "integrations":
       return "link";
+    case "command-center":
+      return "zap";
+    case "admin":
+      return "settings";
     case "agents":
       return "folder";
     case "chat":
@@ -194,6 +205,10 @@ export function titleForTab(tab: Tab) {
       return "Runs";
     case "integrations":
       return "Integrations";
+    case "command-center":
+      return "Command Center";
+    case "admin":
+      return "Admin";
     case "agents":
       return "Agents";
     case "overview":
@@ -235,6 +250,10 @@ export function subtitleForTab(tab: Tab) {
       return "Live and historical executions across agents and automations.";
     case "integrations":
       return "Connect engines and apps (Activepieces, BCGPT/Basecamp, and more).";
+    case "command-center":
+      return "Plan and execute multi-step operations with approvals and history.";
+    case "admin":
+      return "Workspace identity, roles, members, and PMOS audit feed.";
     case "agents":
       return "Manage agent workspaces, tools, and identities.";
     case "overview":

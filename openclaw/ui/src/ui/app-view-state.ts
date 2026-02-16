@@ -42,6 +42,22 @@ import type {
   ActivepiecesRunSummary,
 } from "./controllers/pmos-activepieces.ts";
 import type { PmosExecutionTraceEvent } from "./controllers/pmos-trace.ts";
+import type {
+  PmosAuditEvent,
+  PmosMember,
+  PmosMemberStatus,
+  PmosRole,
+} from "./controllers/pmos-admin.ts";
+import type {
+  PmosCommandHistoryEntry,
+  PmosCommandPendingApproval,
+  PmosCommandPlanStep,
+} from "./controllers/pmos-command-center.ts";
+import type {
+  PmosFlowGraphEdge,
+  PmosFlowGraphNode,
+  PmosFlowGraphOp,
+} from "./controllers/pmos-flow-builder.ts";
 
 export type AppViewState = {
   settings: UiSettings;
@@ -132,6 +148,32 @@ export type AppViewState = {
   pmosConnectorsLastChecked: number | null;
   pmosTraceEvents: PmosExecutionTraceEvent[];
 
+  // PMOS identity/admin (Phase 4)
+  pmosAdminDraftsInitialized: boolean;
+  pmosAdminLoading: boolean;
+  pmosAdminSaving: boolean;
+  pmosAdminError: string | null;
+  pmosWorkspaceId: string;
+  pmosWorkspaceName: string;
+  pmosCurrentUserName: string;
+  pmosCurrentUserEmail: string;
+  pmosCurrentUserRole: PmosRole;
+  pmosMembers: PmosMember[];
+  pmosMemberDraftName: string;
+  pmosMemberDraftEmail: string;
+  pmosMemberDraftRole: PmosRole;
+  pmosMemberDraftStatus: PmosMemberStatus;
+  pmosAuditEvents: PmosAuditEvent[];
+
+  // PMOS unified command center (Phase 6)
+  pmosCommandPrompt: string;
+  pmosCommandPlanning: boolean;
+  pmosCommandExecuting: boolean;
+  pmosCommandError: string | null;
+  pmosCommandPlan: PmosCommandPlanStep[];
+  pmosCommandHistory: PmosCommandHistoryEntry[];
+  pmosCommandPendingApprovals: PmosCommandPendingApproval[];
+
   // PMOS Activepieces native embed (Phase 2)
   apPiecesLoading: boolean;
   apPiecesError: string | null;
@@ -174,6 +216,18 @@ export type AppViewState = {
   apFlowTriggerPayloadDraft: string;
   apFlowMutating: boolean;
   apFlowMutateError: string | null;
+
+  // PMOS AI flow builder stream (Phase 5)
+  pmosFlowBuilderPrompt: string;
+  pmosFlowBuilderGenerating: boolean;
+  pmosFlowBuilderCommitting: boolean;
+  pmosFlowBuilderError: string | null;
+  pmosFlowBuilderFlowName: string;
+  pmosFlowBuilderNodes: PmosFlowGraphNode[];
+  pmosFlowBuilderEdges: PmosFlowGraphEdge[];
+  pmosFlowBuilderOps: PmosFlowGraphOp[];
+  pmosFlowBuilderOpIndex: number;
+  pmosFlowBuilderLastCommittedFlowId: string | null;
 
   apRunsLoading: boolean;
   apRunsError: string | null;
@@ -353,6 +407,10 @@ export type AppViewState = {
   handleAbortChat: () => Promise<void>;
   handlePmosRefreshConnectors: () => Promise<void>;
   handlePmosTraceClear: () => void;
+  handlePmosAdminLoad: () => Promise<void>;
+  handlePmosAdminSave: (opts?: { action?: string; target?: string; detail?: string }) => Promise<void>;
+  handlePmosMemberUpsert: () => Promise<void>;
+  handlePmosMemberRemove: (email: string) => Promise<void>;
   handlePmosIntegrationsLoad: () => Promise<void>;
   handlePmosIntegrationsSave: () => Promise<void>;
   handlePmosIntegrationsClearActivepiecesKey: () => Promise<void>;
@@ -370,9 +428,16 @@ export type AppViewState = {
   handlePmosApFlowDelete: () => Promise<void>;
   handlePmosApFlowApplyOperation: () => Promise<void>;
   handlePmosApFlowTriggerWebhook: (opts?: { draft?: boolean; sync?: boolean }) => Promise<void>;
+  handlePmosFlowBuilderGenerate: () => Promise<void>;
+  handlePmosFlowBuilderCommit: () => Promise<void>;
+  handlePmosFlowBuilderReset: () => void;
   handlePmosApRunsLoad: () => Promise<void>;
   handlePmosApRunSelect: (runId: string) => Promise<void>;
   handlePmosApRunRetry: (strategy: "FROM_FAILED_STEP" | "ON_LATEST_VERSION") => Promise<void>;
+  handlePmosCommandPlan: () => Promise<void>;
+  handlePmosCommandExecute: () => Promise<void>;
+  handlePmosCommandApprove: (approvalId: string) => Promise<void>;
+  handlePmosCommandClearHistory: () => void;
   removeQueuedMessage: (id: string) => void;
   handleChatScroll: (event: Event) => void;
   resetToolStream: () => void;

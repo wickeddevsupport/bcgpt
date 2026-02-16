@@ -51,6 +51,7 @@ import {
   updateSkillEnabled,
 } from "./controllers/skills.ts";
 import { loadUsage, loadSessionTimeSeries, loadSessionLogs } from "./controllers/usage.ts";
+import { canManagePmosMembers } from "./controllers/pmos-admin.ts";
 import { icons } from "./icons.ts";
 import { normalizeBasePath, pathForTab, TAB_GROUPS, subtitleForTab, titleForTab } from "./navigation.ts";
 
@@ -63,10 +64,12 @@ const debouncedLoadUsage = (state: UsageState) => {
   usageDateDebounceTimeout = window.setTimeout(() => void loadUsage(state), 400);
 };
 import { renderAgents } from "./views/agents.ts";
+import { renderAdmin } from "./views/admin.ts";
 import { renderAutomations } from "./views/automations.ts";
 import { renderDashboard } from "./views/dashboard.ts";
 import { renderChannels } from "./views/channels.ts";
 import { renderChat } from "./views/chat.ts";
+import { renderCommandCenter } from "./views/command-center.ts";
 import { renderConfig } from "./views/config.ts";
 import { renderCron } from "./views/cron.ts";
 import { renderDebug } from "./views/debug.ts";
@@ -294,6 +297,16 @@ export function renderApp(state: AppViewState) {
                 mutating: state.apFlowMutating,
                 mutateError: state.apFlowMutateError,
 
+                builderPrompt: state.pmosFlowBuilderPrompt,
+                builderGenerating: state.pmosFlowBuilderGenerating,
+                builderCommitting: state.pmosFlowBuilderCommitting,
+                builderError: state.pmosFlowBuilderError,
+                builderFlowName: state.pmosFlowBuilderFlowName,
+                builderNodes: state.pmosFlowBuilderNodes,
+                builderEdges: state.pmosFlowBuilderEdges,
+                builderOps: state.pmosFlowBuilderOps,
+                builderLastCommittedFlowId: state.pmosFlowBuilderLastCommittedFlowId,
+
                 onFlowsQueryChange: (next) => {
                   state.apFlowsQuery = next;
                   state.apFlowsError = null;
@@ -318,6 +331,10 @@ export function renderApp(state: AppViewState) {
                 onApplyOperation: () => state.handlePmosApFlowApplyOperation(),
                 onTriggerPayloadDraftChange: (next) => (state.apFlowTriggerPayloadDraft = next),
                 onTriggerWebhook: (opts) => state.handlePmosApFlowTriggerWebhook(opts),
+                onBuilderPromptChange: (next) => (state.pmosFlowBuilderPrompt = next),
+                onBuilderGenerate: () => state.handlePmosFlowBuilderGenerate(),
+                onBuilderCommit: () => state.handlePmosFlowBuilderCommit(),
+                onBuilderReset: () => state.handlePmosFlowBuilderReset(),
               })
             : nothing
         }
@@ -423,6 +440,69 @@ export function renderApp(state: AppViewState) {
                   state.apConnectionCreateBasicPass = next;
                   state.apConnectionCreateError = null;
                 },
+              })
+            : nothing
+        }
+
+        ${
+          state.tab === "command-center"
+            ? renderCommandCenter({
+                connected: state.connected,
+                planning: state.pmosCommandPlanning,
+                executing: state.pmosCommandExecuting,
+                error: state.pmosCommandError,
+                prompt: state.pmosCommandPrompt,
+                plan: state.pmosCommandPlan,
+                pendingApprovals: state.pmosCommandPendingApprovals,
+                history: state.pmosCommandHistory,
+                onPromptChange: (next) => {
+                  state.pmosCommandPrompt = next;
+                  state.pmosCommandError = null;
+                },
+                onPlan: () => state.handlePmosCommandPlan(),
+                onExecute: () => state.handlePmosCommandExecute(),
+                onApprove: (approvalId) => state.handlePmosCommandApprove(approvalId),
+                onClearHistory: () => state.handlePmosCommandClearHistory(),
+              })
+            : nothing
+        }
+
+        ${
+          state.tab === "admin"
+            ? renderAdmin({
+                connected: state.connected,
+                loading: state.pmosAdminLoading,
+                saving: state.pmosAdminSaving,
+                error: state.pmosAdminError,
+                workspaceId: state.pmosWorkspaceId,
+                workspaceName: state.pmosWorkspaceName,
+                currentUserName: state.pmosCurrentUserName,
+                currentUserEmail: state.pmosCurrentUserEmail,
+                currentUserRole: state.pmosCurrentUserRole,
+                canManageMembers: canManagePmosMembers(state),
+                memberDraftName: state.pmosMemberDraftName,
+                memberDraftEmail: state.pmosMemberDraftEmail,
+                memberDraftRole: state.pmosMemberDraftRole,
+                memberDraftStatus: state.pmosMemberDraftStatus,
+                members: state.pmosMembers,
+                auditEvents: state.pmosAuditEvents,
+                onWorkspaceIdChange: (next) => (state.pmosWorkspaceId = next),
+                onWorkspaceNameChange: (next) => (state.pmosWorkspaceName = next),
+                onCurrentUserNameChange: (next) => (state.pmosCurrentUserName = next),
+                onCurrentUserEmailChange: (next) => (state.pmosCurrentUserEmail = next),
+                onCurrentUserRoleChange: (next) => (state.pmosCurrentUserRole = next),
+                onSave: () =>
+                  state.handlePmosAdminSave({
+                    action: "pmos.admin.profile.save",
+                    target: "workspace",
+                  }),
+                onRefresh: () => state.handlePmosAdminLoad(),
+                onMemberDraftNameChange: (next) => (state.pmosMemberDraftName = next),
+                onMemberDraftEmailChange: (next) => (state.pmosMemberDraftEmail = next),
+                onMemberDraftRoleChange: (next) => (state.pmosMemberDraftRole = next),
+                onMemberDraftStatusChange: (next) => (state.pmosMemberDraftStatus = next),
+                onUpsertMember: () => state.handlePmosMemberUpsert(),
+                onRemoveMember: (email) => state.handlePmosMemberRemove(email),
               })
             : nothing
         }

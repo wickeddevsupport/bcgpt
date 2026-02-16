@@ -205,6 +205,16 @@ export async function refreshActiveTab(host: SettingsHost) {
       (host as unknown as OpenClawApp).handlePmosApConnectionsLoad(),
     ]);
   }
+  if (host.tab === "admin") {
+    await (host as unknown as OpenClawApp).handlePmosAdminLoad();
+  }
+  if (host.tab === "command-center") {
+    await Promise.all([
+      (host as unknown as OpenClawApp).handlePmosIntegrationsLoad(),
+      (host as unknown as OpenClawApp).handlePmosApFlowsLoad(),
+      (host as unknown as OpenClawApp).handlePmosApRunsLoad(),
+    ]);
+  }
   if (host.tab === "automations") {
     // Ensure connector config is hydrated before trying to load flows.
     await (host as unknown as OpenClawApp).handlePmosIntegrationsLoad();

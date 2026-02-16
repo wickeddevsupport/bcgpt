@@ -88,6 +88,26 @@ import {
 } from "./controllers/pmos-connectors.ts";
 import type { PmosExecutionTraceEvent } from "./controllers/pmos-trace.ts";
 import {
+  hydratePmosAdminFromConfig,
+  loadPmosAdminState,
+  removePmosMember,
+  savePmosAdminState,
+  upsertPmosMember,
+  type PmosAuditEvent,
+  type PmosMember,
+  type PmosMemberStatus,
+  type PmosRole,
+} from "./controllers/pmos-admin.ts";
+import {
+  approvePmosCommandStep,
+  clearPmosCommandHistory,
+  executePmosCommandPlan,
+  planPmosCommand,
+  type PmosCommandHistoryEntry,
+  type PmosCommandPendingApproval,
+  type PmosCommandPlanStep,
+} from "./controllers/pmos-command-center.ts";
+import {
   applyActivepiecesFlowOperationDraft,
   createActivepiecesConnection,
   createActivepiecesFlow,
@@ -105,6 +125,14 @@ import {
   setActivepiecesFlowStatus,
   triggerActivepiecesFlowWebhook,
 } from "./controllers/pmos-activepieces.ts";
+import {
+  commitPmosFlowBuilderPlan,
+  generatePmosFlowBuilderPlan,
+  resetPmosFlowBuilder,
+  type PmosFlowGraphEdge,
+  type PmosFlowGraphNode,
+  type PmosFlowGraphOp,
+} from "./controllers/pmos-flow-builder.ts";
 import { loadConfig } from "./controllers/config.ts";
 
 declare global {
@@ -224,6 +252,32 @@ export class OpenClawApp extends LitElement {
   @state() pmosConnectorsLastChecked: number | null = null;
   @state() pmosTraceEvents: PmosExecutionTraceEvent[] = [];
 
+  // PMOS identity/admin (Phase 4)
+  @state() pmosAdminDraftsInitialized = false;
+  @state() pmosAdminLoading = false;
+  @state() pmosAdminSaving = false;
+  @state() pmosAdminError: string | null = null;
+  @state() pmosWorkspaceId = "default";
+  @state() pmosWorkspaceName = "PMOS Workspace";
+  @state() pmosCurrentUserName = "";
+  @state() pmosCurrentUserEmail = "";
+  @state() pmosCurrentUserRole: PmosRole = "workspace_admin";
+  @state() pmosMembers: PmosMember[] = [];
+  @state() pmosMemberDraftName = "";
+  @state() pmosMemberDraftEmail = "";
+  @state() pmosMemberDraftRole: PmosRole = "member";
+  @state() pmosMemberDraftStatus: PmosMemberStatus = "active";
+  @state() pmosAuditEvents: PmosAuditEvent[] = [];
+
+  // PMOS unified command center (Phase 6)
+  @state() pmosCommandPrompt = "";
+  @state() pmosCommandPlanning = false;
+  @state() pmosCommandExecuting = false;
+  @state() pmosCommandError: string | null = null;
+  @state() pmosCommandPlan: PmosCommandPlanStep[] = [];
+  @state() pmosCommandHistory: PmosCommandHistoryEntry[] = [];
+  @state() pmosCommandPendingApprovals: PmosCommandPendingApproval[] = [];
+
   // PMOS Activepieces native embed (Phase 2)
   @state() apPiecesLoading = false;
   @state() apPiecesError: string | null = null;
@@ -267,6 +321,18 @@ export class OpenClawApp extends LitElement {
   @state() apFlowTriggerPayloadDraft = "{\n  \n}\n";
   @state() apFlowMutating = false;
   @state() apFlowMutateError: string | null = null;
+
+  // PMOS AI flow builder stream (Phase 5)
+  @state() pmosFlowBuilderPrompt = "";
+  @state() pmosFlowBuilderGenerating = false;
+  @state() pmosFlowBuilderCommitting = false;
+  @state() pmosFlowBuilderError: string | null = null;
+  @state() pmosFlowBuilderFlowName = "";
+  @state() pmosFlowBuilderNodes: PmosFlowGraphNode[] = [];
+  @state() pmosFlowBuilderEdges: PmosFlowGraphEdge[] = [];
+  @state() pmosFlowBuilderOps: PmosFlowGraphOp[] = [];
+  @state() pmosFlowBuilderOpIndex = 0;
+  @state() pmosFlowBuilderLastCommittedFlowId: string | null = null;
 
   @state() apRunsLoading = false;
   @state() apRunsError: string | null = null;
@@ -539,6 +605,44 @@ export class OpenClawApp extends LitElement {
     this.pmosTraceEvents = [];
   }
 
+  async handlePmosAdminLoad() {
+    await loadPmosAdminState(this);
+    hydratePmosAdminFromConfig(this);
+  }
+
+  async handlePmosAdminSave(opts?: { action?: string; target?: string; detail?: string }) {
+    await savePmosAdminState(this, opts);
+    await loadPmosAdminState(this);
+  }
+
+  async handlePmosMemberUpsert() {
+    this.pmosAdminError = null;
+    upsertPmosMember(this);
+    if (this.pmosAdminError) {
+      return;
+    }
+    await this.handlePmosAdminSave({
+      action: "pmos.admin.member.upsert",
+      target: this.pmosMemberDraftEmail.trim().toLowerCase() || "member",
+    });
+    this.pmosMemberDraftName = "";
+    this.pmosMemberDraftEmail = "";
+    this.pmosMemberDraftRole = "member";
+    this.pmosMemberDraftStatus = "active";
+  }
+
+  async handlePmosMemberRemove(email: string) {
+    this.pmosAdminError = null;
+    removePmosMember(this, email);
+    if (this.pmosAdminError) {
+      return;
+    }
+    await this.handlePmosAdminSave({
+      action: "pmos.admin.member.remove",
+      target: email.trim().toLowerCase(),
+    });
+  }
+
   async handlePmosIntegrationsLoad() {
     await loadConfig(this);
     hydratePmosConnectorDraftsFromConfig(this);
@@ -638,6 +742,18 @@ export class OpenClawApp extends LitElement {
     );
   }
 
+  async handlePmosFlowBuilderGenerate() {
+    await generatePmosFlowBuilderPlan(this);
+  }
+
+  async handlePmosFlowBuilderCommit() {
+    await commitPmosFlowBuilderPlan(this);
+  }
+
+  handlePmosFlowBuilderReset() {
+    resetPmosFlowBuilder(this);
+  }
+
   async handlePmosApRunsLoad() {
     await loadActivepiecesRuns(this as unknown as Parameters<typeof loadActivepiecesRuns>[0]);
   }
@@ -654,6 +770,22 @@ export class OpenClawApp extends LitElement {
       this as unknown as Parameters<typeof retryActivepiecesRun>[0],
       strategy,
     );
+  }
+
+  async handlePmosCommandPlan() {
+    await planPmosCommand(this);
+  }
+
+  async handlePmosCommandExecute() {
+    await executePmosCommandPlan(this);
+  }
+
+  async handlePmosCommandApprove(approvalId: string) {
+    await approvePmosCommandStep(this, approvalId);
+  }
+
+  handlePmosCommandClearHistory() {
+    clearPmosCommandHistory(this);
   }
 
   removeQueuedMessage(id: string) {
