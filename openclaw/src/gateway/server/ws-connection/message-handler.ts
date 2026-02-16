@@ -25,6 +25,7 @@ import { upsertPresence } from "../../../infra/system-presence.js";
 import { loadVoiceWakeConfig } from "../../../infra/voicewake.js";
 import { rawDataToString } from "../../../infra/ws.js";
 import { isGatewayCliClient, isWebchatClient } from "../../../utils/message-channel.js";
+import { resolvePmosSessionFromRequest, scopesForPmosRole } from "../../pmos-auth.js";
 import { authorizeGatewayConnect, isLocalDirectRequest } from "../../auth.js";
 import { buildDeviceAuthPayload } from "../../device-auth.js";
 import { isLoopbackAddress, isTrustedProxyAddress, resolveGatewayClientIp } from "../../net.js";
@@ -336,8 +337,15 @@ export function attachGatewayWsMessageHandler(params: {
           return;
         }
 
+        const pmosSession =
+          connectParams.client.mode === "webchat"
+            ? await resolvePmosSessionFromRequest(upgradeReq)
+            : { ok: false as const, status: 401, error: "not webchat" };
+        const pmosRole = pmosSession.ok ? pmosSession.user.role : null;
+
         const roleRaw = connectParams.role ?? "operator";
-        const role = roleRaw === "operator" || roleRaw === "node" ? roleRaw : null;
+        const roleCandidate = roleRaw === "operator" || roleRaw === "node" ? roleRaw : null;
+        const role = pmosRole ? "operator" : roleCandidate;
         if (!role) {
           setHandshakeState("failed");
           setCloseCause("invalid-role", {
@@ -357,8 +365,9 @@ export function attachGatewayWsMessageHandler(params: {
           return;
         }
         const requestedScopes = Array.isArray(connectParams.scopes) ? connectParams.scopes : [];
-        const scopes =
-          requestedScopes.length > 0
+        const scopes = pmosRole
+          ? scopesForPmosRole(pmosRole)
+          : requestedScopes.length > 0
             ? requestedScopes
             : role === "operator"
               ? ["operator.admin"]
@@ -410,12 +419,14 @@ export function attachGatewayWsMessageHandler(params: {
         const allowControlUiBypass = allowInsecureControlUi || disableControlUiDeviceAuth;
         const device = disableControlUiDeviceAuth ? null : deviceRaw;
 
-        const authResult = await authorizeGatewayConnect({
-          auth: resolvedAuth,
-          connectAuth: connectParams.auth,
-          req: upgradeReq,
-          trustedProxies,
-        });
+        const authResult = pmosSession.ok
+          ? { ok: true as const, method: "pmos-session" as const }
+          : await authorizeGatewayConnect({
+              auth: resolvedAuth,
+              connectAuth: connectParams.auth,
+              req: upgradeReq,
+              trustedProxies,
+            });
         let authOk = authResult.ok;
         let authMethod =
           authResult.method ?? (resolvedAuth.mode === "password" ? "password" : "token");
@@ -881,6 +892,9 @@ export function attachGatewayWsMessageHandler(params: {
           socket,
           connect: connectParams,
           connId,
+          pmosRole: pmosSession.ok ? pmosSession.user.role : undefined,
+          pmosUserId: pmosSession.ok ? pmosSession.user.id : undefined,
+          pmosWorkspaceId: pmosSession.ok ? pmosSession.user.workspaceId : undefined,
           presenceKey,
           clientIp: reportedClientIp,
         };

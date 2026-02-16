@@ -16,20 +16,24 @@ Execute productization Phases 7-12 to turn PMOS into a normal multi-user product
 ## 3. Active Milestone Queue
 
 ## M1: Auth + Roles (Phase 7)
-Status: pending
+Status: completed (local), pending server deploy + smoke
 
 Tasks:
-1. Add sign-in/sign-up routes and session middleware.
+1. Add sign-in/sign-up routes and session middleware. ✅
 2. Add role bootstrap policy:
-   - first account -> `super_admin`
-   - later signups -> `workspace_admin`
-3. Enforce role guards server-side.
-4. Enforce shell access restriction to `super_admin` only.
+   - first account -> `super_admin` ✅
+   - later signups -> `workspace_admin` ✅
+3. Enforce role guards server-side. ✅
+4. Enforce shell access restriction to `super_admin` only. ✅
 
 Done when:
-1. Users can authenticate through PMOS UI.
-2. Role bootstrap and role checks are verified by tests.
-3. Non-super-admin shell attempts are blocked.
+1. Users can authenticate through PMOS UI. ✅
+2. Role bootstrap and role checks are verified by tests. ✅
+3. Non-super-admin shell attempts are blocked. ✅
+
+Validation run:
+1. `corepack pnpm --dir openclaw exec vitest run src/gateway/pmos-auth.test.ts src/gateway/server-methods.pmos-role.test.ts` ✅
+2. `corepack pnpm --dir openclaw/ui build` ✅
 
 ## M2: Onboarding Wizard (Phase 8)
 Status: pending
@@ -50,13 +54,20 @@ Status: pending
 
 Tasks:
 1. Keep advanced surfaces hidden for regular roles.
-2. Refine primary nav and empty states.
-3. Add role-aware UI gating everywhere.
-4. Add plain-language setup hints in Dashboard/Integrations.
+2. Port an Activepieces-style Flow Studio UI directly into PMOS:
+   - center flow canvas
+   - right configuration panel
+   - dropdown/selector-first step editing UX
+3. Add side chatbox in Flow Studio for direct flow creation/editing with live graph updates.
+4. Refine primary nav and empty states.
+5. Add role-aware UI gating everywhere.
+6. Add plain-language setup hints in Dashboard/Integrations.
 
 Done when:
 1. Workspace admin UX is clean and non-technical.
-2. Admin-only or shell-only controls are never shown to ineligible users.
+2. Users can fully edit flow steps in PMOS without switching to Flow Pieces UI.
+3. Chat-generated flow changes are visible live next to the canvas.
+4. Admin-only or shell-only controls are never shown to ineligible users.
 
 ## M4: Chat-First Execution (Phase 10)
 Status: pending
@@ -88,9 +99,9 @@ Done when:
 
 ## 4. Immediate Implementation Order
 
-1. Start M1: auth + role bootstrap + shell restriction.
-2. Continue to M2 onboarding immediately after M1 merge.
-3. Then M3 UX simplification and role-gated navigation.
+1. Deploy M1 to `os.wickedlab.io` and run smoke checks.
+2. Start M2 onboarding wizard implementation.
+3. Then M3 UX simplification with Activepieces-style Flow Studio + side chat.
 
 ## 5. Deployment Checklist (Each Milestone)
 

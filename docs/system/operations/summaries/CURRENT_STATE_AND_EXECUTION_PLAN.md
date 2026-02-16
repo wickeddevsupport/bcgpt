@@ -31,6 +31,12 @@ The following are already built and treated as baseline:
 5. Reimagined dashboard foundation with real metrics and execution trace.
 6. Admin shell foundations (workspace identity, members, audit feed).
 7. Live flow builder stream and command center foundations.
+8. Phase 7 M1 is implemented locally:
+   - PMOS sign-in/sign-up/session endpoints
+   - role bootstrap (`super_admin` first, then `workspace_admin`)
+   - UI auth gate before dashboard
+   - server-side super-admin shell restriction
+   - targeted tests passing
 
 ## 4. Productization Execution Plan (The "Do It All" Plan)
 
@@ -84,12 +90,19 @@ Scope:
    - Runs
    - Integrations
    - Chat
-3. Improve empty states and setup copy.
-4. Add role-aware UI gating to prevent inaccessible actions.
+3. Build Flow Studio as a direct Activepieces-style editor inside PMOS:
+   - center canvas with trigger/action cards
+   - right-side step configuration panel with dropdowns, selectors, and guided fields
+   - no "open external app" jump for normal flow editing
+4. Add a persistent side chatbox in the same Flow Studio screen for AI-assisted flow creation/editing with live graph updates.
+5. Improve empty states and setup copy.
+6. Add role-aware UI gating to prevent inaccessible actions.
 
 Acceptance criteria:
 1. Non-technical workspace admin can navigate core flows without docs.
-2. No shell/admin-only controls appear for non-eligible roles.
+2. Users can edit full flow details from PMOS using intuitive form controls (dropdown-first UX).
+3. Chat-driven flow edits are visible live on the same screen.
+4. No shell/admin-only controls appear for non-eligible roles.
 
 ## Phase 10: Chat-First Operations and Live Trace
 
@@ -149,7 +162,7 @@ Acceptance criteria:
 
 ## 5. Delivery Milestones
 
-1. Milestone M1: Auth and role bootstrap complete (Phase 7).
+1. Milestone M1: Auth and role bootstrap complete in code, pending server deploy + smoke (Phase 7).
 2. Milestone M2: Wizard-driven onboarding complete (Phase 8).
 3. Milestone M3: Simplified UX and role-gated surfaces complete (Phase 9).
 4. Milestone M4: Chat-first operations and approval loop complete (Phase 10).
@@ -164,9 +177,10 @@ All must be true:
 3. Non-super-admin users cannot access shell execution paths.
 4. Workspace admins can fully create/manage automations and agents without shell.
 5. Flow edits in PMOS reflect in Flow Pieces and vice versa.
-6. Chat executes end-to-end operations with visible execution trace and approvals.
-7. E2E, monitoring, and rollback checks pass.
-8. MCP and Flow production services remain stable and backward-compatible.
+6. Flow Studio in PMOS is Activepieces-grade usable (canvas + right config panel + dropdown-guided fields).
+7. Chat executes end-to-end operations with visible execution trace and approvals on the same workflow surface.
+8. E2E, monitoring, and rollback checks pass.
+9. MCP and Flow production services remain stable and backward-compatible.
 
 ## 7. Fresh Session Start Protocol
 

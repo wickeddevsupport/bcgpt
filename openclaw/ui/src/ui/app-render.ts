@@ -53,7 +53,14 @@ import {
 import { loadUsage, loadSessionTimeSeries, loadSessionLogs } from "./controllers/usage.ts";
 import { canManagePmosMembers } from "./controllers/pmos-admin.ts";
 import { icons } from "./icons.ts";
-import { normalizeBasePath, pathForTab, TAB_GROUPS, subtitleForTab, titleForTab } from "./navigation.ts";
+import {
+  normalizeBasePath,
+  pathForTab,
+  TAB_GROUPS,
+  subtitleForTab,
+  titleForTab,
+  type Tab,
+} from "./navigation.ts";
 
 // Module-scope debounce for usage date changes (avoids type-unsafe hacks on state object)
 let usageDateDebounceTimeout: number | null = null;
@@ -104,7 +111,113 @@ function resolveAssistantAvatarUrl(state: AppViewState): string | undefined {
   return identity?.avatarUrl;
 }
 
+function canAccessTab(state: AppViewState, tab: Tab): boolean {
+  const role = state.pmosAuthUser?.role ?? null;
+  if (!role) {
+    return false;
+  }
+  if (role === "super_admin") {
+    return true;
+  }
+  if (tab === "nodes" || tab === "config" || tab === "debug" || tab === "logs") {
+    return false;
+  }
+  return true;
+}
+
+function renderAuthScreen(state: AppViewState) {
+  const loading = state.pmosAuthLoading;
+  const isSignup = state.pmosAuthMode === "signup";
+  return html`
+    <div class="pmos-auth-shell">
+      <div class="pmos-auth-card">
+        <div class="pmos-auth-brand">
+          <img
+            src=${state.basePath ? `${state.basePath}/wicked-os-logo.svg` : "/wicked-os-logo.svg"}
+            alt="Wicked OS"
+          />
+        </div>
+        <div class="pmos-auth-title">${isSignup ? "Create your workspace" : "Sign in to Wicked OS"}</div>
+        <div class="pmos-auth-subtitle">
+          ${isSignup
+            ? "First account becomes super admin. Next signups become workspace admins."
+            : "Use your PMOS account to access your workspace and agents."}
+        </div>
+        <form
+          class="pmos-auth-form"
+          @submit=${(event: Event) => {
+            event.preventDefault();
+            void state.handlePmosAuthSubmit();
+          }}
+        >
+          ${isSignup
+            ? html`
+                <label class="field">
+                  <span>Name</span>
+                  <input
+                    .value=${state.pmosAuthName}
+                    @input=${(event: Event) =>
+                      (state.pmosAuthName = (event.target as HTMLInputElement).value)}
+                    autocomplete="name"
+                    placeholder="Your name"
+                    required
+                  />
+                </label>
+              `
+            : nothing}
+          <label class="field">
+            <span>Email</span>
+            <input
+              .value=${state.pmosAuthEmail}
+              @input=${(event: Event) =>
+                (state.pmosAuthEmail = (event.target as HTMLInputElement).value)}
+              autocomplete="email"
+              placeholder="you@company.com"
+              required
+            />
+          </label>
+          <label class="field">
+            <span>Password</span>
+            <input
+              type="password"
+              .value=${state.pmosAuthPassword}
+              @input=${(event: Event) =>
+                (state.pmosAuthPassword = (event.target as HTMLInputElement).value)}
+              autocomplete=${isSignup ? "new-password" : "current-password"}
+              placeholder="At least 8 characters"
+              required
+            />
+          </label>
+          ${state.pmosAuthError ? html`<div class="pill danger">${state.pmosAuthError}</div>` : nothing}
+          <button class="button primary" type="submit" ?disabled=${loading}>
+            ${loading ? "Please wait..." : isSignup ? "Create account" : "Sign in"}
+          </button>
+        </form>
+        <div class="pmos-auth-switch">
+          ${isSignup
+            ? html`
+                Already have an account?
+                <button class="link-button" @click=${() => (state.pmosAuthMode = "signin")}>
+                  Sign in
+                </button>
+              `
+            : html`
+                New to Wicked OS?
+                <button class="link-button" @click=${() => (state.pmosAuthMode = "signup")}>
+                  Create account
+                </button>
+              `}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 export function renderApp(state: AppViewState) {
+  if (state.pmosAuthLoading || !state.pmosAuthAuthenticated) {
+    return renderAuthScreen(state);
+  }
+
   const presenceCount = state.presenceEntries.length;
   const sessionsCount = state.sessionsResult?.count ?? null;
   const cronNext = state.cronStatus?.nextWakeAtMs ?? null;
@@ -117,6 +230,7 @@ export function renderApp(state: AppViewState) {
   const configValue =
     state.configForm ?? (state.configSnapshot?.config as Record<string, unknown> | null);
   const basePath = normalizeBasePath(state.basePath ?? "");
+  const tabAllowed = canAccessTab(state, state.tab);
   const resolvedAgentId =
     state.agentsSelectedId ??
     state.agentsList?.defaultId ??
@@ -146,18 +260,31 @@ export function renderApp(state: AppViewState) {
           </div>
         </div>
         <div class="topbar-status">
+          ${state.pmosAuthUser
+            ? html`
+                <div class="pill">
+                  <span>${state.pmosAuthUser.role === "super_admin" ? "Super Admin" : "Workspace Admin"}</span>
+                  <span class="mono">${state.pmosAuthUser.email}</span>
+                </div>
+              `
+            : nothing}
           <div class="pill">
             <span class="statusDot ${state.connected ? "ok" : ""}"></span>
             <span>Health</span>
             <span class="mono">${state.connected ? "OK" : "Offline"}</span>
           </div>
+          <button class="button" @click=${() => void state.handlePmosAuthLogout()}>Sign out</button>
           ${renderThemeToggle(state)}
         </div>
       </header>
       <aside class="nav ${state.settings.navCollapsed ? "nav--collapsed" : ""}">
         ${TAB_GROUPS.map((group) => {
+          const visibleTabs = group.tabs.filter((tab) => canAccessTab(state, tab));
+          if (visibleTabs.length === 0) {
+            return nothing;
+          }
           const isGroupCollapsed = state.settings.navGroupsCollapsed[group.label] ?? false;
-          const hasActiveTab = group.tabs.some((tab) => tab === state.tab);
+          const hasActiveTab = visibleTabs.some((tab) => tab === state.tab);
           return html`
             <div class="nav-group ${isGroupCollapsed && !hasActiveTab ? "nav-group--collapsed" : ""}">
               <button
@@ -176,7 +303,7 @@ export function renderApp(state: AppViewState) {
                 <span class="nav-label__chevron">${isGroupCollapsed ? "+" : "-"}</span>
               </button>
               <div class="nav-group__items">
-                ${group.tabs.map((tab) => renderTab(state, tab))}
+                ${visibleTabs.map((tab) => renderTab(state, tab))}
               </div>
             </div>
           `;
@@ -230,6 +357,24 @@ export function renderApp(state: AppViewState) {
             ${isChat ? renderChatControls(state) : nothing}
           </div>
         </section>
+        ${!tabAllowed
+          ? html`
+              <section class="card">
+                <div class="stack">
+                  <div class="section-title">Access Restricted</div>
+                  <div class="muted">
+                    This section is restricted to super-admin accounts. Use Dashboard or Chat for
+                    normal workspace operations.
+                  </div>
+                  <div class="row">
+                    <button class="button" @click=${() => state.setTab("dashboard")}>
+                      Go to dashboard
+                    </button>
+                  </div>
+                </div>
+              </section>
+            `
+          : html`
 
         ${
           state.tab === "dashboard"
@@ -1269,7 +1414,7 @@ export function renderApp(state: AppViewState) {
         }
 
         ${
-          state.tab === "nodes"
+          state.tab === "nodes" && canAccessTab(state, "nodes")
             ? renderNodes({
                 loading: state.nodesLoading,
                 nodes: state.nodes,
@@ -1429,7 +1574,7 @@ export function renderApp(state: AppViewState) {
         }
 
         ${
-          state.tab === "config"
+          state.tab === "config" && canAccessTab(state, "config")
             ? renderConfig({
                 raw: state.configRaw,
                 originalRaw: state.configRawOriginal,
@@ -1469,7 +1614,7 @@ export function renderApp(state: AppViewState) {
         }
 
         ${
-          state.tab === "debug"
+          state.tab === "debug" && canAccessTab(state, "debug")
             ? renderDebug({
                 loading: state.debugLoading,
                 status: state.debugStatus,
@@ -1490,7 +1635,7 @@ export function renderApp(state: AppViewState) {
         }
 
         ${
-          state.tab === "logs"
+          state.tab === "logs" && canAccessTab(state, "logs")
             ? renderLogs({
                 loading: state.logsLoading,
                 error: state.logsError,
@@ -1511,6 +1656,7 @@ export function renderApp(state: AppViewState) {
               })
             : nothing
         }
+          `}
       </main>
       ${renderExecApprovalPrompt(state)}
       ${renderGatewayUrlConfirmation(state)}

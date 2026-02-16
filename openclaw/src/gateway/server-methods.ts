@@ -32,9 +32,24 @@ const READ_SCOPE = "operator.read";
 const WRITE_SCOPE = "operator.write";
 const APPROVALS_SCOPE = "operator.approvals";
 const PAIRING_SCOPE = "operator.pairing";
+const SHELL_SCOPE = "operator.shell";
+const SUPER_ADMIN_ROLE = "super_admin";
 
 const APPROVAL_METHODS = new Set(["exec.approval.request", "exec.approval.resolve"]);
 const NODE_ROLE_METHODS = new Set(["node.invoke.result", "node.event", "skills.bins"]);
+const SUPER_ADMIN_ONLY_METHODS = new Set([
+  "node.invoke",
+  "node.pair.request",
+  "node.pair.approve",
+  "node.pair.reject",
+  "node.pair.verify",
+  "node.rename",
+  "device.pair.approve",
+  "device.pair.reject",
+  "device.token.rotate",
+  "device.token.revoke",
+  "update.run",
+]);
 const PAIRING_METHODS = new Set([
   "node.pair.request",
   "node.pair.list",
@@ -97,6 +112,17 @@ function authorizeGatewayMethod(method: string, client: GatewayRequestOptions["c
   }
   const role = client.connect.role ?? "operator";
   const scopes = client.connect.scopes ?? [];
+  const pmosRole = client.pmosRole ?? null;
+
+  if (pmosRole && pmosRole !== SUPER_ADMIN_ROLE && SUPER_ADMIN_ONLY_METHODS.has(method)) {
+    return errorShape(ErrorCodes.INVALID_REQUEST, "super_admin role required");
+  }
+  if (pmosRole === SUPER_ADMIN_ROLE && SUPER_ADMIN_ONLY_METHODS.has(method)) {
+    if (!scopes.includes(SHELL_SCOPE) && !scopes.includes(ADMIN_SCOPE)) {
+      return errorShape(ErrorCodes.INVALID_REQUEST, "missing scope: operator.shell");
+    }
+  }
+
   if (NODE_ROLE_METHODS.has(method)) {
     if (role === "node") {
       return null;

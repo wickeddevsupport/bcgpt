@@ -43,6 +43,7 @@ import { getBearerToken, getHeader } from "./http-utils.js";
 import { resolveGatewayClientIp } from "./net.js";
 import { handleOpenAiHttpRequest } from "./openai-http.js";
 import { handleOpenResponsesHttpRequest } from "./openresponses-http.js";
+import { handlePmosAuthHttpRequest } from "./pmos-auth-http.js";
 import { handleToolsInvokeHttpRequest } from "./tools-invoke-http.js";
 
 type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
@@ -317,6 +318,15 @@ export function createGatewayHttpServer(opts: {
     try {
       const configSnapshot = loadConfig();
       const trustedProxies = configSnapshot.gateway?.trustedProxies ?? [];
+      if (
+        await handlePmosAuthHttpRequest({
+          req,
+          res,
+          controlUiBasePath,
+        })
+      ) {
+        return;
+      }
       if (await handleHooksRequest(req, res)) {
         return;
       }

@@ -86,6 +86,13 @@ import {
   savePmosConnectorsConfig,
   type PmosConnectorsStatus,
 } from "./controllers/pmos-connectors.ts";
+import {
+  loadPmosAuthSession,
+  loginPmosAuth,
+  logoutPmosAuth,
+  signupPmosAuth,
+  type PmosAuthUser,
+} from "./controllers/pmos-auth.ts";
 import type { PmosExecutionTraceEvent } from "./controllers/pmos-trace.ts";
 import {
   hydratePmosAdminFromConfig,
@@ -162,6 +169,14 @@ export class OpenClawApp extends LitElement {
   @state() password = "";
   @state() tab: Tab = "dashboard";
   @state() onboarding = resolveOnboardingMode();
+  @state() pmosAuthLoading = true;
+  @state() pmosAuthAuthenticated = false;
+  @state() pmosAuthMode: "signin" | "signup" = "signin";
+  @state() pmosAuthName = "";
+  @state() pmosAuthEmail = "";
+  @state() pmosAuthPassword = "";
+  @state() pmosAuthError: string | null = null;
+  @state() pmosAuthUser: PmosAuthUser | null = null;
   @state() connected = false;
   @state() theme: ThemeMode = this.settings.theme ?? "system";
   @state() themeResolved: ResolvedTheme = "dark";
@@ -515,6 +530,7 @@ export class OpenClawApp extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     handleConnected(this as unknown as Parameters<typeof handleConnected>[0]);
+    void this.handlePmosAuthBootstrap();
   }
 
   protected firstUpdated() {
@@ -532,6 +548,34 @@ export class OpenClawApp extends LitElement {
 
   connect() {
     connectGatewayInternal(this as unknown as Parameters<typeof connectGatewayInternal>[0]);
+  }
+
+  async handlePmosAuthBootstrap() {
+    await loadPmosAuthSession(this);
+    if (this.pmosAuthAuthenticated) {
+      this.connect();
+    }
+  }
+
+  async handlePmosAuthSubmit() {
+    const ok =
+      this.pmosAuthMode === "signup" ? await signupPmosAuth(this) : await loginPmosAuth(this);
+    if (!ok) {
+      return;
+    }
+    this.lastError = null;
+    this.connect();
+  }
+
+  async handlePmosAuthLogout() {
+    await logoutPmosAuth(this);
+    this.client?.stop();
+    this.client = null;
+    this.connected = false;
+    this.hello = null;
+    this.lastError = null;
+    this.execApprovalQueue = [];
+    this.execApprovalError = null;
   }
 
   handleChatScroll(event: Event) {

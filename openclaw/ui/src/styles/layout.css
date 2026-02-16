@@ -22,6 +22,81 @@
   overflow: hidden;
 }
 
+.pmos-auth-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  background:
+    radial-gradient(1200px 420px at 15% -10%, rgba(232, 59, 59, 0.16), transparent 60%),
+    radial-gradient(900px 360px at 85% 110%, rgba(129, 97, 255, 0.08), transparent 58%),
+    var(--bg);
+}
+
+.pmos-auth-card {
+  width: min(520px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+}
+
+.pmos-auth-brand {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.pmos-auth-brand img {
+  width: min(240px, 70%);
+  height: auto;
+}
+
+.pmos-auth-title {
+  font-size: 1.2rem;
+  font-weight: 700;
+  margin-bottom: 6px;
+  text-align: center;
+}
+
+.pmos-auth-subtitle {
+  color: var(--muted);
+  text-align: center;
+  margin-bottom: 16px;
+}
+
+.pmos-auth-form {
+  display: grid;
+  gap: 10px;
+}
+
+.pmos-auth-form .button {
+  width: 100%;
+}
+
+.pmos-auth-switch {
+  margin-top: 14px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 0.94rem;
+}
+
+.link-button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  margin-left: 6px;
+}
+
+.link-button:hover {
+  text-decoration: underline;
+}
+
 @supports (height: 100dvh) {
   .shell {
     height: 100dvh;

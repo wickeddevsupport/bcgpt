@@ -34,6 +34,7 @@ import type {
 import type { ChatAttachment, ChatQueueItem, CronFormState } from "./ui-types.ts";
 import type { NostrProfileFormState } from "./views/channels.nostr-profile-form.ts";
 import type { SessionLogEntry } from "./views/usage.ts";
+import type { PmosAuthUser } from "./controllers/pmos-auth.ts";
 import type { PmosConnectorsStatus } from "./controllers/pmos-connectors.ts";
 import type {
   ActivepiecesConnectionSummary,
@@ -64,6 +65,14 @@ export type AppViewState = {
   password: string;
   tab: Tab;
   onboarding: boolean;
+  pmosAuthLoading: boolean;
+  pmosAuthAuthenticated: boolean;
+  pmosAuthMode: "signin" | "signup";
+  pmosAuthName: string;
+  pmosAuthEmail: string;
+  pmosAuthPassword: string;
+  pmosAuthError: string | null;
+  pmosAuthUser: PmosAuthUser | null;
   basePath: string;
   connected: boolean;
   theme: ThemeMode;
@@ -354,6 +363,8 @@ export type AppViewState = {
   client: GatewayBrowserClient | null;
   refreshSessionsAfterChat: Set<string>;
   connect: () => void;
+  handlePmosAuthSubmit: () => Promise<void>;
+  handlePmosAuthLogout: () => Promise<void>;
   setTab: (tab: Tab) => void;
   setTheme: (theme: ThemeMode, context?: ThemeTransitionContext) => void;
   applySettings: (next: UiSettings) => void;

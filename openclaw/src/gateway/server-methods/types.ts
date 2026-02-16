@@ -9,12 +9,16 @@ import type { NodeRegistry } from "../node-registry.js";
 import type { ConnectParams, ErrorShape, RequestFrame } from "../protocol/index.js";
 import type { ChannelRuntimeSnapshot } from "../server-channels.js";
 import type { DedupeEntry } from "../server-shared.js";
+import type { PmosRole } from "../pmos-auth.js";
 
 type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
 
 export type GatewayClient = {
   connect: ConnectParams;
   connId?: string;
+  pmosRole?: PmosRole;
+  pmosUserId?: string;
+  pmosWorkspaceId?: string;
 };
 
 export type RespondFn = (
