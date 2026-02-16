@@ -27,6 +27,8 @@ export type DashboardProps = {
   automationsHref: string;
   runsHref: string;
   chatHref: string;
+  configHref?: string;
+  modelAuthConfigured?: boolean;
   onSettingsChange: (next: UiSettings) => void;
   onConnect: () => void;
   onRefreshConnectors: () => void;
@@ -166,6 +168,14 @@ export function renderDashboard(props: DashboardProps) {
       actionLabel: "Set project",
     },
     {
+      id: "model-auth",
+      title: "Add AI Model Key",
+      detail: "Set at least one provider API key and default model in Config.",
+      done: Boolean(props.modelAuthConfigured),
+      href: props.configHref ?? props.integrationsHref,
+      actionLabel: "Open config",
+    },
+    {
       id: "first-flow",
       title: "Create First Automation",
       detail: "Build your first flow in Automations.",
@@ -180,6 +190,18 @@ export function renderDashboard(props: DashboardProps) {
       done: runs.length > 0,
       href: props.runsHref,
       actionLabel: "Open runs",
+    },
+    {
+      id: "chat-ready",
+      title: "Start Using Chat",
+      detail: "Use chat to build and run workflows in plain language.",
+      done:
+        props.connected &&
+        Boolean(props.modelAuthConfigured) &&
+        apStatus.tone === "ok" &&
+        bcgptStatus.tone === "ok",
+      href: props.chatHref,
+      actionLabel: "Open chat",
     },
   ];
   const setupCompleted = setupSteps.filter((step) => step.done).length;
