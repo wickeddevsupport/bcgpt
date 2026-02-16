@@ -322,7 +322,11 @@ export function renderApp(state: AppViewState) {
                 retryError: state.apRunRetryError,
 
                 onRefresh: () => state.handlePmosApRunsLoad(),
-                onSelectRun: (runId) => state.handlePmosApRunSelect(runId),
+                onSelectRun: (runId) => {
+                  state.apRunDetailsError = null;
+                  state.apRunRetryError = null;
+                  state.handlePmosApRunSelect(runId);
+                },
                 onRetry: (strategy) => state.handlePmosApRunRetry(strategy),
               })
             : nothing
@@ -357,7 +361,10 @@ export function renderApp(state: AppViewState) {
                 apPiecesError: state.apPiecesError,
                 apPiecesQuery: state.apPiecesQuery,
                 apPieces: state.apPieces,
-                onApPiecesQueryChange: (next) => (state.apPiecesQuery = next),
+                onApPiecesQueryChange: (next) => {
+                  state.apPiecesQuery = next;
+                  state.apPiecesError = null;
+                },
                 onApPiecesRefresh: () => state.handlePmosApPiecesLoad(),
 
                 apConnectionsLoading: state.apConnectionsLoading,
@@ -374,12 +381,30 @@ export function renderApp(state: AppViewState) {
                 onApConnectionsRefresh: () => state.handlePmosApConnectionsLoad(),
                 onApConnectionCreate: () => state.handlePmosApConnectionCreate(),
                 onApConnectionDelete: (connectionId) => state.handlePmosApConnectionDelete(connectionId),
-                onApConnectionCreatePieceNameChange: (next) => (state.apConnectionCreatePieceName = next),
-                onApConnectionCreateDisplayNameChange: (next) => (state.apConnectionCreateDisplayName = next),
-                onApConnectionCreateTypeChange: (next) => (state.apConnectionCreateType = next),
-                onApConnectionCreateSecretTextChange: (next) => (state.apConnectionCreateSecretText = next),
-                onApConnectionCreateBasicUserChange: (next) => (state.apConnectionCreateBasicUser = next),
-                onApConnectionCreateBasicPassChange: (next) => (state.apConnectionCreateBasicPass = next),
+                onApConnectionCreatePieceNameChange: (next) => {
+                  state.apConnectionCreatePieceName = next;
+                  state.apConnectionCreateError = null;
+                },
+                onApConnectionCreateDisplayNameChange: (next) => {
+                  state.apConnectionCreateDisplayName = next;
+                  state.apConnectionCreateError = null;
+                },
+                onApConnectionCreateTypeChange: (next) => {
+                  state.apConnectionCreateType = next;
+                  state.apConnectionCreateError = null;
+                },
+                onApConnectionCreateSecretTextChange: (next) => {
+                  state.apConnectionCreateSecretText = next;
+                  state.apConnectionCreateError = null;
+                },
+                onApConnectionCreateBasicUserChange: (next) => {
+                  state.apConnectionCreateBasicUser = next;
+                  state.apConnectionCreateError = null;
+                },
+                onApConnectionCreateBasicPassChange: (next) => {
+                  state.apConnectionCreateBasicPass = next;
+                  state.apConnectionCreateError = null;
+                },
               })
             : nothing
         }

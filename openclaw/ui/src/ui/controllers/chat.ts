@@ -27,6 +27,33 @@ export type ChatEventPayload = {
   errorMessage?: string;
 };
 
+async function resolveChatReadinessError(state: ChatState): Promise<string | null> {
+  if (!state.client || !state.connected) {
+    return "Connect to PMOS first, then try again.";
+  }
+  try {
+    const res = await state.client.request<{ models?: Array<Record<string, unknown>> }>(
+      "models.list",
+      {},
+    );
+    const models = Array.isArray(res.models) ? res.models : [];
+    if (models.length === 0) {
+      return "No AI model is configured for this workspace. Configure one in Admin (Advanced) -> Config.";
+    }
+    const hasAvailable = models.some((model) => model?.available === true);
+    if (!hasAvailable) {
+      return (
+        "No model auth is configured for the active session. " +
+        "Add a provider API key in Admin (Advanced) -> Config, then try Chat again."
+      );
+    }
+    return null;
+  } catch {
+    // If the probe fails, do not block sending; normal chat error handling will catch issues.
+    return null;
+  }
+}
+
 export async function loadChatHistory(state: ChatState) {
   if (!state.client || !state.connected) {
     return;
@@ -69,6 +96,20 @@ export async function sendChatMessage(
   const msg = message.trim();
   const hasAttachments = attachments && attachments.length > 0;
   if (!msg && !hasAttachments) {
+    return null;
+  }
+
+  const readinessError = await resolveChatReadinessError(state);
+  if (readinessError) {
+    state.lastError = readinessError;
+    state.chatMessages = [
+      ...state.chatMessages,
+      {
+        role: "assistant",
+        content: [{ type: "text", text: `Error: ${readinessError}` }],
+        timestamp: Date.now(),
+      },
+    ];
     return null;
   }
 

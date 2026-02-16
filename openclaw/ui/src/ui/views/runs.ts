@@ -53,7 +53,7 @@ export function renderRuns(props: RunsProps) {
               const status = run.status ?? "n/a";
               const meta = [run.flowId ? `flow ${run.flowId}` : null, run.created ? `created ${run.created}` : null]
                 .filter(Boolean)
-                .join(" · ");
+                .join(" | ");
               return html`
                 <div
                   class="list-item list-item-clickable ${selected ? "list-item-selected" : ""}"
@@ -94,7 +94,7 @@ export function renderRuns(props: RunsProps) {
           }
 
           ${props.runDetailsLoading ? html`<div class="muted" style="margin-top: 14px;">Loading run...</div>` : nothing}
-          ${props.runDetailsError ? html`<div class="callout danger" style="margin-top: 12px;">${props.runDetailsError}</div>` : nothing}
+          ${props.runDetailsError && props.selectedRunId ? html`<div class="callout danger" style="margin-top: 12px;">${props.runDetailsError}</div>` : nothing}
           ${props.retryError ? html`<div class="callout danger" style="margin-top: 12px;">${props.retryError}</div>` : nothing}
 
           ${
@@ -118,3 +118,4 @@ export function renderRuns(props: RunsProps) {
     </section>
   `;
 }
+
