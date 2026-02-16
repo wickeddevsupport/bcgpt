@@ -251,7 +251,24 @@ function renderAuthScreen(state: AppViewState) {
 }
 
 export function renderApp(state: AppViewState) {
-  if (state.pmosAuthLoading || !state.pmosAuthAuthenticated) {
+  if (state.pmosAuthLoading) {
+    return html`
+      <div class="pmos-auth-shell">
+        <div class="pmos-auth-card">
+          <div class="pmos-auth-brand">
+            <img
+              src=${state.basePath ? `${state.basePath}/wicked-os-logo.svg` : "/wicked-os-logo.svg"}
+              alt="Wicked OS"
+            />
+          </div>
+          <div class="pmos-auth-title">Wicked OS</div>
+          <div class="pmos-auth-subtitle">Restoring your session...</div>
+        </div>
+      </div>
+    `;
+  }
+
+  if (!state.pmosAuthAuthenticated) {
     return renderAuthScreen(state);
   }
 
