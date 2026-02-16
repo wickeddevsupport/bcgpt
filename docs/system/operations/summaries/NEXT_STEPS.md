@@ -29,7 +29,7 @@ Shipped + deployed to `os.wickedlab.io`:
 
 Smoke validation:
 
-1. `https://os.wickedlab.io/api/health` returns 200.
+1. `https://os.wickedlab.io/health` returns 200.
 2. From inside the PMOS container:
    - `node openclaw.mjs gateway call pmos.connectors.status --json`
 
@@ -66,29 +66,53 @@ Shipped + deployed to `os.wickedlab.io`:
 3. Chat view now shows the same live execution trace stream.
 4. Dashboard polling refreshes connectors/flows/runs while dashboard is open.
 
-## Immediate Work Queue (Phase 4 Start)
+## Phase 4 (Complete): PMOS Identity + Admin Shell
 
-1. PMOS identity + admin (OpenClaw-first, PMOS UX):
-   - email auth
-   - workspaces + roles (`system_admin`, `workspace_admin`, `member`, `viewer`)
-   - admin screens (users/invites/roles) + audit/activity feed
+Shipped + deployed to `os.wickedlab.io`:
 
-2. AI-assisted flow creation (the "watch it build" experience):
-   - chat -> graph-ops stream (`add_node`, `add_edge`, `update_mapping`)
-   - live canvas updates in PMOS
-   - commit/sync to Activepieces, show result immediately
+1. Workspace identity panel in PMOS Admin.
+2. Workspace members management (add/remove, role/status).
+3. PMOS audit feed for admin and PMOS action events.
+
+## Phase 5 (Complete): Live AI Flow Builder
+
+Shipped + deployed to `os.wickedlab.io`:
+
+1. Prompt-driven graph generation in Automations.
+2. Live graph operation stream (`add_node`, `add_edge`, `set_mapping`).
+3. Commit flow shell to Activepieces and open it in PMOS.
+
+## Phase 6 (Complete): Unified Command Center
+
+Shipped + deployed to `os.wickedlab.io`:
+
+1. Prompt -> plan pipeline for PMOS actions.
+2. Multi-step execution with high-risk approval queue.
+3. Command history and pending approvals in PMOS UI.
+
+## Immediate Work Queue (Phase 7)
+
+1. Hardening and production readiness:
+   - CI smoke gate using PMOS smoke suite.
+   - telemetry + alerting for chat/tool failures.
+   - rollback drills and runbook lock.
+2. UX polish for regular users:
+   - simpler onboarding copy
+   - clearer setup guidance and error states.
 
 ## Deployment / Smoke Checklist (Every Deploy)
 
 1. `https://os.wickedlab.io/` loads (OpenClaw Control UI).
 2. `OPENCLAW_GATEWAY_TOKEN` is present in PMOS env (required for LAN bind behind Traefik).
-3. PMOS tool invoke works with token:
-   - `POST https://os.wickedlab.io/tools/invoke` with `flow_flows_list` returns `ok: true`.
+3. Run `node openclaw/scripts/pmos-smoke.mjs` with:
+   - `OPENCLAW_GATEWAY_TOKEN`
+   - `ACTIVEPIECES_PROJECT_ID`
 4. `https://flow.wickedlab.io/api/v1/flags` returns 200.
 5. `https://bcgpt.wickedlab.io/connect` returns 200.
 6. From PMOS UI, verify:
-   - can reach Activepieces (API 200 with key)
-   - can reach BCGPT MCP tools (API 200 with key)
+   - chat sends and gets assistant reply
+   - flows create/open/edit/run works
+   - command center plan/execute/approval works
 
 ## Fresh Session Rule
 
