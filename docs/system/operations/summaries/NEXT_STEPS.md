@@ -16,34 +16,44 @@ Execute productization Phases 7-12 to turn PMOS into a normal multi-user product
 ## 3. Active Milestone Queue
 
 ## M1: Auth + Roles (Phase 7)
-Status: completed (local), pending server deploy + smoke
+Status: completed and deployed (smoke passed)
 
 Tasks:
-1. Add sign-in/sign-up routes and session middleware. ✅
+1. Add sign-in/sign-up routes and session middleware. [done]
 2. Add role bootstrap policy:
-   - first account -> `super_admin` ✅
-   - later signups -> `workspace_admin` ✅
-3. Enforce role guards server-side. ✅
-4. Enforce shell access restriction to `super_admin` only. ✅
+   - first account -> `super_admin` [done]
+   - later signups -> `workspace_admin` [done]
+3. Enforce role guards server-side. [done]
+4. Enforce shell access restriction to `super_admin` only. [done]
 
 Done when:
-1. Users can authenticate through PMOS UI. ✅
-2. Role bootstrap and role checks are verified by tests. ✅
-3. Non-super-admin shell attempts are blocked. ✅
+1. Users can authenticate through PMOS UI. [done]
+2. Role bootstrap and role checks are verified by tests. [done]
+3. Non-super-admin shell attempts are blocked. [done]
 
 Validation run:
-1. `corepack pnpm --dir openclaw exec vitest run src/gateway/pmos-auth.test.ts src/gateway/server-methods.pmos-role.test.ts` ✅
-2. `corepack pnpm --dir openclaw/ui build` ✅
+1. `corepack pnpm --dir openclaw exec vitest run src/gateway/pmos-auth.test.ts src/gateway/server-methods.pmos-role.test.ts` [done]
+2. `corepack pnpm --dir openclaw/ui build` [done]
+3. Live smoke:
+   - `POST /api/pmos/auth/signup` first user -> `super_admin` [done]
+   - `POST /api/pmos/auth/signup` second user -> `workspace_admin` [done]
+   - `GET /api/pmos/auth/me` returns authenticated user with session cookie [done]
+   - `POST /api/pmos/auth/logout` clears auth session [done]
 
 ## M2: Onboarding Wizard (Phase 8)
-Status: pending
+Status: in progress
 
 Tasks:
-1. Build first-run setup wizard screens.
-2. Add connector test step for Flow Pieces.
-3. Add connector test step for BCGPT/Basecamp.
-4. Add AI provider key/model setup step.
-5. Add final "ready to use chat" state.
+1. Build first-run setup wizard screens. [done]
+2. Add connector test step for Flow Pieces. [in progress]
+3. Add connector test step for BCGPT/Basecamp. [in progress]
+4. Add AI provider key/model setup step. [pending]
+5. Add final "ready to use chat" state. [pending]
+
+Implemented this pass:
+1. Dashboard `Quick Setup Wizard` with ordered setup steps and progress state.
+2. Step-level CTAs (connect, integrations, automations, runs) with one-click navigation.
+3. `Run setup check` action wired to full dashboard refresh.
 
 Done when:
 1. Workspace admin can finish setup with no terminal actions.
@@ -99,15 +109,15 @@ Done when:
 
 ## 4. Immediate Implementation Order
 
-1. Deploy M1 to `os.wickedlab.io` and run smoke checks.
-2. Start M2 onboarding wizard implementation.
-3. Then M3 UX simplification with Activepieces-style Flow Studio + side chat.
+1. Complete remaining M2 wizard steps (provider key step + ready-state handoff).
+2. Start M3 UX simplification with Activepieces-style Flow Studio + side chat.
+3. Continue role-aware gating cleanup for workspace admins.
 
 ## 5. Deployment Checklist (Each Milestone)
 
 1. Build and deploy PMOS only (`os.wickedlab.io`).
 2. Verify:
-   - `https://os.wickedlab.io/health`
+   - `https://os.wickedlab.io/`
    - login/signup flows (when M1 lands)
    - connector checks and wizard path (when M2 lands)
 3. Confirm no regression:

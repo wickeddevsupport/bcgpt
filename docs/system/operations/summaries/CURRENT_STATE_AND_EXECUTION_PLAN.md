@@ -37,6 +37,11 @@ The following are already built and treated as baseline:
    - UI auth gate before dashboard
    - server-side super-admin shell restriction
    - targeted tests passing
+9. Phase 7 M1 is deployed on `os.wickedlab.io`:
+   - signup/login/logout endpoints verified live
+   - first signup creates `super_admin`; next signup creates `workspace_admin`
+10. Phase 8 M2 started:
+   - Dashboard includes `Quick Setup Wizard` with step status, progress, and guided CTAs.
 
 ## 4. Productization Execution Plan (The "Do It All" Plan)
 
@@ -162,9 +167,9 @@ Acceptance criteria:
 
 ## 5. Delivery Milestones
 
-1. Milestone M1: Auth and role bootstrap complete in code, pending server deploy + smoke (Phase 7).
-2. Milestone M2: Wizard-driven onboarding complete (Phase 8).
-3. Milestone M3: Simplified UX and role-gated surfaces complete (Phase 9).
+1. Milestone M1: Auth and role bootstrap complete and deployed (Phase 7).
+2. Milestone M2: Wizard-driven onboarding in progress (Phase 8).
+3. Milestone M3: Simplified UX and role-gated surfaces pending (Phase 9).
 4. Milestone M4: Chat-first operations and approval loop complete (Phase 10).
 5. Milestone M5: Multi-tenant hardening + launch gate complete (Phases 11-12).
 

@@ -74,6 +74,16 @@ function relativeFromAny(value: unknown): string {
   return "n/a";
 }
 
+type SetupStep = {
+  id: string;
+  title: string;
+  detail: string;
+  done: boolean;
+  href?: string;
+  actionLabel?: string;
+  actionKind?: "connect" | "refresh";
+};
+
 export function renderDashboard(props: DashboardProps) {
   const ap = props.connectorsStatus?.activepieces ?? null;
   const bcgpt = props.connectorsStatus?.bcgpt ?? null;
@@ -122,6 +132,58 @@ export function renderDashboard(props: DashboardProps) {
   })();
 
   const refreshBusy = props.connectorsLoading || props.flowsLoading || props.runsLoading;
+  const setupSteps: SetupStep[] = [
+    {
+      id: "gateway",
+      title: "Connect Wicked OS",
+      detail: "Paste your access key once, then connect this browser to the gateway.",
+      done: props.connected && Boolean(props.settings.token.trim()),
+      actionKind: "connect",
+      actionLabel: "Connect now",
+    },
+    {
+      id: "flowpieces",
+      title: "Connect Flow Pieces",
+      detail: "Set URL + API key so PMOS can create and edit flows natively.",
+      done: apStatus.tone === "ok",
+      href: props.integrationsHref,
+      actionLabel: "Open integrations",
+    },
+    {
+      id: "bcgpt",
+      title: "Connect BCGPT",
+      detail: "Add your BCGPT API key so chat can use Basecamp and MCP tools.",
+      done: bcgptStatus.tone === "ok",
+      href: props.integrationsHref,
+      actionLabel: "Open integrations",
+    },
+    {
+      id: "project",
+      title: "Set Flow Project",
+      detail: "Pick your Flow Pieces project ID to scope automations and runs.",
+      done: projectConfigured,
+      href: props.integrationsHref,
+      actionLabel: "Set project",
+    },
+    {
+      id: "first-flow",
+      title: "Create First Automation",
+      detail: "Build your first flow in Automations.",
+      done: flows.length > 0,
+      href: props.automationsHref,
+      actionLabel: "Open automations",
+    },
+    {
+      id: "first-run",
+      title: "Run First Test",
+      detail: "Trigger a flow and confirm a successful run appears in Runs.",
+      done: runs.length > 0,
+      href: props.runsHref,
+      actionLabel: "Open runs",
+    },
+  ];
+  const setupCompleted = setupSteps.filter((step) => step.done).length;
+  const nextSetupStep = setupSteps.find((step) => !step.done) ?? null;
   const focusItems = [
     !projectConfigured
       ? {
@@ -150,6 +212,63 @@ export function renderDashboard(props: DashboardProps) {
   ].filter((item): item is { title: string; detail: string; href: string } => Boolean(item));
 
   return html`
+    <section class="card" style="margin-bottom: 18px;">
+      <div class="card-title">Quick Setup Wizard</div>
+      <div class="card-sub">
+        Follow these steps once. After setup, your team can run nearly everything by chat.
+      </div>
+
+      <div class="row" style="margin-top: 12px; align-items: center;">
+        <span class="chip ${setupCompleted === setupSteps.length ? "chip-ok" : "chip-warn"}">
+          ${setupCompleted}/${setupSteps.length} completed
+        </span>
+        <button class="btn btn--secondary" @click=${() => props.onRefreshDashboard()} ?disabled=${refreshBusy || !props.connected}>
+          ${refreshBusy ? "Checking..." : "Run setup check"}
+        </button>
+        ${nextSetupStep
+          ? html`
+              <span class="muted">
+                Next: <strong>${nextSetupStep.title}</strong>
+              </span>
+            `
+          : html`<span class="muted">Setup complete. Use Chat to run workflows.</span>`}
+      </div>
+
+      <div class="list" style="margin-top: 12px;">
+        ${setupSteps.map((step, index) => {
+          const chipClass = step.done ? "chip chip-ok" : "chip chip-warn";
+          return html`
+            <div class="list-item">
+              <div class="list-main">
+                <div class="list-title">${index + 1}. ${step.title}</div>
+                <div class="list-sub">${step.detail}</div>
+              </div>
+              <div class="list-meta">
+                <span class=${chipClass}>${step.done ? "Done" : "Pending"}</span>
+                ${
+                  step.done
+                    ? nothing
+                    : step.actionKind === "connect"
+                      ? html`
+                          <button
+                            class="btn btn--sm"
+                            @click=${() => props.onConnect()}
+                            ?disabled=${!props.settings.token.trim() || props.connected}
+                          >
+                            ${step.actionLabel ?? "Connect"}
+                          </button>
+                        `
+                      : step.href
+                        ? html`<a class="btn btn--sm" href=${step.href}>${step.actionLabel ?? "Open"}</a>`
+                        : nothing
+                }
+              </div>
+            </div>
+          `;
+        })}
+      </div>
+    </section>
+
     <section class="grid grid-cols-2">
       <div class="card">
         <div class="card-title">Integration Health</div>
