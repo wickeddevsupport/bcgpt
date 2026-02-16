@@ -1,0 +1,32 @@
+{
+  "name": "Wicked Ops (n8n)",
+  "url": "https://ops.wickedlab.io",
+  "apiKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI5MGRhMTg3Yy0xZDRkLTRkZjEtOGEwNy0xZTRlMDQ2ZjUxZTYiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwianRpIjoiNTE2MGJhNzItN2IwYi00NTE1LWJmZWMtMDg5M2FiMTIwOGI0IiwiaWF0IjoxNzcxMjczOTA4fQ.arI-_Qo1koVbZqfO8YjzVXLFjoRPnGNHX-LcjTtFEY8",
+  "apiKeyName": "os",
+  "endpoints": {
+    "workflows": "https://ops.wickedlab.io/api/v1/workflows",
+    "executions": "https://ops.wickedlab.io/api/v1/executions",
+    "credentials": "https://ops.wickedlab.io/api/v1/credentials"
+  },
+  "headers": {
+    "X-N8N-API-KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI5MGRhMTg3Yy0xZDRkLTRkZjEtOGEwNy0xZTRlMDQ2ZjUxZTYiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwianRpIjoiNTE2MGJhNzItN2IwYi00NTE1LWJmZWMtMDg5M2FiMTIwOGI0IiwiaWF0IjoxNzcxMjczOTA4fQ.arI-_Qo1koVbZqfO8YjzVXLFjoRPnGNHX-LcjTtFEY8"
+  },
+  "deployment": {
+    "platform": "Coolify",
+    "domain": "ops.wickedlab.io",
+    "containers": {
+      "n8n": "ops-kgcogk04ogkwg40og4k8sksw",
+      "postgres": "ops-postgres-kgcogk04ogkwg40og4k8sksw",
+      "redis": "ops-redis-kgcogk04ogkwg40og4k8sksw"
+    },
+    "volumes": {
+      "data": "ops-data",
+      "postgres": "ops-postgres-data",
+      "redis": "ops-redis-data"
+    }
+  },
+  "multiTenant": {
+    "enabled": false,
+    "note": "Multi-tenant workspace isolation to be implemented in OpenClaw integration"
+  }
+}

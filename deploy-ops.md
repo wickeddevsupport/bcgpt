@@ -173,7 +173,19 @@ Each workspace will get its own n8n API key:
 
 ### For OpenClaw Integration
 
+**API Key Created:** `os` ✅
+**Configured in:** `ops-config.json`
+
 Next step: Create `openclaw/extensions/wicked-ops/index.ts` to integrate n8n with OpenClaw.
+
+Example API call:
+```bash
+curl https://ops.wickedlab.io/api/v1/workflows \
+  -H "X-N8N-API-KEY: YOUR_API_KEY"
+# Returns: {"data":[],"nextCursor":null}
+```
+
+See [ops-config.json](ops-config.json) for complete configuration.
 
 ---
 
@@ -223,6 +235,8 @@ docker exec -it wicked-ops-postgres psql -U ops_user -d wicked_ops -c "SELECT CO
 ---
 
 **Deployment created:** 2026-02-17
-**Files:** `docker-compose.ops.yml`, `.env.ops`
-**Domain:** ops.wickedlab.io
-**Status:** Ready to deploy ✅
+**Deployed via:** Coolify (Application UUID: kgcogk04ogkwg40og4k8sksw)
+**Files:** `docker-compose.ops.yml`, `.env.ops`, `ops-config.json`
+**Domain:** https://ops.wickedlab.io
+**Status:** ✅ **DEPLOYED AND RUNNING**
+**API Key:** `os` (configured in ops-config.json)
