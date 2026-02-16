@@ -273,6 +273,26 @@ export function renderIntegrations(props: IntegrationsProps) {
                   <div class="list-sub mono">${sub}</div>
                   ${desc ? html`<div class="list-sub">${desc}</div>` : nothing}
                 </div>
+                <div class="list-meta">
+                  <div></div>
+                  <div>
+                    <button
+                      class="btn btn--sm"
+                      ?disabled=${!props.connected || !sub}
+                      @click=${() => {
+                        if (!sub) {
+                          return;
+                        }
+                        props.onApConnectionCreatePieceNameChange(sub);
+                        if (!props.apConnectionCreateDisplayName.trim()) {
+                          props.onApConnectionCreateDisplayNameChange(title);
+                        }
+                      }}
+                    >
+                      Use
+                    </button>
+                  </div>
+                </div>
               </div>
             `;
           })}
@@ -391,7 +411,7 @@ export function renderIntegrations(props: IntegrationsProps) {
             const title = conn.displayName || conn.id;
             const sub = [conn.pieceName ? `piece ${conn.pieceName}` : null, conn.status ? conn.status : null]
               .filter(Boolean)
-              .join(" · ");
+              .join(" | ");
             return html`
               <div class="list-item">
                 <div class="list-main">
@@ -416,3 +436,4 @@ export function renderIntegrations(props: IntegrationsProps) {
     </section>
   `;
 }
+
