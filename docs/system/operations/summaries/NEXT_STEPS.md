@@ -1,123 +1,114 @@
-# NEXT STEPS - PMOS (OpenClaw Base + Activepieces Engine)
+# NEXT STEPS - PMOS Productization Board
 
 Last updated: 2026-02-16
 Canonical plan: `docs/system/operations/summaries/CURRENT_STATE_AND_EXECUTION_PLAN.md`
 
-## Current Reality (Keep This Straight)
+## 1. Current Target
 
-1. PMOS is `os.wickedlab.io` and is **OpenClaw gateway + Control UI** built from `openclaw/` via `docker-compose.pmos.yml`.
-2. Activepieces engine remains live at `flow.wickedlab.io` (unchanged).
-3. BCGPT MCP/connect remains live at `bcgpt.wickedlab.io` (unchanged).
+Execute productization Phases 7-12 to turn PMOS into a normal multi-user product while keeping MCP and Flow services stable.
 
-## Guardrails (Must Stay True)
+## 2. Guardrails
 
-1. Do not change MCP behavior/tool contracts on `bcgpt.wickedlab.io` unless explicitly approved.
-2. Do not change Activepieces behavior on `flow.wickedlab.io` unless explicitly approved.
-3. PMOS work happens in `openclaw/` (UI + extensions) and PMOS glue modules.
+1. MCP server behavior unchanged unless explicitly approved.
+2. Flow Pieces behavior unchanged unless explicitly approved.
+3. PMOS work isolated to OpenClaw/PMOS customization layer.
 
-## Phase 1 (Complete): OpenClaw UX + Connector Onboarding
+## 3. Active Milestone Queue
 
-Shipped + deployed to `os.wickedlab.io`:
+## M1: Auth + Roles (Phase 7)
+Status: pending
 
-1. Simplified OpenClaw Control UI into a PMOS shell:
-   - PMOS-first navigation (Dashboard, Automations, Runs, Integrations, Chat).
-   - Legacy panels moved under "Admin (Advanced)" and collapsed by default.
-2. Added connector onboarding + health checks:
-   - Activepieces: reachability + auth probe via flows list.
-   - BCGPT: reachability + auth probe via MCP `tools/list` (API key required).
-3. Added gateway method: `pmos.connectors.status`.
+Tasks:
+1. Add sign-in/sign-up routes and session middleware.
+2. Add role bootstrap policy:
+   - first account -> `super_admin`
+   - later signups -> `workspace_admin`
+3. Enforce role guards server-side.
+4. Enforce shell access restriction to `super_admin` only.
 
-Smoke validation:
+Done when:
+1. Users can authenticate through PMOS UI.
+2. Role bootstrap and role checks are verified by tests.
+3. Non-super-admin shell attempts are blocked.
 
-1. `https://os.wickedlab.io/health` returns 200.
-2. From inside the PMOS container:
-   - `node openclaw.mjs gateway call pmos.connectors.status --json`
+## M2: Onboarding Wizard (Phase 8)
+Status: pending
 
-## Phase 2 (Complete): Native Activepieces Embed
+Tasks:
+1. Build first-run setup wizard screens.
+2. Add connector test step for Flow Pieces.
+3. Add connector test step for BCGPT/Basecamp.
+4. Add AI provider key/model setup step.
+5. Add final "ready to use chat" state.
 
-Shipped + deployed to `os.wickedlab.io`:
+Done when:
+1. Workspace admin can finish setup with no terminal actions.
+2. Wizard displays clear pass/fail actions per connector.
 
-1. Integrations view includes:
-   - pieces catalog (search + browse)
-   - connections CRUD (create/list/delete)
-2. Automations (Flows) view includes:
-   - list + create flows
-   - open flow details
-   - basic mutations (rename, enable/disable, publish, delete)
-   - webhook trigger + payload JSON
-   - advanced FlowOperationRequest editor (raw op JSON)
-3. Runs view includes:
-   - list runs + view details
-   - retry (supported strategies)
+## M3: Simplified UX (Phase 9)
+Status: pending
 
-Prerequisite: set Activepieces `projectId` (many APIs require it).
-- PMOS -> Integrations -> Activepieces -> Project ID, then Save
-- Stored at `pmos.connectors.activepieces.projectId`
+Tasks:
+1. Keep advanced surfaces hidden for regular roles.
+2. Refine primary nav and empty states.
+3. Add role-aware UI gating everywhere.
+4. Add plain-language setup hints in Dashboard/Integrations.
 
-## Phase 3 (Complete): Reimagined Dashboard Foundation
+Done when:
+1. Workspace admin UX is clean and non-technical.
+2. Admin-only or shell-only controls are never shown to ineligible users.
 
-Shipped + deployed to `os.wickedlab.io`:
+## M4: Chat-First Execution (Phase 10)
+Status: pending
 
-1. Dashboard now uses real PMOS data:
-   - Portfolio Pulse (flows/runs/connector risk)
-   - Automation Live (recent runs + status counters)
-   - Focus Today (prioritized action cards with drill-down links)
-2. Agent Timeline uses standardized PMOS execution trace schema.
-3. Chat view now shows the same live execution trace stream.
-4. Dashboard polling refreshes connectors/flows/runs while dashboard is open.
+Tasks:
+1. Normalize execution trace schema for all models.
+2. Render live trace in chat sidebar.
+3. Wire chat intents to flow create/edit/run actions.
+4. Add approval workflow for high-risk actions.
 
-## Phase 4 (Complete): PMOS Identity + Admin Shell
+Done when:
+1. Chat can execute end-to-end PMOS operations with visible trace.
+2. Approval gates block high-risk operations until approved.
 
-Shipped + deployed to `os.wickedlab.io`:
+## M5: Hardening + Launch (Phases 11-12)
+Status: pending
 
-1. Workspace identity panel in PMOS Admin.
-2. Workspace members management (add/remove, role/status).
-3. PMOS audit feed for admin and PMOS action events.
+Tasks:
+1. Add workspace isolation tests.
+2. Add secrets masking and audit hardening.
+3. Add quota/rate-limit controls.
+4. Add E2E pipeline and production smoke suite.
+5. Finalize monitoring + rollback runbook drill.
 
-## Phase 5 (Complete): Live AI Flow Builder
+Done when:
+1. Security and isolation checks pass.
+2. E2E + smoke checks pass.
+3. Rollback drill is successful.
 
-Shipped + deployed to `os.wickedlab.io`:
+## 4. Immediate Implementation Order
 
-1. Prompt-driven graph generation in Automations.
-2. Live graph operation stream (`add_node`, `add_edge`, `set_mapping`).
-3. Commit flow shell to Activepieces and open it in PMOS.
+1. Start M1: auth + role bootstrap + shell restriction.
+2. Continue to M2 onboarding immediately after M1 merge.
+3. Then M3 UX simplification and role-gated navigation.
 
-## Phase 6 (Complete): Unified Command Center
+## 5. Deployment Checklist (Each Milestone)
 
-Shipped + deployed to `os.wickedlab.io`:
+1. Build and deploy PMOS only (`os.wickedlab.io`).
+2. Verify:
+   - `https://os.wickedlab.io/health`
+   - login/signup flows (when M1 lands)
+   - connector checks and wizard path (when M2 lands)
+3. Confirm no regression:
+   - `https://bcgpt.wickedlab.io/health`
+   - `https://flow.wickedlab.io/api/v1/flags`
+4. Run PMOS smoke script:
+   - `node openclaw/scripts/pmos-smoke.mjs`
 
-1. Prompt -> plan pipeline for PMOS actions.
-2. Multi-step execution with high-risk approval queue.
-3. Command history and pending approvals in PMOS UI.
-
-## Immediate Work Queue (Phase 7)
-
-1. Hardening and production readiness:
-   - CI smoke gate using PMOS smoke suite.
-   - telemetry + alerting for chat/tool failures.
-   - rollback drills and runbook lock.
-2. UX polish for regular users:
-   - simpler onboarding copy
-   - clearer setup guidance and error states.
-
-## Deployment / Smoke Checklist (Every Deploy)
-
-1. `https://os.wickedlab.io/` loads (OpenClaw Control UI).
-2. `OPENCLAW_GATEWAY_TOKEN` is present in PMOS env (required for LAN bind behind Traefik).
-3. Run `node openclaw/scripts/pmos-smoke.mjs` with:
-   - `OPENCLAW_GATEWAY_TOKEN`
-   - `ACTIVEPIECES_PROJECT_ID`
-4. `https://flow.wickedlab.io/api/v1/flags` returns 200.
-5. `https://bcgpt.wickedlab.io/connect` returns 200.
-6. From PMOS UI, verify:
-   - chat sends and gets assistant reply
-   - flows create/open/edit/run works
-   - command center plan/execute/approval works
-
-## Fresh Session Rule
+## 6. Fresh Session Rule
 
 Before coding:
 
-1. Read `docs/00-START-HERE.md`.
-2. Read the canonical plan.
-3. Confirm the guardrails.
+1. Read canonical plan and this file.
+2. Pick the current active milestone.
+3. Keep guardrails locked.

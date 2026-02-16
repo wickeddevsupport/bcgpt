@@ -2,263 +2,186 @@
 
 Last updated: 2026-02-16
 Owner: `bcgpt` monorepo
-Purpose: single canonical plan so fresh sessions do not drift.
+Canonical scope: build PMOS as a real multi-tenant product on top of OpenClaw + Flow Pieces without disturbing live MCP/Flow services.
 
-## Implementation Snapshot (2026-02-16)
+## 1. Locked Product Model
 
-Reality check: PMOS is now the **OpenClaw gateway + Control UI** deployed at `os.wickedlab.io`.
-The earlier React PMOS prototype (`frontend/`) is not the PMOS product surface going forward.
+1. `os.wickedlab.io` is the PMOS product UI and control plane.
+2. PMOS runtime base is OpenClaw (`openclaw/`).
+3. Flow Pieces engine is Activepieces (`flow.wickedlab.io`) and is consumed natively inside PMOS.
+4. BCGPT (`bcgpt.wickedlab.io`) remains a connector and MCP/connect surface.
+5. Basecamp is one connector, not the center of PMOS architecture.
 
-### What is live / deployed
+## 2. Guardrails (Non-Negotiable)
 
-1. `os.wickedlab.io` runs OpenClaw (vendored under `openclaw/`) via `docker-compose.pmos.yml`.
-2. OpenClaw is started in container mode (LAN bind) with `OPENCLAW_GATEWAY_TOKEN` set in Coolify env.
-3. Phase 1 PMOS shell is live in the OpenClaw Control UI:
-   - PMOS-first navigation (Dashboard, Automations, Runs, Integrations, Chat).
-   - Legacy OpenClaw panels grouped under "Admin (Advanced)" and collapsed by default.
-4. Connector onboarding + health checks are live:
-   - UI: Integrations screen stores connector config in OpenClaw config (secrets redacted on read).
-   - Gateway method: `pmos.connectors.status` (Activepieces + BCGPT reachability + auth probes).
-5. Phase 2 native Activepieces embed is live inside the PMOS UI (no app-switching):
-   - Integrations: pieces catalog + connections CRUD
-   - Automations: flows list/create/edit/run (incl. webhook trigger)
-   - Runs: list/details + retry
-6. Phase 3 reimagined dashboard foundation is live:
-   - Dashboard widgets now use real data (Portfolio Pulse, Automation Live, Focus Today).
-   - Actionable drill-downs to Automations, Runs, Integrations, and Chat.
-   - Standardized, model-agnostic PMOS execution trace is live in Dashboard and Chat.
-   - Dashboard polling refreshes connectors/flows/runs while the Dashboard tab is active.
-7. Phase 4 PMOS identity/admin shell is live:
-   - Workspace identity panel.
-   - Members list/edit/remove with role/status.
-   - Audit feed appended from PMOS actions.
-8. Phase 5 live AI flow builder is live:
-   - Prompt -> graph op stream (`add_node`, `add_edge`, `set_mapping`).
-   - Commit creates draft flow in Activepieces and auto-opens it in PMOS.
-9. Phase 6 command center is live:
-   - Prompt -> plan -> execute flow actions.
-   - High-risk actions queued for approval.
-   - Command history + pending approvals tracked in PMOS UI.
-10. `flow.wickedlab.io` (Activepieces) remains a separate running service and is treated as the automation engine.
-11. `bcgpt.wickedlab.io` remains the MCP/connect surface (Basecamp OAuth, MCP tools) and is treated as a connector.
+1. Do not change MCP contracts/behavior on `bcgpt.wickedlab.io` unless explicitly approved.
+2. Do not change Activepieces behavior on `flow.wickedlab.io` unless explicitly approved.
+3. PMOS work is additive in `openclaw/` plus PMOS glue code.
+4. Every deployment must keep an immediate rollback path.
+5. Every phase must have smoke checks before being marked complete.
 
-Production image tag (PMOS / OpenClaw): `693aa465`.
+## 3. Current Delivered Baseline
 
-### Production verification (Phase 1 + Phase 2 + Phase 3 + Phase 4 + Phase 5 + Phase 6)
+The following are already built and treated as baseline:
 
-1. Core routes load: `/`, `/command-center`, `/admin`, `/automations`, `/runs`, `/integrations`, `/chat`.
-2. PMOS build asset includes markers: `Portfolio Pulse`, `Execution Trace`, `Workspace Identity`, `AI Flow Builder`, `Command Center`.
-3. `POST https://os.wickedlab.io/tools/invoke` succeeds with PMOS access key for:
-   - `flow_flows_list`
-   - `flow_flow_runs_list`
-   - `flow_flow_create` -> `flow_flow_get` -> `flow_flow_delete` mutation cycle
-4. Gateway chat path is healthy:
-   - WebSocket connect
-   - `models.list` returns available models
-   - `chat.send` accepted and assistant response appears in `chat.history`
-5. For native flow/runs screens, `activepieces.projectId` must be set.
+1. OpenClaw-based PMOS shell is live on `os.wickedlab.io`.
+2. PMOS-first navigation (Dashboard, Automations, Runs, Integrations, Chat).
+3. Connector onboarding and status checks (Flow Pieces + BCGPT).
+4. Native Flow Pieces screens in PMOS (flows, runs, connections, pieces).
+5. Reimagined dashboard foundation with real metrics and execution trace.
+6. Admin shell foundations (workspace identity, members, audit feed).
+7. Live flow builder stream and command center foundations.
 
-### What is next (the actual build)
+## 4. Productization Execution Plan (The "Do It All" Plan)
 
-1. Phase 7: hardening and production readiness:
-   - expanded smoke suite in CI/CD
-   - structured failure telemetry and alerting
-   - rollback drills and runbook lock
-2. UX polish pass for regular users:
-   - reduce advanced-surface overload
-   - clearer empty states and guided setup
+## Phase 7: Identity, Auth, and Roles
 
-## 1. Core Product Direction
+Goal: make PMOS a normal app with sign in/sign up and safe role model.
 
-PMOS is the user-facing product. It is a modern automation and operations OS that combines:
+Scope:
+1. Add PMOS auth flows (email/password first, OAuth optional second pass).
+2. Role bootstrap policy:
+   - First account: `super_admin`
+   - Every later signup: `workspace_admin` with own workspace by default
+3. Role permissions:
+   - `super_admin`: global governance + shell access
+   - `workspace_admin`: full workspace usage, no shell access
+   - `member`: core usage, no shell access
+   - `viewer`: read-only surfaces
 
-1. OpenClaw as the base engine (sessions, orchestration, streaming UI patterns).
-2. Activepieces as the flow engine (pieces/integrations, visual flow execution).
-3. Existing BCGPT MCP leverage (Basecamp OAuth + tools as one connector among many).
-4. A clean PMOS UX for building automations and managing work (project managers are a primary persona, not the only one).
+Acceptance criteria:
+1. New users land on sign-in/sign-up, not direct dashboard.
+2. First-account bootstrap works once and is immutable without DB migration.
+3. Role checks enforced server-side and UI-side.
+4. Shell endpoints blocked for non-`super_admin`.
 
-Key principle: build on existing powerful software, do not rebuild engines from scratch.
+## Phase 8: Workspace Onboarding Wizard (Non-Technical Setup)
 
-## 2. Non-Negotiable Guardrails
+Goal: setup should feel like consumer onboarding, not infra work.
 
-1. `bcgpt.wickedlab.io` MCP server remains operational and unchanged unless explicitly approved.
-2. `flow.wickedlab.io` Activepieces deployment remains operational and unchanged unless explicitly approved.
-3. PMOS work is additive and isolated to the `openclaw/` (UI/engine) customization layer and new PMOS glue code.
-4. No forced migration/cutover until parity and smoke checks pass.
-5. Rollback path must exist for every deployment step.
+Scope:
+1. First-run wizard with 3 steps:
+   - Connect Flow Pieces
+   - Connect BCGPT/Basecamp
+   - Add AI provider key and default model
+2. Guided checks with plain language pass/fail messages.
+3. One-click "test all" and "start using chat" handoff.
 
-## 3. Current Domain and Service Split
+Acceptance criteria:
+1. Workspace admin can complete setup without terminal.
+2. Wizard reports connector health and required actions clearly.
+3. Chat becomes usable immediately after wizard completion.
 
-1. `os.wickedlab.io` = PMOS product surface.
-2. `bcgpt.wickedlab.io` = MCP/connect surface (`/connect` remains valid).
-3. `flow.wickedlab.io` = Activepieces flow application.
+## Phase 9: Simplified Workspace UX
 
-This split stays in place during buildout.
+Goal: regular users get an intuitive product surface.
 
-## 4. How Everything Comes Together
+Scope:
+1. Keep advanced OpenClaw panels hidden by default.
+2. Primary nav for workspace users:
+   - Dashboard
+   - Automations
+   - Runs
+   - Integrations
+   - Chat
+3. Improve empty states and setup copy.
+4. Add role-aware UI gating to prevent inaccessible actions.
 
-PMOS becomes the unifying layer, while OpenClaw/Activepieces/BCGPT stay specialized engines.
+Acceptance criteria:
+1. Non-technical workspace admin can navigate core flows without docs.
+2. No shell/admin-only controls appear for non-eligible roles.
 
-1. User interacts only with PMOS UI (OpenClaw Control UI reimagined).
-2. PMOS orchestrator logic lives alongside OpenClaw and calls:
-   - Activepieces APIs for flow CRUD/runs/pieces/connections
-   - BCGPT MCP tools for Basecamp and data actions
-3. PMOS streams status/events back to UI in real time (OpenClaw-style event UX).
-4. PMOS stores workspace/user/admin state and audit metadata (PMOS-owned identity).
+## Phase 10: Chat-First Operations and Live Trace
 
-Outcome: one product experience, multiple proven engines.
+Goal: users can do most actions by chat, with transparent progress.
 
-## 5. Why This Path (Explicit Decision)
+Scope:
+1. Model-agnostic execution trace in chat sidebar:
+   - plan
+   - tool calls
+   - status updates
+   - result summary
+2. Chat-driven flow creation/edit/run paths.
+3. Approval gates for destructive actions.
+4. Operation history with replay-friendly metadata.
 
-1. Reusing OpenClaw + Activepieces avoids rebuilding mature systems.
-2. Existing MCP server already provides leverage and should be preserved.
-3. Biggest value to build is the PMOS orchestration UX and admin layer, not another flow engine.
-4. This reduces bugs, reduces drift, and keeps delivery speed high.
+Acceptance criteria:
+1. Chat request can create or update a flow end-to-end in PMOS.
+2. Execution trace is visible consistently across supported models.
+3. High-risk actions require explicit approval before execution.
 
-## 6. Auth, Identity, and Admin Model
+## Phase 11: Multi-Tenant Safety and Runtime Hardening
 
-PMOS supports multiple onboarding/auth paths:
+Goal: safe shared product operation at scale.
 
-1. Keep `bcgpt` connect path as one first-class option.
-2. Add PMOS native auth (email + optional OAuth providers).
-3. Link external connections per user/workspace.
+Scope:
+1. Workspace-level isolation of settings, sessions, connectors, agents.
+2. Secret storage hardening and masking.
+3. Per-workspace quotas/rate limits.
+4. Structured audit logs for security/admin operations.
 
-Admin model:
+Acceptance criteria:
+1. Cross-workspace data leakage tests pass.
+2. Secrets are never exposed in plaintext in UI or logs.
+3. Quota/rate behavior is enforced and observable.
 
-1. Roles: `system_admin`, `workspace_admin`, `member`, `viewer`.
-2. Admin console scope:
-   - user and invite management
-   - role assignment
-   - connection policy controls
-   - audit/activity views
-   - feature flags and environment safety controls
+## Phase 12: Release Readiness and Launch Gate
 
-## 7. Reimagined Dashboard (Critical)
+Goal: production-grade confidence before broad rollout.
 
-The reimagined PMOS dashboard is a first-class build target, not a later polish task.
+Scope:
+1. E2E tests for:
+   - signup/signin
+   - onboarding
+   - connector health
+   - chat -> execute -> approve flow
+   - automations/runs lifecycle
+2. SLO and monitoring setup:
+   - route health
+   - chat latency
+   - tool failure rates
+3. Rollback drill and runbook lock.
 
-Required dashboard surfaces:
+Acceptance criteria:
+1. E2E suite passes in CI and production smoke environment.
+2. Monitoring and alerts are active.
+3. Rollback runbook validated in drill.
 
-1. Chat sidebar command surface: primary ask/act/build input lives in chat (OpenClaw-style), not a separate top bar.
-2. Portfolio Pulse: cross-project health, risk, blockers, momentum, ownership load.
-3. Focus Today: personalized priority stack and next best actions.
-4. Automation Live: real-time flow runs, failures, retries, and pending approvals.
-5. Integration Health: connection state and auth health for MCP, Activepieces, and linked apps.
-6. Agent Timeline: what AI executed, what changed, what needs human approval.
-7. Live Thinking/Execution Trace: model-agnostic step stream in chat sidebar (plan, tool calls, progress, results).
+## 5. Delivery Milestones
 
-Dashboard principles:
+1. Milestone M1: Auth and role bootstrap complete (Phase 7).
+2. Milestone M2: Wizard-driven onboarding complete (Phase 8).
+3. Milestone M3: Simplified UX and role-gated surfaces complete (Phase 9).
+4. Milestone M4: Chat-first operations and approval loop complete (Phase 10).
+5. Milestone M5: Multi-tenant hardening + launch gate complete (Phases 11-12).
 
-1. Real-time by default (event stream driven).
-2. Actionable tiles (every insight links to a concrete action).
-3. Unified context (projects + automations + operations in one place).
-4. No iframe-first dependency.
-5. Provider-agnostic UX: same PMOS execution trace experience regardless of connected AI model/provider.
-
-## 8. Flow Experience Vision (Critical)
-
-PMOS must support live AI-assisted flow creation:
-
-1. User asks AI for a flow.
-2. PMOS streams graph operations (`add_node`, `add_edge`, `update_mapping`) in real time.
-3. User sees boxes/lines appear live in PMOS.
-4. PMOS commits validated graph to Activepieces API.
-5. Flow and runs reflect in Activepieces and PMOS simultaneously.
-
-No iframe-first dependency for core creation/management workflow.
-
-## 9. Repository and Runtime Strategy
-
-Single repo, clear internal boundaries:
-
-1. OpenClaw is vendored in-repo: `openclaw/` (engine + Control UI).
-2. Activepieces is vendored in-repo: `activepieces/` (engine + UI), but it remains a separately deployed service for now.
-3. PMOS customization work happens primarily in:
-   - `openclaw/ui/` (PMOS UX shell)
-   - `openclaw/src/` (gateway integration points)
-   - `openclaw/extensions/` (PMOS connectors/tools: activepieces, bcgpt, etc.)
-4. External running services remain stable during implementation (until an explicit migration decision is made).
-
-## 10. Execution Phases
-
-### Phase 0: Guardrails + Baseline Freeze
-
-1. Freeze/record baseline checks for MCP and Activepieces endpoints.
-2. Confirm no changes are applied to those services during PMOS feature work.
-
-### Phase 1: Orchestrator Foundation
-
-1. Define internal PMOS adapter contracts for Activepieces and MCP.
-2. Normalize request/response and event shapes.
-3. Wire OpenClaw Control UI to these adapters (so UI stays clean while engines are swappable).
-
-### Phase 2: Identity + RBAC + Admin Shell
-
-1. Add PMOS auth options (email first, optional OAuth next).
-2. Add workspace model and role enforcement.
-3. Deliver first admin UI shell and audit feed.
-
-### Phase 3: Reimagined Dashboard Foundation
-
-1. Build the new PMOS dashboard layout and data contracts.
-2. Wire real-time widgets (Portfolio Pulse, Automation Live, Agent Timeline).
-3. Add actionable drill-down paths from dashboard insights to execution views.
-4. Implement chat-sidebar live execution trace stream with standardized event schema.
-
-### Phase 4: Native Flows Surface
-
-1. Replace iframe-first dependency with native flows screens.
-2. Implement flow list/create/update/run using Activepieces API.
-3. Add run logs and health/status panels in PMOS.
-
-### Phase 5: Live AI Flow Builder
-
-1. Implement graph-ops streaming from orchestration backend to PMOS canvas.
-2. Add mid-build validation and error recovery.
-3. Add commit/sync controls to Activepieces.
-
-### Phase 6: Unified Command Center
-
-1. Chat-driven orchestration across flows + MCP tools.
-2. Multi-step plan execution with approval gates for risky actions.
-3. Session history + operation timeline in PMOS.
-
-### Phase 7: Hardening and Production Readiness
-
-1. E2E smoke suite for PMOS and cross-service integration checks.
-2. Rate limits, CORS, secret masking, structured logs, rollback docs.
-3. Release checklist required before "phase complete" is declared.
-
-## 11. Definition of Done (Program-Level)
+## 6. Definition of Done (Program Level)
 
 All must be true:
 
-1. PMOS can create/edit/run flows that appear in Activepieces without manual reconciliation.
-2. Existing MCP and Activepieces services remain stable and unchanged by PMOS rollout.
-3. PMOS auth + admin roles are enforced end to end.
-4. Reimagined dashboard is live with real-time portfolio/automation/agent visibility.
-5. Live AI flow creation works with real-time graph updates in UI.
-6. Cross-service smoke tests pass in deployed environment.
-7. Docs and next-step backlog match real implementation status.
-8. Chat sidebar shows consistent live execution trace across supported AI providers.
+1. Users can sign up/sign in as a normal product.
+2. First user is `super_admin`; all others default to `workspace_admin` with isolated workspace.
+3. Non-super-admin users cannot access shell execution paths.
+4. Workspace admins can fully create/manage automations and agents without shell.
+5. Flow edits in PMOS reflect in Flow Pieces and vice versa.
+6. Chat executes end-to-end operations with visible execution trace and approvals.
+7. E2E, monitoring, and rollback checks pass.
+8. MCP and Flow production services remain stable and backward-compatible.
 
-## 12. Fresh Session Start Protocol
+## 7. Fresh Session Start Protocol
 
-Any fresh session must do this before coding:
+Before coding:
 
 1. Read this file.
 2. Read `docs/system/operations/summaries/NEXT_STEPS.md`.
-3. Read `docs/OPENCLAW_ANALYSIS.md` (now a "where to change OpenClaw" guide, not an extraction plan).
+3. Read `docs/OPENCLAW_ANALYSIS.md` for engine integration context.
 4. Run `git status --short`.
-5. Confirm current guardrails:
-   - MCP untouched.
-   - Activepieces untouched.
-   - PMOS changes only unless explicitly approved.
+5. Confirm guardrails and current milestone target.
 
-## 13. Documentation Discipline
+## 8. Documentation Discipline
 
-Every meaningful change must update:
+Every meaningful change updates:
 
 1. `docs/system/operations/summaries/CURRENT_STATE_AND_EXECUTION_PLAN.md`
 2. `docs/system/operations/summaries/NEXT_STEPS.md`
-3. Relevant implementation docs under `docs/pmos/`, `docs/flow/`, or `docs/bcgpt/`
+3. The relevant implementation document under `docs/system/` or `docs/pmos/`.
