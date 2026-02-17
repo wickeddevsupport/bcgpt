@@ -97,7 +97,7 @@ openclaw/
 
 | Environment | URL | Purpose |
 |-------------|-----|---------|
-| Production | https://ops.wickedlab.io | n8n Wicked Ops |
+| Production | Embedded in OpenClaw gateway | n8n runtime for all workspaces |
 | Local Dev | http://127.0.0.1:5678 | Embedded n8n |
 
 ---
@@ -457,7 +457,7 @@ flowchart TB
 4. **Verify Deployment**
    - Check bcgpt.wickedlab.io/health
    - Check os.wickedlab.io
-   - Check ops.wickedlab.io
+   - Check embedded n8n via OpenClaw (`/api/ops/workflows`)
 
 ---
 

@@ -141,7 +141,7 @@ Before starting work:
 ## Guardrails
 
 1. **MCP Stability** - Do not change MCP contracts on bcgpt.wickedlab.io
-2. **n8n Stability** - Do not break existing workflows on ops.wickedlab.io
+2. **n8n Stability** - Do not break existing embedded n8n workflows and workspace isolation
 3. **Additive Development** - PMOS work is additive to OpenClaw core
 4. **Rollback Ready** - Every deployment must have immediate rollback path
 5. **Smoke Tests** - Every phase must pass smoke checks before complete

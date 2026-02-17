@@ -73,6 +73,11 @@ function readGlobalOpsConfig(): { url: string; apiKey: string | null } {
   return { url: url.replace(/\/+$/, ""), apiKey };
 }
 
+function allowRemoteOpsFallback(): boolean {
+  const raw = (process.env.PMOS_ALLOW_REMOTE_OPS_FALLBACK ?? "").trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes";
+}
+
 async function readBody(req: IncomingMessage): Promise<Buffer> {
   return new Promise<Buffer>((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -138,7 +143,7 @@ async function proxyUpstream(params: {
 
 /**
  * Reads the locally-running n8n config from openclaw config / env vars.
- * Returns null if no local n8n is configured (fall back to remote ops.wickedlab.io).
+ * Returns null when no local n8n is configured.
  *
  * Config (openclaw.json):
  *   pmos.n8n.localUrl = "http://localhost:5678"
@@ -274,7 +279,7 @@ export async function handleLocalN8nRequest(
 
   // If the workspace has ops.user credentials stored, attempt a server-side login so the
   // editor opens without showing n8n's login/setup screen (best-effort).
-  await attemptAutoLoginForRequest(req, res, readGlobalOpsConfig().url);
+  await attemptAutoLoginForRequest(req, res, "http://127.0.0.1:5678");
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
@@ -298,11 +303,11 @@ export async function handleLocalN8nRequest(
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.end(
     `<!DOCTYPE html><html><body style="font-family:sans-serif;padding:2rem">` +
-      `<h2>Wicked Ops not available</h2>` +
-      `<p>To enable the workflow editor, either:</p>` +
+      `<h2>Embedded n8n unavailable</h2>` +
+      `<p>To enable the workflow editor:</p>` +
       `<ul>` +
-      `<li>Run n8n locally and set <code>N8N_LOCAL_URL=http://localhost:5678</code>, or</li>` +
-      `<li>Build the editor bundle with <code>pnpm ops-ui:build</code></li>` +
+      `<li>Ensure vendored n8n starts with OpenClaw gateway.</li>` +
+      `<li>Or set <code>N8N_LOCAL_URL=http://localhost:5678</code> for a local n8n process.</li>` +
       `</ul>` +
       `</body></html>`,
   );
@@ -366,10 +371,13 @@ export function tunnelN8nWebSocket(
 
 /**
  * Handles:
- *   /api/ops/*          → proxy to ops.wickedlab.io/api/v1/* with workspace API key injected
- *   /webhook/*          → transparent passthrough to ops.wickedlab.io/webhook/*
- *   /webhook-test/*     → transparent passthrough to ops.wickedlab.io/webhook-test/*
- *   /webhook-waiting/*  → transparent passthrough to ops.wickedlab.io/webhook-waiting/*
+ *   /api/ops/*          -> embedded n8n /rest/* API
+ *   /webhook/*          -> embedded n8n webhook passthrough
+ *   /webhook-test/*     -> embedded n8n webhook-test passthrough
+ *   /webhook-waiting/*  -> embedded n8n webhook-waiting passthrough
+ *
+ * Remote fallback is disabled by default and can be explicitly enabled with
+ * PMOS_ALLOW_REMOTE_OPS_FALLBACK=1.
  *
  * Returns true if the request was handled.
  */
@@ -380,12 +388,23 @@ export async function handleOpsProxyRequest(
   const url = new URL(req.url ?? "/", "http://localhost");
   const pathname = url.pathname;
 
-  // Transparent webhook passthrough — prefer local n8n, fall back to remote ops
+  // Transparent webhook passthrough - embedded n8n by default.
   const webhookPrefixes = ["/webhook-waiting/", "/webhook-test/", "/webhook/"];
   for (const prefix of webhookPrefixes) {
     const bare = prefix.slice(0, -1); // without trailing slash
     if (pathname === bare || pathname.startsWith(prefix)) {
       const localN8n = readLocalN8nConfig();
+      if (!localN8n && !allowRemoteOpsFallback()) {
+        res.statusCode = 503;
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: "Embedded n8n is unavailable for webhook handling.",
+          }),
+        );
+        return true;
+      }
       const baseUrl = localN8n ? localN8n.url : readGlobalOpsConfig().url;
       const subPath = pathname.slice(bare.length);
       const targetUrl = `${baseUrl}${bare}${subPath}${url.search}`;
@@ -394,7 +413,7 @@ export async function handleOpsProxyRequest(
     }
   }
 
-  // API proxy — requires PMOS session, injects workspace-scoped ops API key
+  // API proxy - requires PMOS session.
   if (pathname === "/api/ops" || pathname.startsWith("/api/ops/")) {
     const session = await resolvePmosSessionFromRequest(req);
     if (!session.ok) {
@@ -404,14 +423,38 @@ export async function handleOpsProxyRequest(
       return true;
     }
 
+    const localN8n = readLocalN8nConfig();
     const { workspaceId } = session.user;
+    const apiPath = pathname.slice("/api/ops".length) || "/";
+
+    if (localN8n) {
+      const authHeaders = await buildN8nAuthHeaders(req, localN8n.url);
+      if (!authHeaders.Cookie && !authHeaders["X-N8N-API-KEY"]) {
+        await attemptAutoLoginForRequest(req, res, localN8n.url);
+      }
+      const targetUrl = `${localN8n.url}/rest${apiPath}${url.search}`;
+      await proxyUpstream({ req, res, targetUrl, extraHeaders: authHeaders });
+      return true;
+    }
+
+    if (!allowRemoteOpsFallback()) {
+      res.statusCode = 503;
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.end(
+        JSON.stringify({
+          ok: false,
+          error: "Embedded n8n is unavailable. Start gateway with vendored n8n enabled.",
+        }),
+      );
+      return true;
+    }
+
+    // Legacy remote fallback (explicit opt-in)
     const global = readGlobalOpsConfig();
     const wc = await readWorkspaceConnectors(workspaceId);
-
     const opsUrl = ((wc?.ops?.url?.trim() ?? "") || global.url).replace(/\/+$/, "");
     const allowGlobalKeyFallback = session.user.role === "super_admin";
-    const opsKey =
-      wc?.ops?.apiKey?.trim() || (allowGlobalKeyFallback ? global.apiKey : null);
+    const opsKey = wc?.ops?.apiKey?.trim() || (allowGlobalKeyFallback ? global.apiKey : null);
 
     if (!opsKey) {
       res.statusCode = 503;
@@ -419,16 +462,13 @@ export async function handleOpsProxyRequest(
       res.end(
         JSON.stringify({
           ok: false,
-          error: "Wicked Ops not configured for this workspace. Visit Dashboard to provision.",
+          error: "Remote ops fallback enabled, but no workspace API key is configured.",
         }),
       );
       return true;
     }
 
-    // /api/ops/workflows → /api/v1/workflows
-    const apiPath = pathname.slice("/api/ops".length) || "/";
     const targetUrl = `${opsUrl}/api/v1${apiPath}${url.search}`;
-
     await proxyUpstream({
       req,
       res,
@@ -440,3 +480,4 @@ export async function handleOpsProxyRequest(
 
   return false;
 }
+

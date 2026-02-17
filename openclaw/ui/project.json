@@ -1,0 +1,29 @@
+{
+  "name": "openclaw-control-ui",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "openclaw/ui/src",
+  "projectType": "application",
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "openclaw/ui",
+        "command": "npm run build"
+      }
+    },
+    "dev": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "openclaw/ui",
+        "command": "npm run dev"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "openclaw/ui",
+        "command": "npm run test"
+      }
+    }
+  }
+}

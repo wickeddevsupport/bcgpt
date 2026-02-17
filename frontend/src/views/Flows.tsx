@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  ExternalLink,
   MessageSquare,
   MoreHorizontal,
   Pause,
@@ -25,6 +24,12 @@ interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
+}
+
+interface PendingApproval {
+  action: "deactivate" | "delete";
+  workflowId: string;
+  workflowName: string;
 }
 
 function getN8nBaseUrl(): string {
@@ -60,11 +65,12 @@ export default function Flows() {
 
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
+  const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     {
       id: "welcome",
       role: "assistant",
-      text: "Use commands like: create workflow named Daily Report, rename to Weekly Report, activate, deactivate, add tag finance.",
+      text: "Use commands like: create workflow named Daily Report, rename to Weekly Report, activate, deactivate, delete workflow, add tag finance. Destructive actions require confirm.",
     },
   ]);
 
@@ -168,11 +174,49 @@ export default function Flows() {
     }
   };
 
+  const deleteWorkflow = async (workflowId: string) => {
+    const response = await fetch(`${getN8nApiUrl()}/workflows/${workflowId}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to delete workflow: ${response.statusText}`);
+    }
+  };
+
   const runChatCommand = async (command: string): Promise<string> => {
     const normalized = command.trim();
     const lower = normalized.toLowerCase();
     if (!normalized) {
       return "Enter a command first.";
+    }
+
+    if (lower === "cancel") {
+      if (!pendingApproval) {
+        return "No pending action to cancel.";
+      }
+      const canceled = pendingApproval.workflowName;
+      setPendingApproval(null);
+      return `Cancelled pending action for "${canceled}".`;
+    }
+
+    if (lower === "confirm") {
+      if (!pendingApproval) {
+        return "Nothing pending approval. Run deactivate or delete workflow first.";
+      }
+      const approved = pendingApproval;
+      setPendingApproval(null);
+      if (approved.action === "deactivate") {
+        await toggleWorkflow(approved.workflowId, false);
+        await loadWorkflows();
+        return `Deactivated ${approved.workflowName}.`;
+      }
+      await deleteWorkflow(approved.workflowId);
+      if (selectedWorkflow === approved.workflowId) {
+        setSelectedWorkflow(null);
+      }
+      await loadWorkflows();
+      return `Deleted workflow "${approved.workflowName}".`;
     }
 
     const createMatch = normalized.match(/^create workflow named (.+)$/i);
@@ -194,9 +238,21 @@ export default function Flows() {
       return `Activated ${selectedWorkflowName}.`;
     }
     if (lower === "deactivate") {
-      await toggleWorkflow(selectedWorkflow, false);
-      await loadWorkflows();
-      return `Deactivated ${selectedWorkflowName}.`;
+      setPendingApproval({
+        action: "deactivate",
+        workflowId: selectedWorkflow,
+        workflowName: selectedWorkflowName,
+      });
+      return `Approve deactivation of "${selectedWorkflowName}"? Type confirm or cancel.`;
+    }
+
+    if (lower === "delete workflow") {
+      setPendingApproval({
+        action: "delete",
+        workflowId: selectedWorkflow,
+        workflowName: selectedWorkflowName,
+      });
+      return `Approve deletion of "${selectedWorkflowName}"? Type confirm or cancel.`;
     }
 
     const renameMatch = normalized.match(/^rename to (.+)$/i);
@@ -225,7 +281,7 @@ export default function Flows() {
       return `Added tag "${tagName}" to ${selectedWorkflowName}.`;
     }
 
-    return "Unknown command. Try: activate, deactivate, rename to <name>, add tag <tag>, create workflow named <name>.";
+    return "Unknown command. Try: activate, deactivate, delete workflow, rename to <name>, add tag <tag>, create workflow named <name>, confirm, cancel.";
   };
 
   const submitChat = async () => {
@@ -271,14 +327,6 @@ export default function Flows() {
     return `${base}/workflow/new`;
   };
 
-  const getExternalUrl = () => {
-    const opsUrl = "https://ops.wickedlab.io";
-    if (selectedWorkflow) {
-      return `${opsUrl}/workflow/${selectedWorkflow}`;
-    }
-    return `${opsUrl}/workflows`;
-  };
-
   if (showBuilder) {
     return (
       <div className="h-full flex flex-col -m-6">
@@ -295,21 +343,14 @@ export default function Flows() {
               {selectedWorkflow ? `Edit: ${selectedWorkflowName}` : "Create New Workflow"}
             </span>
           </div>
-          <a
-            href={getExternalUrl()}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1 text-sm text-gray-400 hover:text-white"
-          >
-            Open in Wicked Ops <ExternalLink className="w-4 h-4" />
-          </a>
+          <span className="text-sm text-gray-400">Embedded n8n editor</span>
         </div>
 
         <div className="flex-1 min-h-0 flex">
           <iframe
             src={getBuilderUrl()}
             className="flex-1 w-full bg-gray-900"
-            title="Wicked Ops Workflow Editor"
+            title="OpenClaw Workflow Editor"
             allow="clipboard-read; clipboard-write"
           />
 
@@ -493,14 +534,9 @@ export default function Flows() {
       </div>
 
       <div className="mt-6 text-center">
-        <a
-          href="https://ops.wickedlab.io"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-sm text-gray-500 hover:text-gray-400 flex items-center justify-center gap-1"
-        >
-          Powered by Wicked Ops (n8n) <ExternalLink className="w-3 h-3" />
-        </a>
+        <span className="text-sm text-gray-500">
+          Built-in automation engine powered by n8n
+        </span>
       </div>
     </div>
   );

@@ -56,10 +56,15 @@ flowchart LR
 
 **Files:** [`openclaw/src/config/`](../openclaw/src/config/)
 
-- [ ] Design workspace config file structure
-- [ ] Implement config merge strategy (workspace overrides global)
-- [ ] Update config loading to check workspace context
-- [ ] Add workspace config API endpoints
+- [x] Design workspace config file structure
+- [x] Implement config merge strategy (workspace overrides global)
+- [x] Update config loading to check workspace context
+- [x] Add workspace config API endpoints
+
+**Implementation:**
+- Workspace config storage and merge: `openclaw/src/gateway/workspace-config.ts`
+- HTTP endpoints: `openclaw/src/gateway/workspace-config-http.ts` (`/api/pmos/config`)
+- WS handlers: `pmos.config.workspace.get`, `pmos.config.workspace.set` in `openclaw/src/gateway/server-methods/pmos.ts`
 
 **Proposed Structure:**
 ```
@@ -111,10 +116,16 @@ Embed n8n source code directly in OpenClaw for unlimited customization. This rep
 
 #### 2.1 Clone n8n Source
 
-- [ ] Clone n8n repository to `openclaw/vendor/n8n/`
-- [ ] Pin to stable version (tagged release)
-- [ ] Set up build process for n8n packages
-- [ ] Verify n8n builds successfully
+- [x] Clone n8n repository to `openclaw/vendor/n8n/`
+- [x] Pin to stable version (tagged release)
+- [x] Set up build process for n8n packages
+- [x] Verify n8n builds successfully
+
+**Implementation:**
+- Vendored path: `openclaw/vendor/n8n/`
+- Pinned version marker: `openclaw/vendor/n8n.vendor.json` (`n8n@1.76.1`)
+- Build validation: `pnpm build` run successfully in vendored n8n repo
+- Basecamp node copied into vendored CLI node_modules
 
 **Commands:**
 ```bash
@@ -152,17 +163,24 @@ pnpm build
 
 #### 2.4 Custom Nodes Integration
 
-- [ ] Move Basecamp node to `openclaw/vendor/n8n/custom/nodes/`
+- [x] Move Basecamp node to `openclaw/vendor/n8n/custom/nodes/`
 - [ ] Create OpenClaw-specific nodes
-- [ ] Register custom nodes with n8n
+- [x] Register custom nodes with n8n
 - [ ] Test custom nodes
+
+**Implementation:**
+- Basecamp node vendored path: `openclaw/vendor/n8n/custom/nodes/n8n-nodes-basecamp`
+- Embedded loader wiring: `openclaw/src/gateway/n8n-embed.ts` (`N8N_CUSTOM_EXTENSIONS`)
 
 #### 2.5 UI Customization
 
-- [ ] Create `openclaw/vendor/n8n/custom/ui/` directory
+- [x] Create `openclaw/vendor/n8n/custom/ui/` directory
 - [ ] Customize n8n editor UI for OpenClaw branding
 - [ ] Integrate n8n canvas into PMOS UI
 - [ ] Remove n8n branding elements
+
+**Implementation:**
+- UI customization scaffold: `openclaw/vendor/n8n/custom/ui/README.md`
 
 ### Benefits
 
@@ -199,17 +217,26 @@ pnpm build
 
 #### 3.2 Integrated Chat Sidebar
 
-- [ ] Add chat panel to FlowBuilder view
+- [x] Add chat panel to FlowBuilder view
 - [ ] Enable chat to modify workflow nodes
-- [ ] Show real-time updates from chat commands
-- [ ] Handle approval workflows for destructive changes
+- [x] Show real-time updates from chat commands
+- [x] Handle approval workflows for destructive changes
+
+**Implementation:**
+- Embedded flow chat with command execution: `frontend/src/views/Flows.tsx`
+- Destructive approvals via `confirm` / `cancel` commands for deactivate/delete actions
 
 #### 3.3 Seamless Navigation
 
-- [ ] Remove need to open n8n separately
+- [x] Remove need to open n8n separately
 - [ ] All n8n features accessible from OpenClaw UI
 - [ ] Consistent styling and branding
-- [ ] Single sign-on between OpenClaw and n8n
+- [x] Single sign-on between OpenClaw and n8n
+
+**Implementation:**
+- Flows UI removes external n8n links and uses embedded editor route: `frontend/src/views/Flows.tsx`
+- Gateway uses embedded n8n first for `/api/ops/*` and webhook paths: `openclaw/src/gateway/pmos-ops-proxy.ts`
+- Workspace-scoped auth bridge remains active: `openclaw/src/gateway/n8n-auth-bridge.ts`
 
 ---
 
@@ -376,7 +403,7 @@ interface AgentOrchestrator {
 2. **Verify Services**
    - bcgpt.wickedlab.io/health
    - os.wickedlab.io
-   - ops.wickedlab.io
+   - Embedded n8n reachable via OpenClaw (`/api/ops/workflows`)
 
 3. **Deploy via Coolify**
    ```bash
@@ -394,7 +421,7 @@ interface AgentOrchestrator {
 ## Guardrails
 
 1. **MCP Stability** - Do not change MCP contracts on bcgpt.wickedlab.io
-2. **n8n Stability** - Do not break existing workflows on ops.wickedlab.io
+2. **n8n Stability** - Do not break existing embedded n8n workflows and workspace isolation
 3. **Additive Development** - PMOS work is additive to OpenClaw core
 4. **Rollback Ready** - Every deployment must have immediate rollback path
 5. **Smoke Tests** - Every phase must pass smoke checks before complete
@@ -416,25 +443,25 @@ Before starting work:
 ## Success Metrics
 
 ### Phase 1 Complete When:
-- [ ] All data queries filter by workspace
-- [ ] Cross-workspace isolation tests pass
+- [x] All data queries filter by workspace
+- [x] Cross-workspace isolation tests pass
 - [ ] Super admin can manage all workspaces
-- [ ] New signups get isolated workspace
+- [x] New signups get isolated workspace
 
 ### Phase 2 Complete When:
-- [ ] n8n source pinned in `openclaw/vendor/n8n`
-- [ ] Embedded n8n startup/build process is stable
-- [ ] Custom auth/triggers wired for workspace context
+- [x] n8n source pinned in `openclaw/vendor/n8n`
+- [x] Embedded n8n startup/build process is stable
+- [x] Custom auth/triggers wired for workspace context
 
 ### Phase 3 Complete When:
-- [ ] n8n canvas embedded in OpenClaw UI
+- [x] n8n canvas embedded in OpenClaw UI
 - [ ] Chat sidebar functional in flow builder
-- [ ] No need to open n8n separately
+- [x] No need to open n8n separately
 
 ### Phase 4 Complete When:
-- [ ] Users can add their own AI keys
-- [ ] Keys are validated and stored securely
-- [ ] Multiple providers supported
+- [x] Users can add their own AI keys
+- [x] Keys are validated and stored securely
+- [x] Multiple providers supported
 
 ### Phase 5 Complete When:
 - [ ] Chat can create workflows end-to-end

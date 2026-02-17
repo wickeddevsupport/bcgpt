@@ -1,5 +1,6 @@
 /**
- * Utility to auto-provision a per-workspace n8n Project + API key.
+ * Utility to provision legacy remote n8n connectors for a workspace.
+ * Embedded n8n is the default runtime; this is for explicit remote fallback scenarios.
  * Called fire-and-forget on signup, and also used by the manual provision_ops WS handler.
  */
 import { loadConfig } from "../config/config.js";
@@ -93,7 +94,7 @@ export async function provisionWorkspaceOps(
   const { url: opsUrl, apiKey: opsKey } = resolveOpsGlobals();
   if (!opsKey) {
     throw new Error(
-      "Wicked Ops API key not configured (set OPS_API_KEY env var or PMOS → Integrations).",
+      "Remote n8n API key not configured (set OPS_API_KEY env var or PMOS integrations).",
     );
   }
 
@@ -149,7 +150,7 @@ export async function provisionWorkspaceOps(
 
   if (!projectId && !createdApiKey) {
     const msg = projectRes.error ?? `status=${projectRes.status}`;
-    throw new Error(`Failed to provision Wicked Ops for workspace ${workspaceId}: ${msg}`);
+    throw new Error(`Failed to provision remote n8n fallback for workspace ${workspaceId}: ${msg}`);
   }
 
   // 3. Best-effort: create a workspace-scoped n8n user so the editor can auto-login.

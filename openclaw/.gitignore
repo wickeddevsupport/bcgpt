@@ -39,6 +39,13 @@ apps/ios/*.xcodeproj/
 apps/ios/*.xcworkspace/
 apps/ios/.swiftpm/
 vendor/
+!vendor/n8n/
+vendor/n8n/*
+!vendor/n8n/custom/
+vendor/n8n/custom/*
+!vendor/n8n/custom/ui/
+vendor/n8n/custom/ui/*
+!vendor/n8n/custom/ui/README.md
 apps/ios/Clawdbot.xcodeproj/
 apps/ios/Clawdbot.xcodeproj/**
 apps/macos/.build/**

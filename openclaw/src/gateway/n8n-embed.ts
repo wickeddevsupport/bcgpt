@@ -40,6 +40,7 @@ export function findVendoredN8nRepo(): string | null {
 function resolveBasecampNodeDir(n8nRepoDir: string): string | null {
   const candidates = [
     path.join(n8nRepoDir, "packages", "cli", "node_modules", "n8n-nodes-basecamp"),
+    path.join(n8nRepoDir, "custom", "nodes", "n8n-nodes-basecamp"),
     path.join(n8nRepoDir, "..", "..", "n8n-nodes-basecamp"),
   ];
   for (const c of candidates) {
@@ -80,7 +81,9 @@ export async function spawnEmbeddedN8nIfVendored(opts?: { port?: number; host?: 
   if (basecampNodeDir) {
     // N8N_CUSTOM_EXTENSIONS is the env var n8n uses for additional node packages
     const existing = env.N8N_CUSTOM_EXTENSIONS?.trim();
-    env.N8N_CUSTOM_EXTENSIONS = existing ? `${existing};${basecampNodeDir}` : basecampNodeDir;
+    env.N8N_CUSTOM_EXTENSIONS = existing
+      ? `${existing}${path.delimiter}${basecampNodeDir}`
+      : basecampNodeDir;
   }
 
   // Branding / UI customization

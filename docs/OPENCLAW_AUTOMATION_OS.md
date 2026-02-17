@@ -110,7 +110,7 @@ flowchart TB
 | Auth System | COMPLETE | Signup, login, logout, session management |
 | Role Bootstrap | COMPLETE | First user = super_admin, others = workspace_admin |
 | Shell Restriction | COMPLETE | Non-super-admin blocked from shell access |
-| n8n Integration | IN PROGRESS | Embedding n8n source in openclaw/vendor/n8n |
+| n8n Integration | COMPLETE | n8n source vendored in `openclaw/vendor/n8n` and built (`n8n@1.76.1`) |
 | n8n Embed Code | COMPLETE | [`n8n-embed.ts`](openclaw/src/gateway/n8n-embed.ts) ready |
 | Basecamp n8n Node | BUILT | [`n8n-nodes-basecamp`](n8n-nodes-basecamp/) created |
 | Workspace Context Helpers | COMPLETE | [`workspace-context.ts`](openclaw/src/gateway/workspace-context.ts) |
@@ -122,9 +122,9 @@ flowchart TB
 
 | Feature | Status | Remaining Work |
 |---------|--------|----------------|
-| Workspace Isolation | IN PROGRESS | Core isolation complete; workspace-scoped configs/connectors pending |
+| Workspace Isolation | IN PROGRESS | Core isolation + workspace configs complete; connector hardening and admin UX pending |
 | Onboarding Wizard | PARTIAL | AI provider key setup step needed |
-| n8n UI Integration | PARTIAL | Seamless UI embedding in progress |
+| n8n UI Integration | PARTIAL | Embedded navigation + SSO done; branding polish and full feature parity in progress |
 
 ### Not Started
 
@@ -157,9 +157,9 @@ flowchart TB
 
 ### n8n Deployment
 
-- **Production URL:** https://ops.wickedlab.io
+- **Default Runtime:** Embedded in OpenClaw (`openclaw/vendor/n8n`)
 - **Embed Support:** [`n8n-embed.ts`](openclaw/src/gateway/n8n-embed.ts) spawns n8n as child process
-- **Per-Workspace Projects:** API key provisioning implemented
+- **Legacy Remote Fallback:** Optional via connector/API key settings when explicitly enabled
 - **Custom Nodes:** Basecamp node ready for deployment
 
 ### Basecamp n8n Node
@@ -325,18 +325,18 @@ See [`NEXT_STEPS.md`](NEXT_STEPS.md) for detailed implementation plan.
 
 ### Immediate Priorities
 
-1. **Complete Workspace Isolation** - Implement workspace-scoped configs and connector keys
-2. **Deploy Basecamp Node** - Publish to n8n community
-3. **Build Live Flow Builder** - Integrate n8n canvas in PMOS UI
-4. **Implement Chat-to-Workflow** - Natural language workflow creation
-5. **Multi-Agent Parallel Execution** - Run agents concurrently
+1. **Connector Hardening + Admin UX** - Finish workspace connector governance and super_admin workspace controls
+2. **n8n UI Customization** - Add OpenClaw branding and remove remaining n8n-native UI seams
+3. **Integrated Chat Sidebar** - Complete chat-driven edits in the flow builder
+4. **Chat-to-Workflow Engine** - Implement parser + workflow JSON generation + preview flow
+5. **Multi-Agent Parallel Execution** - Build orchestrator and agent dashboard
 
 ---
 
 ## Guardrails
 
 1. **MCP Stability** - Do not change MCP contracts on bcgpt.wickedlab.io
-2. **n8n Stability** - Do not break existing workflows on ops.wickedlab.io
+2. **n8n Stability** - Do not break existing embedded n8n workflows and workspace isolation
 3. **Additive Development** - PMOS work is additive to OpenClaw core
 4. **Rollback Ready** - Every deployment must have immediate rollback path
 5. **Smoke Tests** - Every phase must pass smoke checks before complete

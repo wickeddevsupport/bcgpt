@@ -310,7 +310,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 
-  // Provision a per-workspace Wicked Ops (n8n) Project + API key when possible.
+  // Provision legacy remote n8n fallback credentials for a workspace when needed.
   // - Attempts to create a Project using the global OPS API key
   // - Attempts to create a workspace-scoped API key (if supported)
   // - Persists `ops.url`, `ops.apiKey` and `ops.projectId` into the workspace connectors file

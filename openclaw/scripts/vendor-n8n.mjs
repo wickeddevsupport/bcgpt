@@ -17,9 +17,10 @@ const force = args.includes("--force");
 const skipBuild = args.includes("--skip-build");
 const version = versionArg ? versionArg.slice("--version=".length).trim() : "n8n@1.76.1";
 
-function run(command, commandArgs, cwd) {
+function run(command, commandArgs, cwd, extraEnv = {}) {
   const result = spawnSync(command, commandArgs, {
     cwd,
+    env: { ...process.env, ...extraEnv },
     stdio: "inherit",
     shell: process.platform === "win32",
   });
@@ -62,25 +63,30 @@ fs.mkdirSync(vendorDir, { recursive: true });
 run("git", ["clone", "--depth", "1", "--branch", version, "https://github.com/n8n-io/n8n.git", n8nDir], openclawDir);
 
 if (!skipBuild) {
-  run("corepack", ["enable"], n8nDir);
-  run("pnpm", ["install", "--frozen-lockfile"], n8nDir);
-  run("pnpm", ["build"], n8nDir);
+  // Use corepack directly (without global shim install) to keep this portable on Windows.
+  run("corepack", ["pnpm", "install", "--frozen-lockfile"], n8nDir, { CI: "1" });
+  run("corepack", ["pnpm", "build"], n8nDir, { CI: "1" });
 }
 
 const basecampNodeDir = path.join(repoRoot, "n8n-nodes-basecamp");
 if (fs.existsSync(basecampNodeDir)) {
   console.log("Installing Basecamp node into vendored n8n.");
   run("npm", ["run", "build"], basecampNodeDir);
-  const target = path.join(n8nDir, "packages", "cli", "node_modules", "n8n-nodes-basecamp");
-  fs.mkdirSync(target, { recursive: true });
-  for (const entry of ["dist", "package.json"]) {
-    const source = path.join(basecampNodeDir, entry);
-    if (!fs.existsSync(source)) continue;
-    const destination = path.join(target, entry);
-    if (fs.existsSync(destination)) {
-      fs.rmSync(destination, { recursive: true, force: true });
+  const targets = [
+    path.join(n8nDir, "packages", "cli", "node_modules", "n8n-nodes-basecamp"),
+    path.join(n8nDir, "custom", "nodes", "n8n-nodes-basecamp"),
+  ];
+  for (const target of targets) {
+    fs.mkdirSync(target, { recursive: true });
+    for (const entry of ["dist", "package.json"]) {
+      const source = path.join(basecampNodeDir, entry);
+      if (!fs.existsSync(source)) continue;
+      const destination = path.join(target, entry);
+      if (fs.existsSync(destination)) {
+        fs.rmSync(destination, { recursive: true, force: true });
+      }
+      fs.cpSync(source, destination, { recursive: true });
     }
-    fs.cpSync(source, destination, { recursive: true });
   }
 }
 
