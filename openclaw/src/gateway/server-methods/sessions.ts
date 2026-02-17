@@ -28,6 +28,7 @@ import {
 } from "../protocol/index.js";
 import {
   archiveFileOnDisk,
+  listAgentsForGateway,
   listSessionsFromStore,
   loadCombinedSessionStoreForGateway,
   loadSessionEntry,
@@ -41,9 +42,10 @@ import {
 } from "../session-utils.js";
 import { applySessionsPatchToStore } from "../sessions-patch.js";
 import { resolveSessionKeyFromResolveParams } from "../sessions-resolve.js";
+import { isSuperAdmin } from "../workspace-context.js";
 
 export const sessionsHandlers: GatewayRequestHandlers = {
-  "sessions.list": ({ params, respond }) => {
+  "sessions.list": ({ params, respond, client }) => {
     if (!validateSessionsListParams(params)) {
       respond(
         false,
@@ -58,6 +60,39 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     const p = params;
     const cfg = loadConfig();
     const { storePath, store } = loadCombinedSessionStoreForGateway(cfg);
+    
+    // Apply workspace filtering for PMOS multi-tenant isolation
+    if (client && !isSuperAdmin(client)) {
+      const { agents } = listAgentsForGateway(cfg);
+      const workspaceAgentIds = new Set(
+        agents
+          .filter((a) => a.workspaceId === client.pmosWorkspaceId)
+          .map((a) => a.id)
+      );
+      
+      // Filter store to only include sessions for workspace agents
+      const filteredStore: Record<string, SessionEntry> = {};
+      for (const [key, entry] of Object.entries(store)) {
+        if (key === "global" || key === "unknown") {
+          continue; // Skip global/unknown sessions for non-super-admin
+        }
+        const parsed = parseAgentSessionKey(key);
+        const agentId = parsed?.agentId ? normalizeAgentId(parsed.agentId) : resolveDefaultAgentId(cfg);
+        if (workspaceAgentIds.has(agentId)) {
+          filteredStore[key] = entry;
+        }
+      }
+      
+      const result = listSessionsFromStore({
+        cfg,
+        storePath,
+        store: filteredStore,
+        opts: p,
+      });
+      respond(true, result, undefined);
+      return;
+    }
+    
     const result = listSessionsFromStore({
       cfg,
       storePath,
@@ -66,7 +101,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     });
     respond(true, result, undefined);
   },
-  "sessions.preview": ({ params, respond }) => {
+  "sessions.preview": ({ params, respond, client }) => {
     if (!validateSessionsPreviewParams(params)) {
       respond(
         false,
@@ -99,12 +134,31 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     }
 
     const cfg = loadConfig();
+    
+    // Get workspace agent IDs for filtering
+    let workspaceAgentIds: Set<string> | null = null;
+    if (client && !isSuperAdmin(client)) {
+      const { agents } = listAgentsForGateway(cfg);
+      workspaceAgentIds = new Set(
+        agents
+          .filter((a) => a.workspaceId === client.pmosWorkspaceId)
+          .map((a) => a.id)
+      );
+    }
+    
     const storeCache = new Map<string, Record<string, SessionEntry>>();
     const previews: SessionsPreviewEntry[] = [];
 
     for (const key of keys) {
       try {
         const target = resolveGatewaySessionStoreTarget({ cfg, key });
+        
+        // Check workspace ownership for non-super-admin users
+        if (workspaceAgentIds && !workspaceAgentIds.has(target.agentId)) {
+          previews.push({ key, status: "missing", items: [] });
+          continue;
+        }
+        
         const store = storeCache.get(target.storePath) ?? loadSessionStore(target.storePath);
         storeCache.set(target.storePath, store);
         const entry =
@@ -134,7 +188,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
 
     respond(true, { ts: Date.now(), previews } satisfies SessionsPreviewResult, undefined);
   },
-  "sessions.resolve": ({ params, respond }) => {
+  "sessions.resolve": ({ params, respond, client }) => {
     if (!validateSessionsResolveParams(params)) {
       respond(
         false,
@@ -154,9 +208,30 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       respond(false, undefined, resolved.error);
       return;
     }
+    
+    // Check workspace ownership for non-super-admin users
+    if (client && !isSuperAdmin(client)) {
+      const { agents } = listAgentsForGateway(cfg);
+      const workspaceAgentIds = new Set(
+        agents
+          .filter((a) => a.workspaceId === client.pmosWorkspaceId)
+          .map((a) => a.id)
+      );
+      
+      const target = resolveGatewaySessionStoreTarget({ cfg, key: resolved.key });
+      if (!workspaceAgentIds.has(target.agentId)) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, `session "${resolved.key}" not found`),
+        );
+        return;
+      }
+    }
+    
     respond(true, { ok: true, key: resolved.key }, undefined);
   },
-  "sessions.patch": async ({ params, respond, context }) => {
+  "sessions.patch": async ({ params, respond, context, client }) => {
     if (!validateSessionsPatchParams(params)) {
       respond(
         false,
@@ -177,6 +252,26 @@ export const sessionsHandlers: GatewayRequestHandlers = {
 
     const cfg = loadConfig();
     const target = resolveGatewaySessionStoreTarget({ cfg, key });
+    
+    // Check workspace ownership for non-super-admin users
+    if (client && !isSuperAdmin(client)) {
+      const { agents } = listAgentsForGateway(cfg);
+      const workspaceAgentIds = new Set(
+        agents
+          .filter((a) => a.workspaceId === client.pmosWorkspaceId)
+          .map((a) => a.id)
+      );
+      
+      if (!workspaceAgentIds.has(target.agentId)) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, `session "${key}" not found`),
+        );
+        return;
+      }
+    }
+    
     const storePath = target.storePath;
     const applied = await updateSessionStore(storePath, async (store) => {
       const primaryKey = target.storeKeys[0] ?? key;
@@ -212,7 +307,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     };
     respond(true, result, undefined);
   },
-  "sessions.reset": async ({ params, respond }) => {
+  "sessions.reset": async ({ params, respond, client }) => {
     if (!validateSessionsResetParams(params)) {
       respond(
         false,
@@ -233,6 +328,26 @@ export const sessionsHandlers: GatewayRequestHandlers = {
 
     const cfg = loadConfig();
     const target = resolveGatewaySessionStoreTarget({ cfg, key });
+    
+    // Check workspace ownership for non-super-admin users
+    if (client && !isSuperAdmin(client)) {
+      const { agents } = listAgentsForGateway(cfg);
+      const workspaceAgentIds = new Set(
+        agents
+          .filter((a) => a.workspaceId === client.pmosWorkspaceId)
+          .map((a) => a.id)
+      );
+      
+      if (!workspaceAgentIds.has(target.agentId)) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, `session "${key}" not found`),
+        );
+        return;
+      }
+    }
+    
     const storePath = target.storePath;
     const next = await updateSessionStore(storePath, (store) => {
       const primaryKey = target.storeKeys[0] ?? key;
@@ -270,7 +385,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     });
     respond(true, { ok: true, key: target.canonicalKey, entry: next }, undefined);
   },
-  "sessions.delete": async ({ params, respond }) => {
+  "sessions.delete": async ({ params, respond, client }) => {
     if (!validateSessionsDeleteParams(params)) {
       respond(
         false,
@@ -299,6 +414,25 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         errorShape(ErrorCodes.INVALID_REQUEST, `Cannot delete the main session (${mainKey}).`),
       );
       return;
+    }
+
+    // Check workspace ownership for non-super-admin users
+    if (client && !isSuperAdmin(client)) {
+      const { agents } = listAgentsForGateway(cfg);
+      const workspaceAgentIds = new Set(
+        agents
+          .filter((a) => a.workspaceId === client.pmosWorkspaceId)
+          .map((a) => a.id)
+      );
+      
+      if (!workspaceAgentIds.has(target.agentId)) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, `session "${key}" not found`),
+        );
+        return;
+      }
     }
 
     const deleteTranscript = typeof p.deleteTranscript === "boolean" ? p.deleteTranscript : true;
@@ -362,7 +496,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
 
     respond(true, { ok: true, key: target.canonicalKey, deleted: existed, archived }, undefined);
   },
-  "sessions.compact": async ({ params, respond }) => {
+  "sessions.compact": async ({ params, respond, client }) => {
     if (!validateSessionsCompactParams(params)) {
       respond(
         false,
@@ -388,6 +522,26 @@ export const sessionsHandlers: GatewayRequestHandlers = {
 
     const cfg = loadConfig();
     const target = resolveGatewaySessionStoreTarget({ cfg, key });
+    
+    // Check workspace ownership for non-super-admin users
+    if (client && !isSuperAdmin(client)) {
+      const { agents } = listAgentsForGateway(cfg);
+      const workspaceAgentIds = new Set(
+        agents
+          .filter((a) => a.workspaceId === client.pmosWorkspaceId)
+          .map((a) => a.id)
+      );
+      
+      if (!workspaceAgentIds.has(target.agentId)) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, `session "${key}" not found`),
+        );
+        return;
+      }
+    }
+    
     const storePath = target.storePath;
     // Lock + read in a short critical section; transcript work happens outside.
     const compactTarget = await updateSessionStore(storePath, (store) => {

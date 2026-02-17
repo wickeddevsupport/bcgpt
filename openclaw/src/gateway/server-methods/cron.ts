@@ -16,6 +16,11 @@ import {
   validateCronUpdateParams,
   validateWakeParams,
 } from "../protocol/index.js";
+import {
+  filterByWorkspace,
+  isSuperAdmin,
+  requireWorkspaceOwnership,
+} from "../workspace-context.js";
 
 export const cronHandlers: GatewayRequestHandlers = {
   wake: ({ params, respond, context }) => {
@@ -37,7 +42,7 @@ export const cronHandlers: GatewayRequestHandlers = {
     const result = context.cron.wake({ mode: p.mode, text: p.text });
     respond(true, result, undefined);
   },
-  "cron.list": async ({ params, respond, context }) => {
+  "cron.list": async ({ params, respond, context, client }) => {
     if (!validateCronListParams(params)) {
       respond(
         false,
@@ -53,6 +58,14 @@ export const cronHandlers: GatewayRequestHandlers = {
     const jobs = await context.cron.list({
       includeDisabled: p.includeDisabled,
     });
+    
+    // Apply workspace filtering for PMOS multi-tenant isolation
+    if (client && !isSuperAdmin(client)) {
+      const filteredJobs = filterByWorkspace(jobs, client);
+      respond(true, { jobs: filteredJobs }, undefined);
+      return;
+    }
+    
     respond(true, { jobs }, undefined);
   },
   "cron.status": async ({ params, respond, context }) => {
@@ -70,7 +83,7 @@ export const cronHandlers: GatewayRequestHandlers = {
     const status = await context.cron.status();
     respond(true, status, undefined);
   },
-  "cron.add": async ({ params, respond, context }) => {
+  "cron.add": async ({ params, respond, context, client }) => {
     const normalized = normalizeCronJobCreate(params) ?? params;
     if (!validateCronAddParams(normalized)) {
       respond(
@@ -93,10 +106,16 @@ export const cronHandlers: GatewayRequestHandlers = {
       );
       return;
     }
+    
+    // Add workspaceId for multi-tenant isolation
+    if (client?.pmosWorkspaceId) {
+      (jobCreate as CronJobCreate & { workspaceId?: string }).workspaceId = client.pmosWorkspaceId;
+    }
+    
     const job = await context.cron.add(jobCreate);
     respond(true, job, undefined);
   },
-  "cron.update": async ({ params, respond, context }) => {
+  "cron.update": async ({ params, respond, context, client }) => {
     const normalizedPatch = normalizeCronJobPatch((params as { patch?: unknown } | null)?.patch);
     const candidate =
       normalizedPatch && typeof params === "object" && params !== null
@@ -127,6 +146,31 @@ export const cronHandlers: GatewayRequestHandlers = {
       );
       return;
     }
+    
+    // Check workspace ownership for non-super-admin users
+    if (client && !isSuperAdmin(client)) {
+      const jobs = await context.cron.list({ includeDisabled: true });
+      const job = jobs.find((j) => j.id === jobId);
+      if (!job) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, `cron job "${jobId}" not found`),
+        );
+        return;
+      }
+      try {
+        requireWorkspaceOwnership(client, job.workspaceId, "cron job");
+      } catch {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, `cron job "${jobId}" not found`),
+        );
+        return;
+      }
+    }
+    
     const patch = p.patch as unknown as CronJobPatch;
     if (patch.schedule) {
       const timestampValidation = validateScheduleTimestamp(patch.schedule);
@@ -142,7 +186,7 @@ export const cronHandlers: GatewayRequestHandlers = {
     const job = await context.cron.update(jobId, patch);
     respond(true, job, undefined);
   },
-  "cron.remove": async ({ params, respond, context }) => {
+  "cron.remove": async ({ params, respond, context, client }) => {
     if (!validateCronRemoveParams(params)) {
       respond(
         false,
@@ -164,10 +208,35 @@ export const cronHandlers: GatewayRequestHandlers = {
       );
       return;
     }
+    
+    // Check workspace ownership for non-super-admin users
+    if (client && !isSuperAdmin(client)) {
+      const jobs = await context.cron.list({ includeDisabled: true });
+      const job = jobs.find((j) => j.id === jobId);
+      if (!job) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, `cron job "${jobId}" not found`),
+        );
+        return;
+      }
+      try {
+        requireWorkspaceOwnership(client, job.workspaceId, "cron job");
+      } catch {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, `cron job "${jobId}" not found`),
+        );
+        return;
+      }
+    }
+    
     const result = await context.cron.remove(jobId);
     respond(true, result, undefined);
   },
-  "cron.run": async ({ params, respond, context }) => {
+  "cron.run": async ({ params, respond, context, client }) => {
     if (!validateCronRunParams(params)) {
       respond(
         false,
@@ -189,10 +258,35 @@ export const cronHandlers: GatewayRequestHandlers = {
       );
       return;
     }
+    
+    // Check workspace ownership for non-super-admin users
+    if (client && !isSuperAdmin(client)) {
+      const jobs = await context.cron.list({ includeDisabled: true });
+      const job = jobs.find((j) => j.id === jobId);
+      if (!job) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, `cron job "${jobId}" not found`),
+        );
+        return;
+      }
+      try {
+        requireWorkspaceOwnership(client, job.workspaceId, "cron job");
+      } catch {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, `cron job "${jobId}" not found`),
+        );
+        return;
+      }
+    }
+    
     const result = await context.cron.run(jobId, p.mode ?? "force");
     respond(true, result, undefined);
   },
-  "cron.runs": async ({ params, respond, context }) => {
+  "cron.runs": async ({ params, respond, context, client }) => {
     if (!validateCronRunsParams(params)) {
       respond(
         false,
@@ -214,6 +308,31 @@ export const cronHandlers: GatewayRequestHandlers = {
       );
       return;
     }
+    
+    // Check workspace ownership for non-super-admin users
+    if (client && !isSuperAdmin(client)) {
+      const jobs = await context.cron.list({ includeDisabled: true });
+      const job = jobs.find((j) => j.id === jobId);
+      if (!job) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, `cron job "${jobId}" not found`),
+        );
+        return;
+      }
+      try {
+        requireWorkspaceOwnership(client, job.workspaceId, "cron job");
+      } catch {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, `cron job "${jobId}" not found`),
+        );
+        return;
+      }
+    }
+    
     const logPath = resolveCronRunLogPath({
       storePath: context.cronStorePath,
       jobId,

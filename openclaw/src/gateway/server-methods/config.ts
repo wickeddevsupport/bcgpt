@@ -35,6 +35,7 @@ import {
   validateConfigSchemaParams,
   validateConfigSetParams,
 } from "../protocol/index.js";
+import { isSuperAdmin, filterByWorkspace } from "../workspace-context.js";
 
 function resolveBaseHash(params: unknown): string | null {
   const raw = (params as { baseHash?: unknown })?.baseHash;
@@ -92,7 +93,7 @@ function requireConfigBaseHash(
 }
 
 export const configHandlers: GatewayRequestHandlers = {
-  "config.get": async ({ params, respond }) => {
+  "config.get": async ({ params, respond, client }) => {
     if (!validateConfigGetParams(params)) {
       respond(
         false,
@@ -105,7 +106,18 @@ export const configHandlers: GatewayRequestHandlers = {
       return;
     }
     const snapshot = await readConfigFileSnapshot();
-    respond(true, redactConfigSnapshot(snapshot), undefined);
+    const redacted = redactConfigSnapshot(snapshot);
+
+    // Filter config to show only workspace-relevant data for non-super-admin users
+    if (client && !isSuperAdmin(client) && redacted.config?.agents) {
+      const filteredAgents = filterByWorkspace(redacted.config.agents, client);
+      redacted.config = {
+        ...redacted.config,
+        agents: filteredAgents,
+      };
+    }
+
+    respond(true, redacted, undefined);
   },
   "config.schema": ({ params, respond }) => {
     if (!validateConfigSchemaParams(params)) {
@@ -149,7 +161,7 @@ export const configHandlers: GatewayRequestHandlers = {
     });
     respond(true, schema, undefined);
   },
-  "config.set": async ({ params, respond }) => {
+  "config.set": async ({ params, respond, client }) => {
     if (!validateConfigSetParams(params)) {
       respond(
         false,
@@ -161,6 +173,17 @@ export const configHandlers: GatewayRequestHandlers = {
       );
       return;
     }
+
+    // Only super-admins can modify global config
+    if (client && !isSuperAdmin(client)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, "config modification requires super-admin privileges"),
+      );
+      return;
+    }
+
     const snapshot = await readConfigFileSnapshot();
     if (!requireConfigBaseHash(params, snapshot, respond)) {
       return;
@@ -215,7 +238,7 @@ export const configHandlers: GatewayRequestHandlers = {
       undefined,
     );
   },
-  "config.patch": async ({ params, respond }) => {
+  "config.patch": async ({ params, respond, client }) => {
     if (!validateConfigPatchParams(params)) {
       respond(
         false,
@@ -227,6 +250,17 @@ export const configHandlers: GatewayRequestHandlers = {
       );
       return;
     }
+
+    // Only super-admins can modify global config
+    if (client && !isSuperAdmin(client)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, "config modification requires super-admin privileges"),
+      );
+      return;
+    }
+
     const snapshot = await readConfigFileSnapshot();
     if (!requireConfigBaseHash(params, snapshot, respond)) {
       return;
@@ -346,7 +380,7 @@ export const configHandlers: GatewayRequestHandlers = {
       undefined,
     );
   },
-  "config.apply": async ({ params, respond }) => {
+  "config.apply": async ({ params, respond, client }) => {
     if (!validateConfigApplyParams(params)) {
       respond(
         false,
@@ -358,6 +392,17 @@ export const configHandlers: GatewayRequestHandlers = {
       );
       return;
     }
+
+    // Only super-admins can modify global config
+    if (client && !isSuperAdmin(client)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, "config modification requires super-admin privileges"),
+      );
+      return;
+    }
+
     const snapshot = await readConfigFileSnapshot();
     if (!requireConfigBaseHash(params, snapshot, respond)) {
       return;

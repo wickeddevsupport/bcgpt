@@ -1,8 +1,10 @@
 # PMOS Unified Platform Plan (OpenClaw + Activepieces)
 
-Last updated: 2026-02-16
+Last updated: 2026-02-17
 Owner: `bcgpt` monorepo
 Canonical scope: build PMOS as a real multi-tenant product on top of OpenClaw + Flow Pieces without disturbing live MCP/Flow services.
+
+**CRITICAL:** Workspace isolation does not exist yet. See `docs/system/operations/WORKSPACE_ISOLATION_PLAN.md` for implementation plan.
 
 ## 1. Locked Product Model
 
@@ -31,15 +33,19 @@ The following are already built and treated as baseline:
 5. Reimagined dashboard foundation with real metrics and execution trace.
 6. Admin shell foundations (workspace identity, members, audit feed).
 7. Live flow builder stream and command center foundations.
-8. Phase 7 M1 is implemented locally:
-   - PMOS sign-in/sign-up/session endpoints
-   - role bootstrap (`super_admin` first, then `workspace_admin`)
-   - UI auth gate before dashboard
-   - server-side super-admin shell restriction
-   - targeted tests passing
-9. Phase 7 M1 is deployed on `os.wickedlab.io`:
-   - signup/login/logout endpoints verified live
-   - first signup creates `super_admin`; next signup creates `workspace_admin`
+8. Phase 7 M1 is **partially implemented** locally:
+   - ✅ PMOS sign-in/sign-up/session endpoints
+   - ✅ role bootstrap (`super_admin` first, then `workspace_admin`)
+   - ✅ UI auth gate before dashboard
+   - ✅ server-side super-admin shell restriction
+   - ✅ targeted tests passing
+   - ✅ workspaceId assigned to each user on signup
+   - ❌ **NO workspace isolation implemented** - workspaceId exists but is never used to filter data
+   - ❌ All users see all agents, cron jobs, sessions, configs, connectors regardless of workspace
+9. Phase 7 M1 is **partially deployed** on `os.wickedlab.io`:
+   - ✅ signup/login/logout endpoints verified live
+   - ✅ first signup creates `super_admin`; next signup creates `workspace_admin`
+   - ❌ **workspace isolation NOT enforced** - all data is shared across users
 10. Phase 8 M2 started:
    - Dashboard includes `Quick Setup Wizard` with step status, progress, and guided CTAs.
 
@@ -49,22 +55,59 @@ The following are already built and treated as baseline:
 
 Goal: make PMOS a normal app with sign in/sign up and safe role model.
 
+Status: **PARTIALLY COMPLETE** (auth done, workspace isolation NOT done)
+
 Scope:
-1. Add PMOS auth flows (email/password first, OAuth optional second pass).
-2. Role bootstrap policy:
+1. Add PMOS auth flows (email/password first, OAuth optional second pass). ✅ DONE
+2. Role bootstrap policy: ✅ DONE
    - First account: `super_admin`
-   - Every later signup: `workspace_admin` with own workspace by default
-3. Role permissions:
+   - Every later signup: `workspace_admin` with workspaceId assigned
+3. Role permissions: ✅ DONE (shell restriction only)
    - `super_admin`: global governance + shell access
    - `workspace_admin`: full workspace usage, no shell access
    - `member`: core usage, no shell access
    - `viewer`: read-only surfaces
+4. **Workspace data isolation**: ❌ NOT DONE
+   - workspaceId exists in user records but is never used to filter data
+   - All users currently share: agents, cron jobs, sessions, configs, connectors
 
 Acceptance criteria:
-1. New users land on sign-in/sign-up, not direct dashboard.
-2. First-account bootstrap works once and is immutable without DB migration.
-3. Role checks enforced server-side and UI-side.
-4. Shell endpoints blocked for non-`super_admin`.
+1. New users land on sign-in/sign-up, not direct dashboard. ✅ DONE
+2. First-account bootstrap works once and is immutable without DB migration. ✅ DONE
+3. Role checks enforced server-side and UI-side. ✅ PARTIAL (shell only)
+4. Shell endpoints blocked for non-`super_admin`. ✅ DONE
+5. **Data scoped by workspace** ❌ NOT DONE - this is Phase 7.5 (new)
+
+## Phase 7.5: Workspace Isolation (NEW - CRITICAL)
+
+Goal: actually enforce workspace boundaries so users only see their own data.
+
+Status: **NOT STARTED**
+
+Scope:
+1. Add workspace-scoped storage model:
+   - Agents scoped to workspaceId
+   - Cron jobs scoped to workspaceId
+   - Sessions/chats scoped to workspaceId
+   - Configs scoped to workspaceId (or use workspace-specific config files)
+   - Connectors/integrations scoped to workspaceId
+2. Enforce workspaceId filtering in all server methods:
+   - `agents.list` returns only workspace's agents
+   - `cron.list` returns only workspace's cron jobs
+   - `sessions.list` returns only workspace's sessions
+   - All CRUD operations check workspace ownership
+3. Add workspace isolation tests:
+   - User A cannot see User B's data
+   - User A cannot modify User B's data
+   - Cross-workspace data leakage tests
+
+Acceptance criteria:
+1. All data queries filter by `client.pmosWorkspaceId`
+2. Users can only access data in their own workspace
+3. Cross-workspace isolation tests pass
+4. Super_admin can optionally see/manage all workspaces (admin view)
+
+**This must be completed before Phase 8** - onboarding wizard is meaningless without workspace isolation.
 
 ## Phase 8: Workspace Onboarding Wizard (Non-Technical Setup)
 
@@ -167,11 +210,12 @@ Acceptance criteria:
 
 ## 5. Delivery Milestones
 
-1. Milestone M1: Auth and role bootstrap complete and deployed (Phase 7).
-2. Milestone M2: Wizard-driven onboarding in progress (Phase 8).
-3. Milestone M3: Simplified UX and role-gated surfaces pending (Phase 9).
-4. Milestone M4: Chat-first operations and approval loop complete (Phase 10).
-5. Milestone M5: Multi-tenant hardening + launch gate complete (Phases 11-12).
+1. Milestone M1: Auth and role bootstrap **partially complete** (Phase 7 - auth done, isolation NOT done).
+2. **Milestone M1.5: Workspace isolation implementation (Phase 7.5 - CRITICAL)**.
+3. Milestone M2: Wizard-driven onboarding pending (Phase 8 - blocked by M1.5).
+4. Milestone M3: Simplified UX and role-gated surfaces pending (Phase 9).
+5. Milestone M4: Chat-first operations and approval loop pending (Phase 10).
+6. Milestone M5: Multi-tenant hardening + launch gate pending (Phases 11-12).
 
 ## 6. Definition of Done (Program Level)
 

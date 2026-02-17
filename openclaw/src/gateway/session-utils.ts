@@ -285,7 +285,7 @@ export function listAgentsForGateway(cfg: OpenClawConfig): {
   const scope = cfg.session?.scope ?? "per-sender";
   const configuredById = new Map<
     string,
-    { name?: string; identity?: GatewayAgentRow["identity"] }
+    { name?: string; workspaceId?: string; identity?: GatewayAgentRow["identity"] }
   >();
   for (const entry of cfg.agents?.list ?? []) {
     if (!entry?.id) {
@@ -306,6 +306,7 @@ export function listAgentsForGateway(cfg: OpenClawConfig): {
       : undefined;
     configuredById.set(normalizeAgentId(entry.id), {
       name: typeof entry.name === "string" && entry.name.trim() ? entry.name.trim() : undefined,
+      workspaceId: entry.workspaceId,
       identity,
     });
   }
@@ -326,6 +327,7 @@ export function listAgentsForGateway(cfg: OpenClawConfig): {
     return {
       id,
       name: meta?.name,
+      workspaceId: meta?.workspaceId,
       identity: meta?.identity,
     };
   });

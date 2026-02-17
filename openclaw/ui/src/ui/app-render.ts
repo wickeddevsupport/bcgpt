@@ -315,6 +315,17 @@ export function renderApp(state: AppViewState) {
     state.agentsList?.agents?.[0]?.id ??
     null;
 
+  // Auto-exit onboarding if all setup steps are done
+  if (state.onboarding && state.tab === "dashboard" && state.configSnapshot) {
+    const modelAuthConfigured = hasConfiguredModelAuth(state.configSnapshot.config);
+    const connectorsOk = state.pmosConnectorsStatus?.ap?.tone === "ok" && state.pmosConnectorsStatus?.bcgpt?.tone === "ok";
+    if (modelAuthConfigured && connectorsOk) {
+      state.onboarding = false;
+      // Optionally, auto-redirect to chat
+      state.setTab("chat");
+    }
+  }
+
   return html`
     <div class="shell ${isChat ? "shell--chat" : ""} ${chatFocus ? "shell--chat-focus" : ""} ${state.settings.navCollapsed ? "shell--nav-collapsed" : ""} ${state.onboarding ? "shell--onboarding" : ""}">
       <header class="topbar">

@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep:*)",
+      "Bash(ssh:*)",
+      "Bash(curl:*)",
+      "Bash(scp:*)",
+      "Bash(/tmp/create-ops-app.php:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(npm install)",
+      "Bash(npm run build:*)",
+      "Bash(npx:*)"
+    ]
+  }
+}

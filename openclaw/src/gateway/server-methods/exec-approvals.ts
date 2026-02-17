@@ -18,6 +18,7 @@ import {
   validateExecApprovalsSetParams,
 } from "../protocol/index.js";
 import { respondUnavailableOnThrow, safeParseJson } from "./nodes.helpers.js";
+import { isSuperAdmin } from "../workspace-context.js";
 
 function resolveBaseHash(params: unknown): string | null {
   const raw = (params as { baseHash?: unknown })?.baseHash;
@@ -107,7 +108,7 @@ export const execApprovalsHandlers: GatewayRequestHandlers = {
       undefined,
     );
   },
-  "exec.approvals.set": ({ params, respond }) => {
+  "exec.approvals.set": ({ params, respond, client }) => {
     if (!validateExecApprovalsSetParams(params)) {
       respond(
         false,
@@ -119,6 +120,17 @@ export const execApprovalsHandlers: GatewayRequestHandlers = {
       );
       return;
     }
+
+    // Only super-admins can modify exec approvals (security settings)
+    if (client && !isSuperAdmin(client)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, "exec approvals modification requires super-admin privileges"),
+      );
+      return;
+    }
+
     ensureExecApprovals();
     const snapshot = readExecApprovalsSnapshot();
     if (!requireApprovalsBaseHash(params, snapshot, respond)) {
@@ -197,7 +209,7 @@ export const execApprovalsHandlers: GatewayRequestHandlers = {
       respond(true, payload, undefined);
     });
   },
-  "exec.approvals.node.set": async ({ params, respond, context }) => {
+  "exec.approvals.node.set": async ({ params, respond, context, client }) => {
     if (!validateExecApprovalsNodeSetParams(params)) {
       respond(
         false,
@@ -209,6 +221,17 @@ export const execApprovalsHandlers: GatewayRequestHandlers = {
       );
       return;
     }
+
+    // Only super-admins can modify exec approvals (security settings)
+    if (client && !isSuperAdmin(client)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, "exec approvals modification requires super-admin privileges"),
+      );
+      return;
+    }
+
     const { nodeId, file, baseHash } = params as {
       nodeId: string;
       file: ExecApprovalsFile;

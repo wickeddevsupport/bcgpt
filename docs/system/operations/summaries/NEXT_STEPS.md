@@ -1,7 +1,9 @@
 # NEXT STEPS - PMOS Productization Board
 
-Last updated: 2026-02-16
+Last updated: 2026-02-17
 Canonical plan: `docs/system/operations/summaries/CURRENT_STATE_AND_EXECUTION_PLAN.md`
+Workspace isolation plan: `docs/system/operations/WORKSPACE_ISOLATION_PLAN.md`
+**⚠️ CRITICAL:** Activepieces integration audit: `docs/system/operations/ACTIVEPIECES_INTEGRATION_AUDIT.md`
 
 ## 1. Current Target
 
@@ -16,20 +18,42 @@ Execute productization Phases 7-12 to turn PMOS into a normal multi-user product
 ## 3. Active Milestone Queue
 
 ## M1: Auth + Roles (Phase 7)
-Status: completed and deployed (smoke passed)
+Status: **PARTIALLY completed** - auth works, workspace isolation does NOT exist
 
 Tasks:
-1. Add sign-in/sign-up routes and session middleware. [done]
-2. Add role bootstrap policy:
+1. Add sign-in/sign-up routes and session middleware. ✅ [done]
+2. Add role bootstrap policy: ✅ [done]
    - first account -> `super_admin` [done]
    - later signups -> `workspace_admin` [done]
-3. Enforce role guards server-side. [done]
-4. Enforce shell access restriction to `super_admin` only. [done]
+3. Enforce role guards server-side. ✅ [partial - shell only]
+4. Enforce shell access restriction to `super_admin` only. ✅ [done]
+5. **Workspace data isolation** ❌ [NOT DONE - see M1.5]
+
+Reality check:
+1. Users can authenticate through PMOS UI. ✅ [done]
+2. Role bootstrap and role checks are verified by tests. ✅ [done]
+3. Non-super-admin shell attempts are blocked. ✅ [done]
+4. **All users share the same data pool** ❌ [workspaceId stored but never used]
+
+## M1.5: Workspace Isolation (Phase 7.5) **CRITICAL - BLOCKING M2**
+Status: not started (must complete before onboarding wizard makes sense)
+
+Tasks:
+1. Design workspace-scoped storage schema. [pending]
+2. Implement workspaceId filtering in all server methods:
+   - agents.* methods filter by workspaceId [pending]
+   - cron.* methods filter by workspaceId [pending]
+   - sessions.* methods filter by workspaceId [pending]
+   - config scoping strategy (workspace-specific or global with workspace field) [pending]
+3. Add workspace ownership checks in CRUD operations. [pending]
+4. Write workspace isolation tests (cross-workspace leakage prevention). [pending]
+5. Migrate any existing data to default workspace or super_admin workspace. [pending]
 
 Done when:
-1. Users can authenticate through PMOS UI. [done]
-2. Role bootstrap and role checks are verified by tests. [done]
-3. Non-super-admin shell attempts are blocked. [done]
+1. All data queries filter by `client.pmosWorkspaceId`.
+2. User A cannot see or modify User B's data.
+3. Workspace isolation tests pass.
+4. Super_admin can optionally view all workspaces (admin panel).
 
 Validation run:
 1. `corepack pnpm --dir openclaw exec vitest run src/gateway/pmos-auth.test.ts src/gateway/server-methods.pmos-role.test.ts` [done]
@@ -109,9 +133,17 @@ Done when:
 
 ## 4. Immediate Implementation Order
 
-1. Complete remaining M2 wizard steps (provider key step + ready-state handoff).
-2. Start M3 UX simplification with Activepieces-style Flow Studio + side chat.
-3. Continue role-aware gating cleanup for workspace admins.
+**CRITICAL FIX REQUIRED FIRST:**
+
+1. **Complete M1.5 (Workspace Isolation)** - this is blocking everything else.
+   - Without workspace isolation, the product is not multi-tenant and all users see each other's data.
+   - This must be done before wizard, UX, or launch work makes sense.
+
+Then continue:
+
+2. Complete remaining M2 wizard steps (provider key step + ready-state handoff).
+3. Start M3 UX simplification with Activepieces-style Flow Studio + side chat.
+4. Continue role-aware gating cleanup for workspace admins.
 
 ## 5. Deployment Checklist (Each Milestone)
 

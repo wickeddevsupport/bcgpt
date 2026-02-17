@@ -21,6 +21,8 @@ import {
   validateSkillsStatusParams,
   validateSkillsUpdateParams,
 } from "../protocol/index.js";
+import { filterByWorkspace, isSuperAdmin } from "../workspace-context.js";
+import { listAgentsForGateway } from "../session-utils.js";
 
 function listWorkspaceDirs(cfg: OpenClawConfig): string[] {
   const dirs = new Set<string>();
@@ -68,7 +70,7 @@ function collectSkillBins(entries: SkillEntry[]): string[] {
 }
 
 export const skillsHandlers: GatewayRequestHandlers = {
-  "skills.status": ({ params, respond }) => {
+  "skills.status": ({ params, respond, client }) => {
     if (!validateSkillsStatusParams(params)) {
       respond(
         false,
@@ -94,6 +96,22 @@ export const skillsHandlers: GatewayRequestHandlers = {
         return;
       }
     }
+
+    // Check workspace ownership for non-super-admin users
+    if (client && !isSuperAdmin(client)) {
+      const { agents } = listAgentsForGateway(cfg);
+      const workspaceAgents = filterByWorkspace(agents, client);
+      const hasAccess = workspaceAgents.some((a) => a.id === agentId);
+      if (!hasAccess) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, `agent "${agentId}" not found`),
+        );
+        return;
+      }
+    }
+
     const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
     const report = buildWorkspaceSkillStatus(workspaceDir, {
       config: cfg,
@@ -101,7 +119,7 @@ export const skillsHandlers: GatewayRequestHandlers = {
     });
     respond(true, report, undefined);
   },
-  "skills.bins": ({ params, respond }) => {
+  "skills.bins": ({ params, respond, client }) => {
     if (!validateSkillsBinsParams(params)) {
       respond(
         false,
@@ -114,7 +132,21 @@ export const skillsHandlers: GatewayRequestHandlers = {
       return;
     }
     const cfg = loadConfig();
-    const workspaceDirs = listWorkspaceDirs(cfg);
+
+    // Filter workspace dirs by workspace ownership for non-super-admin users
+    let workspaceDirs: string[];
+    if (client && !isSuperAdmin(client)) {
+      const { agents } = listAgentsForGateway(cfg);
+      const workspaceAgents = filterByWorkspace(agents, client);
+      const agentDirs = new Set<string>();
+      for (const agent of workspaceAgents) {
+        agentDirs.add(resolveAgentWorkspaceDir(cfg, agent.id));
+      }
+      workspaceDirs = [...agentDirs];
+    } else {
+      workspaceDirs = listWorkspaceDirs(cfg);
+    }
+
     const bins = new Set<string>();
     for (const workspaceDir of workspaceDirs) {
       const entries = loadWorkspaceSkillEntries(workspaceDir, { config: cfg });
@@ -156,7 +188,7 @@ export const skillsHandlers: GatewayRequestHandlers = {
       result.ok ? undefined : errorShape(ErrorCodes.UNAVAILABLE, result.message),
     );
   },
-  "skills.update": async ({ params, respond }) => {
+  "skills.update": async ({ params, respond, client }) => {
     if (!validateSkillsUpdateParams(params)) {
       respond(
         false,
@@ -168,6 +200,17 @@ export const skillsHandlers: GatewayRequestHandlers = {
       );
       return;
     }
+
+    // Only super-admins can modify global skills config
+    if (client && !isSuperAdmin(client)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, "skill modification requires super-admin privileges"),
+      );
+      return;
+    }
+
     const p = params as {
       skillKey: string;
       enabled?: boolean;

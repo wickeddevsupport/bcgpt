@@ -66,6 +66,8 @@ export type CronJobState = {
 export type CronJob = {
   id: string;
   agentId?: string;
+  /** Workspace ID for multi-tenant isolation. */
+  workspaceId?: string;
   name: string;
   description?: string;
   enabled: boolean;

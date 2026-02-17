@@ -42,6 +42,12 @@ import {
   validateAgentsUpdateParams,
 } from "../protocol/index.js";
 import { listAgentsForGateway } from "../session-utils.js";
+import {
+  filterByWorkspace,
+  addWorkspaceId,
+  requireWorkspaceOwnership,
+  isSuperAdmin,
+} from "../workspace-context.js";
 
 const BOOTSTRAP_FILE_NAMES = [
   DEFAULT_AGENTS_FILENAME,
@@ -165,7 +171,7 @@ async function moveToTrashBestEffort(pathname: string): Promise<void> {
 }
 
 export const agentsHandlers: GatewayRequestHandlers = {
-  "agents.list": ({ params, respond }) => {
+  "agents.list": ({ params, respond, client }) => {
     if (!validateAgentsListParams(params)) {
       respond(
         false,
@@ -180,9 +186,17 @@ export const agentsHandlers: GatewayRequestHandlers = {
 
     const cfg = loadConfig();
     const result = listAgentsForGateway(cfg);
+    
+    // Apply workspace filtering for PMOS multi-tenant isolation
+    if (client && !isSuperAdmin(client)) {
+      const filteredAgents = filterByWorkspace(result.agents, client);
+      respond(true, { ...result, agents: filteredAgents }, undefined);
+      return;
+    }
+    
     respond(true, result, undefined);
   },
-  "agents.create": async ({ params, respond }) => {
+  "agents.create": async ({ params, respond, client }) => {
     if (!validateAgentsCreateParams(params)) {
       respond(
         false,
@@ -209,13 +223,27 @@ export const agentsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    if (findAgentEntryIndex(listAgentEntries(cfg), agentId) >= 0) {
-      respond(
-        false,
-        undefined,
-        errorShape(ErrorCodes.INVALID_REQUEST, `agent "${agentId}" already exists`),
-      );
-      return;
+    // Check for existing agent with same ID in the same workspace
+    const existingAgents = listAgentEntries(cfg);
+    if (client && !isSuperAdmin(client)) {
+      const workspaceFiltered = filterByWorkspace(existingAgents, client);
+      if (workspaceFiltered.some((a) => a.id === agentId)) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, `agent "${agentId}" already exists in your workspace`),
+        );
+        return;
+      }
+    } else {
+      if (findAgentEntryIndex(existingAgents, agentId) >= 0) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, `agent "${agentId}" already exists`),
+        );
+        return;
+      }
     }
 
     const workspaceDir = resolveUserPath(String(params.workspace ?? "").trim());
@@ -229,6 +257,14 @@ export const agentsHandlers: GatewayRequestHandlers = {
     });
     const agentDir = resolveAgentDir(nextConfig, agentId);
     nextConfig = applyAgentConfig(nextConfig, { agentId, agentDir });
+
+    // Add workspaceId for multi-tenant isolation
+    if (client) {
+      nextConfig = applyAgentConfig(nextConfig, {
+        agentId,
+        workspaceId: client.pmosWorkspaceId,
+      });
+    }
 
     // Ensure workspace & transcripts exist BEFORE writing config so a failure
     // here does not leave a broken config entry behind.
@@ -254,7 +290,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
 
     respond(true, { ok: true, agentId, name: rawName, workspace: workspaceDir }, undefined);
   },
-  "agents.update": async ({ params, respond }) => {
+  "agents.update": async ({ params, respond, client }) => {
     if (!validateAgentsUpdateParams(params)) {
       respond(
         false,
@@ -271,13 +307,30 @@ export const agentsHandlers: GatewayRequestHandlers = {
 
     const cfg = loadConfig();
     const agentId = normalizeAgentId(String(params.agentId ?? ""));
-    if (findAgentEntryIndex(listAgentEntries(cfg), agentId) < 0) {
+    const agentEntries = listAgentEntries(cfg);
+    const agentEntry = agentEntries.find((a) => normalizeAgentId(a.id) === agentId);
+    
+    if (!agentEntry) {
       respond(
         false,
         undefined,
         errorShape(ErrorCodes.INVALID_REQUEST, `agent "${agentId}" not found`),
       );
       return;
+    }
+
+    // Check workspace ownership for non-super-admin users
+    if (client && !isSuperAdmin(client)) {
+      try {
+        requireWorkspaceOwnership(client, agentEntry.workspaceId, "agent");
+      } catch (err) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, `agent "${agentId}" not found`),
+        );
+        return;
+      }
     }
 
     const workspaceDir =
@@ -313,7 +366,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
 
     respond(true, { ok: true, agentId }, undefined);
   },
-  "agents.delete": async ({ params, respond }) => {
+  "agents.delete": async ({ params, respond, client }) => {
     if (!validateAgentsDeleteParams(params)) {
       respond(
         false,
@@ -338,13 +391,31 @@ export const agentsHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    if (findAgentEntryIndex(listAgentEntries(cfg), agentId) < 0) {
+    
+    const agentEntries = listAgentEntries(cfg);
+    const agentEntry = agentEntries.find((a) => normalizeAgentId(a.id) === agentId);
+    
+    if (!agentEntry) {
       respond(
         false,
         undefined,
         errorShape(ErrorCodes.INVALID_REQUEST, `agent "${agentId}" not found`),
       );
       return;
+    }
+
+    // Check workspace ownership for non-super-admin users
+    if (client && !isSuperAdmin(client)) {
+      try {
+        requireWorkspaceOwnership(client, agentEntry.workspaceId, "agent");
+      } catch (err) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, `agent "${agentId}" not found`),
+        );
+        return;
+      }
     }
 
     const deleteFiles = typeof params.deleteFiles === "boolean" ? params.deleteFiles : true;
@@ -365,7 +436,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
 
     respond(true, { ok: true, agentId, removedBindings: result.removedBindings }, undefined);
   },
-  "agents.files.list": async ({ params, respond }) => {
+  "agents.files.list": async ({ params, respond, client }) => {
     if (!validateAgentsFilesListParams(params)) {
       respond(
         false,
@@ -385,11 +456,24 @@ export const agentsHandlers: GatewayRequestHandlers = {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "unknown agent id"));
       return;
     }
+
+    // Check workspace ownership for non-super-admin users
+    const agentEntries = listAgentEntries(cfg);
+    const agentEntry = agentEntries.find((a) => normalizeAgentId(a.id) === agentId);
+    if (agentEntry && client && !isSuperAdmin(client)) {
+      try {
+        requireWorkspaceOwnership(client, agentEntry.workspaceId, "agent");
+      } catch (err) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "unknown agent id"));
+        return;
+      }
+    }
+
     const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
     const files = await listAgentFiles(workspaceDir);
     respond(true, { agentId, workspace: workspaceDir, files }, undefined);
   },
-  "agents.files.get": async ({ params, respond }) => {
+  "agents.files.get": async ({ params, respond, client }) => {
     if (!validateAgentsFilesGetParams(params)) {
       respond(
         false,
@@ -409,6 +493,19 @@ export const agentsHandlers: GatewayRequestHandlers = {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "unknown agent id"));
       return;
     }
+
+    // Check workspace ownership for non-super-admin users
+    const agentEntries = listAgentEntries(cfg);
+    const agentEntry = agentEntries.find((a) => normalizeAgentId(a.id) === agentId);
+    if (agentEntry && client && !isSuperAdmin(client)) {
+      try {
+        requireWorkspaceOwnership(client, agentEntry.workspaceId, "agent");
+      } catch (err) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "unknown agent id"));
+        return;
+      }
+    }
+
     const name = String(params.name ?? "").trim();
     if (!ALLOWED_FILE_NAMES.has(name)) {
       respond(
@@ -451,7 +548,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
       undefined,
     );
   },
-  "agents.files.set": async ({ params, respond }) => {
+  "agents.files.set": async ({ params, respond, client }) => {
     if (!validateAgentsFilesSetParams(params)) {
       respond(
         false,
@@ -471,6 +568,19 @@ export const agentsHandlers: GatewayRequestHandlers = {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "unknown agent id"));
       return;
     }
+
+    // Check workspace ownership for non-super-admin users
+    const agentEntries = listAgentEntries(cfg);
+    const agentEntry = agentEntries.find((a) => normalizeAgentId(a.id) === agentId);
+    if (agentEntry && client && !isSuperAdmin(client)) {
+      try {
+        requireWorkspaceOwnership(client, agentEntry.workspaceId, "agent");
+      } catch (err) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "unknown agent id"));
+        return;
+      }
+    }
+
     const name = String(params.name ?? "").trim();
     if (!ALLOWED_FILE_NAMES.has(name)) {
       respond(

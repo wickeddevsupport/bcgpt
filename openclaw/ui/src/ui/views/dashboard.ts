@@ -207,8 +207,10 @@ export function renderDashboard(props: DashboardProps) {
     },
   ];
   const setupCompleted = setupSteps.filter((step) => step.done).length;
+  const allSetupDone = setupCompleted === setupSteps.length;
   const nextSetupStep = setupSteps.find((step) => !step.done) ?? null;
-  const wizardOpen = setupCompleted !== setupSteps.length;
+  // Auto-collapse wizard if all steps are done
+  const wizardOpen = !allSetupDone;
   const focusItems = [
     !projectConfigured
       ? {
@@ -261,7 +263,7 @@ export function renderDashboard(props: DashboardProps) {
                   Next: <strong>${nextSetupStep.title}</strong>
                 </span>
               `
-            : html`<span class="muted">Setup complete. Use Chat to run workflows.</span>`}
+            : html`<span class="muted">Setup complete. <a href=${props.chatHref} class="btn btn--primary" style="margin-left:8px;">Start Using Chat</a></span>`}
         </div>
 
         <div class="list" style="margin-top: 12px;">

@@ -38,6 +38,8 @@ import {
 } from "../session-utils.js";
 import { formatForLog } from "../ws-log.js";
 import { injectTimestamp, timestampOptsFromConfig } from "./agent-timestamp.js";
+import { isSuperAdmin } from "../workspace-context.js";
+import { listAgentsForGateway, resolveGatewaySessionStoreTarget } from "../session-utils.js";
 
 type TranscriptAppendResult = {
   ok: boolean;
@@ -199,8 +201,30 @@ function broadcastChatError(params: {
   params.context.nodeSendToSession(params.sessionKey, "chat", payload);
 }
 
+/**
+ * Validates that a user has access to a session by checking workspace ownership.
+ * Returns true if user has access, false otherwise.
+ */
+function canAccessSession(
+  sessionKey: string,
+  cfg: ReturnType<typeof loadConfig>,
+  client: GatewayRequestHandlers["chat.send"] extends (args: infer A) => void ? A["client"] : never,
+): boolean {
+  if (!client || isSuperAdmin(client)) {
+    return true;
+  }
+
+  const target = resolveGatewaySessionStoreTarget({ cfg, key: sessionKey });
+  const { agents } = listAgentsForGateway(cfg);
+  const workspaceAgentIds = new Set(
+    agents.filter((a) => a.workspaceId === client.pmosWorkspaceId).map((a) => a.id),
+  );
+
+  return workspaceAgentIds.has(target.agentId);
+}
+
 export const chatHandlers: GatewayRequestHandlers = {
-  "chat.history": async ({ params, respond, context }) => {
+  "chat.history": async ({ params, respond, context, client }) => {
     if (!validateChatHistoryParams(params)) {
       respond(
         false,
@@ -217,6 +241,16 @@ export const chatHandlers: GatewayRequestHandlers = {
       limit?: number;
     };
     const { cfg, storePath, entry } = loadSessionEntry(sessionKey);
+
+    // Check workspace ownership for non-super-admin users
+    if (!canAccessSession(sessionKey, cfg, client)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, `session "${sessionKey}" not found`),
+      );
+      return;
+    }
     const sessionId = entry?.sessionId;
     const rawMessages =
       sessionId && storePath ? readSessionMessages(sessionId, storePath, entry?.sessionFile) : [];
@@ -253,7 +287,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       verboseLevel,
     });
   },
-  "chat.abort": ({ params, respond, context }) => {
+  "chat.abort": ({ params, respond, context, client }) => {
     if (!validateChatAbortParams(params)) {
       respond(
         false,
@@ -269,6 +303,17 @@ export const chatHandlers: GatewayRequestHandlers = {
       sessionKey: string;
       runId?: string;
     };
+
+    // Check workspace ownership for non-super-admin users
+    const { cfg } = loadSessionEntry(sessionKey);
+    if (!canAccessSession(sessionKey, cfg, client)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, `session "${sessionKey}" not found`),
+      );
+      return;
+    }
 
     const ops = {
       chatAbortControllers: context.chatAbortControllers,
@@ -369,6 +414,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       );
       return;
     }
+
     let parsedMessage = p.message;
     let parsedImages: ChatImageContent[] = [];
     if (normalizedAttachments.length > 0) {
@@ -386,6 +432,16 @@ export const chatHandlers: GatewayRequestHandlers = {
     }
     const rawSessionKey = p.sessionKey;
     const { cfg, entry, canonicalKey: sessionKey } = loadSessionEntry(rawSessionKey);
+
+    // Check workspace ownership for non-super-admin users
+    if (!canAccessSession(rawSessionKey, cfg, client)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, `session "${rawSessionKey}" not found`),
+      );
+      return;
+    }
     const timeoutMs = resolveAgentTimeoutMs({
       cfg,
       overrideMs: p.timeoutMs,
@@ -631,7 +687,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       });
     }
   },
-  "chat.inject": async ({ params, respond, context }) => {
+  "chat.inject": async ({ params, respond, context, client }) => {
     if (!validateChatInjectParams(params)) {
       respond(
         false,
@@ -651,7 +707,17 @@ export const chatHandlers: GatewayRequestHandlers = {
 
     // Load session to find transcript file
     const rawSessionKey = p.sessionKey;
-    const { storePath, entry } = loadSessionEntry(rawSessionKey);
+    const { cfg, storePath, entry } = loadSessionEntry(rawSessionKey);
+
+    // Check workspace ownership for non-super-admin users
+    if (!canAccessSession(rawSessionKey, cfg, client)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, `session "${rawSessionKey}" not found`),
+      );
+      return;
+    }
     const sessionId = entry?.sessionId;
     if (!sessionId || !storePath) {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "session not found"));
