@@ -154,4 +154,25 @@ describe("chat view", () => {
     expect(onNewSession).toHaveBeenCalledTimes(1);
     expect(container.textContent).not.toContain("Stop");
   });
+
+  it('shows "Create workflow" button and calls handler when clicked', () => {
+    const container = document.createElement('div');
+    const onCreate = vi.fn();
+    render(
+      renderChat(
+        createProps({
+          draft: 'When a new ticket is created, post to Slack',
+          onCreateWorkflow: onCreate,
+        }),
+      ),
+      container,
+    );
+
+    const createBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === 'Create workflow',
+    );
+    expect(createBtn).toBeDefined();
+    createBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(onCreate).toHaveBeenCalledTimes(1);
+  });
 });

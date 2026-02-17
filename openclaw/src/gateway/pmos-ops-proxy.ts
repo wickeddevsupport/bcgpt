@@ -163,6 +163,49 @@ export function readLocalN8nConfig(): { url: string; host: string; port: number 
   }
 }
 
+// Best-effort server-side login helper: POSTs credentials to n8n and returns Set-Cookie when available.
+async function attemptN8nLogin(targetBase: string, email: string, password: string) {
+  const endpoints = [
+    `${targetBase.replace(/\/+$/, "")}/rest/users/login`,
+    `${targetBase.replace(/\/+$/, "")}/api/v1/users/login`,
+    `${targetBase.replace(/\/+$/, "")}/users/login`,
+  ];
+  for (const ep of endpoints) {
+    try {
+      const res = await fetch(ep, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password }),
+        redirect: "manual",
+      });
+      const sc = res.headers.get("set-cookie");
+      if (sc) return sc;
+      if (res.ok) return null;
+    } catch (err) {
+      // ignore and try next
+    }
+  }
+  return null;
+}
+
+// If workspace has ops.user creds, attempt server-side login and forward Set-Cookie to client (best-effort).
+async function attemptAutoLoginForRequest(req: IncomingMessage, res: ServerResponse, targetN8nBase: string) {
+  try {
+    const session = await resolvePmosSessionFromRequest(req);
+    if (!session.ok) return;
+    const wc = await readWorkspaceConnectors(session.user.workspaceId);
+    const u = wc?.ops?.user as { email?: string; password?: string } | undefined;
+    if (!u?.email || !u?.password) return;
+    const cookie = await attemptN8nLogin(targetN8nBase, u.email, u.password);
+    if (cookie) {
+      res.setHeader("Set-Cookie", cookie);
+    }
+  } catch (err) {
+    // best-effort only
+    console.warn("[pmos] auto-login attempt failed:", String(err));
+  }
+}
+
 /**
  * Transparent HTTP proxy for local n8n.
  *
@@ -190,6 +233,8 @@ export async function handleLocalN8nRequest(
 
   const n8n = readLocalN8nConfig();
   if (n8n) {
+    // Attempt best-effort auto-login for the workspace user (if provisioned)
+    await attemptAutoLoginForRequest(req, res, n8n.url);
     // Proxy everything transparently to local n8n
     const targetUrl = `${n8n.url}${pathname}${url.search}`;
     await proxyUpstream({ req, res, targetUrl });
@@ -221,6 +266,10 @@ export async function handleLocalN8nRequest(
     path.join(OPS_UI_DIST, normalized, "index.html"),
     path.join(OPS_UI_DIST, "index.html"),
   ];
+
+  // If the workspace has ops.user credentials stored, attempt a server-side login so the
+  // editor opens without showing n8n's login/setup screen (best-effort).
+  await attemptAutoLoginForRequest(req, res, readGlobalOpsConfig().url);
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {

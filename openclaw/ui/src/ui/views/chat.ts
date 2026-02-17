@@ -64,6 +64,8 @@ export type ChatProps = {
   onToggleFocusMode: () => void;
   onDraftChange: (next: string) => void;
   onSend: () => void;
+  onCreateWorkflow?: () => void;
+  createWorkflowBusy?: boolean;
   onAbort?: () => void;
   onQueueRemove: (id: string) => void;
   onNewSession: () => void;
@@ -480,6 +482,14 @@ export function renderChat(props: ChatProps) {
               @click=${canAbort ? props.onAbort : props.onNewSession}
             >
               ${canAbort ? "Stop" : "New session"}
+            </button>
+            <button
+              class="btn"
+              ?disabled=${!props.connected || props.createWorkflowBusy || !String(props.draft ?? "").trim()}
+              @click=${() => props.onCreateWorkflow?.()}
+              title="Create an n8n workflow from this message"
+            >
+              Create workflow
             </button>
             <button
               class="btn primary"

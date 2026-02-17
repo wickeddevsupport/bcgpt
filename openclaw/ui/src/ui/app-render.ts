@@ -510,12 +510,13 @@ export function renderApp(state: AppViewState) {
                       <span class="spinner"></span>
                       <span class="muted">Setting up your automation workspace…</span>
                     </div>`
-                  : html`<iframe
-                      src="/ops-ui/"
-                      style="width:100%;height:100%;border:none;display:block;"
-                      title="Wicked Ops Workflows"
-                      allow="clipboard-read; clipboard-write"
-                    ></iframe>`}
+                  : html`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;">
+                      <script>if (location.pathname !== '/ops-ui/') { location.assign('/ops-ui/'); }</script>
+                      <div style="text-align:center; max-width:600px;">
+                        <h3 style="margin:0 0 8px">Opening Workflows editor…</h3>
+                        <div class="muted">If the editor did not open automatically, <a href="/ops-ui/">click here to open Wicked Ops</a>.</div>
+                      </div>
+                    </div>`}
               </div>`
             : nothing
         }
@@ -1530,6 +1531,8 @@ export function renderApp(state: AppViewState) {
                 attachments: state.chatAttachments,
                 onAttachmentsChange: (next) => (state.chatAttachments = next),
                 onSend: () => state.handleSendChat(),
+                onCreateWorkflow: () => state.handleChatCreateWorkflow(),
+                createWorkflowBusy: state.chatCreateWorkflowBusy,
                 canAbort: Boolean(state.chatRunId),
                 onAbort: () => void state.handleAbortChat(),
                 onQueueRemove: (id) => state.removeQueuedMessage(id),

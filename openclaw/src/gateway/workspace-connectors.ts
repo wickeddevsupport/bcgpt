@@ -3,7 +3,7 @@ import path from "node:path";
 import { CONFIG_DIR, ensureDir } from "../utils.js";
 
 export type WorkspaceConnectors = {
-  ops?: { url?: string; apiKey?: string };
+  ops?: { url?: string; apiKey?: string; user?: { email?: string; password?: string } };
   activepieces?: { url?: string; apiKey?: string; projectId?: string };
   bcgpt?: { url?: string; apiKey?: string };
   [k: string]: unknown;

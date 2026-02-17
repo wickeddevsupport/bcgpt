@@ -47,6 +47,39 @@ describe("pmos.connectors.workspace.provision_ops", () => {
     expect(saved?.ops?.projectId).toBe("proj-123");
   });
 
+  it("creates an n8n user (best-effort) and persists credentials when available", async () => {
+    vi.stubEnv("OPS_URL", opsUrl);
+    vi.stubEnv("OPS_API_KEY", "global-key");
+
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/api/v1/projects")) {
+        return { ok: true, status: 201, text: async () => JSON.stringify({ id: "proj-456" }) } as any;
+      }
+      if (url.endsWith("/api/v1/api-keys")) {
+        return { ok: true, status: 201, text: async () => JSON.stringify({ key: "workspace-key-3" }) } as any;
+      }
+      if (url.endsWith("/api/v1/users")) {
+        return { ok: true, status: 201, text: async () => JSON.stringify({ id: "user-1", email: `pmos-${workspaceId}@wicked.local` }) } as any;
+      }
+      return { ok: false, status: 404, text: async () => "" } as any;
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const respond = vi.fn();
+    const client = { pmosWorkspaceId: workspaceId, pmosRole: "workspace_admin" } as any;
+
+    await pmosHandlers["pmos.connectors.workspace.provision_ops"]({ params: {}, respond, client } as any);
+
+    expect(respond).toHaveBeenCalledWith(true, expect.objectContaining({ ok: true, workspaceId, projectId: "proj-456", apiKey: "workspace-key-3" }), undefined);
+
+    const saved = await readWorkspaceConnectors(workspaceId);
+    expect(saved?.ops?.apiKey).toBe("workspace-key-3");
+    expect(saved?.ops?.projectId).toBe("proj-456");
+    expect(saved?.ops?.user?.email).toBe(`pmos-${workspaceId}@wicked.local`);
+    expect(typeof saved?.ops?.user?.password).toBe("string");
+    expect((saved?.ops?.user?.password ?? "").length).toBeGreaterThan(0);
+  });
+
   it("when Projects API is license-gated, persists API key only", async () => {
     vi.stubEnv("OPS_URL", opsUrl);
     vi.stubEnv("OPS_API_KEY", "global-key");

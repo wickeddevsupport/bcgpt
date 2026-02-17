@@ -3,6 +3,7 @@
  * Called fire-and-forget on signup, and also used by the manual provision_ops WS handler.
  */
 import { loadConfig } from "../config/config.js";
+import crypto from "node:crypto";
 import { readWorkspaceConnectors, writeWorkspaceConnectors } from "./workspace-connectors.js";
 
 export type ProvisionOpsResult = {
@@ -151,7 +152,36 @@ export async function provisionWorkspaceOps(
     throw new Error(`Failed to provision Wicked Ops for workspace ${workspaceId}: ${msg}`);
   }
 
-  // 3. Persist to connectors file
+  // 3. Best-effort: create a workspace-scoped n8n user so the editor can auto-login.
+  //    This is optional and non-fatal — API key + project are the core requirement.
+  let createdUser: { email: string; password: string } | undefined;
+  try {
+    const userEmail = `pmos-${workspaceId}@wicked.local`;
+    const password = crypto.randomBytes(12).toString("base64url");
+    const userEndpoints = [`${opsUrl}/api/v1/users`, `${opsUrl}/rest/users`, `${opsUrl}/users`];
+    for (const ep of userEndpoints) {
+      const uRes = await doFetch(ep, {
+        method: "POST",
+        headers: { "content-type": "application/json", "X-N8N-API-KEY": opsKey },
+        body: JSON.stringify({ email: userEmail, password, firstName: "PMOS", lastName: `ws-${workspaceId}` }),
+        timeoutMs: 12000,
+      });
+      if (uRes.ok && uRes.json) {
+        createdUser = { email: userEmail, password };
+        break;
+      }
+      // if user already exists (409), still persist synthetic creds so gateway can attempt login
+      if (uRes.status === 409) {
+        createdUser = { email: userEmail, password };
+        break;
+      }
+    }
+  } catch (err) {
+    // best-effort: swallow errors and continue
+    console.warn("[pmos] create n8n user (best-effort) failed:", String(err));
+  }
+
+  // 4. Persist to connectors file (include user creds if available)
   const existing = (await readWorkspaceConnectors(workspaceId)) ?? {};
   const next = {
     ...existing,
@@ -160,6 +190,7 @@ export async function provisionWorkspaceOps(
       url: opsUrl,
       ...(createdApiKey ? { apiKey: createdApiKey } : {}),
       ...(projectId ? { projectId } : {}),
+      ...(createdUser ? { user: createdUser } : {}),
     },
   };
   await writeWorkspaceConnectors(workspaceId, next);

@@ -261,6 +261,60 @@ export default {
       },
     });
 
+    // Simple natural-language → workflow helper (pragmatic starter):
+    // creates a minimal workflow skeleton from a short description so chat can
+    // quickly create a workflow and the user can open it in the editor.
+    api.registerTool({
+      name: "ops_workflow_generate",
+      description: "Generate a simple n8n workflow from a short natural-language description.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["name", "description"],
+        properties: {
+          name: { type: "string" },
+          description: { type: "string" },
+          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
+        },
+      },
+      async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
+        const params = resolveToolParams(toolCallIdOrParams, maybeParams) as Record<string, any>;
+        const name = readOptionalString(params, "name");
+        const desc = readOptionalString(params, "description");
+        const workspaceId = readOptionalString(params, "workspaceId");
+        if (!name || !desc) throw new Error("name and description are required");
+
+        // Minimal n8n workflow skeleton: Start node -> Function node that contains the description
+        const workflowBody = {
+          name,
+          nodes: [
+            {
+              name: "Start",
+              type: "n8n-nodes-base.start",
+              typeVersion: 1,
+              position: [250, 300],
+              parameters: {},
+            },
+            {
+              name: "Describe",
+              type: "n8n-nodes-base.function",
+              typeVersion: 1,
+              position: [450, 300],
+              parameters: {
+                functionCode: `// Natural language description:\n// ${desc.replace(/`/g, "\\`")}\nreturn [{ json: { description: ${JSON.stringify(
+                desc,
+              )} } }];`,
+              },
+            },
+          ],
+          connections: {},
+        } as unknown as Record<string, unknown>;
+
+        const data = await opsRequest({ api, endpoint: "workflows", method: "POST", body: workflowBody, workspaceId });
+        return jsonToolResult(data);
+      },
+    });
+
     api.registerTool({
       name: "ops_workflow_update",
       description: "Update an existing n8n workflow.",

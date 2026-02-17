@@ -27,7 +27,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // ── Resolve paths ────────────────────────────────────────────────────────────
 
 const bcgptRoot = path.resolve(__dirname, "..");
-const defaultN8nRepo = path.resolve(bcgptRoot, "..", "n8n");
+// Prefer explicit env, then vendored copy (openclaw/vendor/n8n), then sibling ../n8n
+const vendorCandidate = path.join(bcgptRoot, "openclaw", "vendor", "n8n");
+const siblingCandidate = path.resolve(bcgptRoot, "..", "n8n");
+const defaultN8nRepo = process.env.N8N_REPO_PATH ?? (fs.existsSync(vendorCandidate) ? vendorCandidate : siblingCandidate);
 const n8nRepoPath = process.env.N8N_REPO_PATH ?? defaultN8nRepo;
 const publicPath = process.env.N8N_PUBLIC_PATH ?? "/ops-ui/";
 const outputDir = path.join(__dirname, "dist");

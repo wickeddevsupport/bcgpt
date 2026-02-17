@@ -241,6 +241,8 @@ describe("agents.update", () => {
     vi.clearAllMocks();
     mocks.loadConfigReturn = {};
     mocks.findAgentEntryIndex.mockReturnValue(0);
+    // agent entry used by update/delete handlers
+    mocks.listAgentEntries.mockReturnValue([{ id: "test-agent", workspaceId: undefined } as any]);
     mocks.applyAgentConfig.mockImplementation((_cfg, _opts) => ({}));
   });
 
@@ -297,6 +299,8 @@ describe("agents.delete", () => {
     vi.clearAllMocks();
     mocks.loadConfigReturn = {};
     mocks.findAgentEntryIndex.mockReturnValue(0);
+    // agent entry used by update/delete handlers
+    mocks.listAgentEntries.mockReturnValue([{ id: "test-agent", workspaceId: undefined } as any]);
     mocks.pruneAgentConfig.mockReturnValue({ config: {}, removedBindings: 2 });
   });
 

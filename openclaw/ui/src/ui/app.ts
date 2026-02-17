@@ -213,6 +213,8 @@ export class OpenClawApp extends LitElement {
   @state() chatQueue: ChatQueueItem[] = [];
   @state() chatAttachments: ChatAttachment[] = [];
   @state() chatManualRefreshInFlight = false;
+  @state() chatCreateWorkflowBusy = false;
+  @state() chatCreateWorkflowError: string | null = null;
   // Sidebar state for tool output viewing
   @state() sidebarOpen = false;
   @state() sidebarContent: string | null = null;
@@ -990,6 +992,53 @@ export class OpenClawApp extends LitElement {
       messageOverride,
       opts,
     );
+  }
+
+  async handleChatCreateWorkflow() {
+    const draft = (this.chatMessage ?? "").trim();
+    if (!draft) {
+      this.lastError = "Type a message first to create a workflow.";
+      return;
+    }
+
+    // Simple title: first 6 words title-cased
+    const words = draft.split(/\s+/).filter(Boolean).slice(0, 6);
+    const title = (words.length ? words.join(" ") : "New Automation").slice(0, 64);
+    const name = title.replace(/\b\w/g, (c) => c.toUpperCase());
+
+    this.chatCreateWorkflowBusy = true;
+    this.chatCreateWorkflowError = null;
+    try {
+      // Lazy import controller to avoid circular deps
+      const mod = await import("./controllers/wicked-ops.js");
+      const res = await mod.generateN8nWorkflow(
+        this as unknown as Parameters<typeof mod.generateN8nWorkflow>[0],
+        name,
+        draft,
+      );
+
+      const details = (res ?? {}) as Record<string, unknown>;
+      const possibleId =
+        details.id ?? details.workflowId ?? (details.data && (details.data as any).id) ??
+        (details.details && (details.details as any).id);
+      const workflowId = possibleId ? String(possibleId) : undefined;
+
+      // Redirect to the editor for the new workflow when possible.
+      if (workflowId) {
+        const base = this.settings.basePath?.trim() || "";
+        const path = `${base || ""}/ops-ui/workflows/${encodeURIComponent(workflowId)}`;
+        window.location.assign(path);
+        return;
+      }
+
+      this.lastError = "Workflow created but ID could not be detected. Open Wicked Ops to view your workflows.";
+      window.location.assign((this.settings.basePath?.trim() || "") + "/ops-ui/");
+    } catch (err) {
+      this.chatCreateWorkflowError = String(err ?? "unknown error");
+      this.lastError = `Create workflow failed: ${String(err)}`;
+    } finally {
+      this.chatCreateWorkflowBusy = false;
+    }
   }
 
   async handleWhatsAppStart(force: boolean) {
