@@ -116,6 +116,15 @@ async function loginToN8n(
   email: string,
   password: string,
 ): Promise<string | null> {
+  const toCookieHeader = (setCookies: string[]): string => {
+    // Convert Set-Cookie header values into a Cookie header value.
+    // Keep only the first "key=value" pair from each cookie string.
+    const parts = setCookies
+      .map((value) => (typeof value === "string" ? value.split(";")[0]?.trim() : ""))
+      .filter((value): value is string => Boolean(value));
+    return parts.join("; ");
+  };
+
   const endpoints = [
     `${baseUrl}/rest/users/login`,
     `${baseUrl}/api/v1/users/login`,
@@ -129,8 +138,18 @@ async function loginToN8n(
         body: JSON.stringify({ email, password }),
         redirect: "manual",
       });
-      const setCookie = res.headers.get("set-cookie");
-      if (setCookie) return setCookie;
+      const setCookies = (() => {
+        const headerObj = res.headers as any;
+        const getSetCookie = typeof headerObj?.getSetCookie === "function" ? headerObj.getSetCookie : null;
+        if (getSetCookie) {
+          const values = getSetCookie.call(headerObj) as unknown;
+          return Array.isArray(values) ? (values.filter((v) => typeof v === "string") as string[]) : [];
+        }
+        const value = res.headers.get("set-cookie");
+        return value ? [value] : [];
+      })();
+
+      if (setCookies.length > 0) return toCookieHeader(setCookies);
       if (res.ok) return null;
     } catch {
       // try next endpoint
