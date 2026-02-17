@@ -338,6 +338,19 @@ export function extractPmosSessionTokenFromRequest(req: IncomingMessage): string
   return extractPmosSessionTokenFromCookieHeader(cookieHeader);
 }
 
+function extractBearerTokenFromRequest(req: IncomingMessage): string | null {
+  const raw = req.headers.authorization;
+  const header = Array.isArray(raw) ? raw[0] : raw;
+  if (!header || typeof header !== "string") return null;
+  const trimmed = header.trim();
+  if (!trimmed) return null;
+  const prefix = "bearer ";
+  if (trimmed.length <= prefix.length) return null;
+  if (trimmed.slice(0, prefix.length).toLowerCase() !== prefix) return null;
+  const token = trimmed.slice(prefix.length).trim();
+  return token || null;
+}
+
 export async function resolvePmosSessionFromToken(token: string): Promise<SessionLookupResult> {
   const trimmed = token.trim();
   if (!trimmed) {
@@ -370,11 +383,33 @@ export async function resolvePmosSessionFromToken(token: string): Promise<Sessio
 }
 
 export async function resolvePmosSessionFromRequest(req: IncomingMessage): Promise<SessionLookupResult> {
-  const token = extractPmosSessionTokenFromRequest(req);
-  if (!token) {
-    return { ok: false, status: 401, error: "Session token missing." };
+  const cookieToken = extractPmosSessionTokenFromRequest(req);
+  if (cookieToken) {
+    return await resolvePmosSessionFromToken(cookieToken);
   }
-  return await resolvePmosSessionFromToken(token);
+
+  // Automation / operator flows: allow gateway bearer token as a super_admin PMOS session.
+  // This keeps /api/ops usable for smoke checks and server-to-server calls without a browser cookie.
+  const bearer = extractBearerTokenFromRequest(req);
+  const gatewayToken = (process.env.OPENCLAW_GATEWAY_TOKEN || "").trim();
+  if (bearer && gatewayToken && safeStringEqual(bearer, gatewayToken)) {
+    return await runWithStoreMutex(async () => {
+      const store = await loadStoreUnlocked();
+      pruneExpiredSessions(store);
+      const superAdmin = store.users.find((user) => user.role === "super_admin") ?? store.users[0];
+      if (!superAdmin) {
+        return { ok: false, status: 401, error: "PMOS is not initialized (no users exist yet)." };
+      }
+      return {
+        ok: true,
+        user: toPublicUser(superAdmin),
+        sessionId: "gateway-token",
+        sessionToken: bearer,
+      };
+    });
+  }
+
+  return { ok: false, status: 401, error: "Session token missing." };
 }
 
 export async function revokePmosSessionByToken(token: string): Promise<void> {
