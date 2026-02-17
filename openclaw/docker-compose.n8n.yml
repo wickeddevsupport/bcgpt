@@ -1,0 +1,63 @@
+# Local development: run n8n alongside openclaw
+#
+# Usage:
+#   docker compose -f docker-compose.n8n.yml up
+#
+# This starts a local n8n instance that openclaw proxies at /ops-ui/ and /rest/*.
+#
+# After starting, add to your openclaw config (~/.openclaw/openclaw.json):
+#   {
+#     "pmos": {
+#       "n8n": {
+#         "localUrl": "http://localhost:5678"
+#       }
+#     }
+#   }
+#
+# Or set the env var:
+#   N8N_LOCAL_URL=http://localhost:5678
+#
+# n8n will be available at:
+#   - Direct: http://localhost:5678 (internal)
+#   - Via openclaw proxy: http://localhost:18789/ops-ui/ (when openclaw is running)
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    ports:
+      - "5678:5678"
+    environment:
+      # Serve the editor at /ops-ui/ so openclaw can proxy it correctly
+      N8N_PATH: /ops-ui/
+      # The editor's REST API calls must go back through openclaw's gateway
+      # so workspace API key injection works. When proxied, the browser is on
+      # the same origin as openclaw, so relative /rest/* paths work.
+      WEBHOOK_URL: ${OPENCLAW_PUBLIC_URL:-http://localhost:18789}
+      N8N_PROTOCOL: http
+      N8N_HOST: ${OPENCLAW_HOST:-localhost}
+      # Disable user management for seamless local dev (single-user mode)
+      # Each workspace uses a separate n8n Project for isolation.
+      N8N_USER_MANAGEMENT_DISABLED: "false"
+      # Set owner credentials — openclaw will use these for auto-login
+      N8N_OWNER_EMAIL: ${N8N_OWNER_EMAIL:-admin@wickedlab.io}
+      N8N_OWNER_PASSWORD: ${N8N_OWNER_PASSWORD:-changeme}
+      # Point n8n to send telemetry nowhere
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      # Store data in a Docker volume
+      DB_TYPE: sqlite
+      DB_SQLITE_DATABASE: /home/node/.n8n/database.sqlite
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: "168"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  n8n_data:
+    driver: local

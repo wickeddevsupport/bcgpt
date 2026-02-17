@@ -44,7 +44,11 @@ import { resolveGatewayClientIp } from "./net.js";
 import { handleOpenAiHttpRequest } from "./openai-http.js";
 import { handleOpenResponsesHttpRequest } from "./openresponses-http.js";
 import { handlePmosAuthHttpRequest } from "./pmos-auth-http.js";
-import { handleOpsProxyRequest } from "./pmos-ops-proxy.js";
+import {
+  handleLocalN8nRequest,
+  handleOpsProxyRequest,
+  tunnelN8nWebSocket,
+} from "./pmos-ops-proxy.js";
 import { handleToolsInvokeHttpRequest } from "./tools-invoke-http.js";
 
 type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
@@ -328,6 +332,9 @@ export function createGatewayHttpServer(opts: {
       ) {
         return;
       }
+      if (await handleLocalN8nRequest(req, res)) {
+        return;
+      }
       if (await handleOpsProxyRequest(req, res)) {
         return;
       }
@@ -453,6 +460,10 @@ export function attachGatewayUpgradeHandler(opts: {
         if (canvasHost.handleUpgrade(req, socket, head)) {
           return;
         }
+      }
+      // Tunnel n8n WebSocket push connection to local n8n if configured
+      if (tunnelN8nWebSocket(req, socket, head)) {
+        return;
       }
       wss.handleUpgrade(req, socket, head, (ws) => {
         wss.emit("connection", ws, req);

@@ -1,0 +1,10 @@
+{
+  "name": "@openclaw/ops-ui",
+  "version": "0.1.0",
+  "description": "n8n editor-ui bundle for Wicked OS (built from local n8n repo)",
+  "private": true,
+  "scripts": {
+    "build": "node build.mjs",
+    "build:watch": "node build.mjs --watch"
+  }
+}

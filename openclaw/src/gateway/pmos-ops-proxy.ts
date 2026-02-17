@@ -1,8 +1,42 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { Duplex } from "node:stream";
+import fs from "node:fs";
+import net from "node:net";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import { loadConfig } from "../config/config.js";
 import { resolvePmosSessionFromRequest } from "./pmos-auth.js";
 import { readWorkspaceConnectors } from "./workspace-connectors.js";
+
+// Path to the pre-built ops-ui bundle (openclaw/ops-ui/dist/)
+// Compiled gateway is at openclaw/dist/gateway/, so go up two levels then into ops-ui/dist
+const OPS_UI_DIST = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "ops-ui",
+  "dist",
+);
+
+const OPS_UI_CONTENT_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".mjs": "application/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".map": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".wasm": "application/wasm",
+  ".txt": "text/plain; charset=utf-8",
+};
 
 // Hop-by-hop headers that must not be forwarded
 const STRIP_REQUEST_HEADERS = new Set([
@@ -18,6 +52,8 @@ const STRIP_RESPONSE_HEADERS = new Set([
   "connection",
   "transfer-encoding",
   "keep-alive",
+  // Web Fetch API auto-decompresses; strip so downstream doesn't try to decompress again
+  "content-encoding",
 ]);
 
 function readGlobalOpsConfig(): { url: string; apiKey: string | null } {
@@ -76,7 +112,7 @@ async function proxyUpstream(params: {
     upstream = await fetch(targetUrl, {
       method: req.method,
       headers,
-      body: body.length > 0 ? body : undefined,
+      body: body.length > 0 ? (body as unknown as BodyInit) : undefined,
     });
   } catch (err) {
     res.statusCode = 502;
@@ -100,6 +136,181 @@ async function proxyUpstream(params: {
 }
 
 /**
+ * Reads the locally-running n8n config from openclaw config / env vars.
+ * Returns null if no local n8n is configured (fall back to remote ops.wickedlab.io).
+ *
+ * Config (openclaw.json):
+ *   pmos.n8n.localUrl = "http://localhost:5678"
+ *
+ * Env vars:
+ *   N8N_LOCAL_URL=http://localhost:5678
+ */
+export function readLocalN8nConfig(): { url: string; host: string; port: number } | null {
+  const cfg = loadConfig() as unknown;
+  const pmos = (cfg as Record<string, unknown>)?.pmos as Record<string, unknown> | undefined;
+  const n8n = pmos?.n8n as Record<string, unknown> | undefined;
+  const rawUrl =
+    (typeof n8n?.localUrl === "string" && n8n.localUrl.trim()) ||
+    process.env.N8N_LOCAL_URL?.trim() ||
+    null;
+  if (!rawUrl) return null;
+  try {
+    const parsed = new URL(rawUrl.endsWith("/") ? rawUrl.slice(0, -1) : rawUrl);
+    const port = parsed.port ? parseInt(parsed.port, 10) : parsed.protocol === "https:" ? 443 : 80;
+    return { url: parsed.origin, host: parsed.hostname, port };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Transparent HTTP proxy for local n8n.
+ *
+ * Routes handled:
+ *   /ops-ui/*   → local n8n frontend (requires N8N_PATH=ops-ui on the n8n side)
+ *               fallback: serve pre-built static files from openclaw/ops-ui/dist/
+ *   /rest/*     → local n8n REST API (editor's internal API)
+ *   /form/*     → local n8n form submissions
+ *
+ * Returns true if handled.
+ */
+export async function handleLocalN8nRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<boolean> {
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const pathname = url.pathname;
+
+  const isOpsUi = pathname === "/ops-ui" || pathname.startsWith("/ops-ui/");
+  const isRestApi = pathname === "/rest" || pathname.startsWith("/rest/");
+  const isFormPath = pathname === "/form" || pathname.startsWith("/form/");
+  if (!isOpsUi && !isRestApi && !isFormPath) {
+    return false;
+  }
+
+  const n8n = readLocalN8nConfig();
+  if (n8n) {
+    // Proxy everything transparently to local n8n
+    const targetUrl = `${n8n.url}${pathname}${url.search}`;
+    await proxyUpstream({ req, res, targetUrl });
+    return true;
+  }
+
+  // No local n8n running — for /rest/* and /form/*, don't intercept
+  if (isRestApi || isFormPath) return false;
+
+  // For /ops-ui/*, try serving pre-built static bundle
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    res.statusCode = 405;
+    res.end("Method Not Allowed");
+    return true;
+  }
+
+  const subPath = pathname.slice("/ops-ui".length) || "/";
+  // Prevent directory traversal
+  const normalized = path.posix.normalize(subPath);
+  if (normalized.includes("..") || normalized.includes("\0")) {
+    res.statusCode = 400;
+    res.end("Bad Request");
+    return true;
+  }
+
+  // Try exact path, then index.html fallback for SPA routing
+  const candidates = [
+    path.join(OPS_UI_DIST, normalized),
+    path.join(OPS_UI_DIST, normalized, "index.html"),
+    path.join(OPS_UI_DIST, "index.html"),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+      const ext = path.extname(candidate).toLowerCase();
+      const contentType = OPS_UI_CONTENT_TYPES[ext] ?? "application/octet-stream";
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Cache-Control", ext === ".html" ? "no-cache" : "public, max-age=31536000, immutable");
+      if (req.method === "HEAD") {
+        res.statusCode = 200;
+        res.end();
+      } else {
+        res.statusCode = 200;
+        res.end(fs.readFileSync(candidate));
+      }
+      return true;
+    }
+  }
+
+  // Neither local n8n nor pre-built bundle found
+  res.statusCode = 503;
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.end(
+    `<!DOCTYPE html><html><body style="font-family:sans-serif;padding:2rem">` +
+      `<h2>Wicked Ops not available</h2>` +
+      `<p>To enable the workflow editor, either:</p>` +
+      `<ul>` +
+      `<li>Run n8n locally and set <code>N8N_LOCAL_URL=http://localhost:5678</code>, or</li>` +
+      `<li>Build the editor bundle with <code>pnpm ops-ui:build</code></li>` +
+      `</ul>` +
+      `</body></html>`,
+  );
+  return true;
+}
+
+/**
+ * Tunnels a WebSocket upgrade to the local n8n instance.
+ * Used for n8n's push connection (/push) and any other WS endpoints.
+ *
+ * Returns true if the upgrade was handled.
+ */
+export function tunnelN8nWebSocket(
+  req: IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+): boolean {
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const pathname = url.pathname;
+
+  const isN8nWs =
+    pathname === "/push" ||
+    pathname.startsWith("/push/") ||
+    pathname === "/rest/push" ||
+    pathname.startsWith("/rest/push/");
+
+  if (!isN8nWs) return false;
+
+  const n8n = readLocalN8nConfig();
+  if (!n8n) return false;
+
+  const upstream = net.connect(n8n.port, n8n.host, () => {
+    // Reconstruct the HTTP upgrade request to forward to n8n
+    const headers = Object.entries(req.headers)
+      .filter(([k]) => !["connection", "upgrade"].includes(k.toLowerCase()))
+      .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : (v ?? "")}`)
+      .join("\r\n");
+    upstream.write(
+      `GET ${pathname}${url.search} HTTP/1.1\r\n` +
+        `Host: ${n8n.host}:${n8n.port}\r\n` +
+        `Upgrade: websocket\r\n` +
+        `Connection: Upgrade\r\n` +
+        `${headers}\r\n\r\n`,
+    );
+    if (head.length > 0) {
+      upstream.write(head);
+    }
+    upstream.pipe(socket);
+    socket.pipe(upstream);
+  });
+
+  upstream.on("error", () => {
+    socket.destroy();
+  });
+  socket.on("error", () => {
+    upstream.destroy();
+  });
+
+  return true;
+}
+
+/**
  * Handles:
  *   /api/ops/*          → proxy to ops.wickedlab.io/api/v1/* with workspace API key injected
  *   /webhook/*          → transparent passthrough to ops.wickedlab.io/webhook/*
@@ -115,14 +326,15 @@ export async function handleOpsProxyRequest(
   const url = new URL(req.url ?? "/", "http://localhost");
   const pathname = url.pathname;
 
-  // Transparent webhook passthrough — no auth needed (webhooks are public by design)
+  // Transparent webhook passthrough — prefer local n8n, fall back to remote ops
   const webhookPrefixes = ["/webhook-waiting/", "/webhook-test/", "/webhook/"];
   for (const prefix of webhookPrefixes) {
     const bare = prefix.slice(0, -1); // without trailing slash
     if (pathname === bare || pathname.startsWith(prefix)) {
-      const { url: opsUrl } = readGlobalOpsConfig();
+      const localN8n = readLocalN8nConfig();
+      const baseUrl = localN8n ? localN8n.url : readGlobalOpsConfig().url;
       const subPath = pathname.slice(bare.length);
-      const targetUrl = `${opsUrl}${bare}${subPath}${url.search}`;
+      const targetUrl = `${baseUrl}${bare}${subPath}${url.search}`;
       await proxyUpstream({ req, res, targetUrl });
       return true;
     }
