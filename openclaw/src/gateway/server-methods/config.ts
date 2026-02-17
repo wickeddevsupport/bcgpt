@@ -36,6 +36,7 @@ import {
   validateConfigSetParams,
 } from "../protocol/index.js";
 import { isSuperAdmin, filterByWorkspace } from "../workspace-context.js";
+import { auditLogger } from "../../security/audit-logger.js";
 
 function resolveBaseHash(params: unknown): string | null {
   const raw = (params as { baseHash?: unknown })?.baseHash;
@@ -365,6 +366,15 @@ export const configHandlers: GatewayRequestHandlers = {
       delayMs: restartDelayMs,
       reason: "config.patch",
     });
+
+    // Audit log config modification
+    auditLogger.logSuccess("config.updated", {
+      workspaceId: client?.pmosWorkspaceId,
+      resource: "config",
+      resourceId: "system",
+      metadata: { method: "patch", sessionKey, note },
+    });
+
     respond(
       true,
       {

@@ -48,6 +48,7 @@ import {
   requireWorkspaceOwnership,
   isSuperAdmin,
 } from "../workspace-context.js";
+import { auditLogger } from "../../security/audit-logger.js";
 
 const BOOTSTRAP_FILE_NAMES = [
   DEFAULT_AGENTS_FILENAME,
@@ -288,6 +289,14 @@ export const agentsHandlers: GatewayRequestHandlers = {
     ];
     await fs.appendFile(identityPath, lines.join("\n"), "utf-8");
 
+    // Audit log successful agent creation
+    auditLogger.logSuccess("agent.created", {
+      workspaceId: client?.pmosWorkspaceId,
+      resource: "agent",
+      resourceId: agentId,
+      metadata: { name: rawName, workspace: workspaceDir },
+    });
+
     respond(true, { ok: true, agentId, name: rawName, workspace: workspaceDir }, undefined);
   },
   "agents.update": async ({ params, respond, client }) => {
@@ -433,6 +442,14 @@ export const agentsHandlers: GatewayRequestHandlers = {
         moveToTrashBestEffort(sessionsDir),
       ]);
     }
+
+    // Audit log successful agent deletion
+    auditLogger.logSuccess("agent.deleted", {
+      workspaceId: client?.pmosWorkspaceId,
+      resource: "agent",
+      resourceId: agentId,
+      metadata: { deleteFiles, removedBindings: result.removedBindings },
+    });
 
     respond(true, { ok: true, agentId, removedBindings: result.removedBindings }, undefined);
   },
