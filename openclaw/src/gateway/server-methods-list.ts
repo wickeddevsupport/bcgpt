@@ -89,6 +89,15 @@ const BASE_METHODS = [
   "chat.history",
   "chat.abort",
   "chat.send",
+  // PMOS workspace methods
+  "pmos.connectors.workspace.set",
+  "pmos.connectors.workspace.get",
+  "pmos.connectors.workspace.provision_ops",
+  // BYOK (Bring Your Own Keys)
+  "pmos.byok.list",
+  "pmos.byok.set",
+  "pmos.byok.remove",
+  "pmos.byok.validate",
 ];
 
 export function listGatewayMethods(): string[] {

@@ -1,0 +1,208 @@
+/**
+ * n8n Auth Bridge — OpenClaw Session → n8n Authentication
+ *
+ * Intercepts proxied requests to the embedded n8n instance and injects
+ * authentication context derived from the OpenClaw PMOS session.
+ *
+ * This replaces n8n's default cookie-based auth for embedded deployments,
+ * allowing users to access n8n seamlessly through the OpenClaw UI without
+ * a separate n8n login.
+ *
+ * Flow:
+ *   1. Client sends request with OpenClaw session cookie (pmos_session)
+ *   2. Bridge resolves session → user + workspaceId
+ *   3. Bridge ensures an n8n user exists for this workspace (creates on first access)
+ *   4. Bridge logs into n8n as that user and caches the auth cookie
+ *   5. Proxied request includes the n8n auth cookie transparently
+ */
+
+import type { IncomingMessage } from "node:http";
+import { resolvePmosSessionFromRequest, type PmosAuthUser } from "./pmos-auth.js";
+import { readWorkspaceConnectors, writeWorkspaceConnectors } from "./workspace-connectors.js";
+
+type N8nSessionCache = {
+  cookie: string;
+  expiresAt: number;
+};
+
+// In-memory cache: workspaceId → n8n session cookie
+const sessionCache = new Map<string, N8nSessionCache>();
+
+const SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+/**
+ * Resolve the OpenClaw user from an incoming HTTP request.
+ * Returns null if the request is unauthenticated.
+ */
+export async function resolveOpenClawUser(
+  req: IncomingMessage,
+): Promise<PmosAuthUser | null> {
+  const session = await resolvePmosSessionFromRequest(req);
+  if (!session.ok) return null;
+  return session.user;
+}
+
+/**
+ * Attempt to get a valid n8n auth cookie for the given workspace.
+ * Uses cached cookies when available, otherwise performs server-side login.
+ */
+export async function getN8nAuthCookie(
+  workspaceId: string,
+  n8nBaseUrl: string,
+): Promise<string | null> {
+  // Check cache first
+  const cached = sessionCache.get(workspaceId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.cookie;
+  }
+
+  // Read workspace-specific n8n credentials
+  const wc = await readWorkspaceConnectors(workspaceId);
+  const user = wc?.ops?.user as { email?: string; password?: string } | undefined;
+  if (!user?.email || !user?.password) {
+    return null;
+  }
+
+  // Attempt login to n8n
+  const cookie = await loginToN8n(n8nBaseUrl, user.email, user.password);
+  if (cookie) {
+    sessionCache.set(workspaceId, {
+      cookie,
+      expiresAt: Date.now() + SESSION_TTL_MS,
+    });
+  }
+  return cookie;
+}
+
+/**
+ * Login to n8n and return the session cookie.
+ */
+async function loginToN8n(
+  baseUrl: string,
+  email: string,
+  password: string,
+): Promise<string | null> {
+  const endpoints = [
+    `${baseUrl}/rest/users/login`,
+    `${baseUrl}/api/v1/users/login`,
+  ];
+
+  for (const ep of endpoints) {
+    try {
+      const res = await fetch(ep, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password }),
+        redirect: "manual",
+      });
+      const setCookie = res.headers.get("set-cookie");
+      if (setCookie) return setCookie;
+      if (res.ok) return null;
+    } catch {
+      // try next endpoint
+    }
+  }
+  return null;
+}
+
+/**
+ * Ensure an n8n user exists for this workspace.
+ * Creates one via the n8n API if it doesn't exist yet.
+ * Persists credentials to workspace connectors.
+ */
+export async function ensureN8nWorkspaceUser(
+  workspaceId: string,
+  n8nBaseUrl: string,
+  n8nApiKey: string,
+): Promise<{ email: string; password: string } | null> {
+  // Check if we already have credentials
+  const wc = await readWorkspaceConnectors(workspaceId);
+  const existing = wc?.ops?.user as { email?: string; password?: string } | undefined;
+  if (existing?.email && existing?.password) {
+    return { email: existing.email, password: existing.password };
+  }
+
+  // Generate credentials for this workspace
+  const { randomBytes } = await import("node:crypto");
+  const email = `pmos-${workspaceId}@openclaw.local`;
+  const password = randomBytes(16).toString("base64url");
+
+  // Try to create user in n8n
+  const endpoints = [
+    `${n8nBaseUrl}/api/v1/users`,
+    `${n8nBaseUrl}/rest/users`,
+  ];
+
+  let created = false;
+  for (const ep of endpoints) {
+    try {
+      const res = await fetch(ep, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "X-N8N-API-KEY": n8nApiKey,
+        },
+        body: JSON.stringify({
+          email,
+          password,
+          firstName: "PMOS",
+          lastName: `ws-${workspaceId.slice(0, 8)}`,
+        }),
+      });
+      if (res.ok || res.status === 409) {
+        created = true;
+        break;
+      }
+    } catch {
+      // try next endpoint
+    }
+  }
+
+  if (!created) return null;
+
+  // Persist credentials
+  const next = {
+    ...(wc ?? {}),
+    ops: {
+      ...((wc?.ops ?? {}) as Record<string, unknown>),
+      user: { email, password },
+    },
+  };
+  await writeWorkspaceConnectors(workspaceId, next);
+
+  return { email, password };
+}
+
+/**
+ * Invalidate cached n8n session for a workspace.
+ * Call this when workspace credentials change or user logs out.
+ */
+export function invalidateN8nSession(workspaceId: string): void {
+  sessionCache.delete(workspaceId);
+}
+
+/**
+ * Build proxy headers that include n8n auth for the given request.
+ * Returns extra headers to merge into the proxied request, or empty object
+ * if no auth is available.
+ */
+export async function buildN8nAuthHeaders(
+  req: IncomingMessage,
+  n8nBaseUrl: string,
+): Promise<Record<string, string>> {
+  const user = await resolveOpenClawUser(req);
+  if (!user) return {};
+
+  const cookie = await getN8nAuthCookie(user.workspaceId, n8nBaseUrl);
+  if (!cookie) {
+    // Fall back to API key if available
+    const wc = await readWorkspaceConnectors(user.workspaceId);
+    const apiKey = wc?.ops?.apiKey;
+    if (typeof apiKey === "string" && apiKey) {
+      return { "X-N8N-API-KEY": apiKey };
+    }
+    return {};
+  }
+
+  return { Cookie: cookie };
+}

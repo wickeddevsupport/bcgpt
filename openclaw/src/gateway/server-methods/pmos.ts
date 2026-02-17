@@ -273,4 +273,92 @@ export const pmosHandlers: GatewayRequestHandlers = {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }
   },
+
+  // ── BYOK (Bring Your Own Keys) ──────────────────────────────────────
+
+  "pmos.byok.list": async ({ respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const { listKeys } = await import("../byok-store.js");
+      const keys = await listKeys(workspaceId);
+      respond(true, { workspaceId, keys }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.byok.set": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const p = params as Record<string, unknown> | undefined;
+      const provider = typeof p?.provider === "string" ? p.provider.trim() : "";
+      const apiKey = typeof p?.apiKey === "string" ? p.apiKey.trim() : "";
+      if (!provider || !apiKey) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "provider and apiKey are required"));
+        return;
+      }
+      const label = typeof p?.label === "string" ? p.label.trim() : undefined;
+      const defaultModel = typeof p?.defaultModel === "string" ? p.defaultModel.trim() : undefined;
+      const { setKey } = await import("../byok-store.js");
+      await setKey(workspaceId, provider as import("../byok-store.js").AIProvider, apiKey, { label, defaultModel });
+      respond(true, { ok: true, workspaceId, provider }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.byok.remove": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const provider = typeof (params as Record<string, unknown>)?.provider === "string"
+        ? ((params as Record<string, unknown>).provider as string).trim()
+        : "";
+      if (!provider) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "provider is required"));
+        return;
+      }
+      const { removeKey } = await import("../byok-store.js");
+      const removed = await removeKey(workspaceId, provider as import("../byok-store.js").AIProvider);
+      respond(true, { ok: true, removed, workspaceId, provider }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.byok.validate": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const p = params as Record<string, unknown> | undefined;
+      const provider = typeof p?.provider === "string" ? p.provider.trim() : "";
+      // Accept either an inline apiKey or validate the stored key
+      let apiKey = typeof p?.apiKey === "string" ? p.apiKey.trim() : "";
+      if (!provider) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "provider is required"));
+        return;
+      }
+      if (!apiKey) {
+        // Try to read the stored key
+        const { getKey } = await import("../byok-store.js");
+        const stored = await getKey(workspaceId, provider as import("../byok-store.js").AIProvider);
+        if (!stored) {
+          respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, `No key stored for provider "${provider}"`));
+          return;
+        }
+        apiKey = stored;
+      }
+      const { validateKey, markValidated } = await import("../byok-store.js");
+      const result = await validateKey(provider as import("../byok-store.js").AIProvider, apiKey);
+      // If validating a stored key, mark it
+      if (!p?.apiKey) {
+        await markValidated(workspaceId, provider as import("../byok-store.js").AIProvider, result.valid);
+      }
+      respond(true, { ...result, provider, workspaceId }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
 };

@@ -1,0 +1,470 @@
+# n8n Integration Guide
+
+**Last Updated:** 2026-02-17
+**Related:** [`OPENCLAW_AUTOMATION_OS.md`](OPENCLAW_AUTOMATION_OS.md)
+
+---
+
+## Overview
+
+OpenClaw uses n8n as its workflow automation engine, replacing Activepieces. This guide covers the technical integration details.
+
+### Why n8n
+
+| Aspect | Decision Rationale |
+|--------|-------------------|
+| Multi-tenancy | Per-workspace instances or row-level isolation possible |
+| Licensing | Fair-code license, all features free for self-hosting |
+| API | Excellent REST API for programmatic control |
+| Ecosystem | 400+ mature, community-maintained nodes |
+| Visual Builder | Best-in-class node-based canvas |
+| AI Integration | Native AI nodes for OpenAI, Anthropic, LangChain |
+
+---
+
+## Architecture
+
+### Embedded Source Model (Target Architecture)
+
+**Vision:** n8n source code lives inside OpenClaw for unlimited customization.
+
+```mermaid
+flowchart TB
+    subgraph OpenClaw
+        GW[Gateway Server]
+        WS[Workspace Isolation]
+        AG[Agent Runtime]
+    end
+    
+    subgraph n8n Embedded Source
+        N8N[n8n Core - Local Source]
+        AUTH[Custom Auth Layer]
+        TRIG[Workspace-Aware Triggers]
+        UI[Custom UI Components]
+        NODES[Custom Nodes]
+    end
+    
+    subgraph Storage
+        DB[(Postgres/SQLite)]
+        FS[File Storage]
+    end
+    
+    GW --> N8N
+    N8N --> AUTH
+    AUTH --> WS
+    N8N --> TRIG
+    TRIG --> WS
+    N8N --> UI
+    N8N --> NODES
+    N8N --> DB
+    N8N --> FS
+```
+
+### Directory Structure
+
+```
+openclaw/
+  vendor/
+    n8n/                      # Full n8n source (git subtree or clone)
+      packages/
+        cli/                  # n8n CLI - can be modified
+        core/                 # Core workflow engine - can be modified
+        nodes-base/           # Standard nodes - can add/modify
+        workflow/             # Workflow types
+        editor-ui/            # React UI - can be customized
+      custom/                 # Our customizations
+        auth/                 # OpenClaw session integration
+        triggers/             # Workspace-aware triggers
+        nodes/                # Custom nodes (Basecamp, etc.)
+        ui/                   # UI customizations
+```
+
+### Current URLs
+
+| Environment | URL | Purpose |
+|-------------|-----|---------|
+| Production | https://os.wickedlab.io | OpenClaw with embedded n8n |
+| Local Dev | http://127.0.0.1:5678 | n8n development server |
+    GW --> PROXY
+    PROXY --> API
+    API --> WF
+    N8N --> DB
+    N8N --> FS
+    UI --> N8N
+```
+
+### Current URLs
+
+| Environment | URL | Purpose |
+|-------------|-----|---------|
+| Production | https://ops.wickedlab.io | n8n Wicked Ops |
+| Local Dev | http://127.0.0.1:5678 | Embedded n8n |
+
+---
+
+## Code Structure
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| [`openclaw/src/gateway/n8n-embed.ts`](../openclaw/src/gateway/n8n-embed.ts) | Spawn embedded n8n process |
+| [`openclaw/src/gateway/pmos-ops-proxy.ts`](../openclaw/src/gateway/pmos-ops-proxy.ts) | Proxy requests to n8n API |
+| [`openclaw/src/gateway/pmos-provision-ops.ts`](../openclaw/src/gateway/pmos-provision-ops.ts) | Provision n8n projects per workspace |
+| [`openclaw/ui/src/ui/controllers/wicked-ops.ts`](../openclaw/ui/src/ui/controllers/wicked-ops.ts) | UI controller for n8n operations |
+
+### n8n Embed Module
+
+Located at [`openclaw/src/gateway/n8n-embed.ts`](../openclaw/src/gateway/n8n-embed.ts):
+
+```typescript
+// Key exports
+export type EmbeddedN8nHandle = {
+  child: any;      // Child process handle
+  url: string;     // Base URL for n8n
+};
+
+export function findVendoredN8nRepo(): string | null;
+export async function spawnEmbeddedN8nIfVendored(opts?: { 
+  port?: number; 
+  host?: string 
+}): Promise<EmbeddedN8nHandle | null>;
+```
+
+**Features:**
+- Auto-discovers n8n repository in project
+- Configurable port/host via environment variables
+- Sets up owner credentials automatically
+- Forwards n8n logs to OpenClaw logs
+- Returns handle for process management
+
+### Environment Variables
+
+```bash
+# n8n Configuration
+N8N_EMBED_PATH=/path/to/n8n/repo     # Override n8n location
+N8N_EMBED_PORT=5678                   # Port for embedded n8n
+N8N_EMBED_HOST=127.0.0.1              # Host binding
+N8N_OWNER_EMAIL=admin@local           # Default owner email
+N8N_OWNER_PASSWORD=changeme           # Default owner password
+
+# n8n Process
+N8N_PATH=/ops-ui/                     # Web path prefix
+N8N_PROTOCOL=http                     # Protocol
+N8N_HOST=127.0.0.1                    # Host
+N8N_PORT=5678                         # Port
+```
+
+---
+
+## n8n API Integration
+
+### REST API Endpoints
+
+OpenClaw interacts with n8n via its REST API:
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/v1/workflows` | List workflows |
+| `POST /api/v1/workflows` | Create workflow |
+| `GET /api/v1/workflows/:id` | Get workflow |
+| `PUT /api/v1/workflows/:id` | Update workflow |
+| `DELETE /api/v1/workflows/:id` | Delete workflow |
+| `POST /api/v1/workflows/:id/activate` | Activate workflow |
+| `POST /api/v1/workflows/:id/deactivate` | Deactivate workflow |
+| `GET /api/v1/executions` | List executions |
+| `GET /api/v1/credentials` | List credentials |
+| `POST /api/v1/credentials` | Create credential |
+
+### Proxy Implementation
+
+The PMOS Ops Proxy ([`pmos-ops-proxy.ts`](../openclaw/src/gateway/pmos-ops-proxy.ts)) handles:
+
+1. **Authentication** - Injects n8n API key
+2. **Workspace Context** - Ensures workspace isolation
+3. **Request Forwarding** - Proxies to n8n instance
+4. **Response Transformation** - Normalizes responses
+
+---
+
+## Per-Workspace Provisioning
+
+### Project Structure
+
+Each workspace gets its own n8n project:
+
+```typescript
+// From pmos-provision-ops.ts
+interface N8nProjectProvision {
+  workspaceId: string;
+  projectId: string;
+  apiKey: string;
+  createdAt: Date;
+}
+```
+
+### Provisioning Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant OpenClaw
+    participant n8n
+    
+    User->>OpenClaw: Login
+    OpenClaw->>OpenClaw: Check workspace n8n project
+    alt Project exists
+        OpenClaw->>n8n: Get project API key
+        n8n-->>OpenClaw: API key
+    else Project missing
+        OpenClaw->>n8n: Create project
+        n8n-->>OpenClaw: Project ID + API key
+        OpenClaw->>OpenClaw: Store project mapping
+    end
+    OpenClaw-->>User: Workspace ready with n8n
+```
+
+---
+
+## Custom Nodes
+
+### Basecamp Node
+
+Located at [`n8n-nodes-basecamp/`](../n8n-nodes-basecamp/):
+
+```
+n8n-nodes-basecamp/
+  credentials/
+    BasecampApi.credentials.ts    # OAuth/API key credentials
+  nodes/
+    Basecamp/
+      Basecamp.node.ts            # Main node implementation
+      GenericFunctions.ts         # API helpers
+  package.json
+  README.md
+```
+
+#### Supported Operations
+
+| Resource | Operations |
+|----------|------------|
+| Project | Get Many, Get, Create, Update |
+| Todo | Get Many, Get, Create, Update, Delete, Complete |
+| Todo List | Get Many, Get, Create, Update, Delete |
+| Message | Get Many, Get, Create, Update, Delete |
+| Card | Get Many, Get, Create, Update, Move |
+| Comment | Get Many, Create, Delete |
+| Document | Get Many, Get, Create, Update |
+| File | Get Many, Get, Upload |
+| Person | Get Many, Get |
+
+#### Installation
+
+```bash
+# Build the node
+cd n8n-nodes-basecamp
+npm install
+npm run build
+
+# Link to local n8n
+npm link
+
+# In n8n directory
+npm link @wickedlab/n8n-nodes-basecamp
+```
+
+#### Publishing
+
+```bash
+# Publish to npm
+npm publish --access public
+
+# Or submit to n8n community nodes
+# via GitHub PR to n8n-io/n8n
+```
+
+---
+
+## UI Integration
+
+### Embedded n8n Canvas
+
+The goal is to embed n8n's visual flow builder directly in OpenClaw UI:
+
+```typescript
+// Conceptual implementation
+interface FlowBuilderProps {
+  workspaceId: string;
+  workflowId?: string;
+  onWorkflowChange?: (workflow: Workflow) => void;
+}
+
+function FlowBuilder({ workspaceId, workflowId, onWorkflowChange }: FlowBuilderProps) {
+  // Load n8n canvas in iframe or web component
+  // Sync with chat sidebar for AI-assisted editing
+  // Handle workspace context for API calls
+}
+```
+
+### Chat Integration
+
+The flow builder includes a chat sidebar:
+
+```
++-------------------+-------------------+
+|                   |                   |
+|   n8n Canvas      |   Chat Panel      |
+|   (iframe)        |   (OpenClaw)      |
+|                   |                   |
+|   Nodes render    |   AI can modify   |
+|   here            |   workflow via    |
+|                   |   chat commands   |
+|                   |                   |
++-------------------+-------------------+
+```
+
+---
+
+## Migration from Activepieces
+
+### Migration Steps
+
+1. **Deploy n8n** - Set up n8n instance alongside Activepieces
+2. **Build Custom Nodes** - Port any custom Activepieces pieces
+3. **Create Equivalents** - Recreate Activepieces flows in n8n
+4. **Test Thoroughly** - Verify all workflows function correctly
+5. **Switch Traffic** - Update OpenClaw to use n8n
+6. **Deprecate Activepieces** - Remove Activepieces dependency
+
+### Feature Mapping
+
+| Activepieces | n8n Equivalent |
+|--------------|----------------|
+| Pieces | Nodes |
+| Flows | Workflows |
+| Connections | Credentials |
+| Runs | Executions |
+| Project | Project (same concept) |
+
+---
+
+## Testing
+
+### Test Files
+
+| File | Purpose |
+|------|---------|
+| [`openclaw/src/gateway/n8n-embed.test.ts`](../openclaw/src/gateway/n8n-embed.test.ts) | Unit tests for embed module |
+| [`openclaw/src/gateway/pmos.provision.test.ts`](../openclaw/src/gateway/pmos.provision.test.ts) | Provisioning tests |
+
+### Running Tests
+
+```bash
+# Run n8n integration tests
+corepack pnpm --dir openclaw exec vitest run src/gateway/n8n-embed.test.ts
+
+# Run provisioning tests
+corepack pnpm --dir openclaw exec vitest run src/gateway/pmos.provision.test.ts
+```
+
+---
+
+## Troubleshooting
+
+### Common Issues
+
+| Issue | Solution |
+|-------|----------|
+| n8n not starting | Check port availability, verify n8n repo path |
+| Authentication failures | Verify N8N_OWNER_EMAIL/PASSWORD set correctly |
+| API timeouts | Check n8n process health, increase timeout |
+| Missing nodes | Install custom nodes, rebuild n8n |
+
+### Debug Mode
+
+```bash
+# Enable n8n debug logging
+N8N_LOG_LEVEL=debug
+
+# Check n8n process
+ps aux | grep n8n
+
+# View n8n logs
+docker logs n8n  # if using Docker
+```
+
+---
+
+## Server Access & Deployment
+
+### Server Information
+
+| Layer | Container | Domain | Purpose |
+|-------|-----------|--------|---------|
+| BCGPT | bcgpt | bcgpt.wickedlab.io | MCP server |
+| PMOS | pmos | os.wickedlab.io | OpenClaw + n8n |
+
+### SSH Access
+
+```bash
+# Connect to server
+ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
+```
+
+### Coolify Management
+
+All containers are managed via Coolify. Access Coolify through SSH, not curl.
+
+**Coolify Token:** `[REDACTED - store in secure secret manager]`
+
+**Important:** Always use SSH to access Coolify for container management.
+
+### Container Architecture
+
+```mermaid
+flowchart TB
+    subgraph Hetzner Server
+        COOL[Coolify]
+        
+        subgraph Containers
+            BCGPT[bcgpt container]
+            PMOS[pmos container]
+        end
+        
+        COOL --> BCGPT
+        COOL --> PMOS
+    end
+    
+    BCGPT --> BC[bcgpt.wickedlab.io]
+    PMOS --> OS[os.wickedlab.io]
+```
+
+### Deployment Process
+
+1. **Connect via SSH**
+   ```bash
+   ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
+   ```
+
+2. **Access Coolify**
+   - Use SSH tunnel or local Coolify CLI
+   - Token: `[REDACTED - store in secure secret manager]`
+
+3. **Deploy Updates**
+   - Push to main branch triggers automatic deployment
+   - Or manually trigger via Coolify dashboard
+
+4. **Verify Deployment**
+   - Check bcgpt.wickedlab.io/health
+   - Check os.wickedlab.io
+   - Check ops.wickedlab.io
+
+---
+
+## Future Enhancements
+
+1. **Full Canvas Embedding** - n8n UI fully integrated in OpenClaw
+2. **Chat-to-Workflow** - Natural language workflow creation
+3. **Live Sync** - Real-time workflow updates from chat
+4. **Template Library** - Pre-built workflow templates
+5. **Multi-Instance** - Per-workspace n8n instances for complete isolation

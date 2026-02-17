@@ -26,14 +26,23 @@ RUN pnpm install --frozen-lockfile
 COPY . .
 # Optionally include vendored n8n (for embedded n8n) at build time.
 # Enable by passing build-arg: --build-arg INCLUDE_VENDORED_N8N=true
+# Pin version with: --build-arg N8N_VERSION=n8n@1.76.1
 ARG INCLUDE_VENDORED_N8N=false
+ARG N8N_VERSION=n8n@1.76.1
 RUN if [ "$INCLUDE_VENDORED_N8N" = "true" ]; then \
       apt-get update && \
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git && \
       mkdir -p openclaw/vendor && \
-      git clone --depth 1 https://github.com/n8n-io/n8n.git openclaw/vendor/n8n && \
-      # Install n8n dependencies and build so the vendored copy is runnable at runtime
-      cd openclaw/vendor/n8n && corepack enable && pnpm install --frozen-lockfile && pnpm build; \
+      git clone --depth 1 --branch "$N8N_VERSION" https://github.com/n8n-io/n8n.git openclaw/vendor/n8n && \
+      # Install n8n dependencies and build
+      cd openclaw/vendor/n8n && corepack enable && pnpm install --frozen-lockfile && pnpm build && \
+      # Install custom Basecamp node into vendored n8n
+      cd /app && \
+      if [ -d "n8n-nodes-basecamp" ]; then \
+        cd n8n-nodes-basecamp && npm run build 2>/dev/null || true && \
+        mkdir -p /app/openclaw/vendor/n8n/packages/cli/node_modules/n8n-nodes-basecamp && \
+        cp -r dist package.json /app/openclaw/vendor/n8n/packages/cli/node_modules/n8n-nodes-basecamp/; \
+      fi; \
     fi
 RUN pnpm build
 # Force pnpm for UI build (Bun may fail on ARM/Synology architectures)

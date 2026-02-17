@@ -44,6 +44,7 @@ import { resolveGatewayClientIp } from "./net.js";
 import { handleOpenAiHttpRequest } from "./openai-http.js";
 import { handleOpenResponsesHttpRequest } from "./openresponses-http.js";
 import { handlePmosAuthHttpRequest } from "./pmos-auth-http.js";
+import { handleByokHttp } from "./byok-http.js";
 import {
   handleLocalN8nRequest,
   handleOpsProxyRequest,
@@ -330,6 +331,9 @@ export function createGatewayHttpServer(opts: {
           controlUiBasePath,
         })
       ) {
+        return;
+      }
+      if (await handleByokHttp(req, res)) {
         return;
       }
       if (await handleLocalN8nRequest(req, res)) {

@@ -1,56 +1,172 @@
-# PM OS Documentation Index
+# OpenClaw Documentation Index
 
-Last updated: 2026-02-15
+**Last Updated:** 2026-02-17
 
-## Priority entrypoints
+---
 
-1. `docs/00-START-HERE.md`
-2. `docs/system/operations/summaries/CURRENT_STATE_AND_EXECUTION_PLAN.md`
-3. `docs/system/operations/summaries/NEXT_STEPS.md`
+## Quick Start
 
-These three files are the canonical "where we are now" path.
+New to OpenClaw? Start here:
 
-## By layer
+1. **[OPENCLAW_AUTOMATION_OS.md](OPENCLAW_AUTOMATION_OS.md)** - Master overview of the AI-powered Automation OS
+2. **[NEXT_STEPS.md](NEXT_STEPS.md)** - Actionable implementation plan
 
-## BCGPT (Data layer)
+---
 
-- `docs/bcgpt/README.md`
-- `docs/bcgpt/ARCHITECTURE_PROJECT_ROOT.md`
-- `docs/bcgpt/reference/BASECAMP_API_ENDPOINTS_REFERENCE.md`
-- `docs/bcgpt/phases/TRUE_MCP_ROADMAP.md`
+## Core Documentation
 
-## Flow (Execution layer)
+| Document | Purpose | Audience |
+|----------|---------|----------|
+| [PRODUCT_VISION.md](PRODUCT_VISION.md) | User journey, anti-hallucination, robustness | All |
+| [AUTONOMOUS_AGENTS.md](AUTONOMOUS_AGENTS.md) | AI team that works autonomously 24/7 | All |
+| [UI_MOCKUPS.md](UI_MOCKUPS.md) | Complete UI mockups for all pages | All |
+| [OPENCLAW_AUTOMATION_OS.md](OPENCLAW_AUTOMATION_OS.md) | Master product vision and architecture | All |
+| [AGENT_MANAGEMENT.md](AGENT_MANAGEMENT.md) | How users create, configure, and manage agents | All |
+| [NEXT_STEPS.md](NEXT_STEPS.md) | Implementation plan and tasks | Developers |
+| [N8N_INTEGRATION_GUIDE.md](N8N_INTEGRATION_GUIDE.md) | n8n workflow engine integration | Developers |
+| [WORKSPACE_ISOLATION_STATUS.md](WORKSPACE_ISOLATION_STATUS.md) | Multi-tenant implementation status | Developers |
+| [BASECAMP_NODE_SETUP.md](BASECAMP_NODE_SETUP.md) | Custom n8n node for Basecamp | Developers |
 
-- `docs/flow/README.md`
-- `docs/flow/apps-platform/APPS_MASTER_TODO.md`
-- `docs/flow/apps-platform/APPS_PLATFORM_PRD.md`
-- `docs/flow/apps-platform/APPS_RELEASE_CHECKLIST.md`
+---
 
-## PMOS (Intelligence layer)
+## Documentation Structure
 
-- `docs/pmos/README.md`
-- `docs/pmos/vision/PROJECT_MANAGEMENT_OS.md`
-- `docs/pmos/vision/FEATURES_CATALOG.md`
-- `docs/pmos/vision/INTELLIGENCE_PATTERNS.md`
-- `docs/pmos/vision/ROADMAP_VISUAL.md`
+```
+docs/
+  README.md                    # Quick start guide
+  OPENCLAW_AUTOMATION_OS.md    # Master document
+  NEXT_STEPS.md                # Implementation plan
+  N8N_INTEGRATION_GUIDE.md     # n8n technical guide
+  WORKSPACE_ISOLATION_STATUS.md # Multi-tenant status
+  BASECAMP_NODE_SETUP.md       # Basecamp node guide
+  DOCS_INDEX.md                # This file
+  
+  backup/                      # Archived documentation
+    BACKUP_README.md           # Backup index
+    bcgpt/                     # BCGPT reference (archived)
+    flow/                      # Flow documentation (archived)
+    pmos/                      # PMOS vision (archived)
+    system/                    # System docs (archived)
+```
 
-## System-wide
+---
 
-- `docs/system/architecture/SYSTEM_ARCHITECTURE.md`
-- `docs/system/deployment/DEPLOYMENT_GUIDE.md`
-- `docs/system/deployment/PRODUCTION_HARDENING.md`
-- `docs/system/operations/summaries/QUICK_REFERENCE.md`
-- `docs/system/operations/summaries/SESSION_SUMMARY_COMPREHENSIVE_AUDIT.md`
+## Key Topics
 
-## Strategy/reference docs
+### Architecture
 
-- `docs/OPENCLAW_ANALYSIS.md`
-- `docs/NAVIGATION_MAP.md`
-- `docs/REORGANIZATION_SUMMARY.md`
+- System components and data flow
+- n8n integration architecture
+- Multi-tenant workspace isolation
+- Agent runtime structure
 
-## Session boot checklist
+### Implementation
 
-1. Read the three priority entrypoints above.
-2. Verify working tree: `git status --short`.
-3. Confirm active backend contracts in `index.js`.
-4. Confirm frontend API usage in `frontend/src/api.ts`.
+- Workspace isolation completion
+- n8n UI embedding
+- BYOK (Bring Your Own Keys) management
+- Chat-to-workflow creation
+- Multi-agent parallel execution
+
+### Deployment
+
+- Server access via SSH
+- Coolify container management
+- Container architecture (bcgpt, pmos)
+- Deployment verification
+
+---
+
+## Server Access
+
+```bash
+# SSH to server
+ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
+
+# Coolify Token
+[REDACTED - store in secure secret manager]
+```
+
+**Note:** Access Coolify through SSH, not curl.
+
+---
+
+## Deployment URLs
+
+| Service | URL | Purpose |
+|---------|-----|---------|
+| OpenClaw PMOS | https://os.wickedlab.io | Main product UI (includes embedded n8n) |
+| BCGPT MCP | https://bcgpt.wickedlab.io | MCP server |
+| Activepieces | https://flow.wickedlab.io | Legacy (deprecated) |
+
+---
+
+## Key Code Locations
+
+| Component | Location |
+|-----------|----------|
+| Gateway Server | `openclaw/src/gateway/` |
+| n8n Embed | `openclaw/src/gateway/n8n-embed.ts` |
+| n8n Auth Bridge | `openclaw/src/gateway/n8n-auth-bridge.ts` |
+| n8n Workspace Triggers | `openclaw/src/gateway/n8n-workspace-triggers.ts` |
+| n8n Ops Proxy | `openclaw/src/gateway/pmos-ops-proxy.ts` |
+| Workspace Context | `openclaw/src/gateway/workspace-context.ts` |
+| Workspace Isolation Tests | `openclaw/src/gateway/workspace-isolation.test.ts` |
+| Agent Handlers | `openclaw/src/gateway/server-methods/agents.ts` |
+| Cron Handlers | `openclaw/src/gateway/server-methods/cron.ts` |
+| Session Handlers | `openclaw/src/gateway/server-methods/sessions.ts` |
+| Migration Script | `openclaw/scripts/migrate-workspace-isolation.ts` |
+| Basecamp n8n Node | `n8n-nodes-basecamp/` |
+| BYOK Encrypted Store | `openclaw/src/gateway/byok-store.ts` |
+| BYOK HTTP API | `openclaw/src/gateway/byok-http.ts` |
+| React Frontend (Flows) | `frontend/src/views/Flows.tsx` |
+| React Frontend (Settings/BYOK) | `frontend/src/views/Settings.tsx` |
+| PMOS UI | `openclaw/ui/` |
+| Vendor Setup Script | `openclaw/scripts/setup-vendor-n8n.sh` |
+
+---
+
+## Session Start Protocol
+
+Before starting work:
+
+1. Read [OPENCLAW_AUTOMATION_OS.md](OPENCLAW_AUTOMATION_OS.md)
+2. Read [NEXT_STEPS.md](NEXT_STEPS.md)
+3. Check current phase status
+4. Run `git status --short`
+5. Confirm guardrails
+
+---
+
+## Guardrails
+
+1. **MCP Stability** - Do not change MCP contracts on bcgpt.wickedlab.io
+2. **n8n Stability** - Do not break existing workflows on ops.wickedlab.io
+3. **Additive Development** - PMOS work is additive to OpenClaw core
+4. **Rollback Ready** - Every deployment must have immediate rollback path
+5. **Smoke Tests** - Every phase must pass smoke checks before complete
+
+---
+
+## Archived Documentation
+
+The following directories have been moved to `docs/backup/`:
+
+- `backup/bcgpt/` - BCGPT-specific documentation
+- `backup/flow/` - Flow/Activepieces documentation (now replaced by n8n)
+- `backup/pmos/` - PMOS vision documents
+- `backup/system/` - System architecture and operations
+
+These are preserved for reference. See [backup/BACKUP_README.md](backup/BACKUP_README.md) for details.
+
+---
+
+## Contributing
+
+When adding new documentation:
+
+1. Place core documents in `docs/` root
+2. Update this index file
+3. Cross-reference related documents
+4. Keep documents focused and actionable
+5. Update "Last Updated" dates

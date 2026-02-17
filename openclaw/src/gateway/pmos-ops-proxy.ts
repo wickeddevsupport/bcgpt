@@ -8,6 +8,7 @@ import { Readable } from "node:stream";
 import { loadConfig } from "../config/config.js";
 import { resolvePmosSessionFromRequest } from "./pmos-auth.js";
 import { readWorkspaceConnectors } from "./workspace-connectors.js";
+import { buildN8nAuthHeaders } from "./n8n-auth-bridge.js";
 
 // Path to the pre-built ops-ui bundle (openclaw/ops-ui/dist/)
 // Compiled gateway is at openclaw/dist/gateway/, so go up two levels then into ops-ui/dist
@@ -233,11 +234,15 @@ export async function handleLocalN8nRequest(
 
   const n8n = readLocalN8nConfig();
   if (n8n) {
-    // Attempt best-effort auto-login for the workspace user (if provisioned)
-    await attemptAutoLoginForRequest(req, res, n8n.url);
+    // Use auth bridge for workspace-scoped n8n auth (cached session cookies + API keys)
+    const authHeaders = await buildN8nAuthHeaders(req, n8n.url);
+    // Fall back to legacy auto-login if bridge returns no headers
+    if (!authHeaders.Cookie && !authHeaders["X-N8N-API-KEY"]) {
+      await attemptAutoLoginForRequest(req, res, n8n.url);
+    }
     // Proxy everything transparently to local n8n
     const targetUrl = `${n8n.url}${pathname}${url.search}`;
-    await proxyUpstream({ req, res, targetUrl });
+    await proxyUpstream({ req, res, targetUrl, extraHeaders: authHeaders });
     return true;
   }
 

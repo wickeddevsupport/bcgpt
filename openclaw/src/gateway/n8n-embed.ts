@@ -34,6 +34,25 @@ export function findVendoredN8nRepo(): string | null {
 }
 
 /**
+ * Resolve the Basecamp custom node directory, if installed.
+ * Checks: vendored n8n node_modules → repo-root/n8n-nodes-basecamp
+ */
+function resolveBasecampNodeDir(n8nRepoDir: string): string | null {
+  const candidates = [
+    path.join(n8nRepoDir, "packages", "cli", "node_modules", "n8n-nodes-basecamp"),
+    path.join(n8nRepoDir, "..", "..", "n8n-nodes-basecamp"),
+  ];
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(path.join(c, "package.json"))) return c;
+    } catch {
+      // ignore
+    }
+  }
+  return null;
+}
+
+/**
  * Spawn a vendored n8n as a child process (best-effort).
  * - Sets process.env.N8N_LOCAL_URL when successful.
  * - Returns the spawned child process handle or null if not started.
@@ -55,6 +74,21 @@ export async function spawnEmbeddedN8nIfVendored(opts?: { port?: number; host?: 
   // Provide owner creds if present in env to skip interactive setup
   env.N8N_OWNER_EMAIL = env.N8N_OWNER_EMAIL ?? process.env.N8N_OWNER_EMAIL ?? "admin@local";
   env.N8N_OWNER_PASSWORD = env.N8N_OWNER_PASSWORD ?? process.env.N8N_OWNER_PASSWORD ?? "changeme";
+
+  // Custom Basecamp node: tell n8n where to find community nodes
+  const basecampNodeDir = resolveBasecampNodeDir(repo);
+  if (basecampNodeDir) {
+    // N8N_CUSTOM_EXTENSIONS is the env var n8n uses for additional node packages
+    const existing = env.N8N_CUSTOM_EXTENSIONS?.trim();
+    env.N8N_CUSTOM_EXTENSIONS = existing ? `${existing};${basecampNodeDir}` : basecampNodeDir;
+  }
+
+  // Branding / UI customization
+  env.N8N_TEMPLATES_ENABLED = env.N8N_TEMPLATES_ENABLED ?? "false";
+  env.N8N_HIRING_BANNER_ENABLED = env.N8N_HIRING_BANNER_ENABLED ?? "false";
+  env.N8N_PERSONALIZATION_ENABLED = env.N8N_PERSONALIZATION_ENABLED ?? "false";
+  env.N8N_DIAGNOSTICS_ENABLED = env.N8N_DIAGNOSTICS_ENABLED ?? "false";
+  env.N8N_VERSION_NOTIFICATIONS_ENABLED = env.N8N_VERSION_NOTIFICATIONS_ENABLED ?? "false";
 
   // Primary attempt: use the monorepo CLI binary
   const argv = [process.execPath, path.join("packages", "cli", "bin", "n8n"), "start"];

@@ -5,11 +5,13 @@ import path from "node:path";
 // Use dynamic import so we can stub spawnWithFallback
 describe("n8n-embed spawn behavior", () => {
   const realExists = fs.existsSync;
+  const realStat = fs.statSync;
   beforeEach(() => {
     vi.resetModules();
   });
   afterEach(() => {
     fs.existsSync = realExists;
+    fs.statSync = realStat;
     delete process.env.N8N_LOCAL_URL;
     vi.restoreAllMocks();
   });
@@ -23,9 +25,11 @@ describe("n8n-embed spawn behavior", () => {
 
   it("spawns embedded n8n when vendored repo exists and sets N8N_LOCAL_URL", async () => {
     // Simulate repo present at candidate location
-    const bcgptRoot = path.resolve(__dirname, "..", "..");
+    const bcgptRoot = path.resolve(__dirname, "..", "..", "..");
     const fakeRepo = path.join(bcgptRoot, "openclaw", "vendor", "n8n");
     fs.existsSync = (p: string) => p === fakeRepo || realExists(p);
+    fs.statSync = ((p: fs.PathLike) =>
+      p === fakeRepo ? ({ isDirectory: () => true } as fs.Stats) : realStat(p)) as typeof fs.statSync;
 
     // Stub spawnWithFallback to return a fake child
     const spawnUtils = await import("../process/spawn-utils.js");
