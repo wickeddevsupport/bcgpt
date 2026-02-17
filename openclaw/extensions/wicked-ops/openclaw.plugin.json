@@ -1,9 +1,29 @@
 {
   "id": "wicked-ops",
   "name": "Wicked Ops (n8n)",
-  "version": "1.0.0",
   "description": "n8n workflow automation integration for OpenClaw",
-  "entry": "./index.ts",
-  "author": "WickedLab",
-  "license": "MIT"
+  "version": "1.0.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "baseUrl": {
+        "type": "string"
+      },
+      "apiKey": {
+        "type": "string"
+      }
+    }
+  },
+  "uiHints": {
+    "baseUrl": {
+      "label": "Wicked Ops URL",
+      "placeholder": "https://ops.wickedlab.io"
+    },
+    "apiKey": {
+      "label": "Wicked Ops API Key (n8n)",
+      "sensitive": true,
+      "placeholder": "n8n_..."
+    }
+  }
 }
