@@ -4,7 +4,7 @@ export const TAB_GROUPS = [
   // Wicked OS simplified experience (regular users)
   {
     label: "Wicked OS",
-    tabs: ["dashboard", "automations", "runs", "integrations", "command-center", "admin", "chat"],
+    tabs: ["dashboard", "automations", "integrations", "command-center", "admin", "chat"],
   },
   // Everything else stays available, but is hidden behind the Advanced admin section.
   {
@@ -200,7 +200,7 @@ export function titleForTab(tab: Tab) {
     case "dashboard":
       return "Dashboard";
     case "automations":
-      return "Automations";
+      return "Workflows";
     case "runs":
       return "Runs";
     case "integrations":
@@ -245,7 +245,7 @@ export function subtitleForTab(tab: Tab) {
     case "dashboard":
       return "Your automation OS at a glance: health, integrations, and what is running now.";
     case "automations":
-      return "Build and manage automations (flows + scheduled jobs).";
+      return "Build and run workflows with your personal n8n automation workspace.";
     case "runs":
       return "Live and historical executions across agents and automations.";
     case "integrations":

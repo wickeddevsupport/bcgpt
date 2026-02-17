@@ -2,6 +2,7 @@ import type { GatewayRequestHandlers } from "./types.js";
 import { loadConfig } from "../../config/config.js";
 import { ErrorCodes, errorShape } from "../protocol/index.js";
 import { formatForLog } from "../ws-log.js";
+import { requireWorkspaceId, isSuperAdmin } from "../workspace-context.js";
 
 type ConnectorResult = {
   url: string | null;
@@ -82,7 +83,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
       // readWorkspaceConnectors returns null when not present.
       // NOTE: prefer workspace-specific entries when available.
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { readWorkspaceConnectors } = await import("./workspace-connectors.js");
+      const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
       const workspaceId = client?.pmosWorkspaceId ?? undefined;
       const workspaceConnectors = workspaceId ? await readWorkspaceConnectors(workspaceId) : null;
 
@@ -222,7 +223,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
         return;
       }
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { readWorkspaceConnectors, writeWorkspaceConnectors } = await import("./workspace-connectors.js");
+      const { readWorkspaceConnectors, writeWorkspaceConnectors } = await import("../workspace-connectors.js");
       const existing = (await readWorkspaceConnectors(workspaceId)) ?? {};
       const next = { ...existing, ...(connectors as Record<string, unknown>) };
       await writeWorkspaceConnectors(workspaceId, next);
@@ -243,7 +244,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
       }
       const workspaceId = target ?? requireWorkspaceId(client);
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { readWorkspaceConnectors } = await import("./workspace-connectors.js");
+      const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
       const connectors = (await readWorkspaceConnectors(workspaceId)) ?? {};
       respond(true, { workspaceId, connectors }, undefined);
     } catch (err) {
@@ -260,92 +261,14 @@ export const pmosHandlers: GatewayRequestHandlers = {
     try {
       if (!client) throw new Error("client context required");
       const workspaceId = requireWorkspaceId(client);
-      const projectName = typeof params?.projectName === "string" && params.projectName.trim() ? params.projectName.trim() : `PMOS workspace ${workspaceId}`;
-
-      const cfg = loadConfig() as unknown;
-      const opsUrl = normalizeBaseUrl(
-        readConfigString(cfg, ["pmos", "connectors", "ops", "url"]) ?? process.env.OPS_URL ?? null,
-        "https://ops.wickedlab.io",
-      );
-      const opsKey = readConfigString(cfg, ["pmos", "connectors", "ops", "apiKey"]) ?? (process.env.OPS_API_KEY?.trim() || null);
-      if (!opsKey) {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "Wicked Ops API key not configured (OPS_API_KEY or PMOS -> Integrations)."));
-        return;
-      }
-
-      // Helper to extract an API key string from various possible responses.
-      const extractKey = (json: unknown): string | null => {
-        if (!json || typeof json !== "object") return null;
-        const j = json as Record<string, any>;
-        return (
-          (typeof j.key === "string" && j.key) ||
-          (typeof j.token === "string" && j.token) ||
-          (typeof j.value === "string" && j.value) ||
-          (typeof j.apiKey === "string" && j.apiKey) ||
-          null
-        );
-      };
-
-      // 1) Try to create a Project (may be license-gated)
-      const projectRes = await fetchJson(`${opsUrl}/api/v1/projects`, {
-        method: "POST",
-        headers: { "content-type": "application/json", "X-N8N-API-KEY": opsKey },
-        body: JSON.stringify({ name: projectName }),
-        timeoutMs: 10000,
-      });
-
-      let projectId: string | undefined;
-      if (projectRes.ok && projectRes.json && typeof projectRes.json === "object") {
-        const pj = projectRes.json as Record<string, any>;
-        projectId = (pj.id as string) || (pj.projectId as string) || (pj.name as string) || undefined;
-      }
-
-      // 2) Try to create an API key (best-effort). Some n8n installs may not expose this endpoint.
-      let createdApiKey: string | undefined;
-      const tryCreateApiKey = async () => {
-        const candidateEndpoints = [
-          `${opsUrl}/api/v1/api-keys`,
-          `${opsUrl}/api/v1/users-api-keys`,
-          `${opsUrl}/api/v1/users/api-keys`,
-        ];
-        for (const ep of candidateEndpoints) {
-          const kRes = await fetchJson(ep, {
-            method: "POST",
-            headers: { "content-type": "application/json", "X-N8N-API-KEY": opsKey },
-            body: JSON.stringify({ name: `pmos:${workspaceId}` }),
-            timeoutMs: 10000,
-          });
-          if (kRes.ok && kRes.json) {
-            const maybeKey = extractKey(kRes.json);
-            if (maybeKey) return maybeKey;
-            // Some endpoints return the record with `id` but not the raw key; accept `id` as a token fallback
-            if (kRes.json && typeof kRes.json === "object" && (kRes.json as Record<string, any>).id) {
-              return String((kRes.json as Record<string, any>).id);
-            }
-          }
-          // If endpoint returned 404/403, continue to next candidate
-        }
-        return undefined;
-      };
-
-      createdApiKey = await tryCreateApiKey();
-
-      // If project creation failed due to licensing/permission but API key creation succeeded, persist the API key only.
-      if (!projectId && !createdApiKey) {
-        // Attempt to surface server-side error message when available
-        const msg = projectRes.error ?? `Failed to create project (status=${projectRes.status})`;
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, `Project creation failed: ${msg}`));
-        return;
-      }
-
-      // Persist workspace-scoped connectors (merge with existing)
+      const projectName =
+        typeof params?.projectName === "string" && params.projectName.trim()
+          ? params.projectName.trim()
+          : undefined;
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { readWorkspaceConnectors, writeWorkspaceConnectors } = await import("./workspace-connectors.js");
-      const existing = (await readWorkspaceConnectors(workspaceId)) ?? {};
-      const next = { ...existing, ops: { ...(existing.ops ?? {}), url: opsUrl, ...(createdApiKey ? { apiKey: createdApiKey } : {}), ...(projectId ? { projectId } : {}) } };
-      await writeWorkspaceConnectors(workspaceId, next);
-
-      respond(true, { ok: true, workspaceId, projectId, apiKey: createdApiKey ?? null }, undefined);
+      const { provisionWorkspaceOps } = await import("../pmos-provision-ops.js");
+      const result = await provisionWorkspaceOps(workspaceId, projectName);
+      respond(true, result, undefined);
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }

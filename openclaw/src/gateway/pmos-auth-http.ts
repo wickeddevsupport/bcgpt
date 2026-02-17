@@ -133,6 +133,12 @@ export async function handlePmosAuthHttpRequest(params: {
       sendJson(res, result.status, { ok: false, error: result.error });
       return true;
     }
+    // Fire-and-forget: provision n8n project for the new workspace in the background.
+    import("./pmos-provision-ops.js")
+      .then(({ provisionWorkspaceOps }) => provisionWorkspaceOps(result.user.workspaceId))
+      .catch((err: unknown) => {
+        console.warn("[pmos] auto-provision ops failed for workspace", result.user.workspaceId, String(err));
+      });
     res.setHeader("Set-Cookie", buildPmosSessionCookieValue(result.sessionToken, req));
     sendJson(res, 200, { ok: true, user: result.user });
     return true;

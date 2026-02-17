@@ -1,10 +1,6 @@
 import { html, nothing } from "lit";
 import type { UiSettings } from "../storage.ts";
 import type { PmosConnectorsStatus } from "../controllers/pmos-connectors.ts";
-import type {
-  ActivepiecesFlowSummary,
-  ActivepiecesRunSummary,
-} from "../controllers/pmos-activepieces.ts";
 import type { PmosExecutionTraceEvent } from "../controllers/pmos-trace.ts";
 import { formatRelativeTimestamp } from "../format.ts";
 
@@ -15,17 +11,16 @@ export type DashboardProps = {
   connectorsLoading: boolean;
   connectorsError: string | null;
   connectorsStatus: PmosConnectorsStatus | null;
-  projectId: string;
-  flowsLoading: boolean;
-  flowsError: string | null;
-  flows: ActivepiecesFlowSummary[];
-  runsLoading: boolean;
-  runsError: string | null;
-  runs: ActivepiecesRunSummary[];
+  projectId?: string;
+  flowsLoading?: boolean;
+  flowsError?: string | null;
+  flows?: Array<{ status?: unknown }>;
+  runsLoading?: boolean;
+  runsError?: string | null;
+  runs?: Array<{ status?: unknown }>;
   traceEvents: PmosExecutionTraceEvent[];
   integrationsHref: string;
   automationsHref: string;
-  runsHref: string;
   chatHref: string;
   configHref?: string;
   modelAuthConfigured?: boolean;
@@ -39,7 +34,7 @@ export type DashboardProps = {
   onOpsManualApiKeyChange?: (next: string) => void;
   onSaveOpsApiKey?: () => Promise<void>;
 
-  onNavigateTab: (tab: "integrations" | "automations" | "runs" | "chat" | "config") => void;
+  onNavigateTab: (tab: "integrations" | "automations" | "chat" | "config") => void;
   onSettingsChange: (next: UiSettings) => void;
   onConnect: () => void;
   onRefreshConnectors: () => void;
@@ -99,18 +94,9 @@ type SetupStep = {
 };
 
 export function renderDashboard(props: DashboardProps) {
-  const ap = props.connectorsStatus?.activepieces ?? null;
   const bcgpt = props.connectorsStatus?.bcgpt ?? null;
   const checkedAt = props.connectorsStatus?.checkedAtMs ?? null;
   const checkedLabel = checkedAt ? formatRelativeTimestamp(checkedAt) : "n/a";
-
-  const apStatus = (() => {
-    if (!ap) return { label: "Unknown", tone: "warn" as const };
-    if (!ap.configured) return { label: "Not connected", tone: "warn" as const };
-    if (ap.reachable === false || ap.authOk === false) return { label: "Needs attention", tone: "warn" as const };
-    if (ap.reachable === true && (ap.authOk === true || ap.authOk === null)) return { label: "OK", tone: "ok" as const };
-    return { label: "Checking", tone: "warn" as const };
-  })();
 
   const bcgptStatus = (() => {
     if (!bcgpt) return { label: "Unknown", tone: "warn" as const };
@@ -124,8 +110,6 @@ export function renderDashboard(props: DashboardProps) {
   const flows = props.flows ?? [];
   const runs = props.runs ?? [];
   const trace = props.traceEvents ?? [];
-  const configuredProjectId = String(ap?.projectId ?? props.projectId ?? "").trim();
-  const projectConfigured = Boolean(configuredProjectId);
   const enabledFlows = flows.filter((flow) => String(flow.status ?? "").toUpperCase() === "ENABLED").length;
 
   const runBuckets = runs.reduce(
@@ -137,16 +121,14 @@ export function renderDashboard(props: DashboardProps) {
     { succeeded: 0, failed: 0, running: 0, other: 0 },
   );
 
-  const isConnectorHealthy = apStatus.tone === "ok" && bcgptStatus.tone === "ok";
   const pulse = (() => {
-    if (!projectConfigured) return { label: "Project setup required", tone: "warn" as const };
-    if (!isConnectorHealthy) return { label: "Connector risk", tone: "warn" as const };
+    if (!props.opsProvisioned) return { label: "Provisioning workflows…", tone: "warn" as const };
+    if (bcgptStatus.tone !== "ok") return { label: "Connector risk", tone: "warn" as const };
     if (runBuckets.failed > 0) return { label: "Failures need review", tone: "warn" as const };
-    if (flows.length === 0) return { label: "Ready to build", tone: "warn" as const };
     return { label: "Healthy", tone: "ok" as const };
   })();
 
-  const refreshBusy = props.connectorsLoading || props.flowsLoading || props.runsLoading;
+  const refreshBusy = props.connectorsLoading ?? false;
   const setupSteps: SetupStep[] = [
     {
       id: "gateway",
@@ -157,17 +139,9 @@ export function renderDashboard(props: DashboardProps) {
       actionLabel: "Connect now",
     },
     {
-      id: "flowpieces",
-      title: "Connect Flow Pieces",
-      detail: "Set URL + API key so PMOS can create and edit flows natively.",
-      done: apStatus.tone === "ok",
-      href: props.integrationsHref,
-      actionLabel: "Open integrations",
-    },
-    {
       id: "ops",
       title: "Provision Wicked Ops",
-      detail: "Create a per-workspace n8n Project and API key for workspace isolation.",
+      detail: "Auto-provisioned on signup — creates your personal n8n workflow project.",
       done: Boolean(props.opsProvisioned),
       actionLabel: "Provision",
     },
@@ -180,14 +154,6 @@ export function renderDashboard(props: DashboardProps) {
       actionLabel: "Open integrations",
     },
     {
-      id: "project",
-      title: "Set Flow Project",
-      detail: "Pick your Flow Pieces project ID to scope automations and runs.",
-      done: projectConfigured,
-      href: props.integrationsHref,
-      actionLabel: "Set project",
-    },
-    {
       id: "model-auth",
       title: "Add AI Model Key",
       detail: "Integrations -> AI Model Setup",
@@ -197,19 +163,11 @@ export function renderDashboard(props: DashboardProps) {
     },
     {
       id: "first-flow",
-      title: "Create First Automation",
-      detail: "Build your first flow in Automations.",
+      title: "Create First Workflow",
+      detail: "Build your first workflow in the Workflows editor.",
       done: flows.length > 0,
       href: props.automationsHref,
-      actionLabel: "Open automations",
-    },
-    {
-      id: "first-run",
-      title: "Run First Test",
-      detail: "Trigger a flow and confirm a successful run appears in Runs.",
-      done: runs.length > 0,
-      href: props.runsHref,
-      actionLabel: "Open runs",
+      actionLabel: "Open workflows",
     },
     {
       id: "chat-ready",
@@ -218,7 +176,7 @@ export function renderDashboard(props: DashboardProps) {
       done:
         props.connected &&
         Boolean(props.modelAuthConfigured) &&
-        apStatus.tone === "ok" &&
+        Boolean(props.opsProvisioned) &&
         bcgptStatus.tone === "ok",
       href: props.chatHref,
       actionLabel: "Open chat",
@@ -230,21 +188,11 @@ export function renderDashboard(props: DashboardProps) {
   // Auto-collapse wizard if all steps are done
   const wizardOpen = !allSetupDone;
   const focusItems = [
-    !projectConfigured
-      ? {
-          title: "Set Flow Pieces project",
-          detail: "Integrations -> Flow Pieces -> Project ID",
-          href: props.integrationsHref,
-        }
-      : null,
-    apStatus.tone !== "ok"
-      ? { title: "Fix Flow Pieces connector", detail: "Resolve auth or URL issues", href: props.integrationsHref }
-      : null,
     bcgptStatus.tone !== "ok"
       ? { title: "Fix BCGPT connector", detail: "Restore MCP auth for project actions", href: props.integrationsHref }
       : null,
     runBuckets.failed > 0
-      ? { title: "Investigate failed runs", detail: `${runBuckets.failed} failed recent runs`, href: props.runsHref }
+      ? { title: "Check failed workflow runs", detail: `${runBuckets.failed} failed recent runs — review inside the Workflows editor`, href: props.automationsHref }
       : null,
     flows.length === 0
       ? { title: "Create first automation", detail: "Build a flow in Automations", href: props.automationsHref }
@@ -338,16 +286,12 @@ export function renderDashboard(props: DashboardProps) {
                     ? html`<button class="btn btn--sm" @click=${() => props.onProvisionOps?.()} ?disabled=${props.opsProvisioning || !props.connected}>${props.opsProvisioning ? "Provisioning..." : step.actionLabel ?? "Provision"}</button>`
                     : step.href
                       ? html`<button class="btn btn--sm" @click=${() => {
-                          if (step.id === "flowpieces" || step.id === "bcgpt" || step.id === "project" || step.id === "model-auth") {
+                          if (step.id === "bcgpt" || step.id === "model-auth") {
                             props.onNavigateTab("integrations");
                             return;
                           }
                           if (step.id === "first-flow") {
                             props.onNavigateTab("automations");
-                            return;
-                          }
-                          if (step.id === "first-run") {
-                            props.onNavigateTab("runs");
                             return;
                           }
                           if (step.id === "chat-ready") {
@@ -365,13 +309,12 @@ export function renderDashboard(props: DashboardProps) {
     <section class="grid grid-cols-2">
       <div class="card">
         <div class="card-title">Integration Health</div>
-        <div class="card-sub">Connector state for Flow Pieces and BCGPT.</div>
+        <div class="card-sub">Connector state for Wicked Ops and BCGPT.</div>
 
         <div class="stat-grid" style="margin-top: 16px;">
           <div class="stat">
-            <div class="stat-label">Flow Pieces</div>
-            <div class="stat-value ${apStatus.tone === "ok" ? "ok" : "warn"}">${apStatus.label}</div>
-            <div class="muted mono">${ap?.url ?? "https://flow.wickedlab.io"}</div>
+            <div class="stat-label">Wicked Ops</div>
+            <div class="stat-value ${props.opsProvisioned ? "ok" : "warn"}">${props.opsProvisioned ? "Provisioned" : "Pending"}</div>
           </div>
           <div class="stat">
             <div class="stat-label">BCGPT</div>
@@ -416,13 +359,12 @@ export function renderDashboard(props: DashboardProps) {
           <div class="stat">
             <div class="stat-label">Pulse</div>
             <div class="stat-value ${pulse.tone === "ok" ? "ok" : "warn"}">${pulse.label}</div>
-            <div class="muted">${projectConfigured ? "Project linked" : "Project missing"}</div>
+            <div class="muted">${props.opsProvisioned ? "Workflows ready" : "Provisioning…"}</div>
           </div>
         </div>
 
         <div class="row" style="margin-top: 14px;">
-          <button class="btn" @click=${() => props.onNavigateTab("automations")}>Automations</button>
-          <button class="btn" @click=${() => props.onNavigateTab("runs")}>Runs</button>
+          <button class="btn" @click=${() => props.onNavigateTab("automations")}>Workflows</button>
           <button class="btn btn--secondary" @click=${() => props.onNavigateTab("chat")}>Chat</button>
         </div>
       </div>
@@ -477,7 +419,7 @@ export function renderDashboard(props: DashboardProps) {
           <button class="btn" @click=${() => props.onRefreshDashboard()} ?disabled=${refreshBusy || !props.connected}>
             ${refreshBusy ? "Refreshing..." : "Refresh all"}
           </button>
-          <button class="btn btn--secondary" @click=${() => props.onNavigateTab("runs")}>Open runs</button>
+          <button class="btn btn--secondary" @click=${() => props.onNavigateTab("automations")}>Open workflows</button>
         </div>
       </div>
 
@@ -502,10 +444,6 @@ export function renderDashboard(props: DashboardProps) {
                       }
                       if (item.href === props.automationsHref) {
                         props.onNavigateTab("automations");
-                        return;
-                      }
-                      if (item.href === props.runsHref) {
-                        props.onNavigateTab("runs");
                         return;
                       }
                       props.onNavigateTab("chat");
@@ -587,23 +525,22 @@ export function renderDashboard(props: DashboardProps) {
             : html`
                 <div style="margin-top: 16px; display: grid; gap: 8px;">
                   ${renderStatusPill("Gateway", props.connected ? "Connected" : "Offline", props.connected ? "ok" : "warn")}
-                  ${renderStatusPill("Project", projectConfigured ? "Configured" : "Missing", projectConfigured ? "ok" : "warn")}
+                  ${renderStatusPill("Wicked Ops", props.opsProvisioned ? "Provisioned" : "Pending", props.opsProvisioned ? "ok" : "warn")}
                 </div>
               `
         }
 
         ${
-          !projectConfigured
+          !props.opsProvisioned
             ? html`
                 <div class="callout" style="margin-top: 14px;">
-                  Flow Pieces Project ID is not set. Configure it in Integrations to enable flow/runs widgets.
+                  Wicked Ops workspace is provisioning — workflows will be available shortly.
                 </div>
               `
             : nothing
         }
 
         ${props.lastError ? html`<div class="callout danger" style="margin-top: 14px;">${props.lastError}</div>` : nothing}
-        ${props.flowsError ? html`<div class="callout danger" style="margin-top: 14px;">${props.flowsError}</div>` : nothing}
       </div>
     </section>
   `;

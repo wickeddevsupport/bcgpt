@@ -44,6 +44,7 @@ import { resolveGatewayClientIp } from "./net.js";
 import { handleOpenAiHttpRequest } from "./openai-http.js";
 import { handleOpenResponsesHttpRequest } from "./openresponses-http.js";
 import { handlePmosAuthHttpRequest } from "./pmos-auth-http.js";
+import { handleOpsProxyRequest } from "./pmos-ops-proxy.js";
 import { handleToolsInvokeHttpRequest } from "./tools-invoke-http.js";
 
 type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
@@ -325,6 +326,9 @@ export function createGatewayHttpServer(opts: {
           controlUiBasePath,
         })
       ) {
+        return;
+      }
+      if (await handleOpsProxyRequest(req, res)) {
         return;
       }
       if (await handleHooksRequest(req, res)) {

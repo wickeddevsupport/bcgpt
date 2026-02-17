@@ -1,18 +1,11 @@
 import { html, nothing } from "lit";
 import type { PmosConnectorsStatus } from "../controllers/pmos-connectors.ts";
-import type {
-  ActivepiecesConnectionSummary,
-  ActivepiecesPieceSummary,
-} from "../controllers/pmos-activepieces.ts";
 import type { PmosModelProvider } from "../controllers/pmos-model-auth.ts";
 
 export type IntegrationsProps = {
   connected: boolean;
   saving: boolean;
   error: string | null;
-  activepiecesUrl: string;
-  activepiecesProjectId: string;
-  activepiecesApiKeyDraft: string;
   bcgptUrl: string;
   bcgptApiKeyDraft: string;
   connectorsLoading: boolean;
@@ -25,13 +18,9 @@ export type IntegrationsProps = {
   modelSaving: boolean;
   modelConfigured: boolean;
   modelError: string | null;
-  onActivepiecesUrlChange: (next: string) => void;
-  onActivepiecesProjectIdChange: (next: string) => void;
-  onActivepiecesApiKeyDraftChange: (next: string) => void;
   onBcgptUrlChange: (next: string) => void;
   onBcgptApiKeyDraftChange: (next: string) => void;
   onSave: () => void;
-  onClearActivepiecesKey: () => void;
   onClearBcgptKey: () => void;
   onRefreshConnectors: () => void;
   onModelProviderChange: (next: PmosModelProvider) => void;
@@ -41,34 +30,9 @@ export type IntegrationsProps = {
   onModelSave: () => void;
   onModelClearKey: () => void;
 
-  // Phase 2: Activepieces native embed
-  apPiecesLoading: boolean;
-  apPiecesError: string | null;
-  apPiecesQuery: string;
-  apPieces: ActivepiecesPieceSummary[];
-  onApPiecesQueryChange: (next: string) => void;
-  onApPiecesRefresh: () => void;
-
-  apConnectionsLoading: boolean;
-  apConnectionsError: string | null;
-  apConnections: ActivepiecesConnectionSummary[];
-  apConnectionCreateSaving: boolean;
-  apConnectionCreateError: string | null;
-  apConnectionCreatePieceName: string;
-  apConnectionCreateDisplayName: string;
-  apConnectionCreateType: "secret_text" | "basic_auth" | "no_auth";
-  apConnectionCreateSecretText: string;
-  apConnectionCreateBasicUser: string;
-  apConnectionCreateBasicPass: string;
-  onApConnectionsRefresh: () => void;
-  onApConnectionCreate: () => void;
-  onApConnectionDelete: (connectionId: string) => void;
-  onApConnectionCreatePieceNameChange: (next: string) => void;
-  onApConnectionCreateDisplayNameChange: (next: string) => void;
-  onApConnectionCreateTypeChange: (next: "secret_text" | "basic_auth" | "no_auth") => void;
-  onApConnectionCreateSecretTextChange: (next: string) => void;
-  onApConnectionCreateBasicUserChange: (next: string) => void;
-  onApConnectionCreateBasicPassChange: (next: string) => void;
+  // n8n / Wicked Ops provisioning status
+  opsProvisioned?: boolean;
+  opsProjectId?: string | null;
 };
 
 function renderConnectorStatus(label: string, ok: boolean | null, detail?: string | null) {
@@ -84,15 +48,10 @@ function renderConnectorStatus(label: string, ok: boolean | null, detail?: strin
 }
 
 export function renderIntegrations(props: IntegrationsProps) {
-  const ap = props.connectorsStatus?.activepieces ?? null;
   const bcgpt = props.connectorsStatus?.bcgpt ?? null;
 
-  const apConfigured = ap?.configured ?? false;
   const bcgptConfigured = bcgpt?.configured ?? false;
 
-  const activepiecesKeyPlaceholder = apConfigured
-    ? "Stored (leave blank to keep)"
-    : "Paste Flow Pieces API key (ap_...)";
   const bcgptKeyPlaceholder = bcgptConfigured
     ? "Stored (leave blank to keep)"
     : "Paste BCGPT API key";
@@ -187,64 +146,35 @@ export function renderIntegrations(props: IntegrationsProps) {
 
     <section class="grid grid-cols-2">
       <div class="card">
-        <div class="card-title">Flow Pieces (Flow Engine)</div>
-        <div class="card-sub">Used for flows, pieces, connections, and run logs.</div>
-
-        <div class="form-grid" style="margin-top: 16px;">
-          <label class="field">
-            <span>Base URL</span>
-            <input
-              .value=${props.activepiecesUrl}
-              @input=${(e: Event) => props.onActivepiecesUrlChange((e.target as HTMLInputElement).value)}
-              placeholder="https://flow.wickedlab.io"
-              ?disabled=${!props.connected}
-            />
-          </label>
-          <label class="field">
-            <span>Project ID (optional)</span>
-            <input
-              .value=${props.activepiecesProjectId}
-              @input=${(e: Event) => props.onActivepiecesProjectIdChange((e.target as HTMLInputElement).value)}
-              placeholder="Used for flow CRUD later"
-              ?disabled=${!props.connected}
-            />
-          </label>
-          <label class="field">
-            <span>API Key</span>
-            <input
-              type="password"
-              .value=${props.activepiecesApiKeyDraft}
-              @input=${(e: Event) =>
-                props.onActivepiecesApiKeyDraftChange((e.target as HTMLInputElement).value)}
-              placeholder=${activepiecesKeyPlaceholder}
-              autocomplete="off"
-              ?disabled=${!props.connected}
-            />
-          </label>
+        <div class="card-title">Wicked Ops (Workflow Engine)</div>
+        <div class="card-sub">
+          Powered by n8n — auto-provisioned per workspace. Your workflows are isolated to your workspace.
         </div>
 
-        <div class="row" style="margin-top: 14px;">
-          <button class="btn" ?disabled=${props.saving || !props.connected} @click=${() => props.onSave()}>
-            ${props.saving ? "Saving..." : "Save"}
-          </button>
-          <button
-            class="btn btn--secondary"
-            ?disabled=${props.saving || !props.connected}
-            @click=${() => props.onClearActivepiecesKey()}
-            title="Remove the stored Flow Pieces API key"
-          >
-            Clear key
-          </button>
-          <button
-            class="btn btn--secondary"
-            ?disabled=${props.connectorsLoading || !props.connected}
-            @click=${() => props.onRefreshConnectors()}
-          >
-            ${props.connectorsLoading ? "Checking..." : "Test"}
-          </button>
+        <div style="margin-top: 16px;">
+          ${props.opsProvisioned
+            ? html`
+                <div class="stat">
+                  <div class="stat-label">Status</div>
+                  <div class="stat-value ok">Provisioned</div>
+                  ${props.opsProjectId
+                    ? html`<div class="muted mono" style="font-size:11px;">${props.opsProjectId}</div>`
+                    : nothing}
+                </div>
+                <div class="muted" style="margin-top: 12px;">
+                  Your n8n project and API key are configured. Open the <strong>Workflows</strong> tab to build automations.
+                </div>
+              `
+            : html`
+                <div class="stat">
+                  <div class="stat-label">Status</div>
+                  <div class="stat-value warn">Pending</div>
+                </div>
+                <div class="muted" style="margin-top: 12px;">
+                  Provisioning happens automatically on signup. Check the Dashboard setup wizard if setup is incomplete.
+                </div>
+              `}
         </div>
-
-        ${disabledReason ? html`<div class="muted" style="margin-top: 10px;">${disabledReason}</div>` : nothing}
       </div>
 
       <div class="card">
@@ -306,8 +236,6 @@ export function renderIntegrations(props: IntegrationsProps) {
       <div class="card-sub">Server-side checks (no browser CORS issues).</div>
 
       <div class="stat-grid" style="margin-top: 16px;">
-        ${renderConnectorStatus("Flow Pieces reachable", ap?.reachable ?? null, ap?.flagsUrl ?? null)}
-        ${renderConnectorStatus("Flow Pieces auth", ap?.authOk ?? null, ap?.authUrl ?? null)}
         ${renderConnectorStatus("BCGPT reachable", bcgpt?.reachable ?? null, bcgpt?.healthUrl ?? null)}
         ${renderConnectorStatus("BCGPT auth", bcgpt?.authOk ?? null, bcgpt?.mcpUrl ?? null)}
       </div>

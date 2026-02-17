@@ -72,7 +72,6 @@ const debouncedLoadUsage = (state: UsageState) => {
 };
 import { renderAgents } from "./views/agents.ts";
 import { renderAdmin } from "./views/admin.ts";
-import { renderAutomations } from "./views/automations.ts";
 import { renderDashboard } from "./views/dashboard.ts";
 import { renderChannels } from "./views/channels.ts";
 import { renderChat } from "./views/chat.ts";
@@ -87,7 +86,6 @@ import { renderInstances } from "./views/instances.ts";
 import { renderLogs } from "./views/logs.ts";
 import { renderNodes } from "./views/nodes.ts";
 import { renderOverview } from "./views/overview.ts";
-import { renderRuns } from "./views/runs.ts";
 import { renderSessions } from "./views/sessions.ts";
 import { renderSkills } from "./views/skills.ts";
 import { renderUsage } from "./views/usage.ts";
@@ -474,17 +472,11 @@ export function renderApp(state: AppViewState) {
                 connectorsLoading: state.pmosConnectorsLoading,
                 connectorsError: state.pmosConnectorsError,
                 connectorsStatus: state.pmosConnectorsStatus,
-                projectId: state.pmosActivepiecesProjectId,
-                flowsLoading: state.apFlowsLoading,
-                flowsError: state.apFlowsError,
-                flows: state.apFlows,
-                runsLoading: state.apRunsLoading,
-                runsError: state.apRunsError,
-                runs: state.apRuns,
+                flows: [],
+                runs: [],
                 traceEvents: state.pmosTraceEvents,
                 integrationsHref: pathForTab("integrations", state.basePath),
                 automationsHref: pathForTab("automations", state.basePath),
-                runsHref: pathForTab("runs", state.basePath),
                 chatHref: pathForTab("chat", state.basePath),
                 configHref: pathForTab("config", state.basePath),
                 modelAuthConfigured: hasConfiguredModelAuth(configValue),
@@ -495,8 +487,6 @@ export function renderApp(state: AppViewState) {
                   Promise.all([
                     loadConfig(state),
                     state.handlePmosRefreshConnectors(),
-                    state.handlePmosApFlowsLoad(),
-                    state.handlePmosApRunsLoad(),
                   ]).then(() => undefined),
                 onNavigateTab: (tab) => state.setTab(tab),
                 onClearTrace: () => state.handlePmosTraceClear(),
@@ -514,100 +504,19 @@ export function renderApp(state: AppViewState) {
 
         ${
           state.tab === "automations"
-            ? renderAutomations({
-                connected: state.connected,
-              integrationsHref: pathForTab("integrations", state.basePath),
-              projectId: state.pmosActivepiecesProjectId,
-              onOpenIntegrations: () => state.setTab("integrations"),
-
-                loading: state.apFlowsLoading,
-                error: state.apFlowsError,
-                flowsQuery: state.apFlowsQuery,
-                flows: state.apFlows,
-
-                createName: state.apFlowCreateName,
-                creating: state.apFlowCreateSaving,
-                createError: state.apFlowCreateError,
-
-                selectedFlowId: state.apFlowSelectedId,
-                flowDetailsLoading: state.apFlowDetailsLoading,
-                flowDetailsError: state.apFlowDetailsError,
-                flowDetails: state.apFlowDetails,
-
-                renameDraft: state.apFlowRenameDraft,
-                operationDraft: state.apFlowOperationDraft,
-                triggerPayloadDraft: state.apFlowTriggerPayloadDraft,
-                mutating: state.apFlowMutating,
-                mutateError: state.apFlowMutateError,
-
-                builderPrompt: state.pmosFlowBuilderPrompt,
-                builderGenerating: state.pmosFlowBuilderGenerating,
-                builderCommitting: state.pmosFlowBuilderCommitting,
-                builderError: state.pmosFlowBuilderError,
-                builderFlowName: state.pmosFlowBuilderFlowName,
-                builderNodes: state.pmosFlowBuilderNodes,
-                builderEdges: state.pmosFlowBuilderEdges,
-                builderOps: state.pmosFlowBuilderOps,
-                builderLastCommittedFlowId: state.pmosFlowBuilderLastCommittedFlowId,
-
-                onFlowsQueryChange: (next) => {
-                  state.apFlowsQuery = next;
-                  state.apFlowsError = null;
-                },
-                onRefresh: () => state.handlePmosApFlowsLoad(),
-                onCreateNameChange: (next) => {
-                  state.apFlowCreateName = next;
-                  state.apFlowCreateError = null;
-                },
-                onCreate: () => state.handlePmosApFlowCreate(),
-                onSelectFlow: (flowId) => {
-                  state.apFlowDetailsError = null;
-                  state.apFlowMutateError = null;
-                  state.handlePmosApFlowSelect(flowId);
-                },
-                onRenameDraftChange: (next) => (state.apFlowRenameDraft = next),
-                onRename: () => state.handlePmosApFlowRename(),
-                onSetStatus: (status) => state.handlePmosApFlowSetStatus(status),
-                onPublish: () => state.handlePmosApFlowPublish(),
-                onDelete: () => state.handlePmosApFlowDelete(),
-                onOperationDraftChange: (next) => (state.apFlowOperationDraft = next),
-                onApplyOperation: () => state.handlePmosApFlowApplyOperation(),
-                onTriggerPayloadDraftChange: (next) => (state.apFlowTriggerPayloadDraft = next),
-                onTriggerWebhook: (opts) => state.handlePmosApFlowTriggerWebhook(opts),
-                onBuilderPromptChange: (next) => (state.pmosFlowBuilderPrompt = next),
-                onBuilderGenerate: () => state.handlePmosFlowBuilderGenerate(),
-                onBuilderCommit: () => state.handlePmosFlowBuilderCommit(),
-                onBuilderReset: () => state.handlePmosFlowBuilderReset(),
-              })
-            : nothing
-        }
-
-        ${
-          state.tab === "runs"
-            ? renderRuns({
-                connected: state.connected,
-              integrationsHref: pathForTab("integrations", state.basePath),
-              projectId: state.pmosActivepiecesProjectId,
-              onOpenIntegrations: () => state.setTab("integrations"),
-
-                loading: state.apRunsLoading,
-                error: state.apRunsError,
-                runs: state.apRuns,
-                selectedRunId: state.apRunSelectedId,
-                runDetailsLoading: state.apRunDetailsLoading,
-                runDetailsError: state.apRunDetailsError,
-                runDetails: state.apRunDetails,
-                retrying: state.apRunRetrying,
-                retryError: state.apRunRetryError,
-
-                onRefresh: () => state.handlePmosApRunsLoad(),
-                onSelectRun: (runId) => {
-                  state.apRunDetailsError = null;
-                  state.apRunRetryError = null;
-                  state.handlePmosApRunSelect(runId);
-                },
-                onRetry: (strategy) => state.handlePmosApRunRetry(strategy),
-              })
+            ? html`<div class="tab-panel tab-panel--full-height">
+                ${state.pmosOpsProvisioning
+                  ? html`<div class="loading-panel" style="display:flex;align-items:center;justify-content:center;height:100%;gap:12px;">
+                      <span class="spinner"></span>
+                      <span class="muted">Setting up your automation workspace…</span>
+                    </div>`
+                  : html`<iframe
+                      src="/ops-ui/"
+                      style="width:100%;height:100%;border:none;display:block;"
+                      title="Wicked Ops Workflows"
+                      allow="clipboard-read; clipboard-write"
+                    ></iframe>`}
+              </div>`
             : nothing
         }
 
@@ -617,9 +526,6 @@ export function renderApp(state: AppViewState) {
                 connected: state.connected,
                 saving: state.pmosIntegrationsSaving,
                 error: state.pmosIntegrationsError,
-                activepiecesUrl: state.pmosActivepiecesUrl,
-                activepiecesProjectId: state.pmosActivepiecesProjectId,
-                activepiecesApiKeyDraft: state.pmosActivepiecesApiKeyDraft,
                 bcgptUrl: state.pmosBcgptUrl,
                 bcgptApiKeyDraft: state.pmosBcgptApiKeyDraft,
                 connectorsLoading: state.pmosConnectorsLoading,
@@ -632,14 +538,9 @@ export function renderApp(state: AppViewState) {
                 modelSaving: state.pmosModelSaving,
                 modelConfigured: state.pmosModelConfigured,
                 modelError: state.pmosModelError,
-                onActivepiecesUrlChange: (next) => (state.pmosActivepiecesUrl = next),
-                onActivepiecesProjectIdChange: (next) => (state.pmosActivepiecesProjectId = next),
-                onActivepiecesApiKeyDraftChange: (next) =>
-                  (state.pmosActivepiecesApiKeyDraft = next),
                 onBcgptUrlChange: (next) => (state.pmosBcgptUrl = next),
                 onBcgptApiKeyDraftChange: (next) => (state.pmosBcgptApiKeyDraft = next),
                 onSave: () => state.handlePmosIntegrationsSave(),
-                onClearActivepiecesKey: () => state.handlePmosIntegrationsClearActivepiecesKey(),
                 onClearBcgptKey: () => state.handlePmosIntegrationsClearBcgptKey(),
                 onRefreshConnectors: () => state.handlePmosRefreshConnectors(),
                 onModelProviderChange: (next) => state.handlePmosModelProviderChange(next),
@@ -657,55 +558,8 @@ export function renderApp(state: AppViewState) {
                 },
                 onModelSave: () => state.handlePmosModelSave(),
                 onModelClearKey: () => state.handlePmosModelClearKey(),
-
-                apPiecesLoading: state.apPiecesLoading,
-                apPiecesError: state.apPiecesError,
-                apPiecesQuery: state.apPiecesQuery,
-                apPieces: state.apPieces,
-                onApPiecesQueryChange: (next) => {
-                  state.apPiecesQuery = next;
-                  state.apPiecesError = null;
-                },
-                onApPiecesRefresh: () => state.handlePmosApPiecesLoad(),
-
-                apConnectionsLoading: state.apConnectionsLoading,
-                apConnectionsError: state.apConnectionsError,
-                apConnections: state.apConnections,
-                apConnectionCreateSaving: state.apConnectionCreateSaving,
-                apConnectionCreateError: state.apConnectionCreateError,
-                apConnectionCreatePieceName: state.apConnectionCreatePieceName,
-                apConnectionCreateDisplayName: state.apConnectionCreateDisplayName,
-                apConnectionCreateType: state.apConnectionCreateType,
-                apConnectionCreateSecretText: state.apConnectionCreateSecretText,
-                apConnectionCreateBasicUser: state.apConnectionCreateBasicUser,
-                apConnectionCreateBasicPass: state.apConnectionCreateBasicPass,
-                onApConnectionsRefresh: () => state.handlePmosApConnectionsLoad(),
-                onApConnectionCreate: () => state.handlePmosApConnectionCreate(),
-                onApConnectionDelete: (connectionId) => state.handlePmosApConnectionDelete(connectionId),
-                onApConnectionCreatePieceNameChange: (next) => {
-                  state.apConnectionCreatePieceName = next;
-                  state.apConnectionCreateError = null;
-                },
-                onApConnectionCreateDisplayNameChange: (next) => {
-                  state.apConnectionCreateDisplayName = next;
-                  state.apConnectionCreateError = null;
-                },
-                onApConnectionCreateTypeChange: (next) => {
-                  state.apConnectionCreateType = next;
-                  state.apConnectionCreateError = null;
-                },
-                onApConnectionCreateSecretTextChange: (next) => {
-                  state.apConnectionCreateSecretText = next;
-                  state.apConnectionCreateError = null;
-                },
-                onApConnectionCreateBasicUserChange: (next) => {
-                  state.apConnectionCreateBasicUser = next;
-                  state.apConnectionCreateError = null;
-                },
-                onApConnectionCreateBasicPassChange: (next) => {
-                  state.apConnectionCreateBasicPass = next;
-                  state.apConnectionCreateError = null;
-                },
+                opsProvisioned: Boolean(state.pmosOpsProvisioningResult?.apiKey),
+                opsProjectId: state.pmosOpsProvisioningResult?.projectId ?? null,
               })
             : nothing
         }
