@@ -292,66 +292,44 @@ export function renderDashboard(props: DashboardProps) {
               </div>
             </div>`
           : nothing}
-                  ${
-                    step.done
-                      ? nothing
-                      : step.actionKind === "connect"
-                        ? html`
-                            <button
-                              class="btn btn--sm"
-                              @click=${() => props.onConnect()}
-                              ?disabled=${props.connected}
-                            >
-                              ${step.actionLabel ?? "Connect"}
-                            </button>
-                          `
-                            : step.id === "ops"
-                            ? html`
-                                <button
-                                  class="btn btn--sm"
-                                  @click=${() => props.onProvisionOps?.()}
-                                  ?disabled=${props.opsProvisioning || !props.connected}
-                                >
-                                  ${props.opsProvisioning ? "Provisioning..." : step.actionLabel ?? "Provision"}
-                                </button>
-                              `
-                            : step.href
-                              ? html`
-                                  <button
-                                    class="btn btn--sm"
-                                    @click=${() => {
-                                      if (
-                                        step.id === "flowpieces" ||
-                                        step.id === "bcgpt" ||
-                                        step.id === "project" ||
-                                        step.id === "model-auth"
-                                      ) {
-                                        props.onNavigateTab("integrations");
-                                        return;
-                                      }
-                                      if (step.id === "first-flow") {
-                                        props.onNavigateTab("automations");
-                                        return;
-                                      }
-                                      if (step.id === "first-run") {
-                                        props.onNavigateTab("runs");
-                                        return;
-                                      }
-                                      if (step.id === "chat-ready") {
-                                        props.onNavigateTab("chat");
-                                      }
-                                    }}
-                                  >
-                                    ${step.actionLabel ?? "Open"}
-                                  </button>
-                                `
-                              : nothing
-                  }
-                </div>
+
+        <div style="margin-top:12px;">
+          ${setupSteps.map((step) => html`
+            <div class="setup-step" style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;">
+              <div>
+                <div style="font-weight:600">${step.title}</div>
+                <div class="muted" style="margin-top:4px">${step.detail}</div>
               </div>
-            `;
-          })}
-        </div>
+              <div style="display:flex;gap:8px;align-items:center;">
+                ${step.done ? html`<span class="chip chip-ok">Done</span>` : html`<span class="chip">Pending</span>`}
+
+                ${step.actionKind === "connect"
+                  ? html`<button class="btn btn--sm" @click=${() => props.onConnect()} ?disabled=${props.connected}>${step.actionLabel ?? "Connect"}</button>`
+                  : step.id === "ops"
+                    ? html`<button class="btn btn--sm" @click=${() => props.onProvisionOps?.()} ?disabled=${props.opsProvisioning || !props.connected}>${props.opsProvisioning ? "Provisioning..." : step.actionLabel ?? "Provision"}</button>`
+                    : step.href
+                      ? html`<button class="btn btn--sm" @click=${() => {
+                          if (step.id === "flowpieces" || step.id === "bcgpt" || step.id === "project" || step.id === "model-auth") {
+                            props.onNavigateTab("integrations");
+                            return;
+                          }
+                          if (step.id === "first-flow") {
+                            props.onNavigateTab("automations");
+                            return;
+                          }
+                          if (step.id === "first-run") {
+                            props.onNavigateTab("runs");
+                            return;
+                          }
+                          if (step.id === "chat-ready") {
+                            props.onNavigateTab("chat");
+                          }
+                        }}>${step.actionLabel ?? "Open"}</button>`
+                      : nothing}
+              </div>
+            </div>
+          `)}
+        </div>        </div>
       </div>
     </details>
 
