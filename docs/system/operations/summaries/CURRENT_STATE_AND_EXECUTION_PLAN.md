@@ -1,4 +1,4 @@
-# PMOS Unified Platform Plan (OpenClaw + Activepieces)
+# PMOS Unified Platform Plan (OpenClaw + Flow engines: Activepieces & n8n)
 
 Last updated: 2026-02-17
 Owner: `bcgpt` monorepo
@@ -10,7 +10,7 @@ Canonical scope: build PMOS as a real multi-tenant product on top of OpenClaw + 
 
 1. `os.wickedlab.io` is the PMOS product UI and control plane.
 2. PMOS runtime base is OpenClaw (`openclaw/`).
-3. Flow Pieces engine is Activepieces (`flow.wickedlab.io`) and is consumed natively inside PMOS.
+3. Flow engines: Activepieces (`flow.wickedlab.io`) and Wicked Ops / n8n (`ops.wickedlab.io`) — PMOS can surface either engine; per-workspace n8n Projects + API-key provisioning is implemented.
 4. BCGPT (`bcgpt.wickedlab.io`) remains a connector and MCP/connect surface.
 5. Basecamp is one connector, not the center of PMOS architecture.
 
@@ -226,7 +226,7 @@ All must be true:
 3. Non-super-admin users cannot access shell execution paths.
 4. Workspace admins can fully create/manage automations and agents without shell.
 5. Flow edits in PMOS reflect in Flow Pieces and vice versa.
-6. Flow Studio in PMOS is Activepieces-grade usable (canvas + right config panel + dropdown-guided fields).
+6. Flow Studio in PMOS supports Activepieces-grade UX and Wicked Ops (n8n) flows (canvas + right config panel + dropdown-guided fields).
 7. Chat executes end-to-end operations with visible execution trace and approvals on the same workflow surface.
 8. E2E, monitoring, and rollback checks pass.
 9. MCP and Flow production services remain stable and backward-compatible.

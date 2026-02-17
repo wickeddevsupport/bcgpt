@@ -1,8 +1,8 @@
-# PMOS System Architecture (OpenClaw Base + Activepieces Engine)
+# PMOS System Architecture (OpenClaw + Activepieces and Wicked Ops/n8n)
 
-Last updated: 2026-02-15
+Last updated: 2026-02-17
 
-PMOS is one product UI/UX built on top of proven engines. We do not rebuild OpenClaw or Activepieces from scratch. We customize and integrate them.
+PMOS is one product UI/UX built on top of proven engines. We do not rebuild OpenClaw, Activepieces, or Wicked Ops from scratch. We customize and integrate them.
 
 ## What Runs Where (Current)
 
@@ -19,6 +19,11 @@ PMOS is one product UI/UX built on top of proven engines. We do not rebuild Open
    - BCGPT MCP server + Basecamp OAuth connect surface (`/connect`).
    - Stays operational and unchanged unless explicitly approved.
 
+4. `ops.wickedlab.io`
+   - Wicked Ops (n8n) — self-hosted n8n instance(s) used for workspace-level workflow automation and the Basecamp node.
+   - Provides Projects API and API-key management; PMOS can provision per-workspace Projects + API keys where supported.
+   - Deployed and integrated; PMOS dashboard exposes provisioning + manual API-key fallback for workspace connectors.
+
 ## Engines In This Repo
 
 1. `openclaw/`
@@ -27,7 +32,11 @@ PMOS is one product UI/UX built on top of proven engines. We do not rebuild Open
 
 2. `activepieces/`
    - Activepieces engine and UI codebase (vendored).
-   - Treated as the flow engine and integration catalog.
+   - One supported flow engine for PMOS; used for Flow Pieces screens.
+
+3. `wicked-ops/` (n8n integration)
+   - Wicked Ops (n8n) integration surfaced via `openclaw/extensions/wicked-ops/`.
+   - Supports per-workspace Project provisioning, API-key management, workflow CRUD and Basecamp node operations.
 
 3. Repo root (BCGPT)
    - MCP server, Basecamp OAuth, MCP tools, Flow tool wrappers.
@@ -37,7 +46,7 @@ PMOS is one product UI/UX built on top of proven engines. We do not rebuild Open
 One unified app experience in `os.wickedlab.io`:
 
 1. Chat/agent orchestration (OpenClaw patterns).
-2. Deep native flow creation/editing/runs/logs inside PMOS UI (Activepieces engine behind the scenes).
+2. Deep native flow creation/editing/runs/logs inside PMOS UI (supports Activepieces and Wicked Ops / n8n — PMOS can surface either engine; per-workspace n8n Projects + API-key provisioning is available).
 3. Connectors for data and actions (BCGPT MCP tools is one connector among many).
 4. Admin and identity owned by PMOS (workspaces, roles, policies, audit).
 
@@ -60,7 +69,7 @@ PMOS is the OpenClaw app plus PMOS-specific extensions:
 PMOS UI (OpenClaw Control UI, customized)
   -> OpenClaw gateway (same service)
      -> tool/adapters:
-        - Activepieces adapter (flows/runs/pieces/connections)
+        - Activepieces adapter (flows/runs/pieces/connections) and Wicked Ops (n8n) adapter (workspace Projects, api-keys, workflow CRUD)
         - BCGPT adapter (MCP tools for Basecamp/data)
   -> events streamed back into PMOS UI
 

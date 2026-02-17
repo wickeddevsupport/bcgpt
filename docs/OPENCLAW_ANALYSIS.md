@@ -2,7 +2,7 @@
 
 Last updated: 2026-02-15
 
-This repo includes OpenClaw under `openclaw/`. PMOS is now built directly on OpenClaw (engine + Control UI). This doc explains where to change things and how OpenClaw fits with Activepieces and BCGPT.
+This repo includes OpenClaw under `openclaw/`. PMOS is now built directly on OpenClaw (engine + Control UI). This doc explains where to change things and how OpenClaw fits with Activepieces, Wicked Ops (n8n), and BCGPT.
 
 ## Setup (Production Quickstart)
 
@@ -20,6 +20,10 @@ This repo includes OpenClaw under `openclaw/`. PMOS is now built directly on Ope
      - Base URL: `https://flow.wickedlab.io`
      - API Key: `ap_...`
      - Project ID: required for flows/runs/connections in Phase 2
+   - Wicked Ops (n8n):
+     - Base URL: `https://ops.wickedlab.io`
+     - Provision: use Dashboard **Provision Wicked Ops** (creates a project + API key when allowed) or paste a workspace API key in Integrations (manual fallback)
+     - Note: automated Project creation may be license-gated on the target n8n instance; PMOS UI surfaces a manual-key fallback.
    - BCGPT:
      - Base URL: `https://bcgpt.wickedlab.io`
      - API Key: from `https://bcgpt.wickedlab.io/connect`
@@ -47,7 +51,7 @@ Originally deployed: OpenClaw image tag `openclaw-afb4abc1`.
 
 ## Phase 2 Status (Completed)
 
-Phase 2 shipped **native Activepieces embed inside PMOS** (no app-switching):
+Phase 2 shipped **native Flow Studio embed inside PMOS** (supports Activepieces and Wicked Ops/n8n; no app-switching):
 
 1. Integrations:
    - Pieces catalog (search + browse)
@@ -69,6 +73,10 @@ Set it in PMOS:
 - PMOS -> Integrations -> Activepieces -> Project ID, then Save; or
 - CLI: `openclaw config set pmos.connectors.activepieces.projectId <id>`
 
+For Wicked Ops (n8n):
+- PMOS -> Integrations -> Wicked Ops -> use the **Provision Wicked Ops** onboarding button (best-effort provisioning) or paste a workspace API key into the Integrations form.
+- Gateway implementer note: provisioning handled by `pmos.connectors.workspace.provision_ops` and workspace-scoped connectors are stored under `openclaw/src/gateway/workspace-connectors.ts`.
+
 ## What OpenClaw Provides For PMOS
 
 1. A gateway/runtime (sessions, orchestration loop, tool execution patterns).
@@ -87,10 +95,11 @@ PMOS uses OpenClaw as the base. We are not "extracting patterns into a new serve
    - `openclaw/src/`
    - Use this when you need to add server-side endpoints, event streams, or gateway behaviors.
 
-3. Connector tools (Activepieces + BCGPT adapters)
+3. Connector tools (Activepieces, Wicked Ops + BCGPT adapters)
    - `openclaw/extensions/`
    - Preferred place to add "tools" that call:
      - Activepieces APIs (flows/runs/pieces/connections)
+     - Wicked Ops / n8n APIs (projects, api-keys, workflows)
      - BCGPT MCP endpoint (Basecamp + data tools)
 
 4. Skills (prompt modules)
@@ -159,6 +168,6 @@ Notes:
 ## The PMOS Build Order (OpenClaw First)
 
 1. Streamline OpenClaw Control UI into the PMOS shell (nav + dashboard scaffolding).
-2. Add Activepieces connector tools (HTTP adapter) + PMOS Flows/Integrations screens.
+2. Add Flow connector tools (Activepieces and Wicked Ops/n8n adapters) + PMOS Flows/Integrations screens.
 3. Add PMOS identity (email auth) + RBAC/admin.
 4. Add AI-assisted flow creation (graph-ops streaming and commit to Activepieces).

@@ -38,6 +38,8 @@ PMOS (Professional Multi-tenant OpenClaw System) core infrastructure is **COMPLE
 
 **Result**: PMOS can now create and manage n8n workflows programmatically, enabling AI-driven workflow automation.
 
+- ✅ Per-workspace n8n Project + API-key provisioning implemented (dashboard onboarding + manual API-key fallback). Gateway RPC: `pmos.connectors.workspace.provision_ops`. Workspace-scoped connectors override global connectors when present.
+
 ---
 
 ### M1.5: Workspace Isolation (100%)

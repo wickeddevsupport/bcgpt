@@ -7,6 +7,8 @@
 
 **Short Answer:** **n8n is likely better** for OpenClaw's multi-tenant requirements, BUT both require significant work. Neither has perfect multi-tenancy out-of-box.
 
+**Status update:** n8n integration (Wicked Ops) is now implemented in PMOS and deployed at `ops.wickedlab.io`; PMOS supports per-workspace Projects/API-key provisioning and UI onboarding.
+
 **Winner: n8n (with caveats)**
 - Better API for programmatic management
 - More mature self-hosting
