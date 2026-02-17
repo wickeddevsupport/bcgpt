@@ -274,6 +274,11 @@ export class OpenClawApp extends LitElement {
   @state() pmosConnectorsLastChecked: number | null = null;
   @state() pmosTraceEvents: PmosExecutionTraceEvent[] = [];
 
+  // Wicked Ops (n8n) provisioning per-workspace
+  @state() pmosOpsProvisioning = false;
+  @state() pmosOpsProvisioningError: string | null = null;
+  @state() pmosOpsProvisioningResult: { projectId?: string; apiKey?: string } | null = null;
+
   // PMOS model auth quick setup (admin UX)
   @state() pmosModelProvider: PmosModelProvider = "google";
   @state() pmosModelId = "gemini-3-flash-preview";
@@ -659,6 +664,26 @@ export class OpenClawApp extends LitElement {
 
   async handlePmosRefreshConnectors() {
     await loadPmosConnectorsStatus(this);
+
+    // Refresh workspace-scoped Wicked Ops connectors (if any)
+    try {
+      if (this.client && this.connected) {
+        const ws = await this.client.request<{ workspaceId: string; connectors: Record<string, any> }>(
+          "pmos.connectors.workspace.get",
+          {},
+        );
+        const ops = ws?.connectors?.ops ?? null;
+        if (ops && typeof ops === "object" && ops.apiKey) {
+          this.pmosOpsProvisioningResult = { projectId: ops.projectId ?? undefined, apiKey: String(ops.apiKey) };
+          this.pmosOpsProvisioningError = null;
+        } else {
+          this.pmosOpsProvisioningResult = null;
+        }
+      }
+    } catch (err) {
+      // ignore workspace-read failures (UI remains usable)
+      this.pmosOpsProvisioningResult = null;
+    }
   }
 
   handlePmosTraceClear() {
@@ -708,6 +733,25 @@ export class OpenClawApp extends LitElement {
     hydratePmosConnectorDraftsFromConfig(this);
     hydratePmosModelDraftFromConfig(this);
     await loadPmosConnectorsStatus(this);
+
+    // Load any existing workspace-scoped Wicked Ops connectors so the UI can reflect provisioning state
+    try {
+      if (this.client && this.connected) {
+        const ws = await this.client.request<{ workspaceId: string; connectors: Record<string, any> }>(
+          "pmos.connectors.workspace.get",
+          {},
+        );
+        const ops = ws?.connectors?.ops ?? null;
+        if (ops && typeof ops === "object" && ops.apiKey) {
+          this.pmosOpsProvisioningResult = { projectId: ops.projectId ?? undefined, apiKey: String(ops.apiKey) };
+          this.pmosOpsProvisioningError = null;
+        } else {
+          this.pmosOpsProvisioningResult = null;
+        }
+      }
+    } catch (err) {
+      this.pmosOpsProvisioningResult = null;
+    }
   }
 
   async handlePmosIntegrationsSave() {
@@ -735,6 +779,30 @@ export class OpenClawApp extends LitElement {
     hydratePmosConnectorDraftsFromConfig(this);
     hydratePmosModelDraftFromConfig(this);
     await loadPmosConnectorsStatus(this);
+  }
+
+  async handlePmosProvisionOps(opts?: { projectName?: string }) {
+    if (!this.client || !this.connected) {
+      this.pmosOpsProvisioningError = "Not connected to gateway";
+      return;
+    }
+    this.pmosOpsProvisioning = true;
+    this.pmosOpsProvisioningError = null;
+    this.pmosOpsProvisioningResult = null;
+    try {
+      const res = await this.client.request<{ ok?: boolean; projectId?: string; apiKey?: string }>(
+        "pmos.connectors.workspace.provision_ops",
+        { projectName: opts?.projectName ?? undefined },
+      );
+      // persist result in UI state and refresh connectors
+      this.pmosOpsProvisioningResult = { projectId: res.projectId, apiKey: res.apiKey };
+      this.pmosOpsProvisioningError = null;
+      await this.handlePmosRefreshConnectors();
+    } catch (err) {
+      this.pmosOpsProvisioningError = String(err);
+    } finally {
+      this.pmosOpsProvisioning = false;
+    }
   }
 
   handlePmosModelProviderChange(next: PmosModelProvider) {

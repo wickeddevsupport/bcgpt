@@ -500,6 +500,10 @@ export function renderApp(state: AppViewState) {
                   ]).then(() => undefined),
                 onNavigateTab: (tab) => state.setTab(tab),
                 onClearTrace: () => state.handlePmosTraceClear(),
+                onProvisionOps: () => state.handlePmosProvisionOps(),
+                opsProvisioning: state.pmosOpsProvisioning,
+                opsProvisioned: Boolean(state.pmosOpsProvisioningResult?.apiKey),
+                opsProvisioningResult: state.pmosOpsProvisioningResult,
               })
             : nothing
         }

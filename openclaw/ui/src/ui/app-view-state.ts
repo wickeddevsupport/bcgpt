@@ -157,6 +157,11 @@ export type AppViewState = {
   pmosConnectorsError: string | null;
   pmosConnectorsLastChecked: number | null;
   pmosTraceEvents: PmosExecutionTraceEvent[];
+
+  // workspace-scoped Wicked Ops provisioning state
+  pmosOpsProvisioning: boolean;
+  pmosOpsProvisioningError: string | null;
+  pmosOpsProvisioningResult: { projectId?: string; apiKey?: string } | null;
   pmosModelProvider: PmosModelProvider;
   pmosModelId: string;
   pmosModelAlias: string;

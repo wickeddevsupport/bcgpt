@@ -29,12 +29,19 @@ export type DashboardProps = {
   chatHref: string;
   configHref?: string;
   modelAuthConfigured?: boolean;
+
+  // ops provisioning UI state (workspace-scoped n8n project + API key)
+  opsProvisioning?: boolean;
+  opsProvisioned?: boolean;
+  opsProvisioningResult?: { projectId?: string; apiKey?: string } | null;
+
   onNavigateTab: (tab: "integrations" | "automations" | "runs" | "chat" | "config") => void;
   onSettingsChange: (next: UiSettings) => void;
   onConnect: () => void;
   onRefreshConnectors: () => void;
   onRefreshDashboard: () => void;
   onClearTrace: () => void;
+  onProvisionOps?: () => Promise<void>;
 };
 
 function renderStatusPill(label: string, value: string, status: "ok" | "warn") {
@@ -154,6 +161,13 @@ export function renderDashboard(props: DashboardProps) {
       actionLabel: "Open integrations",
     },
     {
+      id: "ops",
+      title: "Provision Wicked Ops",
+      detail: "Create a per-workspace n8n Project and API key for workspace isolation.",
+      done: Boolean(props.opsProvisioned),
+      actionLabel: "Provision",
+    },
+    {
       id: "bcgpt",
       title: "Connect BCGPT",
       detail: "Add your BCGPT API key so chat can use Basecamp and MCP tools.",
@@ -266,17 +280,18 @@ export function renderDashboard(props: DashboardProps) {
             : html`<span class="muted">Setup complete. <a href=${props.chatHref} class="btn btn--primary" style="margin-left:8px;">Start Using Chat</a></span>`}
         </div>
 
-        <div class="list" style="margin-top: 12px;">
-          ${setupSteps.map((step, index) => {
-            const chipClass = step.done ? "chip chip-ok" : "chip chip-warn";
-            return html`
-              <div class="list-item">
-                <div class="list-main">
-                  <div class="list-title">${index + 1}. ${step.title}</div>
-                  <div class="list-sub">${step.detail}</div>
-                </div>
-                <div class="list-meta">
-                  <span class=${chipClass}>${step.done ? "Done" : "Pending"}</span>
+        <!-- Provisioning result (shown after provisioning completes) -->
+        ${props.opsProvisioningResult && props.opsProvisioningResult.apiKey
+          ? html`<div class="callout success" style="margin-top:12px;">
+              <div><strong>Wicked Ops provisioned</strong></div>
+              <div style="margin-top:6px;">Project ID: <code>${props.opsProvisioningResult.projectId ?? "(n/a)"}</code></div>
+              <div style="margin-top:6px;">API key: <code class="mono">${props.opsProvisioningResult.apiKey}</code></div>
+              <div style="margin-top:8px;">
+                <button class="btn btn--secondary" @click=${() => navigator.clipboard?.writeText(props.opsProvisioningResult?.apiKey ?? "")}>Copy API key</button>
+                <button class="btn" @click=${() => props.onNavigateTab("integrations")}>Open integrations</button>
+              </div>
+            </div>`
+          : nothing}
                   ${
                     step.done
                       ? nothing
@@ -290,37 +305,47 @@ export function renderDashboard(props: DashboardProps) {
                               ${step.actionLabel ?? "Connect"}
                             </button>
                           `
-                        : step.href
-                          ? html`
-                              <button
-                                class="btn btn--sm"
-                                @click=${() => {
-                                  if (
-                                    step.id === "flowpieces" ||
-                                    step.id === "bcgpt" ||
-                                    step.id === "project" ||
-                                    step.id === "model-auth"
-                                  ) {
-                                    props.onNavigateTab("integrations");
-                                    return;
-                                  }
-                                  if (step.id === "first-flow") {
-                                    props.onNavigateTab("automations");
-                                    return;
-                                  }
-                                  if (step.id === "first-run") {
-                                    props.onNavigateTab("runs");
-                                    return;
-                                  }
-                                  if (step.id === "chat-ready") {
-                                    props.onNavigateTab("chat");
-                                  }
-                                }}
-                              >
-                                ${step.actionLabel ?? "Open"}
-                              </button>
-                            `
-                          : nothing
+                            : step.id === "ops"
+                            ? html`
+                                <button
+                                  class="btn btn--sm"
+                                  @click=${() => props.onProvisionOps?.()}
+                                  ?disabled=${props.opsProvisioning || !props.connected}
+                                >
+                                  ${props.opsProvisioning ? "Provisioning..." : step.actionLabel ?? "Provision"}
+                                </button>
+                              `
+                            : step.href
+                              ? html`
+                                  <button
+                                    class="btn btn--sm"
+                                    @click=${() => {
+                                      if (
+                                        step.id === "flowpieces" ||
+                                        step.id === "bcgpt" ||
+                                        step.id === "project" ||
+                                        step.id === "model-auth"
+                                      ) {
+                                        props.onNavigateTab("integrations");
+                                        return;
+                                      }
+                                      if (step.id === "first-flow") {
+                                        props.onNavigateTab("automations");
+                                        return;
+                                      }
+                                      if (step.id === "first-run") {
+                                        props.onNavigateTab("runs");
+                                        return;
+                                      }
+                                      if (step.id === "chat-ready") {
+                                        props.onNavigateTab("chat");
+                                      }
+                                    }}
+                                  >
+                                    ${step.actionLabel ?? "Open"}
+                                  </button>
+                                `
+                              : nothing
                   }
                 </div>
               </div>

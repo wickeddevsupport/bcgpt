@@ -51,8 +51,33 @@ async function opsRequest(params: {
   endpoint: string;
   method?: string;
   body?: unknown;
+  // optional: prefer workspace-scoped connectors when provided
+  workspaceId?: string | null;
 }) {
-  const { baseUrl, apiKey } = resolveOpsConfig(params.api);
+  // Workspace override (if provided) takes precedence.
+  let baseUrl: string;
+  let apiKey: string;
+
+  if (params.workspaceId) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { readWorkspaceConnectors } = await import("../../src/gateway/workspace-connectors.js");
+      const wc = await readWorkspaceConnectors(String(params.workspaceId));
+      if (wc?.ops?.apiKey) {
+        baseUrl = (wc.ops.url ?? "").trim();
+        apiKey = (wc.ops.apiKey ?? "").trim();
+      }
+    } catch {
+      // Fall through to global resolution if workspace read fails
+    }
+  }
+
+  if (!apiKey || !baseUrl) {
+    const resolved = resolveOpsConfig(params.api);
+    baseUrl = baseUrl || resolved.baseUrl;
+    apiKey = apiKey || resolved.apiKey;
+  }
+
   if (!apiKey) {
     throw new Error(
       "Wicked Ops API key is not configured. Set it in PMOS -> Integrations, or set env OPS_API_KEY.",
@@ -158,6 +183,7 @@ export default {
         properties: {
           active: { type: "boolean", description: "Filter by active status" },
           tags: { type: "string", description: "Comma-separated tag names to filter by" },
+          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
@@ -166,13 +192,14 @@ export default {
           ? ((params as Record<string, unknown>).active as boolean | undefined)
           : undefined;
         const tags = readOptionalString(params, "tags");
+        const workspaceId = readOptionalString(params, "workspaceId");
 
         const query = new URLSearchParams();
         if (typeof active === "boolean") query.set("active", active ? "true" : "false");
         if (tags) query.set("tags", tags);
 
         const endpoint = query.toString() ? `workflows?${query.toString()}` : "workflows";
-        const data = await opsRequest({ api, endpoint });
+        const data = await opsRequest({ api, endpoint, workspaceId });
         return jsonToolResult(data);
       },
     });
@@ -186,15 +213,17 @@ export default {
         required: ["workflowId"],
         properties: {
           workflowId: { type: "string", description: "The workflow ID" },
+          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
         const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const workflowId = readOptionalString(params, "workflowId");
+        const workspaceId = readOptionalString(params, "workspaceId");
         if (!workflowId) {
           throw new Error("workflowId is required");
         }
-        const data = await opsRequest({ api, endpoint: `workflows/${workflowId}` });
+        const data = await opsRequest({ api, endpoint: `workflows/${workflowId}`, workspaceId });
         return jsonToolResult(data);
       },
     });
@@ -212,10 +241,12 @@ export default {
           connections: { type: "object", description: "Workflow connections object (JSON)" },
           settings: { type: "object", description: "Workflow settings (JSON)" },
           tags: { type: "array", description: "Array of tag names" },
+          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
         const params = resolveToolParams(toolCallIdOrParams, maybeParams) as Record<string, any>;
+        const workspaceId = readOptionalString(params, "workspaceId");
         if (!params || typeof params !== "object" || !params.name) {
           throw new Error("name is required");
         }
@@ -224,6 +255,7 @@ export default {
           endpoint: "workflows",
           method: "POST",
           body: params,
+          workspaceId,
         });
         return jsonToolResult(data);
       },
@@ -244,11 +276,13 @@ export default {
           settings: { type: "object", description: "Workflow settings (JSON)" },
           tags: { type: "array", description: "Array of tag names" },
           active: { type: "boolean", description: "Whether workflow is active" },
+          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
         const params = resolveToolParams(toolCallIdOrParams, maybeParams) as Record<string, any>;
         const workflowId = readOptionalString(params, "workflowId");
+        const workspaceId = readOptionalString(params, "workspaceId");
         if (!workflowId) {
           throw new Error("workflowId is required");
         }
@@ -258,6 +292,7 @@ export default {
           endpoint: `workflows/${workflowId}`,
           method: "PATCH",
           body: updateBody,
+          workspaceId,
         });
         return jsonToolResult(data);
       },
@@ -272,11 +307,13 @@ export default {
         required: ["workflowId"],
         properties: {
           workflowId: { type: "string", description: "The workflow ID to delete" },
+          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
         const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const workflowId = readOptionalString(params, "workflowId");
+        const workspaceId = readOptionalString(params, "workspaceId");
         if (!workflowId) {
           throw new Error("workflowId is required");
         }
@@ -284,6 +321,7 @@ export default {
           api,
           endpoint: `workflows/${workflowId}`,
           method: "DELETE",
+          workspaceId,
         });
         return jsonToolResult(data);
       },
@@ -298,11 +336,13 @@ export default {
         required: ["workflowId"],
         properties: {
           workflowId: { type: "string", description: "The workflow ID to activate" },
+          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
         const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const workflowId = readOptionalString(params, "workflowId");
+        const workspaceId = readOptionalString(params, "workspaceId");
         if (!workflowId) {
           throw new Error("workflowId is required");
         }
@@ -311,6 +351,7 @@ export default {
           endpoint: `workflows/${workflowId}`,
           method: "PATCH",
           body: { active: true },
+          workspaceId,
         });
         return jsonToolResult(data);
       },
@@ -325,11 +366,13 @@ export default {
         required: ["workflowId"],
         properties: {
           workflowId: { type: "string", description: "The workflow ID to deactivate" },
+          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
         const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const workflowId = readOptionalString(params, "workflowId");
+        const workspaceId = readOptionalString(params, "workspaceId");
         if (!workflowId) {
           throw new Error("workflowId is required");
         }
@@ -338,6 +381,7 @@ export default {
           endpoint: `workflows/${workflowId}`,
           method: "PATCH",
           body: { active: false },
+          workspaceId,
         });
         return jsonToolResult(data);
       },
@@ -357,6 +401,7 @@ export default {
           workflowId: { type: "string", description: "Filter by workflow ID" },
           status: { type: "string", description: "Filter by status: success, error, waiting" },
           limit: { type: "number", description: "Maximum number of results" },
+          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
@@ -364,6 +409,7 @@ export default {
         const workflowId = readOptionalString(params, "workflowId");
         const status = readOptionalString(params, "status");
         const limit = readOptionalNumber(params, "limit");
+        const workspaceId = readOptionalString(params, "workspaceId");
 
         const query = new URLSearchParams();
         if (workflowId) query.set("workflowId", workflowId);
@@ -371,7 +417,7 @@ export default {
         if (limit && limit > 0) query.set("limit", String(Math.trunc(limit)));
 
         const endpoint = query.toString() ? `executions?${query.toString()}` : "executions";
-        const data = await opsRequest({ api, endpoint });
+        const data = await opsRequest({ api, endpoint, workspaceId });
         return jsonToolResult(data);
       },
     });
@@ -385,15 +431,17 @@ export default {
         required: ["executionId"],
         properties: {
           executionId: { type: "string", description: "The execution ID" },
+          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
         const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const executionId = readOptionalString(params, "executionId");
+        const workspaceId = readOptionalString(params, "workspaceId");
         if (!executionId) {
           throw new Error("executionId is required");
         }
-        const data = await opsRequest({ api, endpoint: `executions/${executionId}` });
+        const data = await opsRequest({ api, endpoint: `executions/${executionId}`, workspaceId });
         return jsonToolResult(data);
       },
     });
@@ -408,11 +456,13 @@ export default {
         properties: {
           workflowId: { type: "string", description: "The workflow ID to execute" },
           data: { type: "object", description: "Input data to pass to the workflow (JSON)" },
+          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
         const params = resolveToolParams(toolCallIdOrParams, maybeParams) as Record<string, any>;
         const workflowId = readOptionalString(params, "workflowId");
+        const workspaceId = readOptionalString(params, "workspaceId");
         if (!workflowId) {
           throw new Error("workflowId is required");
         }
@@ -421,6 +471,7 @@ export default {
           endpoint: `workflows/${workflowId}/execute`,
           method: "POST",
           body: params.data || {},
+          workspaceId,
         });
         return jsonToolResult(data);
       },
@@ -438,17 +489,19 @@ export default {
         additionalProperties: false,
         properties: {
           type: { type: "string", description: "Filter by credential type" },
+          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
         const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const type = readOptionalString(params, "type");
+        const workspaceId = readOptionalString(params, "workspaceId");
 
         const query = new URLSearchParams();
         if (type) query.set("type", type);
 
         const endpoint = query.toString() ? `credentials?${query.toString()}` : "credentials";
-        const data = await opsRequest({ api, endpoint });
+        const data = await opsRequest({ api, endpoint, workspaceId });
         return jsonToolResult(data);
       },
     });
@@ -460,9 +513,11 @@ export default {
     api.registerTool({
       name: "ops_test_connection",
       description: "Test connection to Wicked Ops (n8n). Returns success if API key is valid.",
-      parameters: { type: "object", additionalProperties: false, properties: {} },
-      async execute() {
-        const data = await opsRequest({ api, endpoint: "workflows?limit=1" });
+      parameters: { type: "object", additionalProperties: false, properties: { workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" } } },
+      async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
+        const params = resolveToolParams(toolCallIdOrParams, maybeParams);
+        const workspaceId = readOptionalString(params, "workspaceId");
+        const data = await opsRequest({ api, endpoint: "workflows?limit=1", workspaceId });
         return jsonToolResult({ success: true, message: "Connected to Wicked Ops", data });
       },
     });
