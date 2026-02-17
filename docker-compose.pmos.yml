@@ -5,6 +5,8 @@ services:
     build:
       context: ./openclaw
       dockerfile: Dockerfile
+      args:
+        INCLUDE_VENDORED_N8N: "true"
     environment:
       # Keep OpenClaw config/workspace in a named volume by pinning HOME into /app.
       HOME: /app

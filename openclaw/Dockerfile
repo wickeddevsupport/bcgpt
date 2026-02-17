@@ -24,6 +24,15 @@ COPY scripts ./scripts
 RUN pnpm install --frozen-lockfile
 
 COPY . .
+# Optionally include vendored n8n (for embedded n8n) at build time.
+# Enable by passing build-arg: --build-arg INCLUDE_VENDORED_N8N=true
+ARG INCLUDE_VENDORED_N8N=false
+RUN if [ "$INCLUDE_VENDORED_N8N" = "true" ]; then \
+      apt-get update && \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git && \
+      mkdir -p openclaw/vendor && \
+      git clone --depth 1 https://github.com/n8n-io/n8n.git openclaw/vendor/n8n; \
+    fi
 RUN pnpm build
 # Force pnpm for UI build (Bun may fail on ARM/Synology architectures)
 ENV OPENCLAW_PREFER_PNPM=1
