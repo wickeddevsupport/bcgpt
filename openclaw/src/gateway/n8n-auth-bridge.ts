@@ -30,6 +30,40 @@ const sessionCache = new Map<string, N8nSessionCache>();
 
 const SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
+type OwnerCookieCache = {
+  cookie: string;
+  expiresAt: number;
+};
+
+// In-memory cache: n8nBaseUrl â†’ owner session cookie
+const ownerCookieCache = new Map<string, OwnerCookieCache>();
+
+function readOwnerCreds(): { email: string; password: string } | null {
+  const email = (process.env.N8N_OWNER_EMAIL || "").trim();
+  const password = (process.env.N8N_OWNER_PASSWORD || "").trim();
+  if (!email || !password) return null;
+  return { email, password };
+}
+
+async function getOwnerCookie(n8nBaseUrl: string): Promise<string | null> {
+  const cached = ownerCookieCache.get(n8nBaseUrl);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.cookie;
+  }
+
+  const creds = readOwnerCreds();
+  if (!creds) return null;
+
+  const cookie = await loginToN8n(n8nBaseUrl, creds.email, creds.password);
+  if (cookie) {
+    ownerCookieCache.set(n8nBaseUrl, {
+      cookie,
+      expiresAt: Date.now() + SESSION_TTL_MS,
+    });
+  }
+  return cookie;
+}
+
 /**
  * Resolve the OpenClaw user from an incoming HTTP request.
  * Returns null if the request is unauthenticated.
@@ -174,6 +208,70 @@ export async function ensureN8nWorkspaceUser(
 }
 
 /**
+ * Embedded-first provisioning helper:
+ * If a workspace has no ops.user creds yet, try to create a workspace user using the n8n owner session.
+ *
+ * Best-effort: if the user already exists (409), we do not overwrite local creds because we
+ * can't recover the password safely without a reset flow.
+ */
+async function ensureWorkspaceUserViaOwnerCookie(
+  workspaceId: string,
+  n8nBaseUrl: string,
+): Promise<{ email: string; password: string } | null> {
+  const wc = await readWorkspaceConnectors(workspaceId);
+  const existing = wc?.ops?.user as { email?: string; password?: string } | undefined;
+  if (existing?.email && existing?.password) {
+    return { email: existing.email, password: existing.password };
+  }
+
+  const ownerCookie = await getOwnerCookie(n8nBaseUrl);
+  if (!ownerCookie) return null;
+
+  const { randomBytes } = await import("node:crypto");
+  const email = `pmos-${workspaceId}@openclaw.local`;
+  const password = randomBytes(16).toString("base64url");
+
+  const endpoints = [`${n8nBaseUrl}/api/v1/users`, `${n8nBaseUrl}/rest/users`];
+  for (const ep of endpoints) {
+    try {
+      const res = await fetch(ep, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          Cookie: ownerCookie,
+        },
+        body: JSON.stringify({
+          email,
+          password,
+          firstName: "PMOS",
+          lastName: `ws-${workspaceId.slice(0, 8)}`,
+        }),
+      });
+
+      if (res.ok) {
+        const next = {
+          ...(wc ?? {}),
+          ops: {
+            ...((wc?.ops ?? {}) as Record<string, unknown>),
+            user: { email, password },
+          },
+        };
+        await writeWorkspaceConnectors(workspaceId, next);
+        return { email, password };
+      }
+
+      if (res.status === 409) {
+        return null;
+      }
+    } catch {
+      // try next endpoint
+    }
+  }
+
+  return null;
+}
+
+/**
  * Invalidate cached n8n session for a workspace.
  * Call this when workspace credentials change or user logs out.
  */
@@ -193,16 +291,29 @@ export async function buildN8nAuthHeaders(
   const user = await resolveOpenClawUser(req);
   if (!user) return {};
 
-  const cookie = await getN8nAuthCookie(user.workspaceId, n8nBaseUrl);
-  if (!cookie) {
-    // Fall back to API key if available
-    const wc = await readWorkspaceConnectors(user.workspaceId);
-    const apiKey = wc?.ops?.apiKey;
-    if (typeof apiKey === "string" && apiKey) {
-      return { "X-N8N-API-KEY": apiKey };
-    }
-    return {};
+  const { workspaceId } = user;
+
+  // Preferred: workspace-scoped cookie via stored ops.user credentials.
+  let cookie = await getN8nAuthCookie(workspaceId, n8nBaseUrl);
+  if (cookie) return { Cookie: cookie };
+
+  // Fallback: workspace API key if present.
+  const wc = await readWorkspaceConnectors(workspaceId);
+  const apiKey = wc?.ops?.apiKey;
+  if (typeof apiKey === "string" && apiKey) {
+    return { "X-N8N-API-KEY": apiKey };
   }
 
-  return { Cookie: cookie };
+  // Bootstrap: if no creds exist yet, try to provision a workspace user using the owner session.
+  await ensureWorkspaceUserViaOwnerCookie(workspaceId, n8nBaseUrl);
+  cookie = await getN8nAuthCookie(workspaceId, n8nBaseUrl);
+  if (cookie) return { Cookie: cookie };
+
+  // Last-resort for initial bootstrap: let super_admin operate with the owner cookie.
+  if (user.role === "super_admin") {
+    const ownerCookie = await getOwnerCookie(n8nBaseUrl);
+    if (ownerCookie) return { Cookie: ownerCookie };
+  }
+
+  return {};
 }

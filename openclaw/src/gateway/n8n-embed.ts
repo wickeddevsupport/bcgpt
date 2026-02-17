@@ -162,6 +162,9 @@ export async function spawnEmbeddedN8nIfVendored(opts?: { port?: number; host?: 
   // Provide owner creds if present in env to skip interactive setup
   env.N8N_OWNER_EMAIL = env.N8N_OWNER_EMAIL ?? process.env.N8N_OWNER_EMAIL ?? "admin@local";
   env.N8N_OWNER_PASSWORD = env.N8N_OWNER_PASSWORD ?? process.env.N8N_OWNER_PASSWORD ?? "changeme";
+  // Keep gateway env in sync with the embedded child so the auth bridge can bootstrap.
+  process.env.N8N_OWNER_EMAIL = process.env.N8N_OWNER_EMAIL ?? env.N8N_OWNER_EMAIL;
+  process.env.N8N_OWNER_PASSWORD = process.env.N8N_OWNER_PASSWORD ?? env.N8N_OWNER_PASSWORD;
 
   // Custom nodes: tell n8n where to find additional community node packages.
   const customNodeDirs = resolveCustomNodeDirs(repo);
