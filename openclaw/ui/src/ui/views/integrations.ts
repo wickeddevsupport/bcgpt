@@ -146,9 +146,9 @@ export function renderIntegrations(props: IntegrationsProps) {
 
     <section class="grid grid-cols-2">
       <div class="card">
-        <div class="card-title">Wicked Ops (Workflow Engine)</div>
+        <div class="card-title">OpenClaw Workflows (n8n Engine)</div>
         <div class="card-sub">
-          Powered by n8n — auto-provisioned per workspace. Your workflows are isolated to your workspace.
+          Powered by embedded n8n and auto-provisioned per workspace. Your workflows are isolated to your workspace.
         </div>
 
         <div style="margin-top: 16px;">
@@ -260,7 +260,7 @@ export function renderIntegrations(props: IntegrationsProps) {
     <section class="grid grid-cols-2" style="margin-top: 18px;">
       <div class="card">
         <div class="card-title">Pieces Catalog</div>
-        <div class="card-sub">Browse Flow Pieces integrations (200+).</div>
+        <div class="card-sub">Browse available workflow integrations and nodes.</div>
 
         <div class="form-grid" style="margin-top: 14px;">
           <label class="field full">
@@ -327,7 +327,7 @@ export function renderIntegrations(props: IntegrationsProps) {
 
       <div class="card">
         <div class="card-title">Connections</div>
-        <div class="card-sub">Create and manage Flow Pieces app connections for your project.</div>
+        <div class="card-sub">Create and manage app connections for your workflow project.</div>
 
         <div class="form-grid" style="margin-top: 14px;">
           <label class="field">

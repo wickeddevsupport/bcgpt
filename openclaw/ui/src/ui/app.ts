@@ -1031,7 +1031,7 @@ export class OpenClawApp extends LitElement {
         return;
       }
 
-      this.lastError = "Workflow created but ID could not be detected. Open Wicked Ops to view your workflows.";
+      this.lastError = "Workflow created but ID could not be detected. Open Workflows editor to view your workflows.";
       window.location.assign((this.settings.basePath?.trim() || "") + "/ops-ui/");
     } catch (err) {
       this.chatCreateWorkflowError = String(err ?? "unknown error");

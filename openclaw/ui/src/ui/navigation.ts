@@ -249,7 +249,7 @@ export function subtitleForTab(tab: Tab) {
     case "runs":
       return "Live and historical executions across agents and automations.";
     case "integrations":
-      return "Connect engines and apps (Flow Pieces, BCGPT/Basecamp, and more).";
+      return "Connect workflow engines and apps (embedded n8n, BCGPT/Basecamp, and more).";
     case "command-center":
       return "Plan and execute multi-step operations with approvals and history.";
     case "admin":

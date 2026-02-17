@@ -412,13 +412,13 @@ export function renderApp(state: AppViewState) {
             </a>
             <a
               class="nav-item nav-item--external"
-              href=${state.pmosActivepiecesUrl}
+              href=${`${basePath || ""}/ops-ui/`}
               target="_blank"
               rel="noreferrer"
-              title="Open Flow Pieces (opens in new tab)"
+              title="Open Workflows Editor (opens in new tab)"
             >
               <span class="nav-item__icon" aria-hidden="true">${icons.link}</span>
-              <span class="nav-item__text">Flow Pieces</span>
+              <span class="nav-item__text">Workflows Editor</span>
             </a>
             <a
               class="nav-item nav-item--external"
@@ -514,7 +514,7 @@ export function renderApp(state: AppViewState) {
                       <script>if (location.pathname !== '/ops-ui/') { location.assign('/ops-ui/'); }</script>
                       <div style="text-align:center; max-width:600px;">
                         <h3 style="margin:0 0 8px">Opening Workflows editor…</h3>
-                        <div class="muted">If the editor did not open automatically, <a href="/ops-ui/">click here to open Wicked Ops</a>.</div>
+                        <div class="muted">If the editor did not open automatically, <a href="/ops-ui/">click here to open the Workflows editor</a>.</div>
                       </div>
                     </div>`}
               </div>`

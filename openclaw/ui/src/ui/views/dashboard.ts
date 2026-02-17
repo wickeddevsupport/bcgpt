@@ -140,7 +140,7 @@ export function renderDashboard(props: DashboardProps) {
     },
     {
       id: "ops",
-      title: "Provision Wicked Ops",
+      title: "Provision Workflows",
       detail: "Auto-provisioned on signup — creates your personal n8n workflow project.",
       done: Boolean(props.opsProvisioned),
       actionLabel: "Provision",
@@ -235,7 +235,7 @@ export function renderDashboard(props: DashboardProps) {
         <!-- Provisioning result (shown after provisioning completes) -->
         ${props.opsProvisioningResult && props.opsProvisioningResult.apiKey
           ? html`<div class="callout success" style="margin-top:12px;">
-              <div><strong>Wicked Ops provisioned</strong></div>
+              <div><strong>Workflow project provisioned</strong></div>
               <div style="margin-top:6px;">Project ID: <code>${props.opsProvisioningResult.projectId ?? "(n/a)"}</code></div>
               <div style="margin-top:6px;">API key: <code class="mono">${props.opsProvisioningResult.apiKey}</code></div>
               <div style="margin-top:8px;">
@@ -250,11 +250,11 @@ export function renderDashboard(props: DashboardProps) {
           ? html`<div class="callout warn" style="margin-top:12px;">
               <div><strong>Automated provisioning failed</strong></div>
               <div style="margin-top:6px;">${props.opsProvisioningError}</div>
-              <div style="margin-top:8px;">You can create a Project in Wicked Ops (n8n) manually and paste its API key below to scope workflows to this workspace.</div>
+              <div style="margin-top:8px;">You can create an n8n Project manually and paste its API key below to scope workflows to this workspace.</div>
             </div>
             <div class="form-grid" style="margin-top:8px;">
               <label class="field">
-                <span>Wicked Ops API key</span>
+                <span>Workflow API key</span>
                 <input
                   type="password"
                   .value=${props.opsManualApiKeyDraft ?? ""}
@@ -309,11 +309,11 @@ export function renderDashboard(props: DashboardProps) {
     <section class="grid grid-cols-2">
       <div class="card">
         <div class="card-title">Integration Health</div>
-        <div class="card-sub">Connector state for Wicked Ops and BCGPT.</div>
+        <div class="card-sub">Connector state for Workflows and BCGPT.</div>
 
         <div class="stat-grid" style="margin-top: 16px;">
           <div class="stat">
-            <div class="stat-label">Wicked Ops</div>
+            <div class="stat-label">Workflows</div>
             <div class="stat-value ${props.opsProvisioned ? "ok" : "warn"}">${props.opsProvisioned ? "Provisioned" : "Pending"}</div>
           </div>
           <div class="stat">
@@ -525,7 +525,7 @@ export function renderDashboard(props: DashboardProps) {
             : html`
                 <div style="margin-top: 16px; display: grid; gap: 8px;">
                   ${renderStatusPill("Gateway", props.connected ? "Connected" : "Offline", props.connected ? "ok" : "warn")}
-                  ${renderStatusPill("Wicked Ops", props.opsProvisioned ? "Provisioned" : "Pending", props.opsProvisioned ? "ok" : "warn")}
+                  ${renderStatusPill("Workflows", props.opsProvisioned ? "Provisioned" : "Pending", props.opsProvisioned ? "ok" : "warn")}
                 </div>
               `
         }
@@ -534,7 +534,7 @@ export function renderDashboard(props: DashboardProps) {
           !props.opsProvisioned
             ? html`
                 <div class="callout" style="margin-top: 14px;">
-                  Wicked Ops workspace is provisioning — workflows will be available shortly.
+                  Workflow workspace is provisioning - workflows will be available shortly.
                 </div>
               `
             : nothing

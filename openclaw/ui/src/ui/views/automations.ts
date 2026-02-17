@@ -82,7 +82,7 @@ export function renderAutomations(props: AutomationsProps) {
     : null;
   const projectReason = props.projectId.trim()
     ? null
-    : "Flow Pieces Project ID is required. Set it in Integrations -> Flow Pieces -> Project ID, then Save.";
+    : "Workflow project ID is required. Set it in Integrations, then Save.";
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const flowStatus = props.flowDetails ? String((props.flowDetails as any).status ?? "") : "";
@@ -93,7 +93,7 @@ export function renderAutomations(props: AutomationsProps) {
       <div class="agents-sidebar">
         <div class="card">
           <div class="card-title">Create flow</div>
-          <div class="card-sub">Create a new Flow Pieces flow in your configured project.</div>
+          <div class="card-sub">Create a new workflow in your configured workspace project.</div>
 
           <div class="form-grid" style="margin-top: 14px;">
             <label class="field full">
@@ -127,7 +127,7 @@ export function renderAutomations(props: AutomationsProps) {
 
         <div class="card">
           <div class="card-title">Flows</div>
-          <div class="card-sub">Your Flow Pieces flows (native inside Wicked OS).</div>
+          <div class="card-sub">Your workspace workflows (native inside Wicked OS).</div>
 
           <div class="form-grid" style="margin-top: 14px;">
             <label class="field full">
@@ -351,7 +351,7 @@ export function renderAutomations(props: AutomationsProps) {
                   <div class="card" style="margin-top: 16px;">
                     <div class="card-title">Webhook Trigger</div>
                     <div class="card-sub">
-                      Triggers via Flow Pieces webhook endpoint (works for webhook-triggered flows).
+                      Triggers via workflow webhook endpoint (works for webhook-triggered flows).
                     </div>
                     <label class="field" style="margin-top: 12px;">
                       <span>Payload (JSON)</span>
