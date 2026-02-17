@@ -45,7 +45,7 @@ describe("dashboard provisioning UI", () => {
 
     const callout = container.querySelector(".callout.success");
     expect(callout).not.toBeNull();
-    expect(callout?.textContent).toContain("Wicked Ops provisioned");
+    expect(callout?.textContent).toContain("Workflow project provisioned");
     expect(callout?.textContent).toContain("abc-123");
 
     const copyBtn = Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("Copy API key"));

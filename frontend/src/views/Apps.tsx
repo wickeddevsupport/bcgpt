@@ -339,12 +339,12 @@ export default function Apps() {
           {/* Open Full Catalog Link */}
           <div className="mt-6 text-center">
             <a
-              href="https://flow.wickedlab.io/connections"
+              href="/ops-ui/"
               target="_blank"
               rel="noopener noreferrer"
               className="text-teal-400 hover:text-teal-300 inline-flex items-center gap-2"
             >
-              View full catalog in Activepieces <ExternalLink className="w-4 h-4" />
+              Open full n8n catalog <ExternalLink className="w-4 h-4" />
             </a>
           </div>
         </>

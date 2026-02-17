@@ -9,7 +9,7 @@
 New to OpenClaw? Start here:
 
 1. **[OPENCLAW_AUTOMATION_OS.md](OPENCLAW_AUTOMATION_OS.md)** - Master overview of the AI-powered Automation OS
-2. **[NEXT_STEPS.md](NEXT_STEPS.md)** - Actionable implementation plan
+2. **[NEXT_STEPS.md](NEXT_STEPS.md)** - Actionable implementation plan + consolidated current TODO list
 
 ---
 
@@ -24,6 +24,7 @@ New to OpenClaw? Start here:
 | [AGENT_MANAGEMENT.md](AGENT_MANAGEMENT.md) | How users create, configure, and manage agents | All |
 | [NEXT_STEPS.md](NEXT_STEPS.md) | Implementation plan and tasks | Developers |
 | [N8N_INTEGRATION_GUIDE.md](N8N_INTEGRATION_GUIDE.md) | n8n workflow engine integration | Developers |
+| [COOLIFY_DEPLOY_NX_RUNBOOK.md](COOLIFY_DEPLOY_NX_RUNBOOK.md) | Coolify + Nx deploy and SSH verification runbook | Developers |
 | [WORKSPACE_ISOLATION_STATUS.md](WORKSPACE_ISOLATION_STATUS.md) | Multi-tenant implementation status | Developers |
 | [BASECAMP_NODE_SETUP.md](BASECAMP_NODE_SETUP.md) | Custom n8n node for Basecamp | Developers |
 
@@ -37,6 +38,7 @@ docs/
   OPENCLAW_AUTOMATION_OS.md    # Master document
   NEXT_STEPS.md                # Implementation plan
   N8N_INTEGRATION_GUIDE.md     # n8n technical guide
+  COOLIFY_DEPLOY_NX_RUNBOOK.md # deployment runbook
   WORKSPACE_ISOLATION_STATUS.md # Multi-tenant status
   BASECAMP_NODE_SETUP.md       # Basecamp node guide
   DOCS_INDEX.md                # This file
@@ -70,6 +72,7 @@ docs/
 
 ### Deployment
 
+- Primary runbook: [COOLIFY_DEPLOY_NX_RUNBOOK.md](COOLIFY_DEPLOY_NX_RUNBOOK.md)
 - NX build/test orchestration (pre-deploy validation)
 - Server access via SSH
 - Coolify container management
@@ -82,8 +85,8 @@ docs/
 
 ```bash
 # Optional pre-deploy validation (NX)
-corepack pnpm exec nx run-many -t build --projects=openclaw-app,openclaw-control-ui,openclaw-frontend
-corepack pnpm exec nx run openclaw-app:test
+NX_DAEMON=false corepack pnpm exec nx run-many -t build --projects=openclaw-app,openclaw-control-ui,openclaw-frontend
+NX_DAEMON=false corepack pnpm exec nx run openclaw-app:test
 
 # SSH to server
 ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
@@ -101,8 +104,8 @@ ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
 | Service | URL | Purpose |
 |---------|-----|---------|
 | OpenClaw PMOS | https://os.wickedlab.io | Main product UI (includes embedded n8n) |
+| OpenClaw n8n Editor | https://os.wickedlab.io/ops-ui/ | Embedded n8n editor route |
 | BCGPT MCP | https://bcgpt.wickedlab.io | MCP server |
-| Activepieces | https://flow.wickedlab.io | Legacy (deprecated) |
 
 ---
 

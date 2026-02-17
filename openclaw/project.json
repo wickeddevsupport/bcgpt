@@ -8,28 +8,28 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "openclaw",
-        "command": "pnpm build"
+        "command": "corepack pnpm build"
       }
     },
     "dev": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "openclaw",
-        "command": "pnpm dev"
+        "command": "corepack pnpm dev"
       }
     },
     "test": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "openclaw",
-        "command": "pnpm test"
+        "command": "corepack pnpm test"
       }
     },
     "n8n-vendor": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "openclaw",
-        "command": "pnpm n8n:vendor"
+        "command": "corepack pnpm n8n:vendor"
       }
     }
   }

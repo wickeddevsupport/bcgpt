@@ -193,11 +193,33 @@ describe("exec tool backgrounding", () => {
       backgroundMs: 1000,
       timeoutSec: 5,
     });
+    const customProcess = createProcessTool();
 
     const result = await customBash.execute("call1", {
       command: "echo hi",
     });
-    const text = result.content.find((c) => c.type === "text")?.text ?? "";
+    let text = result.content.find((c) => c.type === "text")?.text ?? "";
+    if (!text.includes("hi")) {
+      const sessionId =
+        typeof (result.details as { sessionId?: unknown }).sessionId === "string"
+          ? (result.details as { sessionId: string }).sessionId
+          : null;
+      expect(sessionId).toBeTruthy();
+      let status = (result.details as { status?: string }).status ?? "running";
+      const deadline = Date.now() + (isWin ? 12_000 : 4_000);
+      while (sessionId && Date.now() < deadline && status === "running") {
+        const poll = await customProcess.execute("call2", {
+          action: "poll",
+          sessionId,
+        });
+        status = (poll.details as { status?: string }).status ?? "running";
+        text = poll.content.find((c) => c.type === "text")?.text ?? text;
+        if (status === "running") {
+          await sleep(50);
+        }
+      }
+      expect(status).toBe("completed");
+    }
     expect(text).toContain("hi");
   });
 

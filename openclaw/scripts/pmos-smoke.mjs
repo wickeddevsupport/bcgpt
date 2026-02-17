@@ -3,7 +3,6 @@
 const baseUrl = (process.env.PMOS_URL || "https://os.wickedlab.io").replace(/\/+$/, "");
 const wsUrl = baseUrl.replace(/^http/i, (match) => (match.toLowerCase() === "https" ? "wss" : "ws"));
 const token = (process.env.OPENCLAW_GATEWAY_TOKEN || process.env.PMOS_GATEWAY_TOKEN || "").trim();
-const projectId = (process.env.ACTIVEPIECES_PROJECT_ID || "").trim();
 const sessionKey = "smoke-main";
 
 if (!token) {
@@ -22,6 +21,19 @@ async function assertGetOk(path) {
   const { res, text } = await fetchText(url);
   if (!res.ok) {
     throw new Error(`GET ${path} failed: ${res.status} ${res.statusText} ${text}`);
+  }
+  return text;
+}
+
+async function assertGetAuthOk(path) {
+  const url = `${baseUrl}${path}`;
+  const { res, text } = await fetchText(url, {
+    headers: {
+      authorization: `Bearer ${token}`,
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`GET ${path} (auth) failed: ${res.status} ${res.statusText} ${text}`);
   }
   return text;
 }
@@ -56,6 +68,31 @@ function assertContains(text, needle, label) {
   if (!text.includes(needle)) {
     throw new Error(`Missing marker (${label}): ${needle}`);
   }
+}
+
+function asObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+
+function findFlowId(value) {
+  const obj = asObject(value);
+  if (!obj) return null;
+
+  const direct = obj.id ?? obj.workflowId;
+  if (typeof direct === "string" && direct.trim()) {
+    return direct.trim();
+  }
+
+  const nestedData = findFlowId(obj.data);
+  if (nestedData) return nestedData;
+
+  const nestedDetails = findFlowId(obj.details);
+  if (nestedDetails) return nestedDetails;
+
+  const nestedResult = findFlowId(obj.result);
+  if (nestedResult) return nestedResult;
+
+  return null;
 }
 
 function extractAssetPath(rootHtml) {
@@ -233,9 +270,11 @@ async function main() {
   // Base routes
   const rootHtml = await assertGetOk("/");
   await assertGetOk("/health");
+  await assertGetOk("/ops-ui/");
   for (const path of ["/command-center", "/admin", "/automations", "/runs", "/integrations", "/chat"]) {
     await assertGetOk(path);
   }
+  await assertGetAuthOk("/api/ops/workflows");
 
   // UI markers live in the JS bundle (SPA).
   const assetPath = extractAssetPath(rootHtml);
@@ -245,24 +284,19 @@ async function main() {
   assertContains(bundle, "AI Flow Builder", "phase5");
   assertContains(bundle, "Execution Trace", "phase3");
 
-  // Activepieces tools + mutation smoke
-  if (projectId) {
-    await assertTool("flow_flows_list", { projectId, limit: 5 });
-    await assertTool("flow_flow_runs_list", { projectId, limit: 5 });
+  // n8n ops tools + mutation smoke
+  await assertTool("ops_workflows_list", {});
+  await assertTool("ops_executions_list", { limit: 5 });
 
-    const created = await assertTool("flow_flow_create", {
-      projectId,
-      displayName: `PMOS Smoke ${Date.now()}`,
-    });
-    const flowId = created?.result?.details?.id;
-    if (!flowId || typeof flowId !== "string") {
-      throw new Error("flow_flow_create succeeded but did not return flow id.");
-    }
-    await assertTool("flow_flow_get", { flowId });
-    await assertTool("flow_flow_delete", { flowId });
-  } else {
-    console.warn("ACTIVEPIECES_PROJECT_ID not provided; skipping flow tool smoke.");
+  const created = await assertTool("ops_workflow_create", {
+    name: `PMOS Smoke ${Date.now()}`,
+  });
+  const flowId = findFlowId(created);
+  if (!flowId) {
+    throw new Error("ops_workflow_create succeeded but did not return workflow id.");
   }
+  await assertTool("ops_workflow_get", { workflowId: flowId });
+  await assertTool("ops_workflow_delete", { workflowId: flowId });
 
   // Gateway chat path (model auth + chat.send + history)
   await assertGatewayChat();

@@ -95,6 +95,7 @@ type SetupStep = {
 
 export function renderDashboard(props: DashboardProps) {
   const bcgpt = props.connectorsStatus?.bcgpt ?? null;
+  const ops = props.connectorsStatus?.ops ?? null;
   const checkedAt = props.connectorsStatus?.checkedAtMs ?? null;
   const checkedLabel = checkedAt ? formatRelativeTimestamp(checkedAt) : "n/a";
 
@@ -104,6 +105,13 @@ export function renderDashboard(props: DashboardProps) {
     if (bcgpt.reachable === false || bcgpt.authOk === false) return { label: "Needs attention", tone: "warn" as const };
     if (bcgpt.reachable === true && (bcgpt.authOk === true || bcgpt.authOk === null)) return { label: "OK", tone: "ok" as const };
     return { label: "Checking", tone: "warn" as const };
+  })();
+  const opsRuntimeStatus = (() => {
+    if (!ops) return { label: "Unknown", tone: "warn" as const };
+    if (ops.reachable === true) return { label: "Ready", tone: "ok" as const };
+    if (ops.reachable === false) return { label: "Offline", tone: "warn" as const };
+    if (ops.configured) return { label: "Starting", tone: "warn" as const };
+    return { label: "Not configured", tone: "warn" as const };
   })();
 
   const showAccessCard = !props.connected;
@@ -122,7 +130,8 @@ export function renderDashboard(props: DashboardProps) {
   );
 
   const pulse = (() => {
-    if (!props.opsProvisioned) return { label: "Provisioning workflows…", tone: "warn" as const };
+    if (!props.opsProvisioned) return { label: "Provisioning workflows...", tone: "warn" as const };
+    if (opsRuntimeStatus.tone !== "ok") return { label: "Workflow runtime issue", tone: "warn" as const };
     if (bcgptStatus.tone !== "ok") return { label: "Connector risk", tone: "warn" as const };
     if (runBuckets.failed > 0) return { label: "Failures need review", tone: "warn" as const };
     return { label: "Healthy", tone: "ok" as const };
@@ -141,9 +150,17 @@ export function renderDashboard(props: DashboardProps) {
     {
       id: "ops",
       title: "Provision Workflows",
-      detail: "Auto-provisioned on signup — creates your personal n8n workflow project.",
+      detail: "Auto-provisioned on signup - creates your personal n8n workflow project.",
       done: Boolean(props.opsProvisioned),
       actionLabel: "Provision",
+    },
+    {
+      id: "ops-runtime",
+      title: "Embedded n8n Runtime",
+      detail: "Verify native workflow editor runtime health before building flows.",
+      done: opsRuntimeStatus.tone === "ok",
+      actionKind: "refresh",
+      actionLabel: "Check runtime",
     },
     {
       id: "bcgpt",
@@ -177,6 +194,7 @@ export function renderDashboard(props: DashboardProps) {
         props.connected &&
         Boolean(props.modelAuthConfigured) &&
         Boolean(props.opsProvisioned) &&
+        opsRuntimeStatus.tone === "ok" &&
         bcgptStatus.tone === "ok",
       href: props.chatHref,
       actionLabel: "Open chat",
@@ -192,7 +210,7 @@ export function renderDashboard(props: DashboardProps) {
       ? { title: "Fix BCGPT connector", detail: "Restore MCP auth for project actions", href: props.integrationsHref }
       : null,
     runBuckets.failed > 0
-      ? { title: "Check failed workflow runs", detail: `${runBuckets.failed} failed recent runs — review inside the Workflows editor`, href: props.automationsHref }
+      ? { title: "Check failed workflow runs", detail: `${runBuckets.failed} failed recent runs - review inside the Workflows editor`, href: props.automationsHref }
       : null,
     flows.length === 0
       ? { title: "Create first automation", detail: "Build a flow in Automations", href: props.automationsHref }
@@ -282,6 +300,8 @@ export function renderDashboard(props: DashboardProps) {
 
                 ${step.actionKind === "connect"
                   ? html`<button class="btn btn--sm" @click=${() => props.onConnect()} ?disabled=${props.connected}>${step.actionLabel ?? "Connect"}</button>`
+                  : step.actionKind === "refresh"
+                    ? html`<button class="btn btn--sm" @click=${() => props.onRefreshConnectors()} ?disabled=${props.connectorsLoading || !props.connected}>${props.connectorsLoading ? "Checking..." : step.actionLabel ?? "Refresh"}</button>`
                   : step.id === "ops"
                     ? html`<button class="btn btn--sm" @click=${() => props.onProvisionOps?.()} ?disabled=${props.opsProvisioning || !props.connected}>${props.opsProvisioning ? "Provisioning..." : step.actionLabel ?? "Provision"}</button>`
                     : step.href
@@ -314,7 +334,10 @@ export function renderDashboard(props: DashboardProps) {
         <div class="stat-grid" style="margin-top: 16px;">
           <div class="stat">
             <div class="stat-label">Workflows</div>
-            <div class="stat-value ${props.opsProvisioned ? "ok" : "warn"}">${props.opsProvisioned ? "Provisioned" : "Pending"}</div>
+            <div class="stat-value ${props.opsProvisioned && opsRuntimeStatus.tone === "ok" ? "ok" : "warn"}">
+              ${props.opsProvisioned ? opsRuntimeStatus.label : "Pending"}
+            </div>
+            ${ops?.error ? html`<div class="muted">${ops.error}</div>` : nothing}
           </div>
           <div class="stat">
             <div class="stat-label">BCGPT</div>
@@ -359,7 +382,7 @@ export function renderDashboard(props: DashboardProps) {
           <div class="stat">
             <div class="stat-label">Pulse</div>
             <div class="stat-value ${pulse.tone === "ok" ? "ok" : "warn"}">${pulse.label}</div>
-            <div class="muted">${props.opsProvisioned ? "Workflows ready" : "Provisioning…"}</div>
+            <div class="muted">${props.opsProvisioned ? "Workflows ready" : "Provisioning..."}</div>
           </div>
         </div>
 

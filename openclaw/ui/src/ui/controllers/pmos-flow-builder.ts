@@ -40,7 +40,7 @@ export type PmosFlowBuilderState = {
   settings: UiSettings;
   basePath: string;
   sessionKey: string;
-  pmosActivepiecesProjectId: string;
+  pmosOpsProjectId: string;
   apFlowCreateName: string;
 
   pmosFlowBuilderPrompt: string;
@@ -142,13 +142,13 @@ function inferFlowName(prompt: string): string {
 }
 
 const ACTION_KEYWORDS: Array<{ re: RegExp; label: string; piece: string }> = [
-  { re: /\bslack\b/i, label: "Post to Slack", piece: "@activepieces/piece-slack" },
-  { re: /\bgmail|email\b/i, label: "Send Email", piece: "@activepieces/piece-gmail" },
-  { re: /\bgoogle\s*sheets|sheets\b/i, label: "Write to Google Sheets", piece: "@activepieces/piece-google-sheets" },
-  { re: /\bnotion\b/i, label: "Update Notion", piece: "@activepieces/piece-notion" },
-  { re: /\bdiscord\b/i, label: "Send Discord message", piece: "@activepieces/piece-discord" },
-  { re: /\btelegram\b/i, label: "Send Telegram message", piece: "@activepieces/piece-telegram" },
-  { re: /\bairtable\b/i, label: "Update Airtable", piece: "@activepieces/piece-airtable" },
+  { re: /\bslack\b/i, label: "Post to Slack", piece: "n8n-nodes-base.slack" },
+  { re: /\bgmail|email\b/i, label: "Send Email", piece: "n8n-nodes-base.gmail" },
+  { re: /\bgoogle\s*sheets|sheets\b/i, label: "Write to Google Sheets", piece: "n8n-nodes-base.googleSheets" },
+  { re: /\bnotion\b/i, label: "Update Notion", piece: "n8n-nodes-base.notion" },
+  { re: /\bdiscord\b/i, label: "Send Discord message", piece: "n8n-nodes-base.discord" },
+  { re: /\btelegram\b/i, label: "Send Telegram message", piece: "n8n-nodes-base.telegram" },
+  { re: /\bairtable\b/i, label: "Update Airtable", piece: "n8n-nodes-base.airtable" },
 ];
 
 function detectActions(prompt: string): Array<{ label: string; piece: string }> {
@@ -159,7 +159,7 @@ function detectActions(prompt: string): Array<{ label: string; piece: string }> 
   if (found.length > 0) {
     return found.slice(0, 5);
   }
-  return [{ label: "Send HTTP request", piece: "@activepieces/piece-http" }];
+  return [{ label: "Send HTTP request", piece: "n8n-nodes-base.httpRequest" }];
 }
 
 function buildGraphOps(promptRaw: string): {
@@ -177,7 +177,7 @@ function buildGraphOps(promptRaw: string): {
     id: "node-trigger",
     type: "trigger",
     label: triggerLabel,
-    piece: triggerLabel === "Schedule Trigger" ? "@activepieces/piece-schedule" : "@activepieces/piece-webhook",
+    piece: triggerLabel === "Schedule Trigger" ? "n8n-nodes-base.scheduleTrigger" : "n8n-nodes-base.webhook",
   };
 
   const actionDefs = detectActions(prompt);
@@ -280,21 +280,68 @@ export async function generatePmosFlowBuilderPlan(state: PmosFlowBuilderState) {
 }
 
 export async function commitPmosFlowBuilderPlan(state: PmosFlowBuilderState) {
-  const projectId = state.pmosActivepiecesProjectId.trim();
-  if (!projectId) {
-    state.pmosFlowBuilderError =
-      "Flow Pieces Project ID is required. Set it in Integrations -> Flow Pieces -> Project ID.";
-    return;
-  }
   const flowName = state.pmosFlowBuilderFlowName.trim() || state.apFlowCreateName.trim() || "New Automation";
   state.pmosFlowBuilderCommitting = true;
   state.pmosFlowBuilderError = null;
   try {
-    const created = await invokeTool<Record<string, unknown>>(state, "flow_flow_create", {
-      projectId,
-      displayName: flowName,
+    const n8nNodes = state.pmosFlowBuilderNodes.map((node, index) => ({
+      id: node.id,
+      name: node.label,
+      type:
+        node.type === "trigger"
+          ? node.piece ?? "n8n-nodes-base.webhook"
+          : "n8n-nodes-base.set",
+      typeVersion: 1,
+      position: [280 + index * 260, 320],
+      parameters:
+        node.type === "trigger"
+          ? {}
+          : {
+              keepOnlySet: false,
+              values: {
+                string: [
+                  {
+                    name: "step",
+                    value: node.label,
+                  },
+                ],
+              },
+            },
+    }));
+
+    const n8nConnections: Record<string, unknown> = {};
+    for (const edge of state.pmosFlowBuilderEdges) {
+      const fromNode = n8nNodes.find((node) => node.id === edge.from);
+      const toNode = n8nNodes.find((node) => node.id === edge.to);
+      if (!fromNode || !toNode) {
+        continue;
+      }
+      n8nConnections[fromNode.name] = {
+        main: [
+          [
+            {
+              node: toNode.name,
+              type: "main",
+              index: 0,
+            },
+          ],
+        ],
+      };
+    }
+
+    const created = await invokeTool<Record<string, unknown>>(state, "ops_workflow_create", {
+      name: flowName,
+      nodes: n8nNodes,
+      connections: n8nConnections,
+      settings: {},
     });
-    const flowId = typeof created?.id === "string" ? created.id.trim() : "";
+    const payload =
+      created && typeof created === "object" && !Array.isArray(created)
+        ? ((created as { data?: unknown }).data ?? created)
+        : created;
+    const flowId = typeof (payload as { id?: unknown })?.id === "string"
+      ? ((payload as { id: string }).id).trim()
+      : "";
     if (!flowId) {
       throw new Error("Flow creation did not return an id.");
     }

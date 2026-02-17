@@ -168,6 +168,10 @@ vi.mock("@clack/prompts", () => ({
   select,
 }));
 
+vi.mock("../terminal/note.js", () => ({
+  note,
+}));
+
 vi.mock("../agents/skills-status.js", () => ({
   buildWorkspaceSkillStatus: () => ({ skills: [] }),
 }));

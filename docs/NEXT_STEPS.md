@@ -9,6 +9,53 @@
 
 This document outlines the actionable implementation plan for completing OpenClaw as a fully AI-powered Automation OS with n8n as the workflow engine.
 
+## Consolidated TODO (Current)
+
+This is the active, consolidated list for the current sprint after removing Activepieces from the runtime path.
+
+### P0 - Stabilize Runtime (This Week)
+
+- [x] Remove Activepieces-only render blocks that crash Integrations view (`openclaw/ui/src/ui/views/integrations.ts`)
+- [x] Migrate PMOS flow/run controllers from `flow_*` tools to n8n `ops_*` tools (`openclaw/ui/src/ui/controllers/pmos-workflows.ts`)
+- [x] Migrate command-center and flow-builder tool calls to `ops_*` (`openclaw/ui/src/ui/controllers/pmos-command-center.ts`, `openclaw/ui/src/ui/controllers/pmos-flow-builder.ts`)
+- [x] Remove workflow new-tab redirect behavior; keep editor native in dashboard tab (`openclaw/ui/src/ui/app-render.ts`, `openclaw/ui/src/ui/app.ts`)
+- [x] Remove Activepieces connector probes/status payload from gateway checks (`openclaw/src/gateway/server-methods/pmos.ts`)
+- [x] Remove legacy UI fallback that mapped `ops` URL from `pmos.connectors.activepieces.url` (`openclaw/ui/src/ui/controllers/pmos-connectors.ts`)
+- [x] Force-disable deprecated `pmos-activepieces` plugin so stale config cannot re-enable it (`openclaw/src/plugins/config-state.ts`)
+- [x] Move PMOS smoke checks from Activepieces `flow_*` tools to n8n `ops_*` tools (`openclaw/scripts/pmos-smoke.mjs`)
+- [x] Prevent legacy Activepieces install from running by default in postinstall (`scripts/prepare-activepieces-install.js`)
+- [x] Make `openclaw-app` Nx targets use `corepack pnpm` and remove nested `pnpm` dependency in build script (`openclaw/project.json`, `openclaw/package.json`)
+- [x] Fix embedded n8n vendored-path discovery for both repo layouts (`openclaw/src/gateway/n8n-embed.ts`)
+- [x] Add explicit embedded n8n/ops runtime diagnostics to connector status checks and dashboard health cards (`openclaw/src/gateway/server-methods/pmos.ts`, `openclaw/ui/src/ui/views/dashboard.ts`, `openclaw/ui/src/ui/views/integrations.ts`)
+- [x] Add `pmos.connectors.ops` schema support and workspace connector typing for `projectId` (`openclaw/src/config/zod-schema.ts`, `openclaw/src/gateway/workspace-connectors.ts`)
+
+### P0 - Deployment Path (Coolify + Nx + Server)
+
+- [x] Publish deploy runbook for Nx validation + Coolify + SSH smoke checks (`docs/COOLIFY_DEPLOY_NX_RUNBOOK.md`)
+- [x] Add automated SSH runtime check script for embedded n8n marker + deprecated plugin detection (`openclaw/scripts/pmos-server-check.mjs`)
+- [ ] Run Nx validation end-to-end in CI shell with `pnpm` available:
+  - [x] `NX_DAEMON=false corepack pnpm exec nx run-many -t build --projects=openclaw-app,openclaw-control-ui,openclaw-frontend`
+  - [ ] `NX_DAEMON=false corepack pnpm exec nx run openclaw-app:test` (currently fails in pre-existing suites outside PMOS scope)
+  - Current failing suites from local run (2026-02-17): `src/cli/memory-cli.test.ts`, multiple `src/commands/doctor*.test.ts`, `src/media/server.test.ts`, and `src/cli/gateway-cli.coverage.test.ts`
+- [ ] Deploy PMOS/OpenClaw via Coolify on main branch
+- [ ] Redeploy PMOS container with the embedded n8n repo-path fix (`openclaw/src/gateway/n8n-embed.ts`) so `/ops-ui/` no longer returns 503
+- [ ] Verify on server (SSH) that embedded n8n process starts with gateway
+- [ ] Smoke test production routes:
+  - `https://os.wickedlab.io` (dashboard auth + tabs)
+  - `https://os.wickedlab.io/ops-ui/` (embedded editor route)
+  - `https://os.wickedlab.io/api/ops/workflows` (authenticated ops proxy)
+  - `https://bcgpt.wickedlab.io/health`
+- Current production snapshot (2026-02-17): root `200`, `ops-ui` `503`, `bcgpt /health` `200`; redeploy is still required to pick up latest runtime changes (forced `pmos-activepieces` disable + embedded n8n checks).
+
+### P1 - Final Cleanup (After Production Validation)
+
+- [x] Remove deprecated Activepieces plugin from bundled defaults/config templates (`openclaw/src/plugins/config-state.ts`)
+- [x] Remove `pmos.connectors.activepieces.*` from UI config write path (legacy reads kept for compatibility) (`openclaw/ui/src/ui/controllers/pmos-connectors.ts`, `openclaw/ui/src/ui/app.ts`, `openclaw/ui/src/ui/app-view-state.ts`)
+- [ ] Archive or delete `openclaw/extensions/pmos-activepieces/` after one stable release cycle
+- [ ] Remove stale Flow Pieces wording in hidden/legacy views (`runs`, legacy cards) and docs backups as needed
+- [x] Add regression tests for native automations embed and connector config cleanup (`openclaw/ui/src/ui/controllers/pmos-embed.test.ts`, `openclaw/ui/src/ui/controllers/pmos-connectors.test.ts`)
+- [x] Rotate/replace hardcoded secrets in legacy helper scripts (`scripts/start-bcgpt.sh`) and require env-injected secrets only
+
 ---
 
 ## Priority Order
@@ -164,19 +211,20 @@ pnpm build
 #### 2.4 Custom Nodes Integration
 
 - [x] Move Basecamp node to `openclaw/vendor/n8n/custom/nodes/`
-- [ ] Create OpenClaw-specific nodes
+- [x] Create OpenClaw-specific nodes (`openclaw/vendor/n8n/custom/nodes/n8n-nodes-openclaw`)
 - [x] Register custom nodes with n8n
-- [ ] Test custom nodes
+- [ ] Test custom nodes in deployed embedded runtime
 
 **Implementation:**
 - Basecamp node vendored path: `openclaw/vendor/n8n/custom/nodes/n8n-nodes-basecamp`
-- Embedded loader wiring: `openclaw/src/gateway/n8n-embed.ts` (`N8N_CUSTOM_EXTENSIONS`)
+- OpenClaw node vendored path: `openclaw/vendor/n8n/custom/nodes/n8n-nodes-openclaw`
+- Embedded loader wiring now auto-discovers all packages under `openclaw/vendor/n8n/custom/nodes/*` (`openclaw/src/gateway/n8n-embed.ts`, `N8N_CUSTOM_EXTENSIONS`)
 
 #### 2.5 UI Customization
 
 - [x] Create `openclaw/vendor/n8n/custom/ui/` directory
 - [ ] Customize n8n editor UI for OpenClaw branding
-- [ ] Integrate n8n canvas into PMOS UI
+- [x] Integrate n8n canvas into PMOS UI
 - [ ] Remove n8n branding elements
 
 **Implementation:**
@@ -212,7 +260,7 @@ pnpm build
 - [x] n8n workflow list via `/api/ops/workflows` proxy
 - [x] Workflow activate/deactivate controls
 - [x] Auth bridge integration for seamless session passthrough
-- [x] Fallback to MCP tool call for legacy Activepieces flows
+- [x] Control UI flow/run actions migrated to n8n `ops_*` tool surface
 - [x] Quick action templates (Basecamp Sync, Slack Alerts, Daily Report)
 
 #### 3.2 Integrated Chat Sidebar
@@ -229,12 +277,14 @@ pnpm build
 #### 3.3 Seamless Navigation
 
 - [x] Remove need to open n8n separately
+- [x] Keep n8n editor embedded in the Workflows tab (no redirect/new-tab requirement)
 - [ ] All n8n features accessible from OpenClaw UI
 - [ ] Consistent styling and branding
 - [x] Single sign-on between OpenClaw and n8n
 
 **Implementation:**
 - Flows UI removes external n8n links and uses embedded editor route: `frontend/src/views/Flows.tsx`
+- Control UI automations tab now embeds n8n editor in-panel: `openclaw/ui/src/ui/app-render.ts`
 - Gateway uses embedded n8n first for `/api/ops/*` and webhook paths: `openclaw/src/gateway/pmos-ops-proxy.ts`
 - Workspace-scoped auth bridge remains active: `openclaw/src/gateway/n8n-auth-bridge.ts`
 

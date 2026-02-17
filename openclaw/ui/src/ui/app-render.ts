@@ -61,6 +61,7 @@ import {
   titleForTab,
   type Tab,
 } from "./navigation.ts";
+import { buildOpsUiEmbedUrl } from "./controllers/pmos-embed.ts";
 
 // Module-scope debounce for usage date changes (avoids type-unsafe hacks on state object)
 let usageDateDebounceTimeout: number | null = null;
@@ -316,7 +317,11 @@ export function renderApp(state: AppViewState) {
   // Auto-exit onboarding if all setup steps are done
   if (state.onboarding && state.tab === "dashboard" && state.configSnapshot) {
     const modelAuthConfigured = hasConfiguredModelAuth(state.configSnapshot.config);
-    const connectorsOk = state.pmosConnectorsStatus?.ap?.tone === "ok" && state.pmosConnectorsStatus?.bcgpt?.tone === "ok";
+    const connectorsOk =
+      Boolean(state.pmosOpsProvisioningResult?.apiKey) &&
+      state.pmosConnectorsStatus?.ops?.reachable === true &&
+      state.pmosConnectorsStatus?.bcgpt?.reachable === true &&
+      (state.pmosConnectorsStatus?.bcgpt?.authOk ?? false) === true;
     if (modelAuthConfigured && connectorsOk) {
       state.onboarding = false;
       // Optionally, auto-redirect to chat
@@ -410,16 +415,15 @@ export function renderApp(state: AppViewState) {
               <span class="nav-item__icon" aria-hidden="true">${icons.book}</span>
               <span class="nav-item__text">Basecamp Connect</span>
             </a>
-            <a
+            <button
               class="nav-item nav-item--external"
-              href=${`${basePath || ""}/ops-ui/`}
-              target="_blank"
-              rel="noreferrer"
-              title="Open Workflows Editor (opens in new tab)"
+              type="button"
+              @click=${() => state.setTab("automations")}
+              title="Open embedded Workflows editor"
             >
               <span class="nav-item__icon" aria-hidden="true">${icons.link}</span>
               <span class="nav-item__text">Workflows Editor</span>
-            </a>
+            </button>
             <a
               class="nav-item nav-item--external"
               href=${state.pmosBcgptUrl}
@@ -508,14 +512,21 @@ export function renderApp(state: AppViewState) {
                 ${state.pmosOpsProvisioning
                   ? html`<div class="loading-panel" style="display:flex;align-items:center;justify-content:center;height:100%;gap:12px;">
                       <span class="spinner"></span>
-                      <span class="muted">Setting up your automation workspace…</span>
+                      <span class="muted">Setting up your automation workspace...</span>
                     </div>`
-                  : html`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;">
-                      <script>if (location.pathname !== '/ops-ui/') { location.assign('/ops-ui/'); }</script>
-                      <div style="text-align:center; max-width:600px;">
-                        <h3 style="margin:0 0 8px">Opening Workflows editor…</h3>
-                        <div class="muted">If the editor did not open automatically, <a href="/ops-ui/">click here to open the Workflows editor</a>.</div>
+                  : html`<div class="card" style="height:calc(100vh - 200px); min-height:640px; padding:0; overflow:hidden;">
+                      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);">
+                        <div class="card-sub">Embedded n8n editor (native in dashboard)</div>
+                        <a class="btn btn--secondary btn--sm" href=${buildOpsUiEmbedUrl(basePath, null)} rel="noreferrer">
+                          Open editor route
+                        </a>
                       </div>
+                      <iframe
+                        src=${buildOpsUiEmbedUrl(basePath, state.apFlowSelectedId)}
+                        title="OpenClaw Workflows Editor"
+                        style="width:100%;height:100%;border:0;display:block;background:#111;"
+                        allow="clipboard-read; clipboard-write"
+                      ></iframe>
                     </div>`}
               </div>`
             : nothing
@@ -1645,3 +1656,4 @@ export function renderApp(state: AppViewState) {
     </div>
   `;
 }
+

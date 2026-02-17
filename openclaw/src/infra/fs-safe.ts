@@ -35,6 +35,13 @@ const isNotFoundError = (err: unknown) =>
 const isSymlinkOpenError = (err: unknown) =>
   isNodeError(err) && (err.code === "ELOOP" || err.code === "EINVAL" || err.code === "ENOTSUP");
 
+const canCompareFileIdentity = (stat: Stats): boolean =>
+  process.platform !== "win32" &&
+  Number.isFinite(stat.ino) &&
+  Number.isFinite(stat.dev) &&
+  stat.ino > 0 &&
+  stat.dev > 0;
+
 export async function openFileWithinRoot(params: {
   rootDir: string;
   relativePath: string;
@@ -87,7 +94,11 @@ export async function openFileWithinRoot(params: {
     }
 
     const realStat = await fs.stat(realPath);
-    if (stat.ino !== realStat.ino || stat.dev !== realStat.dev) {
+    if (
+      canCompareFileIdentity(stat) &&
+      canCompareFileIdentity(realStat) &&
+      (stat.ino !== realStat.ino || stat.dev !== realStat.dev)
+    ) {
       throw new SafeOpenError("invalid-path", "path mismatch");
     }
 

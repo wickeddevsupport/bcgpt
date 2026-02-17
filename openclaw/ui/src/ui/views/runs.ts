@@ -1,5 +1,5 @@
 import { html, nothing } from "lit";
-import type { ActivepiecesRunSummary } from "../controllers/pmos-activepieces.ts";
+import type { WorkflowRunSummary } from "../controllers/pmos-workflows.ts";
 
 export type RunsProps = {
   connected: boolean;
@@ -9,7 +9,7 @@ export type RunsProps = {
 
   loading: boolean;
   error: string | null;
-  runs: ActivepiecesRunSummary[];
+  runs: WorkflowRunSummary[];
   selectedRunId: string | null;
   runDetailsLoading: boolean;
   runDetailsError: string | null;
@@ -28,14 +28,14 @@ export function renderRuns(props: RunsProps) {
     : null;
   const projectReason = props.projectId.trim()
     ? null
-    : "Flow Pieces Project ID is required. Set it in Integrations -> Flow Pieces -> Project ID, then Save.";
+    : "Workflow project ID is required. Open Integrations and complete provisioning, then refresh.";
 
   return html`
     <section class="agents-layout">
       <div class="agents-sidebar">
         <div class="card">
           <div class="card-title">Runs</div>
-          <div class="card-sub">Recent Flow Pieces executions (project scoped).</div>
+          <div class="card-sub">Recent workflow executions (project scoped).</div>
 
           <div class="row" style="margin-top: 12px;">
             <button class="btn" @click=${() => props.onRefresh()} ?disabled=${!props.connected || !props.projectId.trim() || props.loading}>

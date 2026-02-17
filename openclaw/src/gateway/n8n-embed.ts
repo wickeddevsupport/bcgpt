@@ -11,14 +11,20 @@ export type EmbeddedN8nHandle = {
 };
 
 function resolveRepoCandidates(): string[] {
-  // Candidate locations (env override > repo-root/n8n > openclaw/vendor/n8n)
+  // Candidate locations:
+  // - env override
+  // - repo-root/n8n (legacy)
+  // - repo-root/vendor/n8n (when OpenClaw itself is repo root)
+  // - repo-root/openclaw/vendor/n8n (when OpenClaw is nested under a parent repo)
   const envPath = process.env.N8N_EMBED_PATH?.trim();
   const bcgptRoot = path.resolve(__dirname, "..", "..", "..");
   const candidates = [] as string[];
   if (envPath) candidates.push(envPath);
   candidates.push(path.join(bcgptRoot, "n8n"));
+  candidates.push(path.join(bcgptRoot, "vendor", "n8n"));
   candidates.push(path.join(bcgptRoot, "openclaw", "vendor", "n8n"));
-  return candidates;
+  // Keep order while removing accidental duplicates.
+  return Array.from(new Set(candidates.map((entry) => path.resolve(entry))));
 }
 
 export function findVendoredN8nRepo(): string | null {
@@ -34,23 +40,41 @@ export function findVendoredN8nRepo(): string | null {
 }
 
 /**
- * Resolve the Basecamp custom node directory, if installed.
- * Checks: vendored n8n node_modules → repo-root/n8n-nodes-basecamp
+ * Resolve custom n8n node package directories.
+ * Sources:
+ * - vendored n8n custom nodes directory: vendor/n8n/custom/nodes/*
+ * - legacy root-level package fallback: ../../n8n-nodes-basecamp
  */
-function resolveBasecampNodeDir(n8nRepoDir: string): string | null {
-  const candidates = [
-    path.join(n8nRepoDir, "packages", "cli", "node_modules", "n8n-nodes-basecamp"),
-    path.join(n8nRepoDir, "custom", "nodes", "n8n-nodes-basecamp"),
-    path.join(n8nRepoDir, "..", "..", "n8n-nodes-basecamp"),
-  ];
-  for (const c of candidates) {
+function resolveCustomNodeDirs(n8nRepoDir: string): string[] {
+  const found = new Set<string>();
+
+  const addIfPackage = (candidate: string) => {
     try {
-      if (fs.existsSync(path.join(c, "package.json"))) return c;
+      if (fs.existsSync(path.join(candidate, "package.json"))) {
+        found.add(path.resolve(candidate));
+      }
     } catch {
       // ignore
     }
+  };
+
+  // Legacy fallbacks
+  addIfPackage(path.join(n8nRepoDir, "packages", "cli", "node_modules", "n8n-nodes-basecamp"));
+  addIfPackage(path.join(n8nRepoDir, "..", "..", "n8n-nodes-basecamp"));
+
+  // Vendored custom node packages (preferred)
+  const customNodesRoot = path.join(n8nRepoDir, "custom", "nodes");
+  try {
+    const entries = fs.readdirSync(customNodesRoot, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      addIfPackage(path.join(customNodesRoot, entry.name));
+    }
+  } catch {
+    // ignore missing custom nodes dir
   }
-  return null;
+
+  return Array.from(found);
 }
 
 /**
@@ -76,14 +100,16 @@ export async function spawnEmbeddedN8nIfVendored(opts?: { port?: number; host?: 
   env.N8N_OWNER_EMAIL = env.N8N_OWNER_EMAIL ?? process.env.N8N_OWNER_EMAIL ?? "admin@local";
   env.N8N_OWNER_PASSWORD = env.N8N_OWNER_PASSWORD ?? process.env.N8N_OWNER_PASSWORD ?? "changeme";
 
-  // Custom Basecamp node: tell n8n where to find community nodes
-  const basecampNodeDir = resolveBasecampNodeDir(repo);
-  if (basecampNodeDir) {
-    // N8N_CUSTOM_EXTENSIONS is the env var n8n uses for additional node packages
-    const existing = env.N8N_CUSTOM_EXTENSIONS?.trim();
-    env.N8N_CUSTOM_EXTENSIONS = existing
-      ? `${existing}${path.delimiter}${basecampNodeDir}`
-      : basecampNodeDir;
+  // Custom nodes: tell n8n where to find additional community node packages.
+  const customNodeDirs = resolveCustomNodeDirs(repo);
+  if (customNodeDirs.length > 0) {
+    const existing = (env.N8N_CUSTOM_EXTENSIONS ?? "")
+      .split(path.delimiter)
+      .map((part) => part.trim())
+      .filter(Boolean);
+    env.N8N_CUSTOM_EXTENSIONS = Array.from(new Set([...existing, ...customNodeDirs])).join(
+      path.delimiter,
+    );
   }
 
   // Branding / UI customization

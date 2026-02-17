@@ -122,23 +122,23 @@ import {
   type PmosCommandPlanStep,
 } from "./controllers/pmos-command-center.ts";
 import {
-  applyActivepiecesFlowOperationDraft,
-  createActivepiecesConnection,
-  createActivepiecesFlow,
-  deleteActivepiecesConnection,
-  deleteActivepiecesFlow,
-  loadActivepiecesConnections,
-  loadActivepiecesFlows,
-  loadActivepiecesFlowDetails,
-  loadActivepiecesPieces,
-  loadActivepiecesRunDetails,
-  loadActivepiecesRuns,
-  publishActivepiecesFlow,
-  renameActivepiecesFlow,
-  retryActivepiecesRun,
-  setActivepiecesFlowStatus,
-  triggerActivepiecesFlowWebhook,
-} from "./controllers/pmos-activepieces.ts";
+  applyWorkflowOperationDraft,
+  createWorkflowConnection,
+  createWorkflow,
+  deleteWorkflowConnection,
+  deleteWorkflow,
+  loadWorkflowConnections,
+  loadWorkflows,
+  loadWorkflowDetails,
+  loadWorkflowPieces,
+  loadWorkflowRunDetails,
+  loadWorkflowRuns,
+  publishWorkflow,
+  renameWorkflow,
+  retryWorkflowRun,
+  setWorkflowStatus,
+  triggerWorkflowWebhook,
+} from "./controllers/pmos-workflows.ts";
 import {
   commitPmosFlowBuilderPlan,
   generatePmosFlowBuilderPlan,
@@ -263,9 +263,7 @@ export class OpenClawApp extends LitElement {
 
   // PMOS connector onboarding (Phase 1)
   @state() pmosConnectorDraftsInitialized = false;
-  @state() pmosActivepiecesUrl = "https://flow.wickedlab.io";
-  @state() pmosActivepiecesProjectId = "";
-  @state() pmosActivepiecesApiKeyDraft = "";
+  @state() pmosOpsUrl = "https://ops.wickedlab.io";
   @state() pmosBcgptUrl = "https://bcgpt.wickedlab.io";
   @state() pmosBcgptApiKeyDraft = "";
   @state() pmosIntegrationsSaving = false;
@@ -320,11 +318,11 @@ export class OpenClawApp extends LitElement {
   @state() pmosCommandHistory: PmosCommandHistoryEntry[] = [];
   @state() pmosCommandPendingApprovals: PmosCommandPendingApproval[] = [];
 
-  // PMOS Activepieces native embed (Phase 2)
+  // PMOS workflows native embed (Phase 2)
   @state() apPiecesLoading = false;
   @state() apPiecesError: string | null = null;
   @state() apPiecesQuery = "";
-  @state() apPieces: import("./controllers/pmos-activepieces.ts").ActivepiecesPieceSummary[] = [];
+  @state() apPieces: import("./controllers/pmos-workflows.ts").WorkflowPieceSummary[] = [];
   @state() apPieceSelectedName: string | null = null;
   @state() apPieceDetailsLoading = false;
   @state() apPieceDetailsError: string | null = null;
@@ -332,7 +330,7 @@ export class OpenClawApp extends LitElement {
 
   @state() apConnectionsLoading = false;
   @state() apConnectionsError: string | null = null;
-  @state() apConnections: import("./controllers/pmos-activepieces.ts").ActivepiecesConnectionSummary[] =
+  @state() apConnections: import("./controllers/pmos-workflows.ts").WorkflowConnectionSummary[] =
     [];
   @state() apConnectionsCursor: string | null = null;
   @state() apConnectionsHasNext = false;
@@ -348,7 +346,7 @@ export class OpenClawApp extends LitElement {
   @state() apFlowsLoading = false;
   @state() apFlowsError: string | null = null;
   @state() apFlowsQuery = "";
-  @state() apFlows: import("./controllers/pmos-activepieces.ts").ActivepiecesFlowSummary[] = [];
+  @state() apFlows: import("./controllers/pmos-workflows.ts").WorkflowSummary[] = [];
   @state() apFlowsCursor: string | null = null;
   @state() apFlowsHasNext = false;
   @state() apFlowCreateName = "";
@@ -378,7 +376,7 @@ export class OpenClawApp extends LitElement {
 
   @state() apRunsLoading = false;
   @state() apRunsError: string | null = null;
-  @state() apRuns: import("./controllers/pmos-activepieces.ts").ActivepiecesRunSummary[] = [];
+  @state() apRuns: import("./controllers/pmos-workflows.ts").WorkflowRunSummary[] = [];
   @state() apRunsCursor: string | null = null;
   @state() apRunsHasNext = false;
   @state() apRunSelectedId: string | null = null;
@@ -775,15 +773,6 @@ export class OpenClawApp extends LitElement {
     await loadPmosConnectorsStatus(this);
   }
 
-  async handlePmosIntegrationsClearActivepiecesKey() {
-    await savePmosConnectorsConfig(this, { clearActivepiecesKey: true });
-    await loadConfig(this);
-    this.pmosConnectorDraftsInitialized = false;
-    hydratePmosConnectorDraftsFromConfig(this);
-    hydratePmosModelDraftFromConfig(this);
-    await loadPmosConnectorsStatus(this);
-  }
-
   async handlePmosIntegrationsClearBcgptKey() {
     await savePmosConnectorsConfig(this, { clearBcgptKey: true });
     await loadConfig(this);
@@ -859,73 +848,73 @@ export class OpenClawApp extends LitElement {
   }
 
   async handlePmosApPiecesLoad() {
-    await loadActivepiecesPieces(this as unknown as Parameters<typeof loadActivepiecesPieces>[0]);
+    await loadWorkflowPieces(this as unknown as Parameters<typeof loadWorkflowPieces>[0]);
   }
 
   async handlePmosApConnectionsLoad() {
-    await loadActivepiecesConnections(
-      this as unknown as Parameters<typeof loadActivepiecesConnections>[0],
+    await loadWorkflowConnections(
+      this as unknown as Parameters<typeof loadWorkflowConnections>[0],
     );
   }
 
   async handlePmosApConnectionCreate() {
-    await createActivepiecesConnection(
-      this as unknown as Parameters<typeof createActivepiecesConnection>[0],
+    await createWorkflowConnection(
+      this as unknown as Parameters<typeof createWorkflowConnection>[0],
     );
   }
 
   async handlePmosApConnectionDelete(connectionId: string) {
-    await deleteActivepiecesConnection(
-      this as unknown as Parameters<typeof deleteActivepiecesConnection>[0],
+    await deleteWorkflowConnection(
+      this as unknown as Parameters<typeof deleteWorkflowConnection>[0],
       connectionId,
     );
   }
 
   async handlePmosApFlowsLoad() {
-    await loadActivepiecesFlows(this as unknown as Parameters<typeof loadActivepiecesFlows>[0]);
+    await loadWorkflows(this as unknown as Parameters<typeof loadWorkflows>[0]);
   }
 
   async handlePmosApFlowCreate() {
-    await createActivepiecesFlow(this as unknown as Parameters<typeof createActivepiecesFlow>[0]);
+    await createWorkflow(this as unknown as Parameters<typeof createWorkflow>[0]);
   }
 
   async handlePmosApFlowSelect(flowId: string) {
-    await loadActivepiecesFlowDetails(
-      this as unknown as Parameters<typeof loadActivepiecesFlowDetails>[0],
+    await loadWorkflowDetails(
+      this as unknown as Parameters<typeof loadWorkflowDetails>[0],
       flowId,
     );
   }
 
   async handlePmosApFlowRename() {
-    await renameActivepiecesFlow(this as unknown as Parameters<typeof renameActivepiecesFlow>[0]);
+    await renameWorkflow(this as unknown as Parameters<typeof renameWorkflow>[0]);
   }
 
   async handlePmosApFlowSetStatus(status: "ENABLED" | "DISABLED") {
-    await setActivepiecesFlowStatus(
-      this as unknown as Parameters<typeof setActivepiecesFlowStatus>[0],
+    await setWorkflowStatus(
+      this as unknown as Parameters<typeof setWorkflowStatus>[0],
       status,
     );
   }
 
   async handlePmosApFlowPublish() {
-    await publishActivepiecesFlow(
-      this as unknown as Parameters<typeof publishActivepiecesFlow>[0],
+    await publishWorkflow(
+      this as unknown as Parameters<typeof publishWorkflow>[0],
     );
   }
 
   async handlePmosApFlowDelete() {
-    await deleteActivepiecesFlow(this as unknown as Parameters<typeof deleteActivepiecesFlow>[0]);
+    await deleteWorkflow(this as unknown as Parameters<typeof deleteWorkflow>[0]);
   }
 
   async handlePmosApFlowApplyOperation() {
-    await applyActivepiecesFlowOperationDraft(
-      this as unknown as Parameters<typeof applyActivepiecesFlowOperationDraft>[0],
+    await applyWorkflowOperationDraft(
+      this as unknown as Parameters<typeof applyWorkflowOperationDraft>[0],
     );
   }
 
   async handlePmosApFlowTriggerWebhook(opts?: { draft?: boolean; sync?: boolean }) {
-    await triggerActivepiecesFlowWebhook(
-      this as unknown as Parameters<typeof triggerActivepiecesFlowWebhook>[0],
+    await triggerWorkflowWebhook(
+      this as unknown as Parameters<typeof triggerWorkflowWebhook>[0],
       opts,
     );
   }
@@ -943,19 +932,19 @@ export class OpenClawApp extends LitElement {
   }
 
   async handlePmosApRunsLoad() {
-    await loadActivepiecesRuns(this as unknown as Parameters<typeof loadActivepiecesRuns>[0]);
+    await loadWorkflowRuns(this as unknown as Parameters<typeof loadWorkflowRuns>[0]);
   }
 
   async handlePmosApRunSelect(runId: string) {
-    await loadActivepiecesRunDetails(
-      this as unknown as Parameters<typeof loadActivepiecesRunDetails>[0],
+    await loadWorkflowRunDetails(
+      this as unknown as Parameters<typeof loadWorkflowRunDetails>[0],
       runId,
     );
   }
 
   async handlePmosApRunRetry(strategy: "FROM_FAILED_STEP" | "ON_LATEST_VERSION") {
-    await retryActivepiecesRun(
-      this as unknown as Parameters<typeof retryActivepiecesRun>[0],
+    await retryWorkflowRun(
+      this as unknown as Parameters<typeof retryWorkflowRun>[0],
       strategy,
     );
   }
@@ -1023,16 +1012,16 @@ export class OpenClawApp extends LitElement {
         (details.details && (details.details as any).id);
       const workflowId = possibleId ? String(possibleId) : undefined;
 
-      // Redirect to the editor for the new workflow when possible.
+      // Keep workflow editing native inside the dashboard tab.
       if (workflowId) {
-        const base = this.settings.basePath?.trim() || "";
-        const path = `${base || ""}/ops-ui/workflows/${encodeURIComponent(workflowId)}`;
-        window.location.assign(path);
+        this.apFlowSelectedId = workflowId;
+        this.setTab("automations");
         return;
       }
 
-      this.lastError = "Workflow created but ID could not be detected. Open Workflows editor to view your workflows.";
-      window.location.assign((this.settings.basePath?.trim() || "") + "/ops-ui/");
+      this.lastError =
+        "Workflow created but ID could not be detected. Opening Workflows tab.";
+      this.setTab("automations");
     } catch (err) {
       this.chatCreateWorkflowError = String(err ?? "unknown error");
       this.lastError = `Create workflow failed: ${String(err)}`;

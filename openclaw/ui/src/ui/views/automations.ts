@@ -1,5 +1,5 @@
 import { html, nothing } from "lit";
-import type { ActivepiecesFlowSummary } from "../controllers/pmos-activepieces.ts";
+import type { WorkflowSummary } from "../controllers/pmos-workflows.ts";
 import type {
   PmosFlowGraphEdge,
   PmosFlowGraphNode,
@@ -15,7 +15,7 @@ export type AutomationsProps = {
   loading: boolean;
   error: string | null;
   flowsQuery: string;
-  flows: ActivepiecesFlowSummary[];
+  flows: WorkflowSummary[];
 
   createName: string;
   creating: boolean;
@@ -64,11 +64,11 @@ export type AutomationsProps = {
   onBuilderReset: () => void;
 };
 
-function formatFlowTitle(flow: ActivepiecesFlowSummary) {
+function formatFlowTitle(flow: WorkflowSummary) {
   return flow.displayName || flow.id;
 }
 
-function formatFlowMeta(flow: ActivepiecesFlowSummary) {
+function formatFlowMeta(flow: WorkflowSummary) {
   const parts: string[] = [];
   if (flow.status) parts.push(flow.status);
   if (flow.updated) parts.push(`updated ${flow.updated}`);

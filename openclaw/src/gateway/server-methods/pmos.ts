@@ -15,6 +15,9 @@ type ConnectorResult = {
   authUrl?: string | null;
   healthUrl?: string | null;
   mcpUrl?: string | null;
+  editorUrl?: string | null;
+  mode?: "embedded" | "remote";
+  vendoredRepo?: string | null;
 };
 
 async function fetchJson(
@@ -73,6 +76,11 @@ function readConfigString(cfg: unknown, path: string[]): string | null {
   return trimmed ? trimmed : null;
 }
 
+function isReachableStatus(code: number): boolean {
+  // 401/403/404 still prove the upstream is alive.
+  return code === 401 || code === 403 || code === 404;
+}
+
 export const pmosHandlers: GatewayRequestHandlers = {
   "pmos.connectors.status": async ({ respond, client }) => {
     try {
@@ -87,27 +95,17 @@ export const pmosHandlers: GatewayRequestHandlers = {
       const workspaceId = client?.pmosWorkspaceId ?? undefined;
       const workspaceConnectors = workspaceId ? await readWorkspaceConnectors(workspaceId) : null;
 
-      const apUrl = normalizeBaseUrl(
-        // workspace-scoped -> global config -> env -> fallback
-        (workspaceConnectors?.activepieces?.url as string | undefined) ??
-          readConfigString(cfg, ["pmos", "connectors", "activepieces", "url"]) ??
-          process.env.ACTIVEPIECES_URL ??
-          null,
-        "https://flow.wickedlab.io",
-      );
       const allowGlobalSecrets = Boolean(client && isSuperAdmin(client));
-
-      const apKey =
-        (workspaceConnectors?.activepieces?.apiKey as string | undefined) ??
-        (allowGlobalSecrets
-          ? readConfigString(cfg, ["pmos", "connectors", "activepieces", "apiKey"]) ??
-            (process.env.ACTIVEPIECES_API_KEY?.trim() || null)
-          : null);
-      const apProjectId =
-        (workspaceConnectors?.activepieces?.projectId as string | undefined) ??
-        readConfigString(cfg, ["pmos", "connectors", "activepieces", "projectId"]) ??
-        (process.env.ACTIVEPIECES_PROJECT_ID?.trim() || null);
-      const apProjectProbe = apProjectId || "probe";
+      const opsUrlRaw =
+        (workspaceConnectors?.ops?.url as string | undefined) ??
+        readConfigString(cfg, ["pmos", "connectors", "ops", "url"]) ??
+        process.env.OPS_URL ??
+        null;
+      const opsUrl = normalizeBaseUrl(opsUrlRaw, "https://ops.wickedlab.io");
+      const opsProjectId =
+        (workspaceConnectors?.ops?.projectId as string | undefined) ??
+        readConfigString(cfg, ["pmos", "connectors", "ops", "projectId"]) ??
+        null;
 
       const bcgptUrl = normalizeBaseUrl(
         (workspaceConnectors?.bcgpt?.url as string | undefined) ??
@@ -123,18 +121,21 @@ export const pmosHandlers: GatewayRequestHandlers = {
             (process.env.BCGPT_API_KEY?.trim() || null)
           : null);
 
-      const ap: ConnectorResult = {
-        url: apUrl,
-        projectId: apProjectId,
-        configured: Boolean(apKey),
+      const { readLocalN8nConfig } = await import("../pmos-ops-proxy.js");
+      const { findVendoredN8nRepo } = await import("../n8n-embed.js");
+      const localN8n = readLocalN8nConfig();
+      const vendoredRepo = findVendoredN8nRepo();
+
+      const ops: ConnectorResult = {
+        url: localN8n?.url ?? opsUrl,
+        projectId: opsProjectId,
+        configured: Boolean(localN8n || vendoredRepo || (opsUrlRaw && opsUrlRaw.trim())),
         reachable: null,
-        authOk: apKey ? null : false,
-        flagsUrl: `${apUrl}/api/v1/flags`,
-        // Use a project-gated endpoint and include a probe projectId.
-        // This avoids false negatives when the stored principal isn't allowed on /users/me.
-        authUrl: apKey
-          ? `${apUrl}/api/v1/flows?projectId=${encodeURIComponent(apProjectProbe)}&limit=1`
-          : null,
+        authOk: null,
+        mode: localN8n || vendoredRepo ? "embedded" : "remote",
+        editorUrl: "/ops-ui/",
+        vendoredRepo,
+        healthUrl: localN8n ? `${localN8n.url}/healthz` : null,
         error: null,
       };
 
@@ -148,24 +149,21 @@ export const pmosHandlers: GatewayRequestHandlers = {
         error: null,
       };
 
-      // Activepieces reachability (public)
-      const apFlags = await fetchJson(ap.flagsUrl!, { method: "GET" });
-      ap.reachable = apFlags.ok;
-      if (!apFlags.ok) {
-        ap.error = apFlags.error || "ACTIVEPIECES_UNREACHABLE";
-      }
-
-      // Activepieces API key check
-      if (apKey) {
-        const apAuth = await fetchJson(ap.authUrl!, {
-          method: "GET",
-          headers: {
-            authorization: `Bearer ${apKey}`,
-          },
-        });
-        ap.authOk = apAuth.ok;
-        if (!apAuth.ok && !ap.error) {
-          ap.error = apAuth.error || "ACTIVEPIECES_AUTH_FAILED";
+      // Embedded n8n / ops runtime reachability.
+      if (localN8n) {
+        const localHealth = await fetchJson(`${localN8n.url}/healthz`, { method: "GET", timeoutMs: 3500 });
+        ops.reachable = localHealth.ok || isReachableStatus(localHealth.status);
+        if (!ops.reachable) {
+          ops.error = localHealth.error || "EMBEDDED_N8N_UNREACHABLE";
+        }
+      } else if (vendoredRepo) {
+        ops.reachable = false;
+        ops.error = "Vendored n8n is present but runtime is not running (N8N_LOCAL_URL missing).";
+      } else if (opsUrlRaw && opsUrlRaw.trim()) {
+        const remoteHealth = await fetchJson(`${opsUrl}/healthz`, { method: "GET", timeoutMs: 3500 });
+        ops.reachable = remoteHealth.ok || isReachableStatus(remoteHealth.status);
+        if (!ops.reachable) {
+          ops.error = remoteHealth.error || "OPS_REMOTE_UNREACHABLE";
         }
       }
 
@@ -203,7 +201,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
         true,
         {
           checkedAtMs: Date.now(),
-          activepieces: ap,
+          ops,
           bcgpt,
         },
         undefined,

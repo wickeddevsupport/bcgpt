@@ -38,11 +38,11 @@ import type { PmosAuthUser } from "./controllers/pmos-auth.ts";
 import type { PmosConnectorsStatus } from "./controllers/pmos-connectors.ts";
 import type { PmosModelProvider } from "./controllers/pmos-model-auth.ts";
 import type {
-  ActivepiecesConnectionSummary,
-  ActivepiecesFlowSummary,
-  ActivepiecesPieceSummary,
-  ActivepiecesRunSummary,
-} from "./controllers/pmos-activepieces.ts";
+  WorkflowConnectionSummary,
+  WorkflowSummary,
+  WorkflowPieceSummary,
+  WorkflowRunSummary,
+} from "./controllers/pmos-workflows.ts";
 import type { PmosExecutionTraceEvent } from "./controllers/pmos-trace.ts";
 import type {
   PmosAuditEvent,
@@ -99,6 +99,8 @@ export type AppViewState = {
   chatThinkingLevel: string | null;
   chatQueue: ChatQueueItem[];
   chatManualRefreshInFlight: boolean;
+  chatCreateWorkflowBusy: boolean;
+  chatCreateWorkflowError: string | null;
   nodesLoading: boolean;
   nodes: Array<Record<string, unknown>>;
   chatNewMessagesBelow: boolean;
@@ -145,9 +147,7 @@ export type AppViewState = {
 
   // PMOS connector onboarding (Phase 1)
   pmosConnectorDraftsInitialized: boolean;
-  pmosActivepiecesUrl: string;
-  pmosActivepiecesProjectId: string;
-  pmosActivepiecesApiKeyDraft: string;
+  pmosOpsUrl: string;
   pmosBcgptUrl: string;
   pmosBcgptApiKeyDraft: string;
   pmosIntegrationsSaving: boolean;
@@ -198,11 +198,11 @@ export type AppViewState = {
   pmosCommandHistory: PmosCommandHistoryEntry[];
   pmosCommandPendingApprovals: PmosCommandPendingApproval[];
 
-  // PMOS Activepieces native embed (Phase 2)
+  // PMOS workflows native embed (Phase 2)
   apPiecesLoading: boolean;
   apPiecesError: string | null;
   apPiecesQuery: string;
-  apPieces: ActivepiecesPieceSummary[];
+  apPieces: WorkflowPieceSummary[];
   apPieceSelectedName: string | null;
   apPieceDetailsLoading: boolean;
   apPieceDetailsError: string | null;
@@ -210,7 +210,7 @@ export type AppViewState = {
 
   apConnectionsLoading: boolean;
   apConnectionsError: string | null;
-  apConnections: ActivepiecesConnectionSummary[];
+  apConnections: WorkflowConnectionSummary[];
   apConnectionsCursor: string | null;
   apConnectionsHasNext: boolean;
   apConnectionCreateSaving: boolean;
@@ -225,7 +225,7 @@ export type AppViewState = {
   apFlowsLoading: boolean;
   apFlowsError: string | null;
   apFlowsQuery: string;
-  apFlows: ActivepiecesFlowSummary[];
+  apFlows: WorkflowSummary[];
   apFlowsCursor: string | null;
   apFlowsHasNext: boolean;
   apFlowCreateName: string;
@@ -255,7 +255,7 @@ export type AppViewState = {
 
   apRunsLoading: boolean;
   apRunsError: string | null;
-  apRuns: ActivepiecesRunSummary[];
+  apRuns: WorkflowRunSummary[];
   apRunsCursor: string | null;
   apRunsHasNext: boolean;
   apRunSelectedId: string | null;
@@ -430,6 +430,7 @@ export type AppViewState = {
   setSessionKey: (next: string) => void;
   setChatMessage: (next: string) => void;
   handleSendChat: (messageOverride?: string, opts?: { restoreDraft?: boolean }) => Promise<void>;
+  handleChatCreateWorkflow: () => Promise<void>;
   handleAbortChat: () => Promise<void>;
   handlePmosRefreshConnectors: () => Promise<void>;
   handlePmosProvisionOps: (opts?: { projectName?: string }) => Promise<void>;
@@ -441,7 +442,6 @@ export type AppViewState = {
   handlePmosMemberRemove: (email: string) => Promise<void>;
   handlePmosIntegrationsLoad: () => Promise<void>;
   handlePmosIntegrationsSave: () => Promise<void>;
-  handlePmosIntegrationsClearActivepiecesKey: () => Promise<void>;
   handlePmosIntegrationsClearBcgptKey: () => Promise<void>;
   handlePmosModelProviderChange: (next: PmosModelProvider) => void;
   handlePmosModelSave: () => Promise<void>;

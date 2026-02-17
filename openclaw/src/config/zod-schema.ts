@@ -101,6 +101,14 @@ const PmosConnectorActivepiecesSchema = z
   })
   .strict();
 
+const PmosConnectorOpsSchema = z
+  .object({
+    url: z.string().optional(),
+    apiKey: z.string().optional(),
+    projectId: z.string().optional(),
+  })
+  .strict();
+
 const PmosConnectorBcgptSchema = z
   .object({
     url: z.string().optional(),
@@ -197,6 +205,8 @@ const PmosSchema = z
   .object({
     connectors: z
       .object({
+        ops: PmosConnectorOpsSchema.optional(),
+        // Legacy-only compatibility path. New writes should use `ops`.
         activepieces: PmosConnectorActivepiecesSchema.optional(),
         bcgpt: PmosConnectorBcgptSchema.optional(),
       })

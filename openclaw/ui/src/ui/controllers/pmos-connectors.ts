@@ -3,14 +3,16 @@ import type { ConfigSnapshot } from "../types.ts";
 
 export type PmosConnectorsStatus = {
   checkedAtMs: number;
-  activepieces: {
+  ops?: {
     url: string | null;
     projectId?: string | null;
     configured: boolean;
     reachable: boolean | null;
     authOk: boolean | null;
-    flagsUrl: string | null;
-    authUrl: string | null;
+    healthUrl?: string | null;
+    editorUrl?: string | null;
+    mode?: "embedded" | "remote";
+    vendoredRepo?: string | null;
     error: string | null;
   };
   bcgpt: {
@@ -30,9 +32,7 @@ export type PmosConnectorsState = {
   configSnapshot: ConfigSnapshot | null;
 
   // Draft fields (UI inputs)
-  pmosActivepiecesUrl: string;
-  pmosActivepiecesProjectId: string;
-  pmosActivepiecesApiKeyDraft: string;
+  pmosOpsUrl: string;
   pmosBcgptUrl: string;
   pmosBcgptApiKeyDraft: string;
   pmosConnectorDraftsInitialized: boolean;
@@ -92,6 +92,36 @@ function deletePath(obj: Record<string, unknown>, path: string[]) {
   delete cur[path[path.length - 1]!];
 }
 
+function deletePathAndPrune(obj: Record<string, unknown>, path: string[]) {
+  if (path.length === 0) return;
+  const parents: Array<{ holder: Record<string, unknown>; key: string }> = [];
+  let cur: Record<string, unknown> = obj;
+  for (let i = 0; i < path.length - 1; i++) {
+    const key = path[i]!;
+    const next = cur[key];
+    if (!next || typeof next !== "object" || Array.isArray(next)) {
+      return;
+    }
+    parents.push({ holder: cur, key });
+    cur = next as Record<string, unknown>;
+  }
+
+  delete cur[path[path.length - 1]!];
+
+  for (let i = parents.length - 1; i >= 0; i--) {
+    const { holder, key } = parents[i]!;
+    const candidate = holder[key];
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      continue;
+    }
+    if (Object.keys(candidate as Record<string, unknown>).length === 0) {
+      delete holder[key];
+      continue;
+    }
+    break;
+  }
+}
+
 function normalizeUrl(raw: string, fallback: string): string {
   const trimmed = raw.trim();
   if (!trimmed) {
@@ -105,22 +135,17 @@ export function hydratePmosConnectorDraftsFromConfig(state: PmosConnectorsState)
     return;
   }
   const cfg = state.configSnapshot?.config ?? null;
-  const apUrl =
-    (typeof getPath(cfg, ["pmos", "connectors", "activepieces", "url"]) === "string"
-      ? (getPath(cfg, ["pmos", "connectors", "activepieces", "url"]) as string)
-      : "") || "https://flow.wickedlab.io";
+  const opsUrl =
+    (typeof getPath(cfg, ["pmos", "connectors", "ops", "url"]) === "string"
+      ? (getPath(cfg, ["pmos", "connectors", "ops", "url"]) as string)
+      : "") || "https://ops.wickedlab.io";
   const bcgptUrl =
     (typeof getPath(cfg, ["pmos", "connectors", "bcgpt", "url"]) === "string"
       ? (getPath(cfg, ["pmos", "connectors", "bcgpt", "url"]) as string)
       : "") || "https://bcgpt.wickedlab.io";
-  const apProjectId =
-    (typeof getPath(cfg, ["pmos", "connectors", "activepieces", "projectId"]) === "string"
-      ? (getPath(cfg, ["pmos", "connectors", "activepieces", "projectId"]) as string)
-      : "") || "";
 
-  state.pmosActivepiecesUrl = normalizeUrl(apUrl, "https://flow.wickedlab.io");
+  state.pmosOpsUrl = normalizeUrl(opsUrl, "https://ops.wickedlab.io");
   state.pmosBcgptUrl = normalizeUrl(bcgptUrl, "https://bcgpt.wickedlab.io");
-  state.pmosActivepiecesProjectId = apProjectId.trim();
   state.pmosConnectorDraftsInitialized = true;
 }
 
@@ -143,7 +168,7 @@ export async function loadPmosConnectorsStatus(state: PmosConnectorsState) {
 
 export async function savePmosConnectorsConfig(
   state: PmosConnectorsState,
-  opts?: { clearActivepiecesKey?: boolean; clearBcgptKey?: boolean },
+  opts?: { clearBcgptKey?: boolean },
 ) {
   if (!state.client || !state.connected) {
     return;
@@ -159,29 +184,12 @@ export async function savePmosConnectorsConfig(
     }
     const nextConfig = deepClone((snapshot.config ?? {}) as Record<string, unknown>);
 
-    const apUrl = normalizeUrl(state.pmosActivepiecesUrl, "https://flow.wickedlab.io");
+    const opsUrl = normalizeUrl(state.pmosOpsUrl, "https://ops.wickedlab.io");
     const bcgptUrl = normalizeUrl(state.pmosBcgptUrl, "https://bcgpt.wickedlab.io");
 
-    setPath(nextConfig, ["pmos", "connectors", "activepieces", "url"], apUrl);
+    setPath(nextConfig, ["pmos", "connectors", "ops", "url"], opsUrl);
     setPath(nextConfig, ["pmos", "connectors", "bcgpt", "url"], bcgptUrl);
-
-    const apProjectId = state.pmosActivepiecesProjectId.trim();
-    if (apProjectId) {
-      setPath(nextConfig, ["pmos", "connectors", "activepieces", "projectId"], apProjectId);
-    } else {
-      deletePath(nextConfig, ["pmos", "connectors", "activepieces", "projectId"]);
-    }
-
-    const apKey = state.pmosActivepiecesApiKeyDraft.trim();
     const bcgptKey = state.pmosBcgptApiKeyDraft.trim();
-
-    if (opts?.clearActivepiecesKey) {
-      deletePath(nextConfig, ["pmos", "connectors", "activepieces", "apiKey"]);
-      state.pmosActivepiecesApiKeyDraft = "";
-    } else if (apKey) {
-      setPath(nextConfig, ["pmos", "connectors", "activepieces", "apiKey"], apKey);
-      state.pmosActivepiecesApiKeyDraft = "";
-    }
 
     if (opts?.clearBcgptKey) {
       deletePath(nextConfig, ["pmos", "connectors", "bcgpt", "apiKey"]);
@@ -190,6 +198,11 @@ export async function savePmosConnectorsConfig(
       setPath(nextConfig, ["pmos", "connectors", "bcgpt", "apiKey"], bcgptKey);
       state.pmosBcgptApiKeyDraft = "";
     }
+
+    // Always remove deprecated Activepieces connector keys from config writes.
+    deletePathAndPrune(nextConfig, ["pmos", "connectors", "activepieces", "url"]);
+    deletePathAndPrune(nextConfig, ["pmos", "connectors", "activepieces", "projectId"]);
+    deletePathAndPrune(nextConfig, ["pmos", "connectors", "activepieces", "apiKey"]);
 
     const raw = JSON.stringify(nextConfig, null, 2).trimEnd().concat("\n");
     await state.client.request("config.set", { raw, baseHash });

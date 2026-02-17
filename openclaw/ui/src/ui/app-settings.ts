@@ -200,11 +200,6 @@ export async function refreshActiveTab(host: SettingsHost) {
   }
   if (host.tab === "integrations") {
     await (host as unknown as OpenClawApp).handlePmosIntegrationsLoad();
-    // Phase 2: native embed panels (safe even if projectId isn't set yet; controllers show a helpful error).
-    await Promise.all([
-      (host as unknown as OpenClawApp).handlePmosApPiecesLoad(),
-      (host as unknown as OpenClawApp).handlePmosApConnectionsLoad(),
-    ]);
   }
   if (host.tab === "admin") {
     await (host as unknown as OpenClawApp).handlePmosAdminLoad();

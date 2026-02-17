@@ -15,10 +15,12 @@ export type NormalizedPluginsConfig = {
 
 export const BUNDLED_ENABLED_BY_DEFAULT = new Set<string>([
   "device-pair",
-  "pmos-activepieces",
+  "wicked-ops",
   "phone-control",
   "talk-voice",
 ]);
+
+const FORCE_DISABLED_PLUGIN_IDS = new Set<string>(["pmos-activepieces"]);
 
 const normalizeList = (value: unknown): string[] => {
   if (!Array.isArray(value)) {
@@ -167,6 +169,9 @@ export function resolveEnableState(
   origin: PluginRecord["origin"],
   config: NormalizedPluginsConfig,
 ): { enabled: boolean; reason?: string } {
+  if (FORCE_DISABLED_PLUGIN_IDS.has(id)) {
+    return { enabled: false, reason: "deprecated plugin disabled" };
+  }
   if (!config.enabled) {
     return { enabled: false, reason: "plugins disabled" };
   }

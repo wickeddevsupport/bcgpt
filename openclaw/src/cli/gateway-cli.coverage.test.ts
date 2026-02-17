@@ -17,6 +17,7 @@ const gatewayStatusCommand = vi.fn(async () => {});
 
 const runtimeLogs: string[] = [];
 const runtimeErrors: string[] = [];
+const stripAnsi = (value: string) => value.replace(/\u001b\[[0-9;]*m/g, "");
 const defaultRuntime = {
   log: (msg: string) => runtimeLogs.push(msg),
   error: (msg: string) => runtimeErrors.push(msg),
@@ -204,7 +205,7 @@ describe("gateway-cli coverage", () => {
       from: "user",
     });
 
-    const out = runtimeLogs.join("\n");
+    const out = stripAnsi(runtimeLogs.join("\n"));
     expect(out).toContain("Gateway Discovery");
     expect(out).toContain("Found 1 gateway(s)");
     expect(out).toContain("- Studio openclaw.internal.");

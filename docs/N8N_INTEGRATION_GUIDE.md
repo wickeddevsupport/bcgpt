@@ -1,13 +1,26 @@
 # n8n Integration Guide
 
 **Last Updated:** 2026-02-17
-**Related:** [`OPENCLAW_AUTOMATION_OS.md`](OPENCLAW_AUTOMATION_OS.md)
+**Related:** [`OPENCLAW_AUTOMATION_OS.md`](OPENCLAW_AUTOMATION_OS.md), [`COOLIFY_DEPLOY_NX_RUNBOOK.md`](COOLIFY_DEPLOY_NX_RUNBOOK.md)
 
 ---
 
 ## Overview
 
 OpenClaw uses n8n as its workflow automation engine, replacing Activepieces. This guide covers the technical integration details.
+
+### Current Runtime Notes (2026-02-17)
+
+- Control UI workflows are now embedded natively in the `automations` tab (no forced `/ops-ui/` redirect/new-tab behavior).
+- PMOS flow/run command handlers use n8n `ops_*` tools instead of legacy `flow_*` Activepieces tools.
+- Connector status checks no longer probe Activepieces endpoints in the active runtime path.
+- Connector status now includes explicit embedded runtime diagnostics (`ops.reachable`, mode, vendored-repo presence) to expose `/ops-ui/` startup failures quickly.
+- Deprecated `pmos-activepieces` plugin is force-disabled in runtime plugin resolution.
+- PMOS smoke script now validates `ops_*` workflow/execution APIs (`openclaw/scripts/pmos-smoke.mjs`).
+- Root `postinstall` no longer installs Activepieces unless explicitly enabled with `ENABLE_ACTIVEPIECES_INSTALL=true`.
+- Embedded n8n repo discovery now supports both `/vendor/n8n` and `/openclaw/vendor/n8n` layouts (`openclaw/src/gateway/n8n-embed.ts`).
+- Embedded custom node loading now auto-discovers all node packages in `openclaw/vendor/n8n/custom/nodes/*` (includes `n8n-nodes-basecamp` and `n8n-nodes-openclaw`).
+- Control UI connector saves now write `pmos.connectors.ops` and prune legacy `pmos.connectors.activepieces.*` keys from config writes.
 
 ### Why n8n
 

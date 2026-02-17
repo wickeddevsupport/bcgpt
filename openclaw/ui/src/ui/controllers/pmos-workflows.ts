@@ -11,7 +11,7 @@ type ToolInvokeErr = {
   error?: { type?: string; message?: string };
 };
 
-export type ActivepiecesPieceSummary = {
+export type WorkflowPieceSummary = {
   name?: string;
   displayName?: string;
   description?: string;
@@ -19,7 +19,7 @@ export type ActivepiecesPieceSummary = {
   version?: string;
 };
 
-export type ActivepiecesFlowSummary = {
+export type WorkflowSummary = {
   id: string;
   displayName?: string;
   status?: string;
@@ -27,7 +27,7 @@ export type ActivepiecesFlowSummary = {
   created?: string;
 };
 
-export type ActivepiecesRunSummary = {
+export type WorkflowRunSummary = {
   id: string;
   flowId?: string;
   projectId?: string;
@@ -35,7 +35,7 @@ export type ActivepiecesRunSummary = {
   created?: string;
 };
 
-export type ActivepiecesConnectionSummary = {
+export type WorkflowConnectionSummary = {
   id: string;
   displayName?: string;
   pieceName?: string;
@@ -44,20 +44,20 @@ export type ActivepiecesConnectionSummary = {
   created?: string;
 };
 
-export type PmosActivepiecesState = {
+export type PmosWorkflowsState = {
   settings: UiSettings;
   basePath: string;
   connected: boolean;
   sessionKey: string;
 
   // Kept for compatibility with older saved UI state.
-  pmosActivepiecesProjectId: string;
+  pmosOpsProjectId: string;
 
   // Pieces
   apPiecesLoading: boolean;
   apPiecesError: string | null;
   apPiecesQuery: string;
-  apPieces: ActivepiecesPieceSummary[];
+  apPieces: WorkflowPieceSummary[];
   apPieceSelectedName: string | null;
   apPieceDetailsLoading: boolean;
   apPieceDetailsError: string | null;
@@ -67,7 +67,7 @@ export type PmosActivepiecesState = {
   // Connections
   apConnectionsLoading: boolean;
   apConnectionsError: string | null;
-  apConnections: ActivepiecesConnectionSummary[];
+  apConnections: WorkflowConnectionSummary[];
   apConnectionsCursor: string | null;
   apConnectionsHasNext: boolean;
   apConnectionCreateSaving: boolean;
@@ -83,7 +83,7 @@ export type PmosActivepiecesState = {
   apFlowsLoading: boolean;
   apFlowsError: string | null;
   apFlowsQuery: string;
-  apFlows: ActivepiecesFlowSummary[];
+  apFlows: WorkflowSummary[];
   apFlowsCursor: string | null;
   apFlowsHasNext: boolean;
   apFlowCreateName: string;
@@ -103,7 +103,7 @@ export type PmosActivepiecesState = {
   // Runs
   apRunsLoading: boolean;
   apRunsError: string | null;
-  apRuns: ActivepiecesRunSummary[];
+  apRuns: WorkflowRunSummary[];
   apRunsCursor: string | null;
   apRunsHasNext: boolean;
   apRunSelectedId: string | null;
@@ -129,7 +129,7 @@ function resolveToolsInvokeUrl(state: { basePath: string }): string {
 }
 
 async function invokeTool<T = unknown>(
-  state: Pick<PmosActivepiecesState, "settings" | "basePath" | "sessionKey">,
+  state: Pick<PmosWorkflowsState, "settings" | "basePath" | "sessionKey">,
   tool: string,
   args: Record<string, unknown>,
 ): Promise<T> {
@@ -221,7 +221,7 @@ function readId(value: unknown): string | undefined {
   return undefined;
 }
 
-function normalizeWorkflowSummary(entry: Record<string, unknown>): ActivepiecesFlowSummary | null {
+function normalizeWorkflowSummary(entry: Record<string, unknown>): WorkflowSummary | null {
   const id =
     readId(entry.id) ??
     readId(entry.workflowId) ??
@@ -243,7 +243,7 @@ function normalizeWorkflowSummary(entry: Record<string, unknown>): ActivepiecesF
   };
 }
 
-function normalizeExecutionSummary(entry: Record<string, unknown>): ActivepiecesRunSummary | null {
+function normalizeExecutionSummary(entry: Record<string, unknown>): WorkflowRunSummary | null {
   const id = readId(entry.id) ?? readId(entry.executionId);
   if (!id) {
     return null;
@@ -259,7 +259,7 @@ function normalizeExecutionSummary(entry: Record<string, unknown>): Activepieces
   };
 }
 
-function normalizeCredentialSummary(entry: Record<string, unknown>): ActivepiecesConnectionSummary | null {
+function normalizeCredentialSummary(entry: Record<string, unknown>): WorkflowConnectionSummary | null {
   const id = readId(entry.id);
   if (!id) {
     return null;
@@ -289,7 +289,7 @@ function normalizeFlowDetails(value: unknown): unknown {
   return { ...obj, status };
 }
 
-export async function loadActivepiecesPieces(state: PmosActivepiecesState) {
+export async function loadWorkflowPieces(state: PmosWorkflowsState) {
   state.apPiecesLoading = true;
   state.apPiecesError = null;
   try {
@@ -303,7 +303,7 @@ export async function loadActivepiecesPieces(state: PmosActivepiecesState) {
   }
 }
 
-export async function loadActivepiecesPieceDetails(state: PmosActivepiecesState, pieceName: string) {
+export async function loadWorkflowPieceDetails(state: PmosWorkflowsState, pieceName: string) {
   const name = pieceName.trim();
   if (!name) {
     return;
@@ -315,7 +315,7 @@ export async function loadActivepiecesPieceDetails(state: PmosActivepiecesState,
   state.apPieceDetailsLoading = false;
 }
 
-export async function loadActivepiecesConnections(state: PmosActivepiecesState) {
+export async function loadWorkflowConnections(state: PmosWorkflowsState) {
   state.apConnectionsLoading = true;
   state.apConnectionsError = null;
   try {
@@ -323,7 +323,7 @@ export async function loadActivepiecesConnections(state: PmosActivepiecesState) 
     const items = toItems(details, ["data", "credentials"]);
     state.apConnections = items
       .map((entry) => normalizeCredentialSummary(entry))
-      .filter((entry): entry is ActivepiecesConnectionSummary => Boolean(entry));
+      .filter((entry): entry is WorkflowConnectionSummary => Boolean(entry));
     state.apConnectionsCursor = null;
     state.apConnectionsHasNext = false;
   } catch (err) {
@@ -336,7 +336,7 @@ export async function loadActivepiecesConnections(state: PmosActivepiecesState) 
   }
 }
 
-export async function createActivepiecesConnection(state: PmosActivepiecesState) {
+export async function createWorkflowConnection(state: PmosWorkflowsState) {
   state.apConnectionCreateSaving = true;
   state.apConnectionCreateError = null;
   try {
@@ -348,14 +348,14 @@ export async function createActivepiecesConnection(state: PmosActivepiecesState)
   }
 }
 
-export async function deleteActivepiecesConnection(
-  state: PmosActivepiecesState,
+export async function deleteWorkflowConnection(
+  state: PmosWorkflowsState,
   _connectionId: string,
 ) {
   state.apConnectionsError = "Delete credential is managed inside the embedded n8n editor.";
 }
 
-export async function loadActivepiecesFlows(state: PmosActivepiecesState) {
+export async function loadWorkflows(state: PmosWorkflowsState) {
   state.apFlowsLoading = true;
   state.apFlowsError = null;
   try {
@@ -363,7 +363,7 @@ export async function loadActivepiecesFlows(state: PmosActivepiecesState) {
     const items = toItems(details, ["data", "workflows"]);
     const normalized = items
       .map((entry) => normalizeWorkflowSummary(entry))
-      .filter((entry): entry is ActivepiecesFlowSummary => Boolean(entry));
+      .filter((entry): entry is WorkflowSummary => Boolean(entry));
     const query = state.apFlowsQuery.trim().toLowerCase();
     state.apFlows = query
       ? normalized.filter((flow) => {
@@ -383,7 +383,7 @@ export async function loadActivepiecesFlows(state: PmosActivepiecesState) {
   }
 }
 
-export async function createActivepiecesFlow(state: PmosActivepiecesState) {
+export async function createWorkflow(state: PmosWorkflowsState) {
   const name = state.apFlowCreateName.trim();
   if (!name) {
     state.apFlowCreateError = "Workflow name is required.";
@@ -396,9 +396,9 @@ export async function createActivepiecesFlow(state: PmosActivepiecesState) {
     const details = toObject(unwrapData(created)) ?? {};
     const flowId = readId(details.id);
     state.apFlowCreateName = "";
-    await loadActivepiecesFlows(state);
+    await loadWorkflows(state);
     if (flowId) {
-      await loadActivepiecesFlowDetails(state, flowId);
+      await loadWorkflowDetails(state, flowId);
     }
   } catch (err) {
     state.apFlowCreateError = String(err);
@@ -407,7 +407,7 @@ export async function createActivepiecesFlow(state: PmosActivepiecesState) {
   }
 }
 
-export async function loadActivepiecesFlowDetails(state: PmosActivepiecesState, flowId: string) {
+export async function loadWorkflowDetails(state: PmosWorkflowsState, flowId: string) {
   const id = flowId.trim();
   if (!id) {
     return;
@@ -433,7 +433,7 @@ export async function loadActivepiecesFlowDetails(state: PmosActivepiecesState, 
   }
 }
 
-export async function renameActivepiecesFlow(state: PmosActivepiecesState) {
+export async function renameWorkflow(state: PmosWorkflowsState) {
   if (!state.apFlowSelectedId) {
     return;
   }
@@ -449,8 +449,8 @@ export async function renameActivepiecesFlow(state: PmosActivepiecesState) {
       workflowId: state.apFlowSelectedId,
       name,
     });
-    await loadActivepiecesFlowDetails(state, state.apFlowSelectedId);
-    await loadActivepiecesFlows(state);
+    await loadWorkflowDetails(state, state.apFlowSelectedId);
+    await loadWorkflows(state);
   } catch (err) {
     state.apFlowMutateError = String(err);
   } finally {
@@ -458,8 +458,8 @@ export async function renameActivepiecesFlow(state: PmosActivepiecesState) {
   }
 }
 
-export async function setActivepiecesFlowStatus(
-  state: PmosActivepiecesState,
+export async function setWorkflowStatus(
+  state: PmosWorkflowsState,
   status: "ENABLED" | "DISABLED",
 ) {
   if (!state.apFlowSelectedId) {
@@ -473,8 +473,8 @@ export async function setActivepiecesFlowStatus(
     } else {
       await invokeTool(state, "ops_workflow_deactivate", { workflowId: state.apFlowSelectedId });
     }
-    await loadActivepiecesFlowDetails(state, state.apFlowSelectedId);
-    await loadActivepiecesFlows(state);
+    await loadWorkflowDetails(state, state.apFlowSelectedId);
+    await loadWorkflows(state);
   } catch (err) {
     state.apFlowMutateError = String(err);
   } finally {
@@ -482,7 +482,7 @@ export async function setActivepiecesFlowStatus(
   }
 }
 
-export async function publishActivepiecesFlow(state: PmosActivepiecesState) {
+export async function publishWorkflow(state: PmosWorkflowsState) {
   if (!state.apFlowSelectedId) {
     return;
   }
@@ -490,8 +490,8 @@ export async function publishActivepiecesFlow(state: PmosActivepiecesState) {
   state.apFlowMutateError = null;
   try {
     // n8n applies updates directly; no publish/lock step is required.
-    await loadActivepiecesFlowDetails(state, state.apFlowSelectedId);
-    await loadActivepiecesFlows(state);
+    await loadWorkflowDetails(state, state.apFlowSelectedId);
+    await loadWorkflows(state);
   } catch (err) {
     state.apFlowMutateError = String(err);
   } finally {
@@ -499,7 +499,7 @@ export async function publishActivepiecesFlow(state: PmosActivepiecesState) {
   }
 }
 
-export async function deleteActivepiecesFlow(state: PmosActivepiecesState) {
+export async function deleteWorkflow(state: PmosWorkflowsState) {
   if (!state.apFlowSelectedId) {
     return;
   }
@@ -509,7 +509,7 @@ export async function deleteActivepiecesFlow(state: PmosActivepiecesState) {
     await invokeTool(state, "ops_workflow_delete", { workflowId: state.apFlowSelectedId });
     state.apFlowSelectedId = null;
     state.apFlowDetails = null;
-    await loadActivepiecesFlows(state);
+    await loadWorkflows(state);
   } catch (err) {
     state.apFlowMutateError = String(err);
   } finally {
@@ -517,7 +517,7 @@ export async function deleteActivepiecesFlow(state: PmosActivepiecesState) {
   }
 }
 
-export async function applyActivepiecesFlowOperationDraft(state: PmosActivepiecesState) {
+export async function applyWorkflowOperationDraft(state: PmosWorkflowsState) {
   if (!state.apFlowSelectedId) {
     return;
   }
@@ -534,8 +534,8 @@ export async function applyActivepiecesFlowOperationDraft(state: PmosActivepiece
       workflowId: state.apFlowSelectedId,
       ...patch,
     });
-    await loadActivepiecesFlowDetails(state, state.apFlowSelectedId);
-    await loadActivepiecesFlows(state);
+    await loadWorkflowDetails(state, state.apFlowSelectedId);
+    await loadWorkflows(state);
   } catch (err) {
     state.apFlowMutateError = String(err);
   } finally {
@@ -543,8 +543,8 @@ export async function applyActivepiecesFlowOperationDraft(state: PmosActivepiece
   }
 }
 
-export async function triggerActivepiecesFlowWebhook(
-  state: PmosActivepiecesState,
+export async function triggerWorkflowWebhook(
+  state: PmosWorkflowsState,
   opts?: { draft?: boolean; sync?: boolean },
 ) {
   if (!state.apFlowSelectedId) {
@@ -563,7 +563,7 @@ export async function triggerActivepiecesFlowWebhook(
         __sync: Boolean(opts?.sync),
       },
     });
-    await loadActivepiecesRuns(state);
+    await loadWorkflowRuns(state);
   } catch (err) {
     state.apFlowMutateError = String(err);
   } finally {
@@ -571,7 +571,7 @@ export async function triggerActivepiecesFlowWebhook(
   }
 }
 
-export async function loadActivepiecesRuns(state: PmosActivepiecesState) {
+export async function loadWorkflowRuns(state: PmosWorkflowsState) {
   state.apRunsLoading = true;
   state.apRunsError = null;
   try {
@@ -582,7 +582,7 @@ export async function loadActivepiecesRuns(state: PmosActivepiecesState) {
     const items = toItems(details, ["data", "executions"]);
     state.apRuns = items
       .map((entry) => normalizeExecutionSummary(entry))
-      .filter((entry): entry is ActivepiecesRunSummary => Boolean(entry));
+      .filter((entry): entry is WorkflowRunSummary => Boolean(entry));
     state.apRunsCursor = null;
     state.apRunsHasNext = false;
   } catch (err) {
@@ -595,7 +595,7 @@ export async function loadActivepiecesRuns(state: PmosActivepiecesState) {
   }
 }
 
-export async function loadActivepiecesRunDetails(state: PmosActivepiecesState, runId: string) {
+export async function loadWorkflowRunDetails(state: PmosWorkflowsState, runId: string) {
   const id = runId.trim();
   if (!id) {
     return;
@@ -615,8 +615,8 @@ export async function loadActivepiecesRunDetails(state: PmosActivepiecesState, r
   }
 }
 
-export async function retryActivepiecesRun(
-  state: PmosActivepiecesState,
+export async function retryWorkflowRun(
+  state: PmosWorkflowsState,
   strategy: "FROM_FAILED_STEP" | "ON_LATEST_VERSION",
 ) {
   if (!state.apRunSelectedId) {
@@ -644,8 +644,8 @@ export async function retryActivepiecesRun(
         __retryStrategy: strategy,
       },
     });
-    await loadActivepiecesRunDetails(state, state.apRunSelectedId);
-    await loadActivepiecesRuns(state);
+    await loadWorkflowRunDetails(state, state.apRunSelectedId);
+    await loadWorkflowRuns(state);
   } catch (err) {
     state.apRunRetryError = String(err);
   } finally {

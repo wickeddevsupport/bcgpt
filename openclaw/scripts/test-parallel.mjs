@@ -39,13 +39,14 @@ const resolvedOverride =
   Number.isFinite(overrideWorkers) && overrideWorkers > 0 ? overrideWorkers : null;
 const parallelRuns = runs.filter((entry) => entry.name !== "gateway");
 const serialRuns = runs.filter((entry) => entry.name === "gateway");
-const localWorkers = Math.max(4, Math.min(16, os.cpus().length));
+const localWorkers = isWindows ? 1 : Math.max(4, Math.min(16, os.cpus().length));
 const parallelCount = Math.max(1, parallelRuns.length);
 const perRunWorkers = Math.max(1, Math.floor(localWorkers / parallelCount));
 const macCiWorkers = isCI && isMacOS ? 1 : perRunWorkers;
 // Keep worker counts predictable for local runs; trim macOS CI workers to avoid worker crashes/OOM.
 // In CI on linux/windows, prefer Vitest defaults to avoid cross-test interference from lower worker counts.
 const maxWorkers = resolvedOverride ?? (isCI && !isMacOS ? null : macCiWorkers);
+const runGroupsInParallel = !isWindows;
 
 const WARNING_SUPPRESSION_FLAGS = [
   "--disable-warning=ExperimentalWarning",
@@ -122,13 +123,25 @@ if (passthroughArgs.length > 0) {
   process.exit(Number(code) || 0);
 }
 
-const parallelCodes = await Promise.all(parallelRuns.map(run));
-const failedParallel = parallelCodes.find((code) => code !== 0);
-if (failedParallel !== undefined) {
-  process.exit(failedParallel);
+if (runGroupsInParallel) {
+  const parallelCodes = await Promise.all(parallelRuns.map(run));
+  const failedParallel = parallelCodes.find((code) => code !== 0);
+  if (failedParallel !== undefined) {
+    process.exit(failedParallel);
+  }
+
+  for (const entry of serialRuns) {
+    // eslint-disable-next-line no-await-in-loop
+    const code = await run(entry);
+    if (code !== 0) {
+      process.exit(code);
+    }
+  }
+
+  process.exit(0);
 }
 
-for (const entry of serialRuns) {
+for (const entry of runs) {
   // eslint-disable-next-line no-await-in-loop
   const code = await run(entry);
   if (code !== 0) {

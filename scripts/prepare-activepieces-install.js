@@ -5,6 +5,9 @@ import { execSync } from 'child_process';
 const root = process.cwd();
 const activepiecesRoot = path.join(root, 'activepieces');
 const activepiecesNodeModules = path.join(activepiecesRoot, 'node_modules');
+const enableInstall =
+  process.env.ENABLE_ACTIVEPIECES_INSTALL === 'true' ||
+  process.env.ENABLE_ACTIVEPIECES_INSTALL === '1';
 const skipInstall =
   process.env.SKIP_ACTIVEPIECES_INSTALL === 'true' ||
   process.env.SKIP_ACTIVEPIECES_INSTALL === '1';
@@ -28,6 +31,11 @@ const tryExec = (command) => {
 
 if (skipInstall) {
   console.log('[postinstall] SKIP_ACTIVEPIECES_INSTALL=true, skipping activepieces install');
+  process.exit(0);
+}
+
+if (!enableInstall) {
+  console.log('[postinstall] Activepieces install disabled by default. Set ENABLE_ACTIVEPIECES_INSTALL=true to enable legacy install path.');
   process.exit(0);
 }
 

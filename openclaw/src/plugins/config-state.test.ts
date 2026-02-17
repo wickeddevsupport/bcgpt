@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizePluginsConfig } from "./config-state.js";
+import { normalizePluginsConfig, resolveEnableState } from "./config-state.js";
 
 describe("normalizePluginsConfig", () => {
   it("uses default memory slot when not specified", () => {
@@ -47,5 +47,20 @@ describe("normalizePluginsConfig", () => {
       slots: { memory: "   " },
     });
     expect(result.slots.memory).toBe("memory-core");
+  });
+
+  it("always disables deprecated pmos-activepieces plugin", () => {
+    const plugins = normalizePluginsConfig({
+      entries: {
+        "pmos-activepieces": {
+          enabled: true,
+        },
+      },
+      allow: ["pmos-activepieces"],
+    });
+    expect(resolveEnableState("pmos-activepieces", "bundled", plugins)).toEqual({
+      enabled: false,
+      reason: "deprecated plugin disabled",
+    });
   });
 });

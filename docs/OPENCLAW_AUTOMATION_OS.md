@@ -113,6 +113,8 @@ flowchart TB
 | n8n Integration | COMPLETE | n8n source vendored in `openclaw/vendor/n8n` and built (`n8n@1.76.1`) |
 | n8n Embed Code | COMPLETE | [`n8n-embed.ts`](openclaw/src/gateway/n8n-embed.ts) ready |
 | Basecamp n8n Node | BUILT | [`n8n-nodes-basecamp`](n8n-nodes-basecamp/) created |
+| OpenClaw n8n Node | BUILT | `openclaw/vendor/n8n/custom/nodes/n8n-nodes-openclaw` created |
+| Control UI Native Workflows | COMPLETE | Workflows tab embeds n8n editor directly (no redirect/new tab) |
 | Workspace Context Helpers | COMPLETE | [`workspace-context.ts`](openclaw/src/gateway/workspace-context.ts) |
 | Agent Workspace Filtering | COMPLETE | Agents scoped to workspace |
 | Rate Limiting | COMPLETE | Per-workspace rate limits |
@@ -124,7 +126,7 @@ flowchart TB
 |---------|--------|----------------|
 | Workspace Isolation | IN PROGRESS | Core isolation + workspace configs complete; connector hardening and admin UX pending |
 | Onboarding Wizard | PARTIAL | AI provider key setup step needed |
-| n8n UI Integration | PARTIAL | Embedded navigation + SSO done; branding polish and full feature parity in progress |
+| n8n UI Integration | PARTIAL | Embedded navigation + SSO done, control UI now native in-dashboard; branding polish and full feature parity in progress |
 
 ### Not Started
 
@@ -201,7 +203,7 @@ n8n-nodes-basecamp/
 | Cron Jobs | COMPLETE | [`cron.ts`](openclaw/src/gateway/server-methods/cron.ts) filters and enforces ownership |
 | Sessions | COMPLETE | [`sessions.ts`](openclaw/src/gateway/server-methods/sessions.ts) scoped by agent workspace ownership |
 | Configs | PENDING | Workspace-specific config files |
-| Connectors | PENDING | Workspace-scoped API keys |
+| Connectors | IN PROGRESS | Workspace-scoped connector APIs implemented; final cleanup/deprecation path ongoing |
 
 ### Workspace Context API
 
@@ -347,6 +349,7 @@ See [`NEXT_STEPS.md`](NEXT_STEPS.md) for detailed implementation plan.
 
 - [`NEXT_STEPS.md`](NEXT_STEPS.md) - Actionable implementation plan
 - [`N8N_INTEGRATION_GUIDE.md`](N8N_INTEGRATION_GUIDE.md) - n8n technical details
+- [`COOLIFY_DEPLOY_NX_RUNBOOK.md`](COOLIFY_DEPLOY_NX_RUNBOOK.md) - Coolify + Nx deploy/runbook
 - [`WORKSPACE_ISOLATION_STATUS.md`](WORKSPACE_ISOLATION_STATUS.md) - Multi-tenant status
 - [`BASECAMP_NODE_SETUP.md`](BASECAMP_NODE_SETUP.md) - Custom n8n node guide
 
@@ -357,8 +360,8 @@ See [`NEXT_STEPS.md`](NEXT_STEPS.md) for detailed implementation plan.
 | Service | URL | Purpose |
 |---------|-----|---------|
 | OpenClaw PMOS | https://os.wickedlab.io | Main product UI (includes embedded n8n) |
+| OpenClaw n8n Editor | https://os.wickedlab.io/ops-ui/ | Embedded n8n editor route |
 | BCGPT MCP | https://bcgpt.wickedlab.io | MCP server |
-| Activepieces | https://flow.wickedlab.io | Legacy (to be deprecated) |
 
 ---
 

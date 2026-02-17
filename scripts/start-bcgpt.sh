@@ -1,27 +1,65 @@
-#!/bin/bash
-sudo docker rm -f bcgptapi-bcgpt-1 2>/dev/null
-sudo docker run -d --name bcgptapi-bcgpt-1 --restart=unless-stopped \
-  -v bcgpt-data:/data \
-  --network bcgptapi_default \
-  -l 'traefik.enable=true' \
-  -l 'traefik.docker.network=coolify' \
-  -l 'traefik.http.routers.bcgpt.rule=Host(`bcgpt.wickedlab.io`)' \
-  -l 'traefik.http.routers.bcgpt.entrypoints=http,https' \
-  -l 'traefik.http.routers.bcgpt.tls=true' \
-  -l 'traefik.http.routers.bcgpt.tls.certresolver=letsencrypt' \
-  -l 'traefik.http.services.bcgpt.loadbalancer.server.port=10000' \
-  -e OTP_SECRET=ac28e03de88f2433a367e810a302d7695b4bc690872dc9c360a956c2e40b1383 \
-  -e BASECAMP_CLIENT_ID=bef6feca339ce94f907b2dd8c3dd72e048acd9d4 \
-  -e BASECAMP_CLIENT_SECRET=067156375b08398f383799bc2c1bc9feb5e16907 \
-  -e BASECAMP_DEFAULT_ACCOUNT_ID=5282924 \
-  -e APP_BASE_URL=https://bcgpt.wickedlab.io \
-  -e PORT=10000 \
-  -e 'DATABASE_URL=postgresql://bcgpt:RZ5m7nQxW4vK8dY2tL9p@bcgptapi-bcgpt-postgres-1:5432/bcgpt' \
-  -e SQLITE_PATH=/data/bcgpt.sqlite \
-  -e PMOS_URL=https://os.wickedlab.io \
-  -e ACTIVEPIECES_URL=https://flow.wickedlab.io \
-  -e ACTIVEPIECES_API_KEY=ap_fmeLRfVrVbKcqqC_8v2AeVvzBefgwvFv9P7E-7fpNG4 \
-  bcgptapi-bcgpt:latest
+#!/usr/bin/env bash
+set -euo pipefail
 
-sudo docker network connect coolify bcgptapi-bcgpt-1 2>/dev/null || true
-echo "Container started"
+# Secure restart helper for the legacy BCGPT container.
+# Secrets must come from the caller environment (or an injected env-file), never hardcoded.
+
+REQUIRED_VARS=(
+  OTP_SECRET
+  BASECAMP_CLIENT_ID
+  BASECAMP_CLIENT_SECRET
+  BASECAMP_DEFAULT_ACCOUNT_ID
+  DATABASE_URL
+)
+
+missing=()
+for key in "${REQUIRED_VARS[@]}"; do
+  if [[ -z "${!key:-}" ]]; then
+    missing+=("${key}")
+  fi
+done
+
+if (( ${#missing[@]} > 0 )); then
+  echo "Missing required env vars: ${missing[*]}" >&2
+  echo "Export them from your secret manager before running this script." >&2
+  exit 1
+fi
+
+if [[ -n "${ACTIVEPIECES_URL:-}" || -n "${ACTIVEPIECES_API_KEY:-}" ]]; then
+  echo "Warning: ACTIVEPIECES_* variables are deprecated and ignored by this script." >&2
+fi
+
+APP_BASE_URL="${APP_BASE_URL:-https://bcgpt.wickedlab.io}"
+PMOS_URL="${PMOS_URL:-https://os.wickedlab.io}"
+PORT="${PORT:-10000}"
+SQLITE_PATH="${SQLITE_PATH:-/data/bcgpt.sqlite}"
+IMAGE="${IMAGE:-bcgptapi-bcgpt:latest}"
+CONTAINER_NAME="${CONTAINER_NAME:-bcgptapi-bcgpt-1}"
+PRIMARY_NETWORK="${PRIMARY_NETWORK:-bcgptapi_default}"
+TRAEFIK_NETWORK="${TRAEFIK_NETWORK:-coolify}"
+ROUTER_HOST="${ROUTER_HOST:-bcgpt.wickedlab.io}"
+
+sudo docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
+sudo docker run -d --name "${CONTAINER_NAME}" --restart=unless-stopped \
+  -v bcgpt-data:/data \
+  --network "${PRIMARY_NETWORK}" \
+  -l "traefik.enable=true" \
+  -l "traefik.docker.network=${TRAEFIK_NETWORK}" \
+  -l "traefik.http.routers.bcgpt.rule=Host(\`${ROUTER_HOST}\`)" \
+  -l "traefik.http.routers.bcgpt.entrypoints=http,https" \
+  -l "traefik.http.routers.bcgpt.tls=true" \
+  -l "traefik.http.routers.bcgpt.tls.certresolver=letsencrypt" \
+  -l "traefik.http.services.bcgpt.loadbalancer.server.port=${PORT}" \
+  -e OTP_SECRET \
+  -e BASECAMP_CLIENT_ID \
+  -e BASECAMP_CLIENT_SECRET \
+  -e BASECAMP_DEFAULT_ACCOUNT_ID \
+  -e APP_BASE_URL="${APP_BASE_URL}" \
+  -e PORT="${PORT}" \
+  -e DATABASE_URL \
+  -e SQLITE_PATH="${SQLITE_PATH}" \
+  -e PMOS_URL="${PMOS_URL}" \
+  "${IMAGE}"
+
+sudo docker network connect "${TRAEFIK_NETWORK}" "${CONTAINER_NAME}" 2>/dev/null || true
+echo "Container started: ${CONTAINER_NAME}"

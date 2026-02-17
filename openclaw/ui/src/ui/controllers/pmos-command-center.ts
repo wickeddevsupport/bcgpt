@@ -35,6 +35,8 @@ export type PmosCommandPendingApproval = {
   step: PmosCommandPlanStep;
 };
 
+type HistoryStatus = PmosCommandHistoryEntry["status"];
+
 type ToolInvokeOk = {
   ok: true;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -51,7 +53,7 @@ export type PmosCommandCenterState = {
   settings: UiSettings;
   basePath: string;
   sessionKey: string;
-  pmosActivepiecesProjectId: string;
+  pmosOpsProjectId: string;
 
   pmosCommandPrompt: string;
   pmosCommandPlanning: boolean;
@@ -96,6 +98,28 @@ function summarizeToolDetails(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function prependHistory(
+  state: Pick<PmosCommandCenterState, "pmosCommandHistory">,
+  entry: {
+    prompt: string;
+    status: HistoryStatus;
+    summary: string;
+    steps: PmosCommandPlanStep[];
+    id?: string;
+    ts?: number;
+  },
+) {
+  const normalized: PmosCommandHistoryEntry = {
+    id: entry.id ?? nextId("cmd-history"),
+    ts: entry.ts ?? Date.now(),
+    prompt: entry.prompt,
+    status: entry.status,
+    summary: entry.summary,
+    steps: entry.steps,
+  };
+  state.pmosCommandHistory = [normalized, ...state.pmosCommandHistory].slice(0, 120);
 }
 
 async function invokeTool<T = unknown>(
@@ -162,7 +186,7 @@ function parsePrompt(promptRaw: string): PmosCommandPlanStep[] {
       `Create flow: ${displayName || "Untitled"}`,
       { displayName: displayName || "Untitled Flow" },
       "low",
-      "Creates a new draft flow in Flow Pieces.",
+      "Creates a new n8n workflow.",
     );
   }
 
@@ -173,7 +197,7 @@ function parsePrompt(promptRaw: string): PmosCommandPlanStep[] {
       `Trigger flow: ${triggerFlowMatch[1]}`,
       { flowId: triggerFlowMatch[1] },
       "low",
-      "Triggers an existing flow webhook.",
+      "Triggers a workflow execution.",
     );
   }
 
@@ -196,7 +220,7 @@ function parsePrompt(promptRaw: string): PmosCommandPlanStep[] {
       "low",
       "Runs connector checks and refreshes dashboard datasets.",
     );
-    addStep("list_flows", "List latest flows", { limit: 10 }, "low");
+    addStep("list_flows", "List latest flows", {}, "low");
   }
 
   if (steps.length === 0) {
@@ -207,7 +231,7 @@ function parsePrompt(promptRaw: string): PmosCommandPlanStep[] {
       "low",
       "No direct command detected, running health refresh.",
     );
-    addStep("list_flows", "List latest flows", { limit: 10 }, "low");
+    addStep("list_flows", "List latest flows", {}, "low");
   }
 
   return steps;
@@ -223,17 +247,12 @@ export async function planPmosCommand(state: PmosCommandCenterState) {
   state.pmosCommandError = null;
   try {
     state.pmosCommandPlan = parsePrompt(prompt);
-    state.pmosCommandHistory = [
-      {
-        id: nextId("cmd-history"),
-        ts: Date.now(),
-        prompt,
-        status: "planned",
-        summary: `Planned ${state.pmosCommandPlan.length} step(s).`,
-        steps: state.pmosCommandPlan.map((step) => ({ ...step })),
-      },
-      ...state.pmosCommandHistory,
-    ].slice(0, 120);
+    prependHistory(state, {
+      prompt,
+      status: "planned",
+      summary: `Planned ${state.pmosCommandPlan.length} step(s).`,
+      steps: state.pmosCommandPlan.map((step) => ({ ...step })),
+    });
   } catch (err) {
     state.pmosCommandError = String(err);
   } finally {
@@ -255,28 +274,16 @@ async function executePlanStep(
       return "Connector checks and datasets refreshed.";
     }
     case "list_flows": {
-      const projectId = state.pmosActivepiecesProjectId.trim();
-      if (!projectId) {
-        throw new Error("Flow Pieces Project ID missing (set it in Integrations).");
-      }
-      const details = await invokeTool(state, "flow_flows_list", {
-        projectId,
-        limit: typeof step.args.limit === "number" ? step.args.limit : 10,
-      });
+      const details = await invokeTool(state, "ops_workflows_list", {});
       return `Loaded flows: ${summarizeToolDetails(details)}`;
     }
     case "create_flow": {
-      const projectId = state.pmosActivepiecesProjectId.trim();
-      if (!projectId) {
-        throw new Error("Flow Pieces Project ID missing (set it in Integrations).");
-      }
       const displayName =
         typeof step.args.displayName === "string" && step.args.displayName.trim()
           ? step.args.displayName.trim()
           : "Untitled Flow";
-      const details = await invokeTool(state, "flow_flow_create", {
-        projectId,
-        displayName,
+      const details = await invokeTool(state, "ops_workflow_create", {
+        name: displayName,
       });
       await state.handlePmosApFlowsLoad();
       return `Flow created: ${summarizeToolDetails(details)}`;
@@ -287,9 +294,9 @@ async function executePlanStep(
       if (!flowId) {
         throw new Error("Flow ID required to trigger flow.");
       }
-      const details = await invokeTool(state, "flow_flow_trigger", {
-        flowId,
-        payload: {},
+      const details = await invokeTool(state, "ops_workflow_execute", {
+        workflowId: flowId,
+        data: {},
       });
       await state.handlePmosApRunsLoad();
       return `Flow triggered: ${summarizeToolDetails(details)}`;
@@ -300,7 +307,7 @@ async function executePlanStep(
       if (!flowId) {
         throw new Error("Flow ID required to delete flow.");
       }
-      const details = await invokeTool(state, "flow_flow_delete", { flowId });
+      const details = await invokeTool(state, "ops_workflow_delete", { workflowId: flowId });
       await state.handlePmosApFlowsLoad();
       return `Flow deleted: ${summarizeToolDetails(details)}`;
     }
@@ -330,17 +337,12 @@ export async function executePmosCommandPlan(state: PmosCommandCenterState) {
         };
         state.pmosCommandPendingApprovals = [approval, ...state.pmosCommandPendingApprovals].slice(0, 50);
         state.pmosCommandPlan = updated;
-        state.pmosCommandHistory = [
-          {
-            id: nextId("cmd-history"),
-            ts: Date.now(),
-            prompt: state.pmosCommandPrompt.trim(),
-            status: "needs_approval",
-            summary: `Paused for approval: ${step.title}`,
-            steps: updated.map((entry) => ({ ...entry })),
-          },
-          ...state.pmosCommandHistory,
-        ].slice(0, 120);
+        prependHistory(state, {
+          prompt: state.pmosCommandPrompt.trim(),
+          status: "needs_approval",
+          summary: `Paused for approval: ${step.title}`,
+          steps: updated.map((entry) => ({ ...entry })),
+        });
         return;
       }
       step.status = "running";
@@ -353,33 +355,23 @@ export async function executePmosCommandPlan(state: PmosCommandCenterState) {
         step.status = "error";
         step.result = String(err);
         state.pmosCommandPlan = [...updated];
-        state.pmosCommandHistory = [
-          {
-            id: nextId("cmd-history"),
-            ts: Date.now(),
-            prompt: state.pmosCommandPrompt.trim(),
-            status: "failed",
-            summary: `Failed: ${step.title}`,
-            steps: updated.map((entry) => ({ ...entry })),
-          },
-          ...state.pmosCommandHistory,
-        ].slice(0, 120);
+        prependHistory(state, {
+          prompt: state.pmosCommandPrompt.trim(),
+          status: "failed",
+          summary: `Failed: ${step.title}`,
+          steps: updated.map((entry) => ({ ...entry })),
+        });
         throw err;
       }
       state.pmosCommandPlan = [...updated];
     }
 
-    state.pmosCommandHistory = [
-      {
-        id: nextId("cmd-history"),
-        ts: Date.now(),
-        prompt: state.pmosCommandPrompt.trim(),
-        status: "executed",
-        summary: "Plan executed successfully.",
-        steps: updated.map((entry) => ({ ...entry })),
-      },
-      ...state.pmosCommandHistory,
-    ].slice(0, 120);
+    prependHistory(state, {
+      prompt: state.pmosCommandPrompt.trim(),
+      status: "executed",
+      summary: "Plan executed successfully.",
+      steps: updated.map((entry) => ({ ...entry })),
+    });
   } catch (err) {
     state.pmosCommandError = String(err);
   } finally {
@@ -402,23 +394,18 @@ export async function approvePmosCommandStep(state: PmosCommandCenterState, appr
   try {
     const result = await executePlanStep(state, { ...approval.step, status: "running" });
     state.pmosCommandPendingApprovals = state.pmosCommandPendingApprovals.filter((entry) => entry.id !== target);
-    state.pmosCommandHistory = [
-      {
-        id: nextId("cmd-history"),
-        ts: Date.now(),
-        prompt: approval.prompt,
-        status: "executed",
-        summary: `Approved and executed: ${approval.step.title}`,
-        steps: [
-          {
-            ...approval.step,
-            status: "success",
-            result,
-          },
-        ],
-      },
-      ...state.pmosCommandHistory,
-    ].slice(0, 120);
+    prependHistory(state, {
+      prompt: approval.prompt,
+      status: "executed",
+      summary: `Approved and executed: ${approval.step.title}`,
+      steps: [
+        {
+          ...approval.step,
+          status: "success",
+          result,
+        },
+      ],
+    });
     await state.handlePmosApFlowsLoad();
     await state.handlePmosApRunsLoad();
   } catch (err) {

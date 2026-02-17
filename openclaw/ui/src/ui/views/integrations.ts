@@ -49,12 +49,48 @@ function renderConnectorStatus(label: string, ok: boolean | null, detail?: strin
 
 export function renderIntegrations(props: IntegrationsProps) {
   const bcgpt = props.connectorsStatus?.bcgpt ?? null;
+  const ops = props.connectorsStatus?.ops ?? null;
 
   const bcgptConfigured = bcgpt?.configured ?? false;
 
   const bcgptKeyPlaceholder = bcgptConfigured
     ? "Stored (leave blank to keep)"
     : "Paste BCGPT API key";
+  const opsRuntime = (() => {
+    if (!ops) {
+      return {
+        label: "Unknown",
+        tone: "warn" as const,
+        detail: "Runtime probe has not completed yet.",
+      };
+    }
+    if (ops.reachable === true) {
+      return {
+        label: "Ready",
+        tone: "ok" as const,
+        detail: ops.url ?? "/ops-ui/",
+      };
+    }
+    if (ops.reachable === false) {
+      return {
+        label: "Offline",
+        tone: "warn" as const,
+        detail: ops.error ?? "Embedded runtime is unreachable.",
+      };
+    }
+    if (ops.configured) {
+      return {
+        label: "Starting",
+        tone: "warn" as const,
+        detail: "Runtime configured, waiting for health checks.",
+      };
+    }
+    return {
+      label: "Not configured",
+      tone: "warn" as const,
+      detail: "No embedded runtime detected.",
+    };
+  })();
 
   const disabledReason = !props.connected
     ? "Sign in first, then wait for the Wicked OS gateway to connect."
@@ -151,30 +187,38 @@ export function renderIntegrations(props: IntegrationsProps) {
           Powered by embedded n8n and auto-provisioned per workspace. Your workflows are isolated to your workspace.
         </div>
 
-        <div style="margin-top: 16px;">
-          ${props.opsProvisioned
+        <div class="stat-grid" style="margin-top: 16px;">
+          <div class="stat">
+            <div class="stat-label">Workspace Access</div>
+            <div class="stat-value ${props.opsProvisioned ? "ok" : "warn"}">
+              ${props.opsProvisioned ? "Provisioned" : "Pending"}
+            </div>
+            ${props.opsProjectId
+              ? html`<div class="muted mono" style="font-size:11px;">${props.opsProjectId}</div>`
+              : nothing}
+          </div>
+          <div class="stat">
+            <div class="stat-label">Embedded Runtime</div>
+            <div class="stat-value ${opsRuntime.tone === "ok" ? "ok" : "warn"}">${opsRuntime.label}</div>
+            <div class="muted mono" style="font-size:11px;">${opsRuntime.detail}</div>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top: 12px;">
+          <a class="btn btn--secondary" href="./ops-ui/" target="_self" rel="noreferrer">
+            Open embedded editor
+          </a>
+        </div>
+
+        ${
+          ops?.reachable === false
             ? html`
-                <div class="stat">
-                  <div class="stat-label">Status</div>
-                  <div class="stat-value ok">Provisioned</div>
-                  ${props.opsProjectId
-                    ? html`<div class="muted mono" style="font-size:11px;">${props.opsProjectId}</div>`
-                    : nothing}
-                </div>
-                <div class="muted" style="margin-top: 12px;">
-                  Your n8n project and API key are configured. Open the <strong>Workflows</strong> tab to build automations.
+                <div class="callout warn" style="margin-top: 12px;">
+                  Embedded editor is unavailable. Redeploy latest gateway and verify `/ops-ui/` health from the dashboard check.
                 </div>
               `
-            : html`
-                <div class="stat">
-                  <div class="stat-label">Status</div>
-                  <div class="stat-value warn">Pending</div>
-                </div>
-                <div class="muted" style="margin-top: 12px;">
-                  Provisioning happens automatically on signup. Check the Dashboard setup wizard if setup is incomplete.
-                </div>
-              `}
-        </div>
+            : nothing
+        }
       </div>
 
       <div class="card">
@@ -240,6 +284,16 @@ export function renderIntegrations(props: IntegrationsProps) {
         ${renderConnectorStatus("BCGPT auth", bcgpt?.authOk ?? null, bcgpt?.mcpUrl ?? null)}
       </div>
 
+      <div class="row" style="margin-top: 14px;">
+        <button
+          class="btn"
+          ?disabled=${props.connectorsLoading || !props.connected}
+          @click=${() => props.onRefreshConnectors()}
+        >
+          ${props.connectorsLoading ? "Checking..." : "Refresh status"}
+        </button>
+      </div>
+
       ${
         props.connectorsError
           ? html`<div class="callout danger" style="margin-top: 14px;">
@@ -255,209 +309,6 @@ export function renderIntegrations(props: IntegrationsProps) {
             </div>`
           : nothing
       }
-    </section>
-
-    <section class="grid grid-cols-2" style="margin-top: 18px;">
-      <div class="card">
-        <div class="card-title">Pieces Catalog</div>
-        <div class="card-sub">Browse available workflow integrations and nodes.</div>
-
-        <div class="form-grid" style="margin-top: 14px;">
-          <label class="field full">
-            <span>Search</span>
-            <input
-              .value=${props.apPiecesQuery}
-              @input=${(e: Event) => props.onApPiecesQueryChange((e.target as HTMLInputElement).value)}
-              placeholder="e.g. Slack, Gmail, Notion"
-              ?disabled=${!props.connected}
-            />
-          </label>
-        </div>
-
-        <div class="row" style="margin-top: 12px;">
-          <button
-            class="btn"
-            ?disabled=${!props.connected || props.apPiecesLoading}
-            @click=${() => props.onApPiecesRefresh()}
-          >
-            ${props.apPiecesLoading ? "Loading..." : "Load pieces"}
-          </button>
-        </div>
-
-        ${props.apPiecesError ? html`<div class="callout danger" style="margin-top: 12px;">${props.apPiecesError}</div>` : nothing}
-
-        <div class="list" style="margin-top: 14px; max-height: 420px; overflow: auto;">
-          ${props.apPieces.map((piece) => {
-            const title = piece.displayName || piece.name || "Piece";
-            const sub = piece.name || "";
-            const desc = piece.description || "";
-            return html`
-              <div class="list-item">
-                <div class="list-main">
-                  <div class="list-title">${title}</div>
-                  <div class="list-sub mono">${sub}</div>
-                  ${desc ? html`<div class="list-sub">${desc}</div>` : nothing}
-                </div>
-                <div class="list-meta">
-                  <div></div>
-                  <div>
-                    <button
-                      class="btn btn--sm"
-                      ?disabled=${!props.connected || !sub}
-                      @click=${() => {
-                        if (!sub) {
-                          return;
-                        }
-                        props.onApConnectionCreatePieceNameChange(sub);
-                        if (!props.apConnectionCreateDisplayName.trim()) {
-                          props.onApConnectionCreateDisplayNameChange(title);
-                        }
-                      }}
-                    >
-                      Use
-                    </button>
-                  </div>
-                </div>
-              </div>
-            `;
-          })}
-          ${props.apPieces.length === 0 && !props.apPiecesLoading ? html`<div class="muted">No pieces loaded.</div>` : nothing}
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">Connections</div>
-        <div class="card-sub">Create and manage app connections for your workflow project.</div>
-
-        <div class="form-grid" style="margin-top: 14px;">
-          <label class="field">
-            <span>Piece name</span>
-            <input
-              .value=${props.apConnectionCreatePieceName}
-              @input=${(e: Event) => props.onApConnectionCreatePieceNameChange((e.target as HTMLInputElement).value)}
-              placeholder="e.g. slack"
-              ?disabled=${!props.connected}
-            />
-          </label>
-          <label class="field">
-            <span>Display name</span>
-            <input
-              .value=${props.apConnectionCreateDisplayName}
-              @input=${(e: Event) => props.onApConnectionCreateDisplayNameChange((e.target as HTMLInputElement).value)}
-              placeholder="e.g. Slack (Prod)"
-              ?disabled=${!props.connected}
-            />
-          </label>
-          <label class="field">
-            <span>Auth type</span>
-            <select
-              .value=${props.apConnectionCreateType}
-              @change=${(e: Event) =>
-                props.onApConnectionCreateTypeChange((e.target as HTMLSelectElement).value as any)}
-              ?disabled=${!props.connected}
-            >
-              <option value="secret_text">Secret Text</option>
-              <option value="basic_auth">Basic Auth</option>
-              <option value="no_auth">No Auth</option>
-            </select>
-          </label>
-
-          ${
-            props.apConnectionCreateType === "secret_text"
-              ? html`
-                  <label class="field full">
-                    <span>Secret</span>
-                    <input
-                      type="password"
-                      .value=${props.apConnectionCreateSecretText}
-                      @input=${(e: Event) =>
-                        props.onApConnectionCreateSecretTextChange((e.target as HTMLInputElement).value)}
-                      placeholder="token / api key"
-                      autocomplete="off"
-                      ?disabled=${!props.connected}
-                    />
-                  </label>
-                `
-              : nothing
-          }
-
-          ${
-            props.apConnectionCreateType === "basic_auth"
-              ? html`
-                  <label class="field">
-                    <span>Username</span>
-                    <input
-                      .value=${props.apConnectionCreateBasicUser}
-                      @input=${(e: Event) =>
-                        props.onApConnectionCreateBasicUserChange((e.target as HTMLInputElement).value)}
-                      placeholder="username"
-                      ?disabled=${!props.connected}
-                    />
-                  </label>
-                  <label class="field">
-                    <span>Password</span>
-                    <input
-                      type="password"
-                      .value=${props.apConnectionCreateBasicPass}
-                      @input=${(e: Event) =>
-                        props.onApConnectionCreateBasicPassChange((e.target as HTMLInputElement).value)}
-                      placeholder="password"
-                      autocomplete="off"
-                      ?disabled=${!props.connected}
-                    />
-                  </label>
-                `
-              : nothing
-          }
-        </div>
-
-        <div class="row" style="margin-top: 12px;">
-          <button
-            class="btn primary"
-            ?disabled=${!props.connected || props.apConnectionCreateSaving}
-            @click=${() => props.onApConnectionCreate()}
-          >
-            ${props.apConnectionCreateSaving ? "Creating..." : "Create connection"}
-          </button>
-          <button
-            class="btn btn--secondary"
-            ?disabled=${!props.connected || props.apConnectionsLoading}
-            @click=${() => props.onApConnectionsRefresh()}
-          >
-            ${props.apConnectionsLoading ? "Loading..." : "Refresh"}
-          </button>
-        </div>
-
-        ${props.apConnectionCreateError ? html`<div class="callout danger" style="margin-top: 12px;">${props.apConnectionCreateError}</div>` : nothing}
-        ${props.apConnectionsError ? html`<div class="callout danger" style="margin-top: 12px;">${props.apConnectionsError}</div>` : nothing}
-
-        <div class="list" style="margin-top: 14px; max-height: 420px; overflow: auto;">
-          ${props.apConnections.map((conn) => {
-            const title = conn.displayName || conn.id;
-            const sub = [conn.pieceName ? `piece ${conn.pieceName}` : null, conn.status ? conn.status : null]
-              .filter(Boolean)
-              .join(" | ");
-            return html`
-              <div class="list-item">
-                <div class="list-main">
-                  <div class="list-title">${title}</div>
-                  <div class="list-sub mono">${conn.id}</div>
-                  ${sub ? html`<div class="list-sub">${sub}</div>` : nothing}
-                </div>
-                <div class="list-meta">
-                  <div></div>
-                  <div>
-                    <button class="btn btn--sm danger" @click=${() => props.onApConnectionDelete(conn.id)}>
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              </div>
-            `;
-          })}
-          ${props.apConnections.length === 0 && !props.apConnectionsLoading ? html`<div class="muted">No connections loaded.</div>` : nothing}
-        </div>
-      </div>
     </section>
   `;
 }
