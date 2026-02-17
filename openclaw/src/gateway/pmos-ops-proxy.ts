@@ -10,15 +10,66 @@ import { resolvePmosSessionFromRequest } from "./pmos-auth.js";
 import { readWorkspaceConnectors } from "./workspace-connectors.js";
 import { buildN8nAuthHeaders } from "./n8n-auth-bridge.js";
 
+function uniqResolved(items: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of items) {
+    const resolved = path.resolve(item);
+    if (seen.has(resolved)) continue;
+    seen.add(resolved);
+    out.push(resolved);
+  }
+  return out;
+}
+
+function findOpenclawRoot(startDir: string): string | null {
+  let dir = path.resolve(startDir);
+  for (let i = 0; i < 10; i++) {
+    try {
+      if (fs.existsSync(path.join(dir, "openclaw.mjs"))) {
+        return dir;
+      }
+    } catch {
+      // ignore
+    }
+    const next = path.dirname(dir);
+    if (next === dir) break;
+    dir = next;
+  }
+  return null;
+}
+
 // Path to the pre-built ops-ui bundle (openclaw/ops-ui/dist/)
-// Compiled gateway is at openclaw/dist/gateway/, so go up two levels then into ops-ui/dist
-const OPS_UI_DIST = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "..",
-  "ops-ui",
-  "dist",
-);
+// Prefer resolving from the OpenClaw root (works with flattened build outputs where
+// import.meta.url lives directly under dist/).
+function resolveOpsUiDistDir(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const root = findOpenclawRoot(here) ?? findOpenclawRoot(process.cwd());
+  const candidates = uniqResolved([
+    // Typical package layout
+    root ? path.join(root, "ops-ui", "dist") : "",
+    // Monorepo layout (repo-root/openclaw/ops-ui/dist)
+    root ? path.join(root, "openclaw", "ops-ui", "dist") : "",
+    // Legacy relative path (when gateway output lived under dist/gateway)
+    path.resolve(here, "..", "..", "ops-ui", "dist"),
+    // CWD fallbacks (local dev)
+    path.resolve(process.cwd(), "ops-ui", "dist"),
+    path.resolve(process.cwd(), "openclaw", "ops-ui", "dist"),
+  ].filter(Boolean));
+
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) return candidate;
+    } catch {
+      // ignore
+    }
+  }
+
+  // If nothing exists, return the best guess for better error messaging.
+  return candidates[0] ?? path.resolve(process.cwd(), "ops-ui", "dist");
+}
+
+const OPS_UI_DIST = resolveOpsUiDistDir();
 
 const OPS_UI_CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -480,4 +531,3 @@ export async function handleOpsProxyRequest(
 
   return false;
 }
-

@@ -15,6 +15,13 @@ services:
       # Required when binding to LAN (0.0.0.0) behind Traefik.
       OPENCLAW_GATEWAY_TOKEN: "${OPENCLAW_GATEWAY_TOKEN}"
 
+      # Embedded-first behavior. Only allow remote ops provisioning if explicitly enabled.
+      PMOS_ALLOW_REMOTE_OPS_FALLBACK: "${PMOS_ALLOW_REMOTE_OPS_FALLBACK:-0}"
+
+      # Persist embedded n8n state (SQLite DB, credentials, settings) inside the OpenClaw volume.
+      # Without this, n8n defaults to ~/.n8n which is not persisted in this compose.
+      N8N_USER_FOLDER: "${N8N_USER_FOLDER:-/app/.openclaw/n8n}"
+
       # Optional model auth (add in Coolify env vars if/when needed).
       CLAUDE_AI_SESSION_KEY: "${CLAUDE_AI_SESSION_KEY:-}"
       CLAUDE_WEB_SESSION_KEY: "${CLAUDE_WEB_SESSION_KEY:-}"

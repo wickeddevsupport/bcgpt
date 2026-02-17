@@ -528,3 +528,6 @@ Before starting work:
 - [ ] Live flow builder with real-time updates
 - [ ] Flow control panel functional
 - [ ] Template library available
+ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
+Coolify token
+`[REDACTED - store in a secure secret manager, not in git/docs]`

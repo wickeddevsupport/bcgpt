@@ -10,6 +10,69 @@ export type EmbeddedN8nHandle = {
   url: string;
 };
 
+function uniqResolved(items: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of items) {
+    const resolved = path.resolve(item);
+    if (seen.has(resolved)) continue;
+    seen.add(resolved);
+    out.push(resolved);
+  }
+  return out;
+}
+
+function findOpenclawRoot(startDir: string): string | null {
+  let dir = path.resolve(startDir);
+  for (let i = 0; i < 10; i++) {
+    try {
+      if (fs.existsSync(path.join(dir, "openclaw.mjs"))) {
+        return dir;
+      }
+    } catch {
+      // ignore
+    }
+    const next = path.dirname(dir);
+    if (next === dir) break;
+    dir = next;
+  }
+  return null;
+}
+
+function resolveRootCandidates(): string[] {
+  const roots: string[] = [];
+  const fromCwd = findOpenclawRoot(process.cwd());
+  if (fromCwd) roots.push(fromCwd);
+  const fromHere = findOpenclawRoot(__dirname);
+  if (fromHere) roots.push(fromHere);
+
+  // Legacy heuristic: allow importing from deeply nested build outputs.
+  roots.push(path.resolve(__dirname, "..", "..", ".."));
+
+  // Common monorepo layouts: {repo}/openclaw as a nested package.
+  roots.push(path.join(process.cwd(), "openclaw"));
+
+  // Also consider parent dirs of each root so we can resolve {repo}/openclaw/vendor/n8n
+  // when we started inside {repo}/openclaw.
+  for (const root of [...roots]) {
+    roots.push(path.dirname(root));
+  }
+
+  return uniqResolved(roots);
+}
+
+function isN8nRepoDir(dir: string): boolean {
+  try {
+    if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return false;
+    // Minimal shape check to avoid false positives on arbitrary directories.
+    if (fs.existsSync(path.join(dir, "packages", "cli"))) return true;
+    if (fs.existsSync(path.join(dir, "packages", "cli", "bin", "n8n"))) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 function resolveRepoCandidates(): string[] {
   // Candidate locations:
   // - env override
@@ -17,24 +80,24 @@ function resolveRepoCandidates(): string[] {
   // - repo-root/vendor/n8n (when OpenClaw itself is repo root)
   // - repo-root/openclaw/vendor/n8n (when OpenClaw is nested under a parent repo)
   const envPath = process.env.N8N_EMBED_PATH?.trim();
-  const bcgptRoot = path.resolve(__dirname, "..", "..", "..");
-  const candidates = [] as string[];
+  const candidates: string[] = [];
+
   if (envPath) candidates.push(envPath);
-  candidates.push(path.join(bcgptRoot, "n8n"));
-  candidates.push(path.join(bcgptRoot, "vendor", "n8n"));
-  candidates.push(path.join(bcgptRoot, "openclaw", "vendor", "n8n"));
+
+  for (const root of resolveRootCandidates()) {
+    candidates.push(path.join(root, "n8n"));
+    candidates.push(path.join(root, "vendor", "n8n"));
+    candidates.push(path.join(root, "openclaw", "vendor", "n8n"));
+  }
+
   // Keep order while removing accidental duplicates.
-  return Array.from(new Set(candidates.map((entry) => path.resolve(entry))));
+  return uniqResolved(candidates);
 }
 
 export function findVendoredN8nRepo(): string | null {
   const candidates = resolveRepoCandidates();
   for (const c of candidates) {
-    try {
-      if (fs.existsSync(c) && fs.statSync(c).isDirectory()) return c;
-    } catch {
-      // ignore
-    }
+    if (isN8nRepoDir(c)) return c;
   }
   return null;
 }

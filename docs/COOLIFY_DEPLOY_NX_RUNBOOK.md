@@ -34,6 +34,7 @@ Set these in Coolify service env vars/secrets:
 
 - `OPENCLAW_GATEWAY_TOKEN` (required)
 - `PMOS_ALLOW_REMOTE_OPS_FALLBACK=0` (recommended for embedded-first runtime)
+- `N8N_USER_FOLDER=/app/.openclaw/n8n` (recommended; persists embedded n8n state inside the OpenClaw volume)
 - `N8N_EMBED_PORT=5678` (optional; default is `5678`)
 - `N8N_EMBED_HOST=127.0.0.1` (optional; default is `127.0.0.1`)
 - `N8N_OWNER_EMAIL` (recommended)
