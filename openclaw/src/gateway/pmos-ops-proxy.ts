@@ -93,6 +93,8 @@ const OPS_UI_CONTENT_TYPES: Record<string, string> = {
 // Hop-by-hop headers that must not be forwarded
 const STRIP_REQUEST_HEADERS = new Set([
   "host",
+  // Never forward OpenClaw's gateway bearer token to n8n (it can override cookie/api-key auth).
+  "authorization",
   "connection",
   "transfer-encoding",
   "upgrade",
