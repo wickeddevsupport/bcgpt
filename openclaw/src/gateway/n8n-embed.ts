@@ -160,7 +160,8 @@ export async function spawnEmbeddedN8nIfVendored(opts?: { port?: number; host?: 
   env.N8N_PORT = String(port);
   env.N8N_LOCAL_URL = baseUrl;
   // Provide owner creds if present in env to skip interactive setup
-  env.N8N_OWNER_EMAIL = env.N8N_OWNER_EMAIL ?? process.env.N8N_OWNER_EMAIL ?? "admin@local";
+  // Use a syntactically valid email by default (n8n validates owner email on setup).
+  env.N8N_OWNER_EMAIL = env.N8N_OWNER_EMAIL ?? process.env.N8N_OWNER_EMAIL ?? "admin@openclaw.local";
   env.N8N_OWNER_PASSWORD = env.N8N_OWNER_PASSWORD ?? process.env.N8N_OWNER_PASSWORD ?? "changeme";
   // Keep gateway env in sync with the embedded child so the auth bridge can bootstrap.
   process.env.N8N_OWNER_EMAIL = process.env.N8N_OWNER_EMAIL ?? env.N8N_OWNER_EMAIL;

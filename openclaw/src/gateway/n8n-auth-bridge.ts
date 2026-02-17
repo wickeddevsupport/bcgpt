@@ -37,6 +37,7 @@ type OwnerCookieCache = {
 
 // In-memory cache: n8nBaseUrl â†’ owner session cookie
 const ownerCookieCache = new Map<string, OwnerCookieCache>();
+const ownerSetupAttempted = new Set<string>();
 
 function readOwnerCreds(): { email: string; password: string } | null {
   const email = (process.env.N8N_OWNER_EMAIL || "").trim();
@@ -54,7 +55,13 @@ async function getOwnerCookie(n8nBaseUrl: string): Promise<string | null> {
   const creds = readOwnerCreds();
   if (!creds) return null;
 
-  const cookie = await loginToN8n(n8nBaseUrl, creds.email, creds.password);
+  let cookie = await loginToN8n(n8nBaseUrl, creds.email, creds.password);
+  if (!cookie && !ownerSetupAttempted.has(n8nBaseUrl)) {
+    ownerSetupAttempted.add(n8nBaseUrl);
+    await attemptOwnerSetup(n8nBaseUrl, creds);
+    cookie = await loginToN8n(n8nBaseUrl, creds.email, creds.password);
+  }
+
   if (cookie) {
     ownerCookieCache.set(n8nBaseUrl, {
       cookie,
@@ -62,6 +69,43 @@ async function getOwnerCookie(n8nBaseUrl: string): Promise<string | null> {
     });
   }
   return cookie;
+}
+
+async function attemptOwnerSetup(
+  n8nBaseUrl: string,
+  creds: { email: string; password: string },
+): Promise<boolean> {
+  const firstName = (process.env.N8N_OWNER_FIRST_NAME || "OpenClaw").trim() || "OpenClaw";
+  const lastName = (process.env.N8N_OWNER_LAST_NAME || "Owner").trim() || "Owner";
+
+  const endpoints = [
+    `${n8nBaseUrl.replace(/\/+$/, "")}/rest/owner/setup`,
+    `${n8nBaseUrl.replace(/\/+$/, "")}/api/v1/owner/setup`,
+  ];
+
+  for (const ep of endpoints) {
+    try {
+      const res = await fetch(ep, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: creds.email,
+          password: creds.password,
+          firstName,
+          lastName,
+        }),
+      });
+
+      if (res.ok) return true;
+
+      // "already setup" or validation errors; caller will retry login regardless.
+      if (res.status === 400) return false;
+    } catch {
+      // try next endpoint
+    }
+  }
+
+  return false;
 }
 
 /**
