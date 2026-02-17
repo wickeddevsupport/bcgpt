@@ -34,6 +34,10 @@ export type DashboardProps = {
   opsProvisioning?: boolean;
   opsProvisioned?: boolean;
   opsProvisioningResult?: { projectId?: string; apiKey?: string } | null;
+  opsProvisioningError?: string | null;
+  opsManualApiKeyDraft?: string;
+  onOpsManualApiKeyChange?: (next: string) => void;
+  onSaveOpsApiKey?: () => Promise<void>;
 
   onNavigateTab: (tab: "integrations" | "automations" | "runs" | "chat" | "config") => void;
   onSettingsChange: (next: UiSettings) => void;
@@ -290,6 +294,31 @@ export function renderDashboard(props: DashboardProps) {
                 <button class="btn btn--secondary" @click=${() => navigator.clipboard?.writeText(props.opsProvisioningResult?.apiKey ?? "")}>Copy API key</button>
                 <button class="btn" @click=${() => props.onNavigateTab("integrations")}>Open integrations</button>
               </div>
+            </div>`
+          : nothing}
+
+        <!-- Manual API-key fallback when automated provisioning is blocked (license-gated or API missing) -->
+        ${props.opsProvisioningError
+          ? html`<div class="callout warn" style="margin-top:12px;">
+              <div><strong>Automated provisioning failed</strong></div>
+              <div style="margin-top:6px;">${props.opsProvisioningError}</div>
+              <div style="margin-top:8px;">You can create a Project in Wicked Ops (n8n) manually and paste its API key below to scope workflows to this workspace.</div>
+            </div>
+            <div class="form-grid" style="margin-top:8px;">
+              <label class="field">
+                <span>Wicked Ops API key</span>
+                <input
+                  type="password"
+                  .value=${props.opsManualApiKeyDraft ?? ""}
+                  @input=${(e: Event) => props.onOpsManualApiKeyChange?.((e.target as HTMLInputElement).value)}
+                  placeholder="Paste API key here"
+                  autocomplete="off"
+                />
+              </label>
+            </div>
+            <div class="row" style="margin-top:8px;">
+              <button class="btn" @click=${() => props.onSaveOpsApiKey?.()} ?disabled=${!props.opsManualApiKeyDraft}>Save API key</button>
+              <button class="btn btn--secondary" @click=${() => props.onNavigateTab("integrations")}>Open integrations</button>
             </div>`
           : nothing}
 

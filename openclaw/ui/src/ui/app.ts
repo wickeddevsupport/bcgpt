@@ -279,6 +279,10 @@ export class OpenClawApp extends LitElement {
   @state() pmosOpsProvisioningError: string | null = null;
   @state() pmosOpsProvisioningResult: { projectId?: string; apiKey?: string } | null = null;
 
+  // Manual API-key fallback (when Projects API is license-gated)
+  @state() pmosOpsManualApiKeyDraft = "";
+  @state() pmosOpsSavingManualKey = false;
+
   // PMOS model auth quick setup (admin UX)
   @state() pmosModelProvider: PmosModelProvider = "google";
   @state() pmosModelId = "gemini-3-flash-preview";
@@ -674,10 +678,13 @@ export class OpenClawApp extends LitElement {
         );
         const ops = ws?.connectors?.ops ?? null;
         if (ops && typeof ops === "object" && ops.apiKey) {
-          this.pmosOpsProvisioningResult = { projectId: ops.projectId ?? undefined, apiKey: String(ops.apiKey) };
+          const key = String(ops.apiKey);
+          this.pmosOpsProvisioningResult = { projectId: ops.projectId ?? undefined, apiKey: key };
+          this.pmosOpsManualApiKeyDraft = key;
           this.pmosOpsProvisioningError = null;
         } else {
           this.pmosOpsProvisioningResult = null;
+          this.pmosOpsManualApiKeyDraft = "";
         }
       }
     } catch (err) {
@@ -743,10 +750,13 @@ export class OpenClawApp extends LitElement {
         );
         const ops = ws?.connectors?.ops ?? null;
         if (ops && typeof ops === "object" && ops.apiKey) {
-          this.pmosOpsProvisioningResult = { projectId: ops.projectId ?? undefined, apiKey: String(ops.apiKey) };
+          const key = String(ops.apiKey);
+          this.pmosOpsProvisioningResult = { projectId: ops.projectId ?? undefined, apiKey: key };
+          this.pmosOpsManualApiKeyDraft = key;
           this.pmosOpsProvisioningError = null;
         } else {
           this.pmosOpsProvisioningResult = null;
+          this.pmosOpsManualApiKeyDraft = "";
         }
       }
     } catch (err) {
@@ -799,9 +809,36 @@ export class OpenClawApp extends LitElement {
       this.pmosOpsProvisioningError = null;
       await this.handlePmosRefreshConnectors();
     } catch (err) {
+      // keep original error message for display and allow manual-key fallback UI to show
       this.pmosOpsProvisioningError = String(err);
     } finally {
       this.pmosOpsProvisioning = false;
+    }
+  }
+
+  async handlePmosSaveManualOpsKey() {
+    if (!this.client || !this.connected) {
+      this.pmosOpsProvisioningError = "Not connected to gateway";
+      return;
+    }
+    const key = String(this.pmosOpsManualApiKeyDraft ?? "").trim();
+    if (!key) {
+      this.pmosOpsProvisioningError = "API key cannot be empty";
+      return;
+    }
+
+    this.pmosOpsSavingManualKey = true;
+    this.pmosOpsProvisioningError = null;
+    try {
+      await this.client.request("pmos.connectors.workspace.set", { connectors: { ops: { apiKey: key } } });
+      // reflect saved key in UI state and refresh connectors
+      this.pmosOpsProvisioningResult = { apiKey: key };
+      this.pmosOpsManualApiKeyDraft = "";
+      await this.handlePmosRefreshConnectors();
+    } catch (err) {
+      this.pmosOpsProvisioningError = String(err);
+    } finally {
+      this.pmosOpsSavingManualKey = false;
     }
   }
 

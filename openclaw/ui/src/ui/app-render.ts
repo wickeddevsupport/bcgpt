@@ -504,6 +504,10 @@ export function renderApp(state: AppViewState) {
                 opsProvisioning: state.pmosOpsProvisioning,
                 opsProvisioned: Boolean(state.pmosOpsProvisioningResult?.apiKey),
                 opsProvisioningResult: state.pmosOpsProvisioningResult,
+                opsProvisioningError: state.pmosOpsProvisioningError,
+                opsManualApiKeyDraft: state.pmosOpsManualApiKeyDraft,
+                onOpsManualApiKeyChange: (v: string) => (state.pmosOpsManualApiKeyDraft = v),
+                onSaveOpsApiKey: () => state.handlePmosSaveManualOpsKey(),
               })
             : nothing
         }

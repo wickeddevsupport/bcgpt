@@ -162,6 +162,8 @@ export type AppViewState = {
   pmosOpsProvisioning: boolean;
   pmosOpsProvisioningError: string | null;
   pmosOpsProvisioningResult: { projectId?: string; apiKey?: string } | null;
+  pmosOpsManualApiKeyDraft: string;
+  pmosOpsSavingManualKey: boolean;
   pmosModelProvider: PmosModelProvider;
   pmosModelId: string;
   pmosModelAlias: string;
