@@ -83,20 +83,6 @@ openclaw/
 
 | Environment | URL | Purpose |
 |-------------|-----|---------|
-| Production | https://os.wickedlab.io | OpenClaw with embedded n8n |
-| Local Dev | http://127.0.0.1:5678 | n8n development server |
-    GW --> PROXY
-    PROXY --> API
-    API --> WF
-    N8N --> DB
-    N8N --> FS
-    UI --> N8N
-```
-
-### Current URLs
-
-| Environment | URL | Purpose |
-|-------------|-----|---------|
 | Production | Embedded in OpenClaw gateway | n8n runtime for all workspaces |
 | Local Dev | http://127.0.0.1:5678 | Embedded n8n |
 
@@ -325,16 +311,18 @@ The flow builder includes a chat sidebar:
 
 ---
 
-## Migration from Activepieces
+## Legacy Migration Notes
 
-### Migration Steps
+### Migration Status
 
-1. **Deploy n8n** - Set up n8n instance alongside Activepieces
-2. **Build Custom Nodes** - Port any custom Activepieces pieces
-3. **Create Equivalents** - Recreate Activepieces flows in n8n
-4. **Test Thoroughly** - Verify all workflows function correctly
-5. **Switch Traffic** - Update OpenClaw to use n8n
-6. **Deprecate Activepieces** - Remove Activepieces dependency
+OpenClaw is now on an embedded n8n model by default. Activepieces is legacy and should not be used for new automation work.
+
+If an old workspace still depends on Activepieces artifacts:
+1. **Map existing flows** to n8n workflow equivalents.
+2. **Port custom integrations** as n8n custom/community nodes.
+3. **Validate behavior** with workspace-scoped test runs.
+4. **Cut over traffic** to embedded n8n endpoints (`/api/ops/*`).
+5. **Retire legacy references** after verification.
 
 ### Feature Mapping
 
@@ -441,20 +429,27 @@ flowchart TB
 
 ### Deployment Process
 
-1. **Connect via SSH**
+1. **Run NX Validation**
+   ```bash
+   corepack pnpm exec nx run-many -t build --projects=openclaw-app,openclaw-control-ui,openclaw-frontend
+   corepack pnpm exec nx run openclaw-app:test
+   ```
+   NX is for build/test orchestration and fast feedback.
+
+2. **Connect via SSH**
    ```bash
    ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
    ```
 
-2. **Access Coolify**
+3. **Access Coolify**
    - Use SSH tunnel or local Coolify CLI
    - Token: `[REDACTED - store in secure secret manager]`
 
-3. **Deploy Updates**
+4. **Deploy Updates**
    - Push to main branch triggers automatic deployment
    - Or manually trigger via Coolify dashboard
 
-4. **Verify Deployment**
+5. **Verify Deployment**
    - Check bcgpt.wickedlab.io/health
    - Check os.wickedlab.io
    - Check embedded n8n via OpenClaw (`/api/ops/workflows`)

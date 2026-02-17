@@ -70,6 +70,7 @@ docs/
 
 ### Deployment
 
+- NX build/test orchestration (pre-deploy validation)
 - Server access via SSH
 - Coolify container management
 - Container architecture (bcgpt, pmos)
@@ -80,6 +81,10 @@ docs/
 ## Server Access
 
 ```bash
+# Optional pre-deploy validation (NX)
+corepack pnpm exec nx run-many -t build --projects=openclaw-app,openclaw-control-ui,openclaw-frontend
+corepack pnpm exec nx run openclaw-app:test
+
 # SSH to server
 ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
 
@@ -87,7 +92,7 @@ ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
 [REDACTED - store in secure secret manager]
 ```
 
-**Note:** Access Coolify through SSH, not curl.
+**Note:** NX validates builds/tests; Coolify performs runtime deployment. Access Coolify through SSH, not curl.
 
 ---
 

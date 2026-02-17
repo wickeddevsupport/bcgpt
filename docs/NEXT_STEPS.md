@@ -394,11 +394,12 @@ interface AgentOrchestrator {
 
 ### Before Each Deployment
 
-1. **Run Tests**
+1. **Run NX Validation (Build/Test)**
    ```bash
-   corepack pnpm --dir openclaw test
-   corepack pnpm --dir openclaw/ui build
+   corepack pnpm exec nx run-many -t build --projects=openclaw-app,openclaw-control-ui,openclaw-frontend
+   corepack pnpm exec nx run openclaw-app:test
    ```
+   NX is used for fast local/CI validation. It is not the production deploy mechanism.
 
 2. **Verify Services**
    - bcgpt.wickedlab.io/health
@@ -408,7 +409,7 @@ interface AgentOrchestrator {
 3. **Deploy via Coolify**
    ```bash
    ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
-   # Access Coolify and trigger deployment
+   # Push to main for auto-deploy or trigger manually in Coolify
    ```
 
 4. **Post-Deployment Verification**
