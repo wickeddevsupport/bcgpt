@@ -170,6 +170,9 @@ async function loginToN8n(
   };
 
   const endpoints = [
+    // Current n8n (v1.x) login endpoint
+    `${baseUrl}/rest/login`,
+    // Legacy fallbacks
     `${baseUrl}/rest/users/login`,
     `${baseUrl}/api/v1/users/login`,
   ];

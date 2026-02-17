@@ -225,6 +225,7 @@ export function readLocalN8nConfig(): { url: string; host: string; port: number 
 // Best-effort server-side login helper: POSTs credentials to n8n and returns Set-Cookie when available.
 async function attemptN8nLogin(targetBase: string, email: string, password: string) {
   const endpoints = [
+    `${targetBase.replace(/\/+$/, "")}/rest/login`,
     `${targetBase.replace(/\/+$/, "")}/rest/users/login`,
     `${targetBase.replace(/\/+$/, "")}/api/v1/users/login`,
     `${targetBase.replace(/\/+$/, "")}/users/login`,
