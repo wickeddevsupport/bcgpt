@@ -297,13 +297,6 @@ export async function buildN8nAuthHeaders(
   let cookie = await getN8nAuthCookie(workspaceId, n8nBaseUrl);
   if (cookie) return { Cookie: cookie };
 
-  // Fallback: workspace API key if present.
-  const wc = await readWorkspaceConnectors(workspaceId);
-  const apiKey = wc?.ops?.apiKey;
-  if (typeof apiKey === "string" && apiKey) {
-    return { "X-N8N-API-KEY": apiKey };
-  }
-
   // Bootstrap: if no creds exist yet, try to provision a workspace user using the owner session.
   await ensureWorkspaceUserViaOwnerCookie(workspaceId, n8nBaseUrl);
   cookie = await getN8nAuthCookie(workspaceId, n8nBaseUrl);
@@ -313,6 +306,18 @@ export async function buildN8nAuthHeaders(
   if (user.role === "super_admin") {
     const ownerCookie = await getOwnerCookie(n8nBaseUrl);
     if (ownerCookie) return { Cookie: ownerCookie };
+  }
+
+  // Last-resort: use API key only when explicitly scoped to this n8n base URL.
+  // (Some workspaces may still carry remote ops keys; don't leak those into embedded n8n auth.)
+  const wc = await readWorkspaceConnectors(workspaceId);
+  const ops = wc?.ops as Record<string, unknown> | undefined;
+  const apiKey = typeof ops?.apiKey === "string" ? ops.apiKey.trim() : "";
+  const opsUrl =
+    typeof ops?.url === "string" ? ops.url.trim().replace(/\/+$/, "") : "";
+  const base = n8nBaseUrl.trim().replace(/\/+$/, "");
+  if (apiKey && opsUrl && opsUrl === base) {
+    return { "X-N8N-API-KEY": apiKey };
   }
 
   return {};
