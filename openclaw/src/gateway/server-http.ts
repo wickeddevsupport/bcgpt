@@ -45,6 +45,7 @@ import { handleOpenAiHttpRequest } from "./openai-http.js";
 import { handleOpenResponsesHttpRequest } from "./openresponses-http.js";
 import { handlePmosAuthHttpRequest } from "./pmos-auth-http.js";
 import { handleByokHttp } from "./byok-http.js";
+import { handleWorkspaceConfigHttp } from "./workspace-config-http.js";
 import {
   handleLocalN8nRequest,
   handleOpsProxyRequest,
@@ -334,6 +335,9 @@ export function createGatewayHttpServer(opts: {
         return;
       }
       if (await handleByokHttp(req, res)) {
+        return;
+      }
+      if (await handleWorkspaceConfigHttp(req, res)) {
         return;
       }
       if (await handleLocalN8nRequest(req, res)) {

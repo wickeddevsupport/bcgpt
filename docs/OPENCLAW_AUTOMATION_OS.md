@@ -122,7 +122,7 @@ flowchart TB
 
 | Feature | Status | Remaining Work |
 |---------|--------|----------------|
-| Workspace Isolation | PARTIAL | Cron jobs, sessions need workspace filtering |
+| Workspace Isolation | IN PROGRESS | Core isolation complete; workspace-scoped configs/connectors pending |
 | Onboarding Wizard | PARTIAL | AI provider key setup step needed |
 | n8n UI Integration | PARTIAL | Seamless UI embedding in progress |
 
@@ -133,7 +133,7 @@ flowchart TB
 | Live Flow Builder | HIGH | Visual workflow editor with integrated chat |
 | Multi-Agent Parallel Execution | HIGH | Run multiple agents concurrently |
 | Chat-Driven Workflow Creation | HIGH | Create n8n workflows via chat |
-| BYOK Management UI | MEDIUM | UI for managing AI provider keys |
+| BYOK Usage Analytics | MEDIUM | Per-key usage statistics and cost visibility |
 | Flow Activation Controls | MEDIUM | Start/stop/pause workflows from chat |
 | Agent Templates | MEDIUM | Pre-configured agent blueprints |
 
@@ -198,8 +198,8 @@ n8n-nodes-basecamp/
 | Layer | Status | Implementation |
 |-------|--------|----------------|
 | Agents | COMPLETE | [`agents.ts`](openclaw/src/gateway/server-methods/agents.ts) filters by workspace |
-| Cron Jobs | PENDING | Needs workspaceId filtering |
-| Sessions | PENDING | Needs workspaceId filtering |
+| Cron Jobs | COMPLETE | [`cron.ts`](openclaw/src/gateway/server-methods/cron.ts) filters and enforces ownership |
+| Sessions | COMPLETE | [`sessions.ts`](openclaw/src/gateway/server-methods/sessions.ts) scoped by agent workspace ownership |
 | Configs | PENDING | Workspace-specific config files |
 | Connectors | PENDING | Workspace-scoped API keys |
 
@@ -325,7 +325,7 @@ See [`NEXT_STEPS.md`](NEXT_STEPS.md) for detailed implementation plan.
 
 ### Immediate Priorities
 
-1. **Complete Workspace Isolation** - Finish cron/sessions filtering
+1. **Complete Workspace Isolation** - Implement workspace-scoped configs and connector keys
 2. **Deploy Basecamp Node** - Publish to n8n community
 3. **Build Live Flow Builder** - Integrate n8n canvas in PMOS UI
 4. **Implement Chat-to-Workflow** - Natural language workflow creation

@@ -102,6 +102,8 @@
     "tui": "node scripts/run-node.mjs tui",
     "tui:dev": "OPENCLAW_PROFILE=dev CLAWDBOT_PROFILE=dev node scripts/run-node.mjs --dev tui",
     "ops-ui:build": "node ops-ui/build.mjs",
+    "n8n:vendor": "node scripts/vendor-n8n.mjs",
+    "n8n:vendor:force": "node scripts/vendor-n8n.mjs --force",
     "ui:build": "node scripts/ui.js build",
     "ui:dev": "node scripts/ui.js dev",
     "ui:install": "node scripts/ui.js install"

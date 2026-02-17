@@ -95,10 +95,14 @@ export const pmosHandlers: GatewayRequestHandlers = {
           null,
         "https://flow.wickedlab.io",
       );
+      const allowGlobalSecrets = Boolean(client && isSuperAdmin(client));
+
       const apKey =
         (workspaceConnectors?.activepieces?.apiKey as string | undefined) ??
-        readConfigString(cfg, ["pmos", "connectors", "activepieces", "apiKey"]) ??
-        (process.env.ACTIVEPIECES_API_KEY?.trim() || null);
+        (allowGlobalSecrets
+          ? readConfigString(cfg, ["pmos", "connectors", "activepieces", "apiKey"]) ??
+            (process.env.ACTIVEPIECES_API_KEY?.trim() || null)
+          : null);
       const apProjectId =
         (workspaceConnectors?.activepieces?.projectId as string | undefined) ??
         readConfigString(cfg, ["pmos", "connectors", "activepieces", "projectId"]) ??
@@ -114,8 +118,10 @@ export const pmosHandlers: GatewayRequestHandlers = {
       );
       const bcgptKey =
         (workspaceConnectors?.bcgpt?.apiKey as string | undefined) ??
-        readConfigString(cfg, ["pmos", "connectors", "bcgpt", "apiKey"]) ??
-        (process.env.BCGPT_API_KEY?.trim() || null);
+        (allowGlobalSecrets
+          ? readConfigString(cfg, ["pmos", "connectors", "bcgpt", "apiKey"]) ??
+            (process.env.BCGPT_API_KEY?.trim() || null)
+          : null);
 
       const ap: ConnectorResult = {
         url: apUrl,
@@ -204,6 +210,58 @@ export const pmosHandlers: GatewayRequestHandlers = {
       );
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, formatForLog(err)));
+    }
+  },
+
+  "pmos.config.workspace.get": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const target =
+        typeof params?.workspaceId === "string" ? params.workspaceId.trim() : undefined;
+      if (target && !isSuperAdmin(client)) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "access denied"));
+        return;
+      }
+      const workspaceId = target ?? requireWorkspaceId(client);
+      const { readWorkspaceConfig, loadEffectiveWorkspaceConfig } = await import(
+        "../workspace-config.js"
+      );
+      const workspaceConfig = (await readWorkspaceConfig(workspaceId)) ?? {};
+      const effectiveConfig = await loadEffectiveWorkspaceConfig(workspaceId);
+      respond(true, { workspaceId, workspaceConfig, effectiveConfig }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.config.workspace.set": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const p = params as Record<string, unknown> | undefined;
+      const target = typeof p?.workspaceId === "string" ? p.workspaceId.trim() : undefined;
+      if (target && !isSuperAdmin(client)) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "access denied"));
+        return;
+      }
+      const workspaceId = target ?? requireWorkspaceId(client);
+      const patch = p?.patch;
+      if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "patch must be an object"));
+        return;
+      }
+      const replace = p?.replace === true;
+      const { patchWorkspaceConfig, writeWorkspaceConfig, loadEffectiveWorkspaceConfig } =
+        await import("../workspace-config.js");
+      const workspaceConfig = replace
+        ? (patch as Record<string, unknown>)
+        : await patchWorkspaceConfig(workspaceId, patch as Record<string, unknown>);
+      if (replace) {
+        await writeWorkspaceConfig(workspaceId, workspaceConfig);
+      }
+      const effectiveConfig = await loadEffectiveWorkspaceConfig(workspaceId);
+      respond(true, { ok: true, workspaceId, workspaceConfig, effectiveConfig }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }
   },
 

@@ -204,7 +204,7 @@ pnpm build
 - [ ] Show real-time updates from chat commands
 - [ ] Handle approval workflows for destructive changes
 
-#### 2.3 Seamless Navigation
+#### 3.3 Seamless Navigation
 
 - [ ] Remove need to open n8n separately
 - [ ] All n8n features accessible from OpenClaw UI
@@ -213,7 +213,7 @@ pnpm build
 
 ---
 
-## Phase 3: BYOK (Bring Your Own Keys) Management
+## Phase 4: BYOK (Bring Your Own Keys) Management
 
 **Priority:** HIGH
 **Status:** COMPLETE
@@ -221,7 +221,7 @@ pnpm build
 
 ### Tasks
 
-#### 3.1 AI Provider Key Storage - COMPLETE
+#### 4.1 AI Provider Key Storage - COMPLETE
 
 - [x] Design secure key storage schema (`openclaw/src/gateway/byok-store.ts`)
 - [x] Implement encryption for stored keys (AES-256-GCM with server-side master key)
@@ -234,13 +234,13 @@ pnpm build
 - WS handlers: `pmos.byok.list`, `pmos.byok.set`, `pmos.byok.remove`, `pmos.byok.validate`
 - Master key: `OPENCLAW_BYOK_SECRET` env var or auto-generated `~/.openclaw/byok.secret`
 
-#### 3.2 BYOK Setup Wizard - COMPLETE
+#### 4.2 BYOK Setup Wizard - COMPLETE
 
 - [x] Key validation (test API call per provider)
 - [x] Model selection UI (provider-specific model dropdowns)
 - [ ] Cost estimation display (deferred to future)
 
-#### 3.3 Key Management UI - COMPLETE
+#### 4.3 Key Management UI - COMPLETE
 
 - [x] Settings page for AI keys (`frontend/src/views/Settings.tsx`)
 - [x] Add/edit/remove keys
@@ -249,7 +249,7 @@ pnpm build
 
 ---
 
-## Phase 4: Chat-to-Workflow Creation
+## Phase 5: Chat-to-Workflow Creation
 
 **Priority:** HIGH
 **Status:** NOT STARTED
@@ -257,7 +257,7 @@ pnpm build
 
 ### Tasks
 
-#### 4.1 Natural Language Parser
+#### 5.1 Natural Language Parser
 
 - [ ] Implement intent recognition for workflow creation
 - [ ] Map natural language to n8n node types
@@ -275,14 +275,14 @@ Parser:
   Mapping: todo.title -> issue.title, todo.description -> issue.body
 ```
 
-#### 4.2 Workflow Generator
+#### 5.2 Workflow Generator
 
 - [ ] Generate n8n workflow JSON from parsed intent
 - [ ] Validate workflow structure
 - [ ] Create workflow via n8n API
 - [ ] Show preview before creation
 
-#### 4.3 Chat-Driven Modifications
+#### 5.3 Chat-Driven Modifications
 
 - [ ] Enable chat to modify existing workflows
 - [ ] Add/remove nodes via chat
@@ -291,7 +291,7 @@ Parser:
 
 ---
 
-## Phase 5: Multi-Agent Parallel Execution
+## Phase 6: Multi-Agent Parallel Execution
 
 **Priority:** MEDIUM
 **Status:** NOT STARTED
@@ -299,7 +299,7 @@ Parser:
 
 ### Tasks
 
-#### 5.1 Agent Runtime Enhancement
+#### 6.1 Agent Runtime Enhancement
 
 - [ ] Implement parallel agent execution
 - [ ] Add agent orchestration layer
@@ -315,7 +315,7 @@ interface AgentOrchestrator {
 }
 ```
 
-#### 5.2 Agent Templates
+#### 6.2 Agent Templates
 
 - [ ] Create pre-configured agent blueprints
 - [ ] Sales Agent template
@@ -323,7 +323,7 @@ interface AgentOrchestrator {
 - [ ] Dev Agent template
 - [ ] PM Agent template
 
-#### 5.3 Agent Dashboard
+#### 6.3 Agent Dashboard
 
 - [ ] Multi-agent status view
 - [ ] Per-agent metrics
@@ -332,7 +332,7 @@ interface AgentOrchestrator {
 
 ---
 
-## Phase 6: Live Flow Builder
+## Phase 7: Live Flow Builder
 
 **Priority:** MEDIUM
 **Status:** NOT STARTED
@@ -340,21 +340,21 @@ interface AgentOrchestrator {
 
 ### Tasks
 
-#### 6.1 Real-Time Canvas Updates
+#### 7.1 Real-Time Canvas Updates
 
 - [ ] WebSocket connection for live updates
 - [ ] Node position sync
 - [ ] Connection updates
 - [ ] Execution visualization
 
-#### 6.2 Flow Control Panel
+#### 7.2 Flow Control Panel
 
 - [ ] Activate/deactivate workflows
 - [ ] Execution history
 - [ ] Error handling UI
 - [ ] Rollback controls
 
-#### 6.3 Template Library
+#### 7.3 Template Library
 
 - [ ] Pre-built workflow templates
 - [ ] One-click template deployment
@@ -422,26 +422,31 @@ Before starting work:
 - [ ] New signups get isolated workspace
 
 ### Phase 2 Complete When:
+- [ ] n8n source pinned in `openclaw/vendor/n8n`
+- [ ] Embedded n8n startup/build process is stable
+- [ ] Custom auth/triggers wired for workspace context
+
+### Phase 3 Complete When:
 - [ ] n8n canvas embedded in OpenClaw UI
 - [ ] Chat sidebar functional in flow builder
 - [ ] No need to open n8n separately
 
-### Phase 3 Complete When:
+### Phase 4 Complete When:
 - [ ] Users can add their own AI keys
 - [ ] Keys are validated and stored securely
 - [ ] Multiple providers supported
 
-### Phase 4 Complete When:
+### Phase 5 Complete When:
 - [ ] Chat can create workflows end-to-end
 - [ ] Chat can modify existing workflows
 - [ ] Preview before creation works
 
-### Phase 5 Complete When:
+### Phase 6 Complete When:
 - [ ] Multiple agents run in parallel
 - [ ] Agent templates available
 - [ ] Agent dashboard shows all agents
 
-### Phase 6 Complete When:
+### Phase 7 Complete When:
 - [ ] Live flow builder with real-time updates
 - [ ] Flow control panel functional
 - [ ] Template library available

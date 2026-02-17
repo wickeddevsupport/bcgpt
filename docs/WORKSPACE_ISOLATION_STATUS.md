@@ -592,8 +592,8 @@ This allows super_admin to:
 ### Phase 1: Core Infrastructure
 - [x] Create workspace context helpers
 - [x] Add workspaceId to agent config schema
-- [ ] Add workspaceId to cron job schema
-- [ ] Write migration script
+- [x] Add workspaceId to cron job schema
+- [x] Write migration script
 - [ ] Run migration on dev environment
 
 ### Phase 2: Server Method Updates
@@ -604,8 +604,8 @@ This allows super_admin to:
 - [ ] Add workspace config system
 
 ### Phase 3: Testing
-- [ ] Write workspace isolation unit tests
-- [ ] Write cross-workspace leakage tests
+- [x] Write workspace isolation unit tests
+- [x] Write cross-workspace leakage tests
 - [ ] Write E2E smoke tests for multi-user scenarios
 - [ ] All tests passing
 

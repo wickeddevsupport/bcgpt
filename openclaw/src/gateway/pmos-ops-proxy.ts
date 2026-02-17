@@ -409,7 +409,9 @@ export async function handleOpsProxyRequest(
     const wc = await readWorkspaceConnectors(workspaceId);
 
     const opsUrl = ((wc?.ops?.url?.trim() ?? "") || global.url).replace(/\/+$/, "");
-    const opsKey = wc?.ops?.apiKey?.trim() || global.apiKey;
+    const allowGlobalKeyFallback = session.user.role === "super_admin";
+    const opsKey =
+      wc?.ops?.apiKey?.trim() || (allowGlobalKeyFallback ? global.apiKey : null);
 
     if (!opsKey) {
       res.statusCode = 503;

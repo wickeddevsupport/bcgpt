@@ -93,6 +93,8 @@ const BASE_METHODS = [
   "pmos.connectors.workspace.set",
   "pmos.connectors.workspace.get",
   "pmos.connectors.workspace.provision_ops",
+  "pmos.config.workspace.get",
+  "pmos.config.workspace.set",
   // BYOK (Bring Your Own Keys)
   "pmos.byok.list",
   "pmos.byok.set",
