@@ -49,6 +49,7 @@ import {
   isSuperAdmin,
 } from "../workspace-context.js";
 import { auditLogger } from "../../security/audit-logger.js";
+import { rateLimiter } from "../../security/rate-limiter.js";
 
 const BOOTSTRAP_FILE_NAMES = [
   DEFAULT_AGENTS_FILENAME,
@@ -212,6 +213,18 @@ export const agentsHandlers: GatewayRequestHandlers = {
       return;
     }
 
+    // Rate limit agent creation per workspace
+    const createWorkspaceId = client?.pmosWorkspaceId ?? "global";
+    const createRateCheck = rateLimiter.check(createWorkspaceId, "agents.create");
+    if (!createRateCheck.allowed) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.UNAVAILABLE, `Rate limit exceeded. Retry after ${createRateCheck.retryAfter}s`),
+      );
+      return;
+    }
+
     const cfg = loadConfig();
     const rawName = String(params.name ?? "").trim();
     const agentId = normalizeAgentId(rawName);
@@ -314,6 +327,12 @@ export const agentsHandlers: GatewayRequestHandlers = {
       return;
     }
 
+    const updateRateCheck = rateLimiter.check(client?.pmosWorkspaceId ?? "global", "agents.update");
+    if (!updateRateCheck.allowed) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, `Rate limit exceeded. Retry after ${updateRateCheck.retryAfter}s`));
+      return;
+    }
+
     const cfg = loadConfig();
     const agentId = normalizeAgentId(String(params.agentId ?? ""));
     const agentEntries = listAgentEntries(cfg);
@@ -387,6 +406,12 @@ export const agentsHandlers: GatewayRequestHandlers = {
           )}`,
         ),
       );
+      return;
+    }
+
+    const deleteRateCheck = rateLimiter.check(client?.pmosWorkspaceId ?? "global", "agents.delete");
+    if (!deleteRateCheck.allowed) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, `Rate limit exceeded. Retry after ${deleteRateCheck.retryAfter}s`));
       return;
     }
 

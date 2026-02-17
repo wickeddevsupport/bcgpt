@@ -39,6 +39,7 @@ import {
 import { formatForLog } from "../ws-log.js";
 import { injectTimestamp, timestampOptsFromConfig } from "./agent-timestamp.js";
 import { isSuperAdmin } from "../workspace-context.js";
+import { rateLimiter } from "../../security/rate-limiter.js";
 import { listAgentsForGateway, resolveGatewaySessionStoreTarget } from "../session-utils.js";
 
 type TranscriptAppendResult = {
@@ -372,6 +373,12 @@ export const chatHandlers: GatewayRequestHandlers = {
       );
       return;
     }
+    const chatRateCheck = rateLimiter.check(client?.pmosWorkspaceId ?? "global", "chat.send");
+    if (!chatRateCheck.allowed) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, `Rate limit exceeded. Retry after ${chatRateCheck.retryAfter}s`));
+      return;
+    }
+
     const p = params as {
       sessionKey: string;
       message: string;
