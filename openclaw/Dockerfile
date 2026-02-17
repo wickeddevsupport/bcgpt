@@ -31,7 +31,9 @@ RUN if [ "$INCLUDE_VENDORED_N8N" = "true" ]; then \
       apt-get update && \
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git && \
       mkdir -p openclaw/vendor && \
-      git clone --depth 1 https://github.com/n8n-io/n8n.git openclaw/vendor/n8n; \
+      git clone --depth 1 https://github.com/n8n-io/n8n.git openclaw/vendor/n8n && \
+      # Install n8n dependencies and build so the vendored copy is runnable at runtime
+      cd openclaw/vendor/n8n && corepack enable && pnpm install --frozen-lockfile && pnpm build; \
     fi
 RUN pnpm build
 # Force pnpm for UI build (Bun may fail on ARM/Synology architectures)
