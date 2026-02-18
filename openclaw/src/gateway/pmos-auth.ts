@@ -412,6 +412,22 @@ export async function resolvePmosSessionFromRequest(req: IncomingMessage): Promi
   return { ok: false, status: 401, error: "Session token missing." };
 }
 
+/**
+ * Best-effort lookup: find a PMOS user record by workspaceId.
+ *
+ * Today PMOS assigns a unique workspaceId per signup, so this maps 1:1 to a user.
+ * If multi-user workspaces are added later, this should be revisited.
+ */
+export async function resolvePmosUserByWorkspaceId(workspaceId: string): Promise<PmosAuthUser | null> {
+  const wsId = String(workspaceId ?? "").trim();
+  if (!wsId) return null;
+  return await runWithStoreMutex(async () => {
+    const store = await loadStoreUnlocked();
+    const user = store.users.find((entry) => entry.workspaceId === wsId);
+    return user ? toPublicUser(user) : null;
+  });
+}
+
 export async function revokePmosSessionByToken(token: string): Promise<void> {
   const trimmed = token.trim();
   if (!trimmed) {

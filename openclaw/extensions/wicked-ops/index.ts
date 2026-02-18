@@ -1,5 +1,6 @@
 import type { OpenClawPluginApi } from "../../src/plugins/types.js";
-import { getOwnerCookie } from "../../src/gateway/n8n-auth-bridge.js";
+import { getOrCreateWorkspaceN8nCookie, getOwnerCookie } from "../../src/gateway/n8n-auth-bridge.js";
+import { resolvePmosUserByWorkspaceId } from "../../src/gateway/pmos-auth.js";
 import { readLocalN8nConfig, ensureWorkspaceN8nTag, workflowBelongsToWorkspace } from "../../src/gateway/pmos-ops-proxy.js";
 
 type OpsConfig = {
@@ -59,6 +60,27 @@ async function resolveEmbeddedOpsContext(workspaceId?: string | null): Promise<E
   if (!local) {
     return null;
   }
+
+  // Workspace-scoped n8n cookie when available: this keeps "one login" and ensures
+  // workflows are created/owned by the workspace user (not the global n8n owner).
+  if (workspaceId) {
+    const wsId = String(workspaceId).trim();
+    const pmosUser = await resolvePmosUserByWorkspaceId(wsId).catch(() => null);
+    const cookie = await getOrCreateWorkspaceN8nCookie({
+      workspaceId: wsId,
+      n8nBaseUrl: local.url,
+      pmosUser,
+    });
+    if (!cookie) {
+      throw new Error("Unable to authenticate embedded n8n for this workspace.");
+    }
+    return {
+      baseUrl: local.url.replace(/\/+$/, ""),
+      headers: { Cookie: cookie },
+      workspaceId: wsId,
+    };
+  }
+
   const ownerCookie = await getOwnerCookie(local.url);
   if (!ownerCookie) {
     throw new Error(

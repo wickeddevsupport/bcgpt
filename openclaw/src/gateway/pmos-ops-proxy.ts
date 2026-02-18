@@ -96,6 +96,9 @@ const STRIP_REQUEST_HEADERS = new Set([
   "host",
   // Never forward OpenClaw's gateway bearer token to n8n (it can override cookie/api-key auth).
   "authorization",
+  // Never forward browser cookies (pmos_session, stale n8n-auth, etc.). The auth bridge injects
+  // the correct n8n cookie per request.
+  "cookie",
   "connection",
   "transfer-encoding",
   "upgrade",
@@ -632,8 +635,10 @@ export async function tunnelN8nWebSocket(
   if (!n8n) return false;
 
   // Inject n8n auth cookie so n8n accepts the WebSocket upgrade.
-  // Strip the client's cookies (pmos_session, etc.) and replace with the owner cookie.
-  const ownerCookie = await getOwnerCookie(n8n.url);
+  // Strip the client's cookies (pmos_session, etc.) and replace with a workspace-scoped
+  // n8n cookie derived from the PMOS session.
+  const authHeaders = await buildN8nAuthHeaders(req, n8n.url);
+  const cookie = typeof authHeaders.Cookie === "string" ? authHeaders.Cookie : "";
 
   const upstream = net.connect(n8n.port, n8n.host, () => {
     // Reconstruct the HTTP upgrade request, stripping client cookies and injecting n8n auth
@@ -641,7 +646,7 @@ export async function tunnelN8nWebSocket(
       .filter(([k]) => !["connection", "upgrade", "cookie"].includes(k.toLowerCase()))
       .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : (v ?? "")}`)
       .join("\r\n");
-    const cookieLine = ownerCookie ? `Cookie: ${ownerCookie}\r\n` : "";
+    const cookieLine = cookie ? `Cookie: ${cookie}\r\n` : "";
     upstream.write(
       `GET ${pathname}${url.search} HTTP/1.1\r\n` +
         `Host: ${n8n.host}:${n8n.port}\r\n` +

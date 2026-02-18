@@ -27,8 +27,30 @@ type N8nSessionCache = {
 
 // In-memory cache: workspaceId → n8n session cookie
 const sessionCache = new Map<string, N8nSessionCache>();
+const provisionInFlight = new Map<string, Promise<unknown>>();
 
 const SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+function toCookieHeader(setCookies: string[]): string {
+  // Convert Set-Cookie header values into a Cookie header value.
+  // Keep only the first "key=value" pair from each cookie string.
+  const parts = setCookies
+    .map((value) => (typeof value === "string" ? value.split(";")[0]?.trim() : ""))
+    .filter((value): value is string => Boolean(value));
+  return parts.join("; ");
+}
+
+function getSetCookieValues(res: Response): string[] {
+  // Node's undici exposes getSetCookie() for multiple Set-Cookie headers.
+  const headerObj = res.headers as any;
+  const getSetCookie = typeof headerObj?.getSetCookie === "function" ? headerObj.getSetCookie : null;
+  if (getSetCookie) {
+    const values = getSetCookie.call(headerObj) as unknown;
+    return Array.isArray(values) ? (values.filter((v) => typeof v === "string") as string[]) : [];
+  }
+  const value = res.headers.get("set-cookie");
+  return value ? [value] : [];
+}
 
 type OwnerCookieCache = {
   cookie: string;
@@ -168,15 +190,6 @@ async function loginToN8n(
   email: string,
   password: string,
 ): Promise<string | null> {
-  const toCookieHeader = (setCookies: string[]): string => {
-    // Convert Set-Cookie header values into a Cookie header value.
-    // Keep only the first "key=value" pair from each cookie string.
-    const parts = setCookies
-      .map((value) => (typeof value === "string" ? value.split(";")[0]?.trim() : ""))
-      .filter((value): value is string => Boolean(value));
-    return parts.join("; ");
-  };
-
   const endpoints = [
     // Current n8n (v1.x) login endpoint
     `${baseUrl}/rest/login`,
@@ -193,16 +206,7 @@ async function loginToN8n(
         body: JSON.stringify({ email, password }),
         redirect: "manual",
       });
-      const setCookies = (() => {
-        const headerObj = res.headers as any;
-        const getSetCookie = typeof headerObj?.getSetCookie === "function" ? headerObj.getSetCookie : null;
-        if (getSetCookie) {
-          const values = getSetCookie.call(headerObj) as unknown;
-          return Array.isArray(values) ? (values.filter((v) => typeof v === "string") as string[]) : [];
-        }
-        const value = res.headers.get("set-cookie");
-        return value ? [value] : [];
-      })();
+      const setCookies = getSetCookieValues(res);
 
       if (setCookies.length > 0) return toCookieHeader(setCookies);
       if (res.ok) return null;
@@ -214,61 +218,115 @@ async function loginToN8n(
 }
 
 /**
- * Ensure an n8n user exists for this workspace.
- * Creates one via the n8n API if it doesn't exist yet.
- * Persists credentials to workspace connectors.
+ * Embedded-first provisioning helper:
+ * If a workspace has no `ops.user` creds yet, create a workspace-scoped n8n user via invitations
+ * and accept the invite programmatically to issue a usable auth cookie immediately.
  */
-export async function ensureN8nWorkspaceUser(
-  workspaceId: string,
-  n8nBaseUrl: string,
-  n8nApiKey: string,
-): Promise<{ email: string; password: string } | null> {
-  // Check if we already have credentials
+async function ensureWorkspaceUserViaInvitation(params: {
+  workspaceId: string;
+  n8nBaseUrl: string;
+  email: string;
+  name?: string | null;
+}): Promise<{ email: string; password: string; cookie: string } | null> {
+  const { workspaceId, n8nBaseUrl } = params;
+
   const wc = await readWorkspaceConnectors(workspaceId);
   const existing = wc?.ops?.user as { email?: string; password?: string } | undefined;
-  if (existing?.email && existing?.password) {
-    return { email: existing.email, password: existing.password };
-  }
+  if (existing?.email && existing?.password) return null;
 
-  // Generate credentials for this workspace
-  const { randomBytes } = await import("node:crypto");
-  const email = `pmos-${workspaceId}@openclaw.local`;
-  const password = randomBytes(16).toString("base64url");
+  const ownerCookie = await getOwnerCookie(n8nBaseUrl);
+  if (!ownerCookie) return null;
 
-  // Try to create user in n8n
-  const endpoints = [
-    `${n8nBaseUrl}/api/v1/users`,
-    `${n8nBaseUrl}/rest/users`,
-  ];
+  const base = n8nBaseUrl.replace(/\/+$/, "");
 
-  let created = false;
-  for (const ep of endpoints) {
-    try {
-      const res = await fetch(ep, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "X-N8N-API-KEY": n8nApiKey,
-        },
-        body: JSON.stringify({
-          email,
-          password,
-          firstName: "PMOS",
-          lastName: `ws-${workspaceId.slice(0, 8)}`,
-        }),
-      });
-      if (res.ok || res.status === 409) {
-        created = true;
-        break;
-      }
-    } catch {
-      // try next endpoint
+  // Resolve inviterId (owner user id).
+  let inviterId: string | null = null;
+  try {
+    const meRes = await fetch(`${base}/rest/login`, {
+      headers: { Cookie: ownerCookie, accept: "application/json" },
+    });
+    if (meRes.ok) {
+      const me = (await meRes.json().catch(() => null)) as any;
+      inviterId = (me?.data?.id ?? me?.id) ? String(me.data?.id ?? me.id) : null;
     }
+  } catch {
+    // ignore
   }
+  if (!inviterId) return null;
 
-  if (!created) return null;
+  const { randomBytes } = await import("node:crypto");
+  const email = String(params.email ?? "").trim().toLowerCase() || `pmos-${workspaceId}@openclaw.local`;
+  const password = randomBytes(24).toString("base64url");
 
-  // Persist credentials
+  const splitName = (raw?: string | null): { firstName: string; lastName: string } => {
+    const value = String(raw ?? "").trim();
+    if (!value) return { firstName: "PMOS", lastName: `ws-${workspaceId.slice(0, 8)}` };
+    const parts = value.split(/\s+/).filter(Boolean);
+    if (parts.length === 1) return { firstName: parts[0], lastName: `ws-${workspaceId.slice(0, 8)}` };
+    return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
+  };
+  const { firstName, lastName } = splitName(params.name);
+
+  type InviteResponse = {
+    user?: { id?: string; email?: string };
+    error?: string;
+  };
+
+  // Create user shell via invitation.
+  let inviteeId: string | null = null;
+  try {
+    const inviteRes = await fetch(`${base}/rest/invitations`, {
+      method: "POST",
+      headers: {
+        Cookie: ownerCookie,
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify([{ email, role: "global:member" }]),
+    });
+    if (!inviteRes.ok) {
+      const text = await inviteRes.text().catch(() => "");
+      console.warn("[n8n-auth] invite failed:", inviteRes.status, text.slice(0, 300));
+      return null;
+    }
+
+    const invited = (await inviteRes.json().catch(() => null)) as unknown;
+    if (Array.isArray(invited)) {
+      const match = (invited as InviteResponse[]).find((entry) => {
+        const e = String(entry?.user?.email ?? "").trim().toLowerCase();
+        return e === email;
+      });
+      inviteeId = match?.user?.id ? String(match.user.id) : null;
+    }
+  } catch (err) {
+    console.warn("[n8n-auth] invite error:", String(err));
+    return null;
+  }
+  if (!inviteeId) return null;
+
+  // Accept invitation (skipAuth) and extract the n8n-auth cookie.
+  let cookie: string | null = null;
+  try {
+    const acceptRes = await fetch(`${base}/rest/invitations/${inviteeId}/accept`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ inviterId, firstName, lastName, password }),
+      redirect: "manual",
+    });
+    if (!acceptRes.ok) {
+      const text = await acceptRes.text().catch(() => "");
+      console.warn("[n8n-auth] accept invite failed:", acceptRes.status, text.slice(0, 300));
+      return null;
+    }
+    const setCookies = getSetCookieValues(acceptRes);
+    cookie = setCookies.length > 0 ? toCookieHeader(setCookies) : null;
+  } catch (err) {
+    console.warn("[n8n-auth] accept invite error:", String(err));
+    return null;
+  }
+  if (!cookie) return null;
+
+  // Persist credentials for future logins.
   const next = {
     ...(wc ?? {}),
     ops: {
@@ -278,71 +336,57 @@ export async function ensureN8nWorkspaceUser(
   };
   await writeWorkspaceConnectors(workspaceId, next);
 
-  return { email, password };
+  // Cache the cookie for immediate use.
+  sessionCache.set(workspaceId, { cookie, expiresAt: Date.now() + SESSION_TTL_MS });
+
+  return { email, password, cookie };
 }
 
 /**
- * Embedded-first provisioning helper:
- * If a workspace has no ops.user creds yet, try to create a workspace user using the n8n owner session.
+ * Get or create a workspace-scoped n8n cookie (SSO-style).
  *
- * Best-effort: if the user already exists (409), we do not overwrite local creds because we
- * can't recover the password safely without a reset flow.
+ * Used by both the HTTP proxy (iframe) and tool calls (wicked-ops), so that workflow
+ * reads/writes happen under the same n8n identity for a given PMOS workspace.
  */
-async function ensureWorkspaceUserViaOwnerCookie(
-  workspaceId: string,
-  n8nBaseUrl: string,
-): Promise<{ email: string; password: string } | null> {
-  const wc = await readWorkspaceConnectors(workspaceId);
-  const existing = wc?.ops?.user as { email?: string; password?: string } | undefined;
-  if (existing?.email && existing?.password) {
-    return { email: existing.email, password: existing.password };
+export async function getOrCreateWorkspaceN8nCookie(params: {
+  workspaceId: string;
+  n8nBaseUrl: string;
+  pmosUser?: Pick<PmosAuthUser, "email" | "name"> | null;
+}): Promise<string | null> {
+  const { workspaceId, n8nBaseUrl } = params;
+
+  let cookie = await getN8nAuthCookie(workspaceId, n8nBaseUrl);
+  if (cookie) return cookie;
+
+  const emailHint =
+    (typeof params.pmosUser?.email === "string" && params.pmosUser.email.trim()) ||
+    `pmos-${workspaceId}@openclaw.local`;
+  const nameHint = typeof params.pmosUser?.name === "string" ? params.pmosUser.name : null;
+
+  const runProvision = async () => {
+    await ensureWorkspaceUserViaInvitation({
+      workspaceId,
+      n8nBaseUrl,
+      email: emailHint,
+      name: nameHint,
+    });
+  };
+
+  const inFlight = provisionInFlight.get(workspaceId);
+  if (inFlight) {
+    await inFlight.catch(() => undefined);
+  } else {
+    const p = runProvision().finally(() => {
+      if (provisionInFlight.get(workspaceId) === p) {
+        provisionInFlight.delete(workspaceId);
+      }
+    });
+    provisionInFlight.set(workspaceId, p);
+    await p.catch(() => undefined);
   }
 
-  const ownerCookie = await getOwnerCookie(n8nBaseUrl);
-  if (!ownerCookie) return null;
-
-  const { randomBytes } = await import("node:crypto");
-  const email = `pmos-${workspaceId}@openclaw.local`;
-  const password = randomBytes(16).toString("base64url");
-
-  const endpoints = [`${n8nBaseUrl}/api/v1/users`, `${n8nBaseUrl}/rest/users`];
-  for (const ep of endpoints) {
-    try {
-      const res = await fetch(ep, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          Cookie: ownerCookie,
-        },
-        body: JSON.stringify({
-          email,
-          password,
-          firstName: "PMOS",
-          lastName: `ws-${workspaceId.slice(0, 8)}`,
-        }),
-      });
-
-      if (res.ok) {
-        const next = {
-          ...(wc ?? {}),
-          ops: {
-            ...((wc?.ops ?? {}) as Record<string, unknown>),
-            user: { email, password },
-          },
-        };
-        await writeWorkspaceConnectors(workspaceId, next);
-        return { email, password };
-      }
-
-      if (res.status === 409) {
-        return null;
-      }
-    } catch {
-      // try next endpoint
-    }
-  }
-
-  return null;
+  cookie = await getN8nAuthCookie(workspaceId, n8nBaseUrl);
+  return cookie;
 }
 
 /**
@@ -367,20 +411,18 @@ export async function buildN8nAuthHeaders(
 
   const { workspaceId } = user;
 
-  // Preferred: workspace-scoped cookie via stored ops.user credentials.
-  let cookie = await getN8nAuthCookie(workspaceId, n8nBaseUrl);
+  // Preferred: workspace-scoped cookie (auto-provisioned via invitations on first use).
+  let cookie = await getOrCreateWorkspaceN8nCookie({ workspaceId, n8nBaseUrl, pmosUser: user });
   if (cookie) return { Cookie: cookie };
 
-  // Bootstrap: if no creds exist yet, try to provision a workspace user using the owner session.
-  await ensureWorkspaceUserViaOwnerCookie(workspaceId, n8nBaseUrl);
-  cookie = await getN8nAuthCookie(workspaceId, n8nBaseUrl);
-  if (cookie) return { Cookie: cookie };
-
-  // Last-resort: use owner cookie for any authenticated PMOS user.
-  // Per-workspace n8n user creation is not reliably supported in this n8n version.
-  // Workspace isolation is enforced at the proxy level via workflow tags.
-  const ownerCookie = await getOwnerCookie(n8nBaseUrl);
-  if (ownerCookie) return { Cookie: ownerCookie };
+  // Optional last-resort: allow owner fallback only for super_admin or when explicitly enabled.
+  const allowOwnerFallback =
+    user.role === "super_admin" ||
+    ["1", "true", "yes"].includes(String(process.env.N8N_ALLOW_OWNER_FALLBACK ?? "").trim().toLowerCase());
+  if (allowOwnerFallback) {
+    const ownerCookie = await getOwnerCookie(n8nBaseUrl);
+    if (ownerCookie) return { Cookie: ownerCookie };
+  }
 
   // Last-resort: use API key only when explicitly scoped to this n8n base URL.
   // (Some workspaces may still carry remote ops keys; don't leak those into embedded n8n auth.)
