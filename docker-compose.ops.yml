@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   ops:
-    image: n8nio/n8n:latest
+    image: ghcr.io/wickeddevsupport/openclaw-n8n-vendor:n8n-1.76.1
     container_name: wicked-ops
     restart: unless-stopped
     labels:
