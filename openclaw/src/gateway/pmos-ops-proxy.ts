@@ -8,7 +8,7 @@ import { Readable } from "node:stream";
 import { loadConfig } from "../config/config.js";
 import { resolvePmosSessionFromRequest } from "./pmos-auth.js";
 import { readWorkspaceConnectors } from "./workspace-connectors.js";
-import { buildN8nAuthHeaders } from "./n8n-auth-bridge.js";
+import { buildN8nAuthHeaders, getOwnerCookie } from "./n8n-auth-bridge.js";
 
 function uniqResolved(items: string[]): string[] {
   const seen = new Set<string>();
@@ -109,6 +109,197 @@ const STRIP_RESPONSE_HEADERS = new Set([
   // Web Fetch API auto-decompresses; strip so downstream doesn't try to decompress again
   "content-encoding",
 ]);
+
+// ---------------------------------------------------------------------------
+// Workspace isolation: tag-based workflow filtering
+// ---------------------------------------------------------------------------
+
+// Cache: workspaceId → n8n tag ID
+const workspaceTagCache = new Map<string, string>();
+
+async function ensureWorkspaceN8nTag(workspaceId: string, n8nBaseUrl: string): Promise<string | null> {
+  const cached = workspaceTagCache.get(workspaceId);
+  if (cached) return cached;
+
+  const tagName = `pmos-ws-${workspaceId}`;
+  const base = n8nBaseUrl.replace(/\/+$/, "");
+  const ownerCookie = await getOwnerCookie(n8nBaseUrl);
+  if (!ownerCookie) return null;
+
+  try {
+    // Find existing tag
+    const listRes = await fetch(`${base}/rest/tags`, {
+      headers: { Cookie: ownerCookie, accept: "application/json" },
+    });
+    if (listRes.ok) {
+      const data = await listRes.json() as { data?: Array<{ id: string; name: string }> };
+      const match = (data.data ?? []).find((t) => t.name === tagName);
+      if (match?.id) {
+        workspaceTagCache.set(workspaceId, match.id);
+        return match.id;
+      }
+    }
+
+    // Create tag
+    const createRes = await fetch(`${base}/rest/tags`, {
+      method: "POST",
+      headers: { Cookie: ownerCookie, "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ name: tagName }),
+    });
+    if (createRes.ok) {
+      const data = await createRes.json() as { id?: string; data?: { id: string } };
+      const id = data.id ?? data.data?.id;
+      if (id) {
+        workspaceTagCache.set(workspaceId, id);
+        return id;
+      }
+    }
+  } catch {
+    // best-effort
+  }
+  return null;
+}
+
+function workflowBelongsToWorkspace(workflow: unknown, workspaceId: string): boolean {
+  const wf = workflow as Record<string, unknown> | null;
+  if (!wf) return false;
+  const tagName = `pmos-ws-${workspaceId}`;
+  const tags = Array.isArray(wf.tags) ? wf.tags : [];
+  return tags.some((t: unknown) => {
+    if (!t || typeof t !== "object") return false;
+    return (t as Record<string, unknown>).name === tagName;
+  });
+}
+
+async function proxyWorkflowList(params: {
+  req: IncomingMessage;
+  res: ServerResponse;
+  targetUrl: string;
+  extraHeaders?: Record<string, string>;
+  workspaceId: string;
+}): Promise<void> {
+  const { req, res, targetUrl, extraHeaders, workspaceId } = params;
+  const headers = buildForwardHeaders(req, extraHeaders);
+  const body = await readBody(req);
+
+  let upstream: Response;
+  try {
+    upstream = await fetch(targetUrl, {
+      method: req.method,
+      headers,
+      body: body.length > 0 ? (body as unknown as BodyInit) : undefined,
+    });
+  } catch (err) {
+    res.statusCode = 502;
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.end(JSON.stringify({ ok: false, error: `Upstream unreachable: ${String(err)}` }));
+    return;
+  }
+
+  if (upstream.ok) {
+    const rawBuf = Buffer.from(await upstream.arrayBuffer());
+    try {
+      const parsed = JSON.parse(rawBuf.toString("utf-8")) as unknown;
+      const filtered = (() => {
+        if (parsed && typeof parsed === "object" && Array.isArray((parsed as Record<string, unknown>).data)) {
+          const p = parsed as Record<string, unknown>;
+          return { ...p, data: (p.data as unknown[]).filter((wf) => workflowBelongsToWorkspace(wf, workspaceId)) };
+        }
+        if (Array.isArray(parsed)) {
+          return parsed.filter((wf) => workflowBelongsToWorkspace(wf, workspaceId));
+        }
+        return parsed;
+      })();
+      const filteredStr = JSON.stringify(filtered);
+      res.statusCode = upstream.status;
+      for (const [k, v] of upstream.headers.entries()) {
+        if (STRIP_RESPONSE_HEADERS.has(k.toLowerCase()) || k.toLowerCase() === "content-length") continue;
+        res.setHeader(k, v);
+      }
+      res.setHeader("Content-Length", Buffer.byteLength(filteredStr));
+      res.end(filteredStr);
+      return;
+    } catch {
+      // parse failed — return original buffered response
+      res.statusCode = upstream.status;
+      for (const [k, v] of upstream.headers.entries()) {
+        if (STRIP_RESPONSE_HEADERS.has(k.toLowerCase())) continue;
+        res.setHeader(k, v);
+      }
+      res.end(rawBuf);
+      return;
+    }
+  }
+
+  // Non-OK: stream through
+  res.statusCode = upstream.status;
+  for (const [k, v] of upstream.headers.entries()) {
+    if (STRIP_RESPONSE_HEADERS.has(k.toLowerCase())) continue;
+    res.setHeader(k, v);
+  }
+  if (upstream.body) {
+    Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0]).pipe(res);
+  } else {
+    res.end();
+  }
+}
+
+async function proxyWorkflowCreate(params: {
+  req: IncomingMessage;
+  res: ServerResponse;
+  targetUrl: string;
+  extraHeaders?: Record<string, string>;
+  workspaceId: string;
+  n8nBaseUrl: string;
+}): Promise<void> {
+  const { req, res, targetUrl, extraHeaders, workspaceId, n8nBaseUrl } = params;
+  let body = await readBody(req);
+
+  // Inject workspace tag ID into the workflow body
+  const tagId = await ensureWorkspaceN8nTag(workspaceId, n8nBaseUrl);
+  if (tagId && body.length > 0) {
+    try {
+      const parsed = JSON.parse(body.toString("utf-8")) as Record<string, unknown>;
+      const existingTags = Array.isArray(parsed.tags) ? (parsed.tags as unknown[]) : [];
+      if (!existingTags.includes(tagId)) {
+        parsed.tags = [...existingTags, tagId];
+      }
+      body = Buffer.from(JSON.stringify(parsed));
+    } catch {
+      // keep original body
+    }
+  }
+
+  const headers = buildForwardHeaders(req, {
+    ...extraHeaders,
+    "content-length": String(body.length),
+  });
+
+  let upstream: Response;
+  try {
+    upstream = await fetch(targetUrl, {
+      method: req.method,
+      headers,
+      body: body.length > 0 ? (body as unknown as BodyInit) : undefined,
+    });
+  } catch (err) {
+    res.statusCode = 502;
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.end(JSON.stringify({ ok: false, error: `Upstream unreachable: ${String(err)}` }));
+    return;
+  }
+
+  res.statusCode = upstream.status;
+  for (const [k, v] of upstream.headers.entries()) {
+    if (STRIP_RESPONSE_HEADERS.has(k.toLowerCase())) continue;
+    res.setHeader(k, v);
+  }
+  if (upstream.body) {
+    Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0]).pipe(res);
+  } else {
+    res.end();
+  }
+}
 
 function readGlobalOpsConfig(): { url: string; apiKey: string | null } {
   const cfg = loadConfig() as unknown;
@@ -293,8 +484,24 @@ export async function handleLocalN8nRequest(
 
   const n8n = readLocalN8nConfig();
   if (n8n) {
-    // Use auth bridge for workspace-scoped n8n auth (cached session cookies + API keys)
     const authHeaders = await buildN8nAuthHeaders(req, n8n.url);
+
+    // Workspace-aware workflow endpoints (editor iframe calls /rest/workflows)
+    if (isRestApi && (pathname === "/rest/workflows" || pathname.startsWith("/rest/workflows/"))) {
+      const session = await resolvePmosSessionFromRequest(req);
+      if (session.ok) {
+        const { workspaceId } = session.user;
+        if (req.method === "GET" && pathname === "/rest/workflows") {
+          await proxyWorkflowList({ req, res, targetUrl: `${n8n.url}/rest/workflows${url.search}`, extraHeaders: authHeaders, workspaceId });
+          return true;
+        }
+        if ((req.method === "POST" || req.method === "PUT" || req.method === "PATCH") && pathname === "/rest/workflows") {
+          await proxyWorkflowCreate({ req, res, targetUrl: `${n8n.url}/rest/workflows${url.search}`, extraHeaders: authHeaders, workspaceId, n8nBaseUrl: n8n.url });
+          return true;
+        }
+      }
+    }
+
     // Fall back to legacy auto-login if bridge returns no headers
     if (!authHeaders.Cookie && !authHeaders["X-N8N-API-KEY"]) {
       await attemptAutoLoginForRequest(req, res, n8n.url);
@@ -483,6 +690,19 @@ export async function handleOpsProxyRequest(
 
     if (localN8n) {
       const authHeaders = await buildN8nAuthHeaders(req, localN8n.url);
+
+      // Workspace-aware workflow endpoints
+      if (apiPath === "/workflows" || apiPath.startsWith("/workflows/")) {
+        if (req.method === "GET" && apiPath === "/workflows") {
+          await proxyWorkflowList({ req, res, targetUrl: `${localN8n.url}/rest/workflows${url.search}`, extraHeaders: authHeaders, workspaceId });
+          return true;
+        }
+        if ((req.method === "POST" || req.method === "PUT" || req.method === "PATCH") && apiPath === "/workflows") {
+          await proxyWorkflowCreate({ req, res, targetUrl: `${localN8n.url}/rest/workflows${url.search}`, extraHeaders: authHeaders, workspaceId, n8nBaseUrl: localN8n.url });
+          return true;
+        }
+      }
+
       if (!authHeaders.Cookie && !authHeaders["X-N8N-API-KEY"]) {
         await attemptAutoLoginForRequest(req, res, localN8n.url);
       }

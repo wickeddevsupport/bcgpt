@@ -241,6 +241,9 @@ export function connectGateway(host: GatewayHost) {
       void loadNodes(host as unknown as OpenClawApp, { quiet: true });
       void loadDevices(host as unknown as OpenClawApp, { quiet: true });
       void refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0]);
+      // Auto-refresh connector status on connect so opsProvisioned is populated
+      // immediately (no manual "Provision" click required).
+      void (host as unknown as OpenClawApp).handlePmosRefreshConnectors();
     },
     onClose: ({ code, reason }) => {
       host.connected = false;

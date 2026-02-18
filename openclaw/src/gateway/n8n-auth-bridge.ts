@@ -46,7 +46,7 @@ function readOwnerCreds(): { email: string; password: string } | null {
   return { email, password };
 }
 
-async function getOwnerCookie(n8nBaseUrl: string): Promise<string | null> {
+export async function getOwnerCookie(n8nBaseUrl: string): Promise<string | null> {
   const cached = ownerCookieCache.get(n8nBaseUrl);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.cookie;
@@ -368,11 +368,11 @@ export async function buildN8nAuthHeaders(
   cookie = await getN8nAuthCookie(workspaceId, n8nBaseUrl);
   if (cookie) return { Cookie: cookie };
 
-  // Last-resort for initial bootstrap: let super_admin operate with the owner cookie.
-  if (user.role === "super_admin") {
-    const ownerCookie = await getOwnerCookie(n8nBaseUrl);
-    if (ownerCookie) return { Cookie: ownerCookie };
-  }
+  // Last-resort: use owner cookie for any authenticated PMOS user.
+  // Per-workspace n8n user creation is not reliably supported in this n8n version.
+  // Workspace isolation is enforced at the proxy level via workflow tags.
+  const ownerCookie = await getOwnerCookie(n8nBaseUrl);
+  if (ownerCookie) return { Cookie: ownerCookie };
 
   // Last-resort: use API key only when explicitly scoped to this n8n base URL.
   // (Some workspaces may still carry remote ops keys; don't leak those into embedded n8n auth.)

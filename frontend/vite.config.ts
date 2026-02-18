@@ -8,12 +8,17 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
+      // Proxy API and ops calls to the OpenClaw gateway (default dev port 10001)
       '/api': {
-        target: 'http://localhost:3001',
+        target: 'http://localhost:10001',
         changeOrigin: true,
       },
       '/mcp': {
-        target: 'http://localhost:3001',
+        target: 'http://localhost:10001',
+        changeOrigin: true,
+      },
+      '/ops-ui': {
+        target: 'http://localhost:10001',
         changeOrigin: true,
       },
     },

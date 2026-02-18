@@ -23,12 +23,12 @@ export default function Sidebar() {
       {/* Logo */}
       <div className="p-3 lg:p-4 border-b border-gray-700">
         <div className="flex items-center gap-2">
-          <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
-            <span className="text-white font-bold text-lg">P</span>
+          <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl flex items-center justify-center shadow-lg">
+            <span className="text-white font-bold text-lg">O</span>
           </div>
           <div className="hidden lg:block">
-            <span className="text-lg font-bold">PMOS</span>
-            <p className="text-xs text-gray-400">PM Operating System</p>
+            <span className="text-lg font-bold">OpenClaw</span>
+            <p className="text-xs text-gray-400">AI Automation OS</p>
           </div>
         </div>
       </div>

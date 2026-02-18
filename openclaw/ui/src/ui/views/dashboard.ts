@@ -138,73 +138,41 @@ export function renderDashboard(props: DashboardProps) {
   })();
 
   const refreshBusy = props.connectorsLoading ?? false;
+  // Core setup: only the 3 steps needed to start using the app.
+  // BCGPT / AI model / first workflow are optional config — shown in Integrations tab.
   const setupSteps: SetupStep[] = [
     {
       id: "gateway",
-      title: "Connect Wicked OS",
-      detail: "Sign in and connect once. Access key is only needed for legacy/manual pairing.",
+      title: "Sign in",
+      detail: "Authenticated and connected to your workspace.",
       done: props.connected,
       actionKind: "connect",
-      actionLabel: "Connect now",
+      actionLabel: "Reconnect",
     },
     {
       id: "ops",
-      title: "Provision Workflows",
-      detail: "Auto-provisioned on signup - creates your personal n8n workflow project.",
+      title: "Workflow engine ready",
+      detail: "Your embedded workflow runtime is running. No provisioning needed.",
       done: Boolean(props.opsProvisioned),
-      actionLabel: "Provision",
+      actionKind: "refresh",
+      actionLabel: "Check status",
     },
     {
       id: "ops-runtime",
-      title: "Embedded n8n Runtime",
-      detail: "Verify native workflow editor runtime health before building flows.",
+      title: "Workflows editor live",
+      detail: "The n8n editor is embedded and accessible in the Workflows tab.",
       done: opsRuntimeStatus.tone === "ok",
       actionKind: "refresh",
       actionLabel: "Check runtime",
-    },
-    {
-      id: "bcgpt",
-      title: "Connect BCGPT",
-      detail: "Add your BCGPT API key so chat can use Basecamp and MCP tools.",
-      done: bcgptStatus.tone === "ok",
-      href: props.integrationsHref,
-      actionLabel: "Open integrations",
-    },
-    {
-      id: "model-auth",
-      title: "Add AI Model Key",
-      detail: "Integrations -> AI Model Setup",
-      done: Boolean(props.modelAuthConfigured),
-      href: props.integrationsHref,
-      actionLabel: "Configure model",
-    },
-    {
-      id: "first-flow",
-      title: "Create First Workflow",
-      detail: "Build your first workflow in the Workflows editor.",
-      done: flows.length > 0,
-      href: props.automationsHref,
-      actionLabel: "Open workflows",
-    },
-    {
-      id: "chat-ready",
-      title: "Start Using Chat",
-      detail: "Use chat to build and run workflows in plain language.",
-      done:
-        props.connected &&
-        Boolean(props.modelAuthConfigured) &&
-        Boolean(props.opsProvisioned) &&
-        opsRuntimeStatus.tone === "ok" &&
-        bcgptStatus.tone === "ok",
-      href: props.chatHref,
-      actionLabel: "Open chat",
     },
   ];
   const setupCompleted = setupSteps.filter((step) => step.done).length;
   const allSetupDone = setupCompleted === setupSteps.length;
   const nextSetupStep = setupSteps.find((step) => !step.done) ?? null;
-  // Auto-collapse wizard if all steps are done
-  const wizardOpen = !allSetupDone;
+  // Collapse wizard automatically once core is ready (connected + workflow engine up).
+  // Only keep it open if something is broken, so it doesn't distract on every login.
+  const coreReady = props.connected && Boolean(props.opsProvisioned) && opsRuntimeStatus.tone === "ok";
+  const wizardOpen = !coreReady && !allSetupDone;
   const focusItems = [
     bcgptStatus.tone !== "ok"
       ? { title: "Fix BCGPT connector", detail: "Restore MCP auth for project actions", href: props.integrationsHref }
@@ -226,13 +194,13 @@ export function renderDashboard(props: DashboardProps) {
     <details class="card setup-wizard" style="margin-bottom: 18px;" ?open=${wizardOpen}>
       <summary class="setup-wizard__summary">
         <div class="setup-wizard__summary-main">
-          <div class="card-title">Quick Setup Wizard</div>
+          <div class="card-title">System Status</div>
           <div class="card-sub">
-            Follow these steps once. After setup, your team can run nearly everything by chat.
+            ${coreReady ? "Everything is running. Click to expand for details." : "Check that core services are running before using the app."}
           </div>
         </div>
-        <span class="chip ${setupCompleted === setupSteps.length ? "chip-ok" : "chip-warn"}">
-          ${setupCompleted}/${setupSteps.length}
+        <span class="chip ${coreReady ? "chip-ok" : "chip-warn"}">
+          ${coreReady ? "Ready" : `${setupCompleted}/${setupSteps.length}`}
         </span>
       </summary>
 

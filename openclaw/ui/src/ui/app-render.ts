@@ -506,7 +506,7 @@ export function renderApp(state: AppViewState) {
                 onClearTrace: () => state.handlePmosTraceClear(),
                 onProvisionOps: () => state.handlePmosProvisionOps(),
                 opsProvisioning: state.pmosOpsProvisioning,
-                opsProvisioned: Boolean(state.pmosOpsProvisioningResult?.apiKey),
+                opsProvisioned: Boolean(state.pmosOpsProvisioningResult?.apiKey) || state.pmosConnectorsStatus?.ops?.reachable === true,
                 opsProvisioningResult: state.pmosOpsProvisioningResult,
                 opsProvisioningError: state.pmosOpsProvisioningError,
                 opsManualApiKeyDraft: state.pmosOpsManualApiKeyDraft,
@@ -709,7 +709,7 @@ export function renderApp(state: AppViewState) {
                 },
                 onModelSave: () => state.handlePmosModelSave(),
                 onModelClearKey: () => state.handlePmosModelClearKey(),
-                opsProvisioned: Boolean(state.pmosOpsProvisioningResult?.apiKey),
+                opsProvisioned: Boolean(state.pmosOpsProvisioningResult?.apiKey) || state.pmosConnectorsStatus?.ops?.reachable === true,
                 opsProjectId: state.pmosOpsProvisioningResult?.projectId ?? null,
               })
             : nothing

@@ -1,5 +1,6 @@
 // API service for PMOS frontend
-const API_BASE = import.meta.env.DEV ? 'http://localhost:10000' : '';
+// In dev, proxy to OpenClaw gateway. In production, same-origin (deployed together).
+const API_BASE = import.meta.env.DEV ? '' : '';
 
 // Get stored API key
 export function getApiKey(): string | null {
@@ -218,7 +219,64 @@ export async function listProjects(): Promise<Array<{
     throw new Error(data.error.message || 'MCP error');
   }
   
-  return data.result?.content?.[0]?.text 
+  return data.result?.content?.[0]?.text
     ? JSON.parse(data.result.content[0].text).projects || []
     : [];
+}
+
+// ---- PMOS Auth API ----
+// Uses cookie-based sessions (pmos_session). Works from any machine/IP.
+
+export interface AuthUser {
+  id: string
+  name: string
+  email: string
+  role: string
+  workspaceId: string
+}
+
+export async function authMe(): Promise<AuthUser | null> {
+  const response = await fetch(`${API_BASE}/api/pmos/auth/me`, {
+    credentials: 'include',
+  })
+  if (!response.ok) return null
+  const data = await response.json()
+  return data.user ?? null
+}
+
+export async function authLogin(email: string, password: string): Promise<{ ok: boolean; user?: AuthUser; error?: string }> {
+  const response = await fetch(`${API_BASE}/api/pmos/auth/login`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  })
+  const data = await response.json()
+  if (!response.ok) {
+    return { ok: false, error: data.error || `Login failed (${response.status})` }
+  }
+  return { ok: true, user: data.user }
+}
+
+export async function authSignup(name: string, email: string, password: string): Promise<{ ok: boolean; user?: AuthUser; error?: string }> {
+  const response = await fetch(`${API_BASE}/api/pmos/auth/signup`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, email, password }),
+  })
+  const data = await response.json()
+  if (!response.ok) {
+    return { ok: false, error: data.error || `Signup failed (${response.status})` }
+  }
+  return { ok: true, user: data.user }
+}
+
+export async function authLogout(): Promise<void> {
+  await fetch(`${API_BASE}/api/pmos/auth/logout`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  })
 }

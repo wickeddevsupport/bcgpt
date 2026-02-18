@@ -27,15 +27,16 @@ interface PMOSState {
   messages: Message[]
   isLoading: boolean
   chatOpen: boolean
-  
+
   // Project context
   currentProject: Project | null
   projects: Project[]
-  
+
   // User
   user: User | null
   isAuthenticated: boolean
-  
+  authChecked: boolean  // true once we've attempted to restore the session
+
   // Actions
   addMessage: (message: Omit<Message, 'id' | 'timestamp'>) => void
   setMessages: (messages: Message[]) => void
@@ -44,6 +45,7 @@ interface PMOSState {
   setCurrentProject: (project: Project | null) => void
   setProjects: (projects: Project[]) => void
   setUser: (user: User | null) => void
+  setAuthChecked: (checked: boolean) => void
   clearMessages: () => void
 }
 
@@ -63,7 +65,8 @@ export const useStore = create<PMOSState>((set) => ({
   projects: [],
   user: null,
   isAuthenticated: false,
-  
+  authChecked: false,
+
   // Actions
   addMessage: (message) =>
     set((state) => ({
@@ -78,16 +81,18 @@ export const useStore = create<PMOSState>((set) => ({
     })),
 
   setMessages: (messages) => set({ messages }),
-    
+
   setLoading: (loading) => set({ isLoading: loading }),
-  
+
   toggleChat: () => set((state) => ({ chatOpen: !state.chatOpen })),
-  
+
   setCurrentProject: (project) => set({ currentProject: project }),
-  
+
   setProjects: (projects) => set({ projects }),
-  
+
   setUser: (user) => set({ user, isAuthenticated: !!user }),
-  
+
+  setAuthChecked: (checked) => set({ authChecked: checked }),
+
   clearMessages: () => set({ messages: [] }),
 }))

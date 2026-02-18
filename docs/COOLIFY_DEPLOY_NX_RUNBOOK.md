@@ -27,6 +27,10 @@ OPENCLAW_GATEWAY_TOKEN=*** node openclaw/scripts/pmos-smoke.mjs
 ```
 
 ---
+ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
+Coolify token
+12|cG6Bz3yyfgvNwSgIoJAwtZ1bCFVqNTo3CQWjSB990eb7383a
+
 
 ## 2) Coolify Environment Baseline
 
