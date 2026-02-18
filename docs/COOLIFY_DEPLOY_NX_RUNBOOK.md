@@ -163,6 +163,9 @@ node openclaw/scripts/pmos-smoke.mjs
 
 ## 6) Troubleshooting
 
+- If `https://os.wickedlab.io/` returns `503` with `Control UI assets not found`:
+  - The image is missing `openclaw/dist/control-ui/index.html`.
+  - Ensure the Docker build runs `openclaw-control-ui:build` **after** `openclaw-app:build` (to avoid the app build wiping `dist/`), then redeploy.
 - If `https://os.wickedlab.io/ops-ui/` returns `503`, check gateway logs first:
   - You should see `[n8n] embedded n8n started at ...`
   - If missing, verify vendored n8n path detection and container layout (`/vendor/n8n` vs `/openclaw/vendor/n8n`)
