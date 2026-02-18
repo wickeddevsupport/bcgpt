@@ -1,22 +1,24 @@
-name: Build OpenClaw n8n Vendor Image
+name: Build OpenClaw Image
 
 on:
   workflow_dispatch:
     inputs:
-      n8n_version:
-        description: "n8n git tag/branch (e.g. n8n@1.76.1). Leave empty to read from Dockerfile."
-        required: false
-        default: ""
       image_tag:
-        description: "Image tag (e.g. n8n-1.76.1). Leave empty to derive from n8n_version."
+        description: "Image tag (e.g. latest, sha, custom)"
         required: false
-        default: ""
+        default: "latest"
+      n8n_vendor_image:
+        description: "Vendor image (e.g. ghcr.io/wickeddevsupport/openclaw-n8n-vendor:n8n-1.76.1)"
+        required: false
+        default: "ghcr.io/wickeddevsupport/openclaw-n8n-vendor:n8n-1.76.1"
   push:
     branches:
       - main
     paths:
+      - 'openclaw/**'
       - 'Dockerfile.openclaw.nx'
-      - '.github/workflows/openclaw-n8n-vendor-image.yml'
+      - 'docker-compose.pmos.yml'
+      - '.github/workflows/openclaw-image.yml'
 
 permissions:
   contents: read
@@ -39,41 +41,38 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Resolve n8n version
-        id: n8n
+      - name: Resolve image settings
+        id: img
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            version="${{ inputs.n8n_version }}"
-            tag="${{ inputs.image_tag }}"
+          tag="${{ inputs.image_tag }}"
+          vendor="${{ inputs.n8n_vendor_image }}"
+          if [ -z "$tag" ]; then
+            tag="latest"
           fi
-          if [ -z "${version:-}" ]; then
-            version="$(grep -E '^ARG N8N_VERSION=' Dockerfile.openclaw.nx | head -1 | sed -E 's/^ARG N8N_VERSION=//')"
+          if [ -z "$vendor" ]; then
+            vendor="ghcr.io/wickeddevsupport/openclaw-n8n-vendor:n8n-1.76.1"
           fi
-          if [ -z "${tag:-}" ]; then
-            tag="$(echo "$version" | sed -E 's/^n8n@/n8n-/')"
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "vendor=$vendor" >> "$GITHUB_OUTPUT"
 
       - name: Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/wickeddevsupport/openclaw-n8n-vendor
+          images: ghcr.io/wickeddevsupport/openclaw
           tags: |
-            type=raw,value=${{ steps.n8n.outputs.tag }}
+            type=raw,value=${{ steps.img.outputs.tag }}
             type=sha,format=short
 
-      - name: Build and push vendor image
+      - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile.openclaw.nx
-          target: n8n_vendor_build
           push: true
           build-args: |
             INCLUDE_VENDORED_N8N=true
-            N8N_VERSION=${{ steps.n8n.outputs.version }}
+            N8N_VENDOR_IMAGE=${{ steps.img.outputs.vendor }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
