@@ -279,10 +279,11 @@ async function main() {
   // UI markers live in the JS bundle (SPA).
   const assetPath = extractAssetPath(rootHtml);
   const bundle = await assertGetOk(assetPath);
-  assertContains(bundle, "Command Center", "phase6");
-  assertContains(bundle, "Workspace Identity", "phase4");
-  assertContains(bundle, "AI Flow Builder", "phase5");
-  assertContains(bundle, "Execution Trace", "phase3");
+  assertContains(bundle, "Command Center", "ui-command-center");
+  assertContains(bundle, "Workspace Identity", "ui-workspace-identity");
+  // Phase 3 UX: "native" workflows means n8n is embedded in-dashboard, not opened in a new tab.
+  assertContains(bundle, "Embedded n8n editor", "ui-ops-embed");
+  assertContains(bundle, "Execution Trace", "ui-execution-trace");
 
   // n8n ops tools + mutation smoke
   await assertTool("ops_workflows_list", {});

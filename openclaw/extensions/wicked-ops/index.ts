@@ -245,16 +245,47 @@ export default {
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
-        const params = resolveToolParams(toolCallIdOrParams, maybeParams) as Record<string, any>;
-        const workspaceId = readOptionalString(params, "workspaceId");
-        if (!params || typeof params !== "object" || !params.name) {
+        const params = resolveToolParams(toolCallIdOrParams, maybeParams);
+        if (!params || typeof params !== "object" || Array.isArray(params)) {
           throw new Error("name is required");
         }
+        const name = readOptionalString(params, "name");
+        const workspaceId = readOptionalString(params, "workspaceId");
+        if (!name) {
+          throw new Error("name is required");
+        }
+
+        // n8n's API validates request bodies strictly. Ensure required fields exist and
+        // never forward tool-only fields (workspaceId) to n8n.
+        const body: Record<string, unknown> = { ...(params as Record<string, unknown>), name };
+        delete body.workspaceId;
+
+        if (!Array.isArray(body.nodes)) {
+          body.nodes = [
+            {
+              name: "Start",
+              type: "n8n-nodes-base.start",
+              typeVersion: 1,
+              position: [250, 300],
+              parameters: {},
+            },
+          ];
+        }
+        if (!body.connections || typeof body.connections !== "object" || Array.isArray(body.connections)) {
+          body.connections = {};
+        }
+        if (!body.settings || typeof body.settings !== "object" || Array.isArray(body.settings)) {
+          body.settings = {};
+        }
+        if (typeof body.active !== "boolean") {
+          body.active = false;
+        }
+
         const data = await opsRequest({
           api,
           endpoint: "workflows",
           method: "POST",
-          body: params,
+          body,
           workspaceId,
         });
         return jsonToolResult(data);
