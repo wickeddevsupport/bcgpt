@@ -216,7 +216,8 @@ async function proxyWorkflowList(params: {
       const filtered = (() => {
         if (parsed && typeof parsed === "object" && Array.isArray((parsed as Record<string, unknown>).data)) {
           const p = parsed as Record<string, unknown>;
-          return { ...p, data: (p.data as unknown[]).filter((wf) => workflowBelongsToWorkspace(wf, workspaceId)) };
+          const filteredData = (p.data as unknown[]).filter((wf) => workflowBelongsToWorkspace(wf, workspaceId));
+          return { ...p, data: filteredData, count: filteredData.length };
         }
         if (Array.isArray(parsed)) {
           return parsed.filter((wf) => workflowBelongsToWorkspace(wf, workspaceId));
@@ -604,11 +605,11 @@ export async function handleLocalN8nRequest(
  *
  * Returns true if the upgrade was handled.
  */
-export function tunnelN8nWebSocket(
+export async function tunnelN8nWebSocket(
   req: IncomingMessage,
   socket: Duplex,
   head: Buffer,
-): boolean {
+): Promise<boolean> {
   const url = new URL(req.url ?? "/", "http://localhost");
   const pathname = url.pathname;
 
@@ -623,18 +624,24 @@ export function tunnelN8nWebSocket(
   const n8n = readLocalN8nConfig();
   if (!n8n) return false;
 
+  // Inject n8n auth cookie so n8n accepts the WebSocket upgrade.
+  // Strip the client's cookies (pmos_session, etc.) and replace with the owner cookie.
+  const ownerCookie = await getOwnerCookie(n8n.url);
+
   const upstream = net.connect(n8n.port, n8n.host, () => {
-    // Reconstruct the HTTP upgrade request to forward to n8n
-    const headers = Object.entries(req.headers)
-      .filter(([k]) => !["connection", "upgrade"].includes(k.toLowerCase()))
+    // Reconstruct the HTTP upgrade request, stripping client cookies and injecting n8n auth
+    const forwardedHeaders = Object.entries(req.headers)
+      .filter(([k]) => !["connection", "upgrade", "cookie"].includes(k.toLowerCase()))
       .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : (v ?? "")}`)
       .join("\r\n");
+    const cookieLine = ownerCookie ? `Cookie: ${ownerCookie}\r\n` : "";
     upstream.write(
       `GET ${pathname}${url.search} HTTP/1.1\r\n` +
         `Host: ${n8n.host}:${n8n.port}\r\n` +
         `Upgrade: websocket\r\n` +
         `Connection: Upgrade\r\n` +
-        `${headers}\r\n\r\n`,
+        cookieLine +
+        `${forwardedHeaders}\r\n\r\n`,
     );
     if (head.length > 0) {
       upstream.write(head);

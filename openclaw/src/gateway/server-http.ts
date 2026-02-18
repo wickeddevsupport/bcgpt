@@ -471,7 +471,7 @@ export function attachGatewayUpgradeHandler(opts: {
         }
       }
       // Tunnel n8n WebSocket push connection to local n8n if configured
-      if (tunnelN8nWebSocket(req, socket, head)) {
+      if (await tunnelN8nWebSocket(req, socket, head)) {
         return;
       }
       wss.handleUpgrade(req, socket, head, (ws) => {
