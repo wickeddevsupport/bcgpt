@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -122,11 +123,18 @@ const STRIP_RESPONSE_HEADERS = new Set([
 // Cache: workspaceId → n8n tag ID
 const workspaceTagCache = new Map<string, string>();
 
+function workspaceTagName(workspaceId: string): string {
+  // n8n enforces a short tag name limit (currently 24 chars). Workspace IDs are often UUID-like,
+  // so derive a stable short tag name from a hash to guarantee it fits.
+  const hash = createHash("sha256").update(workspaceId).digest("hex").slice(0, 18);
+  return `pmos-${hash}`; // 23 chars
+}
+
 export async function ensureWorkspaceN8nTag(workspaceId: string, n8nBaseUrl: string): Promise<string | null> {
   const cached = workspaceTagCache.get(workspaceId);
   if (cached) return cached;
 
-  const tagName = `pmos-ws-${workspaceId}`;
+  const tagName = workspaceTagName(workspaceId);
   const base = n8nBaseUrl.replace(/\/+$/, "");
   const ownerCookie = await getOwnerCookie(n8nBaseUrl);
   if (!ownerCookie) return null;
@@ -168,7 +176,7 @@ export async function ensureWorkspaceN8nTag(workspaceId: string, n8nBaseUrl: str
 export function workflowBelongsToWorkspace(workflow: unknown, workspaceId: string): boolean {
   const wf = workflow as Record<string, unknown> | null;
   if (!wf) return false;
-  const tagName = `pmos-ws-${workspaceId}`;
+  const tagName = workspaceTagName(workspaceId);
   const tags = Array.isArray(wf.tags) ? wf.tags : [];
   return tags.some((t: unknown) => {
     if (!t || typeof t !== "object") return false;
