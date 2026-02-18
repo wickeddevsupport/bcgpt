@@ -106,7 +106,65 @@ function clearAuthState(state: PmosAuthState): void {
   state.pmosCurrentUserRole = "workspace_admin";
 }
 
+const CACHED_USER_KEY = "pmos_cached_user_v1";
+
+function saveCachedUser(user: PmosAuthUser): void {
+  try {
+    localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function loadCachedUser(): PmosAuthUser | null {
+  try {
+    const raw = localStorage.getItem(CACHED_USER_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const u = parsed as Partial<PmosAuthUser>;
+      if (u.id && u.email && u.role && u.workspaceId) {
+        return u as PmosAuthUser;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function clearCachedUser(): void {
+  try {
+    localStorage.removeItem(CACHED_USER_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 export async function loadPmosAuthSession(state: PmosAuthState): Promise<void> {
+  // Optimistic restore: if we have a cached user, apply it immediately so the
+  // dashboard shows at once instead of a blocking "Restoring session..." screen.
+  const cached = loadCachedUser();
+  if (cached) {
+    applyAuthenticatedUser(state, cached);
+    // Don't set pmosAuthLoading — verify in background without blocking UI
+    try {
+      const result = await requestAuth(state, "me", { method: "GET" });
+      if (result.ok && result.user) {
+        applyAuthenticatedUser(state, result.user);
+        saveCachedUser(result.user);
+      } else if (result.status === 401 || result.status === 403) {
+        clearCachedUser();
+        clearAuthState(state);
+      }
+      // On other errors (network, 5xx), keep the optimistic user — they stay logged in
+    } catch {
+      // Network failure: keep cached state, they stay logged in
+    }
+    return;
+  }
+
+  // No cached user — show loading screen and wait for auth response
   state.pmosAuthLoading = true;
   state.pmosAuthError = null;
   try {
@@ -115,11 +173,11 @@ export async function loadPmosAuthSession(state: PmosAuthState): Promise<void> {
     });
     if (result.ok && result.user) {
       applyAuthenticatedUser(state, result.user);
+      saveCachedUser(result.user);
       return;
     }
-    // Only clear auth state on explicit auth failures. If the server is temporarily
-    // unavailable, keep the last known user to avoid UI flicker on navigation.
     if (result.status === 401 || result.status === 403) {
+      clearCachedUser();
       clearAuthState(state);
     } else {
       state.pmosAuthError = result.error || "Failed to restore session.";
@@ -154,6 +212,7 @@ export async function signupPmosAuth(state: PmosAuthState): Promise<boolean> {
       return false;
     }
     applyAuthenticatedUser(state, result.user);
+    saveCachedUser(result.user);
     state.pmosAuthPassword = "";
     return true;
   } catch (err) {
@@ -180,6 +239,7 @@ export async function loginPmosAuth(state: PmosAuthState): Promise<boolean> {
       return false;
     }
     applyAuthenticatedUser(state, result.user);
+    saveCachedUser(result.user);
     state.pmosAuthPassword = "";
     return true;
   } catch (err) {
@@ -201,6 +261,7 @@ export async function logoutPmosAuth(state: PmosAuthState): Promise<void> {
   } catch (err) {
     state.pmosAuthError = String(err);
   } finally {
+    clearCachedUser();
     clearAuthState(state);
     state.pmosAuthLoading = false;
   }
