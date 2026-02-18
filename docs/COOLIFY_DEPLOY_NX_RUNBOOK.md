@@ -63,6 +63,33 @@ If using command-based build in Coolify, use:
 corepack pnpm exec nx run openclaw-app:build --output-style=stream
 ```
 
+### Optional: Trigger Deploy via Coolify API (SSH)
+
+Use this when webhook auto-deploy is not configured or Coolify UI is unavailable.
+
+On the server (SSH first), generate a short-lived token inside the `coolify` container, trigger deploy, then delete the token:
+
+```bash
+# 1) Create ephemeral token (do not paste tokens into git/docs).
+TOKEN=$(
+  docker exec coolify php artisan tinker --execute='session(["currentTeam" => \App\Models\Team::first()]); echo \App\Models\User::first()->createToken("codex-deploy")->plainTextToken;' \
+    | tail -n 1
+)
+
+# 2) Find resource UUID (apps list).
+docker exec coolify curl -sS http://127.0.0.1:8080/api/v1/applications \
+  -H "Authorization: Bearer $TOKEN" \
+  | docker exec -i coolify jq -r '.[] | [.name, .uuid] | @tsv'
+
+# 3) Trigger deploy (example: pmos uuid).
+docker exec coolify curl -sS -X POST http://127.0.0.1:8080/api/v1/deploy \
+  -H "Authorization: Bearer $TOKEN" \
+  -d uuid=<PMOS_UUID>
+
+# 4) Cleanup (delete token).
+docker exec coolify php artisan tinker --execute='\Laravel\Sanctum\PersonalAccessToken::where("name","codex-deploy")->delete();'
+```
+
 ---
 
 ## 4) SSH Runtime Verification
