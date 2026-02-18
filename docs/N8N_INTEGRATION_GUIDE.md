@@ -22,6 +22,29 @@ OpenClaw uses n8n as its workflow automation engine, replacing Activepieces. Thi
 - Embedded custom node loading now auto-discovers all node packages in `openclaw/vendor/n8n/custom/nodes/*` (includes `n8n-nodes-basecamp` and `n8n-nodes-openclaw`).
 - Control UI connector saves now write `pmos.connectors.ops` and prune legacy `pmos.connectors.activepieces.*` keys from config writes.
 - Production note: `/ops-ui/` responds `200` to GET; prefer GET-based checks over HEAD.
+- The Control UI “Wicked OS Access Key” field is **legacy/manual** access only. Normal users should sign in via PMOS auth; they should not need to paste a key to use embedded workflows.
+
+### Build/Deploy Model (Vendored n8n)
+
+Production runs **embedded n8n** inside the PMOS/OpenClaw container. We do **not** commit the full n8n repo into this repo.
+
+Instead, `Dockerfile.openclaw.nx` does one of the following:
+
+1. **Build-time clone (default)**: clones `n8n-io/n8n` into `openclaw/vendor/n8n` and builds it during the Docker image build.
+2. **Prebuilt vendor image (recommended for speed)**: pulls a prebuilt image that already contains `openclaw/vendor/n8n`, and skips rebuilding n8n on the server.
+
+Key build args:
+
+```bash
+# Build vendored n8n from source (slower on cold cache)
+INCLUDE_VENDORED_N8N=true
+N8N_VERSION=n8n@1.76.1
+
+# Or: reuse a prebuilt vendor stage (fast, recommended on Coolify)
+N8N_VENDOR_IMAGE=ghcr.io/wickeddevsupport/openclaw-n8n-vendor:n8n-1.76.1
+```
+
+In Coolify, set `N8N_VENDOR_IMAGE` as an env var so `docker-compose.pmos.yml` passes it as a build arg.
 
 ### Why n8n
 
@@ -79,7 +102,7 @@ flowchart TB
 ```
 openclaw/
   vendor/
-    n8n/                      # Full n8n source (git subtree or clone)
+    n8n/                      # Full n8n source (Docker build-time clone or prebuilt vendor image)
       packages/
         cli/                  # n8n CLI - can be modified
         core/                 # Core workflow engine - can be modified
@@ -97,8 +120,9 @@ openclaw/
 
 | Environment | URL | Purpose |
 |-------------|-----|---------|
-| Production | Embedded in OpenClaw gateway | n8n runtime for all workspaces |
-| Local Dev | http://127.0.0.1:5678 | Embedded n8n |
+| Production | https://os.wickedlab.io/ops-ui/ | Embedded n8n editor |
+| Production | https://os.wickedlab.io/api/ops/* | Authenticated ops proxy (server-side token) |
+| Local Dev | http://127.0.0.1:5678/ops-ui/ | Embedded n8n editor |
 
 ---
 
@@ -147,12 +171,11 @@ N8N_EMBED_PORT=5678                   # Port for embedded n8n
 N8N_EMBED_HOST=127.0.0.1              # Host binding
 N8N_OWNER_EMAIL=admin@local           # Default owner email
 N8N_OWNER_PASSWORD=changeme           # Default owner password
+N8N_USER_FOLDER=/app/.openclaw/n8n     # Persist embedded n8n state inside the OpenClaw volume
+N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true # Recommended hardening
 
-# n8n Process
-N8N_PATH=/ops-ui/                     # Web path prefix
-N8N_PROTOCOL=http                     # Protocol
-N8N_HOST=127.0.0.1                    # Host
-N8N_PORT=5678                         # Port
+# Embedded-first runtime behavior
+PMOS_ALLOW_REMOTE_OPS_FALLBACK=0      # Default: do not attempt remote-ops provisioning on signup/login
 ```
 
 ---
@@ -223,6 +246,9 @@ sequenceDiagram
     end
     OpenClaw-->>User: Workspace ready with n8n
 ```
+
+**Note:** For embedded-first deployments, workflows should be usable without any external provisioning.
+Remote provisioning is a legacy path (separate ops container) and should only be enabled deliberately via `PMOS_ALLOW_REMOTE_OPS_FALLBACK=1`.
 
 ---
 
@@ -377,6 +403,8 @@ corepack pnpm --dir openclaw exec vitest run src/gateway/pmos.provision.test.ts
 
 | Issue | Solution |
 |-------|----------|
+| `503 Control UI assets not found` on `/` | Image is missing `openclaw/dist/control-ui/index.html`. Fix Docker build ordering so `openclaw-control-ui:build` runs after `openclaw-app:build`, then redeploy. |
+| Docker build fails with `NX Could not find Nx modules at "/app"` | Ensure `Dockerfile.openclaw.nx` installs Nx deps in the workspace root and runs Nx via `./node_modules/.bin/nx`. |
 | n8n not starting | Check port availability, verify n8n repo path |
 | Authentication failures | Verify N8N_OWNER_EMAIL/PASSWORD set correctly |
 | API timeouts | Check n8n process health, increase timeout |

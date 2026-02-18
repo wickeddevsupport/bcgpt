@@ -95,7 +95,11 @@ ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
 # See docs/COOLIFY_DEPLOY_NX_RUNBOOK.md (keep tokens/secrets out of git)
 ```
 
-**Note:** NX validates builds/tests; Coolify performs runtime deployment. Access Coolify through SSH, not curl.
+**Note:** NX validates builds/tests; Coolify performs runtime deployment.
+
+- Preferred: deploy via Coolify UI (webhook or manual redeploy).
+- If API access is required: SSH to the server and run API calls inside the `coolify` container using a short-lived token, then revoke it (never store tokens in git/docs).
+- For faster server builds: set `N8N_VENDOR_IMAGE=ghcr.io/wickeddevsupport/openclaw-n8n-vendor:n8n-1.76.1` in Coolify so n8n is pulled instead of rebuilt.
 
 ---
 

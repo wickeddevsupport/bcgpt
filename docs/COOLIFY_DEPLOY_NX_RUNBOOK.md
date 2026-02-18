@@ -11,7 +11,23 @@ Use this runbook to deploy OpenClaw/PMOS with embedded n8n through Coolify.
 
 Notes:
 - Coolify deployments still run via Docker images. Nx is for local validation and task orchestration; it does not replace Docker.
-- To speed Docker deploys, the `openclaw/Dockerfile` is structured so the expensive embedded n8n build step is cached and does not rerun on every app code change (only when `N8N_VERSION` changes or cache is cold).
+- To speed Docker deploys, `Dockerfile.openclaw.nx` is structured so the expensive embedded n8n build step is cached (or pulled as a prebuilt vendor image) and does not rerun on every app code change.
+
+---
+
+## 0) Known Failure Modes (Seen in Prod)
+
+These are the issues we hit during the initial Coolify+Nx rollout. If you see them again, follow the linked fix.
+
+- `503 Control UI assets not found` on `https://os.wickedlab.io/`
+  - Root cause: image missing `openclaw/dist/control-ui/index.html` at container start.
+  - Fix: ensure `openclaw-control-ui:build` runs **after** `openclaw-app:build` in `Dockerfile.openclaw.nx`, then redeploy.
+- `NX Could not find Nx modules at "/app"` during Docker build
+  - Root cause: Nx deps not installed in the Docker workspace root.
+  - Fix: `Dockerfile.openclaw.nx` must install root Nx deps (see the `npm install ...` step), then run Nx via `./node_modules/.bin/nx`.
+- Slow builds from rebuilding n8n on every deploy
+  - Root cause: cold Docker cache or no shared build cache between deployments.
+  - Fix: set `N8N_VENDOR_IMAGE` to a prebuilt vendor image (see section 2).
 
 ---
 
@@ -46,6 +62,7 @@ Set these in Coolify service env vars/secrets:
 - `PMOS_ALLOW_REMOTE_OPS_FALLBACK=0` (recommended for embedded-first runtime)
 - `N8N_USER_FOLDER=/app/.openclaw/n8n` (recommended; persists embedded n8n state inside the OpenClaw volume)
 - `N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true` (recommended; silences wide-permissions warning and hardens settings file)
+- `N8N_VENDOR_IMAGE=ghcr.io/wickeddevsupport/openclaw-n8n-vendor:n8n-1.76.1` (recommended for speed; skips rebuilding vendored n8n on the server)
 - `N8N_EMBED_PORT=5678` (optional; default is `5678`)
 - `N8N_EMBED_HOST=127.0.0.1` (optional; default is `127.0.0.1`)
 - `N8N_OWNER_EMAIL` (recommended)
@@ -67,11 +84,7 @@ Notes:
 2. Trigger deploy from Coolify UI (or let webhook auto-deploy).
 3. Confirm build logs show successful app build and container restart.
 
-If using command-based build in Coolify, use:
-
-```bash
-corepack pnpm exec nx run openclaw-app:build --output-style=stream
-```
+If you are using the **Docker Compose** build pack (recommended), you should not set a custom build command in Coolify.
 
 ### Optional: Trigger Deploy via Coolify API (SSH)
 
@@ -166,6 +179,8 @@ node openclaw/scripts/pmos-smoke.mjs
 - If `https://os.wickedlab.io/` returns `503` with `Control UI assets not found`:
   - The image is missing `openclaw/dist/control-ui/index.html`.
   - Ensure the Docker build runs `openclaw-control-ui:build` **after** `openclaw-app:build` (to avoid the app build wiping `dist/`), then redeploy.
+- If the root started as `503` and you manually built UI assets inside the running container:
+  - Restart the container so the gateway re-resolves the Control UI root and serves assets.
 - If `https://os.wickedlab.io/ops-ui/` returns `503`, check gateway logs first:
   - You should see `[n8n] embedded n8n started at ...`
   - If missing, verify vendored n8n path detection and container layout (`/vendor/n8n` vs `/openclaw/vendor/n8n`)

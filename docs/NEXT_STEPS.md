@@ -28,6 +28,8 @@ This is the active, consolidated list for the current sprint after removing Acti
 - [x] Fix embedded n8n vendored-path discovery for both repo layouts (`openclaw/src/gateway/n8n-embed.ts`)
 - [x] Add explicit embedded n8n/ops runtime diagnostics to connector status checks and dashboard health cards (`openclaw/src/gateway/server-methods/pmos.ts`, `openclaw/ui/src/ui/views/dashboard.ts`, `openclaw/ui/src/ui/views/integrations.ts`)
 - [x] Add `pmos.connectors.ops` schema support and workspace connector typing for `projectId` (`openclaw/src/config/zod-schema.ts`, `openclaw/src/gateway/workspace-connectors.ts`)
+- [x] Embedded-first runtime: avoid remote-ops auto-provisioning on signup/login unless explicitly enabled (`openclaw/src/gateway/pmos-auth-http.ts`)
+- [x] Sanitize workflow create payload before forwarding to n8n (avoid `workflow_entity.active` sqlite constraint errors) (`openclaw/src/gateway/pmos-ops-proxy.ts`)
 - [x] Fix `config.get` workspace filtering to filter `agents.list` (avoid `items.filter is not a function`) (`openclaw/src/gateway/server-methods/config.ts`)
 - [x] Support CIDR entries in `gateway.trustedProxies` for correct client IP extraction behind reverse proxies (`openclaw/src/gateway/net.ts`, `openclaw/src/gateway/net.test.ts`)
 - [x] Harden embedded n8n settings file permissions via `N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS` baseline (`docker-compose.pmos.yml`, `docs/COOLIFY_DEPLOY_NX_RUNBOOK.md`)
@@ -43,6 +45,12 @@ This is the active, consolidated list for the current sprint after removing Acti
   - Current failing suites from local run (2026-02-17): `src/cli/memory-cli.test.ts`, multiple `src/commands/doctor*.test.ts`, `src/media/server.test.ts`, and `src/cli/gateway-cli.coverage.test.ts`
 - [x] Deploy PMOS/OpenClaw via Coolify on main branch
 - [x] Redeploy PMOS container with the embedded n8n repo-path fix (`openclaw/src/gateway/n8n-embed.ts`) so `/ops-ui/` no longer returns 503
+- [x] Fix Coolify Docker build failures:
+  - [x] Install root Nx deps in `Dockerfile.openclaw.nx` and run Nx via `./node_modules/.bin/nx`
+  - [x] Avoid recursive `chown -R` on `/app` (only chown the runtime-writable directory)
+  - [x] Ensure Control UI assets exist in the final image (build `openclaw-control-ui` after `openclaw-app`)
+- [ ] Configure Coolify to use the prebuilt vendor image for faster deploys:
+  - Set `N8N_VENDOR_IMAGE=ghcr.io/wickeddevsupport/openclaw-n8n-vendor:n8n-1.76.1`
 - [x] Verify on server (SSH) that embedded n8n process starts with gateway
 - [x] Smoke test production routes:
   - `https://os.wickedlab.io` (dashboard auth + tabs)
