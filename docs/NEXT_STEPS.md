@@ -29,6 +29,9 @@ This is the active, consolidated list for the current sprint after removing Acti
 - [x] Add explicit embedded n8n/ops runtime diagnostics to connector status checks and dashboard health cards (`openclaw/src/gateway/server-methods/pmos.ts`, `openclaw/ui/src/ui/views/dashboard.ts`, `openclaw/ui/src/ui/views/integrations.ts`)
 - [x] Add `pmos.connectors.ops` schema support and workspace connector typing for `projectId` (`openclaw/src/config/zod-schema.ts`, `openclaw/src/gateway/workspace-connectors.ts`)
 - [x] Fix `config.get` workspace filtering to filter `agents.list` (avoid `items.filter is not a function`) (`openclaw/src/gateway/server-methods/config.ts`)
+- [x] Support CIDR entries in `gateway.trustedProxies` for correct client IP extraction behind reverse proxies (`openclaw/src/gateway/net.ts`, `openclaw/src/gateway/net.test.ts`)
+- [x] Harden embedded n8n settings file permissions via `N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS` baseline (`docker-compose.pmos.yml`, `docs/COOLIFY_DEPLOY_NX_RUNBOOK.md`)
+- [x] Add native workflow list/search sidebar next to embedded n8n editor (no new tab) (`openclaw/ui/src/ui/app-render.ts`)
 
 ### P0 - Deployment Path (Coolify + Nx + Server)
 

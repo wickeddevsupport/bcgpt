@@ -364,13 +364,16 @@ export async function loadWorkflows(state: PmosWorkflowsState) {
     const normalized = items
       .map((entry) => normalizeWorkflowSummary(entry))
       .filter((entry): entry is WorkflowSummary => Boolean(entry));
-    const query = state.apFlowsQuery.trim().toLowerCase();
-    state.apFlows = query
-      ? normalized.filter((flow) => {
-          const haystack = `${flow.displayName ?? ""} ${flow.id}`.toLowerCase();
-          return haystack.includes(query);
-        })
-      : normalized;
+
+    const toTs = (value?: string) => {
+      if (!value) return 0;
+      const parsed = Date.parse(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    normalized.sort((a, b) => toTs(b.updated ?? b.created) - toTs(a.updated ?? a.created));
+
+    // Keep the raw list in state and apply local filtering in the view for instant search.
+    state.apFlows = normalized;
     state.apFlowsCursor = null;
     state.apFlowsHasNext = false;
   } catch (err) {

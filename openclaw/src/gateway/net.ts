@@ -59,6 +59,136 @@ function normalizeIp(ip: string | undefined): string | undefined {
   return normalizeIPv4MappedAddress(trimmed.toLowerCase());
 }
 
+function parseIpv4ToInt(ip: string): number | null {
+  const parts = ip.split(".");
+  if (parts.length !== 4) {
+    return null;
+  }
+  let value = 0;
+  for (const part of parts) {
+    if (!part) {
+      return null;
+    }
+    const num = Number(part);
+    if (!Number.isInteger(num) || num < 0 || num > 255) {
+      return null;
+    }
+    value = (value << 8) | num;
+  }
+  return value >>> 0;
+}
+
+function stripOptionalZoneId(ip: string): string {
+  const idx = ip.indexOf("%");
+  if (idx === -1) {
+    return ip;
+  }
+  return ip.slice(0, idx);
+}
+
+function parseIpv6ToBigInt(ip: string): bigint | null {
+  const normalized = stripOptionalZoneId(ip);
+  if (net.isIP(normalized) !== 6) {
+    return null;
+  }
+
+  const parts = normalized.split("::");
+  if (parts.length > 2) {
+    return null;
+  }
+
+  const leftRaw = parts[0] ? parts[0].split(":").filter(Boolean) : [];
+  const rightRaw = parts.length === 2 && parts[1] ? parts[1].split(":").filter(Boolean) : [];
+
+  const parseGroups = (groups: string[]): number[] | null => {
+    const out: number[] = [];
+    for (const group of groups) {
+      if (!group) {
+        return null;
+      }
+      if (group.includes(".")) {
+        const ipv4 = parseIpv4ToInt(group);
+        if (ipv4 === null) {
+          return null;
+        }
+        out.push((ipv4 >>> 16) & 0xffff, ipv4 & 0xffff);
+        continue;
+      }
+      const num = Number.parseInt(group, 16);
+      if (!Number.isInteger(num) || num < 0 || num > 0xffff) {
+        return null;
+      }
+      out.push(num);
+    }
+    return out;
+  };
+
+  const left = parseGroups(leftRaw);
+  const right = parseGroups(rightRaw);
+  if (!left || !right) {
+    return null;
+  }
+
+  const total = left.length + right.length;
+  if (total > 8) {
+    return null;
+  }
+
+  const full: number[] = [];
+  full.push(...left);
+
+  if (parts.length === 2) {
+    const missing = 8 - total;
+    for (let i = 0; i < missing; i += 1) {
+      full.push(0);
+    }
+    full.push(...right);
+  } else {
+    if (total !== 8) {
+      return null;
+    }
+    full.push(...right);
+  }
+
+  if (full.length !== 8) {
+    return null;
+  }
+
+  let value = 0n;
+  for (const group of full) {
+    value = (value << 16n) | BigInt(group);
+  }
+  return value;
+}
+
+function isIpv4InCidr(ip: string, base: string, prefix: number): boolean {
+  if (prefix < 0 || prefix > 32) {
+    return false;
+  }
+  const ipInt = parseIpv4ToInt(ip);
+  const baseInt = parseIpv4ToInt(base);
+  if (ipInt === null || baseInt === null) {
+    return false;
+  }
+  const mask = prefix === 0 ? 0 : ((0xffffffff << (32 - prefix)) >>> 0);
+  return (ipInt & mask) === (baseInt & mask);
+}
+
+function isIpv6InCidr(ip: string, base: string, prefix: number): boolean {
+  if (prefix < 0 || prefix > 128) {
+    return false;
+  }
+  const ipBig = parseIpv6ToBigInt(ip);
+  const baseBig = parseIpv6ToBigInt(base);
+  if (ipBig === null || baseBig === null) {
+    return false;
+  }
+  const allOnes = (1n << 128n) - 1n;
+  const hostBits = 128 - prefix;
+  const mask = hostBits === 128 ? 0n : ((allOnes << BigInt(hostBits)) & allOnes);
+  return (ipBig & mask) === (baseBig & mask);
+}
+
 function stripOptionalPort(ip: string): string {
   if (ip.startsWith("[")) {
     const end = ip.indexOf("]");
@@ -100,7 +230,43 @@ export function isTrustedProxyAddress(ip: string | undefined, trustedProxies?: s
   if (!normalized || !trustedProxies || trustedProxies.length === 0) {
     return false;
   }
-  return trustedProxies.some((proxy) => normalizeIp(proxy) === normalized);
+  return trustedProxies.some((entry) => {
+    const raw = String(entry ?? "").trim();
+    if (!raw) {
+      return false;
+    }
+
+    const slash = raw.indexOf("/");
+    if (slash === -1) {
+      return normalizeIp(raw) === normalized;
+    }
+
+    const baseRaw = raw.slice(0, slash).trim();
+    const prefixRaw = raw.slice(slash + 1).trim();
+    if (!baseRaw || !prefixRaw) {
+      return false;
+    }
+
+    const prefix = Number(prefixRaw);
+    if (!Number.isInteger(prefix)) {
+      return false;
+    }
+
+    const base = normalizeIp(baseRaw);
+    if (!base) {
+      return false;
+    }
+
+    const ipFamily = net.isIP(normalized);
+    const baseFamily = net.isIP(base);
+    if (ipFamily === 4 && baseFamily === 4) {
+      return isIpv4InCidr(normalized, base, prefix);
+    }
+    if (ipFamily === 6 && baseFamily === 6) {
+      return isIpv6InCidr(normalized, base, prefix);
+    }
+    return false;
+  });
 }
 
 export function resolveGatewayClientIp(params: {

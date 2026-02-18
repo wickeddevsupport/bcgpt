@@ -313,6 +313,16 @@ export function renderApp(state: AppViewState) {
     state.agentsList?.defaultId ??
     state.agentsList?.agents?.[0]?.id ??
     null;
+  const workflowsQuery = (state.apFlowsQuery ?? "").trim().toLowerCase();
+  const workflowsFiltered = workflowsQuery
+    ? (state.apFlows ?? []).filter((flow) =>
+        `${flow.displayName ?? ""} ${flow.id}`.toLowerCase().includes(workflowsQuery),
+      )
+    : (state.apFlows ?? []);
+  const selectedWorkflow =
+    state.apFlowSelectedId && state.apFlows
+      ? state.apFlows.find((flow) => flow.id === state.apFlowSelectedId) ?? null
+      : null;
 
   // Auto-exit onboarding if all setup steps are done
   if (state.onboarding && state.tab === "dashboard" && state.configSnapshot) {
@@ -513,22 +523,151 @@ export function renderApp(state: AppViewState) {
                   ? html`<div class="loading-panel" style="display:flex;align-items:center;justify-content:center;height:100%;gap:12px;">
                       <span class="spinner"></span>
                       <span class="muted">Setting up your automation workspace...</span>
-                    </div>`
-                  : html`<div class="card" style="height:calc(100vh - 200px); min-height:640px; padding:0; overflow:hidden;">
-                      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);">
-                        <div class="card-sub">Embedded n8n editor (native in dashboard)</div>
-                        <a class="btn btn--secondary btn--sm" href=${buildOpsUiEmbedUrl(basePath, null)} rel="noreferrer">
-                          Open editor route
-                        </a>
+                     </div>`
+                  : html`<div class="card" style="height:calc(100vh - 200px); min-height:640px; padding:0; overflow:hidden; display:flex;">
+                      <div style="width:360px; border-right:1px solid var(--border); display:flex; flex-direction:column; background:rgba(255,255,255,0.02);">
+                        <div style="padding:12px 14px; border-bottom:1px solid var(--border);">
+                          <div class="card-title" style="margin:0;">Workflows</div>
+                          <div class="card-sub" style="margin-top:6px;">
+                            Search, create, and open a workflow directly in the embedded editor.
+                          </div>
+                        </div>
+
+                        <div style="padding:10px 14px; border-bottom:1px solid var(--border); display:flex; flex-direction:column; gap:10px;">
+                          <input
+                            class="input"
+                            .value=${state.apFlowsQuery}
+                            @input=${(e: Event) => (state.apFlowsQuery = (e.target as HTMLInputElement).value)}
+                            placeholder="Search workflows..."
+                            autocomplete="off"
+                          />
+                          <div class="row" style="justify-content:space-between;">
+                            <button
+                              class="btn btn--secondary btn--sm"
+                              ?disabled=${state.apFlowsLoading}
+                              @click=${() => void state.handlePmosApFlowsLoad()}
+                              title="Refresh workflow list"
+                            >
+                              ${state.apFlowsLoading ? "Refreshing..." : "Refresh"}
+                            </button>
+                            <span class="chip ${workflowsFiltered.length ? "chip-ok" : "chip-warn"}" title="Workflows currently loaded">
+                              ${workflowsFiltered.length} ${workflowsFiltered.length === 1 ? "workflow" : "workflows"}
+                            </span>
+                          </div>
+                          ${state.apFlowsError
+                            ? html`<div class="callout warn" style="margin:0;">${state.apFlowsError}</div>`
+                            : nothing}
+                        </div>
+
+                        <div style="padding:10px 14px; border-bottom:1px solid var(--border); display:flex; flex-direction:column; gap:10px;">
+                          <div class="row" style="gap:10px;">
+                            <input
+                              class="input"
+                              style="flex:1; min-width:0;"
+                              .value=${state.apFlowCreateName}
+                              @input=${(e: Event) => (state.apFlowCreateName = (e.target as HTMLInputElement).value)}
+                              placeholder="New workflow name"
+                              autocomplete="off"
+                              ?disabled=${state.apFlowCreateSaving}
+                              @keydown=${(e: KeyboardEvent) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  void state.handlePmosApFlowCreate();
+                                }
+                              }}
+                            />
+                            <button
+                              class="btn primary btn--sm"
+                              ?disabled=${state.apFlowCreateSaving}
+                              @click=${() => void state.handlePmosApFlowCreate()}
+                              title="Create a new workflow"
+                            >
+                              ${state.apFlowCreateSaving ? "Creating..." : "Create"}
+                            </button>
+                          </div>
+                          ${state.apFlowCreateError
+                            ? html`<div class="callout danger" style="margin:0;">${state.apFlowCreateError}</div>`
+                            : nothing}
+                        </div>
+
+                        <div style="flex:1; overflow:auto; padding:10px 10px 14px 10px;">
+                          ${workflowsFiltered.length === 0 && !state.apFlowsLoading
+                            ? html`<div class="muted" style="padding:10px 6px;">
+                                No workflows found. Create one, or refresh.
+                              </div>`
+                            : nothing}
+                          ${workflowsFiltered.map((flow) => {
+                            const selected = state.apFlowSelectedId === flow.id;
+                            const label = flow.displayName || flow.id;
+                            const status = (flow.status ?? "").toUpperCase();
+                            const statusTone = status === "ENABLED" ? "chip-ok" : status === "DISABLED" ? "chip-warn" : "";
+                            return html`
+                              <button
+                                class="btn btn--secondary"
+                                style="
+                                  width:100%;
+                                  justify-content:space-between;
+                                  align-items:flex-start;
+                                  text-align:left;
+                                  padding:10px 10px;
+                                  margin:6px 0;
+                                  border-radius:12px;
+                                  border:1px solid ${selected ? "rgba(255,255,255,0.25)" : "var(--border)"};
+                                  background:${selected ? "rgba(255,255,255,0.06)" : "transparent"};
+                                  gap:10px;
+                                "
+                                @click=${() => void state.handlePmosApFlowSelect(flow.id)}
+                                title=${label}
+                              >
+                                <span style="min-width:0; flex:1; display:flex; flex-direction:column; gap:4px;">
+                                  <span style="font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                                    ${label}
+                                  </span>
+                                  <span class="muted mono" style="font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                                    ${flow.id}
+                                  </span>
+                                </span>
+                                <span style="display:flex; flex-direction:column; align-items:flex-end; gap:6px;">
+                                  ${status
+                                    ? html`<span class="chip ${statusTone}" style="font-size:11px;">${status}</span>`
+                                    : nothing}
+                                </span>
+                              </button>
+                            `;
+                          })}
+                        </div>
                       </div>
-                      <iframe
-                        src=${buildOpsUiEmbedUrl(basePath, state.apFlowSelectedId)}
-                        title="OpenClaw Workflows Editor"
-                        style="width:100%;height:100%;border:0;display:block;background:#111;"
-                        allow="clipboard-read; clipboard-write"
-                      ></iframe>
+
+                      <div style="flex:1; display:flex; flex-direction:column; min-width:0;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border); gap:12px;">
+                          <div style="min-width:0;">
+                            <div class="card-sub">Embedded n8n editor (native in dashboard)</div>
+                            ${selectedWorkflow
+                              ? html`<div class="muted" style="margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                                  Editing: <span style="font-weight:600;">${selectedWorkflow.displayName ?? selectedWorkflow.id}</span>
+                                </div>`
+                              : nothing}
+                          </div>
+                          <div class="row" style="gap:10px;">
+                            <a
+                              class="btn btn--secondary btn--sm"
+                              href=${buildOpsUiEmbedUrl(basePath, null)}
+                              rel="noreferrer"
+                              title="Open the embedded editor route full-screen"
+                            >
+                              Open editor route
+                            </a>
+                          </div>
+                        </div>
+                        <iframe
+                          src=${buildOpsUiEmbedUrl(basePath, state.apFlowSelectedId)}
+                          title="OpenClaw Workflows Editor"
+                          style="width:100%;height:100%;border:0;display:block;background:#111; flex:1;"
+                          allow="clipboard-read; clipboard-write"
+                        ></iframe>
+                      </div>
                     </div>`}
-              </div>`
+               </div>`
             : nothing
         }
 

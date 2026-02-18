@@ -1,79 +1,41 @@
-import os from "node:os";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { pickPrimaryLanIPv4, resolveGatewayListenHosts } from "./net.js";
+import { describe, expect, it } from "vitest";
+import { isTrustedProxyAddress, resolveGatewayClientIp } from "./net.js";
 
-describe("resolveGatewayListenHosts", () => {
-  it("returns the input host when not loopback", async () => {
-    const hosts = await resolveGatewayListenHosts("0.0.0.0", {
-      canBindToHost: async () => {
-        throw new Error("should not be called");
-      },
-    });
-    expect(hosts).toEqual(["0.0.0.0"]);
+describe("gateway/net trusted proxies", () => {
+  it("matches exact proxy IPs (including IPv4-mapped IPv6)", () => {
+    expect(isTrustedProxyAddress("127.0.0.1", ["127.0.0.1"])).toBe(true);
+    expect(isTrustedProxyAddress("::ffff:127.0.0.1", ["127.0.0.1"])).toBe(true);
+    expect(isTrustedProxyAddress("::1", ["127.0.0.1"])).toBe(false);
   });
 
-  it("adds ::1 when IPv6 loopback is available", async () => {
-    const hosts = await resolveGatewayListenHosts("127.0.0.1", {
-      canBindToHost: async () => true,
-    });
-    expect(hosts).toEqual(["127.0.0.1", "::1"]);
+  it("matches IPv4 CIDR entries", () => {
+    expect(isTrustedProxyAddress("10.0.10.2", ["10.0.0.0/8"])).toBe(true);
+    expect(isTrustedProxyAddress("10.255.255.255", ["10.0.0.0/8"])).toBe(true);
+    expect(isTrustedProxyAddress("11.0.0.1", ["10.0.0.0/8"])).toBe(false);
+    expect(isTrustedProxyAddress("10.0.10.2", ["10.0.0.0/33"])).toBe(false);
   });
 
-  it("keeps only IPv4 loopback when IPv6 is unavailable", async () => {
-    const hosts = await resolveGatewayListenHosts("127.0.0.1", {
-      canBindToHost: async () => false,
-    });
-    expect(hosts).toEqual(["127.0.0.1"]);
-  });
-});
-
-describe("pickPrimaryLanIPv4", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
+  it("matches IPv6 CIDR entries", () => {
+    expect(isTrustedProxyAddress("2001:db8::1", ["2001:db8::/32"])).toBe(true);
+    expect(isTrustedProxyAddress("2001:db9::1", ["2001:db8::/32"])).toBe(false);
   });
 
-  it("returns en0 IPv4 address when available", () => {
-    vi.spyOn(os, "networkInterfaces").mockReturnValue({
-      lo0: [
-        { address: "127.0.0.1", family: "IPv4", internal: true, netmask: "" },
-      ] as unknown as os.NetworkInterfaceInfo[],
-      en0: [
-        { address: "192.168.1.42", family: "IPv4", internal: false, netmask: "" },
-      ] as unknown as os.NetworkInterfaceInfo[],
-    });
-    expect(pickPrimaryLanIPv4()).toBe("192.168.1.42");
-  });
+  it("resolves client IP from forwarded headers only when remote is trusted", () => {
+    expect(
+      resolveGatewayClientIp({
+        remoteAddr: "10.0.10.2",
+        forwardedFor: "203.0.113.9",
+        trustedProxies: ["10.0.0.0/8"],
+      }),
+    ).toBe("203.0.113.9");
 
-  it("returns eth0 IPv4 address when en0 is absent", () => {
-    vi.spyOn(os, "networkInterfaces").mockReturnValue({
-      lo: [
-        { address: "127.0.0.1", family: "IPv4", internal: true, netmask: "" },
-      ] as unknown as os.NetworkInterfaceInfo[],
-      eth0: [
-        { address: "10.0.0.5", family: "IPv4", internal: false, netmask: "" },
-      ] as unknown as os.NetworkInterfaceInfo[],
-    });
-    expect(pickPrimaryLanIPv4()).toBe("10.0.0.5");
-  });
-
-  it("falls back to any non-internal IPv4 interface", () => {
-    vi.spyOn(os, "networkInterfaces").mockReturnValue({
-      lo: [
-        { address: "127.0.0.1", family: "IPv4", internal: true, netmask: "" },
-      ] as unknown as os.NetworkInterfaceInfo[],
-      wlan0: [
-        { address: "172.16.0.99", family: "IPv4", internal: false, netmask: "" },
-      ] as unknown as os.NetworkInterfaceInfo[],
-    });
-    expect(pickPrimaryLanIPv4()).toBe("172.16.0.99");
-  });
-
-  it("returns undefined when only internal interfaces exist", () => {
-    vi.spyOn(os, "networkInterfaces").mockReturnValue({
-      lo: [
-        { address: "127.0.0.1", family: "IPv4", internal: true, netmask: "" },
-      ] as unknown as os.NetworkInterfaceInfo[],
-    });
-    expect(pickPrimaryLanIPv4()).toBeUndefined();
+    expect(
+      resolveGatewayClientIp({
+        remoteAddr: "10.0.10.2",
+        forwardedFor: "203.0.113.9",
+        trustedProxies: [],
+      }),
+    ).toBe("10.0.10.2");
   });
 });
+

@@ -21,6 +21,8 @@ services:
       # Persist embedded n8n state (SQLite DB, credentials, settings) inside the OpenClaw volume.
       # Without this, n8n defaults to ~/.n8n which is not persisted in this compose.
       N8N_USER_FOLDER: "${N8N_USER_FOLDER:-/app/.openclaw/n8n}"
+      # Keep permissions on n8n settings file tight (n8n will enforce/auto-fix on startup).
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "${N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS:-true}"
 
       # Optional model auth (add in Coolify env vars if/when needed).
       CLAUDE_AI_SESSION_KEY: "${CLAUDE_AI_SESSION_KEY:-}"

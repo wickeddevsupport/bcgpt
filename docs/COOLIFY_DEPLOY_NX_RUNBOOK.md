@@ -35,6 +35,7 @@ Set these in Coolify service env vars/secrets:
 - `OPENCLAW_GATEWAY_TOKEN` (required)
 - `PMOS_ALLOW_REMOTE_OPS_FALLBACK=0` (recommended for embedded-first runtime)
 - `N8N_USER_FOLDER=/app/.openclaw/n8n` (recommended; persists embedded n8n state inside the OpenClaw volume)
+- `N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true` (recommended; silences wide-permissions warning and hardens settings file)
 - `N8N_EMBED_PORT=5678` (optional; default is `5678`)
 - `N8N_EMBED_HOST=127.0.0.1` (optional; default is `127.0.0.1`)
 - `N8N_OWNER_EMAIL` (recommended)
@@ -129,6 +130,9 @@ node openclaw/scripts/pmos-smoke.mjs
   - You should see `[n8n] embedded n8n started at ...`
   - If missing, verify vendored n8n path detection and container layout (`/vendor/n8n` vs `/openclaw/vendor/n8n`)
 - If logs still show `pmos-activepieces`, the deployed container is on an older runtime path and needs redeploy from latest `main`.
+- If gateway logs show `Proxy headers detected from untrusted address...`:
+  - Set `gateway.trustedProxies` in OpenClaw config to your reverse proxy IP(s).
+  - CIDR entries are supported (example: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) but only trust networks that cannot reach the gateway directly.
 
 ---
 
