@@ -99,6 +99,10 @@ const STRIP_REQUEST_HEADERS = new Set([
   // Never forward browser cookies (pmos_session, stale n8n-auth, etc.). The auth bridge injects
   // the correct n8n cookie per request.
   "cookie",
+  // undici (Node fetch) does not support `Expect: 100-continue` and will throw
+  // `TypeError: fetch failed` with cause `UND_ERR_NOT_SUPPORTED`.
+  // Some clients (notably PowerShell Invoke-WebRequest) send it by default on POST.
+  "expect",
   "connection",
   "transfer-encoding",
   "upgrade",
