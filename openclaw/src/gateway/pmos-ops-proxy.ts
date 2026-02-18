@@ -260,21 +260,25 @@ async function proxyWorkflowCreate(params: {
   const { req, res, targetUrl, extraHeaders, workspaceId, n8nBaseUrl } = params;
   let body = await readBody(req);
 
-  // Inject workspace tag ID into the workflow body
+  // Workspace isolation: inject workspace tag ID into the workflow body.
+  // Also ensure `active` is a boolean. If it's missing/invalid, n8n may insert NULL and
+  // fail with SQLITE_CONSTRAINT (workflow_entity.active) on some setups.
   const tagId = await ensureWorkspaceN8nTag(workspaceId, n8nBaseUrl);
-  if (tagId && body.length > 0) {
+  if (body.length > 0) {
     try {
       const parsed = JSON.parse(body.toString("utf-8")) as Record<string, unknown>;
 
-      // n8n schema expects `active` to be a boolean; null/invalid values can cause SQLITE_CONSTRAINT errors.
-      if ("active" in parsed && typeof parsed.active !== "boolean") {
-        delete parsed.active;
+      if (typeof parsed.active !== "boolean") {
+        parsed.active = false;
       }
 
-      const existingTags = Array.isArray(parsed.tags) ? (parsed.tags as unknown[]) : [];
-      if (!existingTags.includes(tagId)) {
-        parsed.tags = [...existingTags, tagId];
+      if (tagId) {
+        const existingTags = Array.isArray(parsed.tags) ? (parsed.tags as unknown[]) : [];
+        if (!existingTags.includes(tagId)) {
+          parsed.tags = [...existingTags, tagId];
+        }
       }
+
       body = Buffer.from(JSON.stringify(parsed));
     } catch {
       // keep original body

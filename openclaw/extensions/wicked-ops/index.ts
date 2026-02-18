@@ -161,6 +161,11 @@ async function opsRequestEmbedded(params: {
     const body = (params.body && typeof params.body === "object" && !Array.isArray(params.body))
       ? { ...(params.body as Record<string, unknown>) }
       : {};
+    // n8n's internal `/rest/workflows` endpoint will insert `active` as provided. If it's
+    // missing/invalid it can become NULL and fail with SQLITE_CONSTRAINT on some setups.
+    if (typeof (body as any).active !== "boolean") {
+      (body as any).active = false;
+    }
     const existingTags = Array.isArray((body as any).tags) ? (body as any).tags : [];
     if (!existingTags.includes(tagId)) {
       (body as any).tags = [...existingTags, tagId];
