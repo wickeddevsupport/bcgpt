@@ -7,7 +7,11 @@
 
 ## Scope
 
-Use this runbook to deploy OpenClaw/PMOS with embedded n8n through Coolify, with Nx validation before release.
+Use this runbook to deploy OpenClaw/PMOS with embedded n8n through Coolify.
+
+Notes:
+- Coolify deployments still run via Docker images. Nx is for local validation and task orchestration; it does not replace Docker.
+- To speed Docker deploys, the `openclaw/Dockerfile` is structured so the expensive embedded n8n build step is cached and does not rerun on every app code change (only when `N8N_VERSION` changes or cache is cold).
 
 ---
 
@@ -27,9 +31,11 @@ OPENCLAW_GATEWAY_TOKEN=*** node openclaw/scripts/pmos-smoke.mjs
 ```
 
 ---
-ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
-Coolify token
-12|cG6Bz3yyfgvNwSgIoJAwtZ1bCFVqNTo3CQWjSB990eb7383a
+
+## Security Note
+
+Do not store or paste credentials (SSH hosts/keys, API tokens) into this repo.
+Use placeholders in documentation and keep secrets in Coolify's secret manager.
 
 
 ## 2) Coolify Environment Baseline
@@ -99,7 +105,7 @@ docker exec coolify php artisan tinker --execute='\Laravel\Sanctum\PersonalAcces
 ## 4) SSH Runtime Verification
 
 ```bash
-ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
+ssh -i <PATH_TO_SSH_KEY> <USER>@<HOST>
 ```
 
 On server, verify container + logs:
@@ -116,8 +122,8 @@ Expected log marker:
 Optional automated check (from repo root):
 
 ```bash
-PMOS_SSH_KEY=C:\Users\rjnd\.ssh\bcgpt_hetzner \
-PMOS_SSH_HOST=deploy@46.225.102.175 \
+PMOS_SSH_KEY=<PATH_TO_SSH_KEY> \
+PMOS_SSH_HOST=<USER>@<HOST> \
 corepack pnpm --dir openclaw pmos:server-check
 ```
 

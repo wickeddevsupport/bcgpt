@@ -1,4 +1,6 @@
 import type { OpenClawPluginApi } from "../../src/plugins/types.js";
+import { getOwnerCookie } from "../../src/gateway/n8n-auth-bridge.js";
+import { readLocalN8nConfig, ensureWorkspaceN8nTag, workflowBelongsToWorkspace } from "../../src/gateway/pmos-ops-proxy.js";
 
 type OpsConfig = {
   baseUrl?: string;
@@ -46,6 +48,157 @@ function resolveOpsConfig(api: OpenClawPluginApi): Required<OpsConfig> {
   return { baseUrl, apiKey };
 }
 
+type EmbeddedOpsContext = {
+  baseUrl: string;
+  headers: Record<string, string>;
+  workspaceId?: string | null;
+};
+
+async function resolveEmbeddedOpsContext(workspaceId?: string | null): Promise<EmbeddedOpsContext | null> {
+  const local = readLocalN8nConfig();
+  if (!local) {
+    return null;
+  }
+  const ownerCookie = await getOwnerCookie(local.url);
+  if (!ownerCookie) {
+    throw new Error(
+      "Embedded n8n is running but owner credentials are missing. Set N8N_OWNER_EMAIL and N8N_OWNER_PASSWORD.",
+    );
+  }
+  return {
+    baseUrl: local.url.replace(/\/+$/, ""),
+    headers: { Cookie: ownerCookie },
+    workspaceId,
+  };
+}
+
+function normalizeTagFilter(raw?: string | null): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
+function filterWorkflowListByWorkspace(
+  payload: unknown,
+  workspaceId: string | null | undefined,
+  tagFilter: string[] = [],
+): unknown {
+  if (!workspaceId) {
+    return payload;
+  }
+  const passTagFilter = (workflow: unknown): boolean => {
+    if (tagFilter.length === 0) return true;
+    const wf = workflow as Record<string, unknown> | null;
+    if (!wf) return false;
+    const tags = Array.isArray(wf.tags) ? wf.tags : [];
+    const names = tags
+      .map((t) => (t && typeof t === "object" ? String((t as Record<string, unknown>).name ?? "") : ""))
+      .filter(Boolean);
+    return tagFilter.some((t) => names.includes(t));
+  };
+
+  if (Array.isArray(payload)) {
+    return payload.filter((wf) => workflowBelongsToWorkspace(wf, workspaceId) && passTagFilter(wf));
+  }
+  if (payload && typeof payload === "object" && Array.isArray((payload as any).data)) {
+    const p = payload as Record<string, unknown>;
+    const data = (p.data as unknown[]).filter(
+      (wf) => workflowBelongsToWorkspace(wf, workspaceId) && passTagFilter(wf),
+    );
+    return { ...p, data };
+  }
+  return payload;
+}
+
+async function assertWorkspaceWorkflowAccess(params: {
+  baseUrl: string;
+  headers: Record<string, string>;
+  workspaceId?: string | null;
+  workflowId?: string | null;
+}) {
+  const { baseUrl, headers, workspaceId, workflowId } = params;
+  if (!workspaceId || !workflowId) return;
+  const res = await fetch(`${baseUrl}/rest/workflows/${workflowId}`, { headers });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Embedded n8n request failed (${res.status}): ${text}`.trim());
+  }
+  const data = await res.json().catch(() => null);
+  const wf = (data && typeof data === "object" && "data" in data ? (data as any).data : data) as unknown;
+  if (!workflowBelongsToWorkspace(wf, workspaceId)) {
+    throw new Error("Unauthorized: workflow does not belong to this workspace.");
+  }
+}
+
+async function opsRequestEmbedded(params: {
+  endpoint: string;
+  method?: string;
+  body?: unknown;
+  workspaceId?: string | null;
+  tagsFilter?: string | null;
+}) {
+  const ctx = await resolveEmbeddedOpsContext(params.workspaceId);
+  if (!ctx) {
+    return null;
+  }
+  const method = (params.method ?? "GET").toUpperCase();
+  const endpoint = params.endpoint.replace(/^\/+/, "");
+  const url = `${ctx.baseUrl}/rest/${endpoint}`;
+  const hasBody = params.body !== undefined;
+  const headers: Record<string, string> = { ...ctx.headers };
+  if (hasBody) {
+    headers["content-type"] = "application/json";
+  }
+
+  // Workspace isolation: enforce tag on create and verify tag on mutations.
+  if (params.workspaceId && endpoint === "workflows" && method === "POST") {
+    const tagId = await ensureWorkspaceN8nTag(params.workspaceId, ctx.baseUrl);
+    if (!tagId) {
+      throw new Error("Unable to ensure workspace tag for embedded n8n.");
+    }
+    const body = (params.body && typeof params.body === "object" && !Array.isArray(params.body))
+      ? { ...(params.body as Record<string, unknown>) }
+      : {};
+    const existingTags = Array.isArray((body as any).tags) ? (body as any).tags : [];
+    if (!existingTags.includes(tagId)) {
+      (body as any).tags = [...existingTags, tagId];
+    }
+    params.body = body;
+  }
+
+  if (params.workspaceId && endpoint.startsWith("workflows/") && method !== "GET") {
+    const workflowId = endpoint.split("/")[1];
+    await assertWorkspaceWorkflowAccess({
+      baseUrl: ctx.baseUrl,
+      headers: ctx.headers,
+      workspaceId: params.workspaceId,
+      workflowId,
+    });
+  }
+
+  const res = await fetch(url, {
+    method,
+    headers,
+    body: hasBody ? JSON.stringify(params.body) : undefined,
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Embedded n8n ${res.status} ${res.statusText}: ${text}`.trim());
+  }
+
+  const text = await res.text().catch(() => "");
+  const parsed = text ? (() => { try { return JSON.parse(text); } catch { return { raw: text }; } })() : { ok: true };
+
+  if (endpoint.startsWith("workflows") && method === "GET") {
+    const tagFilter = normalizeTagFilter(params.tagsFilter ?? null);
+    return filterWorkflowListByWorkspace(parsed, params.workspaceId, tagFilter);
+  }
+  return parsed;
+}
+
 async function opsRequest(params: {
   api: OpenClawPluginApi;
   endpoint: string;
@@ -53,7 +206,19 @@ async function opsRequest(params: {
   body?: unknown;
   // optional: prefer workspace-scoped connectors when provided
   workspaceId?: string | null;
+  tagsFilter?: string | null;
 }) {
+  const embedded = await opsRequestEmbedded({
+    endpoint: params.endpoint,
+    method: params.method,
+    body: params.body,
+    workspaceId: params.workspaceId,
+    tagsFilter: params.tagsFilter ?? null,
+  });
+  if (embedded) {
+    return embedded;
+  }
+
   // Workspace override (if provided) takes precedence.
   let baseUrl: string;
   let apiKey: string;
@@ -199,7 +364,7 @@ export default {
         if (tags) query.set("tags", tags);
 
         const endpoint = query.toString() ? `workflows?${query.toString()}` : "workflows";
-        const data = await opsRequest({ api, endpoint, workspaceId });
+        const data = await opsRequest({ api, endpoint, workspaceId, tagsFilter: tags });
         return jsonToolResult(data);
       },
     });

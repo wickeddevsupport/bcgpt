@@ -1,4 +1,5 @@
 import type { UiSettings } from "../storage.ts";
+import type { PmosAuthUser } from "./pmos-auth.ts";
 
 export type PmosFlowGraphNode = {
   id: string;
@@ -42,6 +43,7 @@ export type PmosFlowBuilderState = {
   sessionKey: string;
   pmosOpsProjectId: string;
   apFlowCreateName: string;
+  pmosAuthUser?: PmosAuthUser | null;
 
   pmosFlowBuilderPrompt: string;
   pmosFlowBuilderGenerating: boolean;
@@ -82,7 +84,7 @@ function resolveToolsInvokeUrl(state: { basePath: string }): string {
 }
 
 async function invokeTool<T = unknown>(
-  state: Pick<PmosFlowBuilderState, "settings" | "basePath" | "sessionKey">,
+  state: Pick<PmosFlowBuilderState, "settings" | "basePath" | "sessionKey" | "pmosAuthUser">,
   tool: string,
   args: Record<string, unknown>,
 ): Promise<T> {
@@ -90,6 +92,11 @@ async function invokeTool<T = unknown>(
   if (!token) {
     throw new Error("Wicked OS access key missing. Go to Dashboard -> System -> paste key -> Connect.");
   }
+  const wsId = state.pmosAuthUser?.workspaceId;
+  const isSuper = state.pmosAuthUser?.role === "super_admin";
+  const toolArgs =
+    wsId && !isSuper && !("workspaceId" in args) ? { ...args, workspaceId: wsId } : args;
+
   const res = await fetch(resolveToolsInvokeUrl(state), {
     method: "POST",
     headers: {
@@ -98,7 +105,7 @@ async function invokeTool<T = unknown>(
     },
     body: JSON.stringify({
       tool,
-      args,
+      args: toolArgs,
       sessionKey: state.sessionKey || "main",
     }),
   });

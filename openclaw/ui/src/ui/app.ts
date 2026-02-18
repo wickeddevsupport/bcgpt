@@ -88,7 +88,7 @@ import {
 } from "./controllers/pmos-connectors.ts";
 import {
   clearPmosModelApiKey,
-  hydratePmosModelDraftFromConfig,
+  loadPmosModelWorkspaceState,
   savePmosModelConfig,
   setPmosModelProvider,
   type PmosModelProvider,
@@ -291,6 +291,7 @@ export class OpenClawApp extends LitElement {
   @state() pmosModelSaving = false;
   @state() pmosModelError: string | null = null;
   @state() pmosModelConfigured = false;
+  @state() pmosByokProviders: PmosModelProvider[] = [];
 
   // PMOS identity/admin (Phase 4)
   @state() pmosAdminDraftsInitialized = false;
@@ -738,7 +739,7 @@ export class OpenClawApp extends LitElement {
   async handlePmosIntegrationsLoad() {
     await loadConfig(this);
     hydratePmosConnectorDraftsFromConfig(this);
-    hydratePmosModelDraftFromConfig(this);
+    await loadPmosModelWorkspaceState(this);
     await loadPmosConnectorsStatus(this);
 
     // Load any existing workspace-scoped Wicked Ops connectors so the UI can reflect provisioning state
@@ -769,7 +770,7 @@ export class OpenClawApp extends LitElement {
     await loadConfig(this);
     this.pmosConnectorDraftsInitialized = false;
     hydratePmosConnectorDraftsFromConfig(this);
-    hydratePmosModelDraftFromConfig(this);
+    await loadPmosModelWorkspaceState(this);
     await loadPmosConnectorsStatus(this);
   }
 
@@ -778,7 +779,7 @@ export class OpenClawApp extends LitElement {
     await loadConfig(this);
     this.pmosConnectorDraftsInitialized = false;
     hydratePmosConnectorDraftsFromConfig(this);
-    hydratePmosModelDraftFromConfig(this);
+    await loadPmosModelWorkspaceState(this);
     await loadPmosConnectorsStatus(this);
   }
 
@@ -839,12 +840,12 @@ export class OpenClawApp extends LitElement {
 
   async handlePmosModelSave() {
     await savePmosModelConfig(this);
-    hydratePmosModelDraftFromConfig(this);
+    await loadPmosModelWorkspaceState(this);
   }
 
   async handlePmosModelClearKey() {
     await clearPmosModelApiKey(this);
-    hydratePmosModelDraftFromConfig(this);
+    await loadPmosModelWorkspaceState(this);
   }
 
   async handlePmosApPiecesLoad() {

@@ -23,10 +23,11 @@ COPY scripts ./scripts
 
 RUN pnpm install --frozen-lockfile
 
-COPY . .
 # Optionally include vendored n8n (for embedded n8n) at build time.
 # Enable by passing build-arg: --build-arg INCLUDE_VENDORED_N8N=true
 # Pin version with: --build-arg N8N_VERSION=n8n@1.76.1
+# NOTE: This block intentionally runs *before* copying the full repo so Docker layer caching
+# does not rebuild vendored n8n on every app code change.
 ARG INCLUDE_VENDORED_N8N=false
 ARG N8N_VERSION=n8n@1.76.1
 RUN if [ "$INCLUDE_VENDORED_N8N" = "true" ]; then \
@@ -44,6 +45,8 @@ RUN if [ "$INCLUDE_VENDORED_N8N" = "true" ]; then \
         cp -r dist package.json /app/openclaw/vendor/n8n/packages/cli/node_modules/n8n-nodes-basecamp/; \
       fi; \
     fi
+
+COPY . .
 RUN pnpm build
 # Force pnpm for UI build (Bun may fail on ARM/Synology architectures)
 ENV OPENCLAW_PREFER_PNPM=1

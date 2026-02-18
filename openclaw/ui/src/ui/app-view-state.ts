@@ -171,6 +171,7 @@ export type AppViewState = {
   pmosModelSaving: boolean;
   pmosModelError: string | null;
   pmosModelConfigured: boolean;
+  pmosByokProviders: PmosModelProvider[];
 
   // PMOS identity/admin (Phase 4)
   pmosAdminDraftsInitialized: boolean;

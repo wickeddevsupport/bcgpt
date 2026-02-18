@@ -1,5 +1,4 @@
 import type { GatewayBrowserClient } from "../gateway.ts";
-import type { ConfigSnapshot } from "../types.ts";
 
 export type PmosModelProvider = "openai" | "anthropic" | "google" | "zai" | "openrouter";
 
@@ -23,21 +22,10 @@ export const PMOS_MODEL_DEFAULTS: Record<PmosModelProvider, string> = PMOS_MODEL
   {} as Record<PmosModelProvider, string>,
 );
 
-const PMOS_MODEL_ENV_BY_PROVIDER: Record<PmosModelProvider, string> = {
-  openai: "OPENAI_API_KEY",
-  anthropic: "ANTHROPIC_API_KEY",
-  google: "GEMINI_API_KEY",
-  zai: "ZAI_API_KEY",
-  openrouter: "OPENROUTER_API_KEY",
-};
-
-const REDACTED_SENTINEL = "__OPENCLAW_REDACTED__";
 
 export type PmosModelAuthState = {
   client: GatewayBrowserClient | null;
   connected: boolean;
-  applySessionKey: string;
-  configSnapshot: ConfigSnapshot | null;
   pmosModelProvider: PmosModelProvider;
   pmosModelId: string;
   pmosModelAlias: string;
@@ -45,11 +33,9 @@ export type PmosModelAuthState = {
   pmosModelSaving: boolean;
   pmosModelError: string | null;
   pmosModelConfigured: boolean;
+  // Cached from pmos.byok.list so provider switching can update the "configured" chip without refetching.
+  pmosByokProviders?: PmosModelProvider[];
 };
-
-function deepClone<T>(value: T): T {
-  return value && typeof value === "object" ? (JSON.parse(JSON.stringify(value)) as T) : value;
-}
 
 function getPath(obj: unknown, path: string[]): unknown {
   let cur: unknown = obj;
@@ -76,19 +62,6 @@ function setPath(obj: Record<string, unknown>, path: string[], value: unknown) {
     }
     cur = cur[key] as Record<string, unknown>;
   }
-}
-
-function deletePath(obj: Record<string, unknown>, path: string[]) {
-  let cur: Record<string, unknown> = obj;
-  for (let i = 0; i < path.length - 1; i += 1) {
-    const key = path[i]!;
-    const next = cur[key];
-    if (!next || typeof next !== "object" || Array.isArray(next)) {
-      return;
-    }
-    cur = next as Record<string, unknown>;
-  }
-  delete cur[path[path.length - 1]!];
 }
 
 function asNonEmptyString(value: unknown): string | null {
@@ -119,34 +92,13 @@ function parsePrimaryModelRef(value: string | null): { provider: PmosModelProvid
   return { provider: providerRaw, modelId };
 }
 
-function resolveModelApiKeyFromConfig(config: unknown, provider: PmosModelProvider): string | null {
-  const envVar = PMOS_MODEL_ENV_BY_PROVIDER[provider];
-  return (
-    asNonEmptyString(getPath(config, ["env", "vars", envVar])) ??
-    asNonEmptyString(getPath(config, ["env", envVar])) ??
-    asNonEmptyString(getPath(config, ["models", "providers", provider, "apiKey"]))
-  );
-}
-
 export function hydratePmosModelDraftFromConfig(state: PmosModelAuthState) {
-  const cfg = state.configSnapshot?.config ?? null;
-  const primary = asNonEmptyString(getPath(cfg, ["agents", "defaults", "model", "primary"]));
-  const parsedPrimary = parsePrimaryModelRef(primary);
-
-  if (parsedPrimary) {
-    state.pmosModelProvider = parsedPrimary.provider;
-    state.pmosModelId = parsedPrimary.modelId;
-  } else {
-    state.pmosModelId = state.pmosModelId.trim() || PMOS_MODEL_DEFAULTS[state.pmosModelProvider];
-  }
-
-  const modelRef = `${state.pmosModelProvider}/${state.pmosModelId}`;
-  const alias =
-    asNonEmptyString(getPath(cfg, ["agents", "defaults", "models", modelRef, "alias"])) ?? "";
-  state.pmosModelAlias = alias;
-
-  const keyValue = resolveModelApiKeyFromConfig(cfg, state.pmosModelProvider);
-  state.pmosModelConfigured = Boolean(keyValue && keyValue.length > 0);
+  // This controller used to hydrate from global config.get (which is shared across workspaces).
+  // For PMOS multi-tenant BYOK, the source of truth is workspace config + encrypted per-workspace BYOK store.
+  state.pmosModelId = state.pmosModelId.trim() || PMOS_MODEL_DEFAULTS[state.pmosModelProvider];
+  state.pmosModelAlias = state.pmosModelAlias ?? "";
+  const byokProviders = state.pmosByokProviders ?? [];
+  state.pmosModelConfigured = byokProviders.includes(state.pmosModelProvider);
 }
 
 export function setPmosModelProvider(state: PmosModelAuthState, provider: PmosModelProvider) {
@@ -159,8 +111,51 @@ export function setPmosModelProvider(state: PmosModelAuthState, provider: PmosMo
     state.pmosModelId = PMOS_MODEL_DEFAULTS[provider];
   }
   state.pmosModelError = null;
-  const cfg = state.configSnapshot?.config ?? null;
-  state.pmosModelConfigured = Boolean(resolveModelApiKeyFromConfig(cfg, provider));
+  const byokProviders = state.pmosByokProviders ?? [];
+  state.pmosModelConfigured = byokProviders.includes(provider);
+}
+
+function hydrateFromEffectiveConfig(state: PmosModelAuthState, cfg: unknown) {
+  const primary = asNonEmptyString(getPath(cfg, ["agents", "defaults", "model", "primary"]));
+  const parsedPrimary = parsePrimaryModelRef(primary);
+  if (parsedPrimary) {
+    state.pmosModelProvider = parsedPrimary.provider;
+    state.pmosModelId = parsedPrimary.modelId;
+  } else {
+    state.pmosModelId = state.pmosModelId.trim() || PMOS_MODEL_DEFAULTS[state.pmosModelProvider];
+  }
+
+  const modelRef = `${state.pmosModelProvider}/${state.pmosModelId}`;
+  const alias = asNonEmptyString(getPath(cfg, ["agents", "defaults", "models", modelRef, "alias"])) ?? "";
+  state.pmosModelAlias = alias;
+}
+
+export async function loadPmosModelWorkspaceState(state: PmosModelAuthState) {
+  if (!state.client || !state.connected) {
+    return;
+  }
+  state.pmosModelError = null;
+  try {
+    const ws = await state.client.request<{
+      workspaceId: string;
+      workspaceConfig: unknown;
+      effectiveConfig: unknown;
+    }>("pmos.config.workspace.get", {});
+    hydrateFromEffectiveConfig(state, ws.effectiveConfig);
+
+    const byok = await state.client.request<{
+      workspaceId: string;
+      keys: Array<{ provider: string }>;
+    }>("pmos.byok.list", {});
+    const providers = byok.keys
+      .map((k) => (typeof k.provider === "string" ? k.provider.trim() : ""))
+      .filter(Boolean)
+      .filter((p): p is PmosModelProvider => isProvider(p));
+    state.pmosByokProviders = providers;
+    state.pmosModelConfigured = providers.includes(state.pmosModelProvider);
+  } catch (err) {
+    state.pmosModelError = String(err);
+  }
 }
 
 export async function savePmosModelConfig(state: PmosModelAuthState) {
@@ -179,44 +174,26 @@ export async function savePmosModelConfig(state: PmosModelAuthState) {
   state.pmosModelSaving = true;
   state.pmosModelError = null;
   try {
-    const snapshot = await state.client.request<ConfigSnapshot>("config.get", {});
-    const baseHash = snapshot.hash;
-    if (!baseHash) {
-      state.pmosModelError = "Config hash missing; reload and retry.";
-      return;
-    }
-
-    const nextConfig = deepClone((snapshot.config ?? {}) as Record<string, unknown>);
     const modelRef = `${provider}/${modelId}`;
-    setPath(nextConfig, ["agents", "defaults", "model", "primary"], modelRef);
-    setPath(nextConfig, ["agents", "defaults", "models", modelRef], {});
-    if (alias) {
-      setPath(nextConfig, ["agents", "defaults", "models", modelRef, "alias"], alias);
-    } else {
-      deletePath(nextConfig, ["agents", "defaults", "models", modelRef, "alias"]);
-    }
+    // 1) Persist model selection to workspace config (not global config)
+    const patch: Record<string, unknown> = {};
+    setPath(patch, ["agents", "defaults", "model", "primary"], modelRef);
+    // Deep-merge can't delete; set blank string when alias cleared so hydrate ignores it.
+    setPath(patch, ["agents", "defaults", "models", modelRef, "alias"], alias || "");
+    await state.client.request("pmos.config.workspace.set", { patch });
 
+    // 2) Persist API key to encrypted workspace BYOK store
     if (apiKeyDraft) {
-      const envVar = PMOS_MODEL_ENV_BY_PROVIDER[provider];
-      setPath(nextConfig, ["env", "vars", envVar], apiKeyDraft);
+      await state.client.request("pmos.byok.set", {
+        provider,
+        apiKey: apiKeyDraft,
+        defaultModel: modelId,
+        label: `${provider} key`,
+      });
     }
-
-    const raw = JSON.stringify(nextConfig, null, 2).trimEnd().concat("\n");
-    await state.client.request("config.apply", {
-      raw,
-      baseHash,
-      sessionKey: state.applySessionKey,
-    });
 
     state.pmosModelApiKeyDraft = "";
-    state.pmosModelConfigured = true;
-
-    try {
-      state.configSnapshot = await state.client.request<ConfigSnapshot>("config.get", {});
-    } catch {
-      // Gateway may be restarting after apply; keep the local state optimistic.
-      state.configSnapshot = snapshot;
-    }
+    await loadPmosModelWorkspaceState(state);
   } catch (err) {
     state.pmosModelError = String(err);
   } finally {
@@ -231,25 +208,9 @@ export async function clearPmosModelApiKey(state: PmosModelAuthState) {
   state.pmosModelSaving = true;
   state.pmosModelError = null;
   try {
-    const snapshot = await state.client.request<ConfigSnapshot>("config.get", {});
-    const baseHash = snapshot.hash;
-    if (!baseHash) {
-      state.pmosModelError = "Config hash missing; reload and retry.";
-      return;
-    }
-
-    const nextConfig = deepClone((snapshot.config ?? {}) as Record<string, unknown>);
-    const envVar = PMOS_MODEL_ENV_BY_PROVIDER[state.pmosModelProvider];
-    deletePath(nextConfig, ["env", "vars", envVar]);
-    deletePath(nextConfig, ["env", envVar]);
-    deletePath(nextConfig, ["models", "providers", state.pmosModelProvider, "apiKey"]);
-
-    const raw = JSON.stringify(nextConfig, null, 2).trimEnd().concat("\n");
-    await state.client.request("config.set", { raw, baseHash });
-
+    await state.client.request("pmos.byok.remove", { provider: state.pmosModelProvider });
     state.pmosModelApiKeyDraft = "";
-    state.pmosModelConfigured = false;
-    state.configSnapshot = await state.client.request<ConfigSnapshot>("config.get", {});
+    await loadPmosModelWorkspaceState(state);
   } catch (err) {
     state.pmosModelError = String(err);
   } finally {

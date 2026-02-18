@@ -122,7 +122,7 @@ const STRIP_RESPONSE_HEADERS = new Set([
 // Cache: workspaceId → n8n tag ID
 const workspaceTagCache = new Map<string, string>();
 
-async function ensureWorkspaceN8nTag(workspaceId: string, n8nBaseUrl: string): Promise<string | null> {
+export async function ensureWorkspaceN8nTag(workspaceId: string, n8nBaseUrl: string): Promise<string | null> {
   const cached = workspaceTagCache.get(workspaceId);
   if (cached) return cached;
 
@@ -165,7 +165,7 @@ async function ensureWorkspaceN8nTag(workspaceId: string, n8nBaseUrl: string): P
   return null;
 }
 
-function workflowBelongsToWorkspace(workflow: unknown, workspaceId: string): boolean {
+export function workflowBelongsToWorkspace(workflow: unknown, workspaceId: string): boolean {
   const wf = workflow as Record<string, unknown> | null;
   if (!wf) return false;
   const tagName = `pmos-ws-${workspaceId}`;
