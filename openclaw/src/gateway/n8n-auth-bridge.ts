@@ -157,8 +157,10 @@ export async function resolveOpenClawUser(
 async function validateN8nCookie(n8nBaseUrl: string, cookie: string): Promise<boolean> {
   const base = n8nBaseUrl.replace(/\/+$/, "");
   try {
-    // Use /rest/me to check if session is valid (lightweight endpoint)
-    const res = await fetch(`${base}/rest/me`, {
+    // Use GET /rest/login to check if session is valid
+    // - 200 + JSON response = valid session (returns user data)
+    // - 401 or {"status":"error"} = invalid/expired session
+    const res = await fetch(`${base}/rest/login`, {
       method: "GET",
       headers: {
         Cookie: cookie,
@@ -166,11 +168,9 @@ async function validateN8nCookie(n8nBaseUrl: string, cookie: string): Promise<bo
       },
     });
     // Only 200 OK means valid session
-    // 401 (unauthorized), 404 (not found = not logged in), or any other status = invalid
     return res.ok;
   } catch {
     // Network error - assume INVALID to force re-login
-    // Better to re-login than to use a stale cookie
     return false;
   }
 }
