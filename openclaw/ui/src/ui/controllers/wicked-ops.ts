@@ -20,15 +20,15 @@ async function invokeTool(
   args: Record<string, unknown>,
 ) {
   const token = state.settings.token?.trim() ?? "";
-  if (!token) {
-    throw new Error("Wicked OS access key missing. Go to Dashboard -> System -> paste key -> Connect.");
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  // Prefer bearer token when present (remote gateway/operator mode), otherwise rely on PMOS session cookie.
+  if (token) {
+    headers.authorization = `Bearer ${token}`;
   }
   const res = await fetch(resolveToolsInvokeUrl(state), {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${token}`,
-    },
+    credentials: "include",
+    headers,
     body: JSON.stringify({ tool, args, sessionKey: state.sessionKey ?? "main" }),
   });
   const data = (await res.json().catch(() => null)) as ToolInvokeOk | ToolInvokeErr | null;

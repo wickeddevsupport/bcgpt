@@ -30,9 +30,36 @@ import {
   sendUnauthorized,
 } from "./http-common.js";
 import { getBearerToken, getHeader } from "./http-utils.js";
+import { resolvePmosSessionFromRequest } from "./pmos-auth.js";
 
 const DEFAULT_BODY_BYTES = 2 * 1024 * 1024;
 const MEMORY_TOOL_NAMES = new Set(["memory_search", "memory_get"]);
+const PMOS_ALLOWED_TOOL_PREFIX = "ops_";
+const PMOS_VIEWER_ALLOWED_TOOLS = new Set([
+  "ops_workflows_list",
+  "ops_workflow_get",
+  "ops_executions_list",
+  "ops_execution_get",
+  "ops_credentials_list",
+  "ops_test_connection",
+]);
+
+function normalizeBasePath(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "/") {
+    return "";
+  }
+  const withLeading = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  return withLeading.endsWith("/") ? withLeading.slice(0, -1) : withLeading;
+}
+
+function isToolsInvokeRoute(pathname: string, controlUiBasePath?: string): boolean {
+  if (pathname === "/tools/invoke") {
+    return true;
+  }
+  const base = controlUiBasePath ? normalizeBasePath(controlUiBasePath) : "";
+  return Boolean(base && pathname === `${base}/tools/invoke`);
+}
 
 type ToolsInvokeBody = {
   tool?: unknown;
@@ -99,13 +126,43 @@ function mergeActionIntoArgsIfSupported(params: {
   return { ...args, action };
 }
 
+function toolSchemaHasKey(toolSchema: unknown, key: string): boolean {
+  const schemaObj = toolSchema as { properties?: Record<string, unknown> } | null;
+  return Boolean(
+    schemaObj &&
+      typeof schemaObj === "object" &&
+      schemaObj.properties &&
+      typeof schemaObj.properties === "object" &&
+      key in schemaObj.properties,
+  );
+}
+
+function isToolAllowedForPmosSession(params: { tool: string; role: string }): {
+  ok: boolean;
+  message?: string;
+} {
+  const tool = params.tool.trim();
+  if (!tool.startsWith(PMOS_ALLOWED_TOOL_PREFIX)) {
+    return { ok: false, message: "Tool is not available for PMOS sessions." };
+  }
+  if (params.role === "viewer" && !PMOS_VIEWER_ALLOWED_TOOLS.has(tool)) {
+    return { ok: false, message: "This action is read-only for viewer accounts." };
+  }
+  return { ok: true };
+}
+
 export async function handleToolsInvokeHttpRequest(
   req: IncomingMessage,
   res: ServerResponse,
-  opts: { auth: ResolvedGatewayAuth; maxBodyBytes?: number; trustedProxies?: string[] },
+  opts: {
+    auth: ResolvedGatewayAuth;
+    maxBodyBytes?: number;
+    trustedProxies?: string[];
+    controlUiBasePath?: string;
+  },
 ): Promise<boolean> {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-  if (url.pathname !== "/tools/invoke") {
+  if (!isToolsInvokeRoute(url.pathname, opts.controlUiBasePath)) {
     return false;
   }
 
@@ -116,13 +173,20 @@ export async function handleToolsInvokeHttpRequest(
 
   const cfg = loadConfig();
   const token = getBearerToken(req);
-  const authResult = await authorizeGatewayConnect({
+  const gatewayAuthResult = await authorizeGatewayConnect({
     auth: opts.auth,
     connectAuth: token ? { token, password: token } : null,
     req,
     trustedProxies: opts.trustedProxies ?? cfg.gateway?.trustedProxies,
   });
-  if (!authResult.ok) {
+  // PMOS sessions (cookie-based) should be able to invoke ops_* tools without requiring the
+  // shared gateway token. This keeps embedded n8n usable for signed-in workspaces.
+  const pmosSession = await resolvePmosSessionFromRequest(req);
+  const hasPmosCookieSession =
+    pmosSession.ok === true && pmosSession.sessionId !== "gateway-token";
+  const usePmosAuth = !gatewayAuthResult.ok && hasPmosCookieSession;
+
+  if (!gatewayAuthResult.ok && !hasPmosCookieSession) {
     sendUnauthorized(res);
     return true;
   }
@@ -137,6 +201,21 @@ export async function handleToolsInvokeHttpRequest(
   if (!toolName) {
     sendInvalidRequest(res, "tools.invoke requires body.tool");
     return true;
+  }
+
+  if (usePmosAuth) {
+    const role = pmosSession.ok ? pmosSession.user.role : "viewer";
+    const allowed = isToolAllowedForPmosSession({ tool: toolName, role });
+    if (!allowed.ok) {
+      sendJson(res, 403, {
+        ok: false,
+        error: {
+          type: "forbidden",
+          message: allowed.message ?? "Forbidden",
+        },
+      });
+      return true;
+    }
   }
 
   if (process.env.VITEST && MEMORY_TOOL_NAMES.has(toolName)) {
@@ -307,12 +386,21 @@ export async function handleToolsInvokeHttpRequest(
   }
 
   try {
-    const toolArgs = mergeActionIntoArgsIfSupported({
+    let toolArgs = mergeActionIntoArgsIfSupported({
       // oxlint-disable-next-line typescript/no-explicit-any
       toolSchema: (tool as any).parameters,
       action,
       args,
     });
+    if (usePmosAuth && pmosSession.ok && pmosSession.user.role !== "super_admin") {
+      // Enforce workspaceId server-side; never trust the browser-provided workspaceId.
+      const wsId = pmosSession.user.workspaceId?.trim() ?? "";
+      // oxlint-disable-next-line typescript/no-explicit-any
+      const toolSchema = (tool as any).parameters;
+      if (wsId && toolSchemaHasKey(toolSchema, "workspaceId")) {
+        toolArgs = { ...toolArgs, workspaceId: wsId };
+      }
+    }
     // oxlint-disable-next-line typescript/no-explicit-any
     const result = await (tool as any).execute?.(`http-${Date.now()}`, toolArgs);
     sendJson(res, 200, { ok: true, result });

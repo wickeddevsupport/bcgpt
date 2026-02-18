@@ -349,14 +349,15 @@ export function createGatewayHttpServer(opts: {
       if (await handleHooksRequest(req, res)) {
         return;
       }
-      if (
-        await handleToolsInvokeHttpRequest(req, res, {
-          auth: resolvedAuth,
-          trustedProxies,
-        })
-      ) {
-        return;
-      }
+        if (
+          await handleToolsInvokeHttpRequest(req, res, {
+            auth: resolvedAuth,
+            trustedProxies,
+            controlUiBasePath,
+          })
+        ) {
+          return;
+        }
       if (await handleSlackHttpRequest(req, res)) {
         return;
       }

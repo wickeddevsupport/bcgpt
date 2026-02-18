@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestRegistry } from "../test-utils/channel-plugins.js";
 import { resetTestPluginRegistry, setTestPluginRegistry, testState } from "./test-helpers.mocks.js";
 import { installGatewayTestHooks, getFreePort, startGatewayServer } from "./test-helpers.server.js";
+import { signupPmosUser } from "./pmos-auth.js";
 
 installGatewayTestHooks({ scope: "suite" });
 
@@ -234,6 +235,90 @@ describe("POST /tools/invoke", () => {
     expect(res.status).toBe(401);
 
     await server.close();
+  });
+
+  it("accepts PMOS session cookie auth for ops_* tools (no gateway token header required)", async () => {
+    // Ensure a clean PMOS auth store for this test.
+    const stateDir = process.env.OPENCLAW_STATE_DIR;
+    if (!stateDir) {
+      throw new Error("OPENCLAW_STATE_DIR missing in test environment");
+    }
+    await fs.rm(path.join(stateDir, "pmos-auth.json"), { force: true });
+
+    const signup = await signupPmosUser({
+      name: "Owner",
+      email: "owner@example.com",
+      password: "Passw0rd!",
+    });
+    expect(signup.ok).toBe(true);
+    if (!signup.ok) {
+      throw new Error(signup.error);
+    }
+
+    const port = await getFreePort();
+    const server = await startGatewayServer(port, { bind: "loopback" });
+
+    const res = await fetch(`http://127.0.0.1:${port}/tools/invoke`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: `pmos_session=${signup.sessionToken}`,
+      },
+      // Tool isn't expected to exist in this suite (extensions are disabled), but auth should pass.
+      body: JSON.stringify({ tool: "ops_fake", action: "json", args: {}, sessionKey: "main" }),
+    });
+
+    expect(res.status).toBe(404);
+
+    await server.close();
+    await fs.rm(path.join(stateDir, "pmos-auth.json"), { force: true });
+  });
+
+  it("rejects non-ops tools for PMOS sessions", async () => {
+    const stateDir = process.env.OPENCLAW_STATE_DIR;
+    if (!stateDir) {
+      throw new Error("OPENCLAW_STATE_DIR missing in test environment");
+    }
+    await fs.rm(path.join(stateDir, "pmos-auth.json"), { force: true });
+
+    const signup = await signupPmosUser({
+      name: "Owner",
+      email: "owner@example.com",
+      password: "Passw0rd!",
+    });
+    expect(signup.ok).toBe(true);
+    if (!signup.ok) {
+      throw new Error(signup.error);
+    }
+
+    testState.agentsConfig = {
+      list: [
+        {
+          id: "main",
+          tools: {
+            allow: ["agents_list"],
+          },
+        },
+      ],
+      // oxlint-disable-next-line typescript/no-explicit-any
+    } as any;
+
+    const port = await getFreePort();
+    const server = await startGatewayServer(port, { bind: "loopback" });
+
+    const res = await fetch(`http://127.0.0.1:${port}/tools/invoke`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: `pmos_session=${signup.sessionToken}`,
+      },
+      body: JSON.stringify({ tool: "agents_list", action: "json", args: {}, sessionKey: "main" }),
+    });
+
+    expect(res.status).toBe(403);
+
+    await server.close();
+    await fs.rm(path.join(stateDir, "pmos-auth.json"), { force: true });
   });
 
   it("returns 404 when tool is not allowlisted", async () => {
