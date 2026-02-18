@@ -25,3 +25,8 @@ activepieces/package-lock.json
 .nx/cache
 .nx/workspace-data
 docs/pmos/vision/temp log
+
+
+.claude/**
+**/.claude/**
+**/worktrees/**

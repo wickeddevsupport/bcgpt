@@ -3,10 +3,11 @@ version: "3.9"
 services:
   pmos:
     build:
-      context: ./openclaw
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: Dockerfile.openclaw.nx
       args:
         INCLUDE_VENDORED_N8N: "true"
+        OPENCLAW_NX_PROJECTS: "openclaw-app,openclaw-control-ui"
     environment:
       # Keep OpenClaw config/workspace in a named volume by pinning HOME into /app.
       HOME: /app
