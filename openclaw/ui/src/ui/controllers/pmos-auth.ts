@@ -146,6 +146,8 @@ export async function loadPmosAuthSession(state: PmosAuthState): Promise<void> {
   // dashboard shows at once instead of a blocking "Restoring session..." screen.
   const cached = loadCachedUser();
   if (cached) {
+    // If we have a cached user, avoid blocking the UI on the session check.
+    state.pmosAuthLoading = false;
     applyAuthenticatedUser(state, cached);
     // Don't set pmosAuthLoading — verify in background without blocking UI
     try {
