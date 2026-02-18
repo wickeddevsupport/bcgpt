@@ -103,6 +103,9 @@ const STRIP_REQUEST_HEADERS = new Set([
   // `TypeError: fetch failed` with cause `UND_ERR_NOT_SUPPORTED`.
   // Some clients (notably PowerShell Invoke-WebRequest) send it by default on POST.
   "expect",
+  // undici throws on the `Keep-Alive` header (UND_ERR_INVALID_ARG). It's also unnecessary
+  // for upstream fetch requests (connection persistence is handled by the client).
+  "keep-alive",
   "connection",
   "transfer-encoding",
   "upgrade",
