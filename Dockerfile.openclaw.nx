@@ -21,35 +21,38 @@ RUN if [ -n "$OPENCLAW_DOCKER_APT_PACKAGES" ]; then \
 # Workspace metadata for Nx
 COPY package.json nx.json ./
 
-# OpenClaw workspace (includes ui/, packages/, extensions/)
-COPY openclaw/ ./openclaw/
 # Optional custom node (used only when vendoring n8n)
 COPY n8n-nodes-basecamp/ ./n8n-nodes-basecamp/
-
-# Install OpenClaw workspace deps (includes ui)
-RUN corepack pnpm --dir openclaw install --frozen-lockfile
 
 # Optionally include vendored n8n (for embedded n8n) at build time.
 # Enable by passing build-arg: --build-arg INCLUDE_VENDORED_N8N=true
 # Pin version with: --build-arg N8N_VERSION=n8n@1.76.1
-# NOTE: This block intentionally runs *after* deps install and before build.
+# NOTE: This block intentionally runs *before* copying OpenClaw to maximize Docker caching.
 ARG INCLUDE_VENDORED_N8N=false
 ARG N8N_VERSION=n8n@1.76.1
-RUN if [ "$INCLUDE_VENDORED_N8N" = "true" ]; then \
-      apt-get update && \
-      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git && \
-      mkdir -p openclaw/vendor && \
-      git clone --depth 1 --branch "$N8N_VERSION" https://github.com/n8n-io/n8n.git openclaw/vendor/n8n && \
-      # Install n8n dependencies and build
-      cd openclaw/vendor/n8n && corepack enable && pnpm install --frozen-lockfile && pnpm build && \
-      # Install custom Basecamp node into vendored n8n
-      cd /app && \
+RUN set -eux; \
+    if [ "$INCLUDE_VENDORED_N8N" = "true" ]; then \
+      apt-get update; \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git; \
+      mkdir -p openclaw/vendor; \
+      git clone --depth 1 --branch "$N8N_VERSION" https://github.com/n8n-io/n8n.git openclaw/vendor/n8n; \
+      cd openclaw/vendor/n8n; \
+      corepack enable; \
+      pnpm install --frozen-lockfile; \
+      pnpm build; \
+      cd /app; \
       if [ -d "n8n-nodes-basecamp" ]; then \
-        cd n8n-nodes-basecamp && npm run build 2>/dev/null || true && \
-        mkdir -p /app/openclaw/vendor/n8n/packages/cli/node_modules/n8n-nodes-basecamp && \
+        cd n8n-nodes-basecamp && npm run build 2>/dev/null || true; \
+        mkdir -p /app/openclaw/vendor/n8n/packages/cli/node_modules/n8n-nodes-basecamp; \
         cp -r dist package.json /app/openclaw/vendor/n8n/packages/cli/node_modules/n8n-nodes-basecamp/; \
       fi; \
     fi
+
+# OpenClaw workspace (includes ui/, packages/, extensions/)
+COPY openclaw/ ./openclaw/
+
+# Install OpenClaw workspace deps (includes ui)
+RUN corepack pnpm --dir openclaw install --frozen-lockfile
 
 # Build with Nx to match local preflight
 ENV NX_DAEMON=false
