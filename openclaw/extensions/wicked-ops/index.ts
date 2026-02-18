@@ -153,23 +153,29 @@ async function opsRequestEmbedded(params: {
   }
 
   // Workspace isolation: enforce tag on create and verify tag on mutations.
-  if (params.workspaceId && endpoint === "workflows" && method === "POST") {
-    const tagId = await ensureWorkspaceN8nTag(params.workspaceId, ctx.baseUrl);
-    if (!tagId) {
-      throw new Error("Unable to ensure workspace tag for embedded n8n.");
-    }
-    const body = (params.body && typeof params.body === "object" && !Array.isArray(params.body))
-      ? { ...(params.body as Record<string, unknown>) }
-      : {};
+  if (endpoint === "workflows" && method === "POST") {
+    const body =
+      params.body && typeof params.body === "object" && !Array.isArray(params.body)
+        ? { ...(params.body as Record<string, unknown>) }
+        : {};
+
     // n8n's internal `/rest/workflows` endpoint will insert `active` as provided. If it's
     // missing/invalid it can become NULL and fail with SQLITE_CONSTRAINT on some setups.
     if (typeof (body as any).active !== "boolean") {
       (body as any).active = false;
     }
-    const existingTags = Array.isArray((body as any).tags) ? (body as any).tags : [];
-    if (!existingTags.includes(tagId)) {
-      (body as any).tags = [...existingTags, tagId];
+
+    if (params.workspaceId) {
+      const tagId = await ensureWorkspaceN8nTag(params.workspaceId, ctx.baseUrl);
+      if (!tagId) {
+        throw new Error("Unable to ensure workspace tag for embedded n8n.");
+      }
+      const existingTags = Array.isArray((body as any).tags) ? (body as any).tags : [];
+      if (!existingTags.includes(tagId)) {
+        (body as any).tags = [...existingTags, tagId];
+      }
     }
+
     params.body = body;
   }
 
