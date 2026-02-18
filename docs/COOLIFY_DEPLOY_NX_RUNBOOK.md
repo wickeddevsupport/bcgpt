@@ -31,6 +31,9 @@ These are the issues we hit during the initial Coolify+Nx rollout. If you see th
 - `Embedded n8n 500 Internal Server Error: SQLITE_CONSTRAINT: NOT NULL constraint failed: workflow_entity.active`
   - Root cause: `POST /rest/workflows` can insert `active=NULL` when the field is missing/invalid.
   - Fix: force `active: false` on embedded workflow create (tools path + proxy path), then redeploy.
+- `POST /api/ops/workflows` returns `502 {"ok":false,"error":"Upstream unreachable: TypeError: fetch failed"}` (GET works)
+  - Root cause: some clients/proxies send request headers (`Expect: 100-continue`, `Keep-Alive`) that Node's `fetch` (undici) rejects when forwarded upstream.
+  - Fix: strip `expect` + `keep-alive` in `openclaw/src/gateway/pmos-ops-proxy.ts` (`STRIP_REQUEST_HEADERS`), then redeploy.
 - `Unable to ensure workspace tag for embedded n8n.`
   - Root cause: n8n tag names are limited to 24 characters; raw workspace IDs often exceed this.
   - Fix: workspace isolation tag name is derived from a short hash (see `openclaw/src/gateway/pmos-ops-proxy.ts`), then redeploy.
@@ -162,8 +165,16 @@ curl -I https://bcgpt.wickedlab.io/health
 Authenticated ops proxy check:
 
 ```bash
-curl -sS https://os.wickedlab.io/api/ops/workflows \
-  -H "Authorization: Bearer <OPENCLAW_GATEWAY_TOKEN>"
+# 1) Login to PMOS and store the session cookie
+curl -sS -c pmos.cookies.txt -X POST https://os.wickedlab.io/api/pmos/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"email":"<EMAIL>","password":"<PASSWORD>"}'
+
+# 2) Verify embedded n8n is auto-authenticated as the same user
+curl -sS -b pmos.cookies.txt https://os.wickedlab.io/rest/login
+
+# 3) Verify ops proxy works (workflow list)
+curl -sS -b pmos.cookies.txt https://os.wickedlab.io/api/ops/workflows
 ```
 
 End-to-end smoke:

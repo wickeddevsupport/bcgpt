@@ -12,6 +12,7 @@ OpenClaw uses n8n as its workflow automation engine, replacing Activepieces. Thi
 ### Current Runtime Notes (2026-02-18)
 
 - Control UI workflows are now embedded natively in the `automations` tab (no forced `/ops-ui/` redirect/new-tab behavior).
+- Embedded n8n uses **one-login** behavior: the PMOS session (`pmos_session`) is bridged to a **workspace-scoped** n8n auth cookie, and n8n users are auto-provisioned on first access (invitation + accept). `GET /rest/login` should show the same email as the PMOS user.
 - PMOS flow/run command handlers use n8n `ops_*` tools instead of legacy `flow_*` Activepieces tools.
 - Connector status checks no longer probe Activepieces endpoints in the active runtime path.
 - Connector status now includes explicit embedded runtime diagnostics (`ops.reachable`, mode, vendored-repo presence) to expose `/ops-ui/` startup failures quickly.
@@ -25,6 +26,7 @@ OpenClaw uses n8n as its workflow automation engine, replacing Activepieces. Thi
 - If the embedded editor iframe is blank, check `/ops-ui/assets/*.js` in devtools. If those return HTML (index.html) instead of JS, the gateway is not stripping the `/ops-ui` prefix when proxying to embedded n8n.
 - Embedded workflow create forces `active: false` to avoid `SQLITE_CONSTRAINT` errors in n8n SQLite setups.
 - Embedded workspace isolation is tag-based. Tag names are derived from a short workspace hash (n8n tag names are limited to 24 chars).
+- If `POST /api/ops/workflows` returns `502 ... fetch failed` (while `GET /api/ops/workflows` works), the gateway is forwarding unsupported request headers (notably `Expect: 100-continue` and `Keep-Alive`). Fix is in `openclaw/src/gateway/pmos-ops-proxy.ts` (`STRIP_REQUEST_HEADERS`).
 - The Control UI "Wicked OS Access Key" field is **legacy/manual** access only. Normal users should sign in via PMOS auth; they should not need to paste a key to use embedded workflows.
 
 ### Build/Deploy Model (Vendored n8n)
@@ -124,7 +126,7 @@ openclaw/
 | Environment | URL | Purpose |
 |-------------|-----|---------|
 | Production | https://os.wickedlab.io/ops-ui/ | Embedded n8n editor |
-| Production | https://os.wickedlab.io/api/ops/* | Authenticated ops proxy (server-side token) |
+| Production | https://os.wickedlab.io/api/ops/* | Authenticated ops proxy (PMOS session cookie; same-origin) |
 | Local Dev | http://127.0.0.1:5678/ops-ui/ | Embedded n8n editor |
 
 ---
@@ -187,26 +189,33 @@ PMOS_ALLOW_REMOTE_OPS_FALLBACK=0      # Default: do not attempt remote-ops provi
 
 ### REST API Endpoints
 
-OpenClaw interacts with n8n via its REST API:
+OpenClaw interacts with n8n via **two** API surfaces:
+
+1. **Embedded n8n (recommended, default):** internal endpoints under `/rest/*` (cookie-auth, proxied by the gateway with workspace-scoped auth).
+2. **Remote ops fallback (legacy):** public endpoints under `/api/v1/*` (API-key auth), only when `PMOS_ALLOW_REMOTE_OPS_FALLBACK=1`.
+
+#### Embedded n8n (`/rest/*`)
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET /api/v1/workflows` | List workflows |
-| `POST /api/v1/workflows` | Create workflow |
-| `GET /api/v1/workflows/:id` | Get workflow |
-| `PUT /api/v1/workflows/:id` | Update workflow |
-| `DELETE /api/v1/workflows/:id` | Delete workflow |
-| `POST /api/v1/workflows/:id/activate` | Activate workflow |
-| `POST /api/v1/workflows/:id/deactivate` | Deactivate workflow |
-| `GET /api/v1/executions` | List executions |
-| `GET /api/v1/credentials` | List credentials |
-| `POST /api/v1/credentials` | Create credential |
+| `GET /rest/login` | Current user (should match PMOS user email) |
+| `GET /rest/workflows` | List workflows |
+| `POST /rest/workflows` | Create workflow |
+| `GET /rest/workflows/:id` | Get workflow |
+| `PATCH /rest/workflows/:id` | Update workflow (also used to set `active`) |
+| `DELETE /rest/workflows/:id` | Delete workflow |
+| `GET /rest/executions` | List executions |
+| `GET /rest/credentials` | List credentials |
+
+#### Remote ops fallback (`/api/v1/*`, legacy)
+
+When remote ops fallback is enabled, OpenClaw will use the n8n public REST API with `X-N8N-API-KEY` from workspace connectors.
 
 ### Proxy Implementation
 
 The PMOS Ops Proxy ([`pmos-ops-proxy.ts`](../openclaw/src/gateway/pmos-ops-proxy.ts)) handles:
 
-1. **Authentication** - Injects n8n API key
+1. **Authentication** - Injects workspace-scoped n8n auth cookie (embedded) or API key (legacy remote)
 2. **Workspace Context** - Ensures workspace isolation
 3. **Request Forwarding** - Proxies to n8n instance
 4. **Response Transformation** - Normalizes responses
