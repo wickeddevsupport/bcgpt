@@ -102,7 +102,10 @@ COPY --from=n8n_vendor /app/openclaw/vendor/n8n /app/openclaw/vendor/n8n
 # Build with Nx to match local preflight
 ENV NX_DAEMON=false
 ARG OPENCLAW_NX_PROJECTS="openclaw-app,openclaw-control-ui"
-RUN ./node_modules/.bin/nx run-many -t build --projects=$OPENCLAW_NX_PROJECTS --output-style=stream
+# NOTE: `openclaw-app` writes to `openclaw/dist` and may wipe that folder as part of its build.
+# Always build Control UI last so `dist/control-ui` is present at runtime.
+RUN ./node_modules/.bin/nx run-many -t build --projects=$OPENCLAW_NX_PROJECTS --output-style=stream \
+  && ./node_modules/.bin/nx run openclaw-control-ui:build --output-style=stream
 
 # Force pnpm for UI build (Bun may fail on ARM/Synology architectures)
 ENV OPENCLAW_PREFER_PNPM=1
