@@ -45,9 +45,18 @@ RUN set -eux; \
       pnpm build; \
       cd /app; \
       if [ -d "n8n-nodes-basecamp" ]; then \
-        cd n8n-nodes-basecamp && npm run build 2>/dev/null || true; \
-        mkdir -p /app/openclaw/vendor/n8n/packages/cli/node_modules/n8n-nodes-basecamp; \
-        cp -r dist package.json /app/openclaw/vendor/n8n/packages/cli/node_modules/n8n-nodes-basecamp/; \
+        cd n8n-nodes-basecamp; \
+        npm ci --no-audit --no-fund; \
+        npm run build; \
+        if [ -d "dist" ]; then \
+          for target in \
+            /app/openclaw/vendor/n8n/packages/cli/node_modules/n8n-nodes-basecamp \
+            /app/openclaw/vendor/n8n/custom/nodes/n8n-nodes-basecamp \
+          ; do \
+            mkdir -p "$target"; \
+            cp -r dist package.json "$target"/; \
+          done; \
+        fi; \
       fi; \
     else \
       mkdir -p /app/openclaw/vendor/n8n; \
