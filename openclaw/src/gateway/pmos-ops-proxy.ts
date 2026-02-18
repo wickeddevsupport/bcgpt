@@ -108,6 +108,11 @@ const STRIP_RESPONSE_HEADERS = new Set([
   "keep-alive",
   // Web Fetch API auto-decompresses; strip so downstream doesn't try to decompress again
   "content-encoding",
+  // Allow the n8n editor to load inside an iframe within the same OpenClaw origin.
+  // n8n sets overly restrictive CSP/XFO that would blank the editor when embedded.
+  "content-security-policy",
+  "content-security-policy-report-only",
+  "x-frame-options",
 ]);
 
 // ---------------------------------------------------------------------------

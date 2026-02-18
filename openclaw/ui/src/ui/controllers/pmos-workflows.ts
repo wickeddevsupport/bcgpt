@@ -1,4 +1,5 @@
 import type { UiSettings } from "../storage.ts";
+import type { PmosAuthUser } from "./pmos-auth.ts";
 
 type ToolInvokeOk = {
   ok: true;
@@ -49,6 +50,7 @@ export type PmosWorkflowsState = {
   basePath: string;
   connected: boolean;
   sessionKey: string;
+  pmosAuthUser: PmosAuthUser | null;
 
   // Kept for compatibility with older saved UI state.
   pmosOpsProjectId: string;
@@ -359,7 +361,14 @@ export async function loadWorkflows(state: PmosWorkflowsState) {
   state.apFlowsLoading = true;
   state.apFlowsError = null;
   try {
-    const details = await invokeTool<unknown>(state, "ops_workflows_list", {});
+    // Workspace isolation: non-super-admins only see their own tagged workflows.
+    const wsId = state.pmosAuthUser?.workspaceId;
+    const isSuper = state.pmosAuthUser?.role === "super_admin";
+    const toolArgs: Record<string, unknown> = {};
+    if (wsId && !isSuper) {
+      toolArgs.tags = `pmos-ws-${wsId}`;
+    }
+    const details = await invokeTool<unknown>(state, "ops_workflows_list", toolArgs);
     const items = toItems(details, ["data", "workflows"]);
     const normalized = items
       .map((entry) => normalizeWorkflowSummary(entry))
