@@ -22,6 +22,7 @@ OpenClaw uses n8n as its workflow automation engine, replacing Activepieces. Thi
 - Embedded custom node loading now auto-discovers all node packages in `openclaw/vendor/n8n/custom/nodes/*` (includes `n8n-nodes-basecamp` and `n8n-nodes-openclaw`).
 - Control UI connector saves now write `pmos.connectors.ops` and prune legacy `pmos.connectors.activepieces.*` keys from config writes.
 - Production note: `/ops-ui/` responds `200` to GET; prefer GET-based checks over HEAD.
+- If the embedded editor iframe is blank, check `/ops-ui/assets/*.js` in devtools. If those return HTML (index.html) instead of JS, the gateway is not stripping the `/ops-ui` prefix when proxying to embedded n8n.
 - Embedded workflow create forces `active: false` to avoid `SQLITE_CONSTRAINT` errors in n8n SQLite setups.
 - Embedded workspace isolation is tag-based. Tag names are derived from a short workspace hash (n8n tag names are limited to 24 chars).
 - The Control UI "Wicked OS Access Key" field is **legacy/manual** access only. Normal users should sign in via PMOS auth; they should not need to paste a key to use embedded workflows.

@@ -34,6 +34,9 @@ These are the issues we hit during the initial Coolify+Nx rollout. If you see th
 - `Unable to ensure workspace tag for embedded n8n.`
   - Root cause: n8n tag names are limited to 24 characters; raw workspace IDs often exceed this.
   - Fix: workspace isolation tag name is derived from a short hash (see `openclaw/src/gateway/pmos-ops-proxy.ts`), then redeploy.
+- n8n iframe is blank and `/ops-ui/assets/*.js` returns HTML (index.html)
+  - Root cause: embedded n8n expects the reverse proxy to **strip** the `N8N_PATH` prefix (`/ops-ui`) when forwarding requests. If you proxy `/ops-ui/assets/*` as-is, n8n's history fallback returns `index.html` for JS/CSS, so the editor never boots.
+  - Fix: ensure the gateway strips `/ops-ui` when proxying to local n8n (see `openclaw/src/gateway/pmos-ops-proxy.ts`), then redeploy. Verify `GET /ops-ui/assets/*` returns `Content-Type: application/javascript`.
 
 ---
 
