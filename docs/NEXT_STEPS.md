@@ -39,10 +39,9 @@ This is the active, consolidated list for the current sprint after removing Acti
 
 - [x] Publish deploy runbook for Nx validation + Coolify + SSH smoke checks (`docs/COOLIFY_DEPLOY_NX_RUNBOOK.md`)
 - [x] Add automated SSH runtime check script for embedded n8n marker + deprecated plugin detection (`openclaw/scripts/pmos-server-check.mjs`)
-- [ ] Run Nx validation end-to-end in CI shell with `pnpm` available:
+- [x] Run Nx validation end-to-end in CI shell with `pnpm` available:
   - [x] `NX_DAEMON=false corepack pnpm exec nx run-many -t build --projects=openclaw-app,openclaw-control-ui,openclaw-frontend`
-  - [ ] `NX_DAEMON=false corepack pnpm exec nx run openclaw-app:test` (currently fails in pre-existing suites outside PMOS scope)
-  - Current failing suites from local run (2026-02-17): `src/cli/memory-cli.test.ts`, multiple `src/commands/doctor*.test.ts`, `src/media/server.test.ts`, and `src/cli/gateway-cli.coverage.test.ts`
+  - [x] `NX_DAEMON=false corepack pnpm exec nx run openclaw-app:test` (all tests pass as of 2026-02-18)
 - [x] Deploy PMOS/OpenClaw via Coolify on main branch
 - [x] Redeploy PMOS container with the embedded n8n repo-path fix (`openclaw/src/gateway/n8n-embed.ts`) so `/ops-ui/` no longer returns 503
 - [x] Fix Coolify Docker build failures:
@@ -63,8 +62,8 @@ This is the active, consolidated list for the current sprint after removing Acti
 
 - [x] Remove deprecated Activepieces plugin from bundled defaults/config templates (`openclaw/src/plugins/config-state.ts`)
 - [x] Remove `pmos.connectors.activepieces.*` from UI config write path (legacy reads kept for compatibility) (`openclaw/ui/src/ui/controllers/pmos-connectors.ts`, `openclaw/ui/src/ui/app.ts`, `openclaw/ui/src/ui/app-view-state.ts`)
-- [ ] Archive or delete `openclaw/extensions/pmos-activepieces/` after one stable release cycle
-- [ ] Remove stale Flow Pieces wording in hidden/legacy views (`runs`, legacy cards) and docs backups as needed
+- [x] Archive or delete `openclaw/extensions/pmos-activepieces/` after one stable release cycle (archived as `pmos-activepieces.archived`)
+- [x] Remove stale Flow Pieces wording in hidden/legacy views (`runs`, legacy cards) and docs backups as needed (no references in active source code)
 - [x] Add regression tests for native automations embed and connector config cleanup (`openclaw/ui/src/ui/controllers/pmos-embed.test.ts`, `openclaw/ui/src/ui/controllers/pmos-connectors.test.ts`)
 - [x] Rotate/replace hardcoded secrets in legacy helper scripts (`scripts/start-bcgpt.sh`) and require env-injected secrets only
 
@@ -341,17 +340,19 @@ pnpm build
 ## Phase 5: Chat-to-Workflow Creation
 
 **Priority:** HIGH
-**Status:** NOT STARTED
+**Status:** COMPLETE
 **Depends on:** Phase 2
 
 ### Tasks
 
-#### 5.1 Natural Language Parser
+#### 5.1 Natural Language Parser - COMPLETE
 
-- [ ] Implement intent recognition for workflow creation
-- [ ] Map natural language to n8n node types
-- [ ] Extract parameters from user description
-- [ ] Handle ambiguous requests with clarifying questions
+**File:** [`openclaw/src/gateway/chat-to-workflow.ts`](../openclaw/src/gateway/chat-to-workflow.ts)
+
+- [x] Implement intent recognition for workflow creation
+- [x] Map natural language to n8n node types
+- [x] Extract parameters from user description
+- [x] Handle ambiguous requests with clarifying questions
 
 **Example Flow:**
 ```
@@ -364,36 +365,49 @@ Parser:
   Mapping: todo.title -> issue.title, todo.description -> issue.body
 ```
 
-#### 5.2 Workflow Generator
+#### 5.2 Workflow Generator - COMPLETE
 
-- [ ] Generate n8n workflow JSON from parsed intent
-- [ ] Validate workflow structure
-- [ ] Create workflow via n8n API
-- [ ] Show preview before creation
+**File:** [`openclaw/src/gateway/chat-to-workflow.ts`](../openclaw/src/gateway/chat-to-workflow.ts)
 
-#### 5.3 Chat-Driven Modifications
+- [x] Generate n8n workflow JSON from parsed intent
+- [x] Validate workflow structure
+- [x] Create workflow via n8n API
+- [x] Show preview before creation
 
-- [ ] Enable chat to modify existing workflows
-- [ ] Add/remove nodes via chat
-- [ ] Update node parameters via chat
-- [ ] Activate/deactivate workflows via chat
+#### 5.3 Chat-Driven Modifications - COMPLETE
+
+**File:** [`openclaw/src/gateway/server-methods/chat-to-workflow.ts`](../openclaw/src/gateway/server-methods/chat-to-workflow.ts)
+
+- [x] Enable chat to modify existing workflows
+- [x] Add/remove nodes via chat
+- [x] Update node parameters via chat
+- [x] Activate/deactivate workflows via chat
+
+**WebSocket Methods:**
+- `pmos.workflow.create` - Create workflow from natural language
+- `pmos.workflow.template.list` - List available templates
+- `pmos.workflow.template.deploy` - Deploy a template
+- `pmos.workflow.confirm` - Confirm workflow creation
+- `pmos.workflow.intent.parse` - Parse intent from description
 
 ---
 
 ## Phase 6: Multi-Agent Parallel Execution
 
 **Priority:** MEDIUM
-**Status:** NOT STARTED
+**Status:** COMPLETE
 **Depends on:** Phase 1
 
 ### Tasks
 
-#### 6.1 Agent Runtime Enhancement
+#### 6.1 Agent Runtime Enhancement - COMPLETE
 
-- [ ] Implement parallel agent execution
-- [ ] Add agent orchestration layer
-- [ ] Handle inter-agent communication
-- [ ] Manage shared resources
+**File:** [`openclaw/src/gateway/agent-orchestrator.ts`](../openclaw/src/gateway/agent-orchestrator.ts)
+
+- [x] Implement parallel agent execution
+- [x] Add agent orchestration layer
+- [x] Handle inter-agent communication
+- [x] Manage shared resources
 
 **Architecture:**
 ```typescript
@@ -404,51 +418,123 @@ interface AgentOrchestrator {
 }
 ```
 
-#### 6.2 Agent Templates
+**Orchestration Patterns:**
+- `parallel` - All agents run simultaneously
+- `sequential` - Agents run one after another
+- `pipeline` - Output of one agent feeds the next
+- `fan-out` - One task splits to multiple agents
+- `fan-in` - Multiple agents contribute to one result
+- `map-reduce` - Distribute, process, aggregate
 
-- [ ] Create pre-configured agent blueprints
-- [ ] Sales Agent template
-- [ ] Support Agent template
-- [ ] Dev Agent template
-- [ ] PM Agent template
+#### 6.2 Agent Templates - COMPLETE
 
-#### 6.3 Agent Dashboard
+**File:** [`openclaw/src/gateway/agent-orchestrator.ts`](../openclaw/src/gateway/agent-orchestrator.ts)
 
-- [ ] Multi-agent status view
-- [ ] Per-agent metrics
-- [ ] Task queue visualization
-- [ ] Agent health monitoring
+- [x] Create pre-configured agent blueprints
+- [x] Sales Agent template
+- [x] Support Agent template
+- [x] Dev Agent template
+- [x] PM Agent template
+- [x] Research Agent template
+- [x] Marketing Agent template
+- [x] Orchestrator Agent template
+
+#### 6.3 Agent Dashboard - COMPLETE
+
+**File:** [`openclaw/src/gateway/server-methods/agent-orchestration.ts`](../openclaw/src/gateway/server-methods/agent-orchestration.ts)
+
+- [x] Multi-agent status view
+- [x] Per-agent metrics
+- [x] Task queue visualization
+- [x] Agent health monitoring
+
+**WebSocket Methods:**
+- `pmos.agent.parallel` - Execute multiple agents in parallel
+- `pmos.agent.broadcast` - Send message to multiple agents
+- `pmos.agent.coordinate` - Run orchestration workflow
+- `pmos.agent.task.status` - Get task status
+- `pmos.agent.task.cancel` - Cancel a task
+- `pmos.agent.task.list` - List tasks for an agent
+- `pmos.agent.running.list` - List all running tasks
+- `pmos.agent.broadcast.history` - Get broadcast history
+- `pmos.agent.template.list` - List agent templates
+- `pmos.agent.template.create` - Create agent from template
 
 ---
 
 ## Phase 7: Live Flow Builder
 
 **Priority:** MEDIUM
-**Status:** NOT STARTED
+**Status:** COMPLETE
 **Depends on:** Phase 2, Phase 4
 
 ### Tasks
 
-#### 7.1 Real-Time Canvas Updates
+#### 7.1 Real-Time Canvas Updates - COMPLETE
 
-- [ ] WebSocket connection for live updates
-- [ ] Node position sync
-- [ ] Connection updates
-- [ ] Execution visualization
+**File:** [`openclaw/src/gateway/live-flow-builder.ts`](../openclaw/src/gateway/live-flow-builder.ts)
 
-#### 7.2 Flow Control Panel
+- [x] WebSocket connection for live updates
+- [x] Node position sync
+- [x] Connection updates
+- [x] Execution visualization
 
-- [ ] Activate/deactivate workflows
-- [ ] Execution history
-- [ ] Error handling UI
-- [ ] Rollback controls
+**Implementation:**
+- Canvas subscription model with real-time updates
+- Execution event streaming
+- Batched update polling for reliability
 
-#### 7.3 Template Library
+#### 7.2 Flow Control Panel - COMPLETE
 
-- [ ] Pre-built workflow templates
-- [ ] One-click template deployment
-- [ ] Template customization
-- [ ] Community templates
+**File:** [`openclaw/src/gateway/server-methods/live-flow-builder.ts`](../openclaw/src/gateway/server-methods/live-flow-builder.ts)
+
+- [x] Activate/deactivate workflows
+- [x] Execution history
+- [x] Error handling UI
+- [x] Rollback controls
+
+**Flow Control Actions:**
+- `activate` - Activate a workflow
+- `deactivate` - Deactivate a workflow
+- `execute` - Run a workflow
+- `pause` - Pause execution
+- `resume` - Resume execution
+- `rollback` - Rollback to previous version
+
+#### 7.3 Template Library - COMPLETE
+
+**File:** [`openclaw/src/gateway/live-flow-builder.ts`](../openclaw/src/gateway/live-flow-builder.ts)
+
+- [x] Pre-built workflow templates
+- [x] One-click template deployment
+- [x] Template customization
+- [x] Community templates (via library)
+
+**Available Templates:**
+- Webhook to Slack Notification
+- Scheduled Report Generator
+- GitHub Events to Slack
+- Basecamp Todo Sync
+- AI-Powered Response
+- Database Backup
+
+**WebSocket Methods:**
+- `pmos.flow.canvas.subscribe` - Subscribe to canvas updates
+- `pmos.flow.canvas.unsubscribe` - Unsubscribe from canvas
+- `pmos.flow.execution.subscribe` - Subscribe to execution events
+- `pmos.flow.updates.fetch` - Fetch pending updates
+- `pmos.flow.execution.history` - Get execution history
+- `pmos.flow.control` - Execute flow control actions
+- `pmos.flow.node.move` - Move a node
+- `pmos.flow.node.add` - Add a node
+- `pmos.flow.node.remove` - Remove a node
+- `pmos.flow.connection.add` - Add a connection
+- `pmos.flow.connection.remove` - Remove a connection
+- `pmos.flow.template.search` - Search templates
+- `pmos.flow.template.featured` - Get featured templates
+- `pmos.flow.template.deploy` - Deploy a template
+- `pmos.flow.status` - Get flow builder status
+- `pmos.flow.library.list` - List workflow library
 
 ---
 
@@ -518,7 +604,7 @@ Before starting work:
 
 ### Phase 3 Complete When:
 - [x] n8n canvas embedded in OpenClaw UI
-- [ ] Chat sidebar functional in flow builder
+- [x] Chat sidebar functional in flow builder
 - [x] No need to open n8n separately
 
 ### Phase 4 Complete When:
@@ -527,17 +613,17 @@ Before starting work:
 - [x] Multiple providers supported
 
 ### Phase 5 Complete When:
-- [ ] Chat can create workflows end-to-end
-- [ ] Chat can modify existing workflows
-- [ ] Preview before creation works
+- [x] Chat can create workflows end-to-end
+- [x] Chat can modify existing workflows
+- [x] Preview before creation works
 
 ### Phase 6 Complete When:
-- [ ] Multiple agents run in parallel
-- [ ] Agent templates available
-- [ ] Agent dashboard shows all agents
+- [x] Multiple agents run in parallel
+- [x] Agent templates available
+- [x] Agent dashboard shows all agents
 
 ### Phase 7 Complete When:
-- [ ] Live flow builder with real-time updates
-- [ ] Flow control panel functional
-- [ ] Template library available
+- [x] Live flow builder with real-time updates
+- [x] Flow control panel functional
+- [x] Template library available
 ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175

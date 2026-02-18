@@ -417,4 +417,362 @@ export const pmosHandlers: GatewayRequestHandlers = {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }
   },
+
+  // ── Chat-to-Workflow Creation ──────────────────────────────────────
+
+  "pmos.workflow.create": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleWorkflowCreate } = await import("./chat-to-workflow.js");
+      const result = await handleWorkflowCreate(params, client);
+      respond(result.success, result, result.success ? undefined : errorShape(ErrorCodes.INVALID_REQUEST, result.message || "Failed to create workflow"));
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.workflow.template.list": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleTemplateList } = await import("./chat-to-workflow.js");
+      const result = await handleTemplateList(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.workflow.template.deploy": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleTemplateDeploy } = await import("./chat-to-workflow.js");
+      const result = await handleTemplateDeploy(params, client);
+      respond(result.success, result, result.success ? undefined : errorShape(ErrorCodes.INVALID_REQUEST, result.message || "Failed to deploy template"));
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.workflow.confirm": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleWorkflowConfirm } = await import("./chat-to-workflow.js");
+      const result = await handleWorkflowConfirm(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.workflow.intent.parse": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleIntentParse } = await import("./chat-to-workflow.js");
+      const result = await handleIntentParse(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  // ── Multi-Agent Orchestration ──────────────────────────────────────
+
+  "pmos.agent.parallel": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleParallelExecution } = await import("./agent-orchestration.js");
+      const result = await handleParallelExecution(params, client);
+      respond(result.success, result, result.success ? undefined : errorShape(ErrorCodes.INVALID_REQUEST, result.message || "Parallel execution failed"));
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.agent.broadcast": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleAgentBroadcast } = await import("./agent-orchestration.js");
+      const result = await handleAgentBroadcast(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.agent.coordinate": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleOrchestration } = await import("./agent-orchestration.js");
+      const result = await handleOrchestration(params, client);
+      respond(result.success, result, result.success ? undefined : errorShape(ErrorCodes.INVALID_REQUEST, result.message || "Orchestration failed"));
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.agent.task.status": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleTaskStatusQuery } = await import("./agent-orchestration.js");
+      const result = await handleTaskStatusQuery(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.agent.task.cancel": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleTaskCancel } = await import("./agent-orchestration.js");
+      const result = await handleTaskCancel(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.agent.task.list": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleAgentTasksQuery } = await import("./agent-orchestration.js");
+      const result = await handleAgentTasksQuery(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.agent.running.list": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleRunningTasksQuery } = await import("./agent-orchestration.js");
+      const result = await handleRunningTasksQuery(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.agent.broadcast.history": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleBroadcastHistoryQuery } = await import("./agent-orchestration.js");
+      const result = await handleBroadcastHistoryQuery(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.agent.template.list": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleTemplateListQuery } = await import("./agent-orchestration.js");
+      const result = await handleTemplateListQuery(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.agent.template.create": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleTemplateCreate } = await import("./agent-orchestration.js");
+      const result = await handleTemplateCreate(params, client);
+      respond(result.success, result, result.success ? undefined : errorShape(ErrorCodes.INVALID_REQUEST, result.message || "Failed to create agent from template"));
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  // ── Live Flow Builder ──────────────────────────────────────────────
+
+  "pmos.flow.canvas.subscribe": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleCanvasSubscribe } = await import("./live-flow-builder.js");
+      const result = await handleCanvasSubscribe(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.flow.canvas.unsubscribe": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleCanvasUnsubscribe } = await import("./live-flow-builder.js");
+      const result = await handleCanvasUnsubscribe(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.flow.execution.subscribe": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleExecutionSubscribe } = await import("./live-flow-builder.js");
+      const result = await handleExecutionSubscribe(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.flow.execution.unsubscribe": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleExecutionUnsubscribe } = await import("./live-flow-builder.js");
+      const result = await handleExecutionUnsubscribe(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.flow.updates.fetch": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handlePendingUpdatesFetch } = await import("./live-flow-builder.js");
+      const result = await handlePendingUpdatesFetch(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.flow.execution.history": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleExecutionHistoryFetch } = await import("./live-flow-builder.js");
+      const result = await handleExecutionHistoryFetch(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.flow.control": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleFlowControl } = await import("./live-flow-builder.js");
+      const result = await handleFlowControl(params, client);
+      respond(result.success, result, result.success ? undefined : errorShape(ErrorCodes.INVALID_REQUEST, result.message));
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.flow.node.move": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleNodeMove } = await import("./live-flow-builder.js");
+      const result = await handleNodeMove(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.flow.node.add": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleNodeAdd } = await import("./live-flow-builder.js");
+      const result = await handleNodeAdd(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.flow.node.remove": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleNodeRemove } = await import("./live-flow-builder.js");
+      const result = await handleNodeRemove(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.flow.connection.add": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleConnectionAdd } = await import("./live-flow-builder.js");
+      const result = await handleConnectionAdd(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.flow.connection.remove": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleConnectionRemove } = await import("./live-flow-builder.js");
+      const result = await handleConnectionRemove(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.flow.template.search": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleTemplateSearch } = await import("./live-flow-builder.js");
+      const result = await handleTemplateSearch(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.flow.template.featured": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleFeaturedTemplatesFetch } = await import("./live-flow-builder.js");
+      const result = await handleFeaturedTemplatesFetch(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.flow.template.deploy": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleTemplateDeployment } = await import("./live-flow-builder.js");
+      const result = await handleTemplateDeployment(params, client);
+      respond(result.success, result, result.success ? undefined : errorShape(ErrorCodes.INVALID_REQUEST, result.message));
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.flow.status": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleFlowBuilderStatusQuery } = await import("./live-flow-builder.js");
+      const result = await handleFlowBuilderStatusQuery(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.flow.library.list": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const { handleWorkflowLibraryList } = await import("./live-flow-builder.js");
+      const result = await handleWorkflowLibraryList(params, client);
+      respond(result.success, result, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
 };
