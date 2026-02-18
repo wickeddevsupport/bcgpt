@@ -366,14 +366,11 @@ export async function loadWorkflows(state: PmosWorkflowsState) {
   state.apFlowsLoading = true;
   state.apFlowsError = null;
   try {
-    // Workspace isolation: non-super-admins only see their own tagged workflows.
-    const wsId = state.pmosAuthUser?.workspaceId;
-    const isSuper = state.pmosAuthUser?.role === "super_admin";
-    const toolArgs: Record<string, unknown> = {};
-    if (wsId && !isSuper) {
-      toolArgs.tags = `pmos-ws-${wsId}`;
-    }
-    const details = await invokeTool<unknown>(state, "ops_workflows_list", toolArgs);
+    // Workspace isolation is enforced server-side in proxyWorkflowList (pmos-ops-proxy.ts)
+    // via sha256-hashed workspace tags. Do not send a client-side tags filter here —
+    // the client-side tag format (pmos-ws-{id}) never matched the server-side format
+    // (pmos-{sha256hash}) and caused all non-super-admin users to see 0 workflows.
+    const details = await invokeTool<unknown>(state, "ops_workflows_list", {});
     const items = toItems(details, ["data", "workflows"]);
     const normalized = items
       .map((entry) => normalizeWorkflowSummary(entry))

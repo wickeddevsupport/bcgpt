@@ -57,8 +57,13 @@ export async function getOwnerCookie(n8nBaseUrl: string): Promise<string | null>
 
   let cookie = await loginToN8n(n8nBaseUrl, creds.email, creds.password);
   if (!cookie && !ownerSetupAttempted.has(n8nBaseUrl)) {
-    ownerSetupAttempted.add(n8nBaseUrl);
-    await attemptOwnerSetup(n8nBaseUrl, creds);
+    const setup = await attemptOwnerSetup(n8nBaseUrl, creds);
+    // Only gate off future setup attempts if n8n actually responded (responded=true).
+    // If n8n was unreachable (still starting), leave the flag unset so the next
+    // request retries the setup rather than permanently skipping it.
+    if (setup.responded) {
+      ownerSetupAttempted.add(n8nBaseUrl);
+    }
     cookie = await loginToN8n(n8nBaseUrl, creds.email, creds.password);
   }
 
@@ -74,7 +79,7 @@ export async function getOwnerCookie(n8nBaseUrl: string): Promise<string | null>
 async function attemptOwnerSetup(
   n8nBaseUrl: string,
   creds: { email: string; password: string },
-): Promise<boolean> {
+): Promise<{ done: boolean; responded: boolean }> {
   const firstName = (process.env.N8N_OWNER_FIRST_NAME || "OpenClaw").trim() || "OpenClaw";
   const lastName = (process.env.N8N_OWNER_LAST_NAME || "Owner").trim() || "Owner";
 
@@ -96,16 +101,19 @@ async function attemptOwnerSetup(
         }),
       });
 
-      if (res.ok) return true;
+      if (res.ok) return { done: true, responded: true };
 
-      // "already setup" or validation errors; caller will retry login regardless.
-      if (res.status === 400) return false;
+      // "already setup" or validation errors — n8n responded, no point retrying setup.
+      if (res.status === 400) return { done: false, responded: true };
+
+      // 5xx or unexpected status — n8n may still be starting; allow retry.
     } catch {
-      // try next endpoint
+      // Network error — n8n not ready yet; try next endpoint but don't mark as responded.
     }
   }
 
-  return false;
+  // No endpoint responded — n8n is likely still starting up.
+  return { done: false, responded: false };
 }
 
 /**
