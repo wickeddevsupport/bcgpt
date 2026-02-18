@@ -1,6 +1,6 @@
 # n8n Integration Guide
 
-**Last Updated:** 2026-02-17
+**Last Updated:** 2026-02-18
 **Related:** [`OPENCLAW_AUTOMATION_OS.md`](OPENCLAW_AUTOMATION_OS.md), [`COOLIFY_DEPLOY_NX_RUNBOOK.md`](COOLIFY_DEPLOY_NX_RUNBOOK.md)
 
 ---
@@ -9,7 +9,7 @@
 
 OpenClaw uses n8n as its workflow automation engine, replacing Activepieces. This guide covers the technical integration details.
 
-### Current Runtime Notes (2026-02-17)
+### Current Runtime Notes (2026-02-18)
 
 - Control UI workflows are now embedded natively in the `automations` tab (no forced `/ops-ui/` redirect/new-tab behavior).
 - PMOS flow/run command handlers use n8n `ops_*` tools instead of legacy `flow_*` Activepieces tools.
@@ -21,6 +21,7 @@ OpenClaw uses n8n as its workflow automation engine, replacing Activepieces. Thi
 - Embedded n8n repo discovery now supports both `/vendor/n8n` and `/openclaw/vendor/n8n` layouts (`openclaw/src/gateway/n8n-embed.ts`).
 - Embedded custom node loading now auto-discovers all node packages in `openclaw/vendor/n8n/custom/nodes/*` (includes `n8n-nodes-basecamp` and `n8n-nodes-openclaw`).
 - Control UI connector saves now write `pmos.connectors.ops` and prune legacy `pmos.connectors.activepieces.*` keys from config writes.
+- Production note: `/ops-ui/` responds `200` to GET; prefer GET-based checks over HEAD.
 
 ### Why n8n
 
@@ -414,11 +415,11 @@ ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
 
 ### Coolify Management
 
-All containers are managed via Coolify. Access Coolify through SSH, not curl.
+All containers are managed via Coolify.
 
-**Coolify Token:** `[REDACTED - store in secure secret manager]`
-
-**Important:** Always use SSH to access Coolify for container management.
+- Primary: trigger deploys via Coolify UI.
+- If API access is required: use a short-lived token created via SSH and revoke it after use (never store tokens in git/docs).
+- Runbook: [`COOLIFY_DEPLOY_NX_RUNBOOK.md`](COOLIFY_DEPLOY_NX_RUNBOOK.md)
 
 ### Container Architecture
 
@@ -456,7 +457,7 @@ flowchart TB
 
 3. **Access Coolify**
    - Use SSH tunnel or local Coolify CLI
-   - Token: `[REDACTED - store in secure secret manager]`
+   - See [`COOLIFY_DEPLOY_NX_RUNBOOK.md`](COOLIFY_DEPLOY_NX_RUNBOOK.md) (tokens/secrets must stay out of git)
 
 4. **Deploy Updates**
    - Push to main branch triggers automatic deployment

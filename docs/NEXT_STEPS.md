@@ -1,6 +1,6 @@
 # Next Steps - Implementation Plan
 
-**Last Updated:** 2026-02-17
+**Last Updated:** 2026-02-18
 **Related:** [`OPENCLAW_AUTOMATION_OS.md`](OPENCLAW_AUTOMATION_OS.md)
 
 ---
@@ -28,6 +28,7 @@ This is the active, consolidated list for the current sprint after removing Acti
 - [x] Fix embedded n8n vendored-path discovery for both repo layouts (`openclaw/src/gateway/n8n-embed.ts`)
 - [x] Add explicit embedded n8n/ops runtime diagnostics to connector status checks and dashboard health cards (`openclaw/src/gateway/server-methods/pmos.ts`, `openclaw/ui/src/ui/views/dashboard.ts`, `openclaw/ui/src/ui/views/integrations.ts`)
 - [x] Add `pmos.connectors.ops` schema support and workspace connector typing for `projectId` (`openclaw/src/config/zod-schema.ts`, `openclaw/src/gateway/workspace-connectors.ts`)
+- [x] Fix `config.get` workspace filtering to filter `agents.list` (avoid `items.filter is not a function`) (`openclaw/src/gateway/server-methods/config.ts`)
 
 ### P0 - Deployment Path (Coolify + Nx + Server)
 
@@ -37,15 +38,15 @@ This is the active, consolidated list for the current sprint after removing Acti
   - [x] `NX_DAEMON=false corepack pnpm exec nx run-many -t build --projects=openclaw-app,openclaw-control-ui,openclaw-frontend`
   - [ ] `NX_DAEMON=false corepack pnpm exec nx run openclaw-app:test` (currently fails in pre-existing suites outside PMOS scope)
   - Current failing suites from local run (2026-02-17): `src/cli/memory-cli.test.ts`, multiple `src/commands/doctor*.test.ts`, `src/media/server.test.ts`, and `src/cli/gateway-cli.coverage.test.ts`
-- [ ] Deploy PMOS/OpenClaw via Coolify on main branch
-- [ ] Redeploy PMOS container with the embedded n8n repo-path fix (`openclaw/src/gateway/n8n-embed.ts`) so `/ops-ui/` no longer returns 503
-- [ ] Verify on server (SSH) that embedded n8n process starts with gateway
-- [ ] Smoke test production routes:
+- [x] Deploy PMOS/OpenClaw via Coolify on main branch
+- [x] Redeploy PMOS container with the embedded n8n repo-path fix (`openclaw/src/gateway/n8n-embed.ts`) so `/ops-ui/` no longer returns 503
+- [x] Verify on server (SSH) that embedded n8n process starts with gateway
+- [x] Smoke test production routes:
   - `https://os.wickedlab.io` (dashboard auth + tabs)
   - `https://os.wickedlab.io/ops-ui/` (embedded editor route)
   - `https://os.wickedlab.io/api/ops/workflows` (authenticated ops proxy)
   - `https://bcgpt.wickedlab.io/health`
-- Current production snapshot (2026-02-17): root `200`, `ops-ui` `503`, `bcgpt /health` `200`; redeploy is still required to pick up latest runtime changes (forced `pmos-activepieces` disable + embedded n8n checks).
+- Current production snapshot (2026-02-18): root `200`, `/ops-ui/` `200` (GET), `/api/ops/workflows` `401` unauth (expected; `200` with gateway token), `bcgpt /health` `200`.
 
 ### P1 - Final Cleanup (After Production Validation)
 
@@ -529,5 +530,3 @@ Before starting work:
 - [ ] Flow control panel functional
 - [ ] Template library available
 ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
-Coolify token
-`[REDACTED - store in a secure secret manager, not in git/docs]`

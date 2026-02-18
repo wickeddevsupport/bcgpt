@@ -110,11 +110,19 @@ export const configHandlers: GatewayRequestHandlers = {
     const redacted = redactConfigSnapshot(snapshot);
 
     // Filter config to show only workspace-relevant data for non-super-admin users
-    if (client && !isSuperAdmin(client) && redacted.config?.agents) {
-      const filteredAgents = filterByWorkspace(redacted.config.agents, client);
+    if (
+      client &&
+      !isSuperAdmin(client) &&
+      redacted.config?.agents?.list &&
+      Array.isArray(redacted.config.agents.list)
+    ) {
+      const filteredAgents = filterByWorkspace(redacted.config.agents.list, client);
       redacted.config = {
         ...redacted.config,
-        agents: filteredAgents,
+        agents: {
+          ...redacted.config.agents,
+          list: filteredAgents,
+        },
       };
     }
 

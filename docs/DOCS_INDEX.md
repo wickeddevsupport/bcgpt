@@ -1,6 +1,6 @@
 # OpenClaw Documentation Index
 
-**Last Updated:** 2026-02-17
+**Last Updated:** 2026-02-18
 
 ---
 
@@ -91,8 +91,8 @@ NX_DAEMON=false corepack pnpm exec nx run openclaw-app:test
 # SSH to server
 ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
 
-# Coolify Token
-[REDACTED - store in secure secret manager]
+# Deploy runbook
+# See docs/COOLIFY_DEPLOY_NX_RUNBOOK.md (keep tokens/secrets out of git)
 ```
 
 **Note:** NX validates builds/tests; Coolify performs runtime deployment. Access Coolify through SSH, not curl.

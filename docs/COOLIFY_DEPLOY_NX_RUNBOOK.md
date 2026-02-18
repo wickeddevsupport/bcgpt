@@ -1,6 +1,6 @@
 # Coolify Deploy + Nx Runbook
 
-**Last Updated:** 2026-02-17  
+**Last Updated:** 2026-02-18  
 **Related:** [`NEXT_STEPS.md`](NEXT_STEPS.md), [`N8N_INTEGRATION_GUIDE.md`](N8N_INTEGRATION_GUIDE.md)
 
 ---
@@ -95,7 +95,7 @@ corepack pnpm --dir openclaw pmos:server-check
 
 ```bash
 curl -I https://os.wickedlab.io/
-curl -I https://os.wickedlab.io/ops-ui/
+curl -sS -o /dev/null -w "%{http_code}\n" https://os.wickedlab.io/ops-ui/
 curl -I https://bcgpt.wickedlab.io/health
 ```
 

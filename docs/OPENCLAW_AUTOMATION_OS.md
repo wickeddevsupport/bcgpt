@@ -202,7 +202,7 @@ n8n-nodes-basecamp/
 | Agents | COMPLETE | [`agents.ts`](openclaw/src/gateway/server-methods/agents.ts) filters by workspace |
 | Cron Jobs | COMPLETE | [`cron.ts`](openclaw/src/gateway/server-methods/cron.ts) filters and enforces ownership |
 | Sessions | COMPLETE | [`sessions.ts`](openclaw/src/gateway/server-methods/sessions.ts) scoped by agent workspace ownership |
-| Configs | PENDING | Workspace-specific config files |
+| Configs | COMPLETE | Workspace overrides + HTTP APIs (`openclaw/src/gateway/workspace-config.ts`, `openclaw/src/gateway/workspace-config-http.ts`) |
 | Connectors | IN PROGRESS | Workspace-scoped connector APIs implemented; final cleanup/deprecation path ongoing |
 
 ### Workspace Context API
