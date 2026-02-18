@@ -277,9 +277,8 @@ export default {
         if (!body.settings || typeof body.settings !== "object" || Array.isArray(body.settings)) {
           body.settings = {};
         }
-        if (typeof body.active !== "boolean") {
-          body.active = false;
-        }
+        // n8n marks `active` as read-only on workflow creation; activation happens via a separate endpoint.
+        delete body.active;
 
         const data = await opsRequest({
           api,
