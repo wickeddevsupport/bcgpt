@@ -61,7 +61,6 @@ import {
   titleForTab,
   type Tab,
 } from "./navigation.ts";
-import { buildOpsUiEmbedUrl } from "./controllers/pmos-embed.ts";
 
 // Module-scope debounce for usage date changes (avoids type-unsafe hacks on state object)
 let usageDateDebounceTimeout: number | null = null;
@@ -323,6 +322,11 @@ export function renderApp(state: AppViewState) {
     state.apFlowSelectedId && state.apFlows
       ? state.apFlows.find((flow) => flow.id === state.apFlowSelectedId) ?? null
       : null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const _flowRaw = state.apFlowDetails as any;
+  const flowDetailsStatus = _flowRaw
+    ? (String(_flowRaw.status ?? (_flowRaw.active === true ? "ENABLED" : _flowRaw.active === false ? "DISABLED" : ""))).toUpperCase()
+    : "";
 
   // Auto-exit onboarding if all setup steps are done
   if (state.onboarding && state.tab === "dashboard" && state.configSnapshot) {
@@ -638,33 +642,139 @@ export function renderApp(state: AppViewState) {
                         </div>
                       </div>
 
-                      <div style="flex:1; display:flex; flex-direction:column; min-width:0;">
-                        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border); gap:12px;">
-                          <div style="min-width:0;">
-                            <div class="card-sub">Embedded n8n editor (native in dashboard)</div>
-                            ${selectedWorkflow
-                              ? html`<div class="muted" style="margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                                  Editing: <span style="font-weight:600;">${selectedWorkflow.displayName ?? selectedWorkflow.id}</span>
-                                </div>`
-                              : nothing}
-                          </div>
-                          <div class="row" style="gap:10px;">
-                            <a
+                      <div style="flex:1; display:flex; flex-direction:column; min-width:0; overflow:auto;">
+
+                        <!-- AI Flow Builder -->
+                        <div style="padding:14px 16px; border-bottom:1px solid var(--border);">
+                          <div class="card-title" style="margin:0 0 4px 0; font-size:14px;">AI Flow Builder</div>
+                          <div class="card-sub" style="margin-bottom:10px;">Describe your automation and let AI generate a workflow skeleton.</div>
+                          <textarea
+                            class="input"
+                            style="width:100%; min-height:68px; resize:vertical; font-size:13px; box-sizing:border-box;"
+                            .value=${state.pmosFlowBuilderPrompt}
+                            @input=${(e: Event) => (state.pmosFlowBuilderPrompt = (e.target as HTMLTextAreaElement).value)}
+                            placeholder="e.g. When a lead submits the form, post to Slack and add a row to Google Sheets."
+                            ?disabled=${state.pmosFlowBuilderGenerating || state.pmosFlowBuilderCommitting}
+                          ></textarea>
+                          <div class="row" style="margin-top:8px; gap:8px; flex-wrap:wrap;">
+                            <button
+                              class="btn primary btn--sm"
+                              @click=${() => void state.handlePmosFlowBuilderGenerate()}
+                              ?disabled=${state.pmosFlowBuilderGenerating || !state.pmosFlowBuilderPrompt.trim()}
+                            >${state.pmosFlowBuilderGenerating ? "Generating..." : "Generate"}</button>
+                            <button
+                              class="btn btn--sm"
+                              @click=${() => void state.handlePmosFlowBuilderCommit()}
+                              ?disabled=${state.pmosFlowBuilderCommitting || state.pmosFlowBuilderNodes.length === 0}
+                            >${state.pmosFlowBuilderCommitting ? "Creating..." : "Commit flow"}</button>
+                            <button
                               class="btn btn--secondary btn--sm"
-                              href=${buildOpsUiEmbedUrl(basePath, null)}
-                              rel="noreferrer"
-                              title="Open the embedded editor route full-screen"
-                            >
-                              Open editor route
-                            </a>
+                              @click=${() => state.handlePmosFlowBuilderReset()}
+                              ?disabled=${state.pmosFlowBuilderGenerating || state.pmosFlowBuilderCommitting}
+                            >Reset</button>
                           </div>
+                          ${state.pmosFlowBuilderFlowName
+                            ? html`<div class="muted" style="margin-top:6px;font-size:12px;">Draft: <span class="mono">${state.pmosFlowBuilderFlowName}</span></div>`
+                            : nothing}
+                          ${state.pmosFlowBuilderLastCommittedFlowId
+                            ? html`<div class="callout" style="margin-top:8px;font-size:12px;">Created: <span class="mono">${state.pmosFlowBuilderLastCommittedFlowId}</span></div>`
+                            : nothing}
+                          ${state.pmosFlowBuilderError
+                            ? html`<div class="callout danger" style="margin-top:8px;font-size:12px;">${state.pmosFlowBuilderError}</div>`
+                            : nothing}
+                          ${state.pmosFlowBuilderNodes.length > 0
+                            ? html`<div style="margin-top:10px; display:flex; gap:6px; flex-wrap:wrap;">
+                                ${state.pmosFlowBuilderNodes.map((node) => html`
+                                  <span class="chip ${node.type === "trigger" ? "chip-ok" : ""}" style="font-size:11px;">${node.label}</span>
+                                `)}
+                              </div>`
+                            : nothing}
                         </div>
-                        <iframe
-                          src=${buildOpsUiEmbedUrl(basePath, state.apFlowSelectedId)}
-                          title="OpenClaw Workflows Editor"
-                          style="width:100%;height:100%;border:0;display:block;background:#111; flex:1;"
-                          allow="clipboard-read; clipboard-write"
-                        ></iframe>
+
+                        <!-- Flow Details -->
+                        ${!state.apFlowSelectedId
+                          ? html`<div class="muted" style="padding:20px 16px;">Select a workflow from the list to view and edit it here.</div>`
+                          : nothing}
+                        ${state.apFlowDetailsLoading
+                          ? html`<div class="muted" style="padding:16px; display:flex; align-items:center; gap:10px;"><span class="spinner"></span> Loading workflow...</div>`
+                          : nothing}
+                        ${state.apFlowDetails && state.apFlowSelectedId
+                          ? html`
+                            <div style="padding:14px 16px; display:flex; flex-direction:column; gap:14px;">
+                              ${state.apFlowDetailsError || state.apFlowMutateError
+                                ? html`<div class="callout danger" style="font-size:13px;">${state.apFlowDetailsError ?? state.apFlowMutateError}</div>`
+                                : nothing}
+
+                              <div class="stat-grid">
+                                <div class="stat">
+                                  <div class="stat-label">Flow ID</div>
+                                  <div class="stat-value mono" style="font-size:12px; font-weight:600;">${state.apFlowSelectedId}</div>
+                                </div>
+                                <div class="stat">
+                                  <div class="stat-label">Status</div>
+                                  <div class="stat-value ${flowDetailsStatus === "ENABLED" ? "ok" : "warn"}" style="font-size:16px;">${flowDetailsStatus || "n/a"}</div>
+                                </div>
+                              </div>
+
+                              <div style="display:flex; gap:8px; align-items:flex-end;">
+                                <label class="field" style="flex:1; margin:0;">
+                                  <span>Name</span>
+                                  <input
+                                    class="input"
+                                    .value=${state.apFlowRenameDraft}
+                                    @input=${(e: Event) => (state.apFlowRenameDraft = (e.target as HTMLInputElement).value)}
+                                    ?disabled=${state.apFlowMutating}
+                                  />
+                                </label>
+                                <button
+                                  class="btn primary btn--sm"
+                                  @click=${() => void state.handlePmosApFlowRename()}
+                                  ?disabled=${state.apFlowMutating || !state.apFlowRenameDraft.trim()}
+                                >Save</button>
+                              </div>
+
+                              <div class="row" style="gap:8px; flex-wrap:wrap;">
+                                <button
+                                  class="btn btn--sm"
+                                  @click=${() => void state.handlePmosApFlowSetStatus(flowDetailsStatus === "ENABLED" ? "DISABLED" : "ENABLED")}
+                                  ?disabled=${state.apFlowMutating}
+                                >${flowDetailsStatus === "ENABLED" ? "Disable" : "Enable"}</button>
+                                <button
+                                  class="btn btn--sm"
+                                  @click=${() => void state.handlePmosApFlowPublish()}
+                                  ?disabled=${state.apFlowMutating}
+                                >Publish</button>
+                                <button
+                                  class="btn danger btn--sm"
+                                  @click=${() => void state.handlePmosApFlowDelete()}
+                                  ?disabled=${state.apFlowMutating}
+                                >Delete</button>
+                              </div>
+
+                              <div>
+                                <div class="card-title" style="margin-bottom:6px; font-size:13px;">Webhook Trigger</div>
+                                <textarea
+                                  class="input"
+                                  style="width:100%; min-height:56px; resize:vertical; font-size:12px; box-sizing:border-box;"
+                                  .value=${state.apFlowTriggerPayloadDraft}
+                                  @input=${(e: Event) => (state.apFlowTriggerPayloadDraft = (e.target as HTMLTextAreaElement).value)}
+                                  ?disabled=${state.apFlowMutating}
+                                  placeholder="{}"
+                                ></textarea>
+                                <div class="row" style="margin-top:8px; gap:8px;">
+                                  <button class="btn primary btn--sm" @click=${() => void state.handlePmosApFlowTriggerWebhook()} ?disabled=${state.apFlowMutating}>Trigger</button>
+                                  <button class="btn btn--sm" @click=${() => void state.handlePmosApFlowTriggerWebhook({ draft: true })} ?disabled=${state.apFlowMutating}>Draft</button>
+                                  <button class="btn btn--sm" @click=${() => void state.handlePmosApFlowTriggerWebhook({ sync: true })} ?disabled=${state.apFlowMutating}>Sync</button>
+                                </div>
+                              </div>
+
+                              <details>
+                                <summary class="muted" style="cursor:pointer; font-size:12px;">Raw flow JSON</summary>
+                                <pre class="code-block" style="max-height:260px; overflow:auto; margin-top:8px; font-size:11px;">${JSON.stringify(state.apFlowDetails, null, 2)}</pre>
+                              </details>
+                            </div>
+                          `
+                          : nothing}
                       </div>
                     </div>`}
                </div>`
