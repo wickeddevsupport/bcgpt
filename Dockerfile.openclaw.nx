@@ -72,8 +72,6 @@ RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:${PATH}"
 
 RUN corepack enable
-# Install Nx globally so we can run it without a root pnpm workspace.
-RUN npm install -g nx@22.4.5
 
 WORKDIR /app
 
@@ -88,6 +86,10 @@ RUN if [ -n "$OPENCLAW_DOCKER_APT_PACKAGES" ]; then \
 # Workspace metadata for Nx
 COPY package.json nx.json ./
 
+# Nx CLI expects Nx modules to be available in the workspace root (/app).
+# Install only devDependencies (nx) and skip root scripts/prod deps to keep image builds fast and reliable.
+RUN npm install --omit=prod --ignore-scripts --no-audit --no-fund --no-package-lock
+
 # OpenClaw workspace (includes ui/, packages/, extensions/)
 COPY openclaw/ ./openclaw/
 
@@ -100,7 +102,7 @@ COPY --from=n8n_vendor /app/openclaw/vendor/n8n /app/openclaw/vendor/n8n
 # Build with Nx to match local preflight
 ENV NX_DAEMON=false
 ARG OPENCLAW_NX_PROJECTS="openclaw-app,openclaw-control-ui"
-RUN nx run-many -t build --projects=$OPENCLAW_NX_PROJECTS --output-style=stream
+RUN ./node_modules/.bin/nx run-many -t build --projects=$OPENCLAW_NX_PROJECTS --output-style=stream
 
 # Force pnpm for UI build (Bun may fail on ARM/Synology architectures)
 ENV OPENCLAW_PREFER_PNPM=1
