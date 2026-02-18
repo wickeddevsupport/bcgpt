@@ -87,8 +87,8 @@ RUN if [ -n "$OPENCLAW_DOCKER_APT_PACKAGES" ]; then \
 COPY package.json nx.json ./
 
 # Nx CLI expects Nx modules to be available in the workspace root (/app).
-# Install only devDependencies (nx) and skip root scripts/prod deps to keep image builds fast and reliable.
-RUN npm install --omit=prod --ignore-scripts --no-audit --no-fund --no-package-lock
+# Install local Nx deps and skip root scripts to keep image builds fast and reliable.
+RUN npm install --ignore-scripts --no-audit --no-fund --no-package-lock
 
 # OpenClaw workspace (includes ui/, packages/, extensions/)
 COPY openclaw/ ./openclaw/
