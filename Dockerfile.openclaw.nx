@@ -1,12 +1,11 @@
-FROM node:22-bookworm
+# ---------- n8n vendor stage (optionally prebuilt) ----------
+FROM node:22-bookworm as n8n_vendor_build
 
 # Install Bun (required for build scripts)
 RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:${PATH}"
 
 RUN corepack enable
-# Install Nx globally so we can run it without a root pnpm workspace.
-RUN npm install -g nx@22.4.5
 
 WORKDIR /app
 
@@ -47,13 +46,46 @@ RUN set -eux; \
         mkdir -p /app/openclaw/vendor/n8n/packages/cli/node_modules/n8n-nodes-basecamp; \
         cp -r dist package.json /app/openclaw/vendor/n8n/packages/cli/node_modules/n8n-nodes-basecamp/; \
       fi; \
+    else \
+      mkdir -p /app/openclaw/vendor/n8n; \
     fi
+
+# Use a prebuilt n8n vendor image when available.
+ARG N8N_VENDOR_IMAGE=n8n_vendor_build
+FROM ${N8N_VENDOR_IMAGE} as n8n_vendor
+
+# ---------- OpenClaw build stage ----------
+FROM node:22-bookworm
+
+# Install Bun (required for build scripts)
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:${PATH}"
+
+RUN corepack enable
+# Install Nx globally so we can run it without a root pnpm workspace.
+RUN npm install -g nx@22.4.5
+
+WORKDIR /app
+
+ARG OPENCLAW_DOCKER_APT_PACKAGES=""
+RUN if [ -n "$OPENCLAW_DOCKER_APT_PACKAGES" ]; then \
+      apt-get update && \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $OPENCLAW_DOCKER_APT_PACKAGES && \
+      apt-get clean && \
+      rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*; \
+    fi
+
+# Workspace metadata for Nx
+COPY package.json nx.json ./
 
 # OpenClaw workspace (includes ui/, packages/, extensions/)
 COPY openclaw/ ./openclaw/
 
 # Install OpenClaw workspace deps (includes ui)
 RUN corepack pnpm --dir openclaw install --frozen-lockfile
+
+# Bring in vendored n8n (prebuilt or built in the vendor stage)
+COPY --from=n8n_vendor /app/openclaw/vendor/n8n /app/openclaw/vendor/n8n
 
 # Build with Nx to match local preflight
 ENV NX_DAEMON=false

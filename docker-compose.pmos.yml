@@ -8,6 +8,9 @@ services:
       args:
         INCLUDE_VENDORED_N8N: "true"
         OPENCLAW_NX_PROJECTS: "openclaw-app,openclaw-control-ui"
+        # Optional: point to a prebuilt vendor image to skip n8n build.
+        # Example: ghcr.io/<org>/openclaw-n8n-vendor:n8n-1.76.1
+        N8N_VENDOR_IMAGE: "${N8N_VENDOR_IMAGE:-n8n_vendor_build}"
     environment:
       # Keep OpenClaw config/workspace in a named volume by pinning HOME into /app.
       HOME: /app
