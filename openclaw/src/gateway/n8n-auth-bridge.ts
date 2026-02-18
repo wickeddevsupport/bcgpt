@@ -151,8 +151,33 @@ export async function resolveOpenClawUser(
 }
 
 /**
+ * Validate that an n8n auth cookie is still valid by making a lightweight request.
+ * Returns true if the cookie is valid, false if invalid or error.
+ */
+async function validateN8nCookie(n8nBaseUrl: string, cookie: string): Promise<boolean> {
+  const base = n8nBaseUrl.replace(/\/+$/, "");
+  try {
+    // Use /rest/me to check if session is valid (lightweight endpoint)
+    const res = await fetch(`${base}/rest/me`, {
+      method: "GET",
+      headers: {
+        Cookie: cookie,
+        accept: "application/json",
+      },
+    });
+    // 200 = valid session
+    // 401 = invalid/expired session
+    // Any other response = assume valid (don't invalidate on transient errors)
+    return res.ok || res.status !== 401;
+  } catch {
+    // Network error - assume valid to avoid unnecessary re-logins during outages
+    return true;
+  }
+}
+
+/**
  * Attempt to get a valid n8n auth cookie for the given workspace.
- * Uses cached cookies when available, otherwise performs server-side login.
+ * Uses cached cookies when available, validates before use, otherwise performs server-side login.
  */
 export async function getN8nAuthCookie(
   workspaceId: string,
@@ -161,7 +186,13 @@ export async function getN8nAuthCookie(
   // Check cache first
   const cached = sessionCache.get(workspaceId);
   if (cached && cached.expiresAt > Date.now()) {
-    return cached.cookie;
+    // Validate the cached cookie before using it
+    const isValid = await validateN8nCookie(n8nBaseUrl, cached.cookie);
+    if (isValid) {
+      return cached.cookie;
+    }
+    // Cached cookie is invalid (user logged out of n8n) - invalidate and re-login
+    sessionCache.delete(workspaceId);
   }
 
   // Read workspace-specific n8n credentials
