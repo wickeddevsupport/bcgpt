@@ -291,8 +291,15 @@ async function ensureWorkspaceUserViaInvitation(params: {
     }
 
     const invited = (await inviteRes.json().catch(() => null)) as unknown;
-    if (Array.isArray(invited)) {
-      const match = (invited as InviteResponse[]).find((entry) => {
+    const list = (() => {
+      if (Array.isArray(invited)) return invited as InviteResponse[];
+      if (invited && typeof invited === "object" && Array.isArray((invited as any).data)) {
+        return (invited as any).data as InviteResponse[];
+      }
+      return null;
+    })();
+    if (list) {
+      const match = list.find((entry) => {
         const e = String(entry?.user?.email ?? "").trim().toLowerCase();
         return e === email;
       });
