@@ -3,6 +3,7 @@ import type { ThinkLevel } from "../../auto-reply/thinking.js";
 import type { RunEmbeddedPiAgentParams } from "./run/params.js";
 import type { EmbeddedPiAgentMeta, EmbeddedPiRunResult } from "./types.js";
 import { enqueueCommandInLane } from "../../process/command-queue.js";
+import { retryAsync, type RetryInfo } from "../../infra/retry.js";
 import { isMarkdownCapableMessageChannel } from "../../utils/message-channel.js";
 import { resolveOpenClawAgentDir } from "../agent-paths.js";
 import {
@@ -37,6 +38,7 @@ import {
   isContextOverflowError,
   isFailoverAssistantError,
   isFailoverErrorMessage,
+  isRateLimitErrorMessage,
   parseImageSizeError,
   parseImageDimensionError,
   isRateLimitAssistantError,
@@ -59,6 +61,14 @@ import {
 import { describeUnknownError } from "./utils.js";
 
 type ApiKeyInfo = ResolvedProviderAuth;
+
+// Provider rate limit retry configuration
+// When a rate limit (429) error occurs and there are no more auth profiles to rotate to,
+// we retry with exponential backoff before giving up.
+const PROVIDER_RATE_LIMIT_RETRY_ATTEMPTS = 5; // Max retry attempts for rate limit errors
+const PROVIDER_RATE_LIMIT_RETRY_MIN_DELAY_MS = 2000; // Initial delay: 2 seconds
+const PROVIDER_RATE_LIMIT_RETRY_MAX_DELAY_MS = 60000; // Max delay: 60 seconds
+const PROVIDER_RATE_LIMIT_RETRY_JITTER = 0.3; // 30% jitter to avoid thundering herd
 
 // Avoid Anthropic's refusal test token poisoning session transcripts.
 const ANTHROPIC_MAGIC_STRING_TRIGGER_REFUSAL = "ANTHROPIC_MAGIC_STRING_TRIGGER_REFUSAL";
@@ -388,6 +398,13 @@ export async function runEmbeddedPiAgent(
       let toolResultTruncationAttempted = false;
       const usageAccumulator = createUsageAccumulator();
       let autoCompactionCount = 0;
+      let rateLimitRetryAttempts = 0;
+      const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+      const applyJitter = (delayMs: number, jitter: number): number => {
+        if (jitter <= 0) return delayMs;
+        const offset = (Math.random() * 2 - 1) * jitter;
+        return Math.max(0, Math.round(delayMs * (1 + offset)));
+      };
       try {
         while (true) {
           attemptedThinking.add(thinkLevel);
@@ -681,6 +698,22 @@ export async function runEmbeddedPiAgent(
             // FIX: Throw FailoverError for prompt errors when fallbacks configured
             // This enables model fallback for quota/rate limit errors during prompt submission
             if (fallbackConfigured && isFailoverErrorMessage(errorText)) {
+              // Retry on rate limit errors with exponential backoff before failing over
+              const isRateLimitPromptError = promptFailoverReason === "rate_limit" || isRateLimitErrorMessage(errorText);
+              if (isRateLimitPromptError && rateLimitRetryAttempts < PROVIDER_RATE_LIMIT_RETRY_ATTEMPTS) {
+                rateLimitRetryAttempts++;
+                const baseDelay = PROVIDER_RATE_LIMIT_RETRY_MIN_DELAY_MS * 2 ** (rateLimitRetryAttempts - 1);
+                const delay = Math.min(
+                  applyJitter(baseDelay, PROVIDER_RATE_LIMIT_RETRY_JITTER),
+                  PROVIDER_RATE_LIMIT_RETRY_MAX_DELAY_MS,
+                );
+                log.warn(
+                  `Rate limit during prompt for ${provider}/${modelId} (attempt ${rateLimitRetryAttempts}/${PROVIDER_RATE_LIMIT_RETRY_ATTEMPTS}). ` +
+                  `Retrying in ${Math.round(delay / 1000)}s...`,
+                );
+                await sleep(delay);
+                continue;
+              }
               throw new FailoverError(errorText, {
                 reason: promptFailoverReason ?? "unknown",
                 provider,
@@ -786,6 +819,27 @@ export async function runEmbeddedPiAgent(
               const status =
                 resolveFailoverStatus(assistantFailoverReason ?? "unknown") ??
                 (isTimeoutErrorMessage(message) ? 408 : undefined);
+
+              // Retry on rate limit errors with exponential backoff
+              const isRateLimitError =
+                rateLimitFailure ||
+                assistantFailoverReason === "rate_limit" ||
+                status === 429;
+              if (isRateLimitError && rateLimitRetryAttempts < PROVIDER_RATE_LIMIT_RETRY_ATTEMPTS) {
+                rateLimitRetryAttempts++;
+                const baseDelay = PROVIDER_RATE_LIMIT_RETRY_MIN_DELAY_MS * 2 ** (rateLimitRetryAttempts - 1);
+                const delay = Math.min(
+                  applyJitter(baseDelay, PROVIDER_RATE_LIMIT_RETRY_JITTER),
+                  PROVIDER_RATE_LIMIT_RETRY_MAX_DELAY_MS,
+                );
+                log.warn(
+                  `Rate limit hit for ${provider}/${modelId} (attempt ${rateLimitRetryAttempts}/${PROVIDER_RATE_LIMIT_RETRY_ATTEMPTS}). ` +
+                  `Retrying in ${Math.round(delay / 1000)}s...`,
+                );
+                await sleep(delay);
+                continue;
+              }
+
               throw new FailoverError(message, {
                 reason: assistantFailoverReason ?? "unknown",
                 provider,
