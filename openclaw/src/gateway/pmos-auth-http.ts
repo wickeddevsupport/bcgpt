@@ -133,12 +133,23 @@ export async function handlePmosAuthHttpRequest(params: {
       sendJson(res, result.status, { ok: false, error: result.error });
       return true;
     }
-    // Fire-and-forget: provision n8n project for the new workspace in the background.
-    import("./pmos-provision-ops.js")
-      .then(({ provisionWorkspaceOps }) => provisionWorkspaceOps(result.user.workspaceId))
-      .catch((err: unknown) => {
-        console.warn("[pmos] auto-provision ops failed for workspace", result.user.workspaceId, String(err));
-      });
+    // Fire-and-forget: provision *remote* ops (legacy) only when explicitly enabled.
+    // Embedded n8n is the default runtime and does not require provisioning.
+    const allowRemoteOpsFallback = (() => {
+      const raw = (process.env.PMOS_ALLOW_REMOTE_OPS_FALLBACK ?? "").trim().toLowerCase();
+      return raw === "1" || raw === "true" || raw === "yes";
+    })();
+    if (allowRemoteOpsFallback) {
+      import("./pmos-provision-ops.js")
+        .then(({ provisionWorkspaceOps }) => provisionWorkspaceOps(result.user.workspaceId))
+        .catch((err: unknown) => {
+          console.warn(
+            "[pmos] auto-provision ops failed for workspace",
+            result.user.workspaceId,
+            String(err),
+          );
+        });
+    }
     res.setHeader("Set-Cookie", buildPmosSessionCookieValue(result.sessionToken, req));
     sendJson(res, 200, { ok: true, user: result.user });
     return true;

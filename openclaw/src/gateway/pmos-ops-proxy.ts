@@ -265,6 +265,12 @@ async function proxyWorkflowCreate(params: {
   if (tagId && body.length > 0) {
     try {
       const parsed = JSON.parse(body.toString("utf-8")) as Record<string, unknown>;
+
+      // n8n schema expects `active` to be a boolean; null/invalid values can cause SQLITE_CONSTRAINT errors.
+      if ("active" in parsed && typeof parsed.active !== "boolean") {
+        delete parsed.active;
+      }
+
       const existingTags = Array.isArray(parsed.tags) ? (parsed.tags as unknown[]) : [];
       if (!existingTags.includes(tagId)) {
         parsed.tags = [...existingTags, tagId];
