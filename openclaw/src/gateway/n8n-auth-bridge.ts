@@ -165,13 +165,13 @@ async function validateN8nCookie(n8nBaseUrl: string, cookie: string): Promise<bo
         accept: "application/json",
       },
     });
-    // 200 = valid session
-    // 401 = invalid/expired session
-    // Any other response = assume valid (don't invalidate on transient errors)
-    return res.ok || res.status !== 401;
+    // Only 200 OK means valid session
+    // 401 (unauthorized), 404 (not found = not logged in), or any other status = invalid
+    return res.ok;
   } catch {
-    // Network error - assume valid to avoid unnecessary re-logins during outages
-    return true;
+    // Network error - assume INVALID to force re-login
+    // Better to re-login than to use a stale cookie
+    return false;
   }
 }
 
