@@ -530,8 +530,15 @@ export async function handleLocalN8nRequest(
     if (!authHeaders.Cookie && !authHeaders["X-N8N-API-KEY"]) {
       await attemptAutoLoginForRequest(req, res, n8n.url);
     }
-    // Proxy everything transparently to local n8n
-    const targetUrl = `${n8n.url}${pathname}${url.search}`;
+
+    // Proxy everything transparently to local n8n.
+    //
+    // Important: When n8n is served behind a subpath (N8N_PATH=/ops-ui/), it still expects incoming
+    // requests *without* the prefix. The reverse proxy is responsible for stripping it.
+    // If we forward /ops-ui/assets/* as-is, n8n's history-api fallback returns index.html for JS/CSS,
+    // which makes the iframe look "blank" because the editor never loads.
+    const targetPath = isOpsUi ? (pathname.slice("/ops-ui".length) || "/") : pathname;
+    const targetUrl = `${n8n.url}${targetPath}${url.search}`;
     await proxyUpstream({ req, res, targetUrl, extraHeaders: authHeaders });
     return true;
   }
