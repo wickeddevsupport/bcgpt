@@ -22,7 +22,9 @@ OpenClaw uses n8n as its workflow automation engine, replacing Activepieces. Thi
 - Embedded custom node loading now auto-discovers all node packages in `openclaw/vendor/n8n/custom/nodes/*` (includes `n8n-nodes-basecamp` and `n8n-nodes-openclaw`).
 - Control UI connector saves now write `pmos.connectors.ops` and prune legacy `pmos.connectors.activepieces.*` keys from config writes.
 - Production note: `/ops-ui/` responds `200` to GET; prefer GET-based checks over HEAD.
-- The Control UI “Wicked OS Access Key” field is **legacy/manual** access only. Normal users should sign in via PMOS auth; they should not need to paste a key to use embedded workflows.
+- Embedded workflow create forces `active: false` to avoid `SQLITE_CONSTRAINT` errors in n8n SQLite setups.
+- Embedded workspace isolation is tag-based. Tag names are derived from a short workspace hash (n8n tag names are limited to 24 chars).
+- The Control UI "Wicked OS Access Key" field is **legacy/manual** access only. Normal users should sign in via PMOS auth; they should not need to paste a key to use embedded workflows.
 
 ### Build/Deploy Model (Vendored n8n)
 
@@ -210,11 +212,31 @@ The PMOS Ops Proxy ([`pmos-ops-proxy.ts`](../openclaw/src/gateway/pmos-ops-proxy
 
 ---
 
-## Per-Workspace Provisioning
+## Workspace Isolation (Embedded n8n)
+
+Embedded n8n runs as a single instance. Workspace isolation is enforced at the OpenClaw layer using workflow tags:
+
+- On create, OpenClaw ensures a workspace tag exists and injects its ID into the workflow `tags` list.
+- On list, OpenClaw filters results to workflows that contain the workspace tag.
+- On mutations (update/delete/activate/etc), OpenClaw verifies the workflow belongs to the workspace before allowing the request.
+
+Tag naming:
+
+- n8n tag names are limited to 24 characters, so we derive a stable short tag name from the workspace ID hash.
+- Format: `pmos-${sha256(workspaceId).slice(0, 18)}` (23 chars).
+
+Relevant code:
+
+- `openclaw/src/gateway/pmos-ops-proxy.ts` (`ensureWorkspaceN8nTag`, `workflowBelongsToWorkspace`, `proxyWorkflowCreate`)
+- `openclaw/extensions/wicked-ops/index.ts` (`opsRequestEmbedded` create-path enforcement)
+
+---
+
+## Per-Workspace Provisioning (Remote Ops, Legacy)
 
 ### Project Structure
 
-Each workspace gets its own n8n project:
+When using a separate remote Ops/n8n service (legacy), each workspace can be provisioned with its own project/API key:
 
 ```typescript
 // From pmos-provision-ops.ts

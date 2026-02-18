@@ -282,7 +282,7 @@ async function main() {
   assertContains(bundle, "Command Center", "ui-command-center");
   assertContains(bundle, "Workspace Identity", "ui-workspace-identity");
   // Phase 3 UX: "native" workflows means n8n is embedded in-dashboard, not opened in a new tab.
-  assertContains(bundle, "Embedded n8n editor", "ui-ops-embed");
+  assertContains(bundle, "n8n workflow canvas", "ui-ops-embed");
   assertContains(bundle, "Execution Trace", "ui-execution-trace");
 
   // n8n ops tools + mutation smoke

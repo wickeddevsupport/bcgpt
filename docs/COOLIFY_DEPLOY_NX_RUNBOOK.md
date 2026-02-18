@@ -28,6 +28,12 @@ These are the issues we hit during the initial Coolify+Nx rollout. If you see th
 - Slow builds from rebuilding n8n on every deploy
   - Root cause: cold Docker cache or no shared build cache between deployments.
   - Fix: set `N8N_VENDOR_IMAGE` to a prebuilt vendor image (see section 2).
+- `Embedded n8n 500 Internal Server Error: SQLITE_CONSTRAINT: NOT NULL constraint failed: workflow_entity.active`
+  - Root cause: `POST /rest/workflows` can insert `active=NULL` when the field is missing/invalid.
+  - Fix: force `active: false` on embedded workflow create (tools path + proxy path), then redeploy.
+- `Unable to ensure workspace tag for embedded n8n.`
+  - Root cause: n8n tag names are limited to 24 characters; raw workspace IDs often exceed this.
+  - Fix: workspace isolation tag name is derived from a short hash (see `openclaw/src/gateway/pmos-ops-proxy.ts`), then redeploy.
 
 ---
 

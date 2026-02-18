@@ -1,6 +1,6 @@
 # Workspace Isolation Status
 
-**Last Updated:** 2026-02-17
+**Last Updated:** 2026-02-18
 **Related:** [`OPENCLAW_AUTOMATION_OS.md`](OPENCLAW_AUTOMATION_OS.md)
 
 ---
@@ -8,6 +8,12 @@
 ## Overview
 
 OpenClaw implements multi-tenant workspace isolation to ensure each user's data is completely separated. This document tracks the implementation status of workspace isolation across all system components.
+
+### n8n Workflows (Embedded)
+
+- Workspace isolation for workflows is enforced via tags at the OpenClaw layer (single embedded n8n instance).
+- Tag names are derived from a short workspace hash to satisfy n8n's 24-character tag-name limit.
+- Implementation: `openclaw/src/gateway/pmos-ops-proxy.ts` (`ensureWorkspaceN8nTag`, `workflowBelongsToWorkspace`).
 
 ---
 
