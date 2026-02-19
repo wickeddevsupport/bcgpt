@@ -193,6 +193,9 @@ function hasConfiguredModelAuth(config: unknown): boolean {
 function renderAuthScreen(state: AppViewState) {
   const loading = state.pmosAuthLoading;
   const isSignup = state.pmosAuthMode === "signup";
+  const emailValid = state.pmosAuthEmail.includes("@") && state.pmosAuthEmail.includes(".");
+  const passwordValid = state.pmosAuthPassword.length >= 8;
+  const canSubmit = !loading && emailValid && passwordValid;
   return html`
     <div class="pmos-auth-shell">
       <div class="pmos-auth-card">
@@ -254,7 +257,9 @@ function renderAuthScreen(state: AppViewState) {
             />
           </label>
           ${state.pmosAuthError ? html`<div class="pill danger">${state.pmosAuthError}</div>` : nothing}
-          <button class="button primary" type="submit" ?disabled=${loading}>
+          ${state.pmosAuthEmail.length > 0 && !emailValid ? html`<div class="muted" style="font-size:12px;margin-top:4px;">Enter a valid email address.</div>` : nothing}
+          ${state.pmosAuthPassword.length > 0 && !passwordValid ? html`<div class="muted" style="font-size:12px;margin-top:4px;">Password must be at least 8 characters.</div>` : nothing}
+          <button class="button primary" type="submit" ?disabled=${!canSubmit}>
             ${loading ? "Please wait..." : isSignup ? "Create account" : "Sign in"}
           </button>
         </form>
@@ -660,9 +665,12 @@ export function renderApp(state: AppViewState) {
                       onLoadRuns: () => void loadWorkflowRuns(state),
                       templateDeploying: state.apFlowMutating,
                       templateDeployError: state.apFlowMutateError ?? null,
+                      templateDeployedOk: state.apFlowTemplateDeployedOk ?? false,
                       onDeployTemplate: async (templateId: string) => {
                         await state.client!.request("pmos.flow.template.deploy", { templateId });
                         void state.handlePmosApFlowsLoad();
+                        state.apFlowTemplateDeployedOk = true;
+                        setTimeout(() => { state.apFlowTemplateDeployedOk = false; }, 3000);
                       },
                     })}
               </div>`
@@ -707,6 +715,9 @@ export function renderApp(state: AppViewState) {
                 },
                 onModelSave: () => state.handlePmosModelSave(),
                 onModelClearKey: () => state.handlePmosModelClearKey(),
+                onOpenAutomations: () => state.setTab("automations"),
+                modelSavedOk: state.pmosModelSavedOk,
+                bcgptSavedOk: state.pmosBcgptSavedOk,
                 opsProvisioned: Boolean(state.pmosOpsProvisioningResult?.apiKey) || state.pmosConnectorsStatus?.ops?.reachable === true,
                 opsProjectId: state.pmosOpsProvisioningResult?.projectId ?? null,
               })
@@ -796,22 +807,13 @@ export function renderApp(state: AppViewState) {
                 onMemberDraftStatusChange: (next) => (state.pmosMemberDraftStatus = next),
                 onUpsertMember: () => state.handlePmosMemberUpsert(),
                 onRemoveMember: (email) => state.handlePmosMemberRemove(email),
+                memberRemoveConfirm: state.pmosMemberRemoveConfirm,
+                onMemberRemoveConfirmSet: (email) => (state.pmosMemberRemoveConfirm = email),
                 isSuperAdmin: state.pmosAuthUser?.role === "super_admin",
                 workspacesList: state.pmosWorkspacesList,
                 workspacesLoading: state.pmosWorkspacesLoading,
                 workspacesError: state.pmosWorkspacesError,
-                onLoadWorkspaces: () => void (async () => {
-                  state.pmosWorkspacesLoading = true;
-                  state.pmosWorkspacesError = null;
-                  try {
-                    const res = await state.client!.request<{ workspaces: Array<{ workspaceId: string; ownerEmail: string; ownerName: string; ownerRole: string; createdAtMs: number }> }>("pmos.workspaces.list", {});
-                    state.pmosWorkspacesList = res.workspaces ?? [];
-                  } catch (err) {
-                    state.pmosWorkspacesError = String(err);
-                  } finally {
-                    state.pmosWorkspacesLoading = false;
-                  }
-                })(),
+                onLoadWorkspaces: () => void state._loadWorkspacesList(),
               })
             : nothing
         }
@@ -1830,7 +1832,9 @@ export function renderApp(state: AppViewState) {
                 sidebarError: state.sidebarError,
                 splitRatio: state.splitRatio,
                 traceEvents: state.pmosTraceEvents,
+                traceLimit: state.chatTraceLimit,
                 onTraceClear: () => state.handlePmosTraceClear(),
+                onExpandTrace: () => { state.chatTraceLimit = (state.chatTraceLimit ?? 8) + 20; },
                 onOpenSidebar: (content: string) => state.handleOpenSidebar(content),
                 onCloseSidebar: () => state.handleCloseSidebar(),
                 onSplitRatioChange: (ratio: number) => state.handleSplitRatioChange(ratio),

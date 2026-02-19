@@ -51,7 +51,9 @@ export type ChatProps = {
   sidebarError?: string | null;
   splitRatio?: number;
   traceEvents?: PmosExecutionTraceEvent[];
+  traceLimit?: number;
   onTraceClear?: () => void;
+  onExpandTrace?: () => void;
   assistantName: string;
   assistantAvatar: string | null;
   // Agent context (for agent-specific chat)
@@ -430,20 +432,32 @@ export function renderChat(props: ChatProps) {
           <div class="chat-trace__list">
             ${
               props.traceEvents && props.traceEvents.length > 0
-                ? props.traceEvents.slice(0, 8).map(
-                    (event) => html`
-                      <div class="chat-trace__item">
-                        <div class="chat-trace__main">
-                          <div class="chat-trace__name">${event.title}</div>
-                          <div class="chat-trace__detail">${event.detail ?? `${event.source}:${event.kind}`}</div>
-                        </div>
-                        <div class="chat-trace__meta">
-                          <span class=${traceClassForStatus(event.status)}>${event.status}</span>
-                          <span class="mono muted">${formatTraceTime(event.ts)}</span>
-                        </div>
-                      </div>
-                    `,
-                  )
+                ? (() => {
+                    const limit = props.traceLimit ?? 8;
+                    const visible = props.traceEvents.slice(0, limit);
+                    const remaining = props.traceEvents.length - visible.length;
+                    return html`
+                      ${visible.map(
+                        (event) => html`
+                          <div class="chat-trace__item">
+                            <div class="chat-trace__main">
+                              <div class="chat-trace__name">${event.title}</div>
+                              <div class="chat-trace__detail">${event.detail ?? `${event.source}:${event.kind}`}</div>
+                            </div>
+                            <div class="chat-trace__meta">
+                              <span class=${traceClassForStatus(event.status)}>${event.status}</span>
+                              <span class="mono muted">${formatTraceTime(event.ts)}</span>
+                            </div>
+                          </div>
+                        `,
+                      )}
+                      ${remaining > 0
+                        ? html`<button class="btn btn--sm" style="margin-top:8px;" @click=${() => props.onExpandTrace?.()}>
+                            Show ${remaining} more event${remaining !== 1 ? "s" : ""}
+                          </button>`
+                        : nothing}
+                    `;
+                  })()
                 : html`<div class="muted">No trace events yet.</div>`
             }
           </div>

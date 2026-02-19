@@ -77,6 +77,7 @@ export type AutomationsProps = {
   // Template deploy
   templateDeploying: boolean;
   templateDeployError: string | null;
+  templateDeployedOk: boolean;
   onDeployTemplate: (templateId: string) => void;
   // Execution history
   runs: WorkflowRunSummary[];
@@ -99,7 +100,7 @@ function formatFlowMeta(flow: WorkflowSummary) {
 
 export function renderAutomations(props: AutomationsProps) {
   const connectedReason = !props.connected
-    ? "Sign in first, then wait for the Wicked OS gateway to connect."
+    ? "Sign in to your workspace to create and manage workflows."
     : null;
   const projectReason = props.projectId.trim()
     ? null
@@ -148,7 +149,7 @@ export function renderAutomations(props: AutomationsProps) {
 
         <div class="card">
           <div class="card-title">Flows</div>
-          <div class="card-sub">Your workspace workflows (native inside Wicked OS).</div>
+          <div class="card-sub">Your workspace workflows.</div>
 
           <div class="form-grid" style="margin-top: 14px;">
             <label class="field full">
@@ -208,6 +209,7 @@ export function renderAutomations(props: AutomationsProps) {
           <div class="card-title">Templates</div>
           <div class="card-sub">Deploy a pre-built workflow directly into your n8n editor.</div>
 
+          ${props.templateDeployedOk ? html`<div class="callout success" style="margin-top: 10px;">✓ Template deployed — find it in your workflow list above.</div>` : nothing}
           ${props.templateDeployError ? html`<div class="callout danger" style="margin-top: 10px;">${props.templateDeployError}</div>` : nothing}
 
           <div class="list" style="margin-top: 14px;">
@@ -463,7 +465,12 @@ export function renderAutomations(props: AutomationsProps) {
                     <button class="btn" @click=${() => props.onSetStatus(isEnabled ? "DISABLED" : "ENABLED")} ?disabled=${props.mutating}>
                       ${isEnabled ? "Disable" : "Enable"}
                     </button>
-                    <button class="btn" @click=${() => props.onPublish()} ?disabled=${props.mutating}>
+                    <button
+                      class="btn"
+                      @click=${() => props.onPublish()}
+                      ?disabled=${props.mutating}
+                      title="Publish makes this workflow visible to all workspace members. It does not activate execution — use Enable for that."
+                    >
                       Publish
                     </button>
                     <button class="btn danger" @click=${() => props.onDelete()} ?disabled=${props.mutating}>
@@ -485,13 +492,16 @@ export function renderAutomations(props: AutomationsProps) {
                       ></textarea>
                     </label>
                     <div class="row" style="margin-top: 12px;">
-                      <button class="btn primary" @click=${() => props.onTriggerWebhook()} ?disabled=${props.mutating}>
-                        Trigger
+                      <button class="btn btn--primary" @click=${() => props.onTriggerWebhook()} ?disabled=${props.mutating}
+                        title="Send the payload to this workflow's webhook URL to execute it now">
+                        Trigger now
                       </button>
-                      <button class="btn" @click=${() => props.onTriggerWebhook({ draft: true })} ?disabled=${props.mutating}>
-                        Draft
+                      <button class="btn" @click=${() => props.onTriggerWebhook({ draft: true })} ?disabled=${props.mutating}
+                        title="Save the payload as a draft without executing">
+                        Save draft
                       </button>
-                      <button class="btn" @click=${() => props.onTriggerWebhook({ sync: true })} ?disabled=${props.mutating}>
+                      <button class="btn" @click=${() => props.onTriggerWebhook({ sync: true })} ?disabled=${props.mutating}
+                        title="Sync the workflow definition from n8n to ensure it is up to date">
                         Sync
                       </button>
                     </div>

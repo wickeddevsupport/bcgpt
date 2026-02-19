@@ -38,6 +38,10 @@ export type AdminProps = {
   onUpsertMember: () => void;
   onRemoveMember: (email: string) => void;
 
+  // Remove-member confirm state
+  memberRemoveConfirm: string | null;
+  onMemberRemoveConfirmSet: (email: string | null) => void;
+
   // Super-admin: workspace list
   isSuperAdmin?: boolean;
   workspacesList?: Array<{ workspaceId: string; ownerEmail: string; ownerName: string; ownerRole: string; createdAtMs: number }>;
@@ -46,39 +50,62 @@ export type AdminProps = {
   onLoadWorkspaces?: () => void;
 };
 
+const ROLE_DESCRIPTIONS: Record<PmosRole, string> = {
+  system_admin: "Full access to all workspaces and system settings",
+  workspace_admin: "Can manage members, agents, and all workspace settings",
+  member: "Can use agents and automations, cannot manage members",
+  viewer: "Read-only access — cannot chat or modify anything",
+};
+
 function roleLabel(role: PmosRole): string {
   switch (role) {
-    case "system_admin":
-      return "System Admin";
-    case "workspace_admin":
-      return "Workspace Admin";
-    case "member":
-      return "Member";
-    case "viewer":
-      return "Viewer";
-    default:
-      return role;
+    case "system_admin": return "System Admin";
+    case "workspace_admin": return "Workspace Admin";
+    case "member": return "Member";
+    case "viewer": return "Viewer";
+    default: return role;
   }
+}
+
+function friendlyAction(action: string): string {
+  const MAP: Record<string, string> = {
+    "agent.create": "Created agent",
+    "agent.update": "Updated agent",
+    "agent.delete": "Deleted agent",
+    "workspace.config.set": "Changed workspace settings",
+    "workspace.member.upsert": "Added/updated member",
+    "workspace.member.remove": "Removed member",
+    "byok.set": "Saved AI key",
+    "byok.clear": "Removed AI key",
+    "workflow.create": "Created workflow",
+    "workflow.delete": "Deleted workflow",
+    "workflow.status.set": "Changed workflow status",
+  };
+  return MAP[action] ?? action;
 }
 
 export function renderAdmin(props: AdminProps) {
   const disabledReason = !props.connected
-    ? "Connect to Wicked OS first (Dashboard -> Access Key -> Connect)."
+    ? "Sign in to your workspace to manage settings."
     : null;
+
   return html`
     <section class="grid grid-cols-2">
       <div class="card">
         <div class="card-title">Workspace Identity</div>
-        <div class="card-sub">Wicked OS workspace profile, owner identity, and role defaults.</div>
+        <div class="card-sub">Your workspace profile and your account details.</div>
 
         <div class="form-grid" style="margin-top: 14px;">
           <label class="field">
-            <span>Workspace ID</span>
-            <input
-              .value=${props.workspaceId}
-              @input=${(e: Event) => props.onWorkspaceIdChange((e.target as HTMLInputElement).value)}
-              ?disabled=${!props.connected || props.saving}
-            />
+            <span>Workspace ID <span class="muted">(read-only)</span></span>
+            <div class="row" style="gap: 8px; align-items: center;">
+              <code class="mono" style="padding: 8px 10px; background: var(--surface2, var(--surface)); border-radius: 6px; border: 1px solid var(--border); flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${props.workspaceId}</code>
+              <button
+                class="btn btn--sm btn--secondary"
+                @click=${() => navigator.clipboard?.writeText(props.workspaceId)}
+                title="Copy workspace ID"
+              >Copy</button>
+            </div>
           </label>
           <label class="field">
             <span>Workspace Name</span>
@@ -111,16 +138,17 @@ export function renderAdmin(props: AdminProps) {
               @change=${(e: Event) => props.onCurrentUserRoleChange((e.target as HTMLSelectElement).value as PmosRole)}
               ?disabled=${!props.connected || props.saving}
             >
-              <option value="system_admin">System Admin</option>
-              <option value="workspace_admin">Workspace Admin</option>
-              <option value="member">Member</option>
-              <option value="viewer">Viewer</option>
+              <option value="workspace_admin" title=${ROLE_DESCRIPTIONS.workspace_admin}>Workspace Admin</option>
+              <option value="member" title=${ROLE_DESCRIPTIONS.member}>Member</option>
+              <option value="viewer" title=${ROLE_DESCRIPTIONS.viewer}>Viewer</option>
+              <option value="system_admin" title=${ROLE_DESCRIPTIONS.system_admin}>System Admin</option>
             </select>
+            <span class="muted" style="font-size: 11px; margin-top: 4px;">${ROLE_DESCRIPTIONS[props.currentUserRole] ?? ""}</span>
           </label>
         </div>
 
         <div class="row" style="margin-top: 12px;">
-          <button class="btn primary" ?disabled=${!props.connected || props.saving} @click=${() => props.onSave()}>
+          <button class="btn btn--primary" ?disabled=${!props.connected || props.saving} @click=${() => props.onSave()}>
             ${props.saving ? "Saving..." : "Save"}
           </button>
           <button class="btn btn--secondary" ?disabled=${!props.connected || props.loading} @click=${() => props.onRefresh()}>
@@ -134,7 +162,7 @@ export function renderAdmin(props: AdminProps) {
 
       <div class="card">
         <div class="card-title">Workspace Members</div>
-        <div class="card-sub">Role-based access controls for Wicked OS operations.</div>
+        <div class="card-sub">Control who has access and what they can do.</div>
 
         <div class="form-grid" style="margin-top: 14px;">
           <label class="field">
@@ -162,11 +190,11 @@ export function renderAdmin(props: AdminProps) {
               @change=${(e: Event) => props.onMemberDraftRoleChange((e.target as HTMLSelectElement).value as PmosRole)}
               ?disabled=${!props.connected || props.saving || !props.canManageMembers}
             >
-              <option value="workspace_admin">Workspace Admin</option>
-              <option value="member">Member</option>
-              <option value="viewer">Viewer</option>
-              <option value="system_admin">System Admin</option>
+              <option value="workspace_admin" title=${ROLE_DESCRIPTIONS.workspace_admin}>Workspace Admin</option>
+              <option value="member" title=${ROLE_DESCRIPTIONS.member}>Member</option>
+              <option value="viewer" title=${ROLE_DESCRIPTIONS.viewer}>Viewer</option>
             </select>
+            <span class="muted" style="font-size: 11px; margin-top: 4px;">${ROLE_DESCRIPTIONS[props.memberDraftRole] ?? ""}</span>
           </label>
           <label class="field">
             <span>Status</span>
@@ -185,14 +213,14 @@ export function renderAdmin(props: AdminProps) {
 
         <div class="row" style="margin-top: 12px;">
           <button
-            class="btn"
-            ?disabled=${!props.connected || props.saving || !props.canManageMembers}
+            class="btn btn--primary"
+            ?disabled=${!props.connected || props.saving || !props.canManageMembers || !props.memberDraftEmail.trim()}
             @click=${() => props.onUpsertMember()}
           >
-            Upsert member
+            Add / Update Member
           </button>
           ${!props.canManageMembers
-            ? html`<span class="muted">Current role cannot edit membership.</span>`
+            ? html`<span class="muted">Your role cannot edit membership.</span>`
             : nothing}
         </div>
 
@@ -210,11 +238,21 @@ export function renderAdmin(props: AdminProps) {
                 <div class="list-meta">
                   <span class="muted">${formatRelativeTimestamp(Date.parse(member.updatedAt) || Date.now())}</span>
                   ${props.canManageMembers
-                    ? html`
-                        <button class="btn btn--sm danger" @click=${() => props.onRemoveMember(member.email)}>
-                          Remove
-                        </button>
-                      `
+                    ? props.memberRemoveConfirm === member.email
+                      ? html`
+                          <span class="muted" style="font-size:12px;">Remove?</span>
+                          <button class="btn btn--sm btn--danger" @click=${() => { props.onRemoveMember(member.email); props.onMemberRemoveConfirmSet(null); }}>
+                            Confirm
+                          </button>
+                          <button class="btn btn--sm" @click=${() => props.onMemberRemoveConfirmSet(null)}>
+                            Cancel
+                          </button>
+                        `
+                      : html`
+                          <button class="btn btn--sm" @click=${() => props.onMemberRemoveConfirmSet(member.email)}>
+                            Remove
+                          </button>
+                        `
                     : nothing}
                 </div>
               </div>
@@ -227,15 +265,15 @@ export function renderAdmin(props: AdminProps) {
 
     <section class="card" style="margin-top: 18px;">
       <div class="card-title">Audit Feed</div>
-      <div class="card-sub">Admin-level Wicked OS changes and command-center actions.</div>
+      <div class="card-sub">Recent admin-level changes to this workspace.</div>
       <div class="list" style="margin-top: 12px; max-height: 320px; overflow: auto;">
         ${props.auditEvents.slice(0, 80).map(
           (event) => html`
             <div class="list-item">
               <div class="list-main">
-                <div class="list-title">${event.action}</div>
-                <div class="list-sub">${event.target}${event.detail ? ` · ${event.detail}` : ""}</div>
-                <div class="list-sub mono">${event.actor}</div>
+                <div class="list-title">${friendlyAction(event.action)}</div>
+                <div class="list-sub">${event.target}${event.detail ? ` — ${event.detail}` : ""}</div>
+                <div class="list-sub muted">${event.actor}</div>
               </div>
               <div class="list-meta">
                 <span class="chip ${event.status === "error"
@@ -255,14 +293,14 @@ export function renderAdmin(props: AdminProps) {
     ${props.isSuperAdmin ? html`
       <section class="card" style="margin-top: 18px;">
         <div class="card-title">All Workspaces</div>
-        <div class="card-sub">List of all registered workspaces (super_admin only).</div>
+        <div class="card-sub">All registered workspaces — visible to system admins only.</div>
         <div class="row" style="margin-top: 12px;">
           <button
-            class="btn"
+            class="btn btn--secondary"
             @click=${() => props.onLoadWorkspaces?.()}
             ?disabled=${props.workspacesLoading}
           >
-            ${props.workspacesLoading ? "Loading..." : "Load Workspaces"}
+            ${props.workspacesLoading ? "Loading..." : "Refresh"}
           </button>
         </div>
         ${props.workspacesError ? html`<div class="callout danger" style="margin-top: 10px;">${props.workspacesError}</div>` : nothing}
@@ -270,17 +308,17 @@ export function renderAdmin(props: AdminProps) {
           ${(props.workspacesList ?? []).map((ws) => html`
             <div class="list-item">
               <div class="list-main">
-                <div class="list-title mono" style="font-size:12px;">${ws.workspaceId}</div>
-                <div class="list-sub">${ws.ownerName} · ${ws.ownerEmail}</div>
-                <div class="list-sub muted">${new Date(ws.createdAtMs).toLocaleDateString()}</div>
+                <div class="list-title">${ws.ownerName || ws.ownerEmail}</div>
+                <div class="list-sub mono" style="font-size:11px;">${ws.workspaceId}</div>
+                <div class="list-sub muted">${ws.ownerEmail} · Created ${new Date(ws.createdAtMs).toLocaleDateString()}</div>
               </div>
               <div class="list-meta">
-                <span class="chip">${ws.ownerRole}</span>
+                <span class="chip">${roleLabel(ws.ownerRole as PmosRole)}</span>
               </div>
             </div>
           `)}
           ${(props.workspacesList ?? []).length === 0 && !props.workspacesLoading
-            ? html`<div class="muted" style="margin-top: 8px;">Click "Load Workspaces" to fetch the list.</div>`
+            ? html`<div class="muted" style="margin-top: 8px;">No workspaces loaded yet.</div>`
             : nothing}
         </div>
       </section>

@@ -102,6 +102,7 @@ export type AppViewState = {
   chatQueue: ChatQueueItem[];
   chatManualRefreshInFlight: boolean;
   dashboardNlDraft: string;
+  chatTraceLimit: number;
   chatCreateWorkflowBusy: boolean;
   chatCreateWorkflowError: string | null;
   nodesLoading: boolean;
@@ -172,8 +173,10 @@ export type AppViewState = {
   pmosModelAlias: string;
   pmosModelApiKeyDraft: string;
   pmosModelSaving: boolean;
+  pmosModelSavedOk: boolean;
   pmosModelError: string | null;
   pmosModelConfigured: boolean;
+  pmosBcgptSavedOk: boolean;
   pmosByokProviders: PmosModelProvider[];
 
   // PMOS identity/admin (Phase 4)
@@ -191,6 +194,7 @@ export type AppViewState = {
   pmosMemberDraftEmail: string;
   pmosMemberDraftRole: PmosRole;
   pmosMemberDraftStatus: PmosMemberStatus;
+  pmosMemberRemoveConfirm: string | null;
   pmosAuditEvents: PmosAuditEvent[];
   // Super-admin: workspace list
   pmosWorkspacesList: Array<{ workspaceId: string; ownerEmail: string; ownerName: string; ownerRole: string; createdAtMs: number }>;
@@ -248,6 +252,7 @@ export type AppViewState = {
   apFlowTriggerPayloadDraft: string;
   apFlowMutating: boolean;
   apFlowMutateError: string | null;
+  apFlowTemplateDeployedOk: boolean;
 
   // PMOS AI flow builder stream (Phase 5)
   pmosFlowBuilderPrompt: string;

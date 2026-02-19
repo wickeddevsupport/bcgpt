@@ -18,6 +18,8 @@ export type IntegrationsProps = {
   modelSaving: boolean;
   modelConfigured: boolean;
   modelError: string | null;
+  modelSavedOk?: boolean;
+  bcgptSavedOk?: boolean;
   onBcgptUrlChange: (next: string) => void;
   onBcgptApiKeyDraftChange: (next: string) => void;
   onSave: () => void;
@@ -29,6 +31,7 @@ export type IntegrationsProps = {
   onModelApiKeyDraftChange: (next: string) => void;
   onModelSave: () => void;
   onModelClearKey: () => void;
+  onOpenAutomations: () => void;
 
   // n8n / Wicked Ops provisioning status
   opsProvisioned?: boolean;
@@ -55,7 +58,7 @@ export function renderIntegrations(props: IntegrationsProps) {
 
   const bcgptKeyPlaceholder = bcgptConfigured
     ? "Stored (leave blank to keep)"
-    : "Paste BCGPT API key";
+    : "Paste connection key";
   const opsRuntime = (() => {
     if (!ops) {
       return {
@@ -93,7 +96,7 @@ export function renderIntegrations(props: IntegrationsProps) {
   })();
 
   const disabledReason = !props.connected
-    ? "Sign in first, then wait for the Wicked OS gateway to connect."
+    ? "Sign in to your workspace to configure integrations."
     : null;
   const modelKeyPlaceholder = props.modelConfigured
     ? "Stored (leave blank to keep current key)"
@@ -106,11 +109,13 @@ export function renderIntegrations(props: IntegrationsProps) {
     { value: "openrouter", label: "OpenRouter" },
   ];
 
+  const projectIdShort = props.opsProjectId ? String(props.opsProjectId).slice(0, 8) : null;
+
   return html`
     <section class="card" style="margin-bottom: 18px;">
       <div class="card-title">AI Model Setup</div>
       <div class="card-sub">
-        Simple workspace setup: choose provider, model, optional nickname, and paste one API key.
+        Choose your AI provider and paste one API key. All agents in your workspace will use this model.
       </div>
 
       <div class="form-grid" style="margin-top: 16px;">
@@ -137,7 +142,7 @@ export function renderIntegrations(props: IntegrationsProps) {
           />
         </label>
         <label class="field">
-          <span>Nickname (optional)</span>
+          <span>Nickname <span class="muted">(optional)</span></span>
           <input
             .value=${props.modelAlias}
             @input=${(e: Event) => props.onModelAliasChange((e.target as HTMLInputElement).value)}
@@ -160,20 +165,22 @@ export function renderIntegrations(props: IntegrationsProps) {
       </div>
 
       <div class="row" style="margin-top: 14px;">
-        <button class="btn primary" ?disabled=${!props.connected || props.modelSaving} @click=${() => props.onModelSave()}>
-          ${props.modelSaving ? "Saving..." : "Save model config"}
+        <button class="btn btn--primary" ?disabled=${!props.connected || props.modelSaving} @click=${() => props.onModelSave()}>
+          ${props.modelSaving ? "Saving..." : "Save"}
         </button>
         <button
           class="btn btn--secondary"
           ?disabled=${!props.connected || props.modelSaving}
           @click=${() => props.onModelClearKey()}
-          title="Remove stored key for selected provider"
+          title="Remove the saved key for the selected provider"
         >
-          Clear selected provider key
+          Remove saved key
         </button>
-        <span class="chip ${props.modelConfigured ? "chip-ok" : "chip-warn"}">
-          ${props.modelConfigured ? "Model auth configured" : "Model auth pending"}
-        </span>
+        ${props.modelSavedOk
+          ? html`<span class="chip chip-ok">✓ Saved</span>`
+          : html`<span class="chip ${props.modelConfigured ? "chip-ok" : "chip-warn"}">
+              ${props.modelConfigured ? "Configured" : "Not configured"}
+            </span>`}
       </div>
 
       ${props.modelError ? html`<div class="callout danger" style="margin-top: 12px;">${props.modelError}</div>` : nothing}
@@ -182,9 +189,9 @@ export function renderIntegrations(props: IntegrationsProps) {
 
     <section class="grid grid-cols-2">
       <div class="card">
-        <div class="card-title">OpenClaw Workflows (n8n Engine)</div>
+        <div class="card-title">Workflow Engine</div>
         <div class="card-sub">
-          Powered by embedded n8n and auto-provisioned per workspace. Your workflows are isolated to your workspace.
+          Runs your automations in an isolated workspace. Each account has its own private workflow runtime.
         </div>
 
         <div class="stat-grid" style="margin-top: 16px;">
@@ -193,28 +200,30 @@ export function renderIntegrations(props: IntegrationsProps) {
             <div class="stat-value ${props.opsProvisioned ? "ok" : "warn"}">
               ${props.opsProvisioned ? "Provisioned" : "Pending"}
             </div>
-            ${props.opsProjectId
-              ? html`<div class="muted mono" style="font-size:11px;">${props.opsProjectId}</div>`
+            ${projectIdShort
+              ? html`<div class="muted" style="font-size:11px;">
+                  Project ID: <span class="mono">${projectIdShort}…</span>
+                </div>`
               : nothing}
           </div>
           <div class="stat">
-            <div class="stat-label">Embedded Runtime</div>
+            <div class="stat-label">Runtime</div>
             <div class="stat-value ${opsRuntime.tone === "ok" ? "ok" : "warn"}">${opsRuntime.label}</div>
-            <div class="muted mono" style="font-size:11px;">${opsRuntime.detail}</div>
+            <div class="muted" style="font-size:11px;">${opsRuntime.detail}</div>
           </div>
         </div>
 
         <div class="row" style="margin-top: 12px;">
-          <a class="btn btn--secondary" href="./ops-ui/" target="_self" rel="noreferrer">
-            Open embedded editor
-          </a>
+          <button class="btn btn--secondary" @click=${() => props.onOpenAutomations()}>
+            Open in Automations →
+          </button>
         </div>
 
         ${
           ops?.reachable === false
             ? html`
                 <div class="callout warn" style="margin-top: 12px;">
-                  Embedded editor is unavailable. Redeploy latest gateway and verify `/ops-ui/` health from the dashboard check.
+                  Workflow runtime is unavailable. Try refreshing status — if the problem persists, contact support.
                 </div>
               `
             : nothing
@@ -222,12 +231,12 @@ export function renderIntegrations(props: IntegrationsProps) {
       </div>
 
       <div class="card">
-        <div class="card-title">BCGPT (MCP Connector)</div>
-        <div class="card-sub">Basecamp OAuth + MCP tool surface. Wicked OS uses it as a connector.</div>
+        <div class="card-title">Basecamp Connector</div>
+        <div class="card-sub">Connect your Basecamp account so agents can access projects, todos, and messages.</div>
 
         <div class="form-grid" style="margin-top: 16px;">
           <label class="field">
-            <span>Base URL</span>
+            <span>Connector URL</span>
             <input
               .value=${props.bcgptUrl}
               @input=${(e: Event) => props.onBcgptUrlChange((e.target as HTMLInputElement).value)}
@@ -236,7 +245,7 @@ export function renderIntegrations(props: IntegrationsProps) {
             />
           </label>
           <label class="field">
-            <span>API Key</span>
+            <span>Connection Key</span>
             <input
               type="password"
               .value=${props.bcgptApiKeyDraft}
@@ -249,16 +258,16 @@ export function renderIntegrations(props: IntegrationsProps) {
         </div>
 
         <div class="row" style="margin-top: 14px;">
-          <button class="btn" ?disabled=${props.saving || !props.connected} @click=${() => props.onSave()}>
+          <button class="btn btn--primary" ?disabled=${props.saving || !props.connected} @click=${() => props.onSave()}>
             ${props.saving ? "Saving..." : "Save"}
           </button>
           <button
             class="btn btn--secondary"
             ?disabled=${props.saving || !props.connected}
             @click=${() => props.onClearBcgptKey()}
-            title="Remove the stored BCGPT API key"
+            title="Remove the stored connection key"
           >
-            Clear key
+            Remove key
           </button>
           <a
             class="btn btn--secondary"
@@ -267,8 +276,9 @@ export function renderIntegrations(props: IntegrationsProps) {
             rel="noreferrer"
             title="Open Basecamp connect flow in a new tab"
           >
-            Connect Basecamp
+            Connect Basecamp ↗
           </a>
+          ${props.bcgptSavedOk ? html`<span class="chip chip-ok">✓ Saved</span>` : nothing}
         </div>
 
         ${disabledReason ? html`<div class="muted" style="margin-top: 10px;">${disabledReason}</div>` : nothing}
@@ -276,12 +286,12 @@ export function renderIntegrations(props: IntegrationsProps) {
     </section>
 
     <section class="card" style="margin-top: 18px;">
-      <div class="card-title">Status</div>
-      <div class="card-sub">Server-side checks (no browser CORS issues).</div>
+      <div class="card-title">Connection Status</div>
+      <div class="card-sub">Live checks run server-side to avoid browser network restrictions.</div>
 
       <div class="stat-grid" style="margin-top: 16px;">
-        ${renderConnectorStatus("BCGPT reachable", bcgpt?.reachable ?? null, bcgpt?.healthUrl ?? null)}
-        ${renderConnectorStatus("BCGPT auth", bcgpt?.authOk ?? null, bcgpt?.mcpUrl ?? null)}
+        ${renderConnectorStatus("Basecamp connection", bcgpt?.reachable ?? null, bcgpt?.healthUrl ?? null)}
+        ${renderConnectorStatus("Basecamp auth", bcgpt?.authOk ?? null, bcgpt?.mcpUrl ?? null)}
       </div>
 
       <div class="row" style="margin-top: 14px;">

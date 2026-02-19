@@ -216,6 +216,7 @@ export class OpenClawApp extends LitElement {
   @state() chatAttachments: ChatAttachment[] = [];
   @state() chatManualRefreshInFlight = false;
   @state() dashboardNlDraft = "";
+  @state() chatTraceLimit = 8;
   @state() chatCreateWorkflowBusy = false;
   @state() chatCreateWorkflowError: string | null = null;
   // Sidebar state for tool output viewing
@@ -292,8 +293,10 @@ export class OpenClawApp extends LitElement {
   @state() pmosModelAlias = "gemini";
   @state() pmosModelApiKeyDraft = "";
   @state() pmosModelSaving = false;
+  @state() pmosModelSavedOk = false;
   @state() pmosModelError: string | null = null;
   @state() pmosModelConfigured = false;
+  @state() pmosBcgptSavedOk = false;
   @state() pmosByokProviders: PmosModelProvider[] = [];
 
   // PMOS identity/admin (Phase 4)
@@ -311,6 +314,7 @@ export class OpenClawApp extends LitElement {
   @state() pmosMemberDraftEmail = "";
   @state() pmosMemberDraftRole: PmosRole = "member";
   @state() pmosMemberDraftStatus: PmosMemberStatus = "active";
+  @state() pmosMemberRemoveConfirm: string | null = null;
   @state() pmosAuditEvents: PmosAuditEvent[] = [];
   @state() pmosWorkspacesList: Array<{ workspaceId: string; ownerEmail: string; ownerName: string; ownerRole: string; createdAtMs: number }> = [];
   @state() pmosWorkspacesLoading = false;
@@ -368,6 +372,7 @@ export class OpenClawApp extends LitElement {
   @state() apFlowTriggerPayloadDraft = "{\n  \n}\n";
   @state() apFlowMutating = false;
   @state() apFlowMutateError: string | null = null;
+  @state() apFlowTemplateDeployedOk = false;
 
   // PMOS AI flow builder stream (Phase 5)
   @state() pmosFlowBuilderPrompt = "";
@@ -674,6 +679,23 @@ export class OpenClawApp extends LitElement {
 
   setTab(next: Tab) {
     setTabInternal(this as unknown as Parameters<typeof setTabInternal>[0], next);
+    // Auto-load workspaces list when super_admin opens admin tab
+    if (next === "admin" && this.pmosAuthUser?.role === "super_admin" && this.pmosWorkspacesList.length === 0 && !this.pmosWorkspacesLoading) {
+      void this._loadWorkspacesList();
+    }
+  }
+
+  async _loadWorkspacesList() {
+    this.pmosWorkspacesLoading = true;
+    this.pmosWorkspacesError = null;
+    try {
+      const res = await this.client!.request<{ workspaces: Array<{ workspaceId: string; ownerEmail: string; ownerName: string; ownerRole: string; createdAtMs: number }> }>("pmos.workspaces.list", {});
+      this.pmosWorkspacesList = res.workspaces ?? [];
+    } catch (err) {
+      this.pmosWorkspacesError = String(err);
+    } finally {
+      this.pmosWorkspacesLoading = false;
+    }
   }
 
   setTheme(next: ThemeMode, context?: Parameters<typeof setThemeInternal>[2]) {
@@ -797,6 +819,8 @@ export class OpenClawApp extends LitElement {
     hydratePmosConnectorDraftsFromConfig(this);
     await loadPmosModelWorkspaceState(this);
     await loadPmosConnectorsStatus(this);
+    this.pmosBcgptSavedOk = true;
+    setTimeout(() => { this.pmosBcgptSavedOk = false; }, 2500);
   }
 
   async handlePmosIntegrationsClearBcgptKey() {
@@ -866,6 +890,8 @@ export class OpenClawApp extends LitElement {
   async handlePmosModelSave() {
     await savePmosModelConfig(this);
     await loadPmosModelWorkspaceState(this);
+    this.pmosModelSavedOk = true;
+    setTimeout(() => { this.pmosModelSavedOk = false; }, 2500);
   }
 
   async handlePmosModelClearKey() {
