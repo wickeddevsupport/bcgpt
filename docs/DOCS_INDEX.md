@@ -22,6 +22,7 @@ New to OpenClaw? Start here:
 | [UI_MOCKUPS.md](UI_MOCKUPS.md) | Complete UI mockups for all pages | All |
 | [OPENCLAW_AUTOMATION_OS.md](OPENCLAW_AUTOMATION_OS.md) | Master product vision and architecture | All |
 | [AGENT_MANAGEMENT.md](AGENT_MANAGEMENT.md) | How users create, configure, and manage agents | All |
+| [UI_AUDIT.md](UI_AUDIT.md) | Broken/missing UI elements and gaps | All |
 | [NEXT_STEPS.md](NEXT_STEPS.md) | Implementation plan and tasks | Developers |
 | [N8N_INTEGRATION_GUIDE.md](N8N_INTEGRATION_GUIDE.md) | n8n workflow engine integration | Developers |
 | [COOLIFY_DEPLOY_NX_RUNBOOK.md](COOLIFY_DEPLOY_NX_RUNBOOK.md) | Coolify + Nx deploy and SSH verification runbook | Developers |
@@ -144,9 +145,10 @@ Before starting work:
 
 1. Read [OPENCLAW_AUTOMATION_OS.md](OPENCLAW_AUTOMATION_OS.md)
 2. Read [NEXT_STEPS.md](NEXT_STEPS.md)
-3. Check current phase status
-4. Run `git status --short`
-5. Confirm guardrails
+3. Read [UI_AUDIT.md](UI_AUDIT.md) - check for UI gaps
+4. Check current phase status
+5. Run `git status --short`
+6. Confirm guardrails
 
 ---
 

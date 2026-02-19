@@ -1,7 +1,7 @@
 # Next Steps - Reality-Based Plan
 
 **Last Updated:** 2026-02-19
-**Related:** [`COOLIFY_DEPLOY_NX_RUNBOOK.md`](COOLIFY_DEPLOY_NX_RUNBOOK.md), [`WORKSPACE_ISOLATION_STATUS.md`](WORKSPACE_ISOLATION_STATUS.md)
+**Related:** [`COOLIFY_DEPLOY_NX_RUNBOOK.md`](COOLIFY_DEPLOY_NX_RUNBOOK.md), [`WORKSPACE_ISOLATION_STATUS.md`](WORKSPACE_ISOLATION_STATUS.md), [`UI_AUDIT.md`](UI_AUDIT.md)
 
 ---
 
@@ -117,3 +117,19 @@ Automations is considered production-ready only when all are true:
 - Creating/enabling/deleting workflows works from active UI.
 - Refreshing browser does not break session restore or iframe loading.
 - Deployment runbook checks pass end-to-end.
+
+---
+
+## UI Gaps & Issues
+
+See [UI_AUDIT.md](UI_AUDIT.md) for detailed documentation of:
+
+- **P0 Critical**: Dashboard NL input, Quick Action buttons (no event handlers)
+- **P1 Theater**: Onboarding Steps 1&2, Connections page (fake/non-functional)
+- **P2 UX Issues**: Sessions vs Agents confusion, vague status displays, fake templates
+
+**Key Questions for Product Decisions:**
+1. Dashboard NL Input → Navigate to Chat or inline chat?
+2. Quick Actions → What should "Check leads" / "Daily report" actually do?
+3. Onboarding → Strip to BYOK only, or implement real tool connections?
+4. Sessions dropdown → Show agent names instead of technical session keys?
