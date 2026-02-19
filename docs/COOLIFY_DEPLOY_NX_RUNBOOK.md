@@ -1,6 +1,6 @@
 # Coolify Deploy + Nx Runbook
 
-**Last Updated:** 2026-02-18  
+**Last Updated:** 2026-02-19  
 **Related:** [`NEXT_STEPS.md`](NEXT_STEPS.md), [`N8N_INTEGRATION_GUIDE.md`](N8N_INTEGRATION_GUIDE.md)
 
 ---
@@ -40,6 +40,9 @@ These are the issues we hit during the initial Coolify+Nx rollout. If you see th
 - n8n iframe is blank and `/ops-ui/assets/*.js` returns HTML (index.html)
   - Root cause: embedded n8n expects the reverse proxy to **strip** the `N8N_PATH` prefix (`/ops-ui`) when forwarding requests. If you proxy `/ops-ui/assets/*` as-is, n8n's history fallback returns `index.html` for JS/CSS, so the editor never boots.
   - Fix: ensure the gateway strips `/ops-ui` when proxying to local n8n (see `openclaw/src/gateway/pmos-ops-proxy.ts`), then redeploy. Verify `GET /ops-ui/assets/*` returns `Content-Type: application/javascript`.
+- Users see shared owner workflows instead of workspace-isolated workflows
+  - Root cause: owner-cookie fallback is enabled and workspace-scoped n8n identity is bypassed.
+  - Fix: set `N8N_ALLOW_OWNER_FALLBACK=0`; keep `N8N_OWNER_EMAIL` + `N8N_OWNER_PASSWORD` configured so workspace users can be auto-provisioned via invitation flow.
 
 ---
 
@@ -72,13 +75,14 @@ Set these in Coolify service env vars/secrets:
 
 - `OPENCLAW_GATEWAY_TOKEN` (required)
 - `PMOS_ALLOW_REMOTE_OPS_FALLBACK=0` (recommended for embedded-first runtime)
+- `N8N_ALLOW_OWNER_FALLBACK=0` (required for strict per-workspace n8n identity)
 - `N8N_USER_FOLDER=/app/.openclaw/n8n` (recommended; persists embedded n8n state inside the OpenClaw volume)
 - `N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true` (recommended; silences wide-permissions warning and hardens settings file)
 - `N8N_VENDOR_IMAGE=ghcr.io/wickeddevsupport/openclaw-n8n-vendor:n8n-1.76.1` (recommended for speed; skips rebuilding vendored n8n on the server)
 - `N8N_EMBED_PORT=5678` (optional; default is `5678`)
 - `N8N_EMBED_HOST=127.0.0.1` (optional; default is `127.0.0.1`)
-- `N8N_OWNER_EMAIL` (recommended)
-- `N8N_OWNER_PASSWORD` (recommended)
+- `N8N_OWNER_EMAIL` (required for workspace user auto-provisioning)
+- `N8N_OWNER_PASSWORD` (required for workspace user auto-provisioning)
 - `BCGPT_URL` (if BCGPT connector is used)
 - `BCGPT_API_KEY` (if BCGPT connector auth is required)
 
@@ -175,6 +179,11 @@ curl -sS -b pmos.cookies.txt https://os.wickedlab.io/rest/login
 
 # 3) Verify ops proxy works (workflow list)
 curl -sS -b pmos.cookies.txt https://os.wickedlab.io/api/ops/workflows
+
+# 4) Verify n8n identity is not falling back to shared owner account
+curl -sS -b pmos.cookies.txt https://os.wickedlab.io/rest/login | jq -r '.data.email'
+# Expect this to match the PMOS account email (or the workspace-bound mapped user),
+# not a shared owner/admin email for all users.
 ```
 
 End-to-end smoke:

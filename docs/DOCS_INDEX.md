@@ -1,6 +1,6 @@
 # OpenClaw Documentation Index
 
-**Last Updated:** 2026-02-18
+**Last Updated:** 2026-02-19
 
 ---
 
@@ -131,9 +131,9 @@ ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
 | Basecamp n8n Node | `n8n-nodes-basecamp/` |
 | BYOK Encrypted Store | `openclaw/src/gateway/byok-store.ts` |
 | BYOK HTTP API | `openclaw/src/gateway/byok-http.ts` |
-| React Frontend (Flows) | `frontend/src/views/Flows.tsx` |
-| React Frontend (Settings/BYOK) | `frontend/src/views/Settings.tsx` |
-| PMOS UI | `openclaw/ui/` |
+| Active Control UI | `openclaw/ui/` |
+| Automations View | `openclaw/ui/src/ui/views/automations.ts` |
+| Main Render Wiring | `openclaw/ui/src/ui/app-render.ts` |
 | Vendor Setup Script | `openclaw/scripts/setup-vendor-n8n.sh` |
 
 ---

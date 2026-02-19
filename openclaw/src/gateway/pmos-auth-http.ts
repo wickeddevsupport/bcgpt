@@ -68,6 +68,34 @@ function asObject(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+type WarmIdentityUser = {
+  workspaceId: string;
+  email?: string | null;
+  name?: string | null;
+};
+
+async function warmEmbeddedN8nIdentity(user: WarmIdentityUser): Promise<void> {
+  try {
+    const [{ readLocalN8nConfig }, { getOrCreateWorkspaceN8nCookie }] = await Promise.all([
+      import("./pmos-ops-proxy.js"),
+      import("./n8n-auth-bridge.js"),
+    ]);
+    const localN8n = readLocalN8nConfig();
+    if (!localN8n) return;
+
+    await getOrCreateWorkspaceN8nCookie({
+      workspaceId: user.workspaceId,
+      n8nBaseUrl: localN8n.url,
+      pmosUser: {
+        email: typeof user.email === "string" ? user.email : "",
+        name: typeof user.name === "string" ? user.name : "",
+      },
+    });
+  } catch (err) {
+    console.warn("[pmos] embedded n8n identity warm-up failed:", String(err));
+  }
+}
+
 export async function handlePmosAuthHttpRequest(params: {
   req: IncomingMessage;
   res: ServerResponse;
@@ -150,6 +178,9 @@ export async function handlePmosAuthHttpRequest(params: {
           );
         });
     }
+    // Warm workspace-scoped embedded n8n auth so the automations iframe opens
+    // with the same PMOS user context on first load.
+    void warmEmbeddedN8nIdentity(result.user);
     res.setHeader("Set-Cookie", buildPmosSessionCookieValue(result.sessionToken, req));
     sendJson(res, 200, { ok: true, user: result.user });
     return true;
@@ -163,6 +194,8 @@ export async function handlePmosAuthHttpRequest(params: {
       sendJson(res, result.status, { ok: false, error: result.error });
       return true;
     }
+    // Same warm-up on login to avoid first-request races in embedded n8n auth.
+    void warmEmbeddedN8nIdentity(result.user);
     res.setHeader("Set-Cookie", buildPmosSessionCookieValue(result.sessionToken, req));
     sendJson(res, 200, { ok: true, user: result.user });
     return true;

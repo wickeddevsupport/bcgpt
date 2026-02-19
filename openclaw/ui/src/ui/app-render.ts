@@ -73,6 +73,7 @@ const debouncedLoadUsage = (state: UsageState) => {
 };
 import { renderAgents } from "./views/agents.ts";
 import { renderAdmin } from "./views/admin.ts";
+import { renderAutomations } from "./views/automations.ts";
 import { renderDashboard } from "./views/dashboard.ts";
 import { renderChannels } from "./views/channels.ts";
 import { renderChat } from "./views/chat.ts";
@@ -323,11 +324,6 @@ export function renderApp(state: AppViewState) {
     state.apFlowSelectedId && state.apFlows
       ? state.apFlows.find((flow) => flow.id === state.apFlowSelectedId) ?? null
       : null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const _flowRaw = state.apFlowDetails as any;
-  const flowDetailsStatus = _flowRaw
-    ? (String(_flowRaw.status ?? (_flowRaw.active === true ? "ENABLED" : _flowRaw.active === false ? "DISABLED" : ""))).toUpperCase()
-    : "";
 
   // Auto-exit onboarding if all setup steps are done
   if (state.onboarding && state.tab === "dashboard" && state.configSnapshot) {
@@ -528,155 +524,62 @@ export function renderApp(state: AppViewState) {
                   ? html`<div class="loading-panel" style="display:flex;align-items:center;justify-content:center;height:100%;gap:12px;">
                       <span class="spinner"></span>
                       <span class="muted">Setting up your automation workspace...</span>
-                     </div>`
-                  : html`<div class="card" style="height:calc(100vh - 200px); min-height:640px; padding:0; overflow:hidden; display:flex;">
-                      <div style="width:360px; border-right:1px solid var(--border); display:flex; flex-direction:column; background:rgba(255,255,255,0.02);">
-                        <div style="padding:12px 14px; border-bottom:1px solid var(--border);">
-                          <div class="card-title" style="margin:0;">Workflows</div>
-                          <div class="card-sub" style="margin-top:6px;">
-                            Search, create, and open a workflow directly in the embedded editor.
-                          </div>
-                        </div>
-
-                        <div style="padding:10px 14px; border-bottom:1px solid var(--border); display:flex; flex-direction:column; gap:10px;">
-                          <input
-                            class="input"
-                            .value=${state.apFlowsQuery}
-                            @input=${(e: Event) => (state.apFlowsQuery = (e.target as HTMLInputElement).value)}
-                            placeholder="Search workflows..."
-                            autocomplete="off"
-                          />
-                          <div class="row" style="justify-content:space-between;">
-                            <button
-                              class="btn btn--secondary btn--sm"
-                              ?disabled=${state.apFlowsLoading}
-                              @click=${() => void state.handlePmosApFlowsLoad()}
-                              title="Refresh workflow list"
-                            >
-                              ${state.apFlowsLoading ? "Refreshing..." : "Refresh"}
-                            </button>
-                            <span class="chip ${workflowsFiltered.length ? "chip-ok" : "chip-warn"}" title="Workflows currently loaded">
-                              ${workflowsFiltered.length} ${workflowsFiltered.length === 1 ? "workflow" : "workflows"}
-                            </span>
-                          </div>
-                          ${state.apFlowsError
-                            ? html`<div class="callout warn" style="margin:0;">${state.apFlowsError}</div>`
-                            : nothing}
-                        </div>
-
-                        <div style="padding:10px 14px; border-bottom:1px solid var(--border); display:flex; flex-direction:column; gap:10px;">
-                          <div class="row" style="gap:10px;">
-                            <input
-                              class="input"
-                              style="flex:1; min-width:0;"
-                              .value=${state.apFlowCreateName}
-                              @input=${(e: Event) => (state.apFlowCreateName = (e.target as HTMLInputElement).value)}
-                              placeholder="New workflow name"
-                              autocomplete="off"
-                              ?disabled=${state.apFlowCreateSaving}
-                              @keydown=${(e: KeyboardEvent) => {
-                                if (e.key === "Enter") {
-                                  e.preventDefault();
-                                  void state.handlePmosApFlowCreate();
-                                }
-                              }}
-                            />
-                            <button
-                              class="btn primary btn--sm"
-                              ?disabled=${state.apFlowCreateSaving}
-                              @click=${() => void state.handlePmosApFlowCreate()}
-                              title="Create a new workflow"
-                            >
-                              ${state.apFlowCreateSaving ? "Creating..." : "Create"}
-                            </button>
-                          </div>
-                          ${state.apFlowCreateError
-                            ? html`<div class="callout danger" style="margin:0;">${state.apFlowCreateError}</div>`
-                            : nothing}
-                        </div>
-
-                        <div style="flex:1; overflow:auto; padding:10px 10px 14px 10px;">
-                          ${workflowsFiltered.length === 0 && !state.apFlowsLoading
-                            ? html`<div class="muted" style="padding:10px 6px;">
-                                No workflows found. Create one, or refresh.
-                              </div>`
-                            : nothing}
-                          ${workflowsFiltered.map((flow) => {
-                            const selected = state.apFlowSelectedId === flow.id;
-                            const label = flow.displayName || flow.id;
-                            const status = (flow.status ?? "").toUpperCase();
-                            const statusTone = status === "ENABLED" ? "chip-ok" : status === "DISABLED" ? "chip-warn" : "";
-                            return html`
-                              <button
-                                class="btn btn--secondary"
-                                style="
-                                  width:100%;
-                                  justify-content:space-between;
-                                  align-items:flex-start;
-                                  text-align:left;
-                                  padding:10px 10px;
-                                  margin:6px 0;
-                                  border-radius:12px;
-                                  border:1px solid ${selected ? "rgba(255,255,255,0.25)" : "var(--border)"};
-                                  background:${selected ? "rgba(255,255,255,0.06)" : "transparent"};
-                                  gap:10px;
-                                "
-                                @click=${() => void state.handlePmosApFlowSelect(flow.id)}
-                                title=${label}
-                              >
-                                <span style="min-width:0; flex:1; display:flex; flex-direction:column; gap:4px;">
-                                  <span style="font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                                    ${label}
-                                  </span>
-                                  <span class="muted mono" style="font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                                    ${flow.id}
-                                  </span>
-                                </span>
-                                <span style="display:flex; flex-direction:column; align-items:flex-end; gap:6px;">
-                                  ${status
-                                    ? html`<span class="chip ${statusTone}" style="font-size:11px;">${status}</span>`
-                                    : nothing}
-                                </span>
-                              </button>
-                            `;
-                          })}
-                        </div>
-                      </div>
-
-                      <div style="flex:1; display:flex; flex-direction:column; min-width:0;">
-                        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border); gap:12px; flex-shrink:0;">
-                          <div style="min-width:0;">
-                            <div class="card-sub">n8n workflow canvas</div>
-                            ${selectedWorkflow
-                              ? html`<div class="muted" style="margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                                  Editing: <span style="font-weight:600;">${selectedWorkflow.displayName ?? selectedWorkflow.id}</span>
-                                </div>`
-                              : nothing}
-                          </div>
-                          <div class="row" style="gap:8px; flex-shrink:0;">
-                            <button
-                              class="btn btn--sm"
-                              @click=${() => void state.handlePmosApFlowSetStatus(flowDetailsStatus === "ENABLED" ? "DISABLED" : "ENABLED")}
-                              ?disabled=${!state.apFlowSelectedId || state.apFlowMutating}
-                              title=${flowDetailsStatus === "ENABLED" ? "Disable workflow" : "Enable workflow"}
-                            >${flowDetailsStatus === "ENABLED" ? "Disable" : "Enable"}</button>
-                            <button
-                              class="btn danger btn--sm"
-                              @click=${() => void state.handlePmosApFlowDelete()}
-                              ?disabled=${!state.apFlowSelectedId || state.apFlowMutating}
-                              title="Delete workflow"
-                            >Delete</button>
-                          </div>
-                        </div>
-                        <iframe
-                          src=${buildOpsUiEmbedUrl(basePath, state.apFlowSelectedId)}
-                          title="n8n Workflow Canvas"
-                          style="width:100%;flex:1;border:0;display:block;background:#1a1a1a;"
-                          allow="clipboard-read; clipboard-write"
-                        ></iframe>
-                      </div>
-                    </div>`}
-               </div>`
+                    </div>`
+                  : renderAutomations({
+                      connected: state.connected,
+                      integrationsHref: pathForTab("integrations", state.basePath),
+                      projectId: state.pmosOpsProvisioningResult?.projectId ?? "embedded",
+                      onOpenIntegrations: () => state.setTab("integrations"),
+                      embedUrl: buildOpsUiEmbedUrl(basePath, state.apFlowSelectedId),
+                      selectedFlowLabel: selectedWorkflow
+                        ? selectedWorkflow.displayName ?? selectedWorkflow.id
+                        : null,
+                      loading: state.apFlowsLoading,
+                      error: state.apFlowsError,
+                      flowsQuery: state.apFlowsQuery,
+                      flows: workflowsFiltered,
+                      createName: state.apFlowCreateName,
+                      creating: state.apFlowCreateSaving,
+                      createError: state.apFlowCreateError,
+                      selectedFlowId: state.apFlowSelectedId,
+                      flowDetailsLoading: state.apFlowDetailsLoading,
+                      flowDetailsError: state.apFlowDetailsError,
+                      flowDetails: state.apFlowDetails,
+                      renameDraft: state.apFlowRenameDraft,
+                      operationDraft: state.apFlowOperationDraft,
+                      triggerPayloadDraft: state.apFlowTriggerPayloadDraft,
+                      mutating: state.apFlowMutating,
+                      mutateError: state.apFlowMutateError,
+                      builderPrompt: state.pmosFlowBuilderPrompt,
+                      builderGenerating: state.pmosFlowBuilderGenerating,
+                      builderCommitting: state.pmosFlowBuilderCommitting,
+                      builderError: state.pmosFlowBuilderError,
+                      builderFlowName: state.pmosFlowBuilderFlowName,
+                      builderNodes: state.pmosFlowBuilderNodes,
+                      builderEdges: state.pmosFlowBuilderEdges,
+                      builderOps: state.pmosFlowBuilderOps,
+                      builderLastCommittedFlowId: state.pmosFlowBuilderLastCommittedFlowId,
+                      onFlowsQueryChange: (next) => (state.apFlowsQuery = next),
+                      onRefresh: () => void state.handlePmosApFlowsLoad(),
+                      onCreateNameChange: (next) => (state.apFlowCreateName = next),
+                      onCreate: () => void state.handlePmosApFlowCreate(),
+                      onSelectFlow: (flowId) => void state.handlePmosApFlowSelect(flowId),
+                      onRenameDraftChange: (next) => (state.apFlowRenameDraft = next),
+                      onRename: () => void state.handlePmosApFlowRename(),
+                      onSetStatus: (status) => void state.handlePmosApFlowSetStatus(status),
+                      onPublish: () => void state.handlePmosApFlowPublish(),
+                      onDelete: () => void state.handlePmosApFlowDelete(),
+                      onOperationDraftChange: (next) => (state.apFlowOperationDraft = next),
+                      onApplyOperation: () => void state.handlePmosApFlowApplyOperation(),
+                      onTriggerPayloadDraftChange: (next) =>
+                        (state.apFlowTriggerPayloadDraft = next),
+                      onTriggerWebhook: (opts) => void state.handlePmosApFlowTriggerWebhook(opts),
+                      onBuilderPromptChange: (next) => (state.pmosFlowBuilderPrompt = next),
+                      onBuilderGenerate: () => void state.handlePmosFlowBuilderGenerate(),
+                      onBuilderCommit: () => void state.handlePmosFlowBuilderCommit(),
+                      onBuilderReset: () => state.handlePmosFlowBuilderReset(),
+                    })}
+              </div>`
             : nothing
         }
 
@@ -1804,4 +1707,3 @@ export function renderApp(state: AppViewState) {
     </div>
   `;
 }
-

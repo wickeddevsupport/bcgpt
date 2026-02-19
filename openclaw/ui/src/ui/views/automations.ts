@@ -11,6 +11,8 @@ export type AutomationsProps = {
   integrationsHref: string;
   projectId: string;
   onOpenIntegrations: () => void;
+  embedUrl: string;
+  selectedFlowLabel: string | null;
 
   loading: boolean;
   error: string | null;
@@ -188,6 +190,45 @@ export function renderAutomations(props: AutomationsProps) {
         <div class="card">
           <div class="card-title">Flow Editor</div>
           <div class="card-sub">Rename, enable/disable, publish, and apply operations.</div>
+
+          <div class="card" style="margin-top: 16px; padding: 0; overflow: hidden;">
+            <div
+              style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border); gap:12px;"
+            >
+              <div style="min-width:0;">
+                <div class="card-sub">n8n workflow canvas</div>
+                ${
+                  props.selectedFlowLabel
+                    ? html`<div class="muted" style="margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                        Editing: <span style="font-weight:600;">${props.selectedFlowLabel}</span>
+                      </div>`
+                    : html`<div class="muted" style="margin-top:4px;">No flow selected. You can still browse from n8n home.</div>`
+                }
+              </div>
+              <div class="row" style="gap:8px; flex-shrink:0;">
+                <button
+                  class="btn btn--sm"
+                  @click=${() => props.onSetStatus(isEnabled ? "DISABLED" : "ENABLED")}
+                  ?disabled=${!props.selectedFlowId || props.mutating}
+                >
+                  ${isEnabled ? "Disable" : "Enable"}
+                </button>
+                <button
+                  class="btn danger btn--sm"
+                  @click=${() => props.onDelete()}
+                  ?disabled=${!props.selectedFlowId || props.mutating}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+            <iframe
+              src=${props.embedUrl}
+              title="n8n Workflow Canvas"
+              style="width:100%;height:58vh;min-height:420px;border:0;display:block;background:#1a1a1a;"
+              allow="clipboard-read; clipboard-write"
+            ></iframe>
+          </div>
 
           <div class="card" style="margin-top: 16px;">
             <div class="card-title">AI Flow Builder (Live)</div>

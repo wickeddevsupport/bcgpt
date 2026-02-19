@@ -453,10 +453,11 @@ export async function buildN8nAuthHeaders(
   let cookie = await getOrCreateWorkspaceN8nCookie({ workspaceId, n8nBaseUrl, pmosUser: user });
   if (cookie) return { Cookie: cookie };
 
-  // Optional last-resort: allow owner fallback only for super_admin or when explicitly enabled.
-  const allowOwnerFallback =
-    user.role === "super_admin" ||
-    ["1", "true", "yes"].includes(String(process.env.N8N_ALLOW_OWNER_FALLBACK ?? "").trim().toLowerCase());
+  // Optional last-resort: owner fallback is explicitly opt-in.
+  // Default behavior is strict workspace-scoped identity to avoid shared-admin context.
+  const allowOwnerFallback = ["1", "true", "yes"].includes(
+    String(process.env.N8N_ALLOW_OWNER_FALLBACK ?? "").trim().toLowerCase(),
+  );
   if (allowOwnerFallback) {
     const ownerCookie = await getOwnerCookie(n8nBaseUrl);
     if (ownerCookie) return { Cookie: ownerCookie };
