@@ -4,7 +4,7 @@ export const TAB_GROUPS = [
   // Wicked OS simplified experience (regular users)
   {
     label: "Wicked OS",
-    tabs: ["dashboard", "automations", "integrations", "command-center", "admin", "chat"],
+    tabs: ["dashboard", "automations", "connections", "integrations", "command-center", "admin", "chat"],
   },
   // Everything else stays available, but is hidden behind the Advanced admin section.
   {
@@ -31,6 +31,7 @@ export type Tab =
   | "automations"
   | "runs"
   | "integrations"
+  | "connections"
   | "command-center"
   | "admin"
   | "agents"
@@ -52,6 +53,7 @@ const TAB_PATHS: Record<Tab, string> = {
   automations: "/automations",
   runs: "/runs",
   integrations: "/integrations",
+  connections: "/connections",
   "command-center": "/command-center",
   admin: "/admin",
   agents: "/agents",
@@ -205,6 +207,8 @@ export function titleForTab(tab: Tab) {
       return "Runs";
     case "integrations":
       return "Integrations";
+    case "connections":
+      return "Connections";
     case "command-center":
       return "Command Center";
     case "admin":
@@ -250,6 +254,8 @@ export function subtitleForTab(tab: Tab) {
       return "Live and historical executions across agents and automations.";
     case "integrations":
       return "Connect workflow engines and apps (embedded n8n, BCGPT/Basecamp, and more).";
+    case "connections":
+      return "Connect the services your AI agents will use: Slack, GitHub, Email, and more.";
     case "command-center":
       return "Plan and execute multi-step operations with approvals and history.";
     case "admin":

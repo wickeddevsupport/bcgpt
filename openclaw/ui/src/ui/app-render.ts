@@ -79,6 +79,7 @@ import { renderChannels } from "./views/channels.ts";
 import { renderChat } from "./views/chat.ts";
 import { renderCommandCenter } from "./views/command-center.ts";
 import { renderConfig } from "./views/config.ts";
+import { renderConnections } from "./views/connections.ts";
 import { renderCron } from "./views/cron.ts";
 import { renderDebug } from "./views/debug.ts";
 import { renderExecApprovalPrompt } from "./views/exec-approval.ts";
@@ -632,6 +633,26 @@ export function renderApp(state: AppViewState) {
                 onModelClearKey: () => state.handlePmosModelClearKey(),
                 opsProvisioned: Boolean(state.pmosOpsProvisioningResult?.apiKey) || state.pmosConnectorsStatus?.ops?.reachable === true,
                 opsProjectId: state.pmosOpsProvisioningResult?.projectId ?? null,
+              })
+            : nothing
+        }
+
+        ${
+          state.tab === "connections"
+            ? renderConnections({
+                connectorsStatus: state.pmosConnectorsStatus,
+                connectorsLoading: state.pmosConnectorsLoading,
+                connectorsError: state.pmosConnectorsError,
+                onRefreshConnectors: () => state.handlePmosRefreshConnectors(),
+                onConnectService: (serviceId: string) => {
+                  // Navigate to integrations with service pre-selected
+                  state.setTab("integrations");
+                },
+                onDisconnectService: (serviceId: string) => {
+                  // TODO: Implement disconnect
+                  console.log("Disconnect service:", serviceId);
+                },
+                integrationsHref: pathForTab("integrations", state.basePath),
               })
             : nothing
         }
