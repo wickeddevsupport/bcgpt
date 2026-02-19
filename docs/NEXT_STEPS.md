@@ -21,16 +21,16 @@ This file tracks what is actually implemented in active runtime code paths (`ope
 | Admin Panel button for super_admin users | SHIPPED | `openclaw/ui/src/ui/app-render.ts` (topbar) |
 | AI Flow Builder labeled as Preview (not Live) | SHIPPED | `openclaw/ui/src/ui/views/automations.ts` |
 | Chat tab crash (undefined agentId/agent) | FIXED | `openclaw/ui/src/ui/app-render.ts` — variables now declared in `renderApp()` scope |
-| Chat-to-workflow real persistence in n8n | PARTIAL | `openclaw/src/gateway/server-methods/chat-to-workflow.ts` still returns generated ID placeholder |
+| Auto-trigger onboarding after first signup | SHIPPED | `openclaw/ui/src/ui/app.ts` `handlePmosAuthSubmit()` sets `onboarding=true` on signup |
+| Onboarding auto-collapse when AI key saved | SHIPPED | `openclaw/ui/src/ui/app-render.ts` — exits when `pmosModelConfigured === true` |
+| Dashboard real workflow + run data | SHIPPED | `openclaw/ui/src/ui/app-render.ts` passes `state.apFlows` / `state.apRuns`; refresh calls `loadWorkflowRuns` |
+| Workflow execution history panel | SHIPPED | "Recent Runs" card in Automations sidebar — `openclaw/ui/src/ui/views/automations.ts` |
+| Notifications / activity feed | SHIPPED | Bell icon in topbar → slide-over panel with trace events (`openclaw/ui/src/ui/app-render.ts`) |
+| Agent memory view | SHIPPED | "Memory" button in chat agent header navigates to agents → files panel |
+| Super-admin workspace list | SHIPPED | `pmos.workspaces.list` backend + "All Workspaces" card in admin panel |
+| Chat-to-workflow real persistence in n8n | PARTIAL | `openclaw/src/gateway/server-methods/chat-to-workflow.ts` — backend creates real n8n workflows; chat UI to invoke it needs redesign |
 | Multi-agent orchestration as real runtime | PARTIAL | `openclaw/src/gateway/agent-orchestrator.ts` contains placeholder execution paths |
 | Live flow builder true real-time + n8n-backed control | PARTIAL | `openclaw/src/gateway/live-flow-builder.ts` contains simulated/polling placeholders |
-| Dashboard real run data (flows/workflows/run count) | NOT SHIPPED | `openclaw/ui/src/ui/app-render.ts` passes `flows: []` and `runs: []` hardcoded |
-| Auto-trigger onboarding after first signup | NOT SHIPPED | Currently only shows via `?onboarding=1` URL param; new users never see it |
-| Onboarding auto-collapse when core ready | NOT SHIPPED | Wizard stays open even when all 3 steps are complete |
-| Workflow execution history UI | NOT SHIPPED | n8n has full execution logs; no UI to browse them in dashboard |
-| Notifications / activity feed | NOT SHIPPED | `pmosTraceEvents` exists but no panel UI |
-| Agent memory view | NOT SHIPPED | Backend has `agents.files.get/set`; no UI |
-| Super-admin workspace list | NOT SHIPPED | Needs `workspaces.list` backend method; only topbar button exists so far |
 
 ---
 
@@ -50,8 +50,8 @@ This file tracks what is actually implemented in active runtime code paths (`ope
 - [x] Remove placeholder "Create Workflow" button from chat compose area
 - [x] Wire onboarding wizard to dashboard — shows on `?onboarding=1` param
 - [x] Wire Step 3 BYOK form to real `pmos.byok.set` via `handlePmosModelSave()`
-- [ ] Auto-trigger onboarding for new users after first signup (instead of requiring `?onboarding=1`)
-- [ ] Auto-collapse onboarding wizard when all 3 steps are complete / `pmosModelConfigured` is true
+- [x] Auto-trigger onboarding for new users after first signup (instead of requiring `?onboarding=1`)
+- [x] Auto-collapse onboarding wizard when all 3 steps are complete / `pmosModelConfigured` is true
 - [ ] Implement real n8n persistence path in `pmos.workflow.confirm` (chat-to-workflow)
 - [ ] Replace simulated flow-control actions with real n8n-backed actions in live-flow-builder
 
@@ -59,15 +59,15 @@ This file tracks what is actually implemented in active runtime code paths (`ope
 
 - [x] Workflow templates gallery in Automations sidebar
 - [x] AI Flow Builder marked as Preview (honest labeling)
-- [ ] Dashboard: fetch and display real workflow count + recent run stats (currently `flows: []`, `runs: []`)
-- [ ] Workflow execution history panel (browse n8n execution logs from dashboard)
-- [ ] Notifications / activity feed (wire `pmosTraceEvents` into a sidebar panel)
-- [ ] Agent memory view (list/edit files from `agents.files.get/set`)
+- [x] Dashboard: fetch and display real workflow count + recent run stats
+- [x] Workflow execution history panel (Recent Runs card in Automations sidebar)
+- [x] Notifications / activity feed (bell icon → slide-over panel with trace events)
+- [x] Agent memory view ("Memory" button in chat header → agents files panel)
 
 ### P3 - Admin & Multi-Workspace
 
 - [x] Admin Panel button in topbar for super_admin users
-- [ ] Super-admin workspace list (implement `workspaces.list` backend method + populate admin panel UI)
+- [x] Super-admin workspace list (`pmos.workspaces.list` backend + "All Workspaces" card in admin panel)
 - [ ] Per-workspace usage metrics
 
 ### P4 - Quality Gates
@@ -80,6 +80,7 @@ This file tracks what is actually implemented in active runtime code paths (`ope
 
 ## Recent Commits (2026-02-19)
 
+- `675cfebe` feat(pmos): Complete all remaining TODO items — onboarding trigger, exec history, notifications, agent memory, workspace list
 - `a9993d93` fix(pmos): Declare agentId and agent vars in renderApp to fix chat tab crash
 - `88eaa406` feat(pmos): Wire onboarding BYOK form, templates gallery, remove placeholder controls
 
