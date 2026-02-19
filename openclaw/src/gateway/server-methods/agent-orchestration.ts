@@ -309,7 +309,7 @@ export async function handleTemplateListQuery(
 export async function handleTemplateCreate(
   params: unknown,
   client: ClientContext
-): Promise<{ success: boolean; template?: unknown; message?: string }> {
+): Promise<{ success: boolean; template?: unknown; agentId?: string; message?: string }> {
   const parsed = TemplateCreateSchema.safeParse(params);
   
   if (!parsed.success) {
@@ -331,14 +331,45 @@ export async function handleTemplateCreate(
     };
   }
   
-  // In a real implementation, this would save to config
-  // For now, we return the template configuration
-  
-  return {
-    success: true,
-    template,
-    message: `Agent template "${template.name}" created`,
-  };
+  // Persist agent to config
+  try {
+    const { loadConfig, writeConfigFile } = await import('../../config/config.js');
+    const { addWorkspaceId } = await import('../workspace-context.js');
+    
+    const cfg = loadConfig();
+    const agents = cfg.agents?.list || [];
+    
+    // Create new agent entry from template
+    const newAgent = {
+      ...template.config,
+      id: template.config?.id || `agent-${crypto.randomUUID()}`,
+      name: template.name,
+      workspaceId: client.pmosWorkspaceId ? addWorkspaceId(template.config?.id || '', client) : undefined,
+    };
+    
+    // Add to config
+    if (!cfg.agents) {
+      cfg.agents = { list: [] };
+    }
+    cfg.agents.list = [...agents, newAgent];
+    
+    await writeConfigFile(cfg);
+    
+    return {
+      success: true,
+      template,
+      agentId: newAgent.id,
+      message: `Agent "${template.name}" created successfully`,
+    };
+  } catch (error) {
+    // If config save fails, still return success with template
+    // but indicate it wasn't persisted
+    return {
+      success: true,
+      template,
+      message: `Agent template "${template.name}" created (not persisted: ${error})`,
+    };
+  }
 }
 
 export default {

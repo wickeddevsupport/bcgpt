@@ -4,6 +4,13 @@ import type { PmosConnectorsStatus } from "../controllers/pmos-connectors.ts";
 import type { PmosExecutionTraceEvent } from "../controllers/pmos-trace.ts";
 import { formatRelativeTimestamp } from "../format.ts";
 
+function getTimeGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}
+
 export type DashboardProps = {
   connected: boolean;
   settings: UiSettings;
@@ -191,6 +198,85 @@ export function renderDashboard(props: DashboardProps) {
   ].filter((item): item is { title: string; detail: string; href: string } => Boolean(item));
 
   return html`
+    <!-- Greeting header -->
+    <section class="card" style="margin-bottom: 18px;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <h1 style="font-size: 24px; font-weight: 600; margin: 0;">
+            ${getTimeGreeting()}! 👋
+          </h1>
+          <p class="muted" style="margin: 4px 0 0 0;">What would you like to do today?</p>
+        </div>
+      </div>
+      
+      <!-- Natural language input bar -->
+      <div style="margin-top: 16px; display: flex; gap: 8px;">
+        <input 
+          type="text" 
+          placeholder="Ask your AI team to do something..."
+          style="flex: 1; padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border);"
+        />
+        <button class="btn primary">Ask</button>
+      </div>
+      
+      <!-- Quick action buttons -->
+      <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+        <button class="btn btn--secondary">Check leads</button>
+        <button class="btn btn--secondary">Daily report</button>
+        <button class="btn btn--secondary">Create workflow</button>
+        <button class="btn btn--secondary">Settings</button>
+      </div>
+    </section>
+
+    <!-- Your AI Team section -->
+    <section class="card" style="margin-bottom: 18px;">
+      <div class="card-title">Your AI Team</div>
+      <div class="card-sub">4 agents ready to help</div>
+      
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 16px;">
+        <!-- Agent cards -->
+        <div class="card" style="padding: 16px;">
+          <div style="font-weight: 600;">🤝 Sales Agent</div>
+          <div class="muted">Lead qualification</div>
+          <div style="margin-top: 8px;">
+            <span class="chip chip-ok">Active</span>
+            <span class="muted">3 tasks</span>
+          </div>
+          <button class="btn btn--sm" style="margin-top: 8px;">Chat</button>
+        </div>
+        
+        <div class="card" style="padding: 16px;">
+          <div style="font-weight: 600;">💻 Dev Agent</div>
+          <div class="muted">Code & automation</div>
+          <div style="margin-top: 8px;">
+            <span class="chip chip-warn">Queued</span>
+            <span class="muted">2 tasks</span>
+          </div>
+          <button class="btn btn--sm" style="margin-top: 8px;">Chat</button>
+        </div>
+        
+        <div class="card" style="padding: 16px;">
+          <div style="font-weight: 600;">📋 PM Agent</div>
+          <div class="muted">Project management</div>
+          <div style="margin-top: 8px;">
+            <span class="chip chip-ok">Active</span>
+            <span class="muted">1 task</span>
+          </div>
+          <button class="btn btn--sm" style="margin-top: 8px;">Chat</button>
+        </div>
+        
+        <div class="card" style="padding: 16px;">
+          <div style="font-weight: 600;">🎧 Support Agent</div>
+          <div class="muted">Customer support</div>
+          <div style="margin-top: 8px;">
+            <span class="chip">Idle</span>
+            <span class="muted">0 tasks</span>
+          </div>
+          <button class="btn btn--sm" style="margin-top: 8px;">Chat</button>
+        </div>
+      </div>
+    </section>
+
     <details class="card setup-wizard" style="margin-bottom: 18px;" ?open=${wizardOpen}>
       <summary class="setup-wizard__summary">
         <div class="setup-wizard__summary-main">

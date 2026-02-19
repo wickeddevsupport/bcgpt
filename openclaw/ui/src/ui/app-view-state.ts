@@ -34,6 +34,7 @@ import type {
 import type { ChatAttachment, ChatQueueItem, CronFormState } from "./ui-types.ts";
 import type { NostrProfileFormState } from "./views/channels.nostr-profile-form.ts";
 import type { SessionLogEntry } from "./views/usage.ts";
+import type { CreateAgentFormData, AgentActivitySummary } from "./views/agents.ts";
 import type { PmosAuthUser } from "./controllers/pmos-auth.ts";
 import type { PmosConnectorsStatus } from "./controllers/pmos-connectors.ts";
 import type { PmosModelProvider } from "./controllers/pmos-model-auth.ts";
@@ -299,6 +300,14 @@ export type AppViewState = {
   agentSkillsError: string | null;
   agentSkillsReport: SkillStatusReport | null;
   agentSkillsAgentId: string | null;
+  // Create Agent Modal state
+  createModalOpen: boolean;
+  createModalLoading: boolean;
+  createModalError: string | null;
+  createModalFormData: CreateAgentFormData;
+  availableModels: string[];
+  availableSkills: string[];
+  agentActivityById: Record<string, AgentActivitySummary>;
   sessionsLoading: boolean;
   sessionsResult: SessionsListResult | null;
   sessionsError: string | null;

@@ -351,19 +351,34 @@ export function unsubscribeFromExecutions(workflowId: string, clientId: string):
 
 /**
  * Emit a canvas update to all subscribers
+ * 
+ * This stores the update for polling via getPendingUpdates() and can optionally
+ * broadcast to WebSocket subscribers if a broadcast function is provided.
  */
-export function emitCanvasUpdate(update: CanvasUpdate): void {
+export function emitCanvasUpdate(
+  update: CanvasUpdate,
+  broadcast?: (event: string, payload: unknown) => void
+): void {
   const subscribers = canvasSubscribers.get(update.workflowId);
   if (!subscribers || subscribers.size === 0) {
     return;
   }
   
-  // In a real implementation, this would send via WebSocket
-  // For now, we queue it for polling
+  // Queue for polling
   if (!pendingUpdates.has(update.workflowId)) {
     pendingUpdates.set(update.workflowId, []);
   }
   pendingUpdates.get(update.workflowId)!.push(update);
+  
+  // Broadcast to WebSocket subscribers if available
+  if (broadcast) {
+    broadcast('flow.canvas.update', {
+      workflowId: update.workflowId,
+      type: update.type,
+      data: update.data,
+      timestamp: update.timestamp,
+    });
+  }
 }
 
 /**

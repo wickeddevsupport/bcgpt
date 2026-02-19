@@ -24,9 +24,93 @@ import {
   formatNextRun,
 } from "../presenter.ts";
 
+// Agent mode types for business-friendly UI
+export type AgentMode = "autonomous" | "interactive" | "hybrid";
+export type AgentPersonality = "professional" | "friendly" | "technical" | "custom";
+
+export type CreateAgentFormData = {
+  name: string;
+  purpose: string;
+  mode: AgentMode;
+  model: string;
+  skills: string[];
+  personality: AgentPersonality;
+  autonomousTasks: string[];
+};
+
+export type CreateAgentModalProps = {
+  open: boolean;
+  formData: CreateAgentFormData;
+  loading: boolean;
+  error: string | null;
+  availableModels: string[];
+  availableSkills: string[];
+  onCancel: () => void;
+  onSubmit: () => void;
+  onFieldChange: <K extends keyof CreateAgentFormData>(field: K, value: CreateAgentFormData[K]) => void;
+};
+
+// Autonomous task options for the modal
+const AUTONOMOUS_TASK_OPTIONS = [
+  { id: "check-leads", label: "Check for new leads" },
+  { id: "qualify-leads", label: "Qualify leads automatically" },
+  { id: "notify-hot-leads", label: "Notify on hot leads" },
+  { id: "auto-follow-ups", label: "Auto-send follow-ups" },
+];
+
+// Default skill options for the modal
+const DEFAULT_SKILL_OPTIONS = [
+  { id: "basecamp", label: "Basecamp" },
+  { id: "github", label: "GitHub" },
+  { id: "slack", label: "Slack" },
+  { id: "email", label: "Email" },
+  { id: "calendar", label: "Calendar" },
+  { id: "terminal", label: "Terminal" },
+  { id: "knowledge", label: "Knowledge" },
+  { id: "reports", label: "Reports" },
+];
+
+// Default form state
+export const DEFAULT_CREATE_AGENT_FORM: CreateAgentFormData = {
+  name: "",
+  purpose: "",
+  mode: "hybrid",
+  model: "",
+  skills: [],
+  personality: "professional",
+  autonomousTasks: [],
+};
+
 export type AgentsPanel = "overview" | "files" | "tools" | "skills" | "channels" | "cron";
 
+export type AgentActivitySummary = {
+  tasksRunning: number;
+  tasksQueued: number;
+  lastActivityAt: number | null;
+  status: "active" | "paused" | "idle" | "error";
+};
+
 export type AgentsProps = {
+  // Modal state
+  createModalOpen: boolean;
+  createModalLoading: boolean;
+  createModalError: string | null;
+  createModalFormData: CreateAgentFormData;
+  availableModels: string[];
+  availableSkills: string[];
+  onCreateModalOpen: () => void;
+  onCreateModalCancel: () => void;
+  onCreateModalSubmit: () => void;
+  onCreateModalFieldChange: <K extends keyof CreateAgentFormData>(
+    field: K,
+    value: CreateAgentFormData[K],
+  ) => void;
+  // Agent activity summaries by ID
+  agentActivityById: Record<string, AgentActivitySummary>;
+  // Chat integration
+  onOpenAgentChat: (agentId: string) => void;
+  onPauseAgent: (agentId: string) => void;
+  onViewAgentLogs: (agentId: string) => void;
   loading: boolean;
   error: string | null;
   agentsList: AgentsListResult | null;
@@ -543,6 +627,7 @@ export function renderAgents(props: AgentsProps) {
     : null;
 
   return html`
+    ${props.createModalOpen ? renderCreateAgentModal(props) : nothing}
     <div class="agents-layout">
       <section class="card agents-sidebar">
         <div class="row" style="justify-content: space-between;">
@@ -550,9 +635,18 @@ export function renderAgents(props: AgentsProps) {
             <div class="card-title">Agents</div>
             <div class="card-sub">${agents.length} configured.</div>
           </div>
-          <button class="btn btn--sm" ?disabled=${props.loading} @click=${props.onRefresh}>
-            ${props.loading ? "Loading…" : "Refresh"}
-          </button>
+          <div class="row" style="gap: 8px;">
+            <button
+              class="btn btn--sm primary"
+              @click=${props.onCreateModalOpen}
+              ?disabled=${props.createModalLoading}
+            >
+              + New
+            </button>
+            <button class="btn btn--sm" ?disabled=${props.loading} @click=${props.onRefresh}>
+              ${props.loading ? "Loading…" : "Refresh"}
+            </button>
+          </div>
         </div>
         ${
           props.error
@@ -1960,4 +2054,350 @@ function renderAgentSkillRow(
       </div>
     </div>
   `;
+}
+
+/**
+ * Render the Create Agent Modal
+ * Based on UI_MOCKUPS.md Section 7: Create Agent Modal
+ */
+function renderCreateAgentModal(props: AgentsProps) {
+  const { createModalFormData: form, createModalLoading, createModalError } = props;
+  const isAutonomous = form.mode === "autonomous";
+
+  const modeOptions: Array<{ value: AgentMode; label: string }> = [
+    { value: "autonomous", label: "Autonomous" },
+    { value: "interactive", label: "Interactive" },
+    { value: "hybrid", label: "Hybrid" },
+  ];
+
+  const personalityOptions: Array<{ value: AgentPersonality; label: string }> = [
+    { value: "professional", label: "Professional" },
+    { value: "friendly", label: "Friendly" },
+    { value: "technical", label: "Technical" },
+    { value: "custom", label: "Custom" },
+  ];
+
+  const skillOptions = props.availableSkills.length > 0
+    ? props.availableSkills.map((s) => ({ id: s, label: s }))
+    : DEFAULT_SKILL_OPTIONS;
+
+  return html`
+    <div class="exec-approval-overlay" role="dialog" aria-modal="true" aria-labelledby="create-agent-title">
+      <div class="exec-approval-card" style="max-width: 560px;">
+        <div class="exec-approval-header">
+          <div>
+            <div class="exec-approval-title" id="create-agent-title">Create New Agent</div>
+            <div class="exec-approval-sub">Configure a new AI agent for your team.</div>
+          </div>
+          <button
+            class="btn btn--sm"
+            @click=${props.onCreateModalCancel}
+            ?disabled=${createModalLoading}
+            title="Close"
+            style="padding: 4px 8px;"
+          >
+            ✕
+          </button>
+        </div>
+
+        ${createModalError
+          ? html`<div class="callout danger" style="margin-top: 12px;">${createModalError}</div>`
+          : nothing
+        }
+
+        <div class="form-grid" style="margin-top: 16px; grid-template-columns: 1fr;">
+          <!-- Name Field -->
+          <label class="field">
+            <span>Name</span>
+            <input
+              type="text"
+              .value=${form.name}
+              @input=${(e: Event) =>
+                props.onCreateModalFieldChange("name", (e.target as HTMLInputElement).value)}
+              placeholder="e.g., Sales Agent"
+              ?disabled=${createModalLoading}
+            />
+          </label>
+
+          <!-- Purpose Field -->
+          <label class="field">
+            <span>Purpose</span>
+            <input
+              type="text"
+              .value=${form.purpose}
+              @input=${(e: Event) =>
+                props.onCreateModalFieldChange("purpose", (e.target as HTMLInputElement).value)}
+              placeholder="e.g., Handle lead qualification"
+              ?disabled=${createModalLoading}
+            />
+          </label>
+
+          <!-- Mode Dropdown -->
+          <label class="field">
+            <span>Mode</span>
+            <select
+              .value=${form.mode}
+              @change=${(e: Event) =>
+                props.onCreateModalFieldChange("mode", (e.target as HTMLSelectElement).value as AgentMode)}
+              ?disabled=${createModalLoading}
+            >
+              ${modeOptions.map(
+                (opt) => html`
+                  <option value=${opt.value} ?selected=${form.mode === opt.value}>
+                    ${opt.label}
+                  </option>
+                `,
+              )}
+            </select>
+          </label>
+
+          <!-- Model Dropdown -->
+          <label class="field">
+            <span>Model</span>
+            <select
+              .value=${form.model}
+              @change=${(e: Event) =>
+                props.onCreateModalFieldChange("model", (e.target as HTMLSelectElement).value)}
+              ?disabled=${createModalLoading}
+            >
+              <option value="">Select a model...</option>
+              ${props.availableModels.map(
+                (modelId) => html`
+                  <option value=${modelId} ?selected=${form.model === modelId}>
+                    ${modelId}
+                  </option>
+                `,
+              )}
+            </select>
+            <div class="muted" style="font-size: 11px; margin-top: 4px;">
+              Uses your connected AI keys
+            </div>
+          </label>
+
+          <!-- Skills Checkboxes -->
+          <div class="field">
+            <span>Skills</span>
+            <div class="chip-row" style="margin-top: 6px;">
+              ${skillOptions.map((skill) => {
+                const isSelected = form.skills.includes(skill.id);
+                return html`
+                  <label class="chip" style="cursor: pointer;">
+                    <input
+                      type="checkbox"
+                      .checked=${isSelected}
+                      @change=${(e: Event) => {
+                        const checked = (e.target as HTMLInputElement).checked;
+                        const newSkills = checked
+                          ? [...form.skills, skill.id]
+                          : form.skills.filter((s) => s !== skill.id);
+                        props.onCreateModalFieldChange("skills", newSkills);
+                      }}
+                      ?disabled=${createModalLoading}
+                    />
+                    ${skill.label}
+                  </label>
+                `;
+              })}
+            </div>
+          </div>
+
+          <!-- Personality Dropdown -->
+          <label class="field">
+            <span>Personality</span>
+            <select
+              .value=${form.personality}
+              @change=${(e: Event) =>
+                props.onCreateModalFieldChange(
+                  "personality",
+                  (e.target as HTMLSelectElement).value as AgentPersonality,
+                )}
+              ?disabled=${createModalLoading}
+            >
+              ${personalityOptions.map(
+                (opt) => html`
+                  <option value=${opt.value} ?selected=${form.personality === opt.value}>
+                    ${opt.label}
+                  </option>
+                `,
+              )}
+            </select>
+          </label>
+
+          <!-- Autonomous Tasks (only shown when mode is autonomous) -->
+          ${isAutonomous
+            ? html`
+                <div class="field">
+                  <span>Autonomous Tasks</span>
+                  <div class="chip-row" style="margin-top: 6px;">
+                    ${AUTONOMOUS_TASK_OPTIONS.map((task) => {
+                      const isSelected = form.autonomousTasks.includes(task.id);
+                      return html`
+                        <label class="chip" style="cursor: pointer;">
+                          <input
+                            type="checkbox"
+                            .checked=${isSelected}
+                            @change=${(e: Event) => {
+                              const checked = (e.target as HTMLInputElement).checked;
+                              const newTasks = checked
+                                ? [...form.autonomousTasks, task.id]
+                                : form.autonomousTasks.filter((t) => t !== task.id);
+                              props.onCreateModalFieldChange("autonomousTasks", newTasks);
+                            }}
+                            ?disabled=${createModalLoading}
+                          />
+                          ${task.label}
+                        </label>
+                      `;
+                    })}
+                  </div>
+                </div>
+              `
+            : nothing
+          }
+        </div>
+
+        <div class="exec-approval-actions" style="margin-top: 20px; justify-content: flex-end;">
+          <button
+            class="btn"
+            @click=${props.onCreateModalCancel}
+            ?disabled=${createModalLoading}
+          >
+            Cancel
+          </button>
+          <button
+            class="btn primary"
+            @click=${props.onCreateModalSubmit}
+            ?disabled=${createModalLoading || !form.name.trim()}
+          >
+            ${createModalLoading ? "Creating..." : "Create Agent"}
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Render an agent card for the dashboard view
+ * Based on UI_MOCKUPS.md Section 6: Agents Page
+ */
+function renderAgentCard(
+  agent: AgentsListResult["agents"][number],
+  props: AgentsProps,
+  defaultId: string | null,
+) {
+  const activity = props.agentActivityById[agent.id] ?? {
+    tasksRunning: 0,
+    tasksQueued: 0,
+    lastActivityAt: null,
+    status: "idle",
+  };
+  const displayName = normalizeAgentLabel(agent);
+  const emoji = resolveAgentEmoji(agent, props.agentIdentityById[agent.id] ?? null);
+  const isSelected = props.selectedAgentId === agent.id;
+
+  // Resolve mode from config
+  const config = resolveAgentConfig(props.configForm, agent.id);
+  const mode = (config.entry?.tools?.profile as AgentMode) ?? "hybrid";
+  const model = config.entry?.model
+    ? resolveModelLabel(config.entry?.model)
+    : resolveModelLabel(config.defaults?.model);
+
+  const statusClass =
+    activity.status === "active"
+      ? "chip-ok"
+      : activity.status === "paused"
+        ? "chip-warn"
+        : activity.status === "error"
+          ? "chip-danger"
+          : "";
+
+  const lastActivityText = activity.lastActivityAt
+    ? formatRelativeTimestamp(activity.lastActivityAt)
+    : "No recent activity";
+
+  return html`
+    <div class="agent-card ${isSelected ? "agent-card--selected" : ""}">
+      <div class="agent-card-header">
+        <div class="agent-avatar agent-avatar--lg">
+          ${emoji || displayName.slice(0, 1)}
+        </div>
+        <div class="agent-card-info">
+          <div class="agent-card-title">${displayName}</div>
+          <div class="chip-row" style="margin-top: 6px;">
+            <span class="chip ${statusClass}">${activity.status}</span>
+            <span class="chip">${mode}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="agent-card-meta">
+        <div class="agent-card-meta-row">
+          <span class="muted">Model:</span>
+          <span class="mono">${model}</span>
+        </div>
+        <div class="agent-card-meta-row">
+          <span class="muted">Tasks:</span>
+          <span>${activity.tasksRunning} running · ${activity.tasksQueued} queued</span>
+        </div>
+        <div class="agent-card-meta-row">
+          <span class="muted">Last:</span>
+          <span>${lastActivityText}</span>
+        </div>
+      </div>
+
+      ${isAutonomous(agent, props.configForm)
+        ? html`
+            <div class="agent-card-tasks">
+              <div class="muted" style="font-size: 11px; margin-bottom: 6px;">Autonomous Tasks:</div>
+              <div class="chip-row">
+                ${AUTONOMOUS_TASK_OPTIONS.slice(0, 2).map((task) =>
+                  html`<span class="chip chip--sm">${task.label}</span>`,
+                )}
+              </div>
+            </div>
+          `
+        : nothing
+      }
+
+      <div class="agent-card-actions">
+        <button
+          class="btn btn--sm primary"
+          @click=${() => props.onOpenAgentChat(agent.id)}
+        >
+          Chat
+        </button>
+        <button
+          class="btn btn--sm"
+          @click=${() => props.onSelectAgent(agent.id)}
+        >
+          Settings
+        </button>
+        <button
+          class="btn btn--sm"
+          @click=${() => props.onPauseAgent(agent.id)}
+        >
+          ${activity.status === "paused" ? "Resume" : "Pause"}
+        </button>
+        <button
+          class="btn btn--sm"
+          @click=${() => props.onViewAgentLogs(agent.id)}
+        >
+          View Logs
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Check if an agent is in autonomous mode based on its config
+ */
+function isAutonomous(
+  agent: AgentsListResult["agents"][number],
+  configForm: Record<string, unknown> | null,
+): boolean {
+  const config = resolveAgentConfig(configForm, agent.id);
+  const mode = (config.entry?.tools?.profile as string) ?? "";
+  return mode.toLowerCase() === "autonomous";
 }
