@@ -776,6 +776,59 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 
+  // ── AI Workflow Assistant (uses workspace BYOK model) ─────────────
+
+  "pmos.workflow.assist": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+
+      const p = params as {
+        messages?: Array<{ role: string; content: string }>;
+        message?: string;
+      } | null;
+
+      const rawMessages: Array<{ role: string; content: string }> = Array.isArray(p?.messages) ? [...p.messages] : [];
+      if (p?.message && typeof p.message === "string") {
+        rawMessages.push({ role: "user", content: p.message });
+      }
+      if (rawMessages.length === 0) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "messages required"));
+        return;
+      }
+
+      const messages = rawMessages
+        .filter(m => m.role === "user" || m.role === "assistant")
+        .map(m => ({ role: m.role as "user" | "assistant", content: String(m.content) }));
+
+      const { callWorkspaceModel, WORKFLOW_ASSISTANT_SYSTEM_PROMPT } = await import("../workflow-ai.js");
+
+      const result = await callWorkspaceModel(workspaceId, WORKFLOW_ASSISTANT_SYSTEM_PROMPT, messages, {
+        maxTokens: 2048,
+        jsonMode: true,
+      });
+
+      if (!result.ok) {
+        respond(true, { ok: true, message: result.error ?? "AI model unavailable", workflow: null, providerError: true }, undefined);
+        return;
+      }
+
+      let parsed: { message?: string; workflow?: unknown } = {};
+      try {
+        parsed = JSON.parse(result.text ?? "{}") as typeof parsed;
+      } catch {
+        parsed = { message: result.text ?? "" };
+      }
+
+      const assistantMessage = typeof parsed.message === "string" ? parsed.message : result.text ?? "";
+      const workflow = parsed.workflow && typeof parsed.workflow === "object" ? parsed.workflow : null;
+
+      respond(true, { ok: true, message: assistantMessage, workflow, providerUsed: result.providerUsed }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
   // ── Super-admin: Workspace List ────────────────────────────────────
 
   "pmos.workspaces.list": async ({ respond, client }) => {
