@@ -658,6 +658,12 @@ export function renderApp(state: AppViewState) {
                       runsLoading: state.apRunsLoading,
                       runsError: state.apRunsError,
                       onLoadRuns: () => void loadWorkflowRuns(state),
+                      templateDeploying: state.apFlowMutating,
+                      templateDeployError: state.apFlowMutateError ?? null,
+                      onDeployTemplate: async (templateId: string) => {
+                        await state.client!.request("pmos.flow.template.deploy", { templateId });
+                        void state.handlePmosApFlowsLoad();
+                      },
                     })}
               </div>`
             : nothing
@@ -715,8 +721,12 @@ export function renderApp(state: AppViewState) {
                 connectorsError: state.pmosConnectorsError,
                 onRefreshConnectors: () => state.handlePmosRefreshConnectors(),
                 onConnectService: (serviceId: string) => {
-                  // Navigate to integrations with service pre-selected
-                  state.setTab("integrations");
+                  // Native services → integrations; everything else → automations (n8n credentials)
+                  if (serviceId === "basecamp" || serviceId === "github") {
+                    state.setTab("integrations");
+                  } else {
+                    state.setTab("automations");
+                  }
                 },
                 onDisconnectService: (serviceId: string) => {
                   // TODO: Implement disconnect

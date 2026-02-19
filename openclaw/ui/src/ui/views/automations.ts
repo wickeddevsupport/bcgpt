@@ -2,12 +2,12 @@ import { html, nothing } from "lit";
 import type { WorkflowRunSummary, WorkflowSummary } from "../controllers/pmos-workflows.ts";
 
 const WORKFLOW_TEMPLATES = [
-  { id: "webhook-slack", name: "Webhook → Slack Alert", desc: "Post to Slack when a webhook fires", icon: "💬" },
-  { id: "scheduled-report", name: "Scheduled Report", desc: "Generate and send a report on a schedule", icon: "📊" },
-  { id: "github-slack", name: "GitHub → Slack", desc: "Notify Slack on GitHub events", icon: "🐙" },
-  { id: "basecamp-sync", name: "Basecamp Todo Sync", desc: "Sync Basecamp todos to another service", icon: "🏕️" },
-  { id: "ai-response", name: "AI-Powered Response", desc: "Respond to triggers using an AI model", icon: "🤖" },
-  { id: "db-backup", name: "Database Backup", desc: "Scheduled backup of a data source", icon: "💾" },
+  { id: "template-webhook-slack", name: "Webhook → Slack Alert", desc: "Post to Slack when a webhook fires", icon: "💬" },
+  { id: "template-scheduled-report", name: "Scheduled Report", desc: "Generate and send a report on a schedule", icon: "📊" },
+  { id: "template-github-slack", name: "GitHub → Slack", desc: "Notify Slack on GitHub events", icon: "🐙" },
+  { id: "template-basecamp-sync", name: "Basecamp Todo Sync", desc: "Sync Basecamp todos to another service", icon: "🏕️" },
+  { id: "template-ai-response", name: "AI-Powered Response", desc: "Respond to triggers using an AI model", icon: "🤖" },
+  { id: "template-database-backup", name: "Database Backup", desc: "Scheduled backup of a data source", icon: "💾" },
 ];
 import type {
   PmosFlowGraphEdge,
@@ -74,6 +74,10 @@ export type AutomationsProps = {
   onBuilderCommit: () => void;
   onBuilderReset: () => void;
 
+  // Template deploy
+  templateDeploying: boolean;
+  templateDeployError: string | null;
+  onDeployTemplate: (templateId: string) => void;
   // Execution history
   runs: WorkflowRunSummary[];
   runsLoading: boolean;
@@ -202,18 +206,25 @@ export function renderAutomations(props: AutomationsProps) {
 
         <div class="card">
           <div class="card-title">Templates</div>
-          <div class="card-sub">Start from a pre-built workflow. Creates the name in the form above.</div>
+          <div class="card-sub">Deploy a pre-built workflow directly into your n8n editor.</div>
+
+          ${props.templateDeployError ? html`<div class="callout danger" style="margin-top: 10px;">${props.templateDeployError}</div>` : nothing}
 
           <div class="list" style="margin-top: 14px;">
             ${WORKFLOW_TEMPLATES.map((tpl) => html`
-              <div
-                class="list-item list-item-clickable"
-                @click=${() => props.onCreateNameChange(tpl.name)}
-                title=${tpl.desc}
-              >
+              <div class="list-item" title=${tpl.desc}>
                 <div class="list-main">
                   <div class="list-title">${tpl.icon} ${tpl.name}</div>
                   <div class="list-sub">${tpl.desc}</div>
+                </div>
+                <div class="list-meta">
+                  <button
+                    class="btn btn--sm btn--primary"
+                    ?disabled=${!props.connected || props.templateDeploying}
+                    @click=${() => props.onDeployTemplate(tpl.id)}
+                  >
+                    ${props.templateDeploying ? "Deploying..." : "Deploy"}
+                  </button>
                 </div>
               </div>
             `)}

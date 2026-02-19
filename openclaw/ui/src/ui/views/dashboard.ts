@@ -209,11 +209,6 @@ export function renderDashboard(props: DashboardProps) {
     flows.length === 0
       ? { title: "Create first automation", detail: "Build a flow in Automations", href: props.automationsHref }
       : null,
-    {
-      title: "Ask Wicked OS to execute",
-      detail: "Use chat to plan and run multi-step automation",
-      href: props.chatHref,
-    },
   ].filter((item): item is { title: string; detail: string; href: string } => Boolean(item));
 
   return html`
@@ -295,20 +290,24 @@ export function renderDashboard(props: DashboardProps) {
               const emoji = identity?.emoji?.trim() || agent.identity?.emoji?.trim() || '🤖';
               const theme = agent.identity?.theme?.trim() || identity?.theme?.trim() || 'AI Agent';
               
-              const statusClass = 
+              const statusLabel =
+                activity.status === 'active' ? 'Active' :
+                activity.status === 'paused' ? 'Paused' :
+                activity.status === 'error' ? 'Error' : 'Ready';
+              const statusClass =
                 activity.status === 'active' ? 'chip-ok' :
                 activity.status === 'paused' ? 'chip-warn' :
                 activity.status === 'error' ? 'chip-danger' : '';
-              
+
               const taskCount = activity.tasksRunning + activity.tasksQueued;
-              
+
               return html`
                 <div class="card" style="padding: 16px;">
                   <div style="font-weight: 600;">${emoji} ${displayName}</div>
                   <div class="muted">${theme}</div>
                   <div style="margin-top: 8px;">
-                    <span class="chip ${statusClass}">${activity.status}</span>
-                    <span class="muted">${taskCount} task${taskCount !== 1 ? 's' : ''}</span>
+                    <span class="chip ${statusClass}">${statusLabel}</span>
+                    ${taskCount > 0 ? html`<span class="muted">${taskCount} task${taskCount !== 1 ? 's' : ''}</span>` : nothing}
                   </div>
                   <div class="row" style="gap: 8px; margin-top: 8px;">
                     <button class="btn btn--sm btn--primary" @click=${() => props.onOpenAgentChat(agent.id)}>
@@ -525,8 +524,8 @@ export function renderDashboard(props: DashboardProps) {
                     return html`
                       <div class="list-item">
                         <div class="list-main">
-                          <div class="list-title mono">${run.id}</div>
-                          <div class="list-sub">${run.flowId ? `flow ${run.flowId}` : "flow n/a"}</div>
+                          <div class="list-title mono">${String(run.id ?? "").slice(0, 8)}</div>
+                          <div class="list-sub">${run.flowId ? `flow ${String(run.flowId).slice(0, 8)}` : "flow n/a"}</div>
                         </div>
                         <div class="list-meta">
                           <span class=${toneClass}>${status}</span>
@@ -551,6 +550,7 @@ export function renderDashboard(props: DashboardProps) {
       <div class="card">
         <div class="card-title">Focus Today</div>
         <div class="card-sub">Prioritized actions to keep operations healthy.</div>
+        ${focusItems.length === 0 ? html`<div class="muted" style="margin-top: 12px;">All good — no issues to address.</div>` : nothing}
         <div class="list" style="margin-top: 12px;">
           ${focusItems.slice(0, 5).map(
             (item) => html`

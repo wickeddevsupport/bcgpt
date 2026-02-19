@@ -214,8 +214,15 @@ export function renderConnections(props: ConnectionsProps) {
                 <div class="muted">${service.description}</div>
               </div>
             </div>
-            <button class="btn btn--sm btn--primary" style="margin-top: 12px;" @click=${() => props.onConnectService(service.id)}>
-              Connect
+            <button
+              class="btn btn--sm ${service.id === 'basecamp' || service.id === 'github' ? 'btn--primary' : 'btn--secondary'}"
+              style="margin-top: 12px;"
+              @click=${() => props.onConnectService(service.id)}
+              title=${service.id === 'basecamp' || service.id === 'github'
+                ? 'Connect this service'
+                : 'Manage credentials in the Automations workflow editor'}
+            >
+              ${service.id === 'basecamp' || service.id === 'github' ? 'Connect' : 'Add via Automations'}
             </button>
           </div>
         `)}
