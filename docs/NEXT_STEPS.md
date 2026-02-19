@@ -52,8 +52,8 @@ This file tracks what is actually implemented in active runtime code paths (`ope
 - [x] Wire Step 3 BYOK form to real `pmos.byok.set` via `handlePmosModelSave()`
 - [x] Auto-trigger onboarding for new users after first signup (instead of requiring `?onboarding=1`)
 - [x] Auto-collapse onboarding wizard when all 3 steps are complete / `pmosModelConfigured` is true
-- [ ] Implement real n8n persistence path in `pmos.workflow.confirm` (chat-to-workflow)
-- [ ] Replace simulated flow-control actions with real n8n-backed actions in live-flow-builder
+- [x] Implement real n8n persistence path in `pmos.workflow.confirm` (chat-to-workflow) — "Automate" button in chat compose, `handleChatCreateWorkflow` → `wicked-ops.generateN8nWorkflow` → real n8n
+- [x] Replace simulated flow-control actions with real n8n-backed actions in live-flow-builder — `executeFlowControl` calls `setWorkflowActive`/`executeN8nWorkflow`; AI Flow Builder in Automations uses `ops_workflow_create`
 
 ### P2 - Dashboard & Discovery
 

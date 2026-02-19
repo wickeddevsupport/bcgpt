@@ -508,6 +508,16 @@ export function renderChat(props: ChatProps) {
             >
               ${canAbort ? "Stop" : "New session"}
             </button>
+            ${props.onCreateWorkflow
+              ? html`<button
+                  class="btn"
+                  ?disabled=${!props.connected || props.createWorkflowBusy || !props.draft?.trim()}
+                  @click=${props.onCreateWorkflow}
+                  title="Generate a workflow from your message and open it in the Automations editor"
+                >
+                  ${props.createWorkflowBusy ? "Creating..." : "Automate"}
+                </button>`
+              : nothing}
             <button
               class="btn primary"
               ?disabled=${!props.connected}
