@@ -1,5 +1,14 @@
 import { html, nothing } from "lit";
 import type { WorkflowSummary } from "../controllers/pmos-workflows.ts";
+
+const WORKFLOW_TEMPLATES = [
+  { id: "webhook-slack", name: "Webhook → Slack Alert", desc: "Post to Slack when a webhook fires", icon: "💬" },
+  { id: "scheduled-report", name: "Scheduled Report", desc: "Generate and send a report on a schedule", icon: "📊" },
+  { id: "github-slack", name: "GitHub → Slack", desc: "Notify Slack on GitHub events", icon: "🐙" },
+  { id: "basecamp-sync", name: "Basecamp Todo Sync", desc: "Sync Basecamp todos to another service", icon: "🏕️" },
+  { id: "ai-response", name: "AI-Powered Response", desc: "Respond to triggers using an AI model", icon: "🤖" },
+  { id: "db-backup", name: "Database Backup", desc: "Scheduled backup of a data source", icon: "💾" },
+];
 import type {
   PmosFlowGraphEdge,
   PmosFlowGraphNode,
@@ -184,6 +193,26 @@ export function renderAutomations(props: AutomationsProps) {
             ${props.flows.length === 0 && !props.loading ? html`<div class="muted">No flows found.</div>` : nothing}
           </div>
         </div>
+
+        <div class="card">
+          <div class="card-title">Templates</div>
+          <div class="card-sub">Start from a pre-built workflow. Creates the name in the form above.</div>
+
+          <div class="list" style="margin-top: 14px;">
+            ${WORKFLOW_TEMPLATES.map((tpl) => html`
+              <div
+                class="list-item list-item-clickable"
+                @click=${() => props.onCreateNameChange(tpl.name)}
+                title=${tpl.desc}
+              >
+                <div class="list-main">
+                  <div class="list-title">${tpl.icon} ${tpl.name}</div>
+                  <div class="list-sub">${tpl.desc}</div>
+                </div>
+              </div>
+            `)}
+          </div>
+        </div>
       </div>
 
       <div class="agents-main">
@@ -231,9 +260,9 @@ export function renderAutomations(props: AutomationsProps) {
           </div>
 
           <div class="card" style="margin-top: 16px;">
-            <div class="card-title">AI Flow Builder (Live)</div>
+            <div class="card-title">AI Flow Builder <span class="chip" style="font-size:11px;vertical-align:middle;">Preview</span></div>
             <div class="card-sub">
-              Describe your automation and watch Wicked OS stream graph operations before committing a flow shell.
+              Describe your automation in plain English — Wicked OS generates a workflow graph you can commit as a flow shell and finish in the n8n editor above.
             </div>
 
             <label class="field" style="margin-top: 12px;">

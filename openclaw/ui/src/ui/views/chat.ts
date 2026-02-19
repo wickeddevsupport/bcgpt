@@ -505,14 +505,6 @@ export function renderChat(props: ChatProps) {
               ${canAbort ? "Stop" : "New session"}
             </button>
             <button
-              class="btn"
-              ?disabled=${!props.connected || props.createWorkflowBusy || !String(props.draft ?? "").trim()}
-              @click=${() => props.onCreateWorkflow?.()}
-              title="Create an n8n workflow from this message"
-            >
-              Create workflow
-            </button>
-            <button
               class="btn primary"
               ?disabled=${!props.connected}
               @click=${props.onSend}

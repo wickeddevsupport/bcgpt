@@ -52,6 +52,7 @@ import {
 } from "./controllers/skills.ts";
 import { loadUsage, loadSessionTimeSeries, loadSessionLogs } from "./controllers/usage.ts";
 import { canManagePmosMembers } from "./controllers/pmos-admin.ts";
+import type { PmosModelProvider } from "./controllers/pmos-model-auth.ts";
 import { icons } from "./icons.ts";
 import {
   normalizeBasePath,
@@ -382,6 +383,9 @@ export function renderApp(state: AppViewState) {
             <span>Health</span>
             <span class="mono">${state.connected ? "OK" : "Offline"}</span>
           </div>
+          ${state.pmosAuthUser?.role === "super_admin"
+            ? html`<button class="button" @click=${() => state.setTab("admin")} title="Workspace admin panel">Admin Panel</button>`
+            : nothing}
           <button class="button" @click=${() => void state.handlePmosAuthLogout()}>Sign out</button>
           ${renderThemeToggle(state)}
         </div>
@@ -486,7 +490,35 @@ export function renderApp(state: AppViewState) {
 
         ${
           state.tab === "dashboard"
-            ? renderDashboard({
+            ? state.onboarding
+              ? renderOnboarding({
+                  currentStep: state.onboardingStep,
+                  connectorsStatus: state.pmosConnectorsStatus,
+                  connectorsLoading: state.pmosConnectorsLoading,
+                  modelAuthConfigured: hasConfiguredModelAuth(configValue),
+                  agentsCount: state.agentsList?.agents?.length ?? 0,
+                  integrationsHref: pathForTab("integrations", state.basePath),
+                  agentsHref: pathForTab("agents", state.basePath),
+                  chatHref: pathForTab("chat", state.basePath),
+                  onConnectService: () => state.setTab("connections"),
+                  onSelectAgent: () => {},
+                  onNext: () => { state.onboardingStep = Math.min(3, state.onboardingStep + 1) as 1 | 2 | 3; },
+                  onBack: () => { state.onboardingStep = Math.max(1, state.onboardingStep - 1) as 1 | 2 | 3; },
+                  onSkip: () => { state.onboarding = false; },
+                  onComplete: () => { state.onboarding = false; state.setTab("chat"); },
+                  // BYOK form (Step 3)
+                  modelProvider: state.pmosModelProvider,
+                  modelId: state.pmosModelId,
+                  modelApiKeyDraft: state.pmosModelApiKeyDraft,
+                  modelSaving: state.pmosModelSaving,
+                  modelError: state.pmosModelError,
+                  modelConfigured: state.pmosModelConfigured,
+                  onModelProviderChange: (p) => state.handlePmosModelProviderChange(p as PmosModelProvider),
+                  onModelIdChange: (id) => { state.pmosModelId = id; },
+                  onModelApiKeyChange: (key) => { state.pmosModelApiKeyDraft = key; },
+                  onModelSave: () => state.handlePmosModelSave(),
+                })
+              : renderDashboard({
                 connected: state.connected,
                 settings: state.settings,
                 lastError: state.lastError,

@@ -3,6 +3,14 @@ import type { PmosConnectorsStatus } from "../controllers/pmos-connectors.ts";
 
 export type OnboardingStep = 1 | 2 | 3;
 
+const PROVIDER_OPTIONS = [
+  { value: "anthropic", label: "Anthropic", defaultModel: "claude-opus-4-6" },
+  { value: "openai", label: "OpenAI", defaultModel: "gpt-4o" },
+  { value: "google", label: "Google Gemini", defaultModel: "gemini-2.0-flash" },
+  { value: "openrouter", label: "OpenRouter", defaultModel: "google/gemini-2.0-flash:free" },
+  { value: "zai", label: "GLM (Z.AI)", defaultModel: "glm-4.1" },
+];
+
 export type OnboardingProps = {
   currentStep: OnboardingStep;
   connectorsStatus: PmosConnectorsStatus | null;
@@ -16,8 +24,17 @@ export type OnboardingProps = {
   onConnectService: (serviceId: string) => void;
   // Step 2: Choose Agents
   onSelectAgent: (agentTemplate: string) => void;
-  // Step 3: Add AI Keys
-  onAddApiKey: () => void;
+  // Step 3: Add AI Keys (inline BYOK form)
+  modelProvider: string;
+  modelId: string;
+  modelApiKeyDraft: string;
+  modelSaving: boolean;
+  modelError: string | null;
+  modelConfigured: boolean;
+  onModelProviderChange: (provider: string) => void;
+  onModelIdChange: (id: string) => void;
+  onModelApiKeyChange: (key: string) => void;
+  onModelSave: () => void;
   // Navigation
   onNext: () => void;
   onBack: () => void;
@@ -42,7 +59,7 @@ const AGENT_TEMPLATES = [
 
 export function renderOnboarding(props: OnboardingProps) {
   const stepTitles = ["Connect Your Tools", "Choose Your Agents", "Add Your AI Keys"];
-  
+
   return html`
     <div class="onboarding-wizard">
       <div class="onboarding-header">
@@ -59,19 +76,19 @@ export function renderOnboarding(props: OnboardingProps) {
           `)}
         </div>
       </div>
-      
+
       <div class="onboarding-content">
         ${props.currentStep === 1 ? renderStep1(props) : nothing}
         ${props.currentStep === 2 ? renderStep2(props) : nothing}
         ${props.currentStep === 3 ? renderStep3(props) : nothing}
       </div>
-      
+
       <div class="onboarding-footer">
         ${props.currentStep > 1
           ? html`<button class="btn btn--secondary" @click=${props.onBack}>Back</button>`
           : html`<button class="btn btn--link" @click=${props.onSkip}>Skip for now</button>`
         }
-        
+
         ${props.currentStep < 3
           ? html`<button class="btn btn--primary" @click=${props.onNext}>Next Step</button>`
           : html`<button class="btn btn--primary" @click=${props.onComplete}>Start Using Wicked OS</button>`
@@ -84,20 +101,20 @@ export function renderOnboarding(props: OnboardingProps) {
 function renderStep1(props: OnboardingProps) {
   const ops = props.connectorsStatus?.ops;
   const bcgpt = props.connectorsStatus?.bcgpt;
-  
+
   return html`
     <div class="onboarding-step">
       <h2>Connect Your Tools</h2>
       <p class="onboarding-subtitle">Connect the services your AI team will use. You can add more later.</p>
-      
+
       <div class="onboarding-services-grid">
         ${TOOL_SERVICES.map((service) => {
-          const isConnected = service.id === 'basecamp' 
-            ? ops?.reachable === true 
-            : service.id === 'github' 
+          const isConnected = service.id === 'basecamp'
+            ? ops?.reachable === true
+            : service.id === 'github'
               ? bcgpt?.authOk === true
               : false;
-          
+
           return html`
             <div class="onboarding-service-card ${isConnected ? 'connected' : ''}">
               <div class="service-icon">${service.icon}</div>
@@ -113,7 +130,7 @@ function renderStep1(props: OnboardingProps) {
           `;
         })}
       </div>
-      
+
       <div class="onboarding-hint">
         <span class="muted">💡 Tip: You can skip this step and connect services later in the Connections tab.</span>
       </div>
@@ -126,12 +143,12 @@ function renderStep2(props: OnboardingProps) {
     <div class="onboarding-step">
       <h2>Choose Your Agents</h2>
       <p class="onboarding-subtitle">Select pre-built agents to get started. You can customize or add more later.</p>
-      
+
       <div class="onboarding-agents-grid">
         ${AGENT_TEMPLATES.map((agent) => html`
           <label class="onboarding-agent-card ${agent.selected ? 'selected' : ''}">
-            <input 
-              type="checkbox" 
+            <input
+              type="checkbox"
               ?checked=${agent.selected}
               @change=${() => props.onSelectAgent(agent.id)}
             />
@@ -144,7 +161,7 @@ function renderStep2(props: OnboardingProps) {
           </label>
         `)}
       </div>
-      
+
       <div class="onboarding-hint">
         <span class="muted">💡 Tip: The Personal Agent is included by default and can help with any task.</span>
       </div>
@@ -156,45 +173,67 @@ function renderStep3(props: OnboardingProps) {
   return html`
     <div class="onboarding-step">
       <h2>Add Your AI Keys</h2>
-      <p class="onboarding-subtitle">Bring your own API keys to power your AI team. Your keys are stored locally and never leave your workspace.</p>
-      
+      <p class="onboarding-subtitle">Bring your own API keys to power your AI team. Keys are encrypted and stay in your workspace.</p>
+
       <div class="onboarding-keys-section">
-        ${props.modelAuthConfigured
+        ${props.modelConfigured
           ? html`
-            <div class="callout success">
-              <strong>✓ AI model configured</strong>
-              <p>Your AI model is ready to use.</p>
+            <div class="callout success" style="margin-bottom: 16px;">
+              <strong>✓ AI model configured</strong> — your agents are ready to use AI.
             </div>
           `
           : html`
             <div class="onboarding-key-card">
-              <div class="key-header">
-                <span class="key-icon">🔑</span>
-                <span class="key-name">AI Provider API Key</span>
+              <div class="form-grid">
+                <label class="field full">
+                  <span>AI Provider</span>
+                  <select
+                    @change=${(e: Event) => props.onModelProviderChange((e.target as HTMLSelectElement).value)}
+                    ?disabled=${props.modelSaving}
+                  >
+                    ${PROVIDER_OPTIONS.map((p) => html`
+                      <option value=${p.value} ?selected=${props.modelProvider === p.value}>${p.label}</option>
+                    `)}
+                  </select>
+                </label>
+                <label class="field full">
+                  <span>API Key</span>
+                  <input
+                    type="password"
+                    .value=${props.modelApiKeyDraft}
+                    @input=${(e: Event) => props.onModelApiKeyChange((e.target as HTMLInputElement).value)}
+                    placeholder="Paste your API key here"
+                    ?disabled=${props.modelSaving}
+                    autocomplete="off"
+                  />
+                </label>
               </div>
-              <p class="key-desc">
-                Add an API key from Anthropic, OpenAI, OpenRouter, or another provider.
-                This enables your agents to use AI models.
-              </p>
-              <button class="btn btn--primary" @click=${props.onAddApiKey}>
-                Add API Key
-              </button>
+              ${props.modelError ? html`<div class="callout danger" style="margin-top: 10px;">${props.modelError}</div>` : nothing}
+              <div class="row" style="margin-top: 12px;">
+                <button
+                  class="btn btn--primary"
+                  @click=${props.onModelSave}
+                  ?disabled=${props.modelSaving || !props.modelApiKeyDraft.trim()}
+                >
+                  ${props.modelSaving ? "Saving..." : "Save Key"}
+                </button>
+              </div>
             </div>
           `
         }
-        
+
         <div class="onboarding-security-note">
           <h4>🔒 Your Data Stays Local</h4>
           <ul>
-            <li>API keys are stored in your local config</li>
+            <li>API keys are encrypted in your workspace</li>
             <li>Keys are never sent to external servers</li>
-            <li>You can change or remove keys anytime</li>
+            <li>You can change or remove keys anytime in Integrations</li>
           </ul>
         </div>
       </div>
-      
+
       <div class="onboarding-hint">
-        <span class="muted">💡 Tip: You can skip this step if you want to set up keys later in Integrations.</span>
+        <span class="muted">💡 Tip: You can skip this step and add keys later in Integrations → AI Provider Keys.</span>
       </div>
     </div>
   `;
