@@ -1460,6 +1460,103 @@ export function renderApp(state: AppViewState) {
                     : { fallbacks: normalized };
                   updateConfigFormValue(state, basePath, next);
                 },
+                // Create Agent Modal
+                createModalOpen: state.createModalOpen,
+                createModalLoading: state.createModalLoading,
+                createModalError: state.createModalError,
+                createModalFormData: state.createModalFormData,
+                availableModels: state.availableModels,
+                availableSkills: state.availableSkills,
+                onCreateModalOpen: () => {
+                  state.createModalOpen = true;
+                  state.createModalError = null;
+                },
+                onCreateModalCancel: () => {
+                  state.createModalOpen = false;
+                  state.createModalError = null;
+                },
+                onCreateModalFieldChange: (field, value) => {
+                  state.createModalFormData = { ...state.createModalFormData, [field]: value };
+                },
+                onCreateModalSubmit: async () => {
+                  const form = state.createModalFormData;
+                  if (!form.name.trim()) {
+                    state.createModalError = "Agent name is required";
+                    return;
+                  }
+                  state.createModalLoading = true;
+                  state.createModalError = null;
+                  
+                  try {
+                    // Get current config
+                    const currentList = (state.configForm as Record<string, unknown>)?.agents as { list?: unknown[] } | undefined;
+                    const agentsList = Array.isArray(currentList?.list) ? [...currentList.list] : [];
+                    
+                    // Create new agent entry
+                    const newAgent = {
+                      id: form.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
+                      name: form.name.trim(),
+                      identity: {
+                        name: form.name.trim(),
+                        emoji: '🤖',
+                        theme: form.purpose.trim() || 'AI Agent',
+                      },
+                      model: form.model || undefined,
+                      skills: form.skills.length > 0 ? form.skills : undefined,
+                      ...(form.mode === 'autonomous' ? {
+                        cron: form.autonomousTasks.map((task, i) => ({
+                          id: `${form.name.toLowerCase()}-task-${i}`,
+                          name: task,
+                          enabled: true,
+                          scheduleKind: 'every',
+                          everyAmount: '30',
+                          everyUnit: 'minutes',
+                          sessionTarget: 'isolated',
+                          payloadKind: 'agentTurn',
+                          payloadText: task,
+                        })),
+                      } : {}),
+                    };
+                    
+                    agentsList.push(newAgent);
+                    updateConfigFormValue(state, ['agents', 'list'], agentsList);
+                    
+                    // Save config
+                    await saveConfig(state);
+                    await applyConfig(state);
+                    
+                    // Reload agents
+                    await loadAgents(state);
+                    
+                    // Reset and close modal
+                    state.createModalFormData = {
+                      name: '',
+                      purpose: '',
+                      mode: 'interactive',
+                      model: '',
+                      skills: [],
+                      personality: 'professional',
+                      autonomousTasks: [],
+                    };
+                    state.createModalOpen = false;
+                  } catch (error) {
+                    state.createModalError = String(error);
+                  } finally {
+                    state.createModalLoading = false;
+                  }
+                },
+                // Agent activity and actions
+                agentActivityById: state.agentActivityById,
+                onOpenAgentChat: (agentId: string) => {
+                  window.location.href = pathForTab("chat", state.basePath) + `?agent=${agentId}`;
+                },
+                onPauseAgent: (agentId: string) => {
+                  // TODO: Implement pause/resume agent
+                  console.log("Pause agent:", agentId);
+                },
+                onViewAgentLogs: (agentId: string) => {
+                  state.setTab("logs");
+                },
               })
             : nothing
         }
