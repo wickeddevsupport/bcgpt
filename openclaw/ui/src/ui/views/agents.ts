@@ -2162,15 +2162,21 @@ function renderCreateAgentModal(props: AgentsProps) {
             >
               <option value="">Select a model...</option>
               ${props.availableModels.map(
-                (modelId) => html`
-                  <option value=${modelId} ?selected=${form.model === modelId}>
-                    ${modelId}
-                  </option>
-                `,
+                (modelId) => {
+                  // Format model ID into readable label
+                  const label = modelId.includes("/")
+                    ? modelId.split("/").pop()?.replace(/:/g, " ") || modelId
+                    : modelId.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+                  return html`
+                    <option value=${modelId} ?selected=${form.model === modelId}>
+                      ${label}
+                    </option>
+                  `;
+                },
               )}
             </select>
             <div class="muted" style="font-size: 11px; margin-top: 4px;">
-              Uses your connected AI keys
+              💡 Configure API keys in <a href="#integrations" @click=${props.onCancel}>Integrations</a>
             </div>
           </label>
 
