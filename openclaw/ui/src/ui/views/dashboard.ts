@@ -50,6 +50,14 @@ export type DashboardProps = {
   onRefreshDashboard: () => void;
   onClearTrace: () => void;
   onProvisionOps?: () => Promise<void>;
+  // Inline NL chat
+  nlDraft: string;
+  nlBusy: boolean;
+  nlResponse: string | null;
+  onNlDraftChange: (v: string) => void;
+  onAsk: () => void;
+  // Quick actions
+  onQuickAction: (action: "check-leads" | "daily-report" | "create-workflow" | "settings") => void;
 
   // Agent system integration
   agentsList: AgentsListResult | null;
@@ -222,20 +230,33 @@ export function renderDashboard(props: DashboardProps) {
       
       <!-- Natural language input bar -->
       <div style="margin-top: 16px; display: flex; gap: 8px;">
-        <input 
-          type="text" 
+        <input
+          type="text"
+          .value=${props.nlDraft}
+          @input=${(e: Event) => props.onNlDraftChange((e.target as HTMLInputElement).value)}
+          @keydown=${(e: KeyboardEvent) => { if (e.key === "Enter" && !e.shiftKey && props.nlDraft.trim() && !props.nlBusy) { e.preventDefault(); props.onAsk(); } }}
           placeholder="Ask your AI team to do something..."
+          ?disabled=${!props.connected || props.nlBusy}
           style="flex: 1; padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border);"
         />
-        <button class="btn primary">Ask</button>
+        <button class="btn primary" ?disabled=${!props.connected || props.nlBusy || !props.nlDraft.trim()} @click=${props.onAsk}>
+          ${props.nlBusy ? "Sending..." : "Ask"}
+        </button>
       </div>
-      
+
+      ${props.nlResponse ? html`
+        <div style="margin-top: 10px; padding: 12px 14px; background: var(--surface2, var(--surface)); border-radius: 8px; border: 1px solid var(--border); white-space: pre-wrap; font-size: 13px; line-height: 1.6;">
+          ${props.nlResponse}
+        </div>
+        <a href=${props.chatHref} style="display: inline-block; margin-top: 6px; font-size: 12px; opacity: 0.7;">View full conversation in Chat →</a>
+      ` : nothing}
+
       <!-- Quick action buttons -->
       <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
-        <button class="btn btn--secondary">Check leads</button>
-        <button class="btn btn--secondary">Daily report</button>
-        <button class="btn btn--secondary">Create workflow</button>
-        <button class="btn btn--secondary">Settings</button>
+        <button class="btn btn--secondary" ?disabled=${!props.connected} @click=${() => props.onQuickAction("check-leads")}>Check leads</button>
+        <button class="btn btn--secondary" ?disabled=${!props.connected} @click=${() => props.onQuickAction("daily-report")}>Daily report</button>
+        <button class="btn btn--secondary" @click=${() => props.onQuickAction("create-workflow")}>Create workflow</button>
+        <button class="btn btn--secondary" @click=${() => props.onQuickAction("settings")}>Settings</button>
       </div>
     </section>
 

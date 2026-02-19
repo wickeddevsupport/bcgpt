@@ -101,6 +101,7 @@ export type AppViewState = {
   chatThinkingLevel: string | null;
   chatQueue: ChatQueueItem[];
   chatManualRefreshInFlight: boolean;
+  dashboardNlDraft: string;
   chatCreateWorkflowBusy: boolean;
   chatCreateWorkflowError: string | null;
   nodesLoading: boolean;

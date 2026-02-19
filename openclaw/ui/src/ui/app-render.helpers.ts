@@ -39,13 +39,29 @@ export function renderTab(state: AppViewState, tab: Tab) {
   `;
 }
 
+function agentNameFromSessionKey(key: string, agentsList: AppViewState["agentsList"]): string | null {
+  const match = /^agent:([^:]+):(.+)$/.exec(key);
+  if (!match) return null;
+  const agentId = match[1];
+  const sessionName = match[2];
+  const agent = agentsList?.agents?.find((a) => a.id === agentId);
+  if (!agent) return null;
+  const name = agent.name?.trim() || agentId;
+  return sessionName === "main" ? name : `${name} (${sessionName})`;
+}
+
 export function renderChatControls(state: AppViewState) {
   const mainSessionKey = resolveMainSessionKey(state.hello, state.sessionsResult);
-  const sessionOptions = resolveSessionOptions(
+  const rawOptions = resolveSessionOptions(
     state.sessionKey,
     state.sessionsResult,
     mainSessionKey,
   );
+  // Overlay agent names on top of raw session display names
+  const sessionOptions = rawOptions.map((opt) => {
+    const agentName = agentNameFromSessionKey(opt.key, state.agentsList);
+    return agentName ? { ...opt, displayName: agentName } : opt;
+  });
   const disableThinkingToggle = state.onboarding;
   const disableFocusToggle = state.onboarding;
   const showThinking = state.onboarding ? false : state.settings.chatShowThinking;

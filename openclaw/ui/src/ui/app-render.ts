@@ -495,21 +495,9 @@ export function renderApp(state: AppViewState) {
           state.tab === "dashboard"
             ? state.onboarding
               ? renderOnboarding({
-                  currentStep: state.onboardingStep,
-                  connectorsStatus: state.pmosConnectorsStatus,
-                  connectorsLoading: state.pmosConnectorsLoading,
                   modelAuthConfigured: hasConfiguredModelAuth(configValue),
-                  agentsCount: state.agentsList?.agents?.length ?? 0,
-                  integrationsHref: pathForTab("integrations", state.basePath),
-                  agentsHref: pathForTab("agents", state.basePath),
-                  chatHref: pathForTab("chat", state.basePath),
-                  onConnectService: () => state.setTab("connections"),
-                  onSelectAgent: () => {},
-                  onNext: () => { state.onboardingStep = Math.min(3, state.onboardingStep + 1) as 1 | 2 | 3; },
-                  onBack: () => { state.onboardingStep = Math.max(1, state.onboardingStep - 1) as 1 | 2 | 3; },
                   onSkip: () => { state.onboarding = false; },
                   onComplete: () => { state.onboarding = false; state.setTab("chat"); },
-                  // BYOK form (Step 3)
                   modelProvider: state.pmosModelProvider,
                   modelId: state.pmosModelId,
                   modelApiKeyDraft: state.pmosModelApiKeyDraft,
@@ -561,8 +549,45 @@ export function renderApp(state: AppViewState) {
                 agentActivityById: state.agentActivityById,
                 agentIdentityById: state.agentIdentityById,
                 onOpenAgentChat: (agentId: string) => {
-                  // Navigate to chat with the agent
                   window.location.href = pathForTab("chat", state.basePath) + `?agent=${agentId}`;
+                },
+                // Inline NL chat
+                nlDraft: state.dashboardNlDraft,
+                nlBusy: state.chatSending,
+                nlResponse: state.chatStream ?? (() => {
+                  const msgs = state.chatMessages as Array<{ role?: string; content?: unknown }>;
+                  const last = msgs?.findLast?.((m) => m.role === "assistant");
+                  const content = last?.content;
+                  if (typeof content === "string") return content;
+                  if (Array.isArray(content)) {
+                    const text = content.find((c: unknown) => (c as { type?: string })?.type === "text");
+                    return (text as { text?: string })?.text ?? null;
+                  }
+                  return null;
+                })(),
+                onNlDraftChange: (v) => (state.dashboardNlDraft = v),
+                onAsk: () => {
+                  const msg = state.dashboardNlDraft.trim();
+                  if (!msg) return;
+                  state.dashboardNlDraft = "";
+                  state.chatMessage = msg;
+                  void state.handleSendChat();
+                },
+                // Quick actions
+                onQuickAction: (action) => {
+                  if (action === "check-leads") {
+                    state.chatMessage = "Check my leads and give me a summary";
+                    void state.handleSendChat();
+                    state.setTab("chat");
+                  } else if (action === "daily-report") {
+                    state.chatMessage = "Generate my daily report";
+                    void state.handleSendChat();
+                    state.setTab("chat");
+                  } else if (action === "create-workflow") {
+                    state.setTab("automations");
+                  } else if (action === "settings") {
+                    state.setTab("config");
+                  }
                 },
               })
             : nothing

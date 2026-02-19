@@ -215,6 +215,7 @@ export class OpenClawApp extends LitElement {
   @state() chatQueue: ChatQueueItem[] = [];
   @state() chatAttachments: ChatAttachment[] = [];
   @state() chatManualRefreshInFlight = false;
+  @state() dashboardNlDraft = "";
   @state() chatCreateWorkflowBusy = false;
   @state() chatCreateWorkflowError: string | null = null;
   // Sidebar state for tool output viewing
