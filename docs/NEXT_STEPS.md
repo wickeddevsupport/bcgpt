@@ -11,6 +11,8 @@ This file tracks what is actually implemented in active runtime code paths (`ope
 
 | Area | Status | Evidence |
 |---|---|---|
+| Automations redesign: panel + iframe + AI chat layout | SHIPPED | `openclaw/ui/src/ui/views/automations.ts` — left slide-in panel (Workflows/Templates/Runs tabs), full-height n8n iframe, right AI chat panel |
+| Basecamp credential auto-setup in n8n | SHIPPED | `pmos.ops.setup.basecamp` — reads stored BCGPT key, upserts basecampApi credential via n8n REST API |
 | Embedded n8n in active Automations tab | SHIPPED | `openclaw/ui/src/ui/app-render.ts`, `openclaw/ui/src/ui/views/automations.ts` |
 | Workspace workflow isolation (single embedded n8n) | SHIPPED | `openclaw/src/gateway/pmos-ops-proxy.ts` (`ensureWorkspaceN8nTag`, list/create filtering) |
 | Same-session PMOS -> n8n auto-auth | SHIPPED | `openclaw/src/gateway/n8n-auth-bridge.ts`, `openclaw/src/gateway/pmos-auth-http.ts` |
@@ -80,6 +82,9 @@ This file tracks what is actually implemented in active runtime code paths (`ope
 
 ## Recent Commits (2026-02-19)
 
+- `043f558b` feat(basecamp): Auto-configure Basecamp credential in n8n from saved API key
+- `8c02b843` feat(automations): Redesign Automations tab with panel + iframe + AI chat layout
+- `5850d61d` fix(ui): Fix 30+ UI audit items — jargon cleanup, admin remove confirm, auth validation, trace expand
 - `675cfebe` feat(pmos): Complete all remaining TODO items — onboarding trigger, exec history, notifications, agent memory, workspace list
 - `a9993d93` fix(pmos): Declare agentId and agent vars in renderApp to fix chat tab crash
 - `88eaa406` feat(pmos): Wire onboarding BYOK form, templates gallery, remove placeholder controls
