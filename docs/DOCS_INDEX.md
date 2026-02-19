@@ -24,6 +24,7 @@ New to OpenClaw? Start here:
 | [AGENT_MANAGEMENT.md](AGENT_MANAGEMENT.md) | How users create, configure, and manage agents | All |
 | [UI_AUDIT.md](UI_AUDIT.md) | Broken/missing UI elements and gaps | All |
 | [AI_PROVIDER_UNIFICATION.md](AI_PROVIDER_UNIFICATION.md) | Plan to unify AI provider config across Integrations & Agents | All |
+| [INCONSISTENCIES_AUDIT.md](INCONSISTENCIES_AUDIT.md) | Comprehensive audit of disconnected systems, terminology issues | All |
 | [NEXT_STEPS.md](NEXT_STEPS.md) | Implementation plan and tasks | Developers |
 | [N8N_INTEGRATION_GUIDE.md](N8N_INTEGRATION_GUIDE.md) | n8n workflow engine integration | Developers |
 | [COOLIFY_DEPLOY_NX_RUNBOOK.md](COOLIFY_DEPLOY_NX_RUNBOOK.md) | Coolify + Nx deploy and SSH verification runbook | Developers |
