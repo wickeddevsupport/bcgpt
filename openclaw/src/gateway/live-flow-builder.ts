@@ -407,77 +407,196 @@ export function getExecutionHistory(workflowId: string, limit = 100): FlowExecut
 export async function executeFlowControl(
   action: FlowControlAction,
   workflowId: string,
-  _client: ClientContext
+  client: ClientContext
 ): Promise<FlowControlResult> {
-  // In a real implementation, this would integrate with n8n API
-  // For now, we return simulated results
+  const workspaceId = client.pmosWorkspaceId;
+  
+  // Import n8n API client for real operations
+  const { 
+    setWorkflowActive, 
+    executeN8nWorkflow, 
+    getN8nWorkflow,
+    getN8nExecution,
+    cancelN8nExecution,
+  } = await import('./n8n-api-client.js');
   
   switch (action) {
-    case 'activate':
+    case 'activate': {
+      if (!workspaceId) {
+        return {
+          success: false,
+          action,
+          workflowId,
+          message: 'Workspace context required for workflow activation',
+        };
+      }
+      
+      const result = await setWorkflowActive(workspaceId, workflowId, true);
+      
+      if (!result.ok) {
+        return {
+          success: false,
+          action,
+          workflowId,
+          message: `Failed to activate workflow: ${result.error}`,
+        };
+      }
+      
       emitCanvasUpdate({
         type: 'workflow_activate',
         workflowId,
         timestamp: new Date(),
         data: { active: true },
       });
+      
       return {
         success: true,
         action,
         workflowId,
         message: `Workflow ${workflowId} activated successfully`,
+        data: result.workflow,
       };
+    }
       
-    case 'deactivate':
+    case 'deactivate': {
+      if (!workspaceId) {
+        return {
+          success: false,
+          action,
+          workflowId,
+          message: 'Workspace context required for workflow deactivation',
+        };
+      }
+      
+      const result = await setWorkflowActive(workspaceId, workflowId, false);
+      
+      if (!result.ok) {
+        return {
+          success: false,
+          action,
+          workflowId,
+          message: `Failed to deactivate workflow: ${result.error}`,
+        };
+      }
+      
       emitCanvasUpdate({
         type: 'workflow_deactivate',
         workflowId,
         timestamp: new Date(),
         data: { active: false },
       });
+      
       return {
         success: true,
         action,
         workflowId,
         message: `Workflow ${workflowId} deactivated successfully`,
+        data: result.workflow,
       };
+    }
       
-    case 'execute':
+    case 'execute': {
+      if (!workspaceId) {
+        return {
+          success: false,
+          action,
+          workflowId,
+          message: 'Workspace context required for workflow execution',
+        };
+      }
+      
+      const result = await executeN8nWorkflow(workspaceId, workflowId);
+      
+      if (!result.ok) {
+        return {
+          success: false,
+          action,
+          workflowId,
+          message: `Failed to execute workflow: ${result.error}`,
+        };
+      }
+      
       emitExecutionEvent({
         type: 'execution_start',
         workflowId,
-        executionId: `exec-${crypto.randomUUID()}`,
+        executionId: result.executionId || `exec-${crypto.randomUUID()}`,
         timestamp: new Date(),
       });
+      
       return {
         success: true,
         action,
         workflowId,
         message: `Workflow ${workflowId} execution started`,
+        data: { executionId: result.executionId },
       };
+    }
       
-    case 'pause':
+    case 'pause': {
+      // n8n doesn't have a native "pause" action for executions
+      // This would require storing execution state and resuming later
+      return {
+        success: false,
+        action,
+        workflowId,
+        message: `Pause action not directly supported by n8n. Use rollback for state management.`,
+      };
+    }
+      
+    case 'resume': {
+      // Resume would require stored state from a previous pause
+      return {
+        success: false,
+        action,
+        workflowId,
+        message: `Resume action requires a previously paused execution.`,
+      };
+    }
+      
+    case 'rollback': {
+      if (!workspaceId) {
+        return {
+          success: false,
+          action,
+          workflowId,
+          message: 'Workspace context required for workflow rollback',
+        };
+      }
+      
+      // Get the current workflow state
+      const result = await getN8nWorkflow(workspaceId, workflowId);
+      
+      if (!result.ok) {
+        return {
+          success: false,
+          action,
+          workflowId,
+          message: `Failed to get workflow for rollback: ${result.error}`,
+        };
+      }
+      
+      // For rollback, we deactivate and return the current state
+      // A full implementation would track version history
+      if (result.workflow?.active) {
+        const deactivateResult = await setWorkflowActive(workspaceId, workflowId, false);
+        if (!deactivateResult.ok) {
+          return {
+            success: false,
+            action,
+            workflowId,
+            message: `Rollback failed: ${deactivateResult.error}`,
+          };
+        }
+      }
+      
       return {
         success: true,
         action,
         workflowId,
-        message: `Workflow ${workflowId} execution paused`,
+        message: `Workflow ${workflowId} rolled back to inactive state`,
+        data: result.workflow,
       };
-      
-    case 'resume':
-      return {
-        success: true,
-        action,
-        workflowId,
-        message: `Workflow ${workflowId} execution resumed`,
-      };
-      
-    case 'rollback':
-      return {
-        success: true,
-        action,
-        workflowId,
-        message: `Workflow ${workflowId} rolled back to previous version`,
-      };
+    }
       
     default:
       return {
@@ -634,10 +753,31 @@ export async function deployTemplate(
     workspaceId,
   };
   
-  // In a real implementation, this would save to n8n
-  // and trigger the appropriate events
+  // Persist workflow to n8n via API
+  const { createN8nWorkflow } = await import('./n8n-api-client.js');
   
-  return workflow;
+  const result = await createN8nWorkflow(workspaceId, {
+    name: workflow.name,
+    active: false,
+    nodes: workflow.nodes,
+    connections: workflow.connections,
+    settings: workflow.settings,
+    staticData: workflow.staticData,
+    tags: workflow.tags,
+    triggerCount: workflow.triggerCount,
+    updatedAt: workflow.updatedAt,
+    versionId: workflow.versionId,
+  });
+  
+  if (!result.ok) {
+    console.error(`[live-flow-builder] Failed to deploy template: ${result.error}`);
+    // Return the local workflow object even if persistence failed
+    // This allows the caller to see what would have been created
+    return workflow;
+  }
+  
+  // Return the persisted workflow with real ID
+  return result.workflow as Workflow;
 }
 
 /**

@@ -101,7 +101,7 @@ export async function handleTemplateList(
 export async function handleTemplateDeploy(
   params: unknown,
   client: ClientContext
-): Promise<{ success: boolean; message: string; workflow?: Workflow }> {
+): Promise<{ success: boolean; message: string; workflow?: Workflow; workflowId?: string }> {
   const parsed = ChatWorkflowTemplateSchema.safeParse(params);
   
   if (!parsed.success) {
@@ -142,10 +142,34 @@ export async function handleTemplateDeploy(
     workspaceId
   );
   
+  // Persist workflow to n8n via API
+  const { createN8nWorkflow } = await import('../n8n-api-client.js');
+  
+  const result = await createN8nWorkflow(workspaceId, {
+    name: workflow.name,
+    active: false,
+    nodes: workflow.nodes,
+    connections: workflow.connections,
+    settings: workflow.settings,
+    staticData: workflow.staticData,
+    tags: workflow.tags,
+    triggerCount: workflow.triggerCount,
+    updatedAt: workflow.updatedAt,
+    versionId: workflow.versionId,
+  });
+  
+  if (!result.ok) {
+    return {
+      success: false,
+      message: `Template deployment failed: ${result.error}`,
+    };
+  }
+  
   return {
     success: true,
     message: `Template "${template.name}" deployed successfully`,
-    workflow,
+    workflow: result.workflow as Workflow,
+    workflowId: result.workflow!.id,
   };
 }
 
@@ -155,7 +179,7 @@ export async function handleTemplateDeploy(
 export async function handleWorkflowConfirm(
   params: unknown,
   client: ClientContext
-): Promise<{ success: boolean; message: string; workflowId?: string }> {
+): Promise<{ success: boolean; message: string; workflowId?: string; workflow?: Workflow }> {
   const parsed = ChatWorkflowConfirmSchema.safeParse(params);
   
   if (!parsed.success) {
@@ -180,15 +204,34 @@ export async function handleWorkflowConfirm(
     };
   }
   
-  // In a real implementation, this would save to n8n via ops proxy
-  // For now, we return success with a generated ID
+  // Persist workflow to n8n via API
+  const { createN8nWorkflow } = await import('../n8n-api-client.js');
   
-  const workflowId = crypto.randomUUID();
+  const result = await createN8nWorkflow(workspaceId, {
+    name: parsed.data.workflow.name,
+    active: false,
+    nodes: parsed.data.workflow.nodes,
+    connections: parsed.data.workflow.connections,
+    settings: { executionOrder: 'v1' },
+    staticData: null,
+    tags: [],
+    triggerCount: 1,
+    updatedAt: new Date().toISOString(),
+    versionId: crypto.randomUUID(),
+  });
+  
+  if (!result.ok) {
+    return {
+      success: false,
+      message: `Failed to create workflow: ${result.error}`,
+    };
+  }
   
   return {
     success: true,
     message: `Workflow "${parsed.data.workflow.name}" created successfully`,
-    workflowId,
+    workflowId: result.workflow!.id,
+    workflow: result.workflow as Workflow,
   };
 }
 
