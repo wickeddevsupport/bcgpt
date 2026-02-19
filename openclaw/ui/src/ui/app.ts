@@ -176,6 +176,7 @@ export class OpenClawApp extends LitElement {
   @state() password = "";
   @state() tab: Tab = "dashboard";
   @state() onboarding = resolveOnboardingMode();
+  @state() onboardingStep: 1 | 2 | 3 = 1;
   @state() pmosAuthLoading = true;
   @state() pmosAuthAuthenticated = false;
   @state() pmosAuthMode: "signin" | "signup" = "signin";
