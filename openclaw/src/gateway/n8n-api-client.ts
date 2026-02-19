@@ -453,6 +453,79 @@ export async function cancelN8nExecution(
   }
 }
 
+/**
+ * Upsert the Basecamp credential (basecampApi) in n8n.
+ * Creates if not found, updates if already exists.
+ * This lets users automatically configure the Basecamp node after saving their BCGPT key.
+ */
+export async function upsertBasecampCredential(
+  workspaceId: string,
+  bcgptUrl: string,
+  bcgptApiKey: string,
+): Promise<{ ok: boolean; credentialId?: string; error?: string }> {
+  const { baseUrl, cookie } = await getN8nContext(workspaceId);
+
+  if (!cookie) {
+    return { ok: false, error: "n8n not reachable or not authenticated" };
+  }
+
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    "accept": "application/json",
+    "Cookie": cookie,
+  };
+
+  // Fetch existing credentials to see if basecampApi already exists
+  let existingId: string | null = null;
+  try {
+    const listRes = await fetch(`${baseUrl}/rest/credentials`, { method: "GET", headers });
+    if (listRes.ok) {
+      const listData = await listRes.json() as { data?: Array<{ id: string; type: string; name: string }> } | Array<{ id: string; type: string; name: string }>;
+      const list = Array.isArray(listData) ? listData : (listData.data ?? []);
+      const found = list.find((c) => c.type === "basecampApi");
+      if (found) existingId = found.id;
+    }
+  } catch {
+    // ignore list error — will try create
+  }
+
+  const credentialBody = {
+    name: "Basecamp (OpenClaw)",
+    type: "basecampApi",
+    data: { baseUrl: bcgptUrl, apiKey: bcgptApiKey },
+  };
+
+  try {
+    if (existingId) {
+      const res = await fetch(`${baseUrl}/rest/credentials/${existingId}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ data: credentialBody.data }),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        return { ok: false, error: `Failed to update credential: ${res.status} ${text.slice(0, 200)}` };
+      }
+      return { ok: true, credentialId: existingId };
+    } else {
+      const res = await fetch(`${baseUrl}/rest/credentials`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(credentialBody),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        return { ok: false, error: `Failed to create credential: ${res.status} ${text.slice(0, 200)}` };
+      }
+      const data = await res.json() as { id?: string; data?: { id: string } };
+      const credentialId = data.id || data.data?.id;
+      return { ok: true, credentialId };
+    }
+  } catch (err) {
+    return { ok: false, error: `Credential upsert failed: ${err}` };
+  }
+}
+
 export default {
   createN8nWorkflow,
   updateN8nWorkflow,
@@ -463,4 +536,5 @@ export default {
   getN8nExecution,
   listN8nWorkflows,
   cancelN8nExecution,
+  upsertBasecampCredential,
 };

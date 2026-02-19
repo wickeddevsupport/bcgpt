@@ -36,6 +36,12 @@ export type IntegrationsProps = {
   // n8n / Wicked Ops provisioning status
   opsProvisioned?: boolean;
   opsProjectId?: string | null;
+
+  // Basecamp credential setup in n8n
+  basecampSetupPending?: boolean;
+  basecampSetupOk?: boolean;
+  basecampSetupError?: string | null;
+  onSetupBasecamp?: () => void;
 };
 
 function renderConnectorStatus(label: string, ok: boolean | null, detail?: string | null) {
@@ -279,7 +285,23 @@ export function renderIntegrations(props: IntegrationsProps) {
             Connect Basecamp ↗
           </a>
           ${props.bcgptSavedOk ? html`<span class="chip chip-ok">✓ Saved</span>` : nothing}
+          ${props.basecampSetupOk ? html`<span class="chip chip-ok">✓ Added to Workflows</span>` : nothing}
         </div>
+
+        ${props.onSetupBasecamp ? html`
+          <div class="row" style="margin-top: 10px; align-items: center; gap: 10px;">
+            <button
+              class="btn btn--secondary"
+              ?disabled=${!props.connected || props.basecampSetupPending}
+              @click=${() => props.onSetupBasecamp?.()}
+              title="Auto-create the Basecamp credential inside your workflow engine so you can use the Basecamp node immediately"
+            >
+              ${props.basecampSetupPending ? "Configuring..." : "Add to Workflow Engine"}
+            </button>
+            <span class="muted" style="font-size:11px;">Auto-configures Basecamp in n8n using your saved key</span>
+          </div>
+          ${props.basecampSetupError ? html`<div class="callout danger" style="margin-top: 8px; font-size:12px;">${props.basecampSetupError}</div>` : nothing}
+        ` : nothing}
 
         ${disabledReason ? html`<div class="muted" style="margin-top: 10px;">${disabledReason}</div>` : nothing}
       </div>

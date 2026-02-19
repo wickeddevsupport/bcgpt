@@ -718,6 +718,10 @@ export function renderApp(state: AppViewState) {
                 bcgptSavedOk: state.pmosBcgptSavedOk,
                 opsProvisioned: Boolean(state.pmosOpsProvisioningResult?.apiKey) || state.pmosConnectorsStatus?.ops?.reachable === true,
                 opsProjectId: state.pmosOpsProvisioningResult?.projectId ?? null,
+                basecampSetupPending: state.pmosBasecampSetupPending,
+                basecampSetupOk: state.pmosBasecampSetupOk,
+                basecampSetupError: state.pmosBasecampSetupError,
+                onSetupBasecamp: () => void state.handlePmosSetupBasecampInN8n(),
               })
             : nothing
         }

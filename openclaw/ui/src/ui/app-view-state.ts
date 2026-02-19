@@ -177,6 +177,9 @@ export type AppViewState = {
   pmosModelError: string | null;
   pmosModelConfigured: boolean;
   pmosBcgptSavedOk: boolean;
+  pmosBasecampSetupPending: boolean;
+  pmosBasecampSetupOk: boolean;
+  pmosBasecampSetupError: string | null;
   pmosByokProviders: PmosModelProvider[];
 
   // PMOS identity/admin (Phase 4)
@@ -469,6 +472,7 @@ export type AppViewState = {
   handlePmosMemberRemove: (email: string) => Promise<void>;
   handlePmosIntegrationsLoad: () => Promise<void>;
   handlePmosIntegrationsSave: () => Promise<void>;
+  handlePmosSetupBasecampInN8n: () => Promise<void>;
   handlePmosIntegrationsClearBcgptKey: () => Promise<void>;
   handlePmosModelProviderChange: (next: PmosModelProvider) => void;
   handlePmosModelSave: () => Promise<void>;

@@ -297,6 +297,9 @@ export class OpenClawApp extends LitElement {
   @state() pmosModelError: string | null = null;
   @state() pmosModelConfigured = false;
   @state() pmosBcgptSavedOk = false;
+  @state() pmosBasecampSetupPending = false;
+  @state() pmosBasecampSetupOk = false;
+  @state() pmosBasecampSetupError: string | null = null;
   @state() pmosByokProviders: PmosModelProvider[] = [];
 
   // PMOS identity/admin (Phase 4)
@@ -827,6 +830,22 @@ export class OpenClawApp extends LitElement {
     await loadPmosConnectorsStatus(this);
     this.pmosBcgptSavedOk = true;
     setTimeout(() => { this.pmosBcgptSavedOk = false; }, 2500);
+  }
+
+  async handlePmosSetupBasecampInN8n() {
+    if (!this.client || this.pmosBasecampSetupPending) return;
+    this.pmosBasecampSetupPending = true;
+    this.pmosBasecampSetupError = null;
+    this.pmosBasecampSetupOk = false;
+    try {
+      await this.client.request("pmos.ops.setup.basecamp", {});
+      this.pmosBasecampSetupOk = true;
+      setTimeout(() => { this.pmosBasecampSetupOk = false; }, 3000);
+    } catch (err) {
+      this.pmosBasecampSetupError = err instanceof Error ? err.message : String(err);
+    } finally {
+      this.pmosBasecampSetupPending = false;
+    }
   }
 
   async handlePmosIntegrationsClearBcgptKey() {

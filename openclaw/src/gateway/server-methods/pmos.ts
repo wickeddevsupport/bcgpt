@@ -792,4 +792,30 @@ export const pmosHandlers: GatewayRequestHandlers = {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }
   },
+
+  // ── Basecamp credential setup in n8n ──────────────────────────────
+
+  "pmos.ops.setup.basecamp": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
+      const wc = await readWorkspaceConnectors(workspaceId);
+      const bcgptUrl = (wc?.bcgpt?.url as string | undefined)?.trim() || "https://bcgpt.wickedlab.io";
+      const bcgptApiKey = (wc?.bcgpt?.apiKey as string | undefined)?.trim();
+      if (!bcgptApiKey) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "No BCGPT API key stored. Save your Basecamp connection key in Integrations first."));
+        return;
+      }
+      const { upsertBasecampCredential } = await import("../n8n-api-client.js");
+      const result = await upsertBasecampCredential(workspaceId, bcgptUrl, bcgptApiKey);
+      if (!result.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to configure Basecamp credential in n8n"));
+        return;
+      }
+      respond(true, { ok: true, credentialId: result.credentialId, message: "Basecamp credential configured in your workflow engine." }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
 };
