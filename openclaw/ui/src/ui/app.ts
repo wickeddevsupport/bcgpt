@@ -423,6 +423,22 @@ export class OpenClawApp extends LitElement {
   @state() agentSkillsError: string | null = null;
   @state() agentSkillsReport: SkillStatusReport | null = null;
   @state() agentSkillsAgentId: string | null = null;
+  // Create Agent Modal state
+  @state() createModalOpen = false;
+  @state() createModalLoading = false;
+  @state() createModalError: string | null = null;
+  @state() createModalFormData: import("./views/agents.js").CreateAgentFormData = {
+    name: "",
+    purpose: "",
+    mode: "interactive",
+    model: "",
+    skills: [],
+    personality: "professional",
+    autonomousTasks: [],
+  };
+  @state() availableModels: string[] = [];
+  @state() availableSkills: string[] = [];
+  @state() agentActivityById: Record<string, import("./views/agents.js").AgentActivitySummary> = {};
 
   @state() sessionsLoading = false;
   @state() sessionsResult: SessionsListResult | null = null;

@@ -2,6 +2,8 @@ import { html, nothing } from "lit";
 import type { UiSettings } from "../storage.ts";
 import type { PmosConnectorsStatus } from "../controllers/pmos-connectors.ts";
 import type { PmosExecutionTraceEvent } from "../controllers/pmos-trace.ts";
+import type { AgentsListResult, AgentIdentityResult } from "../types.ts";
+import type { AgentActivitySummary } from "./agents.ts";
 import { formatRelativeTimestamp } from "../format.ts";
 
 function getTimeGreeting(): string {
@@ -41,13 +43,19 @@ export type DashboardProps = {
   onOpsManualApiKeyChange?: (next: string) => void;
   onSaveOpsApiKey?: () => Promise<void>;
 
-  onNavigateTab: (tab: "integrations" | "automations" | "chat" | "config") => void;
+  onNavigateTab: (tab: "integrations" | "automations" | "chat" | "config" | "agents") => void;
   onSettingsChange: (next: UiSettings) => void;
   onConnect: () => void;
   onRefreshConnectors: () => void;
   onRefreshDashboard: () => void;
   onClearTrace: () => void;
   onProvisionOps?: () => Promise<void>;
+
+  // Agent system integration
+  agentsList: AgentsListResult | null;
+  agentActivityById: Record<string, AgentActivitySummary>;
+  agentIdentityById: Record<string, AgentIdentityResult>;
+  onOpenAgentChat: (agentId: string) => void;
 };
 
 function renderStatusPill(label: string, value: string, status: "ok" | "warn") {
@@ -105,6 +113,9 @@ export function renderDashboard(props: DashboardProps) {
   const ops = props.connectorsStatus?.ops ?? null;
   const checkedAt = props.connectorsStatus?.checkedAtMs ?? null;
   const checkedLabel = checkedAt ? formatRelativeTimestamp(checkedAt) : "n/a";
+
+  // Agent system
+  const agents = props.agentsList?.agents ?? [];
 
   const bcgptStatus = (() => {
     if (!bcgpt) return { label: "Unknown", tone: "warn" as const };
@@ -230,50 +241,66 @@ export function renderDashboard(props: DashboardProps) {
 
     <!-- Your AI Team section -->
     <section class="card" style="margin-bottom: 18px;">
-      <div class="card-title">Your AI Team</div>
-      <div class="card-sub">4 agents ready to help</div>
+      <div class="row" style="justify-content: space-between; align-items: center;">
+        <div>
+          <div class="card-title">Your AI Team</div>
+          <div class="card-sub">${agents.length} agent${agents.length !== 1 ? 's' : ''} ready to help</div>
+        </div>
+        <button class="btn btn--sm" @click=${() => props.onNavigateTab("agents")}>
+          Manage Agents
+        </button>
+      </div>
       
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 16px;">
-        <!-- Agent cards -->
-        <div class="card" style="padding: 16px;">
-          <div style="font-weight: 600;">🤝 Sales Agent</div>
-          <div class="muted">Lead qualification</div>
-          <div style="margin-top: 8px;">
-            <span class="chip chip-ok">Active</span>
-            <span class="muted">3 tasks</span>
-          </div>
-          <button class="btn btn--sm" style="margin-top: 8px;">Chat</button>
-        </div>
-        
-        <div class="card" style="padding: 16px;">
-          <div style="font-weight: 600;">💻 Dev Agent</div>
-          <div class="muted">Code & automation</div>
-          <div style="margin-top: 8px;">
-            <span class="chip chip-warn">Queued</span>
-            <span class="muted">2 tasks</span>
-          </div>
-          <button class="btn btn--sm" style="margin-top: 8px;">Chat</button>
-        </div>
-        
-        <div class="card" style="padding: 16px;">
-          <div style="font-weight: 600;">📋 PM Agent</div>
-          <div class="muted">Project management</div>
-          <div style="margin-top: 8px;">
-            <span class="chip chip-ok">Active</span>
-            <span class="muted">1 task</span>
-          </div>
-          <button class="btn btn--sm" style="margin-top: 8px;">Chat</button>
-        </div>
-        
-        <div class="card" style="padding: 16px;">
-          <div style="font-weight: 600;">🎧 Support Agent</div>
-          <div class="muted">Customer support</div>
-          <div style="margin-top: 8px;">
-            <span class="chip">Idle</span>
-            <span class="muted">0 tasks</span>
-          </div>
-          <button class="btn btn--sm" style="margin-top: 8px;">Chat</button>
-        </div>
+        ${
+          agents.length === 0
+            ? html`
+              <div class="muted" style="grid-column: 1 / -1; text-align: center; padding: 32px;">
+                <div style="margin-bottom: 12px;">No agents configured yet.</div>
+                <button class="btn btn--primary" @click=${() => props.onNavigateTab("agents")}>
+                  Create your first agent
+                </button>
+              </div>
+            `
+            : agents.map((agent) => {
+              const activity = props.agentActivityById[agent.id] ?? {
+                tasksRunning: 0,
+                tasksQueued: 0,
+                lastActivityAt: null,
+                status: 'idle',
+              };
+              const identity = props.agentIdentityById[agent.id];
+              const displayName = agent.name?.trim() || agent.identity?.name?.trim() || identity?.name?.trim() || agent.id;
+              const emoji = identity?.emoji?.trim() || agent.identity?.emoji?.trim() || '🤖';
+              const theme = agent.identity?.theme?.trim() || identity?.theme?.trim() || 'AI Agent';
+              
+              const statusClass = 
+                activity.status === 'active' ? 'chip-ok' :
+                activity.status === 'paused' ? 'chip-warn' :
+                activity.status === 'error' ? 'chip-danger' : '';
+              
+              const taskCount = activity.tasksRunning + activity.tasksQueued;
+              
+              return html`
+                <div class="card" style="padding: 16px;">
+                  <div style="font-weight: 600;">${emoji} ${displayName}</div>
+                  <div class="muted">${theme}</div>
+                  <div style="margin-top: 8px;">
+                    <span class="chip ${statusClass}">${activity.status}</span>
+                    <span class="muted">${taskCount} task${taskCount !== 1 ? 's' : ''}</span>
+                  </div>
+                  <div class="row" style="gap: 8px; margin-top: 8px;">
+                    <button class="btn btn--sm btn--primary" @click=${() => props.onOpenAgentChat(agent.id)}>
+                      Chat
+                    </button>
+                    <button class="btn btn--sm" @click=${() => props.onNavigateTab("agents")}>
+                      Settings
+                    </button>
+                  </div>
+                </div>
+              `;
+            })
+        }
       </div>
     </section>
 

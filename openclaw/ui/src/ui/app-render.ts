@@ -502,8 +502,9 @@ export function renderApp(state: AppViewState) {
                   Promise.all([
                     loadConfig(state),
                     state.handlePmosRefreshConnectors(),
+                    loadAgents(state),
                   ]).then(() => undefined),
-                onNavigateTab: (tab) => state.setTab(tab),
+                onNavigateTab: (tab) => state.setTab(tab as Tab),
                 onClearTrace: () => state.handlePmosTraceClear(),
                 onProvisionOps: () => state.handlePmosProvisionOps(),
                 opsProvisioning: state.pmosOpsProvisioning,
@@ -513,6 +514,14 @@ export function renderApp(state: AppViewState) {
                 opsManualApiKeyDraft: state.pmosOpsManualApiKeyDraft,
                 onOpsManualApiKeyChange: (v: string) => (state.pmosOpsManualApiKeyDraft = v),
                 onSaveOpsApiKey: () => state.handlePmosSaveManualOpsKey(),
+                // Agent system integration
+                agentsList: state.agentsList,
+                agentActivityById: state.agentActivityById,
+                agentIdentityById: state.agentIdentityById,
+                onOpenAgentChat: (agentId: string) => {
+                  // Navigate to chat with the agent
+                  window.location.href = pathForTab("chat", state.basePath) + `?agent=${agentId}`;
+                },
               })
             : nothing
         }
