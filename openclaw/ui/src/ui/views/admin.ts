@@ -37,6 +37,13 @@ export type AdminProps = {
   onMemberDraftStatusChange: (next: PmosMemberStatus) => void;
   onUpsertMember: () => void;
   onRemoveMember: (email: string) => void;
+
+  // Super-admin: workspace list
+  isSuperAdmin?: boolean;
+  workspacesList?: Array<{ workspaceId: string; ownerEmail: string; ownerName: string; ownerRole: string; createdAtMs: number }>;
+  workspacesLoading?: boolean;
+  workspacesError?: string | null;
+  onLoadWorkspaces?: () => void;
 };
 
 function roleLabel(role: PmosRole): string {
@@ -244,5 +251,39 @@ export function renderAdmin(props: AdminProps) {
         ${props.auditEvents.length === 0 ? html`<div class="muted">No audit events yet.</div>` : nothing}
       </div>
     </section>
+
+    ${props.isSuperAdmin ? html`
+      <section class="card" style="margin-top: 18px;">
+        <div class="card-title">All Workspaces</div>
+        <div class="card-sub">List of all registered workspaces (super_admin only).</div>
+        <div class="row" style="margin-top: 12px;">
+          <button
+            class="btn"
+            @click=${() => props.onLoadWorkspaces?.()}
+            ?disabled=${props.workspacesLoading}
+          >
+            ${props.workspacesLoading ? "Loading..." : "Load Workspaces"}
+          </button>
+        </div>
+        ${props.workspacesError ? html`<div class="callout danger" style="margin-top: 10px;">${props.workspacesError}</div>` : nothing}
+        <div class="list" style="margin-top: 12px;">
+          ${(props.workspacesList ?? []).map((ws) => html`
+            <div class="list-item">
+              <div class="list-main">
+                <div class="list-title mono" style="font-size:12px;">${ws.workspaceId}</div>
+                <div class="list-sub">${ws.ownerName} · ${ws.ownerEmail}</div>
+                <div class="list-sub muted">${new Date(ws.createdAtMs).toLocaleDateString()}</div>
+              </div>
+              <div class="list-meta">
+                <span class="chip">${ws.ownerRole}</span>
+              </div>
+            </div>
+          `)}
+          ${(props.workspacesList ?? []).length === 0 && !props.workspacesLoading
+            ? html`<div class="muted" style="margin-top: 8px;">Click "Load Workspaces" to fetch the list.</div>`
+            : nothing}
+        </div>
+      </section>
+    ` : nothing}
   `;
 }

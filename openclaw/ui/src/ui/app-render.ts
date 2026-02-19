@@ -51,6 +51,7 @@ import {
   updateSkillEnabled,
 } from "./controllers/skills.ts";
 import { loadUsage, loadSessionTimeSeries, loadSessionLogs } from "./controllers/usage.ts";
+import { loadWorkflowRuns } from "./controllers/pmos-workflows.ts";
 import { canManagePmosMembers } from "./controllers/pmos-admin.ts";
 import type { PmosModelProvider } from "./controllers/pmos-model-auth.ts";
 import { icons } from "./icons.ts";
@@ -332,19 +333,10 @@ export function renderApp(state: AppViewState) {
       ? state.apFlows.find((flow) => flow.id === state.apFlowSelectedId) ?? null
       : null;
 
-  // Auto-exit onboarding if all setup steps are done
-  if (state.onboarding && state.tab === "dashboard" && state.configSnapshot) {
-    const modelAuthConfigured = hasConfiguredModelAuth(state.configSnapshot.config);
-    const connectorsOk =
-      Boolean(state.pmosOpsProvisioningResult?.apiKey) &&
-      state.pmosConnectorsStatus?.ops?.reachable === true &&
-      state.pmosConnectorsStatus?.bcgpt?.reachable === true &&
-      (state.pmosConnectorsStatus?.bcgpt?.authOk ?? false) === true;
-    if (modelAuthConfigured && connectorsOk) {
-      state.onboarding = false;
-      // Optionally, auto-redirect to chat
-      state.setTab("chat");
-    }
+  // Auto-exit onboarding once the user has saved an AI key (Step 3 complete)
+  if (state.onboarding && state.pmosModelConfigured) {
+    state.onboarding = false;
+    state.setTab("chat");
   }
 
   return html`
@@ -386,6 +378,17 @@ export function renderApp(state: AppViewState) {
           ${state.pmosAuthUser?.role === "super_admin"
             ? html`<button class="button" @click=${() => state.setTab("admin")} title="Workspace admin panel">Admin Panel</button>`
             : nothing}
+          <button
+            class="button"
+            @click=${() => { state.notificationsOpen = !state.notificationsOpen; }}
+            title="Activity feed"
+            style="position:relative;"
+          >
+            🔔
+            ${state.pmosTraceEvents.length > 0
+              ? html`<span style="position:absolute;top:-4px;right:-4px;background:var(--color-danger,#e74c3c);color:#fff;border-radius:50%;width:16px;height:16px;font-size:10px;display:flex;align-items:center;justify-content:center;line-height:1;">${state.pmosTraceEvents.length > 9 ? "9+" : state.pmosTraceEvents.length}</span>`
+              : nothing}
+          </button>
           <button class="button" @click=${() => void state.handlePmosAuthLogout()}>Sign out</button>
           ${renderThemeToggle(state)}
         </div>
@@ -525,8 +528,8 @@ export function renderApp(state: AppViewState) {
                 connectorsLoading: state.pmosConnectorsLoading,
                 connectorsError: state.pmosConnectorsError,
                 connectorsStatus: state.pmosConnectorsStatus,
-                flows: [],
-                runs: [],
+                flows: state.apFlows ?? [],
+                runs: state.apRuns ?? [],
                 traceEvents: state.pmosTraceEvents,
                 integrationsHref: pathForTab("integrations", state.basePath),
                 automationsHref: pathForTab("automations", state.basePath),
@@ -541,6 +544,7 @@ export function renderApp(state: AppViewState) {
                     loadConfig(state),
                     state.handlePmosRefreshConnectors(),
                     loadAgents(state),
+                    loadWorkflowRuns(state),
                   ]).then(() => undefined),
                 onNavigateTab: (tab) => state.setTab(tab as Tab),
                 onClearTrace: () => state.handlePmosTraceClear(),
@@ -625,6 +629,10 @@ export function renderApp(state: AppViewState) {
                       onBuilderGenerate: () => void state.handlePmosFlowBuilderGenerate(),
                       onBuilderCommit: () => void state.handlePmosFlowBuilderCommit(),
                       onBuilderReset: () => state.handlePmosFlowBuilderReset(),
+                      runs: state.apRuns ?? [],
+                      runsLoading: state.apRunsLoading,
+                      runsError: state.apRunsError,
+                      onLoadRuns: () => void loadWorkflowRuns(state),
                     })}
               </div>`
             : nothing
@@ -753,6 +761,22 @@ export function renderApp(state: AppViewState) {
                 onMemberDraftStatusChange: (next) => (state.pmosMemberDraftStatus = next),
                 onUpsertMember: () => state.handlePmosMemberUpsert(),
                 onRemoveMember: (email) => state.handlePmosMemberRemove(email),
+                isSuperAdmin: state.pmosAuthUser?.role === "super_admin",
+                workspacesList: state.pmosWorkspacesList,
+                workspacesLoading: state.pmosWorkspacesLoading,
+                workspacesError: state.pmosWorkspacesError,
+                onLoadWorkspaces: () => void (async () => {
+                  state.pmosWorkspacesLoading = true;
+                  state.pmosWorkspacesError = null;
+                  try {
+                    const res = await state.client!.request<{ workspaces: Array<{ workspaceId: string; ownerEmail: string; ownerName: string; ownerRole: string; createdAtMs: number }> }>("pmos.workspaces.list", {});
+                    state.pmosWorkspacesList = res.workspaces ?? [];
+                  } catch (err) {
+                    state.pmosWorkspacesError = String(err);
+                  } finally {
+                    state.pmosWorkspacesLoading = false;
+                  }
+                })(),
               })
             : nothing
         }
@@ -1782,6 +1806,11 @@ export function renderApp(state: AppViewState) {
                 agentName: agent?.name ?? agent?.identity?.name ?? state.agentIdentityById[agentId]?.name ?? null,
                 agentEmoji: agent?.identity?.emoji ?? state.agentIdentityById[agentId]?.emoji ?? null,
                 agentTheme: agent?.identity?.theme ?? state.agentIdentityById[agentId]?.theme ?? null,
+                onViewMemory: agentId ? () => {
+                  state.agentsSelectedId = agentId;
+                  state.agentsPanel = "files";
+                  state.setTab("agents");
+                } : undefined,
               })
             : nothing
         }
@@ -1873,6 +1902,52 @@ export function renderApp(state: AppViewState) {
       </main>
       ${renderExecApprovalPrompt(state)}
       ${renderGatewayUrlConfirmation(state)}
+
+      ${state.notificationsOpen ? html`
+        <div
+          class="notifications-overlay"
+          style="position:fixed;inset:0;z-index:900;"
+          @click=${() => { state.notificationsOpen = false; }}
+        ></div>
+        <aside
+          class="notifications-panel"
+          style="position:fixed;top:0;right:0;bottom:0;width:340px;max-width:100vw;background:var(--bg-card,#1a1a1a);border-left:1px solid var(--border);z-index:901;display:flex;flex-direction:column;box-shadow:-4px 0 24px rgba(0,0,0,0.3);"
+        >
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:16px;border-bottom:1px solid var(--border);">
+            <span style="font-weight:600;">Activity Feed</span>
+            <button class="button" @click=${() => { state.notificationsOpen = false; }}>✕</button>
+          </div>
+          <div style="flex:1;overflow-y:auto;padding:12px;">
+            ${state.pmosTraceEvents.length === 0
+              ? html`<div class="muted" style="padding:16px 0;">No activity yet. Events from agent runs and workflows appear here.</div>`
+              : [...state.pmosTraceEvents].reverse().map((ev) => {
+                  const status = ev.status ?? "info";
+                  const chipClass = status === "success" ? "chip-ok" : status === "error" ? "chip-danger" : "chip-muted";
+                  const source = typeof ev.source === "string" ? ev.source : "";
+                  const kind = typeof ev.kind === "string" ? ev.kind : "";
+                  const title = typeof ev.title === "string" && ev.title ? ev.title : `${source}:${kind}`;
+                  const detail = typeof ev.detail === "string" && ev.detail ? ev.detail : null;
+                  const ts = typeof ev.ts === "number" ? new Date(ev.ts).toLocaleTimeString() : "";
+                  return html`
+                    <div class="list-item" style="border-bottom:1px solid var(--border);padding:10px 0;">
+                      <div class="list-main">
+                        <div class="list-title">${title}</div>
+                        ${detail ? html`<div class="list-sub" style="white-space:pre-wrap;word-break:break-word;">${detail}</div>` : nothing}
+                        ${ts ? html`<div class="list-sub muted">${ts}</div>` : nothing}
+                      </div>
+                      <div class="list-meta"><span class="chip ${chipClass}">${status}</span></div>
+                    </div>
+                  `;
+                })
+            }
+          </div>
+          ${state.pmosTraceEvents.length > 0
+            ? html`<div style="padding:12px;border-top:1px solid var(--border);">
+                <button class="btn btn--secondary" style="width:100%;" @click=${() => state.handlePmosTraceClear()}>Clear all</button>
+              </div>`
+            : nothing}
+        </aside>
+      ` : nothing}
     </div>
   `;
 }

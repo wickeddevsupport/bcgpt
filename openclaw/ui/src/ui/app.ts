@@ -177,6 +177,7 @@ export class OpenClawApp extends LitElement {
   @state() tab: Tab = "dashboard";
   @state() onboarding = resolveOnboardingMode();
   @state() onboardingStep: 1 | 2 | 3 = 1;
+  @state() notificationsOpen = false;
   @state() pmosAuthLoading = true;
   @state() pmosAuthAuthenticated = false;
   @state() pmosAuthMode: "signin" | "signup" = "signin";
@@ -310,6 +311,9 @@ export class OpenClawApp extends LitElement {
   @state() pmosMemberDraftRole: PmosRole = "member";
   @state() pmosMemberDraftStatus: PmosMemberStatus = "active";
   @state() pmosAuditEvents: PmosAuditEvent[] = [];
+  @state() pmosWorkspacesList: Array<{ workspaceId: string; ownerEmail: string; ownerName: string; ownerRole: string; createdAtMs: number }> = [];
+  @state() pmosWorkspacesLoading = false;
+  @state() pmosWorkspacesError: string | null = null;
 
   // PMOS unified command center (Phase 6)
   @state() pmosCommandPrompt = "";
@@ -607,6 +611,9 @@ export class OpenClawApp extends LitElement {
       return;
     }
     this.lastError = null;
+    if (this.pmosAuthMode === "signup") {
+      this.onboarding = true;
+    }
     this.connect();
   }
 

@@ -79,6 +79,7 @@ export type ChatProps = {
   onCloseSidebar?: () => void;
   onSplitRatioChange?: (ratio: number) => void;
   onChatScroll?: (event: Event) => void;
+  onViewMemory?: () => void;
 };
 
 const COMPACTION_TOAST_DURATION_MS = 5000;
@@ -305,7 +306,10 @@ export function renderChat(props: ChatProps) {
                 <div style="font-weight: 600; font-size: 16px;">${props.agentName}</div>
                 <div class="muted" style="font-size: 13px;">${props.agentTheme || 'AI Agent'}</div>
               </div>
-              <a href="${pathForTab('agents')}" class="btn btn--sm btn--secondary">Settings</a>
+              <div style="display:flex;gap:6px;">
+                ${props.onViewMemory ? html`<button class="btn btn--sm btn--secondary" @click=${props.onViewMemory}>Memory</button>` : nothing}
+                <a href="${pathForTab('agents')}" class="btn btn--sm btn--secondary">Settings</a>
+              </div>
             </div>
           `
           : nothing

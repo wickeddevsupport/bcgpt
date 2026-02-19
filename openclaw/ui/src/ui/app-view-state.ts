@@ -67,6 +67,7 @@ export type AppViewState = {
   password: string;
   tab: Tab;
   onboarding: boolean;
+  notificationsOpen: boolean;
   pmosAuthLoading: boolean;
   pmosAuthAuthenticated: boolean;
   pmosAuthMode: "signin" | "signup";
@@ -190,6 +191,10 @@ export type AppViewState = {
   pmosMemberDraftRole: PmosRole;
   pmosMemberDraftStatus: PmosMemberStatus;
   pmosAuditEvents: PmosAuditEvent[];
+  // Super-admin: workspace list
+  pmosWorkspacesList: Array<{ workspaceId: string; ownerEmail: string; ownerName: string; ownerRole: string; createdAtMs: number }>;
+  pmosWorkspacesLoading: boolean;
+  pmosWorkspacesError: string | null;
 
   // PMOS unified command center (Phase 6)
   pmosCommandPrompt: string;

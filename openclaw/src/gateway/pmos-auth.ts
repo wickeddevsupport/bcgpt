@@ -428,6 +428,41 @@ export async function resolvePmosUserByWorkspaceId(workspaceId: string): Promise
   });
 }
 
+export type PmosWorkspaceSummary = {
+  workspaceId: string;
+  ownerEmail: string;
+  ownerName: string;
+  ownerRole: PmosRole;
+  createdAtMs: number;
+};
+
+/**
+ * List all unique workspaces from the auth store (super_admin only).
+ * Returns one entry per unique workspaceId (the workspace owner's record).
+ */
+export async function listPmosWorkspaces(): Promise<PmosWorkspaceSummary[]> {
+  return await runWithStoreMutex(async () => {
+    const store = await loadStoreUnlocked();
+    const seen = new Set<string>();
+    const workspaces: PmosWorkspaceSummary[] = [];
+    for (const user of store.users) {
+      if (!user.workspaceId || seen.has(user.workspaceId)) {
+        continue;
+      }
+      seen.add(user.workspaceId);
+      workspaces.push({
+        workspaceId: user.workspaceId,
+        ownerEmail: user.email,
+        ownerName: user.name,
+        ownerRole: user.role,
+        createdAtMs: user.createdAtMs,
+      });
+    }
+    workspaces.sort((a, b) => a.createdAtMs - b.createdAtMs);
+    return workspaces;
+  });
+}
+
 export async function revokePmosSessionByToken(token: string): Promise<void> {
   const trimmed = token.trim();
   if (!trimmed) {

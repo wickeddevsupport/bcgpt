@@ -1,5 +1,5 @@
 import { html, nothing } from "lit";
-import type { WorkflowSummary } from "../controllers/pmos-workflows.ts";
+import type { WorkflowRunSummary, WorkflowSummary } from "../controllers/pmos-workflows.ts";
 
 const WORKFLOW_TEMPLATES = [
   { id: "webhook-slack", name: "Webhook → Slack Alert", desc: "Post to Slack when a webhook fires", icon: "💬" },
@@ -73,6 +73,12 @@ export type AutomationsProps = {
   onBuilderGenerate: () => void;
   onBuilderCommit: () => void;
   onBuilderReset: () => void;
+
+  // Execution history
+  runs: WorkflowRunSummary[];
+  runsLoading: boolean;
+  runsError: string | null;
+  onLoadRuns: () => void;
 };
 
 function formatFlowTitle(flow: WorkflowSummary) {
@@ -211,6 +217,42 @@ export function renderAutomations(props: AutomationsProps) {
                 </div>
               </div>
             `)}
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Recent Runs</div>
+          <div class="card-sub">Execution history for the selected workflow.</div>
+
+          <div class="row" style="margin-top: 12px;">
+            <button
+              class="btn"
+              @click=${() => props.onLoadRuns()}
+              ?disabled=${!props.connected || props.runsLoading}
+            >
+              ${props.runsLoading ? "Loading..." : "Refresh"}
+            </button>
+          </div>
+
+          ${props.runsError ? html`<div class="callout danger" style="margin-top: 10px;">${props.runsError}</div>` : nothing}
+
+          <div class="list" style="margin-top: 12px;">
+            ${props.runs.map((run) => {
+              const status = (run.status ?? "unknown").toUpperCase();
+              const chipClass = status === "SUCCEEDED" ? "chip-ok" : status === "FAILED" ? "chip-danger" : "chip-muted";
+              return html`
+                <div class="list-item">
+                  <div class="list-main">
+                    <div class="list-title mono" style="font-size:11px;">${run.id}</div>
+                    ${run.created ? html`<div class="list-sub">${run.created}</div>` : nothing}
+                  </div>
+                  <div class="list-meta">
+                    <span class="chip ${chipClass}">${run.status ?? "unknown"}</span>
+                  </div>
+                </div>
+              `;
+            })}
+            ${props.runs.length === 0 && !props.runsLoading ? html`<div class="muted" style="margin-top: 8px;">No runs yet. Trigger a flow to see history.</div>` : nothing}
           </div>
         </div>
       </div>

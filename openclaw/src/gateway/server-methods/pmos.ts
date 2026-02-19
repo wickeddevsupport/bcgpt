@@ -775,4 +775,21 @@ export const pmosHandlers: GatewayRequestHandlers = {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }
   },
+
+  // ── Super-admin: Workspace List ────────────────────────────────────
+
+  "pmos.workspaces.list": async ({ respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      if (!isSuperAdmin(client)) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "super_admin role required"));
+        return;
+      }
+      const { listPmosWorkspaces } = await import("../pmos-auth.js");
+      const workspaces = await listPmosWorkspaces();
+      respond(true, { workspaces }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
 };
