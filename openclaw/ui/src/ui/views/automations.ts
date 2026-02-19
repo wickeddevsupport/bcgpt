@@ -271,12 +271,16 @@ export function renderAutomations(props: AutomationsProps) {
   const chatPanel = html`
     <div style="
       width: 320px;
+      min-width: 320px;
+      max-width: 320px;
       flex-shrink: 0;
       display: flex;
       flex-direction: column;
       border-left: 1px solid var(--border);
       background: var(--surface, #1e1e1e);
       overflow: hidden;
+      height: 100%;
+      max-height: 100%;
     ">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--border);flex-shrink:0;">
         <div>
@@ -286,7 +290,7 @@ export function renderAutomations(props: AutomationsProps) {
         <button class="btn btn--sm" @click=${() => props.onChatToggle()} title="Close chat">✕</button>
       </div>
 
-      <div style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;">
+      <div style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;min-height:0;">
         ${props.chatMessages.length === 0 ? html`
           <div class="muted" style="font-size:12px;text-align:center;padding:20px 0;">
             Ask me to create a workflow.<br/>
@@ -360,6 +364,7 @@ export function renderAutomations(props: AutomationsProps) {
       display: flex;
       flex-direction: column;
       height: 100%;
+      max-height: 100vh;
       overflow: hidden;
     ">
       <!-- toolbar -->
@@ -410,17 +415,21 @@ export function renderAutomations(props: AutomationsProps) {
         flex: 1;
         overflow: hidden;
         min-height: 0;
+        max-height: calc(100vh - 48px);
       ">
         <!-- left panel -->
         ${props.panelOpen ? html`
           <div style="
             width: 280px;
+            min-width: 280px;
+            max-width: 280px;
             flex-shrink: 0;
             display: flex;
             flex-direction: column;
             border-right: 1px solid var(--border);
             background: var(--surface, #1e1e1e);
             overflow: hidden;
+            height: 100%;
           ">
             ${props.panelTab === "workflows" ? panelWorkflows : nothing}
             ${props.panelTab === "templates" ? panelTemplates : nothing}
@@ -429,7 +438,7 @@ export function renderAutomations(props: AutomationsProps) {
         ` : nothing}
 
         <!-- n8n iframe -->
-        <div style="flex:1;min-width:0;position:relative;overflow:hidden;">
+        <div style="flex:1;min-width:0;position:relative;overflow:hidden;height:100%;">
           <iframe
             src=${props.embedUrl}
             title="n8n Workflow Canvas"

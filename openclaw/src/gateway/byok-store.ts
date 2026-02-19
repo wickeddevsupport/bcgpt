@@ -15,7 +15,7 @@ import { CONFIG_DIR, ensureDir } from "../utils.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
-export type AIProvider = "openai" | "anthropic" | "google" | "zai" | "openrouter" | "azure" | "custom";
+export type AIProvider = "openai" | "anthropic" | "google" | "zai" | "openrouter" | "kilo" | "azure" | "custom";
 
 export interface ByokEntry {
   provider: AIProvider;
@@ -277,6 +277,16 @@ export async function validateKey(
         );
         if (res.ok) return { valid: true };
         return { valid: false, error: `Google API returned ${res.status}` };
+      }
+      case "kilo": {
+        // Kilo is a proxy/gateway provider - validate by checking the endpoint
+        const kiloUrl = process.env.KILO_API_URL || "https://api.kilo.ai";
+        const res = await fetch(`${kiloUrl}/v1/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: controller.signal,
+        });
+        if (res.ok) return { valid: true };
+        return { valid: false, error: `Kilo API returned ${res.status}` };
       }
       default:
         // For custom/azure providers, we can't validate automatically

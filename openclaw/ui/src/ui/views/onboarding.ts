@@ -6,6 +6,7 @@ const PROVIDER_OPTIONS = [
   { value: "google", label: "Google Gemini", defaultModel: "gemini-2.0-flash" },
   { value: "openrouter", label: "OpenRouter", defaultModel: "google/gemini-2.0-flash:free" },
   { value: "zai", label: "GLM (Z.AI)", defaultModel: "glm-4.1" },
+  { value: "kilo", label: "Kilo", defaultModel: "kilo/z-ai/glm-5:free" },
 ];
 
 export type OnboardingStep = 1 | 2 | 3;

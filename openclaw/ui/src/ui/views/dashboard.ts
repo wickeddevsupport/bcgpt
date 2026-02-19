@@ -201,7 +201,7 @@ export function renderDashboard(props: DashboardProps) {
   const wizardOpen = !coreReady && !allSetupDone;
   const focusItems = [
     bcgptStatus.tone !== "ok"
-      ? { title: "Fix BCGPT connector", detail: "Restore MCP auth for project actions", href: props.integrationsHref }
+      ? { title: "Fix Basecamp connector", detail: "Restore MCP auth for project actions", href: props.integrationsHref }
       : null,
     runBuckets.failed > 0
       ? { title: "Check failed workflow runs", detail: `${runBuckets.failed} failed recent runs - review inside the Workflows editor`, href: props.automationsHref }
@@ -430,7 +430,7 @@ export function renderDashboard(props: DashboardProps) {
     <section class="grid grid-cols-2">
       <div class="card">
         <div class="card-title">Integration Health</div>
-        <div class="card-sub">Connector state for Workflows and BCGPT.</div>
+        <div class="card-sub">Connector state for Workflows and Basecamp.</div>
 
         <div class="stat-grid" style="margin-top: 16px;">
           <div class="stat">
@@ -441,7 +441,7 @@ export function renderDashboard(props: DashboardProps) {
             ${ops?.error ? html`<div class="muted">${ops.error}</div>` : nothing}
           </div>
           <div class="stat">
-            <div class="stat-label">BCGPT</div>
+            <div class="stat-label">Basecamp</div>
             <div class="stat-value ${bcgptStatus.tone === "ok" ? "ok" : "warn"}">${bcgptStatus.label}</div>
             <div class="muted mono">${bcgpt?.url ?? "https://bcgpt.wickedlab.io"}</div>
           </div>

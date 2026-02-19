@@ -113,6 +113,7 @@ export function renderIntegrations(props: IntegrationsProps) {
     { value: "anthropic", label: "Anthropic" },
     { value: "zai", label: "GLM (Z.AI)" },
     { value: "openrouter", label: "OpenRouter" },
+    { value: "kilo", label: "Kilo" },
   ];
 
   const projectIdShort = props.opsProjectId ? String(props.opsProjectId).slice(0, 8) : null;
@@ -298,7 +299,7 @@ export function renderIntegrations(props: IntegrationsProps) {
             >
               ${props.basecampSetupPending ? "Configuring..." : "Add to Workflow Engine"}
             </button>
-            <span class="muted" style="font-size:11px;">Auto-configures Basecamp in n8n using your saved key</span>
+            <span class="muted" style="font-size:11px;">Auto-configures Basecamp in your workflow engine using your saved key</span>
           </div>
           ${props.basecampSetupError ? html`<div class="callout danger" style="margin-top: 8px; font-size:12px;">${props.basecampSetupError}</div>` : nothing}
         ` : nothing}

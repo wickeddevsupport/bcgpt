@@ -1,6 +1,6 @@
 import type { GatewayBrowserClient } from "../gateway.ts";
 
-export type PmosModelProvider = "openai" | "anthropic" | "google" | "zai" | "openrouter";
+export type PmosModelProvider = "openai" | "anthropic" | "google" | "zai" | "openrouter" | "kilo";
 
 export const PMOS_MODEL_PROVIDER_OPTIONS: Array<{
   value: PmosModelProvider;
@@ -12,6 +12,7 @@ export const PMOS_MODEL_PROVIDER_OPTIONS: Array<{
   { value: "anthropic", label: "Anthropic", defaultModelId: "claude-opus-4-6" },
   { value: "zai", label: "GLM (Z.AI)", defaultModelId: "glm-4.7" },
   { value: "openrouter", label: "OpenRouter", defaultModelId: "google/gemini-2.0-flash:free" },
+  { value: "kilo", label: "Kilo", defaultModelId: "kilo/z-ai/glm-5:free" },
 ];
 
 export const PMOS_MODEL_DEFAULTS: Record<PmosModelProvider, string> = PMOS_MODEL_PROVIDER_OPTIONS.reduce(
