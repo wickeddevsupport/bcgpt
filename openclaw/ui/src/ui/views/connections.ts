@@ -202,30 +202,40 @@ export function renderConnections(props: ConnectionsProps) {
     <!-- Available Services -->
     <section class="card" style="margin-bottom: 18px;">
       <div class="card-title">Available Services</div>
-      <div class="card-sub">Connect more services to expand your agents' capabilities</div>
+      <div class="card-sub">Connect services to expand your agents' capabilities. Some require setup in the Workflow Engine.</div>
       
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 16px;">
-        ${availableServices.map((service) => html`
-          <div class="card" style="padding: 16px;">
-            <div class="row" style="gap: 12px; align-items: flex-start;">
-              <div style="font-size: 24px;">${service.icon}</div>
-              <div style="flex: 1;">
-                <div style="font-weight: 600;">${service.name}</div>
-                <div class="muted">${service.description}</div>
+        ${availableServices.map((service) => {
+          const isNative = service.id === 'basecamp' || service.id === 'github';
+          return html`
+            <div class="card" style="padding: 16px;">
+              <div class="row" style="gap: 12px; align-items: flex-start;">
+                <div style="font-size: 24px;">${service.icon}</div>
+                <div style="flex: 1;">
+                  <div style="font-weight: 600;">${service.name}</div>
+                  <div class="muted">${service.description}</div>
+                </div>
+              </div>
+              <div style="margin-top: 12px; display: flex; gap: 8px; align-items: center;">
+                <button
+                  class="btn btn--sm ${isNative ? 'btn--primary' : 'btn--secondary'}"
+                  @click=${() => props.onConnectService(service.id)}
+                  ?disabled=${!isNative}
+                  title=${isNative
+                    ? 'Connect this service directly'
+                    : 'Available through Workflow Engine nodes'}
+                >
+                  ${isNative ? 'Connect' : 'Use in Workflows'}
+                </button>
+                ${!isNative ? html`
+                  <a href="${props.integrationsHref}" class="muted" style="font-size: 11px;">
+                    Setup →
+                  </a>
+                ` : nothing}
               </div>
             </div>
-            <button
-              class="btn btn--sm ${service.id === 'basecamp' || service.id === 'github' ? 'btn--primary' : 'btn--secondary'}"
-              style="margin-top: 12px;"
-              @click=${() => props.onConnectService(service.id)}
-              title=${service.id === 'basecamp' || service.id === 'github'
-                ? 'Connect this service'
-                : 'Manage credentials in the Automations workflow editor'}
-            >
-              ${service.id === 'basecamp' || service.id === 'github' ? 'Connect' : 'Add via Automations'}
-            </button>
-          </div>
-        `)}
+          `;
+        })}
       </div>
     </section>
     
