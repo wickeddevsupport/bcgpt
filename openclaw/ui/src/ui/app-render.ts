@@ -316,6 +316,10 @@ export function renderApp(state: AppViewState) {
     state.agentsList?.defaultId ??
     state.agentsList?.agents?.[0]?.id ??
     null;
+  const agentList = state.agentsList?.agents ?? [];
+  const chatSessionParsed = parseAgentSessionKey(state.sessionKey);
+  const agentId = chatSessionParsed?.agentId ?? null;
+  const agent = agentId ? (agentList.find((entry) => entry.id === agentId) ?? null) : null;
   const workflowsQuery = (state.apFlowsQuery ?? "").trim().toLowerCase();
   const workflowsFiltered = workflowsQuery
     ? (state.apFlows ?? []).filter((flow) =>
