@@ -1643,6 +1643,11 @@ export function renderApp(state: AppViewState) {
                 onSplitRatioChange: (ratio: number) => state.handleSplitRatioChange(ratio),
                 assistantName: state.assistantName,
                 assistantAvatar: state.assistantAvatar,
+                // Agent context for agent-specific chat
+                agentId: agentId,
+                agentName: agent?.name ?? agent?.identity?.name ?? state.agentIdentityById[agentId]?.name ?? null,
+                agentEmoji: agent?.identity?.emoji ?? state.agentIdentityById[agentId]?.emoji ?? null,
+                agentTheme: agent?.identity?.theme ?? state.agentIdentityById[agentId]?.theme ?? null,
               })
             : nothing
         }

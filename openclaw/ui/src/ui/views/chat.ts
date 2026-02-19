@@ -13,6 +13,7 @@ import {
 import { normalizeMessage, normalizeRoleForGrouping } from "../chat/message-normalizer.ts";
 import { icons } from "../icons.ts";
 import { renderMarkdownSidebar } from "./markdown-sidebar.ts";
+import { pathForTab } from "../navigation.ts";
 import "../components/resizable-divider.ts";
 
 export type CompactionIndicatorStatus = {
@@ -53,6 +54,11 @@ export type ChatProps = {
   onTraceClear?: () => void;
   assistantName: string;
   assistantAvatar: string | null;
+  // Agent context (for agent-specific chat)
+  agentId?: string | null;
+  agentName?: string | null;
+  agentEmoji?: string | null;
+  agentTheme?: string | null;
   // Image attachments
   attachments?: ChatAttachment[];
   onAttachmentsChange?: (attachments: ChatAttachment[]) => void;
@@ -289,6 +295,21 @@ export function renderChat(props: ChatProps) {
       ${props.disabledReason ? html`<div class="callout">${props.disabledReason}</div>` : nothing}
 
       ${props.error ? html`<div class="callout danger">${props.error}</div>` : nothing}
+
+      ${
+        props.agentId && props.agentName
+          ? html`
+            <div class="chat-agent-header" style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border-color, #333); margin-bottom: 0;">
+              <div style="font-size: 28px;">${props.agentEmoji || '🤖'}</div>
+              <div style="flex: 1;">
+                <div style="font-weight: 600; font-size: 16px;">${props.agentName}</div>
+                <div class="muted" style="font-size: 13px;">${props.agentTheme || 'AI Agent'}</div>
+              </div>
+              <a href="${pathForTab('agents')}" class="btn btn--sm btn--secondary">Settings</a>
+            </div>
+          `
+          : nothing
+      }
 
       ${
         props.focusMode
