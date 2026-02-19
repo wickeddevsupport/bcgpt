@@ -373,6 +373,12 @@ export class OpenClawApp extends LitElement {
   @state() apFlowMutating = false;
   @state() apFlowMutateError: string | null = null;
   @state() apFlowTemplateDeployedOk = false;
+  @state() automationsPanelOpen = true;
+  @state() automationsPanelTab: "workflows" | "templates" | "settings" | "runs" = "workflows";
+  @state() automationsChatOpen = false;
+  @state() workflowChatDraft = "";
+  @state() workflowChatMessages: Array<{ role: "user" | "assistant"; content: string }> = [];
+  @state() workflowChatSending = false;
 
   // PMOS AI flow builder stream (Phase 5)
   @state() pmosFlowBuilderPrompt = "";
@@ -981,6 +987,29 @@ export class OpenClawApp extends LitElement {
 
   handlePmosFlowBuilderReset() {
     resetPmosFlowBuilder(this);
+  }
+
+  async handleWorkflowChatSend() {
+    const message = this.workflowChatDraft.trim();
+    if (!message || this.workflowChatSending) return;
+    this.workflowChatDraft = "";
+    this.workflowChatMessages = [...this.workflowChatMessages, { role: "user", content: message }];
+    this.workflowChatSending = true;
+    try {
+      const result = await this.client!.request("pmos.workflow.create", { description: message }) as {
+        success: boolean; message: string; workflowId?: string; needsConfirmation?: boolean;
+      };
+      const reply = result.message || (result.success ? "Workflow created!" : "Could not process your request.");
+      this.workflowChatMessages = [...this.workflowChatMessages, { role: "assistant", content: reply }];
+      if (result.success) {
+        void this.handlePmosApFlowsLoad();
+      }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.workflowChatMessages = [...this.workflowChatMessages, { role: "assistant", content: `Error: ${errMsg}` }];
+    } finally {
+      this.workflowChatSending = false;
+    }
   }
 
   async handlePmosApRunsLoad() {

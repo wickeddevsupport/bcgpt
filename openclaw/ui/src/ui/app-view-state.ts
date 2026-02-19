@@ -253,6 +253,12 @@ export type AppViewState = {
   apFlowMutating: boolean;
   apFlowMutateError: string | null;
   apFlowTemplateDeployedOk: boolean;
+  automationsPanelOpen: boolean;
+  automationsPanelTab: "workflows" | "templates" | "settings" | "runs";
+  automationsChatOpen: boolean;
+  workflowChatDraft: string;
+  workflowChatMessages: Array<{ role: "user" | "assistant"; content: string }>;
+  workflowChatSending: boolean;
 
   // PMOS AI flow builder stream (Phase 5)
   pmosFlowBuilderPrompt: string;
@@ -483,6 +489,7 @@ export type AppViewState = {
   handlePmosFlowBuilderGenerate: () => Promise<void>;
   handlePmosFlowBuilderCommit: () => Promise<void>;
   handlePmosFlowBuilderReset: () => void;
+  handleWorkflowChatSend: () => Promise<void>;
   handlePmosApRunsLoad: () => Promise<void>;
   handlePmosApRunSelect: (runId: string) => Promise<void>;
   handlePmosApRunRetry: (strategy: "FROM_FAILED_STEP" | "ON_LATEST_VERSION") => Promise<void>;

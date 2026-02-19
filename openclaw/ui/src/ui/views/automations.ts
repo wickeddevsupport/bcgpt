@@ -2,18 +2,13 @@ import { html, nothing } from "lit";
 import type { WorkflowRunSummary, WorkflowSummary } from "../controllers/pmos-workflows.ts";
 
 const WORKFLOW_TEMPLATES = [
+  { id: "template-basecamp-sync", name: "Basecamp Todo Sync", desc: "Sync Basecamp todos to another service", icon: "🏕️" },
+  { id: "template-ai-response", name: "AI-Powered Response", desc: "Respond to triggers using an AI model", icon: "🤖" },
   { id: "template-webhook-slack", name: "Webhook → Slack Alert", desc: "Post to Slack when a webhook fires", icon: "💬" },
   { id: "template-scheduled-report", name: "Scheduled Report", desc: "Generate and send a report on a schedule", icon: "📊" },
   { id: "template-github-slack", name: "GitHub → Slack", desc: "Notify Slack on GitHub events", icon: "🐙" },
-  { id: "template-basecamp-sync", name: "Basecamp Todo Sync", desc: "Sync Basecamp todos to another service", icon: "🏕️" },
-  { id: "template-ai-response", name: "AI-Powered Response", desc: "Respond to triggers using an AI model", icon: "🤖" },
   { id: "template-database-backup", name: "Database Backup", desc: "Scheduled backup of a data source", icon: "💾" },
 ];
-import type {
-  PmosFlowGraphEdge,
-  PmosFlowGraphNode,
-  PmosFlowGraphOp,
-} from "../controllers/pmos-flow-builder.ts";
 
 export type AutomationsProps = {
   connected: boolean;
@@ -43,16 +38,32 @@ export type AutomationsProps = {
   mutating: boolean;
   mutateError: string | null;
 
-  // Phase 5: AI flow builder stream
-  builderPrompt: string;
-  builderGenerating: boolean;
-  builderCommitting: boolean;
-  builderError: string | null;
-  builderFlowName: string;
-  builderNodes: PmosFlowGraphNode[];
-  builderEdges: PmosFlowGraphEdge[];
-  builderOps: PmosFlowGraphOp[];
-  builderLastCommittedFlowId: string | null;
+  // Template deploy
+  templateDeploying: boolean;
+  templateDeployError: string | null;
+  templateDeployedOk: boolean;
+  onDeployTemplate: (templateId: string) => void;
+
+  // Execution history
+  runs: WorkflowRunSummary[];
+  runsLoading: boolean;
+  runsError: string | null;
+  onLoadRuns: () => void;
+
+  // Panel (left slide-in)
+  panelOpen: boolean;
+  panelTab: "workflows" | "templates" | "runs";
+  onPanelToggle: () => void;
+  onPanelTabChange: (tab: "workflows" | "templates" | "runs") => void;
+
+  // AI Chat (right panel)
+  chatOpen: boolean;
+  onChatToggle: () => void;
+  chatMessages: Array<{ role: "user" | "assistant"; content: string }>;
+  chatDraft: string;
+  chatSending: boolean;
+  onChatDraftChange: (next: string) => void;
+  onChatSend: () => void;
 
   onFlowsQueryChange: (next: string) => void;
   onRefresh: () => void;
@@ -68,475 +79,368 @@ export type AutomationsProps = {
   onApplyOperation: () => void;
   onTriggerPayloadDraftChange: (next: string) => void;
   onTriggerWebhook: (opts?: { draft?: boolean; sync?: boolean }) => void;
-
-  onBuilderPromptChange: (next: string) => void;
-  onBuilderGenerate: () => void;
-  onBuilderCommit: () => void;
-  onBuilderReset: () => void;
-
-  // Template deploy
-  templateDeploying: boolean;
-  templateDeployError: string | null;
-  templateDeployedOk: boolean;
-  onDeployTemplate: (templateId: string) => void;
-  // Execution history
-  runs: WorkflowRunSummary[];
-  runsLoading: boolean;
-  runsError: string | null;
-  onLoadRuns: () => void;
 };
 
 function formatFlowTitle(flow: WorkflowSummary) {
   return flow.displayName || flow.id;
 }
 
-function formatFlowMeta(flow: WorkflowSummary) {
-  const parts: string[] = [];
-  if (flow.status) parts.push(flow.status);
-  if (flow.updated) parts.push(`updated ${flow.updated}`);
-  if (flow.created) parts.push(`created ${flow.created}`);
-  return parts.join(" | ");
+function statusChipClass(status: string) {
+  const s = status.toUpperCase();
+  if (s === "ENABLED") return "chip-ok";
+  if (s === "DISABLED") return "chip-muted";
+  return "";
+}
+
+function runChipClass(status: string) {
+  const s = (status ?? "unknown").toUpperCase();
+  if (s === "SUCCEEDED") return "chip-ok";
+  if (s === "FAILED") return "chip-danger";
+  return "chip-muted";
 }
 
 export function renderAutomations(props: AutomationsProps) {
   const connectedReason = !props.connected
-    ? "Sign in to your workspace to create and manage workflows."
+    ? "Sign in to your workspace to manage workflows."
     : null;
-  const projectReason = props.projectId.trim()
-    ? null
-    : "Workflow project ID is required. Set it in Integrations, then Save.";
+  const projectMissing = !props.projectId.trim();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const flowStatus = props.flowDetails ? String((props.flowDetails as any).status ?? "") : "";
   const isEnabled = flowStatus.toUpperCase() === "ENABLED";
 
-  return html`
-    <section class="agents-layout">
-      <div class="agents-sidebar">
-        <div class="card">
-          <div class="card-title">Create flow</div>
-          <div class="card-sub">Create a new workflow in your configured workspace project.</div>
+  // ─── Left panel content ──────────────────────────────────────────
+  const panelWorkflows = html`
+    <div style="padding: 12px; display: flex; flex-direction: column; gap: 10px; height: 100%; overflow-y: auto;">
+      ${connectedReason ? html`<div class="muted" style="font-size:12px;">${connectedReason}</div>` : nothing}
+      ${projectMissing ? html`<div class="muted" style="font-size:12px;">Set a project in <button class="btn btn--sm" @click=${() => props.onOpenIntegrations()}>Integrations</button></div>` : nothing}
 
-          <div class="form-grid" style="margin-top: 14px;">
-            <label class="field full">
-              <span>Flow name</span>
-              <input
-                .value=${props.createName}
-                @input=${(e: Event) => props.onCreateNameChange((e.target as HTMLInputElement).value)}
-                placeholder="e.g. Onboard new lead"
-                ?disabled=${!props.connected || !props.projectId.trim() || props.creating}
-              />
-            </label>
-          </div>
-
-          <div class="row" style="margin-top: 12px;">
-            <button
-              class="btn primary"
-              @click=${() => props.onCreate()}
-              ?disabled=${!props.connected || !props.projectId.trim() || props.creating || !props.createName.trim()}
-            >
-              ${props.creating ? "Creating..." : "Create flow"}
-            </button>
-            <button class="btn btn--secondary" @click=${() => props.onOpenIntegrations()}>
-              Integrations
-            </button>
-          </div>
-
-          ${props.createError ? html`<div class="callout danger" style="margin-top: 12px;">${props.createError}</div>` : nothing}
-          ${connectedReason ? html`<div class="muted" style="margin-top: 12px;">${connectedReason}</div>` : nothing}
-          ${projectReason ? html`<div class="muted" style="margin-top: 12px;">${projectReason}</div>` : nothing}
+      <div>
+        <div class="card-title" style="margin-bottom:8px;">Create workflow</div>
+        <div style="display:flex;gap:6px;align-items:stretch;">
+          <input
+            style="flex:1;min-width:0;"
+            .value=${props.createName}
+            @input=${(e: Event) => props.onCreateNameChange((e.target as HTMLInputElement).value)}
+            @keydown=${(e: KeyboardEvent) => { if (e.key === "Enter" && props.createName.trim() && !props.creating) props.onCreate(); }}
+            placeholder="Flow name..."
+            ?disabled=${!props.connected || projectMissing || props.creating}
+          />
+          <button
+            class="btn btn--primary btn--sm"
+            @click=${() => props.onCreate()}
+            ?disabled=${!props.connected || projectMissing || props.creating || !props.createName.trim()}
+          >${props.creating ? "..." : "Create"}</button>
         </div>
-
-        <div class="card">
-          <div class="card-title">Flows</div>
-          <div class="card-sub">Your workspace workflows.</div>
-
-          <div class="form-grid" style="margin-top: 14px;">
-            <label class="field full">
-              <span>Search</span>
-              <input
-                .value=${props.flowsQuery}
-                @input=${(e: Event) => props.onFlowsQueryChange((e.target as HTMLInputElement).value)}
-                placeholder="filter by name"
-                ?disabled=${!props.connected || !props.projectId.trim()}
-              />
-            </label>
-          </div>
-
-          <div class="row" style="margin-top: 12px;">
-            <button
-              class="btn"
-              @click=${() => props.onRefresh()}
-              ?disabled=${!props.connected || !props.projectId.trim() || props.loading}
-            >
-              ${props.loading ? "Loading..." : "Refresh"}
-            </button>
-          </div>
-
-          ${props.error ? html`<div class="callout danger" style="margin-top: 12px;">${props.error}</div>` : nothing}
-
-          <div class="list" style="margin-top: 14px;">
-            ${props.flows.map((flow) => {
-              const selected = props.selectedFlowId === flow.id;
-              return html`
-                <div
-                  class="list-item list-item-clickable ${selected ? "list-item-selected" : ""}"
-                  @click=${() => props.onSelectFlow(flow.id)}
-                >
-                  <div class="list-main">
-                    <div class="list-title">${formatFlowTitle(flow)}</div>
-                    <div class="list-sub mono">${flow.id}</div>
-                  </div>
-                  <div class="list-meta">
-                    <div>${formatFlowMeta(flow) || " "}</div>
-                    <div>
-                      <button class="btn btn--sm" @click=${(e: Event) => {
-                        e.stopPropagation();
-                        props.onSelectFlow(flow.id);
-                      }}>
-                        Open
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              `;
-            })}
-            ${props.flows.length === 0 && !props.loading ? html`<div class="muted">No flows found.</div>` : nothing}
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">Templates</div>
-          <div class="card-sub">Deploy a pre-built workflow directly into your n8n editor.</div>
-
-          ${props.templateDeployedOk ? html`<div class="callout success" style="margin-top: 10px;">✓ Template deployed — find it in your workflow list above.</div>` : nothing}
-          ${props.templateDeployError ? html`<div class="callout danger" style="margin-top: 10px;">${props.templateDeployError}</div>` : nothing}
-
-          <div class="list" style="margin-top: 14px;">
-            ${WORKFLOW_TEMPLATES.map((tpl) => html`
-              <div class="list-item" title=${tpl.desc}>
-                <div class="list-main">
-                  <div class="list-title">${tpl.icon} ${tpl.name}</div>
-                  <div class="list-sub">${tpl.desc}</div>
-                </div>
-                <div class="list-meta">
-                  <button
-                    class="btn btn--sm btn--primary"
-                    ?disabled=${!props.connected || props.templateDeploying}
-                    @click=${() => props.onDeployTemplate(tpl.id)}
-                  >
-                    ${props.templateDeploying ? "Deploying..." : "Deploy"}
-                  </button>
-                </div>
-              </div>
-            `)}
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">Recent Runs</div>
-          <div class="card-sub">Execution history for the selected workflow.</div>
-
-          <div class="row" style="margin-top: 12px;">
-            <button
-              class="btn"
-              @click=${() => props.onLoadRuns()}
-              ?disabled=${!props.connected || props.runsLoading}
-            >
-              ${props.runsLoading ? "Loading..." : "Refresh"}
-            </button>
-          </div>
-
-          ${props.runsError ? html`<div class="callout danger" style="margin-top: 10px;">${props.runsError}</div>` : nothing}
-
-          <div class="list" style="margin-top: 12px;">
-            ${props.runs.map((run) => {
-              const status = (run.status ?? "unknown").toUpperCase();
-              const chipClass = status === "SUCCEEDED" ? "chip-ok" : status === "FAILED" ? "chip-danger" : "chip-muted";
-              return html`
-                <div class="list-item">
-                  <div class="list-main">
-                    <div class="list-title mono" style="font-size:11px;">${run.id}</div>
-                    ${run.created ? html`<div class="list-sub">${run.created}</div>` : nothing}
-                  </div>
-                  <div class="list-meta">
-                    <span class="chip ${chipClass}">${run.status ?? "unknown"}</span>
-                  </div>
-                </div>
-              `;
-            })}
-            ${props.runs.length === 0 && !props.runsLoading ? html`<div class="muted" style="margin-top: 8px;">No runs yet. Trigger a flow to see history.</div>` : nothing}
-          </div>
-        </div>
+        ${props.createError ? html`<div class="muted" style="color:var(--color-danger);font-size:11px;margin-top:4px;">${props.createError}</div>` : nothing}
       </div>
 
-      <div class="agents-main">
-        <div class="card">
-          <div class="card-title">Flow Editor</div>
-          <div class="card-sub">Rename, enable/disable, publish, and apply operations.</div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <input
+          style="flex:1;"
+          .value=${props.flowsQuery}
+          @input=${(e: Event) => props.onFlowsQueryChange((e.target as HTMLInputElement).value)}
+          placeholder="Search flows..."
+          ?disabled=${!props.connected || projectMissing}
+        />
+        <button class="btn btn--sm" @click=${() => props.onRefresh()} ?disabled=${!props.connected || projectMissing || props.loading}>
+          ${props.loading ? "..." : "↻"}
+        </button>
+      </div>
 
-          <div class="card" style="margin-top: 16px; padding: 0; overflow: hidden;">
+      ${props.error ? html`<div class="callout danger" style="font-size:12px;">${props.error}</div>` : nothing}
+
+      <div class="list" style="flex:1;overflow-y:auto;">
+        ${props.flows.map((flow) => {
+          const selected = props.selectedFlowId === flow.id;
+          return html`
             <div
-              style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border); gap:12px;"
+              class="list-item list-item-clickable ${selected ? "list-item-selected" : ""}"
+              @click=${() => props.onSelectFlow(flow.id)}
             >
-              <div style="min-width:0;">
-                <div class="card-sub">n8n workflow canvas</div>
-                ${
-                  props.selectedFlowLabel
-                    ? html`<div class="muted" style="margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                        Editing: <span style="font-weight:600;">${props.selectedFlowLabel}</span>
-                      </div>`
-                    : html`<div class="muted" style="margin-top:4px;">No flow selected. You can still browse from n8n home.</div>`
-                }
-              </div>
-              <div class="row" style="gap:8px; flex-shrink:0;">
-                <button
-                  class="btn btn--sm"
-                  @click=${() => props.onSetStatus(isEnabled ? "DISABLED" : "ENABLED")}
-                  ?disabled=${!props.selectedFlowId || props.mutating}
-                >
-                  ${isEnabled ? "Disable" : "Enable"}
-                </button>
-                <button
-                  class="btn danger btn--sm"
-                  @click=${() => props.onDelete()}
-                  ?disabled=${!props.selectedFlowId || props.mutating}
-                >
-                  Delete
-                </button>
+              <div class="list-main" style="min-width:0;">
+                <div class="list-title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${formatFlowTitle(flow)}</div>
+                ${flow.status ? html`<div class="list-sub"><span class="chip ${statusChipClass(flow.status)}" style="font-size:10px;">${flow.status}</span></div>` : nothing}
               </div>
             </div>
-            <iframe
-              src=${props.embedUrl}
-              title="n8n Workflow Canvas"
-              style="width:100%;height:58vh;min-height:420px;border:0;display:block;background:#1a1a1a;"
-              allow="clipboard-read; clipboard-write"
-            ></iframe>
-          </div>
-
-          <div class="card" style="margin-top: 16px;">
-            <div class="card-title">AI Flow Builder <span class="chip" style="font-size:11px;vertical-align:middle;">Preview</span></div>
-            <div class="card-sub">
-              Describe your automation in plain English — Wicked OS generates a workflow graph you can commit as a flow shell and finish in the n8n editor above.
-            </div>
-
-            <label class="field" style="margin-top: 12px;">
-              <span>Prompt</span>
-              <textarea
-                .value=${props.builderPrompt}
-                @input=${(e: Event) => props.onBuilderPromptChange((e.target as HTMLTextAreaElement).value)}
-                placeholder="e.g. Create a lead intake flow that posts to Slack and writes rows to Google Sheets."
-                ?disabled=${props.builderGenerating || props.builderCommitting}
-              ></textarea>
-            </label>
-
-            <div class="row" style="margin-top: 12px;">
-              <button class="btn" @click=${() => props.onBuilderGenerate()} ?disabled=${props.builderGenerating || !props.builderPrompt.trim()}>
-                ${props.builderGenerating ? "Generating..." : "Generate graph"}
-              </button>
-              <button
-                class="btn primary"
-                @click=${() => props.onBuilderCommit()}
-                ?disabled=${props.builderCommitting || props.builderNodes.length === 0}
-              >
-                ${props.builderCommitting ? "Committing..." : "Commit draft flow"}
-              </button>
-              <button class="btn btn--secondary" @click=${() => props.onBuilderReset()} ?disabled=${props.builderGenerating || props.builderCommitting}>
-                Reset
-              </button>
-            </div>
-
-            ${
-              props.builderFlowName
-                ? html`<div class="muted" style="margin-top: 10px;">Draft flow name: <span class="mono">${props.builderFlowName}</span></div>`
-                : nothing
-            }
-            ${
-              props.builderLastCommittedFlowId
-                ? html`
-                    <div class="callout" style="margin-top: 10px;">
-                      Flow shell created: <span class="mono">${props.builderLastCommittedFlowId}</span>
-                    </div>
-                  `
-                : nothing
-            }
-            ${props.builderError ? html`<div class="callout danger" style="margin-top: 10px;">${props.builderError}</div>` : nothing}
-
-            <div class="grid grid-cols-2" style="margin-top: 12px;">
-              <div class="card">
-                <div class="card-title">Graph Nodes</div>
-                <div class="list" style="margin-top: 8px;">
-                  ${props.builderNodes.map(
-                    (node) => html`
-                      <div class="list-item">
-                        <div class="list-main">
-                          <div class="list-title">${node.label}</div>
-                          <div class="list-sub mono">${node.id}</div>
-                          ${node.piece ? html`<div class="list-sub mono">${node.piece}</div>` : nothing}
-                        </div>
-                        <div class="list-meta">
-                          <span class="chip">${node.type}</span>
-                        </div>
-                      </div>
-                    `,
-                  )}
-                  ${props.builderNodes.length === 0 ? html`<div class="muted">No nodes yet.</div>` : nothing}
-                </div>
-              </div>
-              <div class="card">
-                <div class="card-title">Graph Edges</div>
-                <div class="list" style="margin-top: 8px;">
-                  ${props.builderEdges.map(
-                    (edge) => html`
-                      <div class="list-item">
-                        <div class="list-main">
-                          <div class="list-title mono">${edge.from} -> ${edge.to}</div>
-                          <div class="list-sub">${edge.label ?? "then"}</div>
-                        </div>
-                      </div>
-                    `,
-                  )}
-                  ${props.builderEdges.length === 0 ? html`<div class="muted">No edges yet.</div>` : nothing}
-                </div>
-              </div>
-            </div>
-
-            <details style="margin-top: 12px;">
-              <summary class="muted" style="cursor: pointer;">Builder operation stream (${props.builderOps.length})</summary>
-              <div class="list" style="margin-top: 10px; max-height: 220px; overflow: auto;">
-                ${props.builderOps.map(
-                  (op) => html`
-                    <div class="list-item">
-                      <div class="list-main">
-                        <div class="list-title">${op.kind}</div>
-                        <div class="list-sub">${op.detail}</div>
-                      </div>
-                    </div>
-                  `,
-                )}
-              </div>
-            </details>
-          </div>
-
-          ${
-            !props.selectedFlowId
-              ? html`<div class="muted" style="margin-top: 14px;">Select a flow to edit.</div>`
-              : nothing
-          }
-
-          ${
-            props.flowDetailsLoading
-              ? html`<div class="muted" style="margin-top: 14px;">Loading flow...</div>`
-              : nothing
-          }
-
-          ${props.flowDetailsError && props.selectedFlowId ? html`<div class="callout danger" style="margin-top: 12px;">${props.flowDetailsError}</div>` : nothing}
-          ${props.mutateError ? html`<div class="callout danger" style="margin-top: 12px;">${props.mutateError}</div>` : nothing}
-
-          ${
-            props.flowDetails && props.selectedFlowId
-              ? html`
-                  <div class="stat-grid" style="margin-top: 14px;">
-                    <div class="stat">
-                      <div class="stat-label">Flow ID</div>
-                      <div class="stat-value mono" style="font-size: 14px; font-weight: 600;">${props.selectedFlowId}</div>
-                    </div>
-                    <div class="stat">
-                      <div class="stat-label">Status</div>
-                      <div class="stat-value ${isEnabled ? "ok" : "warn"}" style="font-size: 18px;">${flowStatus || "n/a"}</div>
-                    </div>
-                  </div>
-
-                  <div class="form-grid" style="margin-top: 16px;">
-                    <label class="field full">
-                      <span>Rename</span>
-                      <input
-                        .value=${props.renameDraft}
-                        @input=${(e: Event) => props.onRenameDraftChange((e.target as HTMLInputElement).value)}
-                        ?disabled=${props.mutating}
-                      />
-                    </label>
-                  </div>
-
-                  <div class="row" style="margin-top: 12px;">
-                    <button class="btn primary" @click=${() => props.onRename()} ?disabled=${props.mutating || !props.renameDraft.trim()}>
-                      ${props.mutating ? "Working..." : "Save name"}
-                    </button>
-                    <button class="btn" @click=${() => props.onSetStatus(isEnabled ? "DISABLED" : "ENABLED")} ?disabled=${props.mutating}>
-                      ${isEnabled ? "Disable" : "Enable"}
-                    </button>
-                    <button
-                      class="btn"
-                      @click=${() => props.onPublish()}
-                      ?disabled=${props.mutating}
-                      title="Publish makes this workflow visible to all workspace members. It does not activate execution — use Enable for that."
-                    >
-                      Publish
-                    </button>
-                    <button class="btn danger" @click=${() => props.onDelete()} ?disabled=${props.mutating}>
-                      Delete
-                    </button>
-                  </div>
-
-                  <div class="card" style="margin-top: 16px;">
-                    <div class="card-title">Webhook Trigger</div>
-                    <div class="card-sub">
-                      Triggers via workflow webhook endpoint (works for webhook-triggered flows).
-                    </div>
-                    <label class="field" style="margin-top: 12px;">
-                      <span>Payload (JSON)</span>
-                      <textarea
-                        .value=${props.triggerPayloadDraft}
-                        @input=${(e: Event) => props.onTriggerPayloadDraftChange((e.target as HTMLTextAreaElement).value)}
-                        ?disabled=${props.mutating}
-                      ></textarea>
-                    </label>
-                    <div class="row" style="margin-top: 12px;">
-                      <button class="btn btn--primary" @click=${() => props.onTriggerWebhook()} ?disabled=${props.mutating}
-                        title="Send the payload to this workflow's webhook URL to execute it now">
-                        Trigger now
-                      </button>
-                      <button class="btn" @click=${() => props.onTriggerWebhook({ draft: true })} ?disabled=${props.mutating}
-                        title="Save the payload as a draft without executing">
-                        Save draft
-                      </button>
-                      <button class="btn" @click=${() => props.onTriggerWebhook({ sync: true })} ?disabled=${props.mutating}
-                        title="Sync the workflow definition from n8n to ensure it is up to date">
-                        Sync
-                      </button>
-                    </div>
-                  </div>
-
-                  <div class="card" style="margin-top: 16px;">
-                    <div class="card-title">Advanced Operation</div>
-                    <div class="card-sub">
-                      Paste a FlowOperationRequest JSON to apply deeper edits (add/update steps, triggers, etc).
-                    </div>
-                    <label class="field" style="margin-top: 12px;">
-                      <span>Operation JSON</span>
-                      <textarea
-                        .value=${props.operationDraft}
-                        @input=${(e: Event) => props.onOperationDraftChange((e.target as HTMLTextAreaElement).value)}
-                        placeholder='{"type":"CHANGE_NAME","request":{"displayName":"New name"}}'
-                        ?disabled=${props.mutating}
-                      ></textarea>
-                    </label>
-                    <div class="row" style="margin-top: 12px;">
-                      <button class="btn" @click=${() => props.onApplyOperation()} ?disabled=${props.mutating || !props.operationDraft.trim()}>
-                        Apply operation
-                      </button>
-                    </div>
-                  </div>
-
-                  <details style="margin-top: 16px;">
-                    <summary class="muted" style="cursor: pointer;">Raw flow JSON</summary>
-                    <pre class="code-block">${JSON.stringify(props.flowDetails, null, 2)}</pre>
-                  </details>
-                `
-              : nothing
-          }
-        </div>
+          `;
+        })}
+        ${props.flows.length === 0 && !props.loading ? html`<div class="muted" style="font-size:12px;padding:8px 0;">No workflows yet.</div>` : nothing}
       </div>
-    </section>
+
+      ${props.selectedFlowId && props.flowDetails ? html`
+        <div style="border-top:1px solid var(--border);padding-top:10px;">
+          <div class="card-title" style="margin-bottom:8px;">Selected: <span style="font-weight:normal;font-size:12px;">${props.selectedFlowLabel ?? props.selectedFlowId}</span></div>
+
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
+            <button class="btn btn--sm ${isEnabled ? "" : "btn--primary"}" @click=${() => props.onSetStatus(isEnabled ? "DISABLED" : "ENABLED")} ?disabled=${props.mutating}>
+              ${isEnabled ? "Disable" : "Enable"}
+            </button>
+            <button class="btn btn--sm" @click=${() => props.onPublish()} ?disabled=${props.mutating}
+              title="Publish makes this workflow visible to all workspace members.">Publish</button>
+            <button class="btn btn--sm btn--danger" @click=${() => props.onDelete()} ?disabled=${props.mutating}>Delete</button>
+          </div>
+
+          <div style="display:flex;gap:6px;align-items:stretch;margin-bottom:6px;">
+            <input
+              style="flex:1;min-width:0;"
+              .value=${props.renameDraft}
+              @input=${(e: Event) => props.onRenameDraftChange((e.target as HTMLInputElement).value)}
+              placeholder="Rename..."
+              ?disabled=${props.mutating}
+            />
+            <button class="btn btn--sm btn--primary" @click=${() => props.onRename()} ?disabled=${props.mutating || !props.renameDraft.trim()}>Save</button>
+          </div>
+
+          ${props.mutateError ? html`<div class="muted" style="color:var(--color-danger);font-size:11px;">${props.mutateError}</div>` : nothing}
+
+          <details style="margin-top:8px;">
+            <summary class="muted" style="cursor:pointer;font-size:12px;">Webhook trigger</summary>
+            <div style="margin-top:8px;">
+              <textarea
+                style="width:100%;height:64px;font-size:11px;"
+                .value=${props.triggerPayloadDraft}
+                @input=${(e: Event) => props.onTriggerPayloadDraftChange((e.target as HTMLTextAreaElement).value)}
+                ?disabled=${props.mutating}
+              ></textarea>
+              <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
+                <button class="btn btn--sm btn--primary" @click=${() => props.onTriggerWebhook()} ?disabled=${props.mutating}
+                  title="Send payload to this workflow's webhook now">Trigger now</button>
+                <button class="btn btn--sm" @click=${() => props.onTriggerWebhook({ sync: true })} ?disabled=${props.mutating}
+                  title="Sync workflow definition from n8n">Sync</button>
+              </div>
+            </div>
+          </details>
+        </div>
+      ` : nothing}
+    </div>
+  `;
+
+  const panelTemplates = html`
+    <div style="padding: 12px; overflow-y: auto; height: 100%;">
+      ${props.templateDeployedOk ? html`<div class="callout success" style="margin-bottom:10px;font-size:12px;">✓ Template deployed — check your workflows list.</div>` : nothing}
+      ${props.templateDeployError ? html`<div class="callout danger" style="margin-bottom:10px;font-size:12px;">${props.templateDeployError}</div>` : nothing}
+
+      <div class="list">
+        ${WORKFLOW_TEMPLATES.map((tpl) => html`
+          <div class="list-item">
+            <div class="list-main">
+              <div class="list-title">${tpl.icon} ${tpl.name}</div>
+              <div class="list-sub" style="font-size:11px;">${tpl.desc}</div>
+            </div>
+            <div class="list-meta">
+              <button
+                class="btn btn--sm btn--primary"
+                ?disabled=${!props.connected || props.templateDeploying}
+                @click=${() => props.onDeployTemplate(tpl.id)}
+              >${props.templateDeploying ? "..." : "Deploy"}</button>
+            </div>
+          </div>
+        `)}
+      </div>
+    </div>
+  `;
+
+  const panelRuns = html`
+    <div style="padding: 12px; overflow-y: auto; height: 100%;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <div class="card-title">Execution History</div>
+        <button class="btn btn--sm" @click=${() => props.onLoadRuns()} ?disabled=${!props.connected || props.runsLoading}>
+          ${props.runsLoading ? "Loading..." : "Refresh"}
+        </button>
+      </div>
+      ${props.runsError ? html`<div class="callout danger" style="font-size:12px;margin-bottom:8px;">${props.runsError}</div>` : nothing}
+      <div class="list">
+        ${props.runs.map((run) => html`
+          <div class="list-item">
+            <div class="list-main">
+              <div class="list-title mono" style="font-size:11px;">${run.id.slice(0, 8)}…</div>
+              ${run.created ? html`<div class="list-sub" style="font-size:10px;">${run.created}</div>` : nothing}
+            </div>
+            <div class="list-meta">
+              <span class="chip ${runChipClass(run.status ?? "")}" style="font-size:10px;">${run.status ?? "unknown"}</span>
+            </div>
+          </div>
+        `)}
+        ${props.runs.length === 0 && !props.runsLoading ? html`<div class="muted" style="font-size:12px;">No runs yet.</div>` : nothing}
+      </div>
+    </div>
+  `;
+
+  // ─── Right chat panel ──────────────────────────────────────────────
+  const chatPanel = html`
+    <div style="
+      width: 320px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      border-left: 1px solid var(--border);
+      background: var(--surface, #1e1e1e);
+      overflow: hidden;
+    ">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--border);flex-shrink:0;">
+        <div>
+          <div style="font-weight:600;font-size:14px;">AI Workflow Assistant</div>
+          <div class="muted" style="font-size:11px;">Describe what you want to automate</div>
+        </div>
+        <button class="btn btn--sm" @click=${() => props.onChatToggle()} title="Close chat">✕</button>
+      </div>
+
+      <div style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;">
+        ${props.chatMessages.length === 0 ? html`
+          <div class="muted" style="font-size:12px;text-align:center;padding:20px 0;">
+            Ask me to create a workflow.<br/>
+            <span style="font-size:11px;opacity:0.7;">e.g. "Create a flow that posts to Slack when a Basecamp todo is assigned to me"</span>
+          </div>
+        ` : nothing}
+        ${props.chatMessages.map((msg) => html`
+          <div style="
+            display: flex;
+            flex-direction: column;
+            align-items: ${msg.role === "user" ? "flex-end" : "flex-start"};
+          ">
+            <div style="
+              max-width: 90%;
+              padding: 8px 10px;
+              border-radius: 8px;
+              font-size: 13px;
+              line-height: 1.4;
+              background: ${msg.role === "user" ? "var(--color-primary, #4a90d9)" : "var(--surface2, #2a2a2a)"};
+              color: ${msg.role === "user" ? "#fff" : "inherit"};
+              white-space: pre-wrap;
+              word-break: break-word;
+            ">${msg.content}</div>
+          </div>
+        `)}
+        ${props.chatSending ? html`
+          <div style="display:flex;align-items:flex-start;">
+            <div style="padding:8px 10px;border-radius:8px;font-size:13px;background:var(--surface2,#2a2a2a);">
+              <span class="muted">Thinking...</span>
+            </div>
+          </div>
+        ` : nothing}
+      </div>
+
+      <div style="border-top:1px solid var(--border);padding:10px 12px;flex-shrink:0;">
+        <div style="display:flex;gap:8px;align-items:flex-end;">
+          <textarea
+            style="flex:1;min-width:0;height:64px;resize:none;font-size:13px;"
+            .value=${props.chatDraft}
+            @input=${(e: Event) => props.onChatDraftChange((e.target as HTMLTextAreaElement).value)}
+            @keydown=${(e: KeyboardEvent) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (props.chatDraft.trim() && !props.chatSending) props.onChatSend();
+              }
+            }}
+            placeholder="Describe your automation... (Enter to send)"
+            ?disabled=${!props.connected || props.chatSending}
+          ></textarea>
+          <button
+            class="btn btn--primary btn--sm"
+            style="flex-shrink:0;align-self:flex-end;"
+            @click=${() => props.onChatSend()}
+            ?disabled=${!props.connected || !props.chatDraft.trim() || props.chatSending}
+          >${props.chatSending ? "..." : "Send"}</button>
+        </div>
+        <div class="muted" style="font-size:10px;margin-top:4px;">Enter to send · Shift+Enter for new line</div>
+      </div>
+    </div>
+  `;
+
+  // ─── Main layout ───────────────────────────────────────────────────
+  const PANEL_TABS: Array<{ id: "workflows" | "templates" | "runs"; label: string }> = [
+    { id: "workflows", label: "Workflows" },
+    { id: "templates", label: "Templates" },
+    { id: "runs", label: "Runs" },
+  ];
+
+  return html`
+    <div style="
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      overflow: hidden;
+    ">
+      <!-- toolbar -->
+      <div style="
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface, #1e1e1e);
+        flex-shrink: 0;
+      ">
+        <button
+          class="btn btn--sm ${props.panelOpen ? "btn--primary" : "btn--secondary"}"
+          @click=${() => props.onPanelToggle()}
+          title="${props.panelOpen ? "Hide panel" : "Show panel"}"
+        >
+          ≡ ${props.panelOpen ? "Hide" : "Show"} Panel
+        </button>
+
+        ${props.panelOpen ? PANEL_TABS.map((tab) => html`
+          <button
+            class="btn btn--sm ${props.panelTab === tab.id ? "btn--primary" : ""}"
+            @click=${() => props.onPanelTabChange(tab.id)}
+          >${tab.label}</button>
+        `) : nothing}
+
+        <div style="flex:1;"></div>
+
+        ${props.selectedFlowLabel ? html`
+          <span class="muted" style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;">
+            Editing: <strong>${props.selectedFlowLabel}</strong>
+          </span>
+        ` : nothing}
+
+        <button
+          class="btn btn--sm ${props.chatOpen ? "btn--primary" : "btn--secondary"}"
+          @click=${() => props.onChatToggle()}
+          title="AI Workflow Assistant"
+        >
+          AI Assistant ${props.chatOpen ? "▶" : "◀"}
+        </button>
+      </div>
+
+      <!-- main row -->
+      <div style="
+        display: flex;
+        flex: 1;
+        overflow: hidden;
+        min-height: 0;
+      ">
+        <!-- left panel -->
+        ${props.panelOpen ? html`
+          <div style="
+            width: 280px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid var(--border);
+            background: var(--surface, #1e1e1e);
+            overflow: hidden;
+          ">
+            ${props.panelTab === "workflows" ? panelWorkflows : nothing}
+            ${props.panelTab === "templates" ? panelTemplates : nothing}
+            ${props.panelTab === "runs" ? panelRuns : nothing}
+          </div>
+        ` : nothing}
+
+        <!-- n8n iframe -->
+        <div style="flex:1;min-width:0;position:relative;overflow:hidden;">
+          <iframe
+            src=${props.embedUrl}
+            title="n8n Workflow Canvas"
+            style="width:100%;height:100%;border:0;display:block;background:#1a1a1a;"
+            allow="clipboard-read; clipboard-write"
+          ></iframe>
+        </div>
+
+        <!-- right chat panel -->
+        ${props.chatOpen ? chatPanel : nothing}
+      </div>
+    </div>
   `;
 }

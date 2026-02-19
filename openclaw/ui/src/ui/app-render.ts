@@ -631,15 +631,6 @@ export function renderApp(state: AppViewState) {
                       triggerPayloadDraft: state.apFlowTriggerPayloadDraft,
                       mutating: state.apFlowMutating,
                       mutateError: state.apFlowMutateError,
-                      builderPrompt: state.pmosFlowBuilderPrompt,
-                      builderGenerating: state.pmosFlowBuilderGenerating,
-                      builderCommitting: state.pmosFlowBuilderCommitting,
-                      builderError: state.pmosFlowBuilderError,
-                      builderFlowName: state.pmosFlowBuilderFlowName,
-                      builderNodes: state.pmosFlowBuilderNodes,
-                      builderEdges: state.pmosFlowBuilderEdges,
-                      builderOps: state.pmosFlowBuilderOps,
-                      builderLastCommittedFlowId: state.pmosFlowBuilderLastCommittedFlowId,
                       onFlowsQueryChange: (next) => (state.apFlowsQuery = next),
                       onRefresh: () => void state.handlePmosApFlowsLoad(),
                       onCreateNameChange: (next) => (state.apFlowCreateName = next),
@@ -655,10 +646,6 @@ export function renderApp(state: AppViewState) {
                       onTriggerPayloadDraftChange: (next) =>
                         (state.apFlowTriggerPayloadDraft = next),
                       onTriggerWebhook: (opts) => void state.handlePmosApFlowTriggerWebhook(opts),
-                      onBuilderPromptChange: (next) => (state.pmosFlowBuilderPrompt = next),
-                      onBuilderGenerate: () => void state.handlePmosFlowBuilderGenerate(),
-                      onBuilderCommit: () => void state.handlePmosFlowBuilderCommit(),
-                      onBuilderReset: () => state.handlePmosFlowBuilderReset(),
                       runs: state.apRuns ?? [],
                       runsLoading: state.apRunsLoading,
                       runsError: state.apRunsError,
@@ -672,6 +659,17 @@ export function renderApp(state: AppViewState) {
                         state.apFlowTemplateDeployedOk = true;
                         setTimeout(() => { state.apFlowTemplateDeployedOk = false; }, 3000);
                       },
+                      panelOpen: state.automationsPanelOpen,
+                      panelTab: (state.automationsPanelTab === "settings" ? "workflows" : state.automationsPanelTab) as "workflows" | "templates" | "runs",
+                      onPanelToggle: () => { state.automationsPanelOpen = !state.automationsPanelOpen; },
+                      onPanelTabChange: (tab) => { state.automationsPanelTab = tab; },
+                      chatOpen: state.automationsChatOpen,
+                      onChatToggle: () => { state.automationsChatOpen = !state.automationsChatOpen; },
+                      chatMessages: state.workflowChatMessages,
+                      chatDraft: state.workflowChatDraft,
+                      chatSending: state.workflowChatSending,
+                      onChatDraftChange: (next) => { state.workflowChatDraft = next; },
+                      onChatSend: () => void state.handleWorkflowChatSend(),
                     })}
               </div>`
             : nothing
