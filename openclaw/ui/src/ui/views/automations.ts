@@ -2,12 +2,12 @@ import { html, nothing } from "lit";
 import type { WorkflowRunSummary, WorkflowSummary } from "../controllers/pmos-workflows.ts";
 
 const WORKFLOW_TEMPLATES = [
-  { id: "template-basecamp-sync", name: "Basecamp Todo Sync", desc: "Sync Basecamp todos to another service", icon: "🏕️" },
-  { id: "template-ai-response", name: "AI-Powered Response", desc: "Respond to triggers using an AI model", icon: "🤖" },
-  { id: "template-webhook-slack", name: "Webhook → Slack Alert", desc: "Post to Slack when a webhook fires", icon: "💬" },
-  { id: "template-scheduled-report", name: "Scheduled Report", desc: "Generate and send a report on a schedule", icon: "📊" },
-  { id: "template-github-slack", name: "GitHub → Slack", desc: "Notify Slack on GitHub events", icon: "🐙" },
-  { id: "template-database-backup", name: "Database Backup", desc: "Scheduled backup of a data source", icon: "💾" },
+  { id: "template-basecamp-sync", name: "Basecamp Todo Sync", desc: "Sync Basecamp todos to another service", icon: "🏕️", category: "Sync" },
+  { id: "template-ai-response", name: "AI-Powered Response", desc: "Respond to triggers using an AI model", icon: "🤖", category: "AI" },
+  { id: "template-webhook-slack", name: "Webhook → Slack Alert", desc: "Post to Slack when a webhook fires", icon: "💬", category: "Notification" },
+  { id: "template-scheduled-report", name: "Scheduled Report", desc: "Generate and send a report on a schedule", icon: "📊", category: "Reporting" },
+  { id: "template-github-slack", name: "GitHub → Slack", desc: "Notify Slack on GitHub events", icon: "🐙", category: "Notification" },
+  { id: "template-database-backup", name: "Database Backup", desc: "Scheduled backup of a data source", icon: "💾", category: "Maintenance" },
 ];
 
 export type AutomationsProps = {
@@ -167,7 +167,20 @@ export function renderAutomations(props: AutomationsProps) {
             </div>
           `;
         })}
-        ${props.flows.length === 0 && !props.loading ? html`<div class="muted" style="font-size:12px;padding:8px 0;">No workflows yet.</div>` : nothing}
+        ${props.flows.length === 0 && !props.loading ? html`
+            <div style="text-align:center;padding:24px 12px;">
+              <div style="font-size:32px;margin-bottom:12px;">⚡</div>
+              <div style="font-weight:600;margin-bottom:8px;">No workflows yet</div>
+              <div class="muted" style="font-size:12px;margin-bottom:16px;">
+                Create your first automation to get started.
+              </div>
+              <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+                <button class="btn btn--primary btn--sm" @click=${() => props.onPanelTabChange("templates")}>
+                  Browse Templates
+                </button>
+              </div>
+            </div>
+          ` : nothing}
       </div>
 
       ${props.selectedFlowId && props.flowDetails ? html`
@@ -175,12 +188,18 @@ export function renderAutomations(props: AutomationsProps) {
           <div class="card-title" style="margin-bottom:8px;">Selected: <span style="font-weight:normal;font-size:12px;">${props.selectedFlowLabel ?? props.selectedFlowId}</span></div>
 
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
-            <button class="btn btn--sm ${isEnabled ? "" : "btn--primary"}" @click=${() => props.onSetStatus(isEnabled ? "DISABLED" : "ENABLED")} ?disabled=${props.mutating}>
+            <button class="btn btn--sm ${isEnabled ? "" : "btn--primary"}" @click=${() => props.onSetStatus(isEnabled ? "DISABLED" : "ENABLED")} ?disabled=${props.mutating}
+              title="Enable allows this workflow to run when triggered. Disable stops all triggers.">
               ${isEnabled ? "Disable" : "Enable"}
             </button>
             <button class="btn btn--sm" @click=${() => props.onPublish()} ?disabled=${props.mutating}
-              title="Publish makes this workflow visible to all workspace members.">Publish</button>
-            <button class="btn btn--sm btn--danger" @click=${() => props.onDelete()} ?disabled=${props.mutating}>Delete</button>
+              title="Publish makes this workflow visible to all workspace members and activates all triggers.">
+              Publish
+            </button>
+            <button class="btn btn--sm btn--danger" @click=${() => props.onDelete()} ?disabled=${props.mutating}
+              title="Permanently delete this workflow. This cannot be undone.">
+              Delete
+            </button>
           </div>
 
           <div style="display:flex;gap:6px;align-items:stretch;margin-bottom:6px;">
@@ -207,9 +226,13 @@ export function renderAutomations(props: AutomationsProps) {
               ></textarea>
               <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
                 <button class="btn btn--sm btn--primary" @click=${() => props.onTriggerWebhook()} ?disabled=${props.mutating}
-                  title="Send payload to this workflow's webhook now">Trigger now</button>
+                  title="Test this workflow by sending the payload above to its webhook endpoint.">
+                  ▶ Test Trigger
+                </button>
                 <button class="btn btn--sm" @click=${() => props.onTriggerWebhook({ sync: true })} ?disabled=${props.mutating}
-                  title="Sync workflow definition from n8n">Sync</button>
+                  title="Sync the latest workflow definition from n8n (use if you edited it directly in n8n).">
+                  ↻ Sync from n8n
+                </button>
               </div>
             </div>
           </details>
@@ -223,19 +246,31 @@ export function renderAutomations(props: AutomationsProps) {
       ${props.templateDeployedOk ? html`<div class="callout success" style="margin-bottom:10px;font-size:12px;">✓ Template deployed — check your workflows list.</div>` : nothing}
       ${props.templateDeployError ? html`<div class="callout danger" style="margin-bottom:10px;font-size:12px;">${props.templateDeployError}</div>` : nothing}
 
-      <div class="list">
+      <div style="margin-bottom:12px;">
+        <div class="card-title">Workflow Templates</div>
+        <div class="muted" style="font-size:11px;">Pre-built automations you can customize</div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:8px;">
         ${WORKFLOW_TEMPLATES.map((tpl) => html`
-          <div class="list-item">
-            <div class="list-main">
-              <div class="list-title">${tpl.icon} ${tpl.name}</div>
-              <div class="list-sub" style="font-size:11px;">${tpl.desc}</div>
+          <div class="card" style="padding:12px;">
+            <div style="display:flex;align-items:flex-start;gap:10px;">
+              <div style="font-size:24px;flex-shrink:0;">${tpl.icon}</div>
+              <div style="flex:1;min-width:0;">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                  <span style="font-weight:600;font-size:13px;">${tpl.name}</span>
+                  <span class="chip" style="font-size:9px;padding:1px 6px;">${tpl.category}</span>
+                </div>
+                <div class="muted" style="font-size:11px;">${tpl.desc}</div>
+              </div>
             </div>
-            <div class="list-meta">
+            <div style="margin-top:10px;">
               <button
                 class="btn btn--sm btn--primary"
+                style="width:100%;"
                 ?disabled=${!props.connected || props.templateDeploying}
                 @click=${() => props.onDeployTemplate(tpl.id)}
-              >${props.templateDeploying ? "..." : "Deploy"}</button>
+              >${props.templateDeploying ? "Deploying..." : "Use Template"}</button>
             </div>
           </div>
         `)}
@@ -246,26 +281,37 @@ export function renderAutomations(props: AutomationsProps) {
   const panelRuns = html`
     <div style="padding: 12px; overflow-y: auto; height: 100%;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-        <div class="card-title">Execution History</div>
+        <div>
+          <div class="card-title">Execution History</div>
+          <div class="muted" style="font-size:11px;">Recent workflow runs</div>
+        </div>
         <button class="btn btn--sm" @click=${() => props.onLoadRuns()} ?disabled=${!props.connected || props.runsLoading}>
-          ${props.runsLoading ? "Loading..." : "Refresh"}
+          ${props.runsLoading ? "..." : "↻"}
         </button>
       </div>
       ${props.runsError ? html`<div class="callout danger" style="font-size:12px;margin-bottom:8px;">${props.runsError}</div>` : nothing}
-      <div class="list">
-        ${props.runs.map((run) => html`
-          <div class="list-item">
-            <div class="list-main">
-              <div class="list-title mono" style="font-size:11px;">${run.id.slice(0, 8)}…</div>
-              ${run.created ? html`<div class="list-sub" style="font-size:10px;">${run.created}</div>` : nothing}
+      
+      ${props.runs.length === 0 && !props.runsLoading ? html`
+        <div style="text-align:center;padding:24px 12px;">
+          <div style="font-size:24px;margin-bottom:8px;">📋</div>
+          <div class="muted" style="font-size:12px;">No runs yet.</div>
+          <div class="muted" style="font-size:11px;margin-top:4px;">Trigger a workflow to see execution history here.</div>
+        </div>
+      ` : html`
+        <div class="list">
+          ${props.runs.map((run) => html`
+            <div class="list-item">
+              <div class="list-main">
+                <div class="list-title mono" style="font-size:11px;">${run.id.slice(0, 8)}…</div>
+                ${run.created ? html`<div class="list-sub" style="font-size:10px;">${run.created}</div>` : nothing}
+              </div>
+              <div class="list-meta">
+                <span class="chip ${runChipClass(run.status ?? "")}" style="font-size:10px;">${run.status ?? "unknown"}</span>
+              </div>
             </div>
-            <div class="list-meta">
-              <span class="chip ${runChipClass(run.status ?? "")}" style="font-size:10px;">${run.status ?? "unknown"}</span>
-            </div>
-          </div>
-        `)}
-        ${props.runs.length === 0 && !props.runsLoading ? html`<div class="muted" style="font-size:12px;">No runs yet.</div>` : nothing}
-      </div>
+          `)}
+        </div>
+      `}
     </div>
   `;
 
