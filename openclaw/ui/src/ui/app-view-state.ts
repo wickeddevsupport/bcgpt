@@ -182,6 +182,11 @@ export type AppViewState = {
   pmosBasecampSetupError: string | null;
   pmosByokProviders: PmosModelProvider[];
 
+  // Real n8n credentials for the Connections page
+  pmosRealCredentials: Array<{ id: string; name: string; type: string }> | null;
+  pmosRealCredentialsLoading: boolean;
+  pmosRealCredentialsError: string | null;
+
   // PMOS identity/admin (Phase 4)
   pmosAdminDraftsInitialized: boolean;
   pmosAdminLoading: boolean;
@@ -475,6 +480,7 @@ export type AppViewState = {
   handlePmosSetupBasecampInN8n: () => Promise<void>;
   handlePmosIntegrationsClearBcgptKey: () => Promise<void>;
   handlePmosModelProviderChange: (next: PmosModelProvider) => void;
+  handleLoadRealCredentials: () => Promise<void>;
   handlePmosModelSave: () => Promise<void>;
   handlePmosModelClearKey: () => Promise<void>;
   handlePmosApPiecesLoad: () => Promise<void>;

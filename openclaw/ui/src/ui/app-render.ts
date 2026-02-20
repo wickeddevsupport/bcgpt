@@ -732,25 +732,22 @@ export function renderApp(state: AppViewState) {
 
         ${
           state.tab === "connections"
-            ? renderConnections({
-                connectorsStatus: state.pmosConnectorsStatus,
-                connectorsLoading: state.pmosConnectorsLoading,
-                connectorsError: state.pmosConnectorsError,
-                onRefreshConnectors: () => state.handlePmosRefreshConnectors(),
-                onConnectService: (serviceId: string) => {
-                  // Native services → integrations; everything else → automations (n8n credentials)
-                  if (serviceId === "basecamp" || serviceId === "github") {
-                    state.setTab("integrations");
-                  } else {
-                    state.setTab("automations");
-                  }
-                },
-                onDisconnectService: (serviceId: string) => {
-                  // TODO: Implement disconnect
-                  console.log("Disconnect service:", serviceId);
-                },
-                integrationsHref: pathForTab("integrations", state.basePath),
-              })
+            ? (() => {
+                // Lazy-load real credentials when the tab is first opened
+                if (state.pmosRealCredentials === null && !state.pmosRealCredentialsLoading) {
+                  void state.handleLoadRealCredentials();
+                }
+                return renderConnections({
+                  credentials: state.pmosRealCredentials ?? [],
+                  credentialsLoading: state.pmosRealCredentialsLoading,
+                  credentialsError: state.pmosRealCredentialsError,
+                  opsProvisioned: Boolean(state.pmosOpsProvisioningResult?.apiKey) || state.pmosConnectorsStatus?.ops?.reachable === true,
+                  onRefresh: () => void state.handleLoadRealCredentials(),
+                  onAddCredential: () => state.setTab("automations"),
+                  onOpenIntegrations: () => state.setTab("integrations"),
+                  opsUiHref: `${state.basePath ?? ""}/ops-ui/credentials`,
+                });
+              })()
             : nothing
         }
 

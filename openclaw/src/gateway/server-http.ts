@@ -52,6 +52,7 @@ import {
   tunnelN8nWebSocket,
 } from "./pmos-ops-proxy.js";
 import { handleToolsInvokeHttpRequest } from "./tools-invoke-http.js";
+import { handleN8nAiHttpRequest } from "./n8n-ai-http.js";
 
 type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
 
@@ -338,6 +339,9 @@ export function createGatewayHttpServer(opts: {
         return;
       }
       if (await handleWorkspaceConfigHttp(req, res)) {
+        return;
+      }
+      if (await handleN8nAiHttpRequest(req, res)) {
         return;
       }
       if (await handleLocalN8nRequest(req, res)) {

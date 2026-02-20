@@ -302,6 +302,11 @@ export class OpenClawApp extends LitElement {
   @state() pmosBasecampSetupError: string | null = null;
   @state() pmosByokProviders: PmosModelProvider[] = [];
 
+  // Real n8n credentials for the Connections page
+  @state() pmosRealCredentials: Array<{ id: string; name: string; type: string }> | null = null;
+  @state() pmosRealCredentialsLoading = false;
+  @state() pmosRealCredentialsError: string | null = null;
+
   // PMOS identity/admin (Phase 4)
   @state() pmosAdminDraftsInitialized = false;
   @state() pmosAdminLoading = false;
@@ -845,6 +850,24 @@ export class OpenClawApp extends LitElement {
       this.pmosBasecampSetupError = err instanceof Error ? err.message : String(err);
     } finally {
       this.pmosBasecampSetupPending = false;
+    }
+  }
+
+  async handleLoadRealCredentials() {
+    if (!this.client || !this.connected) return;
+    this.pmosRealCredentialsLoading = true;
+    this.pmosRealCredentialsError = null;
+    try {
+      const res = await this.client.request<{ credentials: Array<{ id: string; name: string; type: string }> }>(
+        "pmos.connections.list",
+        {},
+      );
+      this.pmosRealCredentials = res?.credentials ?? [];
+    } catch (err) {
+      this.pmosRealCredentialsError = String(err);
+      this.pmosRealCredentials = [];
+    } finally {
+      this.pmosRealCredentialsLoading = false;
     }
   }
 

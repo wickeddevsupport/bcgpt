@@ -22,6 +22,7 @@ import {
   validateKey,
   markValidated,
 } from "./byok-store.js";
+import { syncByokToN8n } from "./credential-sync.js";
 
 const MAX_BODY_BYTES = 32 * 1024;
 
@@ -96,6 +97,8 @@ export async function handleByokHttp(
         const label = typeof body?.label === "string" ? body.label.trim() : undefined;
         const defaultModel = typeof body?.defaultModel === "string" ? body.defaultModel.trim() : undefined;
         await setKey(workspaceId, provider as AIProvider, apiKey, { label, defaultModel });
+        // Async: sync key to n8n credentials (best-effort, don't block response)
+        void syncByokToN8n(workspaceId, provider).catch(() => undefined);
         sendJson(res, 200, { ok: true, workspaceId, provider });
         return true;
       }

@@ -11,6 +11,116 @@ import { resolvePmosSessionFromRequest } from "./pmos-auth.js";
 import { readWorkspaceConnectors } from "./workspace-connectors.js";
 import { buildN8nAuthHeaders, getOwnerCookie } from "./n8n-auth-bridge.js";
 
+// ── OpenClaw n8n theme injection ──────────────────────────────────────────────
+// Injected into every HTML response from n8n to match OpenClaw's dark theme
+// and remove n8n-specific branding/upgrade prompts.
+const N8N_THEME_CSS = `
+<style id="openclaw-theme">
+/* === OpenClaw n8n Theme Override === */
+
+/* Font */
+:root {
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* Dark background tokens to match OpenClaw */
+:root .dark-theme,
+:root {
+  --color-background-base: #0d0d14 !important;
+  --color-background-xlight: #13131d !important;
+  --color-background-light: #1a1a27 !important;
+  --color-background-medium: #111119 !important;
+  --color-background-dark: #080810 !important;
+  --color-foreground-dark: #e8e8f0 !important;
+  --color-foreground-base: #c8c8d8 !important;
+  --color-foreground-light: #9898b0 !important;
+  --color-foreground-xlight: #6a6a80 !important;
+  --color-primary: #6366f1 !important;
+  --color-primary-tint-1: rgba(99,102,241,0.12) !important;
+  --color-primary-tint-2: rgba(99,102,241,0.06) !important;
+  --color-border: rgba(255,255,255,0.08) !important;
+  --color-border-light: rgba(255,255,255,0.05) !important;
+}
+
+/* Hide n8n top-bar branding / logo wordmark */
+#n8n-logo .logo-text,
+.n8n-logo .logo-text,
+[class*="logo-text"],
+.n8n-logo svg text {
+  display: none !important;
+}
+
+/* Hide hiring banner */
+[data-test-id="banners-stack"],
+.hiring-banner,
+[class*="hiring"],
+.banners-stack {
+  display: none !important;
+}
+
+/* Hide "upgrade" / "enterprise" upsell elements */
+[data-test-id="main-sidebar-upgrade-link"],
+[href*="/settings/usage-and-plan"],
+.upgrade-button,
+.trial-banner,
+[class*="UpgradeBanner"],
+[class*="upgrade-banner"],
+.plan-name-wrapper {
+  display: none !important;
+}
+
+/* Hide "Feature" / "Upgrade to unlock" items in sidebar */
+[class*="enterprise-feature-text"],
+[class*="feature-not-available"] {
+  display: none !important;
+}
+
+/* Slim down the workflow canvas background */
+.workflow-canvas {
+  background: #0d0d14 !important;
+}
+
+/* Tighten node editor panel */
+.node-creator .panel-container {
+  background: #13131d !important;
+}
+
+/* OpenClaw accent on selected/active elements */
+.clickable:hover {
+  color: #6366f1 !important;
+}
+
+.n8n-button--primary,
+[class*="button--primary"] {
+  background: #6366f1 !important;
+  border-color: #6366f1 !important;
+}
+.n8n-button--primary:hover {
+  background: #5254cc !important;
+  border-color: #5254cc !important;
+}
+
+/* Make the header bar slightly more compact */
+.main-header .header-tabs {
+  gap: 4px;
+}
+
+/* Hide n8n community nodes installation prompts in canvas */
+[data-test-id="node-community-notice"] {
+  display: none !important;
+}
+</style>`;
+
+/**
+ * Inject the OpenClaw theme into an n8n HTML response.
+ * Returns modified HTML string with theme CSS inserted before </head>.
+ */
+function injectN8nTheme(html: string): string {
+  const headCloseIdx = html.lastIndexOf("</head>");
+  if (headCloseIdx === -1) return html + N8N_THEME_CSS;
+  return html.slice(0, headCloseIdx) + N8N_THEME_CSS + html.slice(headCloseIdx);
+}
+
 function uniqResolved(items: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -409,6 +519,28 @@ async function proxyUpstream(params: {
   for (const [key, value] of upstream.headers.entries()) {
     if (STRIP_RESPONSE_HEADERS.has(key.toLowerCase())) continue;
     res.setHeader(key, value);
+  }
+
+  // For HTML responses from n8n, buffer and inject our theme CSS
+  const upstreamContentType = upstream.headers.get("content-type") ?? "";
+  if (upstream.body && upstreamContentType.includes("text/html")) {
+    try {
+      const raw = await upstream.text();
+      const themed = injectN8nTheme(raw);
+      const buf = Buffer.from(themed, "utf-8");
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("Content-Length", buf.length);
+      res.removeHeader("transfer-encoding");
+      res.end(buf);
+    } catch {
+      // If buffering fails, fall through to streaming (no theme)
+      if (upstream.body) {
+        Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0]).pipe(res);
+      } else {
+        res.end();
+      }
+    }
+    return;
   }
 
   if (upstream.body) {

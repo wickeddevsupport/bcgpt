@@ -144,11 +144,20 @@ export async function handleTemplateDeploy(
   
   // Persist workflow to n8n via API
   const { createN8nWorkflow } = await import('../n8n-api-client.js');
-  
+
+  // Auto-link credentials to workflow nodes
+  const { fetchWorkspaceCredentials, autoLinkNodeCredentials } = await import('../credential-sync.js');
+  const templateCredentials = await fetchWorkspaceCredentials(workspaceId).catch(() => []);
+  const linkedTemplateNodes = autoLinkNodeCredentials(
+    workflow.nodes as Array<Record<string, unknown>>,
+    templateCredentials,
+  );
+
   const result = await createN8nWorkflow(workspaceId, {
     name: workflow.name,
     active: false,
-    nodes: workflow.nodes,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    nodes: linkedTemplateNodes as any,
     connections: workflow.connections,
     settings: workflow.settings,
     staticData: workflow.staticData,
@@ -157,7 +166,7 @@ export async function handleTemplateDeploy(
     updatedAt: workflow.updatedAt,
     versionId: workflow.versionId,
   });
-  
+
   if (!result.ok) {
     return {
       success: false,
@@ -206,11 +215,20 @@ export async function handleWorkflowConfirm(
   
   // Persist workflow to n8n via API
   const { createN8nWorkflow } = await import('../n8n-api-client.js');
-  
+
+  // Auto-link credentials to workflow nodes based on node types
+  const { fetchWorkspaceCredentials, autoLinkNodeCredentials } = await import('../credential-sync.js');
+  const credentials = await fetchWorkspaceCredentials(workspaceId).catch(() => []);
+  const linkedNodes = autoLinkNodeCredentials(
+    parsed.data.workflow.nodes as Array<Record<string, unknown>>,
+    credentials,
+  );
+
   const result = await createN8nWorkflow(workspaceId, {
     name: parsed.data.workflow.name,
     active: false,
-    nodes: parsed.data.workflow.nodes,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    nodes: linkedNodes as any,
     connections: parsed.data.workflow.connections,
     settings: { executionOrder: 'v1' },
     staticData: null,

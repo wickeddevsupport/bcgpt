@@ -834,7 +834,15 @@ export const pmosHandlers: GatewayRequestHandlers = {
 
       const { callWorkspaceModel, WORKFLOW_ASSISTANT_SYSTEM_PROMPT } = await import("../workflow-ai.js");
 
-      const result = await callWorkspaceModel(workspaceId, WORKFLOW_ASSISTANT_SYSTEM_PROMPT, messages, {
+      // Fetch available credentials and inject into system prompt so AI can reference them
+      const { fetchWorkspaceCredentials, buildCredentialContext } = await import("../credential-sync.js");
+      const availableCredentials = await fetchWorkspaceCredentials(workspaceId).catch(() => []);
+      const credentialContext = buildCredentialContext(availableCredentials);
+      const systemPrompt = credentialContext
+        ? `${WORKFLOW_ASSISTANT_SYSTEM_PROMPT}\n${credentialContext}`
+        : WORKFLOW_ASSISTANT_SYSTEM_PROMPT;
+
+      const result = await callWorkspaceModel(workspaceId, systemPrompt, messages, {
         maxTokens: 2048,
         jsonMode: true,
       });
@@ -855,6 +863,20 @@ export const pmosHandlers: GatewayRequestHandlers = {
       const workflow = parsed.workflow && typeof parsed.workflow === "object" ? parsed.workflow : null;
 
       respond(true, { ok: true, message: assistantMessage, workflow, providerUsed: result.providerUsed }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  // ── Connections: Real n8n credential list ─────────────────────────
+
+  "pmos.connections.list": async ({ respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const { fetchWorkspaceCredentials } = await import("../credential-sync.js");
+      const credentials = await fetchWorkspaceCredentials(workspaceId);
+      respond(true, { credentials }, undefined);
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }

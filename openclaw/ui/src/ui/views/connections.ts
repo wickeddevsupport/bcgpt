@@ -1,259 +1,165 @@
 import { html, nothing } from "lit";
-import type { PmosConnectorsStatus } from "../controllers/pmos-connectors.ts";
-
-export type ConnectionService = {
-  id: string;
-  name: string;
-  icon: string;
-  description: string;
-  category: "productivity" | "communication" | "development" | "data" | "automation";
-  configured: boolean;
-  accountInfo?: string;
-  status?: "connected" | "error" | "pending";
-};
 
 export type ConnectionsProps = {
-  connectorsStatus: PmosConnectorsStatus | null;
-  connectorsLoading: boolean;
-  connectorsError: string | null;
-  onRefreshConnectors: () => void;
-  onConnectService: (serviceId: string) => void;
-  onDisconnectService: (serviceId: string) => void;
-  integrationsHref: string;
+  credentials: Array<{ id: string; name: string; type: string }>;
+  credentialsLoading: boolean;
+  credentialsError: string | null;
+  opsProvisioned: boolean;
+  onRefresh: () => void;
+  onAddCredential: () => void;
+  onOpenIntegrations: () => void;
+  opsUiHref?: string;
 };
 
-const AVAILABLE_SERVICES: Omit<ConnectionService, "configured" | "accountInfo" | "status">[] = [
-  {
-    id: "basecamp",
-    name: "Basecamp",
-    icon: "🏕️",
-    description: "Project management and team collaboration",
-    category: "productivity",
-  },
-  {
-    id: "slack",
-    name: "Slack",
-    icon: "💬",
-    description: "Team messaging and notifications",
-    category: "communication",
-  },
-  {
-    id: "github",
-    name: "GitHub",
-    icon: "🐙",
-    description: "Code repositories and CI/CD",
-    category: "development",
-  },
-  {
-    id: "email",
-    name: "Email (SMTP)",
-    icon: "📧",
-    description: "Send and receive emails",
-    category: "communication",
-  },
-  {
-    id: "google",
-    name: "Google Workspace",
-    icon: "🔷",
-    description: "Gmail, Calendar, Drive, and more",
-    category: "productivity",
-  },
-  {
-    id: "notion",
-    name: "Notion",
-    icon: "📝",
-    description: "Notes, docs, and knowledge base",
-    category: "productivity",
-  },
-  {
-    id: "linear",
-    name: "Linear",
-    icon: "📐",
-    description: "Issue tracking and project management",
-    category: "development",
-  },
-  {
-    id: "jira",
-    name: "Jira",
-    icon: "🧭",
-    description: "Issue and project tracking",
-    category: "development",
-  },
-  {
-    id: "salesforce",
-    name: "Salesforce",
-    icon: "☁️",
-    description: "CRM and sales automation",
-    category: "automation",
-  },
-  {
-    id: "hubspot",
-    name: "HubSpot",
-    icon: "🧡",
-    description: "Marketing, sales, and service",
-    category: "automation",
-  },
-];
+// Human-readable labels + icons for common n8n credential types
+const CRED_TYPE_META: Record<string, { label: string; icon: string; category: string }> = {
+  openAiApi:                { label: "OpenAI",           icon: "⬡", category: "AI" },
+  anthropicApi:             { label: "Anthropic",        icon: "◆", category: "AI" },
+  googlePalmApi:            { label: "Google AI",        icon: "✦", category: "AI" },
+  basecampApi:              { label: "Basecamp",         icon: "🏕️", category: "Productivity" },
+  slackApi:                 { label: "Slack",            icon: "💬", category: "Communication" },
+  githubApi:                { label: "GitHub",           icon: "🐙", category: "Development" },
+  googleMail:               { label: "Gmail",            icon: "📧", category: "Communication" },
+  googleSheetsOAuth2Api:    { label: "Google Sheets",   icon: "📊", category: "Productivity" },
+  notionApi:                { label: "Notion",           icon: "📝", category: "Productivity" },
+  airtableApi:              { label: "Airtable",        icon: "🗃️", category: "Data" },
+  postgres:                 { label: "PostgreSQL",       icon: "🐘", category: "Data" },
+  mySql:                    { label: "MySQL",            icon: "🐬", category: "Data" },
+  redis:                    { label: "Redis",            icon: "🔴", category: "Data" },
+  microsoftTeamsOAuth2Api:  { label: "MS Teams",        icon: "💼", category: "Communication" },
+  discordWebhookApi:        { label: "Discord",          icon: "🎮", category: "Communication" },
+  telegramApi:              { label: "Telegram",         icon: "✈️", category: "Communication" },
+  hubspotApi:               { label: "HubSpot",         icon: "🧡", category: "CRM" },
+  salesforceOAuth2Api:      { label: "Salesforce",      icon: "☁️", category: "CRM" },
+  linearApi:                { label: "Linear",           icon: "📐", category: "Development" },
+  jiraSoftwareCloudApi:     { label: "Jira",            icon: "🧭", category: "Development" },
+  trelloApi:                { label: "Trello",           icon: "📌", category: "Development" },
+  asanaApi:                 { label: "Asana",            icon: "🗂️", category: "Development" },
+  pipedriveApi:             { label: "Pipedrive",       icon: "🔁", category: "CRM" },
+  imap:                     { label: "Email (IMAP)",    icon: "📨", category: "Communication" },
+  smtp:                     { label: "Email (SMTP)",    icon: "📤", category: "Communication" },
+};
 
-function getServiceStatus(serviceId: string, connectorsStatus: PmosConnectorsStatus | null): {
-  configured: boolean;
-  accountInfo?: string;
-  status?: "connected" | "error" | "pending";
-} {
-  if (!connectorsStatus) {
-    return { configured: false };
-  }
-  
-  // Map service IDs to connector status
-  if (serviceId === "ops" || serviceId === "basecamp") {
-    const ops = connectorsStatus.ops;
-    if (!ops?.configured) return { configured: false };
-    return {
-      configured: true,
-      accountInfo: ops.reachable ? "Connected" : "Connection issue",
-      status: ops.reachable ? "connected" : "error",
-    };
-  }
-  
-  if (serviceId === "bcgpt" || serviceId === "github") {
-    const bcgpt = connectorsStatus.bcgpt;
-    if (!bcgpt?.configured) return { configured: false };
-    return {
-      configured: true,
-      accountInfo: bcgpt.authOk ? "Authenticated" : "Auth required",
-      status: bcgpt.authOk ? "connected" : "error",
-    };
-  }
-  
-  // Other services not yet implemented
-  return { configured: false };
+function credentialMeta(type: string) {
+  return CRED_TYPE_META[type] ?? { label: type, icon: "🔗", category: "Other" };
 }
 
 export function renderConnections(props: ConnectionsProps) {
-  const services: ConnectionService[] = AVAILABLE_SERVICES.map((service) => {
-    const status = getServiceStatus(service.id, props.connectorsStatus);
-    return { ...service, ...status };
-  });
-  
-  const connectedServices = services.filter((s) => s.configured);
-  const availableServices = services.filter((s) => !s.configured);
-  
+  const { credentials, credentialsLoading, credentialsError, opsProvisioned } = props;
+
+  const grouped = new Map<string, Array<{ id: string; name: string; type: string }>>();
+  for (const cred of credentials) {
+    const { category } = credentialMeta(cred.type);
+    const list = grouped.get(category) ?? [];
+    list.push(cred);
+    grouped.set(category, list);
+  }
+  const categories = Array.from(grouped.keys()).sort();
+
   return html`
     <div class="page-header">
       <div class="page-title">Connections</div>
-      <div class="page-subtitle">Connect the services your AI agents will use</div>
+      <div class="page-subtitle">Services connected to your automation workspace</div>
     </div>
-    
-    ${props.connectorsError
-      ? html`
-        <div class="callout danger" style="margin-bottom: 18px;">
-          <strong>Connection error:</strong> ${props.connectorsError}
-          <button class="btn btn--sm" @click=${() => props.onRefreshConnectors()} ?disabled=${props.connectorsLoading}>
-            Retry
-          </button>
+
+    <!-- Status bar -->
+    <section class="card" style="margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 16px;">
+        <div>
+          <div style="font-size: 13px; font-weight: 600;">Workflow Engine</div>
+          <div class="muted" style="font-size: 12px;">${opsProvisioned ? "Ready — n8n running" : "Not yet provisioned"}</div>
         </div>
-      `
-      : nothing}
-    
-    <!-- Connected Services -->
-    <section class="card" style="margin-bottom: 18px;">
-      <div class="card-title">Connected Services</div>
-      <div class="card-sub">These services are available to your AI agents</div>
-      
-      ${
-        connectedServices.length === 0
-          ? html`
-            <div class="muted" style="padding: 24px; text-align: center;">
-              No services connected yet. Connect a service below to get started.
-            </div>
-          `
-          : html`
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 16px;">
-              ${connectedServices.map((service) => html`
-                <div class="card" style="padding: 16px;">
-                  <div class="row" style="gap: 12px; align-items: flex-start;">
-                    <div style="font-size: 24px;">${service.icon}</div>
-                    <div style="flex: 1;">
-                      <div style="font-weight: 600;">${service.name}</div>
-                      <div class="muted">${service.description}</div>
-                      ${service.accountInfo
-                        ? html`<div style="margin-top: 4px;"><code class="mono">${service.accountInfo}</code></div>`
-                        : nothing}
-                    </div>
-                    <span class="chip ${service.status === "connected" ? "chip-ok" : "chip-warn"}">
-                      ${service.status === "connected" ? "Connected" : "Issue"}
-                    </span>
-                  </div>
-                  <div class="row" style="gap: 8px; margin-top: 12px;">
-                    <button class="btn btn--sm" @click=${() => props.onConnectService(service.id)}>
-                      Configure
-                    </button>
-                    <button class="btn btn--sm btn--danger" @click=${() => props.onDisconnectService(service.id)}>
-                      Disconnect
-                    </button>
-                  </div>
-                </div>
-              `)}
-            </div>
-          `
-      }
-    </section>
-    
-    <!-- Available Services -->
-    <section class="card" style="margin-bottom: 18px;">
-      <div class="card-title">Available Services</div>
-      <div class="card-sub">Connect services to expand your agents' capabilities. Some require setup in the Workflow Engine.</div>
-      
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 16px;">
-        ${availableServices.map((service) => {
-          const isNative = service.id === 'basecamp' || service.id === 'github';
-          return html`
-            <div class="card" style="padding: 16px;">
-              <div class="row" style="gap: 12px; align-items: flex-start;">
-                <div style="font-size: 24px;">${service.icon}</div>
-                <div style="flex: 1;">
-                  <div style="font-weight: 600;">${service.name}</div>
-                  <div class="muted">${service.description}</div>
-                </div>
-              </div>
-              <div style="margin-top: 12px; display: flex; gap: 8px; align-items: center;">
-                <button
-                  class="btn btn--sm ${isNative ? 'btn--primary' : 'btn--secondary'}"
-                  @click=${() => props.onConnectService(service.id)}
-                  ?disabled=${!isNative}
-                  title=${isNative
-                    ? 'Connect this service directly'
-                    : 'Available through Workflow Engine nodes'}
-                >
-                  ${isNative ? 'Connect' : 'Use in Workflows'}
-                </button>
-                ${!isNative ? html`
-                  <a href="${props.integrationsHref}" class="muted" style="font-size: 11px;">
-                    Setup →
-                  </a>
-                ` : nothing}
-              </div>
-            </div>
-          `;
-        })}
+        <span class="chip ${opsProvisioned ? "chip-ok" : "chip-warn"}">
+          ${opsProvisioned ? "Online" : "Offline"}
+        </span>
       </div>
-    </section>
-    
-    <!-- Custom API -->
-    <section class="card" style="margin-bottom: 18px;">
-      <div class="card-title">Custom Integration</div>
-      <div class="card-sub">Connect to any REST API with custom configuration</div>
-      
-      <div style="padding: 16px;">
-        <div class="muted" style="margin-bottom: 12px;">
-          Add a custom API connection to integrate with services not listed above.
-          Your agents can use any HTTP endpoint you configure.
-        </div>
-        <button class="btn btn--secondary" @click=${() => props.onConnectService("custom-api")}>
-          + Add Custom API
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <button class="btn btn--secondary" ?disabled=${credentialsLoading} @click=${() => props.onRefresh()}>
+          ${credentialsLoading ? "Loading…" : "Refresh"}
         </button>
+        ${opsProvisioned
+          ? html`
+            <a
+              class="btn btn--primary"
+              href="${props.opsUiHref ?? "/ops-ui/credentials"}"
+              target="_parent"
+              style="text-decoration: none;"
+            >
+              + Add Credential
+            </a>`
+          : html`
+            <button class="btn btn--primary" @click=${() => props.onOpenIntegrations()}>
+              Set up Workflow Engine →
+            </button>`}
       </div>
     </section>
+
+    ${credentialsError
+      ? html`<div class="callout danger" style="margin-bottom: 16px;">${credentialsError}</div>`
+      : nothing}
+
+    ${credentialsLoading && credentials.length === 0
+      ? html`
+        <div style="display: flex; align-items: center; gap: 12px; padding: 32px; justify-content: center;">
+          <span class="spinner"></span>
+          <span class="muted">Loading credentials from Workflow Engine…</span>
+        </div>`
+      : credentials.length === 0
+        ? html`
+          <section class="card" style="text-align: center; padding: 40px 24px;">
+            <div style="font-size: 32px; margin-bottom: 12px;">🔗</div>
+            <div style="font-weight: 600; margin-bottom: 8px;">No credentials configured yet</div>
+            <div class="muted" style="margin-bottom: 20px; max-width: 400px; margin-left: auto; margin-right: auto;">
+              Credentials let your workflows connect to external services.
+              AI keys you save in Integrations are synced here automatically.
+              Add more via the Workflow Engine.
+            </div>
+            ${opsProvisioned
+              ? html`
+                <a
+                  class="btn btn--primary"
+                  href="${props.opsUiHref ?? "/ops-ui/credentials"}"
+                  target="_parent"
+                  style="text-decoration: none;"
+                >
+                  Open Workflow Engine to add credentials
+                </a>`
+              : html`
+                <button class="btn btn--primary" @click=${() => props.onOpenIntegrations()}>
+                  Go to Integrations to configure
+                </button>`}
+          </section>`
+        : html`
+          ${categories.map(category => html`
+            <section style="margin-bottom: 18px;">
+              <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary, #a0a0b0); margin-bottom: 10px; padding: 0 2px;">
+                ${category}
+              </div>
+              <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px;">
+                ${(grouped.get(category) ?? []).map(cred => {
+                  const meta = credentialMeta(cred.type);
+                  return html`
+                    <div class="card" style="padding: 14px 16px; display: flex; align-items: center; gap: 12px;">
+                      <div style="font-size: 22px; flex-shrink: 0;">${meta.icon}</div>
+                      <div style="flex: 1; min-width: 0;">
+                        <div style="font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${cred.name}</div>
+                        <div class="muted" style="font-size: 11px;">${meta.label}</div>
+                      </div>
+                      <span class="chip chip-ok" style="flex-shrink: 0;">Configured</span>
+                    </div>
+                  `;
+                })}
+              </div>
+            </section>
+          `)}
+
+          <!-- "Add more" footer -->
+          <div class="muted" style="font-size: 12px; text-align: center; margin-top: 8px;">
+            ${opsProvisioned
+              ? html`To add more credentials, <a href="${props.opsUiHref ?? "/ops-ui/credentials"}" target="_parent">open the Workflow Engine</a>.`
+              : html`Set up the Workflow Engine in <button class="link-btn" @click=${() => props.onOpenIntegrations()}>Integrations</button> to add more.`}
+          </div>
+        `}
   `;
 }
 
