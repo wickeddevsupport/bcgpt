@@ -502,7 +502,20 @@ export function renderAutomations(props: AutomationsProps) {
         </div>
 
         <!-- right chat panel -->
-        ${props.chatOpen ? chatPanel : nothing}
+        ${props.chatOpen ? html`
+          <div style="width: 350px; min-width: 350px; flex-shrink: 0; border-left: 1px solid var(--border); display: flex; flex-direction: column; height: 100%;">
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border);">
+              <span style="font-weight: 600;">Chat</span>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <a href=${props.chatHref} style="font-size: 12px; opacity: 0.7;">Open full →</a>
+                <button class="btn btn--sm" @click=${() => props.onChatToggle()}>✕</button>
+              </div>
+            </div>
+            <div style="flex: 1; overflow: hidden;">
+              ${renderChat(props.chatProps)}
+            </div>
+          </div>
+        ` : nothing}
       </div>
     </div>
   `;
