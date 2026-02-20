@@ -362,6 +362,10 @@ export const chatHandlers: GatewayRequestHandlers = {
     });
   },
   "chat.send": async ({ params, respond, context, client }) => {
+    // Set BYOK workspace context for API key resolution
+    const { setByokWorkspaceContext } = await import("../../agents/model-auth.js");
+    setByokWorkspaceContext(client?.pmosWorkspaceId ?? null);
+    
     if (!validateChatSendParams(params)) {
       respond(
         false,

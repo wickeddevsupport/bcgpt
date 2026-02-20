@@ -44,6 +44,10 @@ import { injectTimestamp, timestampOptsFromConfig } from "./agent-timestamp.js";
 
 export const agentHandlers: GatewayRequestHandlers = {
   agent: async ({ params, respond, context, client }) => {
+    // Set BYOK workspace context for API key resolution
+    const { setByokWorkspaceContext } = await import("../../agents/model-auth.js");
+    setByokWorkspaceContext(client?.pmosWorkspaceId ?? null);
+    
     const p = params;
     if (!validateAgentParams(p)) {
       respond(
