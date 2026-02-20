@@ -15,7 +15,7 @@ import { CONFIG_DIR, ensureDir } from "../utils.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
-export type AIProvider = "openai" | "anthropic" | "google" | "zai" | "openrouter" | "kilo" | "azure" | "custom";
+export type AIProvider = "openai" | "anthropic" | "google" | "zai" | "openrouter" | "kilo" | "moonshot" | "azure" | "custom";
 
 export interface ByokEntry {
   provider: AIProvider;
