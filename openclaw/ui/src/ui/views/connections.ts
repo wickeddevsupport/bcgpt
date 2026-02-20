@@ -40,8 +40,21 @@ const CRED_TYPE_META: Record<string, { label: string; icon: string; category: st
   smtp:                     { label: "Email (SMTP)",    icon: "📤", category: "Communication" },
 };
 
-function credentialMeta(type: string) {
-  return CRED_TYPE_META[type] ?? { label: type, icon: "🔗", category: "Other" };
+// Auto-generate metadata for unknown credential types
+function credentialMeta(type: string): { label: string; icon: string; category: string } {
+  const known = CRED_TYPE_META[type];
+  if (known) return known;
+
+  // Auto-generate for unknown types (e.g., basecampApi → Basecamp)
+  const label = type
+    .replace(/Api$/i, "")
+    .replace(/([A-Z])/g, " $1")
+    .trim();
+  return {
+    label: label || type,
+    icon: "🔗",
+    category: "Other",
+  };
 }
 
 export function renderConnections(props: ConnectionsProps) {

@@ -186,7 +186,52 @@ export async function callWorkspaceModel(
 
 // ─── n8n node catalog for the system prompt ──────────────────────────────────
 
-export const N8N_NODE_CATALOG = `
+// Dynamic n8n node catalog - fetches from n8n API with caching
+const NODE_CATALOG_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+let nodeCatalogCache: { catalog: string; fetchedAt: number } | null = null;
+
+async function fetchN8nNodeTypes(n8nBaseUrl: string): Promise<string> {
+  try {
+    const res = await fetch(`${n8nBaseUrl}/rest/node-types`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) throw new Error(`Failed to fetch node types: ${res.status}`);
+    const data = (await res.json()) as {
+      data?: Array<{ name: string; displayName: string; description?: string }>;
+    };
+
+    const nodes = data.data ?? [];
+    const triggers = nodes.filter((n) => n.name.toLowerCase().includes("trigger"));
+    const actions = nodes.filter((n) => !n.name.toLowerCase().includes("trigger"));
+
+    return `
+## Available n8n Node Types (fetched from your n8n instance)
+
+### Triggers
+${triggers.map((n) => `- ${n.name} — ${n.description ?? n.displayName}`).join("\n")}
+
+### Actions
+${actions.map((n) => `- ${n.name} — ${n.description ?? n.displayName}`).join("\n")}
+`;
+  } catch {
+    return N8N_NODE_CATALOG_FALLBACK;
+  }
+}
+
+export async function getN8nNodeCatalog(n8nBaseUrl?: string): Promise<string> {
+  const now = Date.now();
+  if (nodeCatalogCache && now - nodeCatalogCache.fetchedAt < NODE_CATALOG_CACHE_TTL_MS) {
+    return nodeCatalogCache.catalog;
+  }
+
+  const url = n8nBaseUrl ?? process.env.N8N_EMBED_URL ?? "http://127.0.0.1:5678";
+  const catalog = await fetchN8nNodeTypes(url);
+  nodeCatalogCache = { catalog, fetchedAt: now };
+  return catalog;
+}
+
+// Fallback catalog if n8n is unavailable
+const N8N_NODE_CATALOG_FALLBACK = `
 ## Available n8n Node Types
 
 ### Triggers (workflow starts with one of these)
