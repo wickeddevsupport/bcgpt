@@ -666,6 +666,8 @@ export function renderApp(state: AppViewState) {
                       onPanelToggle: () => { state.automationsPanelOpen = !state.automationsPanelOpen; },
                       onPanelTabChange: (tab) => { state.automationsPanelTab = tab; },
                       chatOpen: state.automationsChatOpen,
+                      currentModel: state.pmosModelConfigured ? `${state.pmosModelProvider}/${state.pmosModelId}` : undefined,
+                      currentModelProvider: state.pmosModelConfigured ? state.pmosModelProvider : undefined,
                       onChatToggle: () => { state.automationsChatOpen = !state.automationsChatOpen; },
                       chatMessages: state.workflowChatMessages,
                       chatDraft: state.workflowChatDraft,

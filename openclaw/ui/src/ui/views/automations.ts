@@ -58,6 +58,8 @@ export type AutomationsProps = {
 
   // AI Chat (right panel)
   chatOpen: boolean;
+  currentModel?: string;  // Current model being used
+  currentModelProvider?: string;  // Provider of current model
   onChatToggle: () => void;
   chatMessages: Array<{ role: "user" | "assistant"; content: string }>;
   chatDraft: string;
@@ -347,7 +349,13 @@ export function renderAutomations(props: AutomationsProps) {
             ?disabled=${!props.connected || !props.chatDraft.trim() || props.chatSending}
           >${props.chatSending ? "..." : "Send"}</button>
         </div>
-        <div class="muted" style="font-size:10px;margin-top:4px;">Enter to send · Shift+Enter for new line</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;">
+          <div class="muted" style="font-size:10px;">Enter to send · Shift+Enter for new line</div>
+          ${props.currentModel
+            ? html`<span class="chip" style="font-size:9px;padding:1px 6px;">${props.currentModelProvider ?? 'AI'} / ${props.currentModel?.includes('/') ? props.currentModel.split('/').pop() : props.currentModel}</span>`
+            : html`<a href=${props.integrationsHref} class="muted" style="font-size:9px;">⚠ No model</a>`
+          }
+        </div>
       </div>
     </div>
   `;
