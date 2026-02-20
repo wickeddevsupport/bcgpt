@@ -418,6 +418,37 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 
+  "pmos.auth.check": async ({ params, respond, context, client }) => {
+    // Check if a provider has API key available from ANY source (not just BYOK)
+    try {
+      const p = params as Record<string, unknown> | undefined;
+      const provider = typeof p?.provider === "string" ? p.provider.trim() : "";
+      if (!provider) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "provider is required"));
+        return;
+      }
+
+      // Set BYOK workspace context for resolution
+      const { setByokWorkspaceContext } = await import("../../agents/model-auth.js");
+      setByokWorkspaceContext(client?.pmosWorkspaceId ?? null);
+
+      const { resolveApiKeyForProvider } = await import("../../agents/model-auth.js");
+      const result = await resolveApiKeyForProvider({
+        provider,
+        cfg: context.cfg,
+        api: context.api,
+      });
+      respond(true, {
+        provider,
+        configured: result.mode !== "none",
+        source: result.source ?? null,
+        mode: result.mode,
+      }, undefined);
+    } catch (err) {
+      respond(true, { provider: "", configured: false, source: null, mode: "none" }, undefined);
+    }
+  },
+
   // ── Chat-to-Workflow Creation ──────────────────────────────────────
 
   "pmos.workflow.create": async ({ params, respond, client }) => {

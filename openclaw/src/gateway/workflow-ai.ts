@@ -265,7 +265,7 @@ Always respond with a JSON object in this exact format:
     "name": "Workflow name",
     "nodes": [
       {
-        "id": "node_1",
+        "id": "uuid-here",
         "name": "Human-readable name",
         "type": "n8n-nodes-base.scheduleTrigger",
         "typeVersion": 1,
@@ -289,4 +289,33 @@ Always respond with a JSON object in this exact format:
 - If the user asks a question, answer it clearly without generating a workflow
 - If the request is ambiguous, ask a clarifying question instead of guessing
 - Always explain what the workflow does in simple language
-- Respond ONLY with the JSON object — no markdown fences, no extra text`;
+- When creating workflows, use AT LEAST 5-10 nodes for meaningful automation
+- Include data transformation nodes (set, code, filter) when needed
+- Include error handling and conditional logic (if, switch) when appropriate
+- Respond ONLY with the JSON object — no markdown fences, no extra text
+
+## Example: Creating a Basecamp Todo Sync Workflow
+
+User: "Create a workflow that syncs new Basecamp todos to Slack and creates a GitHub issue"
+
+Response:
+{
+  "message": "I'll create a workflow that: 1) Triggers when a new todo is created in Basecamp, 2) Formats the data, 3) Sends a notification to Slack, 4) Creates a GitHub issue for tracking. This uses 7 nodes for robust automation.",
+  "workflow": {
+    "name": "Basecamp Todo to Slack and GitHub",
+    "nodes": [
+      {"id": "trigger-1", "name": "Basecamp Trigger", "type": "n8n-nodes-basecamp.basecampTrigger", "typeVersion": 1, "position": [250, 300], "parameters": {"event": "todo.created"}},
+      {"id": "set-1", "name": "Format Todo Data", "type": "n8n-nodes-base.set", "typeVersion": 3, "position": [500, 300], "parameters": {"values": {"string": [{"name": "title", "value": "={{ $json.title }}"}, {"name": "description", "value": "={{ $json.content }}"}]}}},
+      {"id": "slack-1", "name": "Notify Slack", "type": "n8n-nodes-base.slack", "typeVersion": 1, "position": [750, 300], "parameters": {"resource": "message", "operation": "post", "channel": "#notifications", "text": "New Basecamp Todo: {{$json.title}}"}},
+      {"id": "filter-1", "name": "Check Priority", "type": "n8n-nodes-base.if", "typeVersion": 1, "position": [1000, 300], "parameters": {"conditions": {"string": [{"value1": "={{ $json.priority }}", "value2": "high"}]}}},
+      {"id": "github-1", "name": "Create GitHub Issue", "type": "n8n-nodes-base.github", "typeVersion": 1, "position": [1250, 200], "parameters": {"resource": "issue", "operation": "create", "title": "={{ $json.title }}", "body": "={{ $json.description }}"}},
+      {"id": "set-2", "name": "Log Skipped", "type": "n8n-nodes-base.set", "typeVersion": 3, "position": [1250, 400], "parameters": {"values": {"string": [{"name": "status", "value": "skipped_low_priority"}]}}}
+    ],
+    "connections": {
+      "Basecamp Trigger": {"main": [[{"node": "Format Todo Data", "type": "main", "index": 0}]]},
+      "Format Todo Data": {"main": [[{"node": "Notify Slack", "type": "main", "index": 0}]]},
+      "Notify Slack": {"main": [[{"node": "Check Priority", "type": "main", "index": 0}]]},
+      "Check Priority": {"main": [[{"node": "Create GitHub Issue", "type": "main", "index": 0}], [{"node": "Log Skipped", "type": "main", "index": 0}]]}
+    }
+  }
+}`;

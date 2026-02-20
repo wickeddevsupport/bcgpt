@@ -492,11 +492,11 @@ export function renderAutomations(props: AutomationsProps) {
         ` : nothing}
 
         <!-- n8n iframe -->
-        <div style="flex:1;min-width:0;position:relative;overflow:hidden;height:100%;">
+        <div style="flex:1;min-width:0;position:relative;display:flex;flex-direction:column;">
           <iframe
             src=${props.embedUrl}
             title="n8n Workflow Canvas"
-            style="width:100%;height:100%;border:0;display:block;background:#1a1a1a;"
+            style="flex:1;width:100%;border:0;display:block;background:#1a1a1a;min-height:100%;"
             allow="clipboard-read; clipboard-write"
           ></iframe>
         </div>
