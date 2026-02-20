@@ -529,6 +529,8 @@ export function renderApp(state: AppViewState) {
                 chatHref: pathForTab("chat", state.basePath),
                 configHref: pathForTab("config", state.basePath),
                 modelAuthConfigured: hasConfiguredModelAuth(configValue),
+                currentModel: state.pmosModelConfigured ? `${state.pmosModelProvider}/${state.pmosModelId}` : undefined,
+                currentModelProvider: state.pmosModelConfigured ? state.pmosModelProvider : undefined,
                 onSettingsChange: (next) => state.applySettings(next),
                 onConnect: () => state.connect(),
                 onRefreshConnectors: () => state.handlePmosRefreshConnectors(),

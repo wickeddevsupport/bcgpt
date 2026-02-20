@@ -33,6 +33,8 @@ export type DashboardProps = {
   chatHref: string;
   configHref?: string;
   modelAuthConfigured?: boolean;
+  currentModel?: string;  // Current model being used (e.g., "google/gemini-3-flash-preview")
+  currentModelProvider?: string;  // Provider of current model
 
   // ops provisioning UI state (workspace-scoped n8n project + API key)
   opsProvisioning?: boolean;
@@ -224,19 +226,38 @@ export function renderDashboard(props: DashboardProps) {
       </div>
       
       <!-- Natural language input bar -->
-      <div style="margin-top: 16px; display: flex; gap: 8px;">
-        <input
-          type="text"
-          .value=${props.nlDraft}
-          @input=${(e: Event) => props.onNlDraftChange((e.target as HTMLInputElement).value)}
-          @keydown=${(e: KeyboardEvent) => { if (e.key === "Enter" && !e.shiftKey && props.nlDraft.trim() && !props.nlBusy) { e.preventDefault(); props.onAsk(); } }}
-          placeholder="Ask your AI team to do something..."
-          ?disabled=${!props.connected || props.nlBusy}
-          style="flex: 1; padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border);"
-        />
-        <button class="btn primary" ?disabled=${!props.connected || props.nlBusy || !props.nlDraft.trim()} @click=${props.onAsk}>
-          ${props.nlBusy ? "Sending..." : "Ask"}
-        </button>
+      <div style="margin-top: 16px;">
+        <div style="display: flex; gap: 8px;">
+          <input
+            type="text"
+            .value=${props.nlDraft}
+            @input=${(e: Event) => props.onNlDraftChange((e.target as HTMLInputElement).value)}
+            @keydown=${(e: KeyboardEvent) => { if (e.key === "Enter" && !e.shiftKey && props.nlDraft.trim() && !props.nlBusy) { e.preventDefault(); props.onAsk(); } }}
+            placeholder="Ask your AI team to do something..."
+            ?disabled=${!props.connected || props.nlBusy}
+            style="flex: 1; padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border);"
+          />
+          <button class="btn primary" ?disabled=${!props.connected || props.nlBusy || !props.nlDraft.trim()} @click=${props.onAsk}>
+            ${props.nlBusy ? "Sending..." : "Ask"}
+          </button>
+        </div>
+        ${props.currentModel
+          ? html`
+            <div style="margin-top: 6px; display: flex; align-items: center; gap: 8px; font-size: 11px;">
+              <span class="muted">Using:</span>
+              <span class="chip" style="font-size: 10px; padding: 2px 8px;">
+                ${props.currentModelProvider ?? 'AI'} / ${props.currentModel?.includes('/') ? props.currentModel.split('/').pop() : props.currentModel}
+              </span>
+              <a href=${props.integrationsHref} style="opacity: 0.7;">Change</a>
+            </div>
+          `
+          : html`
+            <div style="margin-top: 6px; font-size: 11px;">
+              <span class="chip chip-warn" style="font-size: 10px; padding: 2px 8px;">⚠ No model configured</span>
+              <a href=${props.integrationsHref} style="margin-left: 6px; opacity: 0.7;">Configure in Integrations</a>
+            </div>
+          `
+        }
       </div>
 
       ${props.nlResponse ? html`
