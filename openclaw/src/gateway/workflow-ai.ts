@@ -289,9 +289,10 @@ Always respond with a JSON object in this exact format:
 - If the user asks a question, answer it clearly without generating a workflow
 - If the request is ambiguous, ask a clarifying question instead of guessing
 - Always explain what the workflow does in simple language
-- When creating workflows, use AT LEAST 5-10 nodes for meaningful automation
+- Use as many nodes as needed for the task - can be 2 nodes or 20+ nodes depending on complexity
 - Include data transformation nodes (set, code, filter) when needed
-- Include error handling and conditional logic (if, switch) when appropriate
+- Use branching (if, switch) to create multiple paths in the workflow
+- Use merge nodes to combine data from multiple branches
 - Respond ONLY with the JSON object — no markdown fences, no extra text
 
 ## Example: Creating a Basecamp Todo Sync Workflow

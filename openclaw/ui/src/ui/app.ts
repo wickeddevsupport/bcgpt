@@ -1110,6 +1110,30 @@ export class OpenClawApp extends LitElement {
     messageOverride?: string,
     opts?: Parameters<typeof handleSendChatInternal>[2],
   ) {
+    const message = (messageOverride ?? this.chatMessage ?? "").trim();
+    
+    // Detect workflow creation intent
+    const workflowKeywords = [
+      "create workflow", "make a workflow", "build workflow", "new workflow",
+      "create automation", "make automation", "build automation", "new automation",
+      "create a flow", "make a flow", "build a flow", "new flow",
+      "set up workflow", "setup workflow", "automate this", "workflow that",
+      "n8n workflow", "create an n8n", "build an n8n"
+    ];
+    const isWorkflowIntent = workflowKeywords.some(kw => 
+      message.toLowerCase().includes(kw));
+    
+    if (isWorkflowIntent) {
+      // Route to workflow assistant
+      this.workflowChatDraft = message;
+      this.workflowChatMessages = []; // Start fresh
+      await this.handleWorkflowChatSend();
+      // Switch to automations tab to show the result
+      this.setTab("automations");
+      return;
+    }
+    
+    // Regular chat
     await handleSendChatInternal(
       this as unknown as Parameters<typeof handleSendChatInternal>[0],
       messageOverride,
