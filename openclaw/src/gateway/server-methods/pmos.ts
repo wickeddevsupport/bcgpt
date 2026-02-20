@@ -332,6 +332,17 @@ export const pmosHandlers: GatewayRequestHandlers = {
 
   // ── BYOK (Bring Your Own Keys) ──────────────────────────────────────
 
+  "pmos.config.get": async ({ respond, client }) => {
+    const workspaceId = client?.pmosWorkspaceId;
+    if (!workspaceId) {
+      respond({ ok: false, error: "No workspace context" });
+      return;
+    }
+    const { loadEffectiveWorkspaceConfig } = await import("../workspace-config.js");
+    const config = await loadEffectiveWorkspaceConfig(workspaceId);
+    respond({ ok: true, config });
+  },
+
   "pmos.byok.list": async ({ respond, client }) => {
     try {
       if (!client) throw new Error("client context required");
