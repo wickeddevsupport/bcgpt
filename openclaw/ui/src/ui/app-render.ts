@@ -1566,6 +1566,7 @@ export function renderApp(state: AppViewState) {
                 createModalError: state.createModalError,
                 createModalFormData: state.createModalFormData,
                 availableModels: state.availableModels,
+                configuredProviders: state.pmosByokProviders,
                 availableSkills: state.availableSkills,
                 onCreateModalOpen: () => {
                   state.createModalOpen = true;

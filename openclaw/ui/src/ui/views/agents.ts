@@ -44,6 +44,7 @@ export type CreateAgentModalProps = {
   loading: boolean;
   error: string | null;
   availableModels: string[];
+  configuredProviders: string[];  // Providers with API keys in BYOK
   availableSkills: string[];
   onCancel: () => void;
   onSubmit: () => void;
@@ -97,6 +98,7 @@ export type AgentsProps = {
   createModalError: string | null;
   createModalFormData: CreateAgentFormData;
   availableModels: string[];
+  configuredProviders: string[];  // Providers with API keys in BYOK store
   availableSkills: string[];
   onCreateModalOpen: () => void;
   onCreateModalCancel: () => void;
@@ -2163,20 +2165,26 @@ function renderCreateAgentModal(props: AgentsProps) {
               <option value="">Select a model...</option>
               ${props.availableModels.map(
                 (modelId) => {
+                  // Check if this model's provider is configured
+                  const provider = modelId.includes("/") ? modelId.split("/")[0] : "";
+                  const isConfigured = provider && props.configuredProviders.includes(provider);
                   // Format model ID into readable label
                   const label = modelId.includes("/")
                     ? modelId.split("/").pop()?.replace(/:/g, " ") || modelId
                     : modelId.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
                   return html`
                     <option value=${modelId} ?selected=${form.model === modelId}>
-                      ${label}
+                      ${isConfigured ? "✓ " : ""}${label}
                     </option>
                   `;
                 },
               )}
             </select>
             <div class="muted" style="font-size: 11px; margin-top: 4px;">
-              💡 Configure API keys in <a href="#integrations" @click=${props.onCancel}>Integrations</a>
+              ${props.configuredProviders.length === 0 
+                ? html`⚠️ No API keys configured. <a href="#integrations" @click=${props.onCancel}>Add keys in Integrations</a>`
+                : html`💡 <a href="#integrations" @click=${props.onCancel}>Manage API keys</a>`
+              }
             </div>
           </label>
 
