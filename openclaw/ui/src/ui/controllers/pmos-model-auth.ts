@@ -1,6 +1,6 @@
 import type { GatewayBrowserClient } from "../gateway.ts";
 
-export type PmosModelProvider = "openai" | "anthropic" | "google" | "zai" | "openrouter" | "kilo" | "moonshot" | "custom";
+export type PmosModelProvider = "openai" | "anthropic" | "google" | "zai" | "openrouter" | "kilo" | "moonshot" | "nvidia" | "custom";
 
 export const PMOS_MODEL_PROVIDER_OPTIONS: Array<{
   value: PmosModelProvider;
@@ -14,6 +14,7 @@ export const PMOS_MODEL_PROVIDER_OPTIONS: Array<{
   { value: "openrouter", label: "OpenRouter", defaultModelId: "google/gemini-2.0-flash:free" },
   { value: "kilo", label: "Kilo", defaultModelId: "kilo/z-ai/glm-5:free" },
   { value: "moonshot", label: "Kimi (Moonshot)", defaultModelId: "moonshotai/kimi-k2.5" },
+  { value: "nvidia", label: "NVIDIA NIM", defaultModelId: "minimaxai/minimax-m2.1" },
   { value: "custom", label: "Custom (enter manually)", defaultModelId: "" },
 ];
 
