@@ -274,15 +274,6 @@ export function renderDashboard(props: DashboardProps) {
         <button class="btn btn--secondary" @click=${() => props.onQuickAction("create-workflow")}>Create workflow</button>
         <button class="btn btn--secondary" @click=${() => props.onQuickAction("settings")}>Settings</button>
       </div>
-
-      <!-- Chat - Same as Chat tab -->
-      <div style="margin-top: 20px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-          <span style="font-weight: 600;">Chat</span>
-          <a href=${props.chatHref} style="font-size: 12px; opacity: 0.7;">Open full Chat →</a>
-        </div>
-        ${renderChat(props.chatProps)}
-      </div>
     </section>
 
     <!-- Your AI Team section -->
