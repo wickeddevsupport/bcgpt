@@ -344,6 +344,82 @@ export function renderApp(state: AppViewState) {
     state.setTab("chat");
   }
 
+  // Build chatProps for inline chat panels (dashboard, automations, etc.)
+  const chatProps = {
+    sessionKey: state.sessionKey,
+    onSessionKeyChange: (next: string) => {
+      state.sessionKey = next;
+      state.chatMessage = "";
+      state.chatAttachments = [];
+      state.chatStream = null;
+      state.chatStreamStartedAt = null;
+      state.chatRunId = null;
+      state.chatQueue = [];
+      state.resetToolStream();
+      state.resetChatScroll();
+      state.applySettings({
+        ...state.settings,
+        sessionKey: next,
+        lastActiveSessionKey: next,
+      });
+      void state.loadAssistantIdentity();
+      void loadChatHistory(state);
+      void refreshChatAvatar(state);
+    },
+    thinkingLevel: state.chatThinkingLevel,
+    showThinking,
+    loading: state.chatLoading,
+    sending: state.chatSending,
+    compactionStatus: state.compactionStatus,
+    assistantAvatarUrl: chatAvatarUrl,
+    messages: state.chatMessages,
+    toolMessages: state.chatToolMessages,
+    stream: state.chatStream,
+    streamStartedAt: state.chatStreamStartedAt,
+    draft: state.chatMessage,
+    queue: state.chatQueue,
+    connected: state.connected,
+    canSend: state.connected,
+    disabledReason: chatDisabledReason,
+    error: state.lastError,
+    sessions: state.sessionsResult,
+    focusMode: chatFocus,
+    sidebarOpen: state.chatSidebarOpen,
+    sidebarContent: state.chatSidebarContent,
+    sidebarError: state.chatSidebarError,
+    splitRatio: state.splitRatio,
+    traceEvents: state.pmosTraceEvents,
+    onTraceClear: () => state.handlePmosTraceClear(),
+    onExpandTrace: () => state.setTab("debug"),
+    assistantName: state.assistantName,
+    assistantAvatar: state.assistantAvatar,
+    agentId: agentId,
+    agentName: agent?.identity?.name ?? null,
+    agentEmoji: agent?.identity?.avatar ?? null,
+    attachments: state.chatAttachments,
+    onAttachmentsChange: (attachments: unknown[]) => (state.chatAttachments = attachments as typeof state.chatAttachments),
+    onRefresh: () => void loadChatHistory(state),
+    onToggleFocusMode: () => state.applySettings({ ...state.settings, chatFocusMode: !state.settings.chatFocusMode }),
+    onDraftChange: (next: string) => (state.chatMessage = next),
+    onSend: () => void state.handleSendChat(),
+    onAbort: () => void state.handleAbortChat(),
+    onNewSession: () => {
+      state.sessionKey = "";
+      state.chatMessage = "";
+      state.chatAttachments = [];
+      state.chatMessages = [];
+      state.chatToolMessages = [];
+      state.chatStream = null;
+      state.chatStreamStartedAt = null;
+      state.chatRunId = null;
+      state.chatQueue = [];
+      state.resetToolStream();
+      state.resetChatScroll();
+      void loadChatHistory(state);
+    },
+    onClearError: () => (state.lastError = null),
+  };
+
   return html`
     <div class="shell ${isChat ? "shell--chat" : ""} ${chatFocus ? "shell--chat-focus" : ""} ${state.settings.navCollapsed ? "shell--nav-collapsed" : ""} ${state.onboarding ? "shell--onboarding" : ""}">
       <header class="topbar">
@@ -558,6 +634,8 @@ export function renderApp(state: AppViewState) {
                 onOpenAgentChat: (agentId: string) => {
                   window.location.href = pathForTab("chat", state.basePath) + `?agent=${agentId}`;
                 },
+                // Inline chat panel
+                chatProps,
                 // Inline NL chat
                 nlDraft: state.dashboardNlDraft,
                 nlBusy: state.chatSending,
@@ -674,6 +752,8 @@ export function renderApp(state: AppViewState) {
                       chatSending: state.workflowChatSending,
                       onChatDraftChange: (next) => { state.workflowChatDraft = next; },
                       onChatSend: () => void state.handleWorkflowChatSend(),
+                      // Full chat props for inline chat panel
+                      chatProps,
                     })}
               </div>`
             : nothing

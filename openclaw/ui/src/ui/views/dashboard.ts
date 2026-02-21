@@ -4,6 +4,8 @@ import type { PmosConnectorsStatus } from "../controllers/pmos-connectors.ts";
 import type { PmosExecutionTraceEvent } from "../controllers/pmos-trace.ts";
 import type { AgentsListResult, AgentIdentityResult } from "../types.ts";
 import type { AgentActivitySummary } from "./agents.ts";
+import type { ChatProps } from "./chat.ts";
+import { renderChat } from "./chat.ts";
 import { formatRelativeTimestamp } from "../format.ts";
 
 function getTimeGreeting(): string {
@@ -66,6 +68,8 @@ export type DashboardProps = {
   agentActivityById: Record<string, AgentActivitySummary>;
   agentIdentityById: Record<string, AgentIdentityResult>;
   onOpenAgentChat: (agentId: string) => void;
+  // Inline chat panel
+  chatProps: ChatProps;
 };
 
 function renderStatusPill(label: string, value: string, status: "ok" | "warn") {

@@ -1,5 +1,7 @@
 import { html, nothing } from "lit";
 import type { WorkflowRunSummary, WorkflowSummary } from "../controllers/pmos-workflows.ts";
+import type { ChatProps } from "./chat.ts";
+import { renderChat } from "./chat.ts";
 
 const WORKFLOW_TEMPLATES = [
   { id: "template-basecamp-sync", name: "Basecamp Todo Sync", desc: "Sync Basecamp todos to another service", icon: "🏕️", category: "Sync" },
@@ -66,6 +68,8 @@ export type AutomationsProps = {
   chatSending: boolean;
   onChatDraftChange: (next: string) => void;
   onChatSend: () => void;
+  // Full chat props for inline chat panel
+  chatProps: ChatProps;
 
   onFlowsQueryChange: (next: string) => void;
   onRefresh: () => void;
