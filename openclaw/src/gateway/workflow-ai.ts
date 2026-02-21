@@ -299,7 +299,7 @@ export const WORKFLOW_ASSISTANT_SYSTEM_PROMPT = `You are an expert n8n workflow 
 
 Your job is to help users create, understand, and improve n8n workflows. You know all available n8n nodes and their capabilities.
 
-${N8N_NODE_CATALOG}
+${N8N_NODE_CATALOG_FALLBACK}
 
 ## How to respond
 
