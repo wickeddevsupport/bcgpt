@@ -526,6 +526,112 @@ export async function upsertBasecampCredential(
   }
 }
 
+/**
+ * List all credentials in n8n
+ */
+export async function listN8nCredentials(
+  workspaceId: string,
+): Promise<{ ok: boolean; credentials?: Array<{ id: string; name: string; type: string }>; error?: string }> {
+  const { baseUrl, cookie } = await getN8nContext(workspaceId);
+
+  if (!cookie) {
+    return { ok: false, error: "n8n not reachable or not authenticated" };
+  }
+
+  try {
+    const res = await fetch(`${baseUrl}/rest/credentials`, {
+      method: "GET",
+      headers: {
+        "accept": "application/json",
+        "Cookie": cookie,
+      },
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return { ok: false, error: `Failed to list credentials: ${res.status} ${text.slice(0, 200)}` };
+    }
+
+    const data = await res.json() as { data?: Array<{ id: string; name: string; type: string }> } | Array<{ id: string; name: string; type: string }>;
+    const credentials = Array.isArray(data) ? data : (data.data ?? []);
+    return { ok: true, credentials };
+  } catch (err) {
+    return { ok: false, error: `Failed to list credentials: ${err}` };
+  }
+}
+
+/**
+ * Create a credential in n8n
+ */
+export async function createN8nCredential(
+  workspaceId: string,
+  name: string,
+  type: string,
+  data: Record<string, unknown>,
+): Promise<{ ok: boolean; credentialId?: string; error?: string }> {
+  const { baseUrl, cookie } = await getN8nContext(workspaceId);
+
+  if (!cookie) {
+    return { ok: false, error: "n8n not reachable or not authenticated" };
+  }
+
+  try {
+    const res = await fetch(`${baseUrl}/rest/credentials`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "accept": "application/json",
+        "Cookie": cookie,
+      },
+      body: JSON.stringify({ name, type, data }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return { ok: false, error: `Failed to create credential: ${res.status} ${text.slice(0, 200)}` };
+    }
+
+    const respData = await res.json() as { id?: string; data?: { id: string } };
+    const credentialId = respData.id || respData.data?.id;
+    return { ok: true, credentialId };
+  } catch (err) {
+    return { ok: false, error: `Failed to create credential: ${err}` };
+  }
+}
+
+/**
+ * Delete a credential in n8n
+ */
+export async function deleteN8nCredential(
+  workspaceId: string,
+  credentialId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const { baseUrl, cookie } = await getN8nContext(workspaceId);
+
+  if (!cookie) {
+    return { ok: false, error: "n8n not reachable or not authenticated" };
+  }
+
+  try {
+    const res = await fetch(`${baseUrl}/rest/credentials/${credentialId}`, {
+      method: "DELETE",
+      headers: {
+        "accept": "application/json",
+        "Cookie": cookie,
+      },
+    });
+
+    if (!res.ok && res.status !== 204) {
+      const text = await res.text().catch(() => "");
+      return { ok: false, error: `Failed to delete credential: ${res.status} ${text.slice(0, 200)}` };
+    }
+
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: `Failed to delete credential: ${err}` };
+  }
+}
+
 export default {
   createN8nWorkflow,
   updateN8nWorkflow,

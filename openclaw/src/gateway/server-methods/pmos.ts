@@ -935,4 +935,64 @@ export const pmosHandlers: GatewayRequestHandlers = {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }
   },
+
+  // ── n8n Credentials Management ─────────────────────────────────────
+
+  "pmos.n8n.credentials.list": async ({ respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const { listN8nCredentials } = await import("../n8n-api-client.js");
+      const result = await listN8nCredentials(workspaceId);
+      if (!result.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to list n8n credentials"));
+        return;
+      }
+      respond(true, { credentials: result.credentials }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.n8n.credentials.create": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const p = params as { name?: string; type?: string; data?: Record<string, unknown> } | null;
+      if (!p?.name || !p?.type) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "name and type required"));
+        return;
+      }
+      const { createN8nCredential } = await import("../n8n-api-client.js");
+      const result = await createN8nCredential(workspaceId, p.name, p.type, p.data || {});
+      if (!result.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to create n8n credential"));
+        return;
+      }
+      respond(true, { ok: true, credentialId: result.credentialId }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.n8n.credentials.delete": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const p = params as { credentialId?: string } | null;
+      if (!p?.credentialId) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "credentialId required"));
+        return;
+      }
+      const { deleteN8nCredential } = await import("../n8n-api-client.js");
+      const result = await deleteN8nCredential(workspaceId, p.credentialId);
+      if (!result.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to delete n8n credential"));
+        return;
+      }
+      respond(true, { ok: true }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
 };
