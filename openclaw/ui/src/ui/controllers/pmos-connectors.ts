@@ -46,6 +46,11 @@ export type PmosConnectorsState = {
   // Save fields
   pmosIntegrationsSaving: boolean;
   pmosIntegrationsError: string | null;
+
+  // n8n Credentials
+  pmosN8nCredentials: Array<{ id: string; name: string; type: string }> | null;
+  pmosN8nCredentialsLoading: boolean;
+  pmosN8nCredentialsError: string | null;
 };
 
 function deepClone<T>(value: T): T {
@@ -212,5 +217,22 @@ export async function savePmosConnectorsConfig(
     state.pmosIntegrationsError = String(err);
   } finally {
     state.pmosIntegrationsSaving = false;
+  }
+}
+
+export async function loadPmosN8nCredentials(state: PmosConnectorsState) {
+  if (!state.client || !state.connected) {
+    return;
+  }
+  state.pmosN8nCredentialsLoading = true;
+  state.pmosN8nCredentialsError = null;
+  try {
+    const result = await state.client.request<{ credentials?: Array<{ id: string; name: string; type: string }> }>("pmos.n8n.credentials.list", {});
+    state.pmosN8nCredentials = result.credentials ?? [];
+  } catch (err) {
+    state.pmosN8nCredentialsError = String(err);
+    state.pmosN8nCredentials = null;
+  } finally {
+    state.pmosN8nCredentialsLoading = false;
   }
 }

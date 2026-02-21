@@ -83,6 +83,7 @@ import { type ChatAttachment, type ChatQueueItem, type CronFormState } from "./u
 import {
   hydratePmosConnectorDraftsFromConfig,
   loadPmosConnectorsStatus,
+  loadPmosN8nCredentials,
   savePmosConnectorsConfig,
   type PmosConnectorsStatus,
 } from "./controllers/pmos-connectors.ts";
@@ -276,6 +277,9 @@ export class OpenClawApp extends LitElement {
   @state() pmosConnectorsStatus: PmosConnectorsStatus | null = null;
   @state() pmosConnectorsError: string | null = null;
   @state() pmosConnectorsLastChecked: number | null = null;
+  @state() pmosN8nCredentials: Array<{ id: string; name: string; type: string }> | null = null;
+  @state() pmosN8nCredentialsLoading = false;
+  @state() pmosN8nCredentialsError: string | null = null;
   @state() pmosTraceEvents: PmosExecutionTraceEvent[] = [];
 
   // Wicked Ops (n8n) provisioning per-workspace
@@ -730,6 +734,7 @@ export class OpenClawApp extends LitElement {
 
   async handlePmosRefreshConnectors() {
     await loadPmosConnectorsStatus(this);
+    await loadPmosN8nCredentials(this);
 
     // Refresh workspace-scoped Wicked Ops connectors (if any)
     try {
@@ -802,6 +807,7 @@ export class OpenClawApp extends LitElement {
     hydratePmosConnectorDraftsFromConfig(this);
     await loadPmosModelWorkspaceState(this);
     await loadPmosConnectorsStatus(this);
+    await loadPmosN8nCredentials(this);
 
     // Load any existing workspace-scoped Wicked Ops connectors so the UI can reflect provisioning state
     try {
@@ -833,6 +839,7 @@ export class OpenClawApp extends LitElement {
     hydratePmosConnectorDraftsFromConfig(this);
     await loadPmosModelWorkspaceState(this);
     await loadPmosConnectorsStatus(this);
+    await loadPmosN8nCredentials(this);
     this.pmosBcgptSavedOk = true;
     setTimeout(() => { this.pmosBcgptSavedOk = false; }, 2500);
   }
@@ -878,6 +885,7 @@ export class OpenClawApp extends LitElement {
     hydratePmosConnectorDraftsFromConfig(this);
     await loadPmosModelWorkspaceState(this);
     await loadPmosConnectorsStatus(this);
+    await loadPmosN8nCredentials(this);
   }
 
   async handlePmosProvisionOps(opts?: { projectName?: string }) {

@@ -10,6 +10,7 @@ import { loadAgentSkills } from "./controllers/agent-skills.ts";
 import { loadAgents } from "./controllers/agents.ts";
 import { loadChannels } from "./controllers/channels.ts";
 import { loadChatHistory } from "./controllers/chat.ts";
+import { loadPmosN8nCredentials } from "./controllers/pmos-connectors.ts";
 import {
   applyConfig,
   loadConfig,
@@ -806,6 +807,11 @@ export function renderApp(state: AppViewState) {
                 basecampSetupOk: state.pmosBasecampSetupOk,
                 basecampSetupError: state.pmosBasecampSetupError,
                 onSetupBasecamp: () => void state.handlePmosSetupBasecampInN8n(),
+                // n8n Credentials
+                n8nCredentials: state.pmosN8nCredentials,
+                n8nCredentialsLoading: state.pmosN8nCredentialsLoading,
+                n8nCredentialsError: state.pmosN8nCredentialsError,
+                onRefreshN8nCredentials: () => void loadPmosN8nCredentials(state),
               })
             : nothing
         }

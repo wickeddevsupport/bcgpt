@@ -42,6 +42,12 @@ export type IntegrationsProps = {
   basecampSetupOk?: boolean;
   basecampSetupError?: string | null;
   onSetupBasecamp?: () => void;
+
+  // n8n Credentials
+  n8nCredentials?: Array<{ id: string; name: string; type: string }>;
+  n8nCredentialsLoading?: boolean;
+  n8nCredentialsError?: string | null;
+  onRefreshN8nCredentials?: () => void;
 };
 
 type ProviderOption = {
@@ -348,6 +354,47 @@ export function renderIntegrations(props: IntegrationsProps) {
       ${props.error
         ? html`<div class="callout danger" style="margin-top: 14px;">${props.error}</div>`
         : nothing}
+    </section>
+
+    <!-- n8n Credentials -->
+    <section class="card">
+      <div class="card-title">Workflow Credentials</div>
+      <div class="card-sub">Credentials available in your n8n workflow engine.</div>
+
+      <div class="row" style="margin-top: 16px; align-items: center; gap: 10px;">
+        <button
+          class="btn btn--secondary"
+          ?disabled=${!props.connected || props.n8nCredentialsLoading}
+          @click=${() => props.onRefreshN8nCredentials?.()}
+        >
+          ${props.n8nCredentialsLoading ? "Loading…" : "Refresh Credentials"}
+        </button>
+        <a href="${props.opsProvisioned ? 'https://ops.wickedlab.io/credentials' : '#'}" target="_blank" class="btn btn--secondary" ?disabled=${!props.opsProvisioned}>
+          Manage in n8n →
+        </a>
+      </div>
+
+      ${props.n8nCredentialsError
+        ? html`<div class="callout danger" style="margin-top: 12px; font-size: 12px;">${props.n8nCredentialsError}</div>`
+        : nothing}
+
+      ${props.n8nCredentials && props.n8nCredentials.length > 0
+        ? html`
+          <div class="list" style="margin-top: 12px;">
+            ${props.n8nCredentials.map((cred) => html`
+              <div class="list-item" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border);">
+                <div>
+                  <div style="font-weight: 500;">${cred.name}</div>
+                  <div class="muted" style="font-size: 11px;">${cred.type}</div>
+                </div>
+                <span class="chip chip-ok" style="font-size: 10px;">Ready</span>
+              </div>
+            `)}
+          </div>
+        `
+        : props.n8nCredentials && props.n8nCredentials.length === 0
+          ? html`<div class="muted" style="margin-top: 12px; text-align: center; padding: 20px;">No credentials configured. Click "Manage in n8n" to add credentials.</div>`
+          : nothing}
     </section>
   `;
 }
