@@ -693,5 +693,19 @@ export function renderDashboard(props: DashboardProps) {
         ${props.lastError ? html`<div class="callout danger" style="margin-top: 14px;">${props.lastError}</div>` : nothing}
       </div>
     </section>
+
+    <!-- Chat Panel -->
+    <section class="card" style="margin-top: 18px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div>
+          <div class="card-title">Chat with AI</div>
+          <div class="card-sub">Ask questions, get help, or run tasks</div>
+        </div>
+        <a href=${props.chatHref} style="font-size: 12px; opacity: 0.7;">Open full Chat →</a>
+      </div>
+      <div style="height: 400px; min-height: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 8px;">
+        ${renderChat(props.chatProps)}
+      </div>
+    </section>
   `;
 }

@@ -422,7 +422,7 @@ export function renderAutomations(props: AutomationsProps) {
       display: flex;
       flex-direction: column;
       height: 100%;
-      max-height: 100vh;
+      min-height: 0;
       overflow: hidden;
     ">
       <!-- toolbar -->
@@ -470,10 +470,9 @@ export function renderAutomations(props: AutomationsProps) {
       <!-- main row -->
       <div style="
         display: flex;
-        flex: 1;
+        flex: 1 1 auto;
         overflow: hidden;
         min-height: 0;
-        max-height: calc(100vh - 48px);
       ">
         <!-- left panel -->
         ${props.panelOpen ? html`
@@ -488,6 +487,7 @@ export function renderAutomations(props: AutomationsProps) {
             background: var(--surface, #1e1e1e);
             overflow: hidden;
             height: 100%;
+            min-height: 0;
           ">
             ${props.panelTab === "workflows" ? panelWorkflows : nothing}
             ${props.panelTab === "templates" ? panelTemplates : nothing}
@@ -496,18 +496,18 @@ export function renderAutomations(props: AutomationsProps) {
         ` : nothing}
 
         <!-- n8n iframe -->
-        <div style="flex:1;min-width:0;position:relative;display:flex;flex-direction:column;">
+        <div style="flex:1;min-width:0;position:relative;display:flex;flex-direction:column;min-height:0;height:100%;">
           <iframe
             src=${props.embedUrl}
             title="n8n Workflow Canvas"
-            style="flex:1;width:100%;border:0;display:block;background:#1a1a1a;min-height:100%;"
+            style="flex:1 1 auto;width:100%;height:100%;min-height:0;border:0;display:block;background:#1a1a1a;"
             allow="clipboard-read; clipboard-write"
           ></iframe>
         </div>
 
         <!-- right chat panel -->
         ${props.chatOpen ? html`
-          <div style="width: 350px; min-width: 350px; flex-shrink: 0; border-left: 1px solid var(--border); display: flex; flex-direction: column; height: 100%;">
+          <div style="width: 350px; min-width: 350px; flex-shrink: 0; border-left: 1px solid var(--border); display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden;">
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border);">
               <span style="font-weight: 600;">Chat</span>
               <div style="display: flex; gap: 8px; align-items: center;">
@@ -515,8 +515,10 @@ export function renderAutomations(props: AutomationsProps) {
                 <button class="btn btn--sm" @click=${() => props.onChatToggle()}>✕</button>
               </div>
             </div>
-            <div style="flex: 1; overflow: hidden;">
-              ${renderChat(props.chatProps)}
+            <div style="flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column;">
+              <div style="flex: 1 1 auto; min-height: 0;">
+                ${renderChat(props.chatProps)}
+              </div>
             </div>
           </div>
         ` : nothing}
