@@ -466,6 +466,20 @@ function allowRemoteOpsFallback(): boolean {
   return raw === "1" || raw === "true" || raw === "yes";
 }
 
+async function resolveOpsBaseUrlForRequest(req: IncomingMessage): Promise<string | null> {
+  const global = readGlobalOpsConfig();
+  const session = await resolvePmosSessionFromRequest(req);
+  if (!session.ok) {
+    return global.url || null;
+  }
+
+  const wc = await readWorkspaceConnectors(session.user.workspaceId);
+  const workspaceUrl =
+    typeof wc?.ops?.url === "string" ? wc.ops.url.trim() : "";
+  const resolved = (workspaceUrl || global.url || "").trim();
+  return resolved ? resolved.replace(/\/+$/, "") : null;
+}
+
 async function readBody(req: IncomingMessage): Promise<Buffer> {
   return new Promise<Buffer>((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -581,25 +595,38 @@ export function readLocalN8nConfig(): { url: string; host: string; port: number 
 
 // Best-effort server-side login helper: POSTs credentials to n8n and returns Set-Cookie when available.
 async function attemptN8nLogin(targetBase: string, email: string, password: string) {
+  const loginId = email.trim();
+  const loginPassword = password;
+  if (!loginId || !loginPassword) {
+    return null;
+  }
+
   const endpoints = [
     `${targetBase.replace(/\/+$/, "")}/rest/login`,
     `${targetBase.replace(/\/+$/, "")}/rest/users/login`,
     `${targetBase.replace(/\/+$/, "")}/api/v1/users/login`,
     `${targetBase.replace(/\/+$/, "")}/users/login`,
   ];
+  const payloads: Array<Record<string, unknown>> = [
+    { emailOrLdapLoginId: loginId, password: loginPassword },
+    { email: loginId, password: loginPassword },
+    { username: loginId, password: loginPassword },
+  ];
   for (const ep of endpoints) {
-    try {
-      const res = await fetch(ep, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password }),
-        redirect: "manual",
-      });
-      const sc = res.headers.get("set-cookie");
-      if (sc) return sc;
-      if (res.ok) return null;
-    } catch (err) {
-      // ignore and try next
+    for (const body of payloads) {
+      try {
+        const res = await fetch(ep, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+          redirect: "manual",
+        });
+        const sc = res.headers.get("set-cookie");
+        if (sc) return sc;
+        if (res.ok) return null;
+      } catch (err) {
+        // ignore and try next
+      }
     }
   }
   return null;
@@ -687,6 +714,18 @@ export async function handleLocalN8nRequest(
 
   // No local n8n running — for /rest/* and /form/*, don't intercept
   if (isRestApi || isFormPath) return false;
+
+  const remoteOpsUrl = await resolveOpsBaseUrlForRequest(req);
+  if (remoteOpsUrl) {
+    const authHeaders = await buildN8nAuthHeaders(req, remoteOpsUrl);
+    if (!authHeaders.Cookie && !authHeaders["X-N8N-API-KEY"]) {
+      await attemptAutoLoginForRequest(req, res, remoteOpsUrl);
+    }
+    const targetPath = pathname.slice("/ops-ui".length) || "/";
+    const targetUrl = `${remoteOpsUrl}${targetPath}${url.search}`;
+    await proxyUpstream({ req, res, targetUrl, extraHeaders: authHeaders });
+    return true;
+  }
 
   // For /ops-ui/*, try serving pre-built static bundle
   if (req.method !== "GET" && req.method !== "HEAD") {

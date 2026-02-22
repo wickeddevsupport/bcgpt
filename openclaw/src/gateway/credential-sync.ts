@@ -16,8 +16,56 @@
 
 import { getKey } from "./byok-store.js";
 import { getOrCreateWorkspaceN8nCookie } from "./n8n-auth-bridge.js";
+import { readWorkspaceConnectors } from "./workspace-connectors.js";
+import { readLocalN8nConfig } from "./pmos-ops-proxy.js";
+import { loadConfig } from "../config/config.js";
 
-const N8N_BASE_URL = (process.env.N8N_LOCAL_URL ?? "http://localhost:5678").replace(/\/+$/, "");
+function readConfigString(cfg: unknown, path: string[]): string | null {
+  let current: unknown = cfg;
+  for (const part of path) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) {
+      return null;
+    }
+    current = (current as Record<string, unknown>)[part];
+  }
+  if (typeof current !== "string") {
+    return null;
+  }
+  const trimmed = current.trim();
+  return trimmed ? trimmed : null;
+}
+
+function normalizeBaseUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  return trimmed ? trimmed.replace(/\/+$/, "") : null;
+}
+
+async function resolveWorkspaceN8nBaseUrl(workspaceId: string): Promise<string> {
+  const wc = await readWorkspaceConnectors(workspaceId);
+  const workspaceUrl = normalizeBaseUrl(
+    typeof wc?.ops?.url === "string" ? wc.ops.url : null,
+  );
+  if (workspaceUrl) {
+    return workspaceUrl;
+  }
+
+  const localN8n = readLocalN8nConfig();
+  const localUrl = normalizeBaseUrl(localN8n?.url ?? null);
+  if (localUrl) {
+    return localUrl;
+  }
+
+  const cfg = loadConfig() as unknown;
+  const globalOpsUrl = normalizeBaseUrl(
+    readConfigString(cfg, ["pmos", "connectors", "ops", "url"]),
+  );
+  if (globalOpsUrl) {
+    return globalOpsUrl;
+  }
+
+  return "https://ops.wickedlab.io";
+}
 
 type N8nCredentialType = "openAiApi" | "anthropicApi" | "googlePalmApi";
 
@@ -203,15 +251,16 @@ function credentialName(provider: string): string {
 async function listN8nCredentials(
   workspaceId: string,
 ): Promise<Array<{ id: string; name: string; type: string }>> {
+  const n8nBaseUrl = await resolveWorkspaceN8nBaseUrl(workspaceId);
   const cookie = await getOrCreateWorkspaceN8nCookie({
     workspaceId,
-    n8nBaseUrl: N8N_BASE_URL,
+    n8nBaseUrl,
   });
 
   if (!cookie) return [];
 
   try {
-    const res = await fetch(`${N8N_BASE_URL}/rest/credentials`, {
+    const res = await fetch(`${n8nBaseUrl}/rest/credentials`, {
       headers: {
         Cookie: cookie,
         Accept: "application/json",
@@ -236,14 +285,15 @@ async function createN8nCredential(params: {
   type: string;
   data: Record<string, unknown>;
 }): Promise<{ id: string } | null> {
+  const n8nBaseUrl = await resolveWorkspaceN8nBaseUrl(params.workspaceId);
   const cookie = await getOrCreateWorkspaceN8nCookie({
     workspaceId: params.workspaceId,
-    n8nBaseUrl: N8N_BASE_URL,
+    n8nBaseUrl,
   });
   if (!cookie) return null;
 
   try {
-    const res = await fetch(`${N8N_BASE_URL}/rest/credentials`, {
+    const res = await fetch(`${n8nBaseUrl}/rest/credentials`, {
       method: "POST",
       headers: {
         Cookie: cookie,
@@ -274,14 +324,15 @@ async function updateN8nCredential(params: {
   credentialId: string;
   data: Record<string, unknown>;
 }): Promise<boolean> {
+  const n8nBaseUrl = await resolveWorkspaceN8nBaseUrl(params.workspaceId);
   const cookie = await getOrCreateWorkspaceN8nCookie({
     workspaceId: params.workspaceId,
-    n8nBaseUrl: N8N_BASE_URL,
+    n8nBaseUrl,
   });
   if (!cookie) return false;
 
   try {
-    const res = await fetch(`${N8N_BASE_URL}/rest/credentials/${params.credentialId}`, {
+    const res = await fetch(`${n8nBaseUrl}/rest/credentials/${params.credentialId}`, {
       method: "PATCH",
       headers: {
         Cookie: cookie,

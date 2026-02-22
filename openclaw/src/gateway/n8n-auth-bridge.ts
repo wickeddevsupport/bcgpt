@@ -19,6 +19,7 @@
 import type { IncomingMessage } from "node:http";
 import { resolvePmosSessionFromRequest, type PmosAuthUser } from "./pmos-auth.js";
 import { readWorkspaceConnectors, writeWorkspaceConnectors } from "./workspace-connectors.js";
+import { loadConfig } from "../config/config.js";
 
 type N8nSessionCache = {
   cookie: string;
@@ -61,9 +62,33 @@ type OwnerCookieCache = {
 const ownerCookieCache = new Map<string, OwnerCookieCache>();
 const ownerSetupAttempted = new Set<string>();
 
+function readConfigString(cfg: unknown, path: string[]): string | null {
+  let current: unknown = cfg;
+  for (const part of path) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) {
+      return null;
+    }
+    current = (current as Record<string, unknown>)[part];
+  }
+  if (typeof current !== "string") {
+    return null;
+  }
+  const trimmed = current.trim();
+  return trimmed ? trimmed : null;
+}
+
 function readOwnerCreds(): { email: string; password: string } | null {
-  const email = (process.env.N8N_OWNER_EMAIL || "").trim();
-  const password = (process.env.N8N_OWNER_PASSWORD || "").trim();
+  const cfg = loadConfig() as unknown;
+  const envOwnerEmail = (process.env.N8N_OWNER_EMAIL || "").trim();
+  const envOwnerPassword = (process.env.N8N_OWNER_PASSWORD || "").trim();
+  const email =
+    readConfigString(cfg, ["pmos", "connectors", "ops", "user", "email"]) ??
+    readConfigString(cfg, ["pmos", "n8n", "owner", "email"]) ??
+    envOwnerEmail;
+  const password =
+    readConfigString(cfg, ["pmos", "connectors", "ops", "user", "password"]) ??
+    readConfigString(cfg, ["pmos", "n8n", "owner", "password"]) ??
+    envOwnerPassword;
   if (!email || !password) return null;
   return { email, password };
 }
@@ -221,6 +246,12 @@ async function loginToN8n(
   email: string,
   password: string,
 ): Promise<string | null> {
+  const loginId = email.trim();
+  const loginPassword = password;
+  if (!loginId || !loginPassword) {
+    return null;
+  }
+
   const endpoints = [
     // Current n8n (v1.x) login endpoint
     `${baseUrl}/rest/login`,
@@ -229,20 +260,31 @@ async function loginToN8n(
     `${baseUrl}/api/v1/users/login`,
   ];
 
-  for (const ep of endpoints) {
-    try {
-      const res = await fetch(ep, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password }),
-        redirect: "manual",
-      });
-      const setCookies = getSetCookieValues(res);
+  const payloads: Array<Record<string, unknown>> = [
+    // n8n >= 1.100 typically expects this key.
+    { emailOrLdapLoginId: loginId, password: loginPassword },
+    // Legacy payload shape.
+    { email: loginId, password: loginPassword },
+    // Extra fallback for very old deployments.
+    { username: loginId, password: loginPassword },
+  ];
 
-      if (setCookies.length > 0) return toCookieHeader(setCookies);
-      if (res.ok) return null;
-    } catch {
-      // try next endpoint
+  for (const ep of endpoints) {
+    for (const body of payloads) {
+      try {
+        const res = await fetch(ep, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+          redirect: "manual",
+        });
+        const setCookies = getSetCookieValues(res);
+
+        if (setCookies.length > 0) return toCookieHeader(setCookies);
+        if (res.ok) return null;
+      } catch {
+        // try next payload/endpoint
+      }
     }
   }
   return null;
@@ -263,7 +305,20 @@ async function ensureWorkspaceUserViaInvitation(params: {
 
   const wc = await readWorkspaceConnectors(workspaceId);
   const existing = wc?.ops?.user as { email?: string; password?: string } | undefined;
-  if (existing?.email && existing?.password) return null;
+  if (existing?.email && existing?.password) {
+    const existingCookie = await loginToN8n(n8nBaseUrl, existing.email, existing.password);
+    if (existingCookie) {
+      sessionCache.set(workspaceId, {
+        cookie: existingCookie,
+        expiresAt: Date.now() + SESSION_TTL_MS,
+      });
+      return {
+        email: existing.email.trim().toLowerCase(),
+        password: existing.password,
+        cookie: existingCookie,
+      };
+    }
+  }
 
   const ownerCookie = await getOwnerCookie(n8nBaseUrl);
   if (!ownerCookie) return null;
@@ -286,8 +341,19 @@ async function ensureWorkspaceUserViaInvitation(params: {
   if (!inviterId) return null;
 
   const { randomBytes } = await import("node:crypto");
-  const email = String(params.email ?? "").trim().toLowerCase() || `pmos-${workspaceId}@openclaw.local`;
   const password = randomBytes(24).toString("base64url");
+  const requestedEmail = String(params.email ?? "").trim().toLowerCase();
+  const existingEmail = String(existing?.email ?? "").trim().toLowerCase();
+  const emailCandidates = Array.from(
+    new Set(
+      [
+        requestedEmail,
+        existingEmail,
+        `pmos-${workspaceId}@openclaw.local`,
+        `pmos-${workspaceId}-${Date.now().toString(36)}@openclaw.local`,
+      ].filter(Boolean),
+    ),
+  );
 
   const splitName = (raw?: string | null): { firstName: string; lastName: string } => {
     const value = String(raw ?? "").trim();
@@ -305,42 +371,50 @@ async function ensureWorkspaceUserViaInvitation(params: {
 
   // Create user shell via invitation.
   let inviteeId: string | null = null;
-  try {
-    const inviteRes = await fetch(`${base}/rest/invitations`, {
-      method: "POST",
-      headers: {
-        Cookie: ownerCookie,
-        "content-type": "application/json",
-        accept: "application/json",
-      },
-      body: JSON.stringify([{ email, role: "global:member" }]),
-    });
-    if (!inviteRes.ok) {
-      const text = await inviteRes.text().catch(() => "");
-      console.warn("[n8n-auth] invite failed:", inviteRes.status, text.slice(0, 300));
-      return null;
-    }
-
-    const invited = (await inviteRes.json().catch(() => null)) as unknown;
-    const list = (() => {
-      if (Array.isArray(invited)) return invited as InviteResponse[];
-      if (invited && typeof invited === "object" && Array.isArray((invited as any).data)) {
-        return (invited as any).data as InviteResponse[];
+  let provisionedEmail: string | null = null;
+  for (const candidateEmail of emailCandidates) {
+    try {
+      const inviteRes = await fetch(`${base}/rest/invitations`, {
+        method: "POST",
+        headers: {
+          Cookie: ownerCookie,
+          "content-type": "application/json",
+          accept: "application/json",
+        },
+        body: JSON.stringify([{ email: candidateEmail, role: "global:member" }]),
+      });
+      if (!inviteRes.ok) {
+        const text = await inviteRes.text().catch(() => "");
+        console.warn("[n8n-auth] invite failed:", inviteRes.status, text.slice(0, 300));
+        continue;
       }
-      return null;
-    })();
-    if (list) {
+
+      const invited = (await inviteRes.json().catch(() => null)) as unknown;
+      const list = (() => {
+        if (Array.isArray(invited)) return invited as InviteResponse[];
+        if (invited && typeof invited === "object" && Array.isArray((invited as any).data)) {
+          return (invited as any).data as InviteResponse[];
+        }
+        return null;
+      })();
+      if (!list) {
+        continue;
+      }
+
       const match = list.find((entry) => {
         const e = String(entry?.user?.email ?? "").trim().toLowerCase();
-        return e === email;
+        return e === candidateEmail;
       });
       inviteeId = match?.user?.id ? String(match.user.id) : null;
+      if (inviteeId) {
+        provisionedEmail = candidateEmail;
+        break;
+      }
+    } catch (err) {
+      console.warn("[n8n-auth] invite error:", String(err));
     }
-  } catch (err) {
-    console.warn("[n8n-auth] invite error:", String(err));
-    return null;
   }
-  if (!inviteeId) return null;
+  if (!inviteeId || !provisionedEmail) return null;
 
   // Accept invitation (skipAuth) and extract the n8n-auth cookie.
   let cookie: string | null = null;
@@ -369,7 +443,7 @@ async function ensureWorkspaceUserViaInvitation(params: {
     ...(wc ?? {}),
     ops: {
       ...((wc?.ops ?? {}) as Record<string, unknown>),
-      user: { email, password },
+      user: { email: provisionedEmail, password },
     },
   };
   await writeWorkspaceConnectors(workspaceId, next);
@@ -377,7 +451,7 @@ async function ensureWorkspaceUserViaInvitation(params: {
   // Cache the cookie for immediate use.
   sessionCache.set(workspaceId, { cookie, expiresAt: Date.now() + SESSION_TTL_MS });
 
-  return { email, password, cookie };
+  return { email: provisionedEmail, password, cookie };
 }
 
 /**
