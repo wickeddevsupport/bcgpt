@@ -5,8 +5,9 @@
  * Used by chat-to-workflow, live-flow-builder, and other modules.
  */
 
-import { readWorkspaceConnectors } from "./workspace-connectors.js";
+import { readWorkspaceConnectors, writeWorkspaceConnectors } from "./workspace-connectors.js";
 import { readLocalN8nConfig } from "./pmos-ops-proxy.js";
+import { getOrCreateWorkspaceN8nCookie } from "./n8n-auth-bridge.js";
 
 export interface N8nWorkflow {
   id: string;
@@ -66,41 +67,18 @@ async function getN8nContext(workspaceId: string): Promise<{
   const localN8n = readLocalN8nConfig();
   const baseUrl = localN8n?.url || process.env.OPS_URL || "https://ops.wickedlab.io";
   
-  // Try workspace-scoped credentials first
+  // Use the auto-provisioning flow from n8n-auth-bridge
+  // This will create workspace credentials if they don't exist yet
+  const cookie = await getOrCreateWorkspaceN8nCookie({ 
+    workspaceId, 
+    n8nBaseUrl: baseUrl 
+  });
+  
+  // Also check for API key
   const wc = await readWorkspaceConnectors(workspaceId);
-  const opsUser = wc?.ops?.user as { email?: string; password?: string } | undefined;
   const opsApiKey = wc?.ops?.apiKey as string | undefined;
   
-  let cookie: string | null = null;
-  let hasWorkspaceCredentials = false;
-  
-  if (opsUser?.email && opsUser?.password && localN8n) {
-    hasWorkspaceCredentials = true;
-    // Login with workspace credentials
-    try {
-      const loginRes = await fetch(`${baseUrl}/rest/login`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: opsUser.email, password: opsUser.password }),
-        redirect: "manual",
-      });
-      
-      const setCookies = loginRes.headers.getSetCookie?.() || [];
-      if (setCookies.length > 0) {
-        cookie = setCookies.map(c => c.split(";")[0]).join("; ");
-      }
-    } catch {
-      // Fall back to API key if login fails
-    }
-  }
-  
-  // Use workspace API key if available
-  if (opsApiKey?.trim()) {
-    hasWorkspaceCredentials = true;
-  }
-  
-  // DO NOT fall back to owner cookie - workspace isolation must be enforced
-  // If no workspace credentials, the caller should inform the user to configure n8n
+  const hasWorkspaceCredentials = Boolean(cookie || opsApiKey?.trim());
   
   return {
     baseUrl: baseUrl.replace(/\/+$/, ""),
