@@ -62,6 +62,7 @@ describe("n8n-embed spawn behavior", () => {
     const firstCall = vi.mocked(spawnUtils.spawnWithFallback).mock.calls[0]?.[0];
     const envValue = firstCall?.options?.env?.N8N_CUSTOM_EXTENSIONS;
     expect(typeof envValue).toBe("string");
+    expect(String(envValue)).toContain(";");
     expect(String(envValue)).toContain(path.join(customNodesRoot, "n8n-nodes-basecamp"));
     expect(String(envValue)).toContain(path.join(customNodesRoot, "n8n-nodes-openclaw"));
   });

@@ -140,6 +140,23 @@ function resolveCustomNodeDirs(n8nRepoDir: string): string[] {
   return Array.from(found);
 }
 
+const N8N_CUSTOM_EXTENSIONS_SEPARATOR = ";";
+
+function parseN8nCustomExtensions(raw: string | undefined): string[] {
+  const value = (raw ?? "").trim();
+  if (!value) return [];
+
+  // n8n's loader parses N8N_CUSTOM_EXTENSIONS using ";" even on Linux.
+  // Preserve compatibility with legacy values that may still use path.delimiter.
+  const parts = value.includes(N8N_CUSTOM_EXTENSIONS_SEPARATOR)
+    ? value.split(N8N_CUSTOM_EXTENSIONS_SEPARATOR)
+    : process.platform === "win32"
+      ? [value]
+      : value.split(path.delimiter);
+
+  return parts.map((part) => part.trim()).filter(Boolean);
+}
+
 /**
  * Spawn a vendored n8n as a child process (best-effort).
  * - Sets process.env.N8N_LOCAL_URL when successful.
@@ -171,12 +188,9 @@ export async function spawnEmbeddedN8nIfVendored(opts?: { port?: number; host?: 
   // Custom nodes: tell n8n where to find additional community node packages.
   const customNodeDirs = resolveCustomNodeDirs(repo);
   if (customNodeDirs.length > 0) {
-    const existing = (env.N8N_CUSTOM_EXTENSIONS ?? "")
-      .split(path.delimiter)
-      .map((part) => part.trim())
-      .filter(Boolean);
+    const existing = parseN8nCustomExtensions(env.N8N_CUSTOM_EXTENSIONS);
     env.N8N_CUSTOM_EXTENSIONS = Array.from(new Set([...existing, ...customNodeDirs])).join(
-      path.delimiter,
+      N8N_CUSTOM_EXTENSIONS_SEPARATOR,
     );
   }
 
