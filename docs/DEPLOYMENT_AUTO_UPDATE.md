@@ -6,7 +6,9 @@ This repo uses a safe auto-update flow for PMOS + OPS:
    - Runs weekly.
    - Detects latest stable `n8n@1.x.y`.
    - Updates `Dockerfile.openclaw.nx` pin.
+   - Updates `docker-compose.ops.yml` pinned vendor tag.
    - Smoke-builds vendor and PMOS images.
+   - Pushes vendor image tag for OPS (`n8n-x.y.z`).
    - Creates PR and enables auto-merge.
 
 2. `Build OpenClaw n8n Vendor Image` (`.github/workflows/openclaw-n8n-vendor-image.yml`)
@@ -17,7 +19,7 @@ This repo uses a safe auto-update flow for PMOS + OPS:
    - Optional: restarts OPS app in Coolify to pull the latest `stable` image.
 
 3. `docker-compose.ops.yml`
-   - Uses `ghcr.io/wickeddevsupport/openclaw-n8n-vendor:stable`.
+   - Uses pinned vendor tags (`ghcr.io/wickeddevsupport/openclaw-n8n-vendor:n8n-x.y.z`).
 
 ## Required GitHub Secrets
 

@@ -2,8 +2,8 @@ version: "3.9"
 
 services:
   ops:
-    # Always deploy the latest tested vendor build promoted by CI.
-    image: ghcr.io/wickeddevsupport/openclaw-n8n-vendor:stable
+    # Known-good pinned vendor image (auto-bumped via CI PRs).
+    image: ghcr.io/wickeddevsupport/openclaw-n8n-vendor:n8n-1.76.1
     container_name: wicked-ops
     restart: unless-stopped
     labels:
