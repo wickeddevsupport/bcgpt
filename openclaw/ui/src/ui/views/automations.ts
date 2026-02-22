@@ -1,6 +1,7 @@
 import { html, nothing } from "lit";
 import type { WorkflowRunSummary, WorkflowSummary } from "../controllers/pmos-workflows.ts";
 import type { ChatProps } from "./chat.ts";
+import { renderChat } from "./chat.ts";
 
 const WORKFLOW_TEMPLATES = [
   { id: "template-basecamp-sync", name: "Basecamp Todo Sync", desc: "Sync Basecamp todos to another service", icon: "🏕️", category: "Sync" },
@@ -341,73 +342,9 @@ export function renderAutomations(props: AutomationsProps) {
         </div>
         <button class="btn btn--sm" @click=${() => props.onChatToggle()} title="Close chat">✕</button>
       </div>
-
-      <!-- Messages thread (TOP - scrollable) -->
-      <div style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;min-height:0;">
-        ${props.chatMessages.length === 0 ? html`
-          <div class="muted" style="font-size:12px;text-align:center;padding:20px 0;">
-            Ask me to create a workflow.<br/>
-            <span style="font-size:11px;opacity:0.7;">e.g. "Create a flow that posts to Slack when a Basecamp todo is assigned to me"</span>
-          </div>
-        ` : nothing}
-        ${props.chatMessages.map((msg) => html`
-          <div style="
-            display: flex;
-            flex-direction: column;
-            align-items: ${msg.role === "user" ? "flex-end" : "flex-start"};
-          ">
-            <div style="
-              max-width: 90%;
-              padding: 8px 10px;
-              border-radius: 8px;
-              font-size: 13px;
-              line-height: 1.4;
-              background: ${msg.role === "user" ? "var(--color-primary, #4a90d9)" : "var(--surface2, #2a2a2a)"};
-              color: ${msg.role === "user" ? "#fff" : "inherit"};
-              white-space: pre-wrap;
-              word-break: break-word;
-            ">${msg.content}</div>
-          </div>
-        `)}
-        ${props.chatSending ? html`
-          <div style="display:flex;align-items:flex-start;">
-            <div style="padding:8px 10px;border-radius:8px;font-size:13px;background:var(--surface2,#2a2a2a);">
-              <span class="muted">Thinking...</span>
-            </div>
-          </div>
-        ` : nothing}
-      </div>
-
-      <!-- Chat input box (MIDDLE) -->
-      <div style="padding:10px 12px;border-top:1px solid var(--border);flex-shrink:0;">
-        <textarea
-          style="width:100%;height:64px;resize:none;font-size:13px;"
-          .value=${props.chatDraft}
-          @input=${(e: Event) => props.onChatDraftChange((e.target as HTMLTextAreaElement).value)}
-          @keydown=${(e: KeyboardEvent) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              if (props.chatDraft.trim() && !props.chatSending) props.onChatSend();
-            }
-          }}
-          placeholder="Describe your automation... (Enter to send)"
-          ?disabled=${!props.connected || props.chatSending}
-        ></textarea>
-      </div>
-
-      <!-- Buttons (BOTTOM) -->
-      <div style="padding:0 12px 10px 12px;flex-shrink:0;display:flex;justify-content:space-between;align-items:center;">
-        <div style="display:flex;align-items:center;gap:8px;">
-          ${props.currentModel
-            ? html`<span class="chip" style="font-size:9px;padding:1px 6px;">${props.currentModelProvider ?? "AI"} / ${props.currentModel?.includes("/") ? props.currentModel.split("/").pop() : props.currentModel}</span>`
-            : html`<a href=${props.integrationsHref} class="muted" style="font-size:9px;">⚠ No model</a>`
-          }
-        </div>
-        <button
-          class="btn btn--primary btn--sm"
-          @click=${() => props.onChatSend()}
-          ?disabled=${!props.connected || !props.chatDraft.trim() || props.chatSending}
-        >${props.chatSending ? "..." : "Send"}</button>
+      <!-- Full chat component -->
+      <div style="flex:1;min-height:0;overflow:hidden;">
+        ${renderChat(props.chatProps)}
       </div>
     </div>
   `;
