@@ -325,13 +325,12 @@ export function renderAutomations(props: AutomationsProps) {
     <div style="
       ${isMobile
         ? "position: fixed; right: 0; top: 0; height: 100vh; width: 100%; z-index: 100;"
-        : "flex: 0 0 30%; min-width: 280px; max-width: 40%; height: 100%; min-height: 80vh;"}
+        : "flex: 0 0 30%; min-width: 280px; max-width: 40%; height: 100%; min-height: 80vh; resize: horizontal; overflow: auto;"}
       display: flex;
       flex-direction: column;
       flex-shrink: 0;
       border-left: 1px solid var(--border);
       background: var(--surface, #1e1e1e);
-      overflow: hidden;
     ">
       <!-- Header -->
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--border);flex-shrink:0;">
@@ -435,13 +434,12 @@ export function renderAutomations(props: AutomationsProps) {
           <div style="
             ${isMobile
               ? "position: fixed; left: 0; top: 0; width: min(90vw, 360px); height: 100vh; z-index: 90;"
-              : "flex: 0 0 28%; min-width: 240px; max-width: 35%; height: 100%; min-height: 80vh;"}
+              : "flex: 0 0 28%; min-width: 240px; max-width: 35%; height: 100%; min-height: 80vh; resize: horizontal; overflow: auto;"}
             flex-shrink: 0;
             display: flex;
             flex-direction: column;
             border-right: 1px solid var(--border);
             background: var(--surface, #1e1e1e);
-            overflow-y: auto;
           ">
             ${props.panelTab === "workflows" ? panelWorkflows : nothing}
             ${props.panelTab === "templates" ? panelTemplates : nothing}

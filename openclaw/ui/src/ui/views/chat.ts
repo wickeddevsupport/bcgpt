@@ -396,13 +396,14 @@ export function renderChat(props: ChatProps) {
 
       <div class="chat-compose">
         ${renderAttachmentPreview(props)}
-        <div class="chat-compose__row">
-          <label class="field chat-compose__field">
+        <div class="chat-compose__row" style="flex-direction: column;">
+          <label class="field chat-compose__field" style="width: 100%;">
             <span>Message</span>
             <textarea
               ${ref((el) => el && adjustTextareaHeight(el as HTMLTextAreaElement))}
               .value=${props.draft}
               ?disabled=${!props.connected}
+              style="width: 100%;"
               @keydown=${(e: KeyboardEvent) => {
                 if (e.key !== "Enter") {
                   return;
