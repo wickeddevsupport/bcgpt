@@ -8,9 +8,9 @@ on:
         required: false
         default: "latest"
       n8n_vendor_image:
-        description: "Vendor image (e.g. ghcr.io/wickeddevsupport/openclaw-n8n-vendor:n8n-1.76.1)"
+        description: "Vendor image (e.g. ghcr.io/wickeddevsupport/openclaw-n8n-vendor:stable or n8n_vendor_build)"
         required: false
-        default: "ghcr.io/wickeddevsupport/openclaw-n8n-vendor:n8n-1.76.1"
+        default: "n8n_vendor_build"
   push:
     branches:
       - main
@@ -50,7 +50,7 @@ jobs:
             tag="latest"
           fi
           if [ -z "$vendor" ]; then
-            vendor="ghcr.io/wickeddevsupport/openclaw-n8n-vendor:n8n-1.76.1"
+            vendor="n8n_vendor_build"
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "vendor=$vendor" >> "$GITHUB_OUTPUT"

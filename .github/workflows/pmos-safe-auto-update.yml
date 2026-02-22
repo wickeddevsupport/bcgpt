@@ -1,0 +1,127 @@
+name: PMOS Safe Auto Update
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '15 3 * * 2'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: pmos-safe-auto-update
+  cancel-in-progress: false
+
+jobs:
+  update-n8n:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Resolve latest stable n8n v1 release
+        id: n8n
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner: "n8n-io",
+              repo: "n8n",
+              per_page: 100,
+            });
+            const stable = releases.find(
+              (r) => !r.draft && !r.prerelease && /^n8n@1\.\d+\.\d+$/.test(r.tag_name),
+            );
+            if (!stable) {
+              core.setFailed("No stable n8n@1.x.y release found.");
+              return;
+            }
+            core.info(`Selected ${stable.tag_name}`);
+            core.setOutput("tag", stable.tag_name);
+            core.setOutput("version", stable.tag_name.replace(/^n8n@/, ""));
+
+      - name: Update pinned n8n version
+        run: node scripts/ci/update-n8n-version.mjs "${{ steps.n8n.outputs.tag }}"
+
+      - name: Check for changes
+        id: changed
+        run: |
+          if git diff --quiet -- Dockerfile.openclaw.nx; then
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Buildx
+        if: steps.changed.outputs.value == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Smoke build n8n vendor stage
+        if: steps.changed.outputs.value == 'true'
+        run: |
+          docker buildx build --load \
+            --file Dockerfile.openclaw.nx \
+            --target n8n_vendor_build \
+            --build-arg INCLUDE_VENDORED_N8N=true \
+            --build-arg N8N_VERSION=${{ steps.n8n.outputs.tag }} \
+            --tag local/openclaw-n8n-vendor:smoke \
+            .
+
+      - name: Verify Basecamp node is bundled
+        if: steps.changed.outputs.value == 'true'
+        run: |
+          docker run --rm local/openclaw-n8n-vendor:smoke bash -lc '
+            test -f /app/openclaw/vendor/n8n/custom/nodes/n8n-nodes-basecamp/package.json
+            test -d /app/openclaw/vendor/n8n/custom/nodes/n8n-nodes-basecamp/dist
+          '
+
+      - name: Smoke build PMOS image
+        if: steps.changed.outputs.value == 'true'
+        run: |
+          docker buildx build --load \
+            --file Dockerfile.openclaw.nx \
+            --build-arg INCLUDE_VENDORED_N8N=true \
+            --build-arg N8N_VERSION=${{ steps.n8n.outputs.tag }} \
+            --tag local/openclaw-pmos:smoke \
+            .
+
+      - name: Verify PMOS CLI startup surface
+        if: steps.changed.outputs.value == 'true'
+        run: docker run --rm local/openclaw-pmos:smoke node openclaw.mjs --help >/dev/null
+
+      - name: Create pull request
+        if: steps.changed.outputs.value == 'true'
+        id: cpr
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore: bump n8n to ${{ steps.n8n.outputs.tag }}"
+          title: "chore: bump n8n to ${{ steps.n8n.outputs.tag }}"
+          body: |
+            Automated weekly n8n bump with build smoke checks.
+
+            Changes:
+            - Updated `Dockerfile.openclaw.nx` (`ARG N8N_VERSION`)
+
+            Validation:
+            - Built `n8n_vendor_build` stage
+            - Verified Basecamp custom node bundle exists
+            - Built PMOS image
+            - Verified PMOS CLI entrypoint responds
+          branch: "bot/n8n-${{ steps.n8n.outputs.version }}"
+          delete-branch: true
+          labels: |
+            dependencies
+            automerge
+
+      - name: Enable auto-merge
+        if: steps.cpr.outputs.pull-request-number != ''
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
+          merge-method: squash

@@ -17,6 +17,8 @@ on:
     paths:
       - 'Dockerfile.openclaw.nx'
       - '.github/workflows/openclaw-n8n-vendor-image.yml'
+  schedule:
+    - cron: '30 2 * * 2'
 
 permissions:
   contents: read
@@ -62,6 +64,7 @@ jobs:
           images: ghcr.io/wickeddevsupport/openclaw-n8n-vendor
           tags: |
             type=raw,value=${{ steps.n8n.outputs.tag }}
+            type=raw,value=stable,enable={{is_default_branch}}
             type=sha,format=short
 
       - name: Build and push vendor image
@@ -78,3 +81,15 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Restart OPS in Coolify (optional)
+        if: ${{ (github.ref == 'refs/heads/main' || github.event_name == 'schedule') && secrets.COOLIFY_BASE_URL != '' && secrets.COOLIFY_API_TOKEN != '' && secrets.COOLIFY_OPS_APP_UUID != '' }}
+        env:
+          COOLIFY_BASE_URL: ${{ secrets.COOLIFY_BASE_URL }}
+          COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
+          COOLIFY_OPS_APP_UUID: ${{ secrets.COOLIFY_OPS_APP_UUID }}
+        run: |
+          base="${COOLIFY_BASE_URL%/}"
+          curl -fsS -X GET \
+            "$base/api/v1/applications/$COOLIFY_OPS_APP_UUID/restart?force_rebuild=true" \
+            -H "Authorization: Bearer $COOLIFY_API_TOKEN"
