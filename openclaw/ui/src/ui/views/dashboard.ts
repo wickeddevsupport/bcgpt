@@ -123,6 +123,7 @@ type SetupStep = {
 };
 
 export function renderDashboard(props: DashboardProps) {
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
   const bcgpt = props.connectorsStatus?.bcgpt ?? null;
   const ops = props.connectorsStatus?.ops ?? null;
   const checkedAt = props.connectorsStatus?.checkedAtMs ?? null;
@@ -703,7 +704,7 @@ export function renderDashboard(props: DashboardProps) {
         </div>
         <a href=${props.chatHref} style="font-size: 12px; opacity: 0.7;">Open full Chat →</a>
       </div>
-      <div style="height: 400px; min-height: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 8px;">
+      <div style="${isMobile ? "height: 60vh;" : "height: 400px;"} min-height: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 8px;">
         ${renderChat(props.chatProps)}
       </div>
     </section>

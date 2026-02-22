@@ -106,6 +106,7 @@ function runChipClass(status: string) {
 }
 
 export function renderAutomations(props: AutomationsProps) {
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
   const connectedReason = !props.connected
     ? "Sign in to your workspace to manage workflows."
     : null;
@@ -322,17 +323,15 @@ export function renderAutomations(props: AutomationsProps) {
   // ─── Right chat panel ──────────────────────────────────────────────
   const chatPanel = html`
     <div style="
-      width: 350px;
-      min-width: 350px;
-      max-width: 350px;
-      flex-shrink: 0;
+      ${isMobile
+        ? "position: fixed; right: 0; top: 0; height: 100vh; width: 100%; z-index: 100;"
+        : "flex: 0 0 30%; min-width: 280px; max-width: 40%; height: 100%; min-height: 80vh;"}
       display: flex;
       flex-direction: column;
+      flex-shrink: 0;
       border-left: 1px solid var(--border);
       background: var(--surface, #1e1e1e);
       overflow: hidden;
-      height: 100%;
-      min-height: 80vh;
     ">
       <!-- Header -->
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--border);flex-shrink:0;">
@@ -340,7 +339,12 @@ export function renderAutomations(props: AutomationsProps) {
           <div style="font-weight:600;font-size:14px;">AI Workflow Assistant</div>
           <div class="muted" style="font-size:11px;">Describe what you want to automate</div>
         </div>
-        <button class="btn btn--sm" @click=${() => props.onChatToggle()} title="Close chat">✕</button>
+        <button
+          class="btn ${isMobile ? "btn--primary" : "btn--sm"}"
+          style="${isMobile ? "font-size:16px;padding:8px 12px;" : ""}"
+          @click=${() => props.onChatToggle()}
+          title="Close chat"
+        >✕</button>
       </div>
       <!-- Full chat component -->
       <div style="flex:1;min-height:0;overflow:hidden;">
@@ -409,6 +413,7 @@ export function renderAutomations(props: AutomationsProps) {
       <!-- main row -->
       <div style="
         display: flex;
+        flex-direction: ${isMobile ? "column" : "row"};
         flex: 1 1 auto;
         overflow: hidden;
         min-height: 80vh;
@@ -416,18 +421,27 @@ export function renderAutomations(props: AutomationsProps) {
       ">
         <!-- left panel -->
         ${props.panelOpen ? html`
+          ${isMobile ? html`
+            <div
+              @click=${() => props.onPanelToggle()}
+              style="
+                position: fixed;
+                inset: 0;
+                background: rgba(0, 0, 0, 0.45);
+                z-index: 89;
+              "
+            ></div>
+          ` : nothing}
           <div style="
-            width: 280px;
-            min-width: 280px;
-            max-width: 280px;
+            ${isMobile
+              ? "position: fixed; left: 0; top: 0; width: min(90vw, 360px); height: 100vh; z-index: 90;"
+              : "flex: 0 0 28%; min-width: 240px; max-width: 35%; height: 100%; min-height: 80vh;"}
             flex-shrink: 0;
             display: flex;
             flex-direction: column;
             border-right: 1px solid var(--border);
             background: var(--surface, #1e1e1e);
             overflow-y: auto;
-            height: 100%;
-            min-height: 80vh;
           ">
             ${props.panelTab === "workflows" ? panelWorkflows : nothing}
             ${props.panelTab === "templates" ? panelTemplates : nothing}
@@ -436,7 +450,17 @@ export function renderAutomations(props: AutomationsProps) {
         ` : nothing}
 
         <!-- n8n iframe -->
-        <div style="flex:1;min-width:0;position:relative;display:flex;flex-direction:column;height:100%;min-height:80vh;overflow:hidden;">
+        <div style="
+          flex:1 1 auto;
+          min-width:0;
+          width:100%;
+          position:relative;
+          display:flex;
+          flex-direction:column;
+          height:100%;
+          min-height:80vh;
+          overflow:hidden;
+        ">
           <iframe
             src=${props.embedUrl}
             title="n8n Workflow Canvas"
@@ -447,6 +471,17 @@ export function renderAutomations(props: AutomationsProps) {
 
         <!-- right chat panel -->
         ${props.chatOpen ? html`
+          ${isMobile ? html`
+            <div
+              @click=${() => props.onChatToggle()}
+              style="
+                position: fixed;
+                inset: 0;
+                background: rgba(0, 0, 0, 0.5);
+                z-index: 99;
+              "
+            ></div>
+          ` : nothing}
           ${chatPanel}
         ` : nothing}
       </div>
