@@ -542,10 +542,16 @@ export async function buildN8nAuthHeaders(
   const wc = await readWorkspaceConnectors(workspaceId);
   const ops = wc?.ops as Record<string, unknown> | undefined;
   const apiKey = typeof ops?.apiKey === "string" ? ops.apiKey.trim() : "";
-  const opsUrl =
+  const workspaceOpsUrl =
     typeof ops?.url === "string" ? ops.url.trim().replace(/\/+$/, "") : "";
+  const cfg = loadConfig() as unknown;
+  const globalOpsUrl =
+    readConfigString(cfg, ["pmos", "connectors", "ops", "url"]) ??
+    (process.env.OPS_URL ?? "").trim() ??
+    "";
+  const scopedOpsUrl = (workspaceOpsUrl || globalOpsUrl).trim().replace(/\/+$/, "");
   const base = n8nBaseUrl.trim().replace(/\/+$/, "");
-  if (apiKey && opsUrl && opsUrl === base) {
+  if (apiKey && (!scopedOpsUrl || scopedOpsUrl === base)) {
     return { "X-N8N-API-KEY": apiKey };
   }
 
