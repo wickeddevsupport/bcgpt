@@ -561,6 +561,7 @@ Always respond with a JSON object in this exact format:
 - Use branching (if, switch) to create multiple paths in the workflow
 - Use merge nodes to combine data from multiple branches
 - Prefer complete workflows that can execute without manual node rewiring
+- If a webhook flow must return custom JSON/body/status, include n8n-nodes-base.respondToWebhook and set webhook trigger responseMode to responseNode
 - Respond ONLY with the JSON object — no markdown fences, no extra text
 
 ## Example: Creating a Basecamp Todo Sync Workflow
