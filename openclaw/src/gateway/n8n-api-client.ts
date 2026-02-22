@@ -5,7 +5,6 @@
  * Used by chat-to-workflow, live-flow-builder, and other modules.
  */
 
-import { getOwnerCookie } from "./n8n-auth-bridge.js";
 import { readWorkspaceConnectors } from "./workspace-connectors.js";
 import { readLocalN8nConfig } from "./pmos-ops-proxy.js";
 
@@ -62,6 +61,7 @@ async function getN8nContext(workspaceId: string): Promise<{
   baseUrl: string;
   cookie: string | null;
   apiKey: string | null;
+  hasWorkspaceCredentials: boolean;
 }> {
   const localN8n = readLocalN8nConfig();
   const baseUrl = localN8n?.url || process.env.OPS_URL || "https://ops.wickedlab.io";
@@ -72,8 +72,10 @@ async function getN8nContext(workspaceId: string): Promise<{
   const opsApiKey = wc?.ops?.apiKey as string | undefined;
   
   let cookie: string | null = null;
+  let hasWorkspaceCredentials = false;
   
   if (opsUser?.email && opsUser?.password && localN8n) {
+    hasWorkspaceCredentials = true;
     // Login with workspace credentials
     try {
       const loginRes = await fetch(`${baseUrl}/rest/login`, {
@@ -88,19 +90,23 @@ async function getN8nContext(workspaceId: string): Promise<{
         cookie = setCookies.map(c => c.split(";")[0]).join("; ");
       }
     } catch {
-      // Fall back to owner cookie or API key
+      // Fall back to API key if login fails
     }
   }
   
-  // Fall back to owner cookie
-  if (!cookie && localN8n) {
-    cookie = await getOwnerCookie(baseUrl);
+  // Use workspace API key if available
+  if (opsApiKey?.trim()) {
+    hasWorkspaceCredentials = true;
   }
+  
+  // DO NOT fall back to owner cookie - workspace isolation must be enforced
+  // If no workspace credentials, the caller should inform the user to configure n8n
   
   return {
     baseUrl: baseUrl.replace(/\/+$/, ""),
     cookie,
     apiKey: opsApiKey?.trim() || null,
+    hasWorkspaceCredentials,
   };
 }
 
@@ -111,7 +117,14 @@ export async function createN8nWorkflow(
   workspaceId: string,
   workflow: Omit<N8nWorkflow, 'id'>,
 ): Promise<{ ok: boolean; workflow?: N8nWorkflow; error?: string }> {
-  const { baseUrl, cookie, apiKey } = await getN8nContext(workspaceId);
+  const { baseUrl, cookie, apiKey, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
+  
+  if (!hasWorkspaceCredentials) {
+    return { 
+      ok: false, 
+      error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." 
+    };
+  }
   
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -168,7 +181,11 @@ export async function updateN8nWorkflow(
   workflowId: string,
   updates: Partial<N8nWorkflow>,
 ): Promise<{ ok: boolean; workflow?: N8nWorkflow; error?: string }> {
-  const { baseUrl, cookie, apiKey } = await getN8nContext(workspaceId);
+  const { baseUrl, cookie, apiKey, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
+
+  if (!hasWorkspaceCredentials) {
+    return { ok: false, error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." };
+  }
   
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -211,7 +228,11 @@ export async function getN8nWorkflow(
   workspaceId: string,
   workflowId: string,
 ): Promise<{ ok: boolean; workflow?: N8nWorkflow; error?: string }> {
-  const { baseUrl, cookie, apiKey } = await getN8nContext(workspaceId);
+  const { baseUrl, cookie, apiKey, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
+
+  if (!hasWorkspaceCredentials) {
+    return { ok: false, error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." };
+  }
   
   const headers: Record<string, string> = {
     "accept": "application/json",
@@ -251,7 +272,11 @@ export async function deleteN8nWorkflow(
   workspaceId: string,
   workflowId: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const { baseUrl, cookie, apiKey } = await getN8nContext(workspaceId);
+  const { baseUrl, cookie, apiKey, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
+
+  if (!hasWorkspaceCredentials) {
+    return { ok: false, error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." };
+  }
   
   const headers: Record<string, string> = {
     "accept": "application/json",
@@ -300,7 +325,11 @@ export async function executeN8nWorkflow(
   workspaceId: string,
   workflowId: string,
 ): Promise<{ ok: boolean; executionId?: string; error?: string }> {
-  const { baseUrl, cookie, apiKey } = await getN8nContext(workspaceId);
+  const { baseUrl, cookie, apiKey, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
+
+  if (!hasWorkspaceCredentials) {
+    return { ok: false, error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." };
+  }
   
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -342,7 +371,11 @@ export async function getN8nExecution(
   workspaceId: string,
   executionId: string,
 ): Promise<{ ok: boolean; execution?: N8nExecution; error?: string }> {
-  const { baseUrl, cookie, apiKey } = await getN8nContext(workspaceId);
+  const { baseUrl, cookie, apiKey, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
+
+  if (!hasWorkspaceCredentials) {
+    return { ok: false, error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." };
+  }
   
   const headers: Record<string, string> = {
     "accept": "application/json",
@@ -381,7 +414,11 @@ export async function getN8nExecution(
 export async function listN8nWorkflows(
   workspaceId: string,
 ): Promise<{ ok: boolean; workflows?: N8nWorkflow[]; error?: string }> {
-  const { baseUrl, cookie, apiKey } = await getN8nContext(workspaceId);
+  const { baseUrl, cookie, apiKey, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
+
+  if (!hasWorkspaceCredentials) {
+    return { ok: false, error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." };
+  }
   
   const headers: Record<string, string> = {
     "accept": "application/json",
@@ -422,7 +459,11 @@ export async function cancelN8nExecution(
   workspaceId: string,
   executionId: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const { baseUrl, cookie, apiKey } = await getN8nContext(workspaceId);
+  const { baseUrl, cookie, apiKey, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
+
+  if (!hasWorkspaceCredentials) {
+    return { ok: false, error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." };
+  }
   
   const headers: Record<string, string> = {
     "accept": "application/json",
@@ -463,7 +504,11 @@ export async function upsertBasecampCredential(
   bcgptUrl: string,
   bcgptApiKey: string,
 ): Promise<{ ok: boolean; credentialId?: string; error?: string }> {
-  const { baseUrl, cookie } = await getN8nContext(workspaceId);
+  const { baseUrl, cookie, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
+
+  if (!hasWorkspaceCredentials) {
+    return { ok: false, error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." };
+  }
 
   if (!cookie) {
     return { ok: false, error: "n8n not reachable or not authenticated" };
@@ -532,7 +577,11 @@ export async function upsertBasecampCredential(
 export async function listN8nCredentials(
   workspaceId: string,
 ): Promise<{ ok: boolean; credentials?: Array<{ id: string; name: string; type: string }>; error?: string }> {
-  const { baseUrl, cookie } = await getN8nContext(workspaceId);
+  const { baseUrl, cookie, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
+
+  if (!hasWorkspaceCredentials) {
+    return { ok: false, error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." };
+  }
 
   if (!cookie) {
     return { ok: false, error: "n8n not reachable or not authenticated" };
@@ -569,7 +618,11 @@ export async function createN8nCredential(
   type: string,
   data: Record<string, unknown>,
 ): Promise<{ ok: boolean; credentialId?: string; error?: string }> {
-  const { baseUrl, cookie } = await getN8nContext(workspaceId);
+  const { baseUrl, cookie, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
+
+  if (!hasWorkspaceCredentials) {
+    return { ok: false, error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." };
+  }
 
   if (!cookie) {
     return { ok: false, error: "n8n not reachable or not authenticated" };
@@ -606,7 +659,11 @@ export async function deleteN8nCredential(
   workspaceId: string,
   credentialId: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const { baseUrl, cookie } = await getN8nContext(workspaceId);
+  const { baseUrl, cookie, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
+
+  if (!hasWorkspaceCredentials) {
+    return { ok: false, error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." };
+  }
 
   if (!cookie) {
     return { ok: false, error: "n8n not reachable or not authenticated" };
