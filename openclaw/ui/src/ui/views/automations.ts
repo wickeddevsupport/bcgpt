@@ -333,6 +333,7 @@ export function renderAutomations(props: AutomationsProps) {
       height: 100%;
       min-height: 80vh;
     ">
+      <!-- Header -->
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--border);flex-shrink:0;">
         <div>
           <div style="font-weight:600;font-size:14px;">AI Workflow Assistant</div>
@@ -341,29 +342,7 @@ export function renderAutomations(props: AutomationsProps) {
         <button class="btn btn--sm" @click=${() => props.onChatToggle()} title="Close chat">✕</button>
       </div>
 
-      <div style="padding:10px 12px;border-bottom:1px solid var(--border);flex-shrink:0;">
-        <textarea
-          style="width:100%;height:72px;resize:none;font-size:13px;"
-          .value=${props.chatDraft}
-          @input=${(e: Event) => props.onChatDraftChange((e.target as HTMLTextAreaElement).value)}
-          @keydown=${(e: KeyboardEvent) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              if (props.chatDraft.trim() && !props.chatSending) props.onChatSend();
-            }
-          }}
-          placeholder="Describe your automation... (Enter to send)"
-          ?disabled=${!props.connected || props.chatSending}
-        ></textarea>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;">
-          <div class="muted" style="font-size:10px;">Enter to send · Shift+Enter for new line</div>
-          ${props.currentModel
-            ? html`<span class="chip" style="font-size:9px;padding:1px 6px;">${props.currentModelProvider ?? "AI"} / ${props.currentModel?.includes("/") ? props.currentModel.split("/").pop() : props.currentModel}</span>`
-            : html`<a href=${props.integrationsHref} class="muted" style="font-size:9px;">⚠ No model</a>`
-          }
-        </div>
-      </div>
-
+      <!-- Messages thread (TOP - scrollable) -->
       <div style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;min-height:0;">
         ${props.chatMessages.length === 0 ? html`
           <div class="muted" style="font-size:12px;text-align:center;padding:20px 0;">
@@ -399,10 +378,33 @@ export function renderAutomations(props: AutomationsProps) {
         ` : nothing}
       </div>
 
-      <div style="border-top:1px solid var(--border);padding:10px 12px;flex-shrink:0;">
+      <!-- Chat input box (MIDDLE) -->
+      <div style="padding:10px 12px;border-top:1px solid var(--border);flex-shrink:0;">
+        <textarea
+          style="width:100%;height:64px;resize:none;font-size:13px;"
+          .value=${props.chatDraft}
+          @input=${(e: Event) => props.onChatDraftChange((e.target as HTMLTextAreaElement).value)}
+          @keydown=${(e: KeyboardEvent) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              if (props.chatDraft.trim() && !props.chatSending) props.onChatSend();
+            }
+          }}
+          placeholder="Describe your automation... (Enter to send)"
+          ?disabled=${!props.connected || props.chatSending}
+        ></textarea>
+      </div>
+
+      <!-- Buttons (BOTTOM) -->
+      <div style="padding:0 12px 10px 12px;flex-shrink:0;display:flex;justify-content:space-between;align-items:center;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          ${props.currentModel
+            ? html`<span class="chip" style="font-size:9px;padding:1px 6px;">${props.currentModelProvider ?? "AI"} / ${props.currentModel?.includes("/") ? props.currentModel.split("/").pop() : props.currentModel}</span>`
+            : html`<a href=${props.integrationsHref} class="muted" style="font-size:9px;">⚠ No model</a>`
+          }
+        </div>
         <button
           class="btn btn--primary btn--sm"
-          style="width:100%;"
           @click=${() => props.onChatSend()}
           ?disabled=${!props.connected || !props.chatDraft.trim() || props.chatSending}
         >${props.chatSending ? "..." : "Send"}</button>
