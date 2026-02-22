@@ -331,7 +331,7 @@ export function renderAutomations(props: AutomationsProps) {
       background: var(--surface, #1e1e1e);
       overflow: hidden;
       height: 100%;
-      min-height: 0;
+      min-height: 80vh;
     ">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--border);flex-shrink:0;">
         <div>
@@ -472,8 +472,7 @@ export function renderAutomations(props: AutomationsProps) {
         display: flex;
         flex: 1 1 auto;
         overflow: hidden;
-        min-height: 0;
-        max-height: 80vh;
+        min-height: 80vh;
         height: 80vh;
       ">
         <!-- left panel -->
@@ -489,8 +488,7 @@ export function renderAutomations(props: AutomationsProps) {
             background: var(--surface, #1e1e1e);
             overflow-y: auto;
             height: 100%;
-            max-height: 80vh;
-            min-height: 0;
+            min-height: 80vh;
           ">
             ${props.panelTab === "workflows" ? panelWorkflows : nothing}
             ${props.panelTab === "templates" ? panelTemplates : nothing}
@@ -499,11 +497,11 @@ export function renderAutomations(props: AutomationsProps) {
         ` : nothing}
 
         <!-- n8n iframe -->
-        <div style="flex:1;min-width:0;position:relative;display:flex;flex-direction:column;min-height:0;height:100%;overflow:hidden;">
+        <div style="flex:1;min-width:0;position:relative;display:flex;flex-direction:column;height:100%;min-height:80vh;overflow:hidden;">
           <iframe
             src=${props.embedUrl}
             title="n8n Workflow Canvas"
-            style="flex:1 1 auto;width:100%;height:100%;min-height:0;border:0;display:block;background:#1a1a1a;"
+            style="flex:1 1 auto;width:100%;height:100%;min-height:80vh;border:0;display:block;background:#1a1a1a;"
             allow="clipboard-read; clipboard-write"
           ></iframe>
         </div>
