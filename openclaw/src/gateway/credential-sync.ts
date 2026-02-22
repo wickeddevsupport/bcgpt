@@ -20,6 +20,10 @@ import { readWorkspaceConnectors } from "./workspace-connectors.js";
 import { readLocalN8nConfig } from "./pmos-ops-proxy.js";
 import { loadConfig } from "../config/config.js";
 
+const BASECAMP_ENSURE_SUCCESS_TTL_MS = 60_000;
+const BASECAMP_ENSURE_FAILURE_TTL_MS = 10_000;
+const basecampEnsureCache = new Map<string, { fingerprint: string; at: number; ok: boolean }>();
+
 function readConfigString(cfg: unknown, path: string[]): string | null {
   let current: unknown = cfg;
   for (const part of path) {
@@ -145,12 +149,66 @@ const NODE_CREDENTIAL_MAP: Record<string, string> = {
 
 export type CredentialInfo = { id: string; name: string; type: string };
 
+async function resolveBasecampConnectorConfig(
+  workspaceId: string,
+): Promise<{ baseUrl: string; apiKey: string } | null> {
+  const cfg = loadConfig() as unknown;
+  const wc = await readWorkspaceConnectors(workspaceId).catch(() => null);
+
+  // Keep openclaw.json as the primary source of truth, with workspace connectors as fallback.
+  const configBaseUrl = normalizeBaseUrl(readConfigString(cfg, ["pmos", "connectors", "bcgpt", "url"]));
+  const workspaceBaseUrl = normalizeBaseUrl(
+    typeof wc?.bcgpt?.url === "string" ? wc.bcgpt.url : null,
+  );
+  const baseUrl = configBaseUrl ?? workspaceBaseUrl ?? "https://bcgpt.wickedlab.io";
+
+  const configApiKey = readConfigString(cfg, ["pmos", "connectors", "bcgpt", "apiKey"]);
+  const workspaceApiKey =
+    typeof wc?.bcgpt?.apiKey === "string" ? wc.bcgpt.apiKey.trim() : null;
+  const apiKey = (configApiKey ?? workspaceApiKey ?? "").trim();
+  if (!apiKey) {
+    return null;
+  }
+
+  return { baseUrl, apiKey };
+}
+
+/**
+ * Ensure Basecamp credential (basecampApi) exists in workspace n8n using configured connector key.
+ * Best-effort and cached to avoid repeated upserts on every request.
+ */
+export async function ensureWorkspaceBasecampCredential(workspaceId: string): Promise<void> {
+  const cfg = await resolveBasecampConnectorConfig(workspaceId);
+  if (!cfg) {
+    return;
+  }
+
+  const fingerprint = `${cfg.baseUrl}|${cfg.apiKey.length}|${cfg.apiKey.slice(-6)}`;
+  const cached = basecampEnsureCache.get(workspaceId);
+  const now = Date.now();
+  if (cached && cached.fingerprint === fingerprint) {
+    const ttl = cached.ok ? BASECAMP_ENSURE_SUCCESS_TTL_MS : BASECAMP_ENSURE_FAILURE_TTL_MS;
+    if (now - cached.at < ttl) {
+      return;
+    }
+  }
+
+  try {
+    const { upsertBasecampCredential } = await import("./n8n-api-client.js");
+    const result = await upsertBasecampCredential(workspaceId, cfg.baseUrl, cfg.apiKey);
+    basecampEnsureCache.set(workspaceId, { fingerprint, at: now, ok: Boolean(result.ok) });
+  } catch {
+    basecampEnsureCache.set(workspaceId, { fingerprint, at: now, ok: false });
+  }
+}
+
 /**
  * Fetch all credentials available in a workspace's n8n instance.
  * Returns all credentials (not just OpenClaw-managed ones).
  */
 export async function fetchWorkspaceCredentials(workspaceId: string): Promise<CredentialInfo[]> {
   try {
+    await ensureWorkspaceBasecampCredential(workspaceId);
     return await listN8nCredentials(workspaceId);
   } catch {
     return [];
