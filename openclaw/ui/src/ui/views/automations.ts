@@ -1,7 +1,6 @@
 import { html, nothing } from "lit";
 import type { WorkflowRunSummary, WorkflowSummary } from "../controllers/pmos-workflows.ts";
 import type { ChatProps } from "./chat.ts";
-import { renderChat } from "./chat.ts";
 
 const WORKFLOW_TEMPLATES = [
   { id: "template-basecamp-sync", name: "Basecamp Todo Sync", desc: "Sync Basecamp todos to another service", icon: "🏕️", category: "Sync" },
@@ -322,9 +321,9 @@ export function renderAutomations(props: AutomationsProps) {
   // ─── Right chat panel ──────────────────────────────────────────────
   const chatPanel = html`
     <div style="
-      width: 320px;
-      min-width: 320px;
-      max-width: 320px;
+      width: 350px;
+      min-width: 350px;
+      max-width: 350px;
       flex-shrink: 0;
       display: flex;
       flex-direction: column;
@@ -332,7 +331,7 @@ export function renderAutomations(props: AutomationsProps) {
       background: var(--surface, #1e1e1e);
       overflow: hidden;
       height: 100%;
-      max-height: 100%;
+      min-height: 0;
     ">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--border);flex-shrink:0;">
         <div>
@@ -340,6 +339,29 @@ export function renderAutomations(props: AutomationsProps) {
           <div class="muted" style="font-size:11px;">Describe what you want to automate</div>
         </div>
         <button class="btn btn--sm" @click=${() => props.onChatToggle()} title="Close chat">✕</button>
+      </div>
+
+      <div style="padding:10px 12px;border-bottom:1px solid var(--border);flex-shrink:0;">
+        <textarea
+          style="width:100%;height:72px;resize:none;font-size:13px;"
+          .value=${props.chatDraft}
+          @input=${(e: Event) => props.onChatDraftChange((e.target as HTMLTextAreaElement).value)}
+          @keydown=${(e: KeyboardEvent) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              if (props.chatDraft.trim() && !props.chatSending) props.onChatSend();
+            }
+          }}
+          placeholder="Describe your automation... (Enter to send)"
+          ?disabled=${!props.connected || props.chatSending}
+        ></textarea>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;">
+          <div class="muted" style="font-size:10px;">Enter to send · Shift+Enter for new line</div>
+          ${props.currentModel
+            ? html`<span class="chip" style="font-size:9px;padding:1px 6px;">${props.currentModelProvider ?? "AI"} / ${props.currentModel?.includes("/") ? props.currentModel.split("/").pop() : props.currentModel}</span>`
+            : html`<a href=${props.integrationsHref} class="muted" style="font-size:9px;">⚠ No model</a>`
+          }
+        </div>
       </div>
 
       <div style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;min-height:0;">
@@ -378,34 +400,12 @@ export function renderAutomations(props: AutomationsProps) {
       </div>
 
       <div style="border-top:1px solid var(--border);padding:10px 12px;flex-shrink:0;">
-        <div style="display:flex;gap:8px;align-items:flex-end;">
-          <textarea
-            style="flex:1;min-width:0;height:64px;resize:none;font-size:13px;"
-            .value=${props.chatDraft}
-            @input=${(e: Event) => props.onChatDraftChange((e.target as HTMLTextAreaElement).value)}
-            @keydown=${(e: KeyboardEvent) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                if (props.chatDraft.trim() && !props.chatSending) props.onChatSend();
-              }
-            }}
-            placeholder="Describe your automation... (Enter to send)"
-            ?disabled=${!props.connected || props.chatSending}
-          ></textarea>
-          <button
-            class="btn btn--primary btn--sm"
-            style="flex-shrink:0;align-self:flex-end;"
-            @click=${() => props.onChatSend()}
-            ?disabled=${!props.connected || !props.chatDraft.trim() || props.chatSending}
-          >${props.chatSending ? "..." : "Send"}</button>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;">
-          <div class="muted" style="font-size:10px;">Enter to send · Shift+Enter for new line</div>
-          ${props.currentModel
-            ? html`<span class="chip" style="font-size:9px;padding:1px 6px;">${props.currentModelProvider ?? 'AI'} / ${props.currentModel?.includes('/') ? props.currentModel.split('/').pop() : props.currentModel}</span>`
-            : html`<a href=${props.integrationsHref} class="muted" style="font-size:9px;">⚠ No model</a>`
-          }
-        </div>
+        <button
+          class="btn btn--primary btn--sm"
+          style="width:100%;"
+          @click=${() => props.onChatSend()}
+          ?disabled=${!props.connected || !props.chatDraft.trim() || props.chatSending}
+        >${props.chatSending ? "..." : "Send"}</button>
       </div>
     </div>
   `;
@@ -473,6 +473,8 @@ export function renderAutomations(props: AutomationsProps) {
         flex: 1 1 auto;
         overflow: hidden;
         min-height: 0;
+        max-height: 80vh;
+        height: 80vh;
       ">
         <!-- left panel -->
         ${props.panelOpen ? html`
@@ -485,8 +487,9 @@ export function renderAutomations(props: AutomationsProps) {
             flex-direction: column;
             border-right: 1px solid var(--border);
             background: var(--surface, #1e1e1e);
-            overflow: hidden;
+            overflow-y: auto;
             height: 100%;
+            max-height: 80vh;
             min-height: 0;
           ">
             ${props.panelTab === "workflows" ? panelWorkflows : nothing}
@@ -496,7 +499,7 @@ export function renderAutomations(props: AutomationsProps) {
         ` : nothing}
 
         <!-- n8n iframe -->
-        <div style="flex:1;min-width:0;position:relative;display:flex;flex-direction:column;min-height:0;height:100%;">
+        <div style="flex:1;min-width:0;position:relative;display:flex;flex-direction:column;min-height:0;height:100%;overflow:hidden;">
           <iframe
             src=${props.embedUrl}
             title="n8n Workflow Canvas"
@@ -507,20 +510,7 @@ export function renderAutomations(props: AutomationsProps) {
 
         <!-- right chat panel -->
         ${props.chatOpen ? html`
-          <div style="width: 350px; min-width: 350px; flex-shrink: 0; border-left: 1px solid var(--border); display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden;">
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border);">
-              <span style="font-weight: 600;">Chat</span>
-              <div style="display: flex; gap: 8px; align-items: center;">
-                <a href=${props.chatHref} style="font-size: 12px; opacity: 0.7;">Open full →</a>
-                <button class="btn btn--sm" @click=${() => props.onChatToggle()}>✕</button>
-              </div>
-            </div>
-            <div style="flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column;">
-              <div style="flex: 1 1 auto; min-height: 0;">
-                ${renderChat(props.chatProps)}
-              </div>
-            </div>
-          </div>
+          ${chatPanel}
         ` : nothing}
       </div>
     </div>
