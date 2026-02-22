@@ -357,7 +357,8 @@ export function syncTabWithLocation(host: SettingsHost, replace: boolean) {
   }
   const resolved = tabFromPath(window.location.pathname, host.basePath) ?? "chat";
   setTabFromRoute(host, resolved);
-  syncUrlWithTab(host, resolved, replace);
+  // Sync URL with the actual tab (which may have been redirected for non-superadmin)
+  syncUrlWithTab(host, host.tab, replace);
 }
 
 export function onPopState(host: SettingsHost) {
@@ -383,7 +384,23 @@ export function onPopState(host: SettingsHost) {
   setTabFromRoute(host, resolved);
 }
 
+const RESTRICTED_TABS: Tab[] = ["nodes", "debug", "logs", "config"];
+
+function isRestrictedTab(tab: Tab): boolean {
+  return RESTRICTED_TABS.includes(tab);
+}
+
 export function setTabFromRoute(host: SettingsHost, next: Tab) {
+  // Check if user has access to this tab based on role
+  const pmosUser = (host as any).pmosAuthUser;
+  const role = pmosUser?.role ?? null;
+  const isSuperAdmin = role === "super_admin";
+  
+  // Redirect non-superadmin users away from restricted tabs
+  if (!isSuperAdmin && isRestrictedTab(next)) {
+    next = "dashboard";
+  }
+  
   if (host.tab !== next) {
     host.tab = next;
   }
