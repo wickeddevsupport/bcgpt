@@ -1,13 +1,13 @@
 /**
- * Workflow AI — calls the workspace BYOK model to power the Automations AI chat.
+ * Workflow AI calls the globally configured model from openclaw.json.
  *
- * Reads the provider + model ID from workspace config (agents.defaults.model.primary)
- * and the encrypted API key from byok-store, then makes a direct API call so the
- * same model the user configured in Integrations powers the workflow assistant.
+ * Source of truth:
+ * - agents.defaults.model.primary
+ * - models.providers.<provider>.apiKey (with env fallback when missing)
  */
 
-import { getKey } from "./byok-store.js";
-import { loadEffectiveWorkspaceConfig } from "./workspace-config.js";
+import { getCustomProviderApiKey, resolveEnvApiKey } from "../agents/model-auth.js";
+import { loadConfig, type OpenClawConfig } from "../config/config.js";
 
 type Message = { role: "user" | "assistant" | "system"; content: string };
 
@@ -15,6 +15,70 @@ interface ModelConfig {
   provider: string;
   modelId: string;
   apiKey: string;
+}
+
+function appendV1(baseUrl: string): string {
+  return `${baseUrl.replace(/\/+$/, "")}/v1`;
+}
+
+function resolveKiloBaseUrl(): string {
+  const raw = (process.env.KILO_API_URL ?? "https://api.kilo.ai/api/gateway").trim();
+  const normalized = raw.replace(/\/+$/, "");
+  return normalized.replace(/\/chat\/completions$/, "");
+}
+
+function resolveProviderBaseUrlFromConfig(
+  cfg: OpenClawConfig,
+  provider: string,
+): string | null {
+  const providers = cfg?.models?.providers as Record<string, unknown> | undefined;
+  const entry = providers?.[provider];
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return null;
+  }
+  const raw = typeof (entry as Record<string, unknown>).baseUrl === "string"
+    ? ((entry as Record<string, unknown>).baseUrl as string).trim()
+    : "";
+  return raw ? raw.replace(/\/+$/, "") : null;
+}
+
+function resolveOpenAiCompatibleBaseUrl(provider: string, cfg: OpenClawConfig): string {
+  const configuredBaseUrl = resolveProviderBaseUrlFromConfig(cfg, provider);
+  if (configuredBaseUrl) {
+    // Kilo may be stored with a fully-qualified endpoint; normalize back to base.
+    if (provider === "kilo") {
+      return configuredBaseUrl.replace(/\/chat\/completions$/, "");
+    }
+    return configuredBaseUrl;
+  }
+  switch (provider) {
+    case "openrouter":
+      return "https://openrouter.ai/api/v1";
+    case "zai":
+      return "https://open.bigmodel.cn/api/paas/v4";
+    case "kilo":
+      // Kilo gateway is OpenAI-compatible at /api/gateway/chat/completions.
+      return resolveKiloBaseUrl();
+    case "moonshot":
+      return appendV1(process.env.MOONSHOT_API_URL ?? "https://api.moonshot.ai");
+    case "nvidia":
+      return appendV1(process.env.NVIDIA_API_URL ?? "https://integrate.api.nvidia.com");
+    case "azure":
+      return (
+        process.env.AZURE_OPENAI_BASE_URL ??
+        process.env.OPENAI_API_BASE_URL ??
+        "https://api.openai.com/v1"
+      ).replace(/\/+$/, "");
+    case "custom":
+      return (
+        process.env.CUSTOM_OPENAI_BASE_URL ??
+        process.env.OPENAI_API_BASE_URL ??
+        "https://api.openai.com/v1"
+      ).replace(/\/+$/, "");
+    case "openai":
+    default:
+      return "https://api.openai.com/v1";
+  }
 }
 
 /**
@@ -29,30 +93,36 @@ function parsePrimaryRef(ref: unknown): { provider: string; modelId: string } | 
   return { provider, modelId };
 }
 
+function resolvePrimaryRefFromConfig(cfg: OpenClawConfig): unknown {
+  return cfg?.agents?.defaults?.model?.primary;
+}
+
+async function resolveProviderApiKey(
+  provider: string,
+  cfg: OpenClawConfig,
+): Promise<string | null> {
+  const configApiKey = getCustomProviderApiKey(cfg, provider);
+  if (configApiKey) {
+    return configApiKey;
+  }
+  const envResolved = resolveEnvApiKey(provider);
+  const envApiKey = typeof envResolved?.apiKey === "string" ? envResolved.apiKey.trim() : "";
+  return envApiKey || null;
+}
+
 /**
- * Resolve model config for a workspace. Returns null if no model is configured.
+ * Resolve model config from global openclaw.json. Returns null if no usable model is configured.
  */
-async function resolveModelConfig(workspaceId: string): Promise<ModelConfig | null> {
-  const cfg = await loadEffectiveWorkspaceConfig(workspaceId);
-  const primaryRef = (cfg as Record<string, unknown>)?.agents
-    ? ((cfg as Record<string, unknown>).agents as Record<string, unknown>)?.defaults
-      ? (((cfg as Record<string, unknown>).agents as Record<string, unknown>).defaults as Record<string, unknown>)?.model
-        ? ((((cfg as Record<string, unknown>).agents as Record<string, unknown>).defaults as Record<string, unknown>).model as Record<string, unknown>)?.primary
-        : undefined
-      : undefined
-    : undefined;
-
-  const parsed = parsePrimaryRef(primaryRef);
+async function resolveModelConfig(cfg: OpenClawConfig): Promise<ModelConfig | null> {
+  const parsed = parsePrimaryRef(resolvePrimaryRefFromConfig(cfg));
   if (!parsed) return null;
-
-  const apiKey = await getKey(workspaceId, parsed.provider as import("./byok-store.js").AIProvider);
+  const apiKey = await resolveProviderApiKey(parsed.provider, cfg);
   if (!apiKey) return null;
-
   return { provider: parsed.provider, modelId: parsed.modelId, apiKey };
 }
 
 /**
- * Call the workspace's configured BYOK model with a system prompt + messages.
+ * Call the globally configured model with a system prompt + messages.
  * Returns the assistant's text response.
  */
 export async function callWorkspaceModel(
@@ -61,9 +131,15 @@ export async function callWorkspaceModel(
   messages: Message[],
   opts: { maxTokens?: number; jsonMode?: boolean } = {},
 ): Promise<{ ok: boolean; text?: string; error?: string; providerUsed?: string }> {
-  const config = await resolveModelConfig(workspaceId);
+  void workspaceId;
+  const cfg = loadConfig();
+  const config = await resolveModelConfig(cfg);
   if (!config) {
-    return { ok: false, error: "No AI model configured. Go to Integrations to add a provider API key." };
+    return {
+      ok: false,
+      error:
+        "No AI model configured in openclaw.json (set agents.defaults.model.primary and provider apiKey).",
+    };
   }
 
   const { provider, modelId, apiKey } = config;
@@ -74,39 +150,80 @@ export async function callWorkspaceModel(
       case "openai":
       case "openrouter":
       case "zai":
+      case "kilo":
+      case "moonshot":
+      case "nvidia":
       case "azure":
       case "custom": {
-        const baseUrl = provider === "openrouter"
-          ? "https://openrouter.ai/api/v1"
-          : provider === "zai"
-          ? "https://open.bigmodel.cn/api/paas/v4"
-          : "https://api.openai.com/v1";
-
-        const body: Record<string, unknown> = {
+        const baseUrl = resolveOpenAiCompatibleBaseUrl(provider, cfg);
+        const openAiBody: Record<string, unknown> = {
           model: modelId,
-          messages: [{ role: "system", content: systemPrompt }, ...messages.map(m => ({ role: m.role === "system" ? "user" : m.role, content: m.content }))],
+          messages: [
+            { role: "system", content: systemPrompt },
+            ...messages.map(m => ({ role: m.role === "system" ? "user" : m.role, content: m.content })),
+          ],
           max_tokens: maxTokens,
           temperature: 0.4,
         };
         if (opts.jsonMode) {
-          body.response_format = { type: "json_object" };
+          openAiBody.response_format = { type: "json_object" };
         }
 
-        const res = await fetch(`${baseUrl}/chat/completions`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          return { ok: false, error: `${provider} API error ${res.status}: ${text.slice(0, 300)}` };
+        const callOpenAiCompatible = async (
+          targetProvider: string,
+          targetBaseUrl: string,
+          targetApiKey: string,
+        ): Promise<{ ok: boolean; text?: string; status?: number; error?: string }> => {
+          const res = await fetch(`${targetBaseUrl}/chat/completions`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${targetApiKey}`,
+            },
+            body: JSON.stringify(openAiBody),
+          });
+          if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            return {
+              ok: false,
+              status: res.status,
+              error: `${targetProvider} API error ${res.status}: ${text.slice(0, 300)}`,
+            };
+          }
+          const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
+          return { ok: true, text: data.choices?.[0]?.message?.content ?? "" };
+        };
+
+        const primary = await callOpenAiCompatible(provider, baseUrl, apiKey);
+        if (primary.ok) {
+          return { ok: true, text: primary.text, providerUsed: provider };
         }
-        const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
-        const text = data.choices?.[0]?.message?.content ?? "";
-        return { ok: true, text, providerUsed: provider };
+
+        // Some provider aliases (kilo/moonshot/nvidia) are often configured with OpenRouter model IDs.
+        // If their native endpoint is unavailable for chat completions, fall back to OpenRouter when
+        // a global OpenRouter key exists.
+        const shouldTryOpenRouterFallback =
+          (provider === "kilo" || provider === "moonshot" || provider === "nvidia") &&
+          (primary.status === 404 || primary.status === 405);
+        if (shouldTryOpenRouterFallback) {
+          const openRouterKey = await resolveProviderApiKey("openrouter", cfg);
+          if (openRouterKey) {
+            const fallback = await callOpenAiCompatible(
+              "openrouter",
+              "https://openrouter.ai/api/v1",
+              openRouterKey,
+            );
+            if (fallback.ok) {
+              return {
+                ok: true,
+                text: fallback.text,
+                providerUsed: "openrouter",
+              };
+            }
+          }
+        }
+
+        return { ok: false, error: primary.error };
       }
 
       case "anthropic": {
@@ -177,7 +294,10 @@ export async function callWorkspaceModel(
       }
 
       default:
-        return { ok: false, error: `Unknown provider: ${provider}. Configure a supported provider in Integrations.` };
+        return {
+          ok: false,
+          error: `Unknown provider: ${provider}. Configure a supported provider in openclaw.json.`,
+        };
     }
   } catch (err) {
     return { ok: false, error: `Model call failed: ${err instanceof Error ? err.message : String(err)}` };
@@ -230,6 +350,105 @@ export async function getN8nNodeCatalog(n8nBaseUrl?: string): Promise<string> {
   return catalog;
 }
 
+const WORKSPACE_NODE_CATALOG_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+const WORKSPACE_NODE_CATALOG_MAX_ENTRIES = 180;
+const workspaceNodeCatalogCacheByWorkspace = new Map<string, { catalog: string; fetchedAt: number }>();
+
+type WorkspaceNodeCatalogRow = {
+  name: string;
+  displayName?: string;
+  description?: string;
+};
+
+function isWorkspaceTriggerNode(nodeName: string): boolean {
+  const lower = nodeName.toLowerCase();
+  return lower.includes("trigger") || lower.endsWith(".trigger");
+}
+
+function formatWorkspaceNodeRow(row: WorkspaceNodeCatalogRow): string {
+  const detail = (row.description ?? row.displayName ?? "").trim();
+  return detail ? `- ${row.name} - ${detail}` : `- ${row.name}`;
+}
+
+function trimWorkspaceNodeRows(rows: string[], limit: number): string[] {
+  if (rows.length <= limit) {
+    return rows;
+  }
+  const shown = rows.slice(0, limit);
+  shown.push(`- ... plus ${rows.length - limit} more node types`);
+  return shown;
+}
+
+function buildWorkspaceNodeCatalog(nodeTypes: WorkspaceNodeCatalogRow[]): string {
+  if (!nodeTypes.length) {
+    return N8N_NODE_CATALOG_FALLBACK;
+  }
+
+  // Deduplicate by node name (some n8n builds can return repeated aliases).
+  const byName = new Map<string, WorkspaceNodeCatalogRow>();
+  for (const node of nodeTypes) {
+    if (!node.name || byName.has(node.name)) {
+      continue;
+    }
+    byName.set(node.name, node);
+  }
+
+  const unique = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const custom = unique.filter((node) => !node.name.startsWith("n8n-nodes-base."));
+  const triggers = unique.filter((node) => isWorkspaceTriggerNode(node.name));
+  const actions = unique.filter((node) => !isWorkspaceTriggerNode(node.name));
+
+  const customLimit = Math.min(60, WORKSPACE_NODE_CATALOG_MAX_ENTRIES);
+  const triggerLimit = Math.min(
+    50,
+    Math.max(0, WORKSPACE_NODE_CATALOG_MAX_ENTRIES - customLimit),
+  );
+  const actionLimit = Math.max(
+    0,
+    WORKSPACE_NODE_CATALOG_MAX_ENTRIES - customLimit - triggerLimit,
+  );
+
+  const customLines = trimWorkspaceNodeRows(custom.map(formatWorkspaceNodeRow), customLimit);
+  const triggerLines = trimWorkspaceNodeRows(triggers.map(formatWorkspaceNodeRow), triggerLimit);
+  const actionLines = trimWorkspaceNodeRows(actions.map(formatWorkspaceNodeRow), actionLimit);
+
+  return `
+## Available n8n Node Types (live from this workspace)
+Use this live catalog as the source of truth for node type names.
+
+### Custom/Community Nodes
+${customLines.length > 0 ? customLines.join("\n") : "- None detected"}
+
+### Triggers
+${triggerLines.length > 0 ? triggerLines.join("\n") : "- None detected"}
+
+### Actions
+${actionLines.length > 0 ? actionLines.join("\n") : "- None detected"}
+`;
+}
+
+export async function getWorkspaceN8nNodeCatalog(workspaceId: string): Promise<string> {
+  const cacheKey = workspaceId.trim() || "__default__";
+  const now = Date.now();
+  const cached = workspaceNodeCatalogCacheByWorkspace.get(cacheKey);
+  if (cached && now - cached.fetchedAt < WORKSPACE_NODE_CATALOG_CACHE_TTL_MS) {
+    return cached.catalog;
+  }
+
+  try {
+    const { listN8nNodeTypes } = await import("./n8n-api-client.js");
+    const result = await listN8nNodeTypes(workspaceId);
+    if (!result.ok || !result.nodeTypes?.length) {
+      return N8N_NODE_CATALOG_FALLBACK;
+    }
+    const catalog = buildWorkspaceNodeCatalog(result.nodeTypes);
+    workspaceNodeCatalogCacheByWorkspace.set(cacheKey, { catalog, fetchedAt: now });
+    return catalog;
+  } catch {
+    return N8N_NODE_CATALOG_FALLBACK;
+  }
+}
+
 // Fallback catalog if n8n is unavailable
 const N8N_NODE_CATALOG_FALLBACK = `
 ## Available n8n Node Types
@@ -243,7 +462,6 @@ const N8N_NODE_CATALOG_FALLBACK = `
 - n8n-nodes-base.slackTrigger — Trigger on Slack events (messages, reactions, etc.)
 - n8n-nodes-base.githubTrigger — Trigger on GitHub events (push, PR, issue, etc.)
 - n8n-nodes-base.googleSheetsRowTrigger — Trigger on new row in Google Sheets
-- n8n-nodes-basecamp.basecampTrigger — Trigger on Basecamp events (new todo, message, etc.) [custom node]
 
 ### Basecamp (custom node — uses connected Basecamp account)
 - n8n-nodes-basecamp.basecamp — Resource: project, todo, todolist, message, card, comment, document, file, person
@@ -299,6 +517,9 @@ export const WORKFLOW_ASSISTANT_SYSTEM_PROMPT = `You are an expert n8n workflow 
 
 Your job is to help users create, understand, and improve n8n workflows. You know all available n8n nodes and their capabilities.
 
+If a section titled "Available n8n Node Types (live from this workspace)" is present below, treat it as the source of truth.
+Do not invent node types. Use only node type names that exist in the provided live catalog when available.
+
 ${N8N_NODE_CATALOG_FALLBACK}
 
 ## How to respond
@@ -328,6 +549,7 @@ Always respond with a JSON object in this exact format:
 
 ## Rules
 - Use REAL n8n node type names exactly as listed above (e.g., "n8n-nodes-base.slack" not "slack")
+- If a live workspace node catalog is provided, use ONLY node names from that live catalog
 - The Basecamp node is "n8n-nodes-basecamp.basecamp" — it uses the connected Basecamp account from Integrations
 - Position nodes left-to-right: trigger at x=250, each subsequent node at x+250
 - Keep node parameters minimal — the user can configure details in the n8n editor
@@ -338,11 +560,12 @@ Always respond with a JSON object in this exact format:
 - Include data transformation nodes (set, code, filter) when needed
 - Use branching (if, switch) to create multiple paths in the workflow
 - Use merge nodes to combine data from multiple branches
+- Prefer complete workflows that can execute without manual node rewiring
 - Respond ONLY with the JSON object — no markdown fences, no extra text
 
 ## Example: Creating a Basecamp Todo Sync Workflow
 
-User: "Create a workflow that syncs new Basecamp todos to Slack and creates a GitHub issue"
+User: "Create a workflow that receives new Basecamp todos via webhook, notifies Slack, and creates a GitHub issue"
 
 Response:
 {
@@ -350,7 +573,7 @@ Response:
   "workflow": {
     "name": "Basecamp Todo to Slack and GitHub",
     "nodes": [
-      {"id": "trigger-1", "name": "Basecamp Trigger", "type": "n8n-nodes-basecamp.basecampTrigger", "typeVersion": 1, "position": [250, 300], "parameters": {"event": "todo.created"}},
+      {"id": "trigger-1", "name": "Incoming Todo Webhook", "type": "n8n-nodes-base.webhookTrigger", "typeVersion": 1, "position": [250, 300], "parameters": {"path": "basecamp-todo","responseMode":"onReceived"}},
       {"id": "set-1", "name": "Format Todo Data", "type": "n8n-nodes-base.set", "typeVersion": 3, "position": [500, 300], "parameters": {"values": {"string": [{"name": "title", "value": "={{ $json.title }}"}, {"name": "description", "value": "={{ $json.content }}"}]}}},
       {"id": "slack-1", "name": "Notify Slack", "type": "n8n-nodes-base.slack", "typeVersion": 1, "position": [750, 300], "parameters": {"resource": "message", "operation": "post", "channel": "#notifications", "text": "New Basecamp Todo: {{$json.title}}"}},
       {"id": "filter-1", "name": "Check Priority", "type": "n8n-nodes-base.if", "typeVersion": 1, "position": [1000, 300], "parameters": {"conditions": {"string": [{"value1": "={{ $json.priority }}", "value2": "high"}]}}},
@@ -358,7 +581,7 @@ Response:
       {"id": "set-2", "name": "Log Skipped", "type": "n8n-nodes-base.set", "typeVersion": 3, "position": [1250, 400], "parameters": {"values": {"string": [{"name": "status", "value": "skipped_low_priority"}]}}}
     ],
     "connections": {
-      "Basecamp Trigger": {"main": [[{"node": "Format Todo Data", "type": "main", "index": 0}]]},
+      "Incoming Todo Webhook": {"main": [[{"node": "Format Todo Data", "type": "main", "index": 0}]]},
       "Format Todo Data": {"main": [[{"node": "Notify Slack", "type": "main", "index": 0}]]},
       "Notify Slack": {"main": [[{"node": "Check Priority", "type": "main", "index": 0}]]},
       "Check Priority": {"main": [[{"node": "Create GitHub Issue", "type": "main", "index": 0}], [{"node": "Log Skipped", "type": "main", "index": 0}]]}
