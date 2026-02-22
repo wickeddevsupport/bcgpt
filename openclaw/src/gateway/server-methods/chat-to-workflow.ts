@@ -28,8 +28,9 @@ const ChatWorkflowTemplateSchema = z.object({
 const ChatWorkflowConfirmSchema = z.object({
   workflow: z.object({
     name: z.string(),
-    nodes: z.array(z.any()),
-    connections: z.record(z.any()),
+    nodes: z.array(z.unknown()),
+    // Keep this broad and validate object-shape manually to avoid zod record edge-cases.
+    connections: z.unknown().optional(),
   }),
   confirmed: z.boolean(),
 });
@@ -204,6 +205,18 @@ export async function handleWorkflowConfirm(
       message: 'Workflow creation cancelled',
     };
   }
+
+  const rawConnections = parsed.data.workflow.connections ?? {};
+  if (
+    typeof rawConnections !== "object" ||
+    rawConnections === null ||
+    Array.isArray(rawConnections)
+  ) {
+    return {
+      success: false,
+      message: "Invalid workflow.connections: expected an object",
+    };
+  }
   
   const workspaceId = client.pmosWorkspaceId;
   if (!workspaceId) {
@@ -229,7 +242,7 @@ export async function handleWorkflowConfirm(
     active: false,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     nodes: linkedNodes as any,
-    connections: parsed.data.workflow.connections,
+    connections: rawConnections as Record<string, unknown>,
     settings: { executionOrder: 'v1' },
     staticData: null,
     tags: [],
