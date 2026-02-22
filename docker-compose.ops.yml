@@ -2,8 +2,8 @@ version: "3.9"
 
 services:
   ops:
-    # Known-good pinned vendor image (auto-bumped via CI PRs).
-    image: ghcr.io/wickeddevsupport/openclaw-n8n-vendor:n8n-1.76.1
+    # External OPS runtime (PMOS uses embedded n8n by default).
+    image: n8nio/n8n:latest
     container_name: wicked-ops
     restart: unless-stopped
     labels:
