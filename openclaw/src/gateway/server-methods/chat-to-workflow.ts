@@ -35,6 +35,97 @@ const ChatWorkflowConfirmSchema = z.object({
   confirmed: z.boolean(),
 });
 
+type WorkflowNodeRecord = Record<string, unknown>;
+type N8nConnectionRef = { node: string; type: "main"; index: number };
+type N8nConnectionMap = Record<string, { main: N8nConnectionRef[][] }>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function ensureNodeNames(nodes: WorkflowNodeRecord[]): WorkflowNodeRecord[] {
+  return nodes.map((node, idx) => {
+    const name = typeof node.name === "string" ? node.name.trim() : "";
+    if (name) return node;
+    return { ...node, name: `Step ${idx + 1}` };
+  });
+}
+
+function buildLinearConnections(nodes: WorkflowNodeRecord[]): N8nConnectionMap {
+  const connections: N8nConnectionMap = {};
+  for (let i = 0; i < nodes.length - 1; i += 1) {
+    const from = nodes[i];
+    const to = nodes[i + 1];
+    const fromName = typeof from?.name === "string" ? from.name.trim() : "";
+    const toName = typeof to?.name === "string" ? to.name.trim() : "";
+    if (!fromName || !toName) continue;
+    connections[fromName] = {
+      main: [[{ node: toName, type: "main", index: 0 }]],
+    };
+  }
+  return connections;
+}
+
+function normalizeConnectionRef(
+  value: unknown,
+  validNames: Set<string>,
+): N8nConnectionRef | null {
+  if (!isRecord(value)) return null;
+  const nodeName = typeof value.node === "string" ? value.node.trim() : "";
+  if (!nodeName || !validNames.has(nodeName)) return null;
+  const indexRaw = value.index;
+  const index =
+    typeof indexRaw === "number" && Number.isFinite(indexRaw) && indexRaw >= 0
+      ? Math.floor(indexRaw)
+      : 0;
+  return {
+    node: nodeName,
+    type: "main",
+    index,
+  };
+}
+
+function normalizeWorkflowConnections(
+  raw: Record<string, unknown>,
+  nodes: WorkflowNodeRecord[],
+): N8nConnectionMap {
+  const normalized: N8nConnectionMap = {};
+  const validNames = new Set(
+    nodes
+      .map((node) => (typeof node.name === "string" ? node.name.trim() : ""))
+      .filter((name): name is string => Boolean(name)),
+  );
+
+  for (const [sourceNameRaw, target] of Object.entries(raw)) {
+    const sourceName = sourceNameRaw.trim();
+    if (!sourceName || !validNames.has(sourceName) || !isRecord(target)) continue;
+    const mainRaw = target.main;
+    if (!Array.isArray(mainRaw)) continue;
+
+    const normalizedBranches: N8nConnectionRef[][] = [];
+    for (const branch of mainRaw) {
+      if (!Array.isArray(branch)) continue;
+      const refs: N8nConnectionRef[] = [];
+      for (const candidate of branch) {
+        const ref = normalizeConnectionRef(candidate, validNames);
+        if (ref) refs.push(ref);
+      }
+      if (refs.length > 0) {
+        normalizedBranches.push(refs);
+      }
+    }
+
+    if (normalizedBranches.length > 0) {
+      normalized[sourceName] = { main: normalizedBranches };
+    }
+  }
+
+  if (Object.keys(normalized).length === 0 && nodes.length > 1) {
+    return buildLinearConnections(nodes);
+  }
+  return normalized;
+}
+
 /**
  * Handle chat-to-workflow creation command
  */
@@ -225,6 +316,20 @@ export async function handleWorkflowConfirm(
       message: 'Workspace context required',
     };
   }
+
+  const workflowNodes = ensureNodeNames(
+    parsed.data.workflow.nodes.filter((node): node is WorkflowNodeRecord => isRecord(node)),
+  );
+  if (workflowNodes.length === 0) {
+    return {
+      success: false,
+      message: 'Invalid workflow.nodes: expected at least one node object',
+    };
+  }
+  const normalizedConnections = normalizeWorkflowConnections(
+    rawConnections as Record<string, unknown>,
+    workflowNodes,
+  );
   
   // Persist workflow to n8n via API
   const { createN8nWorkflow } = await import('../n8n-api-client.js');
@@ -233,7 +338,7 @@ export async function handleWorkflowConfirm(
   const { fetchWorkspaceCredentials, autoLinkNodeCredentials } = await import('../credential-sync.js');
   const credentials = await fetchWorkspaceCredentials(workspaceId).catch(() => []);
   const linkedNodes = autoLinkNodeCredentials(
-    parsed.data.workflow.nodes as Array<Record<string, unknown>>,
+    workflowNodes,
     credentials,
   );
 
@@ -242,7 +347,7 @@ export async function handleWorkflowConfirm(
     active: false,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     nodes: linkedNodes as any,
-    connections: rawConnections as Record<string, unknown>,
+    connections: normalizedConnections as Record<string, unknown>,
     settings: { executionOrder: 'v1' },
     staticData: null,
     tags: [],
