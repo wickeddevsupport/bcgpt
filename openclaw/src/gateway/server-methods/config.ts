@@ -348,8 +348,8 @@ export const configHandlers: GatewayRequestHandlers = {
         );
         return;
       }
-      await writeConfigFile(validatedScoped.config);
-      const redactedScoped = redactConfigObject(validatedScoped.config) as Record<string, unknown>;
+      await writeConfigFile(merged.config);
+      const redactedScoped = redactConfigObject(merged.config) as Record<string, unknown>;
       if (
         redactedScoped?.agents &&
         typeof redactedScoped.agents === "object" &&
@@ -634,7 +634,7 @@ export const configHandlers: GatewayRequestHandlers = {
         );
         return;
       }
-      await writeConfigFile(validatedScoped.config);
+      await writeConfigFile(merged.config);
 
       const sessionKey =
         typeof (params as { sessionKey?: unknown }).sessionKey === "string"
@@ -672,7 +672,7 @@ export const configHandlers: GatewayRequestHandlers = {
         delayMs: restartDelayMs,
         reason: "config.apply",
       });
-      const redactedScoped = redactConfigObject(validatedScoped.config) as Record<string, unknown>;
+      const redactedScoped = redactConfigObject(merged.config) as Record<string, unknown>;
       if (
         redactedScoped?.agents &&
         typeof redactedScoped.agents === "object" &&
