@@ -1694,6 +1694,7 @@ export function renderApp(state: AppViewState) {
                 },
                 // Create Agent Modal
                 createModalOpen: state.createModalOpen,
+                createModalStep: state.createModalStep,
                 createModalLoading: state.createModalLoading,
                 createModalError: state.createModalError,
                 createModalFormData: state.createModalFormData,
@@ -1702,10 +1703,16 @@ export function renderApp(state: AppViewState) {
                 availableSkills: state.availableSkills,
                 onCreateModalOpen: () => {
                   state.createModalOpen = true;
+                  state.createModalStep = 1;
                   state.createModalError = null;
                 },
                 onCreateModalCancel: () => {
                   state.createModalOpen = false;
+                  state.createModalStep = 1;
+                  state.createModalError = null;
+                },
+                onCreateModalStepChange: (nextStep) => {
+                  state.createModalStep = nextStep;
                   state.createModalError = null;
                 },
                 onCreateModalFieldChange: (field, value) => {
@@ -1813,6 +1820,7 @@ export function renderApp(state: AppViewState) {
                       autonomousTasks: [],
                     };
                     state.createModalOpen = false;
+                    state.createModalStep = 1;
                   } catch (error) {
                     state.createModalError =
                       error instanceof Error ? error.message : String(error);

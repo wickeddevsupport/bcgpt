@@ -469,6 +469,7 @@ export class OpenClawApp extends LitElement {
   @state() agentSkillsAgentId: string | null = null;
   // Create Agent Modal state
   @state() createModalOpen = false;
+  @state() createModalStep: 1 | 2 | 3 = 1;
   @state() createModalLoading = false;
   @state() createModalError: string | null = null;
   @state() createModalFormData: import("./views/agents.js").CreateAgentFormData = {
@@ -988,19 +989,7 @@ export class OpenClawApp extends LitElement {
     if (!modelId) {
       return;
     }
-    if (
-      provider === "openai" ||
-      provider === "anthropic" ||
-      provider === "google" ||
-      provider === "zai" ||
-      provider === "openrouter" ||
-      provider === "kilo" ||
-      provider === "moonshot" ||
-      provider === "nvidia" ||
-      provider === "custom"
-    ) {
-      this.pmosModelProvider = provider as PmosModelProvider;
-    }
+    this.pmosModelProvider = provider as PmosModelProvider;
     this.pmosModelId = modelId;
   }
 

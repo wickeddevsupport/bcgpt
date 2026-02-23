@@ -1,15 +1,19 @@
 import type { GatewayBrowserClient } from "../gateway.ts";
 
-export type PmosModelProvider =
-  | "openai"
-  | "anthropic"
-  | "google"
-  | "zai"
-  | "openrouter"
-  | "kilo"
-  | "moonshot"
-  | "nvidia"
-  | "custom";
+export const PMOS_KNOWN_MODEL_PROVIDERS = [
+  "openai",
+  "anthropic",
+  "google",
+  "zai",
+  "openrouter",
+  "kilo",
+  "moonshot",
+  "nvidia",
+  "custom",
+] as const;
+
+export type PmosKnownModelProvider = (typeof PMOS_KNOWN_MODEL_PROVIDERS)[number];
+export type PmosModelProvider = string;
 
 export type PmosModelRow = {
   ref: string;
@@ -31,7 +35,7 @@ export type PmosAgentModelAssignment = {
 };
 
 export const PMOS_MODEL_PROVIDER_OPTIONS: Array<{
-  value: PmosModelProvider;
+  value: PmosKnownModelProvider;
   label: string;
   defaultModelId: string;
 }> = [
@@ -46,13 +50,13 @@ export const PMOS_MODEL_PROVIDER_OPTIONS: Array<{
   { value: "custom", label: "Custom (enter manually)", defaultModelId: "" },
 ];
 
-export const PMOS_MODEL_DEFAULTS: Record<PmosModelProvider, string> =
+export const PMOS_MODEL_DEFAULTS: Record<string, string> =
   PMOS_MODEL_PROVIDER_OPTIONS.reduce(
     (acc, entry) => {
       acc[entry.value] = entry.defaultModelId;
       return acc;
     },
-    {} as Record<PmosModelProvider, string>,
+    {} as Record<string, string>,
   );
 
 export type PmosModelAuthState = {
@@ -140,8 +144,8 @@ function asNonEmptyString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function isProvider(value: string): value is PmosModelProvider {
-  return value in PMOS_MODEL_DEFAULTS;
+function getDefaultModelIdForProvider(provider: string): string {
+  return PMOS_MODEL_DEFAULTS[provider.trim().toLowerCase()] ?? "";
 }
 
 function parsePrimaryModelRef(value: string | null): { provider: string; modelId: string } | null {
@@ -271,12 +275,12 @@ function listConfiguredModels(cfg: unknown): Record<string, { alias?: string }> 
   return out;
 }
 
-function listConfiguredProvidersFromConfig(cfg: unknown): PmosModelProvider[] {
+function listConfiguredProvidersFromConfig(cfg: unknown): string[] {
   const raw = getPath(cfg, ["models", "providers"]);
   if (!isRecord(raw)) {
     return [];
   }
-  const out = new Set<PmosModelProvider>();
+  const out = new Set<string>();
   for (const [providerKey, providerCfg] of Object.entries(raw)) {
     if (!isRecord(providerCfg)) {
       continue;
@@ -286,9 +290,7 @@ function listConfiguredProvidersFromConfig(cfg: unknown): PmosModelProvider[] {
       continue;
     }
     const normalized = providerKey.trim().toLowerCase();
-    if (isProvider(normalized)) {
-      out.add(normalized);
-    }
+    out.add(normalized);
   }
   return Array.from(out);
 }
@@ -450,34 +452,39 @@ function findMutableAgentEntry(
 
 export function hydratePmosModelDraftFromConfig(state: PmosModelAuthState) {
   // PMOS source of truth: openclaw.json global config.
-  state.pmosModelId = state.pmosModelId.trim() || PMOS_MODEL_DEFAULTS[state.pmosModelProvider];
+  state.pmosModelProvider = state.pmosModelProvider.trim().toLowerCase() || "custom";
+  state.pmosModelId = state.pmosModelId.trim() || getDefaultModelIdForProvider(state.pmosModelProvider);
   state.pmosModelAlias = state.pmosModelAlias ?? "";
   const configuredProviders = state.pmosByokProviders ?? [];
   state.pmosModelConfigured = configuredProviders.includes(state.pmosModelProvider);
 }
 
 export function setPmosModelProvider(state: PmosModelAuthState, provider: PmosModelProvider) {
-  if (state.pmosModelProvider === provider) {
+  const normalized = provider.trim().toLowerCase();
+  if (!normalized || state.pmosModelProvider === normalized) {
     return;
   }
-  const previousDefault = PMOS_MODEL_DEFAULTS[state.pmosModelProvider];
-  state.pmosModelProvider = provider;
-  if (!state.pmosModelId.trim() || state.pmosModelId === previousDefault) {
-    state.pmosModelId = PMOS_MODEL_DEFAULTS[provider];
+  const previousDefault = getDefaultModelIdForProvider(state.pmosModelProvider);
+  state.pmosModelProvider = normalized;
+  if (!state.pmosModelId.trim() || (previousDefault && state.pmosModelId === previousDefault)) {
+    const nextDefault = getDefaultModelIdForProvider(normalized);
+    if (nextDefault) {
+      state.pmosModelId = nextDefault;
+    }
   }
   state.pmosModelError = null;
   const configuredProviders = state.pmosByokProviders ?? [];
-  state.pmosModelConfigured = configuredProviders.includes(provider);
+  state.pmosModelConfigured = configuredProviders.includes(normalized);
 }
 
 function hydrateFromEffectiveConfig(state: PmosModelAuthState, cfg: unknown) {
   const primary = asNonEmptyString(getPath(cfg, ["agents", "defaults", "model", "primary"]));
   const parsedPrimary = parsePrimaryModelRef(primary);
   if (parsedPrimary) {
-    state.pmosModelProvider = isProvider(parsedPrimary.provider) ? parsedPrimary.provider : "custom";
+    state.pmosModelProvider = parsedPrimary.provider;
     state.pmosModelId = parsedPrimary.modelId;
   } else {
-    state.pmosModelId = state.pmosModelId.trim() || PMOS_MODEL_DEFAULTS[state.pmosModelProvider];
+    state.pmosModelId = state.pmosModelId.trim() || getDefaultModelIdForProvider(state.pmosModelProvider);
   }
 
   const modelRef = `${state.pmosModelProvider}/${state.pmosModelId}`;
@@ -571,7 +578,7 @@ export async function loadPmosModelWorkspaceState(state: PmosModelAuthState) {
           modelId: parsed?.modelId ?? ref,
           alias: configuredModels[ref]?.alias ?? "",
           active: defaultsPrimary === ref,
-          configured: providers.includes(provider as PmosModelProvider),
+          configured: providers.includes(provider),
           inCatalog: catalogRefs.has(ref),
           usedBy: usageByRef.get(ref) ?? [],
           workspaceOverride: Object.prototype.hasOwnProperty.call(configuredModels, ref),
@@ -766,7 +773,7 @@ export async function upsertPmosModelFromRef(
     return;
   }
 
-  const provider = isProvider(parsed.provider) ? parsed.provider : "custom";
+  const provider = parsed.provider;
   state.pmosModelProvider = provider;
   state.pmosModelId = parsed.modelId;
   state.pmosModelAlias = params.alias?.trim() ?? state.pmosModelAlias;
@@ -826,7 +833,7 @@ export async function clearPmosModelApiKey(state: PmosModelAuthState) {
 
 export async function clearPmosModelApiKeyForRef(state: PmosModelAuthState, modelRef: string) {
   const parsed = parsePrimaryModelRef(modelRef);
-  if (!parsed || !isProvider(parsed.provider)) {
+  if (!parsed) {
     state.pmosModelError = "Unknown provider for selected model.";
     return;
   }

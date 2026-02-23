@@ -1,24 +1,30 @@
 import type { IconName } from "./icons.js";
 
 export const TAB_GROUPS = [
-  // Wicked OS simplified experience (regular users)
+  // Dedicated chat section at the top.
+  {
+    label: "Chat",
+    tabs: ["chat"],
+  },
+  // Core Wicked OS workspace surface.
   {
     label: "Wicked OS",
-    tabs: ["dashboard", "automations", "connections", "integrations", "models", "command-center", "admin", "chat"],
+    tabs: ["dashboard", "automations", "connections", "integrations", "command-center"],
   },
-  // Everything else stays available, but is hidden behind the Advanced admin section.
+  // Agent management.
   {
-    label: "Admin (Advanced)",
+    label: "Agents",
+    tabs: ["models", "agents", "skills", "nodes"],
+  },
+  // Runtime control surfaces.
+  {
+    label: "Control",
+    tabs: ["overview", "channels", "instances", "sessions", "usage", "cron"],
+  },
+  // Low-level operational settings.
+  {
+    label: "Settings",
     tabs: [
-      "overview",
-      "channels",
-      "instances",
-      "sessions",
-      "usage",
-      "cron",
-      "agents",
-      "skills",
-      "nodes",
       "config",
       "debug",
       "logs",

@@ -338,6 +338,7 @@ export type AppViewState = {
   agentSkillsAgentId: string | null;
   // Create Agent Modal state
   createModalOpen: boolean;
+  createModalStep: 1 | 2 | 3;
   createModalLoading: boolean;
   createModalError: string | null;
   createModalFormData: CreateAgentFormData;
