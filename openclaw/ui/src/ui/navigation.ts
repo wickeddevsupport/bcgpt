@@ -4,7 +4,7 @@ export const TAB_GROUPS = [
   // Wicked OS simplified experience (regular users)
   {
     label: "Wicked OS",
-    tabs: ["dashboard", "automations", "connections", "integrations", "command-center", "admin", "chat"],
+    tabs: ["dashboard", "automations", "connections", "integrations", "models", "command-center", "admin", "chat"],
   },
   // Everything else stays available, but is hidden behind the Advanced admin section.
   {
@@ -31,6 +31,7 @@ export type Tab =
   | "automations"
   | "runs"
   | "integrations"
+  | "models"
   | "connections"
   | "command-center"
   | "admin"
@@ -53,6 +54,7 @@ const TAB_PATHS: Record<Tab, string> = {
   automations: "/automations",
   runs: "/runs",
   integrations: "/integrations",
+  models: "/models",
   connections: "/connections",
   "command-center": "/command-center",
   admin: "/admin",
@@ -162,6 +164,8 @@ export function iconForTab(tab: Tab): IconName {
       return "scrollText";
     case "integrations":
       return "link";
+    case "models":
+      return "brain";
     case "command-center":
       return "zap";
     case "admin":
@@ -207,6 +211,8 @@ export function titleForTab(tab: Tab) {
       return "Runs";
     case "integrations":
       return "Integrations";
+    case "models":
+      return "Models";
     case "connections":
       return "Connections";
     case "command-center":
@@ -254,6 +260,8 @@ export function subtitleForTab(tab: Tab) {
       return "Live and historical executions across agents and automations.";
     case "integrations":
       return "Connect workflow engines and apps (embedded n8n, BCGPT/Basecamp, and more).";
+    case "models":
+      return "Create and manage workspace models, keys, and agent assignments.";
     case "connections":
       return "Connect the services your AI agents will use: Slack, GitHub, Email, and more.";
     case "command-center":

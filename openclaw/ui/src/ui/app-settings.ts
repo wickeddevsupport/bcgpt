@@ -201,6 +201,9 @@ export async function refreshActiveTab(host: SettingsHost) {
   if (host.tab === "integrations") {
     await (host as unknown as OpenClawApp).handlePmosIntegrationsLoad();
   }
+  if (host.tab === "models") {
+    await (host as unknown as OpenClawApp).handlePmosIntegrationsLoad();
+  }
   if (host.tab === "admin") {
     await (host as unknown as OpenClawApp).handlePmosAdminLoad();
   }

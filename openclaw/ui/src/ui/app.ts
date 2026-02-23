@@ -473,8 +473,12 @@ export class OpenClawApp extends LitElement {
   @state() createModalError: string | null = null;
   @state() createModalFormData: import("./views/agents.js").CreateAgentFormData = {
     name: "",
+    id: "",
     purpose: "",
-    mode: "interactive",
+    workspace: "default",
+    emoji: ":robot:",
+    theme: "",
+    mode: "hybrid",
     model: "",
     skills: [],
     personality: "professional",
@@ -1435,4 +1439,3 @@ export class OpenClawApp extends LitElement {
     return renderApp(this as unknown as AppViewState);
   }
 }
-

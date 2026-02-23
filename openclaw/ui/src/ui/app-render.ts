@@ -91,6 +91,7 @@ import { renderGatewayUrlConfirmation } from "./views/gateway-url-confirmation.t
 import { renderIntegrations } from "./views/integrations.ts";
 import { renderInstances } from "./views/instances.ts";
 import { renderLogs } from "./views/logs.ts";
+import { renderModels } from "./views/models.ts";
 import { renderNodes } from "./views/nodes.ts";
 import { renderOverview } from "./views/overview.ts";
 import { renderSessions } from "./views/sessions.ts";
@@ -189,6 +190,16 @@ function hasConfiguredModelAuth(config: unknown): boolean {
     }
   }
   return false;
+}
+
+function toAgentId(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9_-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function renderAuthScreen(state: AppViewState) {
@@ -787,24 +798,47 @@ export function renderApp(state: AppViewState) {
                 connectorsLoading: state.pmosConnectorsLoading,
                 connectorsStatus: state.pmosConnectorsStatus,
                 connectorsError: state.pmosConnectorsError,
-                modelProvider: state.pmosModelProvider,
-                modelId: state.pmosModelId,
+                modelRows: state.pmosModelRows,
+                onBcgptUrlChange: (next) => (state.pmosBcgptUrl = next),
+                onBcgptApiKeyDraftChange: (next) => (state.pmosBcgptApiKeyDraft = next),
+                onSave: () => state.handlePmosIntegrationsSave(),
+                onClearBcgptKey: () => state.handlePmosIntegrationsClearBcgptKey(),
+                onRefreshConnectors: () => state.handlePmosRefreshConnectors(),
+                onOpenModels: () => state.setTab("models"),
+                onOpenAutomations: () => state.setTab("automations"),
+                bcgptSavedOk: state.pmosBcgptSavedOk,
+                opsProvisioned: Boolean(state.pmosOpsProvisioningResult?.apiKey) || state.pmosConnectorsStatus?.ops?.reachable === true,
+                opsProjectId: state.pmosOpsProvisioningResult?.projectId ?? null,
+                opsUiHref: `${state.basePath ?? ""}/ops-ui/credentials`,
+                basecampSetupPending: state.pmosBasecampSetupPending,
+                basecampSetupOk: state.pmosBasecampSetupOk,
+                basecampSetupError: state.pmosBasecampSetupError,
+                onSetupBasecamp: () => void state.handlePmosSetupBasecampInN8n(),
+                // n8n Credentials
+                n8nCredentials: state.pmosRealCredentials ?? undefined,
+                n8nCredentialsLoading: state.pmosRealCredentialsLoading,
+                n8nCredentialsError: state.pmosRealCredentialsError,
+                onRefreshN8nCredentials: () => void state.handleLoadRealCredentials(),
+              })
+            : nothing
+        }
+
+        ${
+          state.tab === "models"
+            ? renderModels({
+                connected: state.connected,
                 modelAlias: state.pmosModelAlias,
                 modelApiKeyDraft: state.pmosModelApiKeyDraft,
                 modelSaving: state.pmosModelSaving,
                 modelConfigured: state.pmosModelConfigured,
                 modelError: state.pmosModelError,
+                modelSavedOk: state.pmosModelSavedOk,
                 modelRefDraft: state.pmosModelRefDraft,
                 modelRows: state.pmosModelRows,
                 modelCatalogLoading: state.pmosModelCatalogLoading,
                 modelCatalogError: state.pmosModelCatalogError,
                 modelOptions: state.availableModels,
                 agentModelAssignments: state.pmosAgentModelAssignments,
-                onBcgptUrlChange: (next) => (state.pmosBcgptUrl = next),
-                onBcgptApiKeyDraftChange: (next) => (state.pmosBcgptApiKeyDraft = next),
-                onSave: () => state.handlePmosIntegrationsSave(),
-                onClearBcgptKey: () => state.handlePmosIntegrationsClearBcgptKey(),
-                onRefreshConnectors: () => state.handlePmosRefreshConnectors(),
                 onModelRefDraftChange: (next) => state.handlePmosModelRefDraftChange(next),
                 onModelAliasChange: (next) => {
                   state.pmosModelAlias = next;
@@ -821,22 +855,8 @@ export function renderApp(state: AppViewState) {
                 onModelActivate: (ref) => state.handlePmosModelActivate(ref),
                 onModelDeactivate: (ref) => state.handlePmosModelDeactivate(ref),
                 onModelDelete: (ref) => state.handlePmosModelDelete(ref),
-                onAssignAgentModel: (agentId, ref) => state.handlePmosAssignAgentModel(agentId, ref),
-                onOpenAutomations: () => state.setTab("automations"),
-                modelSavedOk: state.pmosModelSavedOk,
-                bcgptSavedOk: state.pmosBcgptSavedOk,
-                opsProvisioned: Boolean(state.pmosOpsProvisioningResult?.apiKey) || state.pmosConnectorsStatus?.ops?.reachable === true,
-                opsProjectId: state.pmosOpsProvisioningResult?.projectId ?? null,
-                opsUiHref: `${state.basePath ?? ""}/ops-ui/credentials`,
-                basecampSetupPending: state.pmosBasecampSetupPending,
-                basecampSetupOk: state.pmosBasecampSetupOk,
-                basecampSetupError: state.pmosBasecampSetupError,
-                onSetupBasecamp: () => void state.handlePmosSetupBasecampInN8n(),
-                // n8n Credentials
-                n8nCredentials: state.pmosRealCredentials ?? undefined,
-                n8nCredentialsLoading: state.pmosRealCredentialsLoading,
-                n8nCredentialsError: state.pmosRealCredentialsError,
-                onRefreshN8nCredentials: () => void state.handleLoadRealCredentials(),
+                onAssignAgentModel: (agentId, ref) =>
+                  state.handlePmosAssignAgentModel(agentId, ref),
               })
             : nothing
         }
@@ -1689,75 +1709,118 @@ export function renderApp(state: AppViewState) {
                   state.createModalError = null;
                 },
                 onCreateModalFieldChange: (field, value) => {
-                  state.createModalFormData = { ...state.createModalFormData, [field]: value };
+                  const nextForm = { ...state.createModalFormData, [field]: value };
+                  if (field === "name") {
+                    const currentId = state.createModalFormData.id.trim();
+                    const previousAutoId = toAgentId(state.createModalFormData.name);
+                    if (!currentId || currentId === previousAutoId) {
+                      nextForm.id = toAgentId(String(value));
+                    }
+                  }
+                  state.createModalFormData = nextForm;
                 },
                 onCreateModalSubmit: async () => {
                   const form = state.createModalFormData;
-                  if (!form.name.trim()) {
+                  const name = form.name.trim();
+                  if (!name) {
                     state.createModalError = "Agent name is required";
                     return;
                   }
+
+                  const candidateId = toAgentId(form.id || name);
+                  if (!candidateId) {
+                    state.createModalError =
+                      "Agent ID is invalid. Use letters, numbers, '-' or '_'.";
+                    return;
+                  }
+
                   state.createModalLoading = true;
                   state.createModalError = null;
-                  
+
                   try {
-                    // Get current config
-                    const currentList = (state.configForm as Record<string, unknown>)?.agents as { list?: unknown[] } | undefined;
-                    const agentsList = Array.isArray(currentList?.list) ? [...currentList.list] : [];
-                    
-                    // Create new agent entry
-                    const newAgent = {
-                      id: form.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
-                      name: form.name.trim(),
-                      identity: {
-                        name: form.name.trim(),
-                        emoji: '🤖',
-                        theme: form.purpose.trim() || 'AI Agent',
-                      },
-                      model: form.model || undefined,
-                      skills: form.skills.length > 0 ? form.skills : undefined,
-                      ...(form.mode === 'autonomous' ? {
-                        cron: form.autonomousTasks.map((task, i) => ({
-                          id: `${form.name.toLowerCase()}-task-${i}`,
-                          name: task,
-                          enabled: true,
-                          scheduleKind: 'every',
-                          everyAmount: '30',
-                          everyUnit: 'minutes',
-                          sessionTarget: 'isolated',
-                          payloadKind: 'agentTurn',
-                          payloadText: task,
-                        })),
-                      } : {}),
+                    if (!state.configForm) {
+                      await loadConfig(state);
+                    }
+                    const config = state.configForm as Record<string, unknown> | null;
+                    if (!config) {
+                      throw new Error("Config is not loaded yet. Refresh and try again.");
+                    }
+
+                    const currentAgents = config.agents as { list?: unknown[] } | undefined;
+                    const agentsList = Array.isArray(currentAgents?.list)
+                      ? [...currentAgents.list]
+                      : [];
+
+                    const duplicateId = agentsList.some((entry) => {
+                      if (!entry || typeof entry !== "object") {
+                        return false;
+                      }
+                      const id = (entry as { id?: unknown }).id;
+                      return (
+                        typeof id === "string" && id.trim().toLowerCase() === candidateId
+                      );
+                    });
+                    if (duplicateId) {
+                      state.createModalError = `Agent ID "${candidateId}" already exists.`;
+                      return;
+                    }
+
+                    const modeToProfile: Record<string, string> = {
+                      autonomous: "full",
+                      interactive: "messaging",
+                      hybrid: "coding",
                     };
-                    
+                    const workspace = form.workspace.trim() || "default";
+                    const model = form.model.trim();
+                    const skills = Array.from(
+                      new Set(form.skills.map((skill) => skill.trim()).filter(Boolean)),
+                    );
+                    const emoji = form.emoji.trim();
+                    const theme = form.theme.trim() || form.purpose.trim();
+
+                    const newAgent: Record<string, unknown> = {
+                      id: candidateId,
+                      name,
+                      workspace,
+                      identity: {
+                        name,
+                        ...(emoji ? { emoji } : {}),
+                        ...(theme ? { theme } : {}),
+                      },
+                      tools: { profile: modeToProfile[form.mode] ?? "coding" },
+                      ...(model ? { model } : {}),
+                      ...(skills.length > 0 ? { skills } : {}),
+                    };
+
                     agentsList.push(newAgent);
-                    updateConfigFormValue(state, ['agents', 'list'], agentsList);
-                    
-                    // Save config
+                    updateConfigFormValue(state, ["agents", "list"], agentsList);
                     await saveConfig(state);
                     await applyConfig(state);
-                    
-                    // Reload agents
                     await loadAgents(state);
-                    
-                    // Reset and close modal
+                    state.agentsSelectedId = candidateId;
+
                     state.createModalFormData = {
-                      name: '',
-                      purpose: '',
-                      mode: 'interactive',
-                      model: '',
+                      name: "",
+                      id: "",
+                      purpose: "",
+                      workspace: "default",
+                      emoji: ":robot:",
+                      theme: "",
+                      mode: "hybrid",
+                      model: "",
                       skills: [],
-                      personality: 'professional',
+                      personality: "professional",
                       autonomousTasks: [],
                     };
                     state.createModalOpen = false;
                   } catch (error) {
-                    state.createModalError = String(error);
+                    state.createModalError =
+                      error instanceof Error ? error.message : String(error);
                   } finally {
                     state.createModalLoading = false;
                   }
                 },
+                onOpenModelsTab: () => state.setTab("models"),
                 // Agent activity and actions
                 agentActivityById: state.agentActivityById,
                 onOpenAgentChat: (agentId: string) => {

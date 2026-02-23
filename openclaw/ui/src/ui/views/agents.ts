@@ -30,7 +30,11 @@ export type AgentPersonality = "professional" | "friendly" | "technical" | "cust
 
 export type CreateAgentFormData = {
   name: string;
+  id: string;
   purpose: string;
+  workspace: string;
+  emoji: string;
+  theme: string;
   mode: AgentMode;
   model: string;
   skills: string[];
@@ -74,7 +78,11 @@ const DEFAULT_SKILL_OPTIONS = [
 // Default form state
 export const DEFAULT_CREATE_AGENT_FORM: CreateAgentFormData = {
   name: "",
+  id: "",
   purpose: "",
+  workspace: "default",
+  emoji: ":robot:",
+  theme: "",
   mode: "hybrid",
   model: "",
   skills: [],
@@ -107,6 +115,7 @@ export type AgentsProps = {
     field: K,
     value: CreateAgentFormData[K],
   ) => void;
+  onOpenModelsTab: () => void;
   // Agent activity summaries by ID
   agentActivityById: Record<string, AgentActivitySummary>;
   // Chat integration
@@ -655,7 +664,7 @@ export function renderAgents(props: AgentsProps) {
             ? html`<div class="callout danger" style="margin-top: 12px;">${props.error}</div>`
             : nothing
         }
-        <div class="agent-list" style="margin-top: 12px;">
+        <div class="agent-list" style="margin-top: 12px; display:grid; gap:10px;">
           ${
             agents.length === 0
               ? html`
@@ -664,20 +673,25 @@ export function renderAgents(props: AgentsProps) {
               : agents.map((agent) => {
                   const badge = agentBadgeText(agent.id, defaultId);
                   const emoji = resolveAgentEmoji(agent, props.agentIdentityById[agent.id] ?? null);
+                  const isActive = selectedId === agent.id;
                   return html`
                     <button
                       type="button"
-                      class="agent-row ${selectedId === agent.id ? "active" : ""}"
+                      class="agent-card ${isActive ? "agent-card--selected" : ""}"
                       @click=${() => props.onSelectAgent(agent.id)}
+                      style="text-align:left; width:100%;"
                     >
-                      <div class="agent-avatar">
-                        ${emoji || normalizeAgentLabel(agent).slice(0, 1)}
+                      <div class="agent-card-header">
+                        <div class="agent-avatar">${emoji || normalizeAgentLabel(agent).slice(0, 1)}</div>
+                        <div class="agent-card-info">
+                          <div class="agent-card-title">${normalizeAgentLabel(agent)}</div>
+                          <div class="muted mono" style="font-size:12px;">${agent.id}</div>
+                        </div>
                       </div>
-                      <div class="agent-info">
-                        <div class="agent-title">${normalizeAgentLabel(agent)}</div>
-                        <div class="agent-sub mono">${agent.id}</div>
+                      <div class="chip-row" style="margin-top:8px;">
+                        ${badge ? html`<span class="chip">${badge}</span>` : nothing}
+                        ${isActive ? html`<span class="chip chip-ok">selected</span>` : nothing}
                       </div>
-                      ${badge ? html`<span class="agent-pill">${badge}</span>` : nothing}
                     </button>
                   `;
                 })
@@ -2066,10 +2080,10 @@ function renderCreateAgentModal(props: AgentsProps) {
   const { createModalFormData: form, createModalLoading, createModalError } = props;
   const isAutonomous = form.mode === "autonomous";
 
-  const modeOptions: Array<{ value: AgentMode; label: string }> = [
-    { value: "autonomous", label: "Autonomous" },
-    { value: "interactive", label: "Interactive" },
-    { value: "hybrid", label: "Hybrid" },
+  const modeOptions: Array<{ value: AgentMode; label: string; description: string }> = [
+    { value: "interactive", label: "Interactive", description: "Optimized for direct chat usage." },
+    { value: "hybrid", label: "Hybrid", description: "Balanced profile for chat and task execution." },
+    { value: "autonomous", label: "Autonomous", description: "Task-heavy profile for scheduled workflows." },
   ];
 
   const personalityOptions: Array<{ value: AgentPersonality; label: string }> = [
@@ -2083,13 +2097,45 @@ function renderCreateAgentModal(props: AgentsProps) {
     ? props.availableSkills.map((s) => ({ id: s, label: s }))
     : DEFAULT_SKILL_OPTIONS;
 
+  const configuredModels = resolveConfiguredModels(props.configForm);
+  const modelConfigured = form.model
+    ? configuredModels.some((option) => option.value === form.model)
+    : true;
+
+  const modeToProfile: Record<AgentMode, string> = {
+    autonomous: "full",
+    interactive: "messaging",
+    hybrid: "coding",
+  };
+
+  const previewAgent: Record<string, unknown> = {
+    id: form.id.trim() || "<auto-from-name>",
+    name: form.name.trim() || "<required>",
+    workspace: form.workspace.trim() || "default",
+    identity: {
+      name: form.name.trim() || "<required>",
+      ...(form.emoji.trim() ? { emoji: form.emoji.trim() } : {}),
+      ...(form.theme.trim() || form.purpose.trim()
+        ? { theme: form.theme.trim() || form.purpose.trim() }
+        : {}),
+    },
+    tools: { profile: modeToProfile[form.mode] },
+  };
+  if (form.model.trim()) {
+    previewAgent.model = form.model.trim();
+  }
+  if (form.skills.length > 0) {
+    previewAgent.skills = form.skills;
+  }
+  const jsonPreview = JSON.stringify(previewAgent, null, 2);
+
   return html`
     <div class="exec-approval-overlay" role="dialog" aria-modal="true" aria-labelledby="create-agent-title">
-      <div class="exec-approval-card" style="max-width: 560px;">
+      <div class="exec-approval-card" style="max-width: 920px; width: min(96vw, 920px);">
         <div class="exec-approval-header">
           <div>
-            <div class="exec-approval-title" id="create-agent-title">Create New Agent</div>
-            <div class="exec-approval-sub">Configure a new AI agent for your team.</div>
+            <div class="exec-approval-title" id="create-agent-title">Create Agent</div>
+            <div class="exec-approval-sub">Card-based setup with configured models and live JSON preview.</div>
           </div>
           <button
             class="btn btn--sm"
@@ -2098,100 +2144,141 @@ function renderCreateAgentModal(props: AgentsProps) {
             title="Close"
             style="padding: 4px 8px;"
           >
-            ✕
+            Close
           </button>
         </div>
 
         ${createModalError
           ? html`<div class="callout danger" style="margin-top: 12px;">${createModalError}</div>`
-          : nothing
-        }
+          : nothing}
 
-        <div class="form-grid" style="margin-top: 16px; grid-template-columns: 1fr;">
-          <!-- Name Field -->
-          <label class="field">
-            <span>Name</span>
-            <input
-              type="text"
-              .value=${form.name}
-              @input=${(e: Event) =>
-                props.onCreateModalFieldChange("name", (e.target as HTMLInputElement).value)}
-              placeholder="e.g., Sales Agent"
-              ?disabled=${createModalLoading}
-            />
-          </label>
+        <section class="card" style="margin-top: 14px;">
+          <div class="card-title">Identity And Routing</div>
+          <div class="card-sub">Core identity and workspace fields written into config.</div>
+          <div class="form-grid" style="margin-top: 14px; grid-template-columns: 1fr 1fr;">
+            <label class="field">
+              <span>Name *</span>
+              <input
+                .value=${form.name}
+                @input=${(e: Event) =>
+                  props.onCreateModalFieldChange("name", (e.target as HTMLInputElement).value)}
+                placeholder="e.g. Sales Agent"
+                ?disabled=${createModalLoading}
+              />
+            </label>
+            <label class="field">
+              <span>Agent ID</span>
+              <input
+                .value=${form.id}
+                @input=${(e: Event) =>
+                  props.onCreateModalFieldChange("id", (e.target as HTMLInputElement).value)}
+                placeholder="auto-generated from name"
+                ?disabled=${createModalLoading}
+              />
+            </label>
+            <label class="field">
+              <span>Workspace</span>
+              <input
+                .value=${form.workspace}
+                @input=${(e: Event) =>
+                  props.onCreateModalFieldChange("workspace", (e.target as HTMLInputElement).value)}
+                placeholder="default"
+                ?disabled=${createModalLoading}
+              />
+            </label>
+            <label class="field">
+              <span>Emoji Or Badge</span>
+              <input
+                .value=${form.emoji}
+                @input=${(e: Event) =>
+                  props.onCreateModalFieldChange("emoji", (e.target as HTMLInputElement).value)}
+                placeholder=":robot:"
+                ?disabled=${createModalLoading}
+              />
+            </label>
+            <label class="field full">
+              <span>Purpose</span>
+              <input
+                .value=${form.purpose}
+                @input=${(e: Event) =>
+                  props.onCreateModalFieldChange("purpose", (e.target as HTMLInputElement).value)}
+                placeholder="One-line mission statement"
+                ?disabled=${createModalLoading}
+              />
+            </label>
+            <label class="field full">
+              <span>Theme</span>
+              <input
+                .value=${form.theme}
+                @input=${(e: Event) =>
+                  props.onCreateModalFieldChange("theme", (e.target as HTMLInputElement).value)}
+                placeholder="Optional identity theme"
+                ?disabled=${createModalLoading}
+              />
+            </label>
+          </div>
+        </section>
 
-          <!-- Purpose Field -->
-          <label class="field">
-            <span>Purpose</span>
-            <input
-              type="text"
-              .value=${form.purpose}
-              @input=${(e: Event) =>
-                props.onCreateModalFieldChange("purpose", (e.target as HTMLInputElement).value)}
-              placeholder="e.g., Handle lead qualification"
-              ?disabled=${createModalLoading}
-            />
-          </label>
+        <section class="card" style="margin-top: 12px;">
+          <div class="card-title">Runtime Profile</div>
+          <div class="card-sub">Choose behavior mode, model, and skills.</div>
+          <div class="form-grid" style="margin-top: 14px; grid-template-columns: 1fr 1fr;">
+            <label class="field">
+              <span>Mode</span>
+              <select
+                .value=${form.mode}
+                @change=${(e: Event) =>
+                  props.onCreateModalFieldChange("mode", (e.target as HTMLSelectElement).value as AgentMode)}
+                ?disabled=${createModalLoading}
+              >
+                ${modeOptions.map(
+                  (opt) => html`
+                    <option value=${opt.value}>${opt.label}</option>
+                  `,
+                )}
+              </select>
+              <div class="muted" style="font-size: 11px; margin-top: 4px;">
+                ${modeOptions.find((opt) => opt.value === form.mode)?.description ?? ""}
+              </div>
+            </label>
+            <label class="field">
+              <span>Personality</span>
+              <select
+                .value=${form.personality}
+                @change=${(e: Event) =>
+                  props.onCreateModalFieldChange(
+                    "personality",
+                    (e.target as HTMLSelectElement).value as AgentPersonality,
+                  )}
+                ?disabled=${createModalLoading}
+              >
+                ${personalityOptions.map(
+                  (opt) => html`<option value=${opt.value}>${opt.label}</option>`,
+                )}
+              </select>
+            </label>
+            <label class="field full">
+              <span>Model</span>
+              <select
+                .value=${form.model}
+                @change=${(e: Event) =>
+                  props.onCreateModalFieldChange("model", (e.target as HTMLSelectElement).value)}
+                ?disabled=${createModalLoading}
+              >
+                <option value="">Inherit workspace default</option>
+                ${configuredModels.map(
+                  (option) => html`<option value=${option.value}>${option.label}</option>`,
+                )}
+                ${form.model && !modelConfigured
+                  ? html`<option value=${form.model}>Current (${form.model})</option>`
+                  : nothing}
+              </select>
+            </label>
+          </div>
 
-          <!-- Mode Dropdown -->
-          <label class="field">
-            <span>Mode</span>
-            <select
-              .value=${form.mode}
-              @change=${(e: Event) =>
-                props.onCreateModalFieldChange("mode", (e.target as HTMLSelectElement).value as AgentMode)}
-              ?disabled=${createModalLoading}
-            >
-              ${modeOptions.map(
-                (opt) => html`
-                  <option value=${opt.value} ?selected=${form.mode === opt.value}>
-                    ${opt.label}
-                  </option>
-                `,
-              )}
-            </select>
-          </label>
-
-          <!-- Model Dropdown -->
-          <label class="field">
-            <span>Model</span>
-            <select
-              .value=${form.model}
-              @change=${(e: Event) =>
-                props.onCreateModalFieldChange("model", (e.target as HTMLSelectElement).value)}
-              ?disabled=${createModalLoading}
-            >
-              <option value="">Select a model...</option>
-              ${props.availableModels.map(
-                (modelId) => {
-                  // Check if this model's provider is configured
-                  const provider = modelId.includes("/") ? modelId.split("/")[0] : "";
-                  const isConfigured = provider && props.configuredProviders.includes(provider);
-                  // Format model ID into readable label
-                  const label = modelId.includes("/")
-                    ? modelId.split("/").pop()?.replace(/:/g, " ") || modelId
-                    : modelId.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-                  return html`
-                    <option value=${modelId} ?selected=${form.model === modelId}>
-                      ${isConfigured ? "✓ " : ""}${label}
-                    </option>
-                  `;
-                },
-              )}
-            </select>
-            <div class="muted" style="font-size: 11px; margin-top: 4px;">
-              ${props.configuredProviders.length === 0 
-                ? html`⚠️ No API keys configured. <a href="#integrations" @click=${props.onCancel}>Add keys in Integrations</a>`
-                : html`💡 <a href="#integrations" @click=${props.onCancel}>Manage API keys</a>`
-              }
-            </div>
-          </label>
-
-          <!-- Skills Checkboxes -->
-          <div class="field">
+          <div class="field" style="margin-top: 12px;">
             <span>Skills</span>
-            <div class="chip-row" style="margin-top: 6px;">
+            <div class="chip-row" style="margin-top: 8px;">
               ${skillOptions.map((skill) => {
                 const isSelected = form.skills.includes(skill.id);
                 return html`
@@ -2215,34 +2302,30 @@ function renderCreateAgentModal(props: AgentsProps) {
             </div>
           </div>
 
-          <!-- Personality Dropdown -->
-          <label class="field">
-            <span>Personality</span>
-            <select
-              .value=${form.personality}
-              @change=${(e: Event) =>
-                props.onCreateModalFieldChange(
-                  "personality",
-                  (e.target as HTMLSelectElement).value as AgentPersonality,
-                )}
-              ?disabled=${createModalLoading}
-            >
-              ${personalityOptions.map(
-                (opt) => html`
-                  <option value=${opt.value} ?selected=${form.personality === opt.value}>
-                    ${opt.label}
-                  </option>
-                `,
-              )}
-            </select>
-          </label>
+          ${configuredModels.length === 0
+            ? html`
+                <div class="callout warn" style="margin-top: 12px;">
+                  No configured models found. Add one first in the Models tab.
+                  <div style="margin-top: 8px;">
+                    <button
+                      class="btn btn--sm"
+                      @click=${() => {
+                        props.onCreateModalCancel();
+                        props.onOpenModelsTab();
+                      }}
+                    >
+                      Open Models Tab
+                    </button>
+                  </div>
+                </div>
+              `
+            : nothing}
 
-          <!-- Autonomous Tasks (only shown when mode is autonomous) -->
           ${isAutonomous
             ? html`
-                <div class="field">
-                  <span>Autonomous Tasks</span>
-                  <div class="chip-row" style="margin-top: 6px;">
+                <div class="field" style="margin-top: 12px;">
+                  <span>Autonomous Task Checklist</span>
+                  <div class="chip-row" style="margin-top: 8px;">
                     ${AUTONOMOUS_TASK_OPTIONS.map((task) => {
                       const isSelected = form.autonomousTasks.includes(task.id);
                       return html`
@@ -2252,10 +2335,10 @@ function renderCreateAgentModal(props: AgentsProps) {
                             .checked=${isSelected}
                             @change=${(e: Event) => {
                               const checked = (e.target as HTMLInputElement).checked;
-                              const newTasks = checked
+                              const next = checked
                                 ? [...form.autonomousTasks, task.id]
-                                : form.autonomousTasks.filter((t) => t !== task.id);
-                              props.onCreateModalFieldChange("autonomousTasks", newTasks);
+                                : form.autonomousTasks.filter((id) => id !== task.id);
+                              props.onCreateModalFieldChange("autonomousTasks", next);
                             }}
                             ?disabled=${createModalLoading}
                           />
@@ -2264,18 +2347,27 @@ function renderCreateAgentModal(props: AgentsProps) {
                       `;
                     })}
                   </div>
+                  <div class="muted" style="font-size: 11px; margin-top: 6px;">
+                    Checklist is stored in UI state and can seed future automation setup.
+                  </div>
                 </div>
               `
-            : nothing
-          }
-        </div>
+            : nothing}
+        </section>
 
-        <div class="exec-approval-actions" style="margin-top: 20px; justify-content: flex-end;">
-          <button
-            class="btn"
-            @click=${props.onCreateModalCancel}
-            ?disabled=${createModalLoading}
-          >
+        <section class="card" style="margin-top: 12px;">
+          <div class="card-title">Config JSON Preview</div>
+          <div class="card-sub">This is what will be written into agents.list on create.</div>
+          <textarea
+            class="mono"
+            style="margin-top: 10px; min-height: 170px;"
+            readonly
+            .value=${jsonPreview}
+          ></textarea>
+        </section>
+
+        <div class="exec-approval-actions" style="margin-top: 18px; justify-content: flex-end;">
+          <button class="btn" @click=${props.onCreateModalCancel} ?disabled=${createModalLoading}>
             Cancel
           </button>
           <button
@@ -2290,7 +2382,6 @@ function renderCreateAgentModal(props: AgentsProps) {
     </div>
   `;
 }
-
 /**
  * Render an agent card for the dashboard view
  * Based on UI_MOCKUPS.md Section 6: Agents Page
