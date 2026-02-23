@@ -446,6 +446,62 @@ export function renderApp(state: AppViewState) {
       : undefined,
   };
 
+  // Workflows tab uses a dedicated assistant flow (`pmos.workflow.assist` / `pmos.workflow.confirm`)
+  // and should not reuse the global chat session state.
+  const workflowChatProps: ChatProps = {
+    ...chatProps,
+    sessionKey: "workflow-assistant",
+    onSessionKeyChange: () => undefined,
+    thinkingLevel: null,
+    showThinking: false,
+    loading: false,
+    sending: state.workflowChatSending,
+    canAbort: false,
+    compactionStatus: null,
+    assistantAvatarUrl: null,
+    messages: state.workflowChatMessages,
+    toolMessages: [],
+    stream: null,
+    streamStartedAt: null,
+    draft: state.workflowChatDraft,
+    queue: [],
+    error: null,
+    sessions: null,
+    focusMode: false,
+    sidebarOpen: false,
+    sidebarContent: null,
+    sidebarError: null,
+    onRefresh: () => Promise.resolve(),
+    onToggleFocusMode: () => undefined,
+    onChatScroll: undefined,
+    onDraftChange: (next: string) => {
+      state.workflowChatDraft = next;
+    },
+    attachments: [],
+    onAttachmentsChange: undefined,
+    onSend: () => void state.handleWorkflowChatSend(),
+    onCreateWorkflow: undefined,
+    createWorkflowBusy: false,
+    onAbort: undefined,
+    onQueueRemove: () => undefined,
+    onNewSession: () => {
+      state.workflowChatDraft = "";
+      state.workflowChatMessages = [];
+    },
+    showNewMessages: false,
+    onScrollToBottom: undefined,
+    onOpenSidebar: undefined,
+    onCloseSidebar: undefined,
+    onSplitRatioChange: undefined,
+    assistantName: "AI Workflow Assistant",
+    assistantAvatar: null,
+    agentId: null,
+    agentName: null,
+    agentEmoji: null,
+    agentTheme: null,
+    onViewMemory: undefined,
+  };
+
   return html`
     <div class="shell ${isChat ? "shell--chat" : ""} ${chatFocus ? "shell--chat-focus" : ""} ${state.settings.navCollapsed ? "shell--nav-collapsed" : ""} ${state.onboarding ? "shell--onboarding" : ""}">
       <header class="topbar">
@@ -782,7 +838,7 @@ export function renderApp(state: AppViewState) {
                       onChatDraftChange: (next) => { state.workflowChatDraft = next; },
                       onChatSend: () => void state.handleWorkflowChatSend(),
                       // Full chat props for inline chat panel
-                      chatProps,
+                      chatProps: workflowChatProps,
                     })}
               </div>`
             : nothing
