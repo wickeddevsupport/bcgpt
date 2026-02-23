@@ -101,6 +101,25 @@ function resolvePrimaryRefFromConfig(cfg: OpenClawConfig): unknown {
   return cfg?.agents?.defaults?.model?.primary;
 }
 
+function resolveFallbackRefsFromConfig(cfg: OpenClawConfig): unknown[] {
+  const raw = cfg?.agents?.defaults?.model?.fallbacks;
+  return Array.isArray(raw) ? raw : [];
+}
+
+function isTemplatedSecretValue(value: string): boolean {
+  const normalized = value.trim();
+  if (!normalized) {
+    return true;
+  }
+  if (/\$\{[^}]+\}/.test(normalized)) {
+    return true;
+  }
+  if (/^<[^>]+>$/.test(normalized)) {
+    return true;
+  }
+  return /^(change[-_ ]?me|replace[-_ ]?me|your[-_ ]?api[-_ ]?key)$/i.test(normalized);
+}
+
 async function resolveProviderApiKey(
   provider: string,
   cfg: OpenClawConfig,
@@ -126,44 +145,56 @@ async function resolveProviderApiKey(
   return envApiKey || null;
 }
 
-/**
- * Resolve model config from workspace-effective config.
- * Returns null if no usable model is configured.
- */
-async function resolveModelConfig(
+function resolveConfiguredModelRefs(
   cfg: OpenClawConfig,
-  workspaceId?: string | null,
-): Promise<ModelConfig | null> {
-  const parsed = parsePrimaryRef(resolvePrimaryRefFromConfig(cfg));
-  if (!parsed) return null;
-  const apiKey = await resolveProviderApiKey(parsed.provider, cfg, workspaceId);
-  if (!apiKey) return null;
-  return { provider: parsed.provider, modelId: parsed.modelId, apiKey };
+): Array<{ provider: string; modelId: string }> {
+  const refs: Array<{ provider: string; modelId: string }> = [];
+  const seen = new Set<string>();
+  const pushRef = (candidate: unknown) => {
+    const parsed = parsePrimaryRef(candidate);
+    if (!parsed) return;
+    const key = `${parsed.provider}/${parsed.modelId}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    refs.push(parsed);
+  };
+  pushRef(resolvePrimaryRefFromConfig(cfg));
+  for (const fallback of resolveFallbackRefsFromConfig(cfg)) {
+    pushRef(fallback);
+  }
+  return refs;
 }
 
-/**
- * Call the globally configured model with a system prompt + messages.
- * Returns the assistant's text response.
- */
-export async function callWorkspaceModel(
-  workspaceId: string,
+async function resolveModelConfigs(
+  cfg: OpenClawConfig,
+  workspaceId?: string | null,
+): Promise<ModelConfig[]> {
+  const refs = resolveConfiguredModelRefs(cfg);
+  if (refs.length === 0) {
+    return [];
+  }
+  const resolved: ModelConfig[] = [];
+  for (const ref of refs) {
+    const apiKey = await resolveProviderApiKey(ref.provider, cfg, workspaceId);
+    if (!apiKey || isTemplatedSecretValue(apiKey)) {
+      continue;
+    }
+    resolved.push({
+      provider: ref.provider,
+      modelId: ref.modelId,
+      apiKey,
+    });
+  }
+  return resolved;
+}
+
+async function callModelWithConfig(
+  cfg: OpenClawConfig,
+  config: ModelConfig,
   systemPrompt: string,
   messages: Message[],
   opts: { maxTokens?: number; jsonMode?: boolean } = {},
 ): Promise<{ ok: boolean; text?: string; error?: string; providerUsed?: string }> {
-  const wsId = String(workspaceId ?? "").trim();
-  const cfg = wsId
-    ? ((await loadEffectiveWorkspaceConfig(wsId)) as OpenClawConfig)
-    : loadConfig();
-  const config = await resolveModelConfig(cfg, wsId || null);
-  if (!config) {
-    return {
-      ok: false,
-      error:
-        "No AI model configured for this workspace (set agents.defaults.model.primary and provider apiKey in workspace config, or add a BYOK key).",
-    };
-  }
-
   const { provider, modelId, apiKey } = config;
   const maxTokens = opts.maxTokens ?? 2048;
 
@@ -221,15 +252,12 @@ export async function callWorkspaceModel(
           return { ok: true, text: primary.text, providerUsed: provider };
         }
 
-        // Some provider aliases (kilo/moonshot/nvidia) are often configured with OpenRouter model IDs.
-        // If their native endpoint is unavailable for chat completions, fall back to OpenRouter when
-        // a global OpenRouter key exists.
         const shouldTryOpenRouterFallback =
           (provider === "kilo" || provider === "moonshot" || provider === "nvidia") &&
           (primary.status === 404 || primary.status === 405);
         if (shouldTryOpenRouterFallback) {
           const openRouterKey = await resolveProviderApiKey("openrouter", cfg);
-          if (openRouterKey) {
+          if (openRouterKey && !isTemplatedSecretValue(openRouterKey)) {
             const fallback = await callOpenAiCompatible(
               "openrouter",
               "https://openrouter.ai/api/v1",
@@ -278,7 +306,6 @@ export async function callWorkspaceModel(
       }
 
       case "google": {
-        // Gemini API
         const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
         for (const m of messages) {
           if (m.role === "system") continue;
@@ -324,6 +351,41 @@ export async function callWorkspaceModel(
   } catch (err) {
     return { ok: false, error: `Model call failed: ${err instanceof Error ? err.message : String(err)}` };
   }
+}
+
+/**
+ * Call the globally configured model with a system prompt + messages.
+ * Returns the assistant's text response.
+ */
+export async function callWorkspaceModel(
+  workspaceId: string,
+  systemPrompt: string,
+  messages: Message[],
+  opts: { maxTokens?: number; jsonMode?: boolean } = {},
+): Promise<{ ok: boolean; text?: string; error?: string; providerUsed?: string }> {
+  const wsId = String(workspaceId ?? "").trim();
+  const cfg = wsId
+    ? ((await loadEffectiveWorkspaceConfig(wsId)) as OpenClawConfig)
+    : loadConfig();
+  const configs = await resolveModelConfigs(cfg, wsId || null);
+  if (!configs.length) {
+    return {
+      ok: false,
+      error:
+        "No AI model configured for this workspace (set agents.defaults.model.primary and provider apiKey in workspace config, or add a BYOK key).",
+    };
+  }
+
+  const errors: string[] = [];
+  for (const modelConfig of configs) {
+    const result = await callModelWithConfig(cfg, modelConfig, systemPrompt, messages, opts);
+    if (result.ok) {
+      return result;
+    }
+    errors.push(`${modelConfig.provider}/${modelConfig.modelId}: ${result.error ?? "unknown error"}`);
+  }
+  const compact = errors.slice(0, 2).join(" | ");
+  return { ok: false, error: compact || "Model call failed for configured workflow assistant models." };
 }
 
 // ─── n8n node catalog for the system prompt ──────────────────────────────────
