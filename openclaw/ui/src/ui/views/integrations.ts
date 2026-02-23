@@ -127,15 +127,96 @@ function buildModelOptions(rows: PmosModelRow[], options: string[]): string[] {
   return Array.from(set).sort((a, b) => a.localeCompare(b));
 }
 
-function resolveAgentModelSelectValue(
-  assignment: PmosAgentModelAssignment,
-  options: string[],
-): string {
-  const current = assignment.modelRef?.trim() ?? "";
-  if (!current) {
+function parseModelRef(
+  value: string | null | undefined,
+): { provider: string; modelId: string } | null {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return null;
+  }
+  const split = raw.indexOf("/");
+  if (split <= 0) {
+    return null;
+  }
+  const provider = raw.slice(0, split).trim().toLowerCase();
+  const modelId = raw.slice(split + 1).trim();
+  if (!provider || !modelId) {
+    return null;
+  }
+  return { provider, modelId };
+}
+
+function buildProviderOptions(modelOptions: string[], rows: PmosModelRow[]): string[] {
+  const set = new Set<string>([
+    "openai",
+    "anthropic",
+    "google",
+    "zai",
+    "openrouter",
+    "kilo",
+    "moonshot",
+    "nvidia",
+    "custom",
+  ]);
+  for (const row of rows) {
+    const provider = row.provider.trim().toLowerCase();
+    if (provider) {
+      set.add(provider);
+    }
+  }
+  for (const ref of modelOptions) {
+    const parsed = parseModelRef(ref);
+    if (parsed?.provider) {
+      set.add(parsed.provider);
+    }
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
+}
+
+function buildModelIdOptionsForProvider(provider: string, modelOptions: string[]): string[] {
+  const normalizedProvider = provider.trim().toLowerCase();
+  if (!normalizedProvider) {
+    return [];
+  }
+  const set = new Set<string>();
+  for (const ref of modelOptions) {
+    const parsed = parseModelRef(ref);
+    if (!parsed || parsed.provider !== normalizedProvider) {
+      continue;
+    }
+    set.add(parsed.modelId);
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
+}
+
+function splitModelRefDraft(value: string | null | undefined): { provider: string; modelId: string } {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return { provider: "", modelId: "" };
+  }
+  const split = raw.indexOf("/");
+  if (split < 0) {
+    return { provider: raw.toLowerCase(), modelId: "" };
+  }
+  return {
+    provider: raw.slice(0, split).trim().toLowerCase(),
+    modelId: raw.slice(split + 1).trim(),
+  };
+}
+
+function composeModelRef(provider: string, modelId: string): string {
+  const normalizedProvider = provider.trim().toLowerCase();
+  const normalizedModelId = modelId.trim();
+  if (!normalizedProvider && !normalizedModelId) {
     return "";
   }
-  return options.includes(current) ? current : current;
+  if (!normalizedProvider) {
+    return normalizedModelId;
+  }
+  if (!normalizedModelId) {
+    return `${normalizedProvider}/`;
+  }
+  return `${normalizedProvider}/${normalizedModelId}`;
 }
 
 export function renderIntegrations(props: IntegrationsProps) {
@@ -190,6 +271,11 @@ export function renderIntegrations(props: IntegrationsProps) {
   const projectIdShort = props.opsProjectId ? String(props.opsProjectId).slice(0, 8) : null;
   const modelRows = props.modelRows ?? [];
   const modelOptions = buildModelOptions(modelRows, props.modelOptions ?? []);
+  const providerOptions = buildProviderOptions(modelOptions, modelRows);
+  const draft = splitModelRefDraft(props.modelRefDraft);
+  const modelIdOptions = buildModelIdOptionsForProvider(draft.provider, modelOptions);
+  const draftRef = composeModelRef(draft.provider, draft.modelId);
+  const modelRefReady = Boolean(parseModelRef(draftRef));
   const activeModel = modelRows.find((row) => row.active) ?? null;
   const opsUiHref = props.opsUiHref ?? "/ops-ui/credentials";
 
@@ -207,7 +293,7 @@ export function renderIntegrations(props: IntegrationsProps) {
         <div>
           <div class="card-title" style="margin-bottom:4px;">Model Manager</div>
           <div class="card-sub" style="margin:0;">
-            Configure models directly from config, set workspace default, and map models to agents.
+            Create or update models from config. Saved models and per-agent activation stay in one place.
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
@@ -218,18 +304,41 @@ export function renderIntegrations(props: IntegrationsProps) {
         </div>
       </div>
 
-      <div class="form-grid" style="margin-bottom: 14px; grid-template-columns: 2fr 1fr;">
-        <label class="field full">
-          <span>Model reference (provider/model)</span>
+      <div class="card-sub" style="margin: 0 0 12px 0;">
+        Add a model with type-ahead suggestions. Free text is supported when no suggestion matches.
+      </div>
+
+      <div class="form-grid" style="margin-bottom: 14px; grid-template-columns: 1fr 2fr;">
+        <label class="field">
+          <span>Provider</span>
           <input
-            list="pmos-model-options"
-            .value=${props.modelRefDraft}
-            @input=${(e: Event) => props.onModelRefDraftChange((e.target as HTMLInputElement).value)}
-            placeholder="e.g. zai/glm-5 or openai/gpt-5"
+            list="pmos-model-provider-options"
+            .value=${draft.provider}
+            @input=${(e: Event) => {
+              const nextProvider = (e.target as HTMLInputElement).value;
+              props.onModelRefDraftChange(composeModelRef(nextProvider, draft.modelId));
+            }}
+            placeholder="e.g. zai, openai, anthropic"
             ?disabled=${!props.connected || props.modelSaving}
           />
-          <datalist id="pmos-model-options">
-            ${modelOptions.map((opt) => html`<option value=${opt}></option>`)}
+          <datalist id="pmos-model-provider-options">
+            ${providerOptions.map((opt) => html`<option value=${opt}></option>`)}
+          </datalist>
+        </label>
+        <label class="field">
+          <span>Model ID</span>
+          <input
+            list="pmos-model-id-options"
+            .value=${draft.modelId}
+            @input=${(e: Event) => {
+              const nextModelId = (e.target as HTMLInputElement).value;
+              props.onModelRefDraftChange(composeModelRef(draft.provider, nextModelId));
+            }}
+            placeholder=${draft.provider ? "e.g. glm-5, gpt-5, claude-opus-4-6" : "Select provider first"}
+            ?disabled=${!props.connected || props.modelSaving || !draft.provider}
+          />
+          <datalist id="pmos-model-id-options">
+            ${modelIdOptions.map((opt) => html`<option value=${opt}></option>`)}
           </datalist>
         </label>
         <label class="field">
@@ -253,19 +362,29 @@ export function renderIntegrations(props: IntegrationsProps) {
             ?disabled=${!props.connected || props.modelSaving}
           />
         </label>
+        <label class="field full">
+          <span>Model reference preview</span>
+          <input
+            class="mono"
+            .value=${draftRef}
+            readonly
+            placeholder="provider/model-id"
+            ?disabled=${true}
+          />
+        </label>
       </div>
 
       <div class="row" style="gap: 8px; flex-wrap: wrap; align-items:center;">
         <button
           class="btn btn--primary"
-          ?disabled=${!props.connected || props.modelSaving || !props.modelRefDraft.trim()}
+          ?disabled=${!props.connected || props.modelSaving || !modelRefReady}
           @click=${() => props.onModelSave()}
         >
           ${props.modelSaving ? "Saving..." : "Save and Activate"}
         </button>
         <button
           class="btn btn--secondary"
-          ?disabled=${!props.connected || props.modelSaving || !props.modelRefDraft.trim()}
+          ?disabled=${!props.connected || props.modelSaving || !modelRefReady}
           @click=${() => props.onModelSaveWithoutActivate()}
         >
           Save Model
@@ -287,127 +406,6 @@ export function renderIntegrations(props: IntegrationsProps) {
       ${props.modelError
         ? html`<div class="callout danger" style="margin-top: 10px; font-size: 12px;">${props.modelError}</div>`
         : nothing}
-
-      <div style="margin-top: 18px; border-top: 1px solid var(--border-color, rgba(255,255,255,0.08)); padding-top: 14px;">
-        <div class="card-title" style="font-size: 14px; margin-bottom: 8px;">Configured Models</div>
-        ${modelRows.length === 0
-          ? html`<div class="muted" style="padding: 10px 0;">No configured models yet.</div>`
-          : html`
-              <div class="list" style="display:flex; flex-direction:column; gap:8px;">
-                ${modelRows.map((row) => html`
-                  <div class="list-item" style="padding:10px; border:1px solid var(--border-color, rgba(255,255,255,0.08)); border-radius:10px;">
-                    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:10px;">
-                      <div style="min-width:0; flex:1;">
-                        <div style="font-weight:600;" class="mono">${row.ref}</div>
-                        <div class="muted" style="font-size:12px; margin-top:2px;">
-                          ${row.alias ? `Alias: ${row.alias}` : "No alias"}
-                        </div>
-                        <div class="muted" style="font-size:12px; margin-top:2px;">
-                          ${row.usedBy.length > 0
-                            ? `Used by: ${row.usedBy.join(", ")}`
-                            : "Used by: none"}
-                        </div>
-                      </div>
-                      <div class="row" style="gap:6px; flex-wrap:wrap; justify-content:flex-end;">
-                        ${row.active ? renderModelToneChip("Active", "ok") : nothing}
-                        ${row.configured
-                          ? renderModelToneChip("Key configured", "ok")
-                          : renderModelToneChip("No key", "warn")}
-                        ${row.inCatalog
-                          ? renderModelToneChip("Catalog", "muted")
-                          : renderModelToneChip("Custom", "muted")}
-                        ${row.workspaceOverride
-                          ? renderModelToneChip("Configured in JSON", "muted")
-                          : renderModelToneChip("Catalog only", "muted")}
-                      </div>
-                    </div>
-                    <div class="row" style="margin-top:8px; gap:6px; flex-wrap:wrap;">
-                      ${!row.active
-                        ? html`
-                            <button
-                              class="btn btn--secondary"
-                              ?disabled=${!props.connected || props.modelSaving}
-                              @click=${() => props.onModelActivate(row.ref)}
-                            >
-                              Activate
-                            </button>
-                          `
-                        : nothing}
-                      ${row.workspaceOverride
-                        ? html`
-                            <button
-                              class="btn btn--secondary"
-                              ?disabled=${!props.connected || props.modelSaving}
-                              @click=${() => props.onModelDeactivate(row.ref)}
-                            >
-                              Deactivate
-                            </button>
-                            <button
-                              class="btn btn--secondary"
-                              ?disabled=${!props.connected || props.modelSaving}
-                              @click=${() => {
-                                if (!window.confirm(`Delete model ${row.ref} from openclaw config?`)) {
-                                  return;
-                                }
-                                props.onModelDelete(row.ref);
-                              }}
-                            >
-                              Delete
-                            </button>
-                          `
-                        : nothing}
-                      <button
-                        class="btn btn--secondary"
-                        ?disabled=${!props.connected || props.modelSaving}
-                        @click=${() => props.onModelClearKeyForRef(row.ref)}
-                      >
-                        Remove key
-                      </button>
-                    </div>
-                  </div>
-                `)}
-              </div>
-            `}
-      </div>
-
-      <div style="margin-top: 18px; border-top: 1px solid var(--border-color, rgba(255,255,255,0.08)); padding-top: 14px;">
-        <div class="card-title" style="font-size: 14px; margin-bottom: 8px;">Agent Model Assignment</div>
-        ${props.agentModelAssignments.length === 0
-          ? html`<div class="muted" style="padding: 10px 0;">No agents found.</div>`
-          : html`
-              <div class="list" style="display:flex; flex-direction:column; gap:8px;">
-                ${props.agentModelAssignments.map((assignment) => {
-                  const selected = resolveAgentModelSelectValue(assignment, modelOptions);
-                  return html`
-                    <div class="list-item" style="padding:10px; border:1px solid var(--border-color, rgba(255,255,255,0.08)); border-radius:10px; display:flex; gap:10px; align-items:center; justify-content:space-between;">
-                      <div>
-                        <div style="font-weight:600;">${assignment.label}</div>
-                        <div class="muted" style="font-size:12px;">
-                          ${assignment.inherited ? "Uses workspace default" : "Explicit model"}
-                        </div>
-                      </div>
-                      <label class="field" style="margin:0; min-width:260px;">
-                        <select
-                          .value=${selected}
-                          ?disabled=${!props.connected || props.modelSaving}
-                          @change=${(e: Event) => {
-                            const next = (e.target as HTMLSelectElement).value.trim();
-                            props.onAssignAgentModel(assignment.agentId, next || null);
-                          }}
-                        >
-                          <option value="">Use workspace default</option>
-                          ${!selected || modelOptions.includes(selected)
-                            ? nothing
-                            : html`<option value=${selected}>${selected}</option>`}
-                          ${modelOptions.map((opt) => html`<option value=${opt}>${opt}</option>`)}
-                        </select>
-                      </label>
-                    </div>
-                  `;
-                })}
-              </div>
-            `}
-      </div>
 
       ${disabledReason
         ? html`<div class="muted" style="margin-top: 10px; font-size: 13px;">${disabledReason}</div>`
