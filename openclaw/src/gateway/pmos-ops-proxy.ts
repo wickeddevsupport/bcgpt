@@ -681,11 +681,22 @@ export async function handleLocalN8nRequest(
 
   const n8n = readLocalN8nConfig();
   if (n8n) {
-    const authHeaders = await buildN8nAuthHeaders(req, n8n.url);
+    let authHeaders = await buildN8nAuthHeaders(req, n8n.url);
+    const session = await resolvePmosSessionFromRequest(req);
+    const isSuperAdmin = session.ok && session.user.role === "super_admin";
+
+    // Super admins can read/manage all workflows using owner auth context.
+    // Keep workflow CREATE/PATCH scoped to workspace identity to avoid
+    // creating resources under shared owner identity.
+    if (isSuperAdmin && req.method && !["POST", "PUT", "PATCH"].includes(req.method.toUpperCase())) {
+      const ownerCookie = await getOwnerCookie(n8n.url);
+      if (ownerCookie) {
+        authHeaders = { ...authHeaders, Cookie: ownerCookie };
+      }
+    }
 
     // Workspace-aware workflow endpoints (editor iframe calls /rest/workflows)
     if (isRestApi && (pathname === "/rest/workflows" || pathname.startsWith("/rest/workflows/"))) {
-      const session = await resolvePmosSessionFromRequest(req);
       if (session.ok) {
         const { workspaceId } = session.user;
         const filterByWorkspace = session.user.role !== "super_admin";
@@ -922,7 +933,13 @@ export async function handleOpsProxyRequest(
     const apiPath = pathname.slice("/api/ops".length) || "/";
 
     if (localN8n) {
-      const authHeaders = await buildN8nAuthHeaders(req, localN8n.url);
+      let authHeaders = await buildN8nAuthHeaders(req, localN8n.url);
+      if (session.user.role === "super_admin" && req.method && !["POST", "PUT", "PATCH"].includes(req.method.toUpperCase())) {
+        const ownerCookie = await getOwnerCookie(localN8n.url);
+        if (ownerCookie) {
+          authHeaders = { ...authHeaders, Cookie: ownerCookie };
+        }
+      }
 
       // Workspace-aware workflow endpoints
       if (apiPath === "/workflows" || apiPath.startsWith("/workflows/")) {
