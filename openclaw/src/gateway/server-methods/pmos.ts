@@ -1131,9 +1131,37 @@ export const pmosHandlers: GatewayRequestHandlers = {
         buildCredentialContext,
         autoLinkNodeCredentials,
       } = await import("../credential-sync.js");
-      const availableCredentials = await fetchWorkspaceCredentials(workspaceId).catch(() => []);
+      const withTimeout = async <T>(
+        promise: Promise<T>,
+        timeoutMs: number,
+        fallback: T,
+      ): Promise<T> => {
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        try {
+          return await Promise.race([
+            promise,
+            new Promise<T>((resolve) => {
+              timer = setTimeout(() => resolve(fallback), timeoutMs);
+            }),
+          ]);
+        } finally {
+          if (timer) {
+            clearTimeout(timer);
+          }
+        }
+      };
+
+      const availableCredentials = await withTimeout(
+        fetchWorkspaceCredentials(workspaceId).catch(() => []),
+        6000,
+        [] as Awaited<ReturnType<typeof fetchWorkspaceCredentials>>,
+      );
       const credentialContext = buildCredentialContext(availableCredentials);
-      const liveNodeCatalog = await getWorkspaceN8nNodeCatalog(workspaceId).catch(() => "");
+      const liveNodeCatalog = await withTimeout(
+        getWorkspaceN8nNodeCatalog(workspaceId).catch(() => ""),
+        6000,
+        "",
+      );
       const workspaceContext = `## Workspace Context
 - Workspace ID: ${workspaceId}
 - Use node type names from the live workspace catalog when available.
