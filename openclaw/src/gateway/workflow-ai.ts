@@ -1,13 +1,17 @@
 /**
- * Workflow AI calls the globally configured model from openclaw.json.
+ * Workflow AI calls the workspace-effective configured model.
  *
  * Source of truth:
+ * - Workspace effective config (global openclaw.json merged with workspace config)
  * - agents.defaults.model.primary
- * - models.providers.<provider>.apiKey (with env fallback when missing)
+ * - models.providers.<provider>.apiKey
+ * - BYOK store key for the workspace (fallback)
+ * - env fallback when missing
  */
 
 import { getCustomProviderApiKey, resolveEnvApiKey } from "../agents/model-auth.js";
 import { loadConfig, type OpenClawConfig } from "../config/config.js";
+import { loadEffectiveWorkspaceConfig } from "./workspace-config.js";
 
 type Message = { role: "user" | "assistant" | "system"; content: string };
 
@@ -100,10 +104,22 @@ function resolvePrimaryRefFromConfig(cfg: OpenClawConfig): unknown {
 async function resolveProviderApiKey(
   provider: string,
   cfg: OpenClawConfig,
+  workspaceId?: string | null,
 ): Promise<string | null> {
   const configApiKey = getCustomProviderApiKey(cfg, provider);
   if (configApiKey) {
     return configApiKey;
+  }
+  if (workspaceId) {
+    try {
+      const { getKey } = await import("./byok-store.js");
+      const byokKey = await getKey(workspaceId, provider as import("./byok-store.js").AIProvider);
+      if (typeof byokKey === "string" && byokKey.trim()) {
+        return byokKey.trim();
+      }
+    } catch {
+      // Best-effort BYOK lookup; fallback below.
+    }
   }
   const envResolved = resolveEnvApiKey(provider);
   const envApiKey = typeof envResolved?.apiKey === "string" ? envResolved.apiKey.trim() : "";
@@ -111,12 +127,16 @@ async function resolveProviderApiKey(
 }
 
 /**
- * Resolve model config from global openclaw.json. Returns null if no usable model is configured.
+ * Resolve model config from workspace-effective config.
+ * Returns null if no usable model is configured.
  */
-async function resolveModelConfig(cfg: OpenClawConfig): Promise<ModelConfig | null> {
+async function resolveModelConfig(
+  cfg: OpenClawConfig,
+  workspaceId?: string | null,
+): Promise<ModelConfig | null> {
   const parsed = parsePrimaryRef(resolvePrimaryRefFromConfig(cfg));
   if (!parsed) return null;
-  const apiKey = await resolveProviderApiKey(parsed.provider, cfg);
+  const apiKey = await resolveProviderApiKey(parsed.provider, cfg, workspaceId);
   if (!apiKey) return null;
   return { provider: parsed.provider, modelId: parsed.modelId, apiKey };
 }
@@ -131,14 +151,16 @@ export async function callWorkspaceModel(
   messages: Message[],
   opts: { maxTokens?: number; jsonMode?: boolean } = {},
 ): Promise<{ ok: boolean; text?: string; error?: string; providerUsed?: string }> {
-  void workspaceId;
-  const cfg = loadConfig();
-  const config = await resolveModelConfig(cfg);
+  const wsId = String(workspaceId ?? "").trim();
+  const cfg = wsId
+    ? ((await loadEffectiveWorkspaceConfig(wsId)) as OpenClawConfig)
+    : loadConfig();
+  const config = await resolveModelConfig(cfg, wsId || null);
   if (!config) {
     return {
       ok: false,
       error:
-        "No AI model configured in openclaw.json (set agents.defaults.model.primary and provider apiKey).",
+        "No AI model configured for this workspace (set agents.defaults.model.primary and provider apiKey in workspace config, or add a BYOK key).",
     };
   }
 

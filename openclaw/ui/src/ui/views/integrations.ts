@@ -83,6 +83,7 @@ function renderChip(text: string, tone: "ok" | "warn" | "muted" = "muted") {
 
 export function renderIntegrations(props: IntegrationsProps) {
   const bcgpt = props.connectorsStatus?.bcgpt ?? null;
+  const bcgptIdentity = bcgpt?.identity ?? null;
   const ops = props.connectorsStatus?.ops ?? null;
   const modelRows = props.modelRows ?? [];
   const activeModel = modelRows.find((row) => row.active) ?? null;
@@ -241,6 +242,26 @@ export function renderIntegrations(props: IntegrationsProps) {
           ${props.bcgptSavedOk ? html`<span class="chip chip-ok">Saved</span>` : nothing}
           ${props.basecampSetupOk ? html`<span class="chip chip-ok">Added to workflow engine</span>` : nothing}
         </div>
+
+        ${bcgptIdentity
+          ? html`
+              <div class="callout" style="margin-top: 10px; font-size: 12px;">
+                <div><strong>Status:</strong> ${bcgptIdentity.connected ? "Connected" : "Not connected"}</div>
+                ${bcgptIdentity.name || bcgptIdentity.email
+                  ? html`<div><strong>User:</strong> ${bcgptIdentity.name ?? "-"} ${bcgptIdentity.email ? html`<span class="mono">(${bcgptIdentity.email})</span>` : nothing}</div>`
+                  : nothing}
+                ${bcgptIdentity.selectedAccountId
+                  ? html`<div><strong>Selected account:</strong> <span class="mono">${bcgptIdentity.selectedAccountId}</span></div>`
+                  : nothing}
+                ${typeof bcgptIdentity.accountsCount === "number"
+                  ? html`<div><strong>Authorized accounts:</strong> ${bcgptIdentity.accountsCount}</div>`
+                  : nothing}
+                ${bcgptIdentity.message
+                  ? html`<div class="muted" style="margin-top:4px;">${bcgptIdentity.message}</div>`
+                  : nothing}
+              </div>
+            `
+          : nothing}
 
         ${props.onSetupBasecamp
           ? html`

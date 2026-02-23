@@ -754,6 +754,9 @@ export class OpenClawApp extends LitElement {
 
   async handlePmosRefreshConnectors() {
     await loadPmosConnectorsStatus(this);
+    if (!this.pmosConnectorDraftsInitialized) {
+      hydratePmosConnectorDraftsFromConfig(this);
+    }
     await loadPmosN8nCredentials(this);
 
     // Refresh workspace-scoped Wicked Ops connectors (if any)
@@ -824,10 +827,10 @@ export class OpenClawApp extends LitElement {
 
   async handlePmosIntegrationsLoad() {
     await loadConfig(this);
+    await loadPmosConnectorsStatus(this);
     hydratePmosConnectorDraftsFromConfig(this);
     await loadPmosModelWorkspaceState(this);
     this.syncPmosModelDraftRef();
-    await loadPmosConnectorsStatus(this);
     await loadPmosN8nCredentials(this);
 
     // Load any existing workspace-scoped Wicked Ops connectors so the UI can reflect provisioning state
@@ -856,11 +859,11 @@ export class OpenClawApp extends LitElement {
   async handlePmosIntegrationsSave() {
     await savePmosConnectorsConfig(this);
     await loadConfig(this);
+    await loadPmosConnectorsStatus(this);
     this.pmosConnectorDraftsInitialized = false;
     hydratePmosConnectorDraftsFromConfig(this);
     await loadPmosModelWorkspaceState(this);
     this.syncPmosModelDraftRef();
-    await loadPmosConnectorsStatus(this);
     await loadPmosN8nCredentials(this);
     this.pmosBcgptSavedOk = true;
     setTimeout(() => { this.pmosBcgptSavedOk = false; }, 2500);
@@ -903,11 +906,11 @@ export class OpenClawApp extends LitElement {
   async handlePmosIntegrationsClearBcgptKey() {
     await savePmosConnectorsConfig(this, { clearBcgptKey: true });
     await loadConfig(this);
+    await loadPmosConnectorsStatus(this);
     this.pmosConnectorDraftsInitialized = false;
     hydratePmosConnectorDraftsFromConfig(this);
     await loadPmosModelWorkspaceState(this);
     this.syncPmosModelDraftRef();
-    await loadPmosConnectorsStatus(this);
     await loadPmosN8nCredentials(this);
   }
 

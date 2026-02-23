@@ -23,6 +23,14 @@ export type PmosConnectorsStatus = {
     healthUrl: string | null;
     mcpUrl: string | null;
     error: string | null;
+    identity?: {
+      connected: boolean;
+      name?: string | null;
+      email?: string | null;
+      selectedAccountId?: string | null;
+      accountsCount?: number;
+      message?: string | null;
+    };
   };
 };
 
@@ -53,10 +61,6 @@ export type PmosConnectorsState = {
   pmosN8nCredentialsError: string | null;
 };
 
-function deepClone<T>(value: T): T {
-  return value && typeof value === "object" ? (JSON.parse(JSON.stringify(value)) as T) : value;
-}
-
 function getPath(obj: unknown, path: string[]): unknown {
   let cur: unknown = obj;
   for (const key of path) {
@@ -66,65 +70,6 @@ function getPath(obj: unknown, path: string[]): unknown {
     cur = (cur as Record<string, unknown>)[key];
   }
   return cur;
-}
-
-function setPath(obj: Record<string, unknown>, path: string[], value: unknown) {
-  let cur: Record<string, unknown> = obj;
-  for (let i = 0; i < path.length; i++) {
-    const key = path[i]!;
-    if (i === path.length - 1) {
-      cur[key] = value;
-      return;
-    }
-    const next = cur[key];
-    if (!next || typeof next !== "object" || Array.isArray(next)) {
-      cur[key] = {};
-    }
-    cur = cur[key] as Record<string, unknown>;
-  }
-}
-
-function deletePath(obj: Record<string, unknown>, path: string[]) {
-  let cur: Record<string, unknown> = obj;
-  for (let i = 0; i < path.length - 1; i++) {
-    const key = path[i]!;
-    const next = cur[key];
-    if (!next || typeof next !== "object" || Array.isArray(next)) {
-      return;
-    }
-    cur = next as Record<string, unknown>;
-  }
-  delete cur[path[path.length - 1]!];
-}
-
-function deletePathAndPrune(obj: Record<string, unknown>, path: string[]) {
-  if (path.length === 0) return;
-  const parents: Array<{ holder: Record<string, unknown>; key: string }> = [];
-  let cur: Record<string, unknown> = obj;
-  for (let i = 0; i < path.length - 1; i++) {
-    const key = path[i]!;
-    const next = cur[key];
-    if (!next || typeof next !== "object" || Array.isArray(next)) {
-      return;
-    }
-    parents.push({ holder: cur, key });
-    cur = next as Record<string, unknown>;
-  }
-
-  delete cur[path[path.length - 1]!];
-
-  for (let i = parents.length - 1; i >= 0; i--) {
-    const { holder, key } = parents[i]!;
-    const candidate = holder[key];
-    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
-      continue;
-    }
-    if (Object.keys(candidate as Record<string, unknown>).length === 0) {
-      delete holder[key];
-      continue;
-    }
-    break;
-  }
 }
 
 function normalizeUrl(raw: string, fallback: string): string {
@@ -140,14 +85,19 @@ export function hydratePmosConnectorDraftsFromConfig(state: PmosConnectorsState)
     return;
   }
   const cfg = state.configSnapshot?.config ?? null;
+  const status = state.pmosConnectorsStatus ?? null;
   const opsUrl =
-    (typeof getPath(cfg, ["pmos", "connectors", "ops", "url"]) === "string"
-      ? (getPath(cfg, ["pmos", "connectors", "ops", "url"]) as string)
-      : "") || "https://ops.wickedlab.io";
+    (typeof status?.ops?.url === "string" && status.ops.url.trim()
+      ? status.ops.url
+      : typeof getPath(cfg, ["pmos", "connectors", "ops", "url"]) === "string"
+        ? (getPath(cfg, ["pmos", "connectors", "ops", "url"]) as string)
+        : "") || "https://ops.wickedlab.io";
   const bcgptUrl =
-    (typeof getPath(cfg, ["pmos", "connectors", "bcgpt", "url"]) === "string"
-      ? (getPath(cfg, ["pmos", "connectors", "bcgpt", "url"]) as string)
-      : "") || "https://bcgpt.wickedlab.io";
+    (typeof status?.bcgpt?.url === "string" && status.bcgpt.url.trim()
+      ? status.bcgpt.url
+      : typeof getPath(cfg, ["pmos", "connectors", "bcgpt", "url"]) === "string"
+        ? (getPath(cfg, ["pmos", "connectors", "bcgpt", "url"]) as string)
+        : "") || "https://bcgpt.wickedlab.io";
 
   state.pmosOpsUrl = normalizeUrl(opsUrl, "https://ops.wickedlab.io");
   state.pmosBcgptUrl = normalizeUrl(bcgptUrl, "https://bcgpt.wickedlab.io");
@@ -181,38 +131,38 @@ export async function savePmosConnectorsConfig(
   state.pmosIntegrationsSaving = true;
   state.pmosIntegrationsError = null;
   try {
-    const snapshot = await state.client.request<ConfigSnapshot>("config.get", {});
-    const baseHash = snapshot.hash;
-    if (!baseHash) {
-      state.pmosIntegrationsError = "Config hash missing; reload and retry.";
-      return;
-    }
-    const nextConfig = deepClone((snapshot.config ?? {}) as Record<string, unknown>);
-
     const opsUrl = normalizeUrl(state.pmosOpsUrl, "https://ops.wickedlab.io");
     const bcgptUrl = normalizeUrl(state.pmosBcgptUrl, "https://bcgpt.wickedlab.io");
-
-    setPath(nextConfig, ["pmos", "connectors", "ops", "url"], opsUrl);
-    setPath(nextConfig, ["pmos", "connectors", "bcgpt", "url"], bcgptUrl);
     const bcgptKey = state.pmosBcgptApiKeyDraft.trim();
 
-    if (opts?.clearBcgptKey) {
-      deletePath(nextConfig, ["pmos", "connectors", "bcgpt", "apiKey"]);
-      state.pmosBcgptApiKeyDraft = "";
-    } else if (bcgptKey) {
-      setPath(nextConfig, ["pmos", "connectors", "bcgpt", "apiKey"], bcgptKey);
-      state.pmosBcgptApiKeyDraft = "";
-    }
+    const connectorsPatch: Record<string, unknown> = {
+      ops: { url: opsUrl },
+      bcgpt:
+        opts?.clearBcgptKey
+          ? { url: bcgptUrl, apiKey: null }
+          : !bcgptKey
+            ? { url: bcgptUrl }
+          : { url: bcgptUrl, apiKey: bcgptKey },
+    };
+    await state.client.request("pmos.connectors.workspace.set", { connectors: connectorsPatch });
+    state.pmosBcgptApiKeyDraft = "";
 
-    // Always remove deprecated Activepieces connector keys from config writes.
-    deletePathAndPrune(nextConfig, ["pmos", "connectors", "activepieces", "url"]);
-    deletePathAndPrune(nextConfig, ["pmos", "connectors", "activepieces", "projectId"]);
-    deletePathAndPrune(nextConfig, ["pmos", "connectors", "activepieces", "apiKey"]);
-
-    const raw = JSON.stringify(nextConfig, null, 2).trimEnd().concat("\n");
-    await state.client.request("config.set", { raw, baseHash });
-    // Keep the UI state in sync with what is persisted.
-    state.configSnapshot = await state.client.request<ConfigSnapshot>("config.get", {});
+    // Keep UI state in sync with persisted workspace connector data.
+    const workspaceConnectors = await state.client.request<{
+      workspaceId: string;
+      connectors: Record<string, unknown>;
+    }>("pmos.connectors.workspace.get", {});
+    const opsSaved = getPath(workspaceConnectors.connectors, ["ops", "url"]);
+    const bcgptSaved = getPath(workspaceConnectors.connectors, ["bcgpt", "url"]);
+    state.pmosOpsUrl = normalizeUrl(
+      typeof opsSaved === "string" ? opsSaved : "https://ops.wickedlab.io",
+      "https://ops.wickedlab.io",
+    );
+    state.pmosBcgptUrl = normalizeUrl(
+      typeof bcgptSaved === "string" ? bcgptSaved : "https://bcgpt.wickedlab.io",
+      "https://bcgpt.wickedlab.io",
+    );
+    state.pmosConnectorDraftsInitialized = true;
   } catch (err) {
     state.pmosIntegrationsError = String(err);
   } finally {

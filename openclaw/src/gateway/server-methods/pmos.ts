@@ -18,6 +18,14 @@ type ConnectorResult = {
   editorUrl?: string | null;
   mode?: "embedded" | "remote";
   vendoredRepo?: string | null;
+  identity?: {
+    connected: boolean;
+    name?: string | null;
+    email?: string | null;
+    selectedAccountId?: string | null;
+    accountsCount?: number;
+    message?: string | null;
+  };
 };
 
 async function fetchJson(
@@ -210,6 +218,33 @@ export const pmosHandlers: GatewayRequestHandlers = {
         if ((!bcgptAuth.ok || hasError) && !bcgpt.error) {
           bcgpt.error = bcgptAuth.error || "BCGPT_AUTH_FAILED";
         }
+
+        // Fetch Basecamp identity/account status for richer UI cards.
+        const bcgptIdentity = await fetchJson(`${bcgptUrl}/action/startbcgpt`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-bcgpt-api-key": bcgptKey,
+          },
+          body: JSON.stringify({}),
+        });
+        if (bcgptIdentity.ok && isJsonObject(bcgptIdentity.json)) {
+          const payload = bcgptIdentity.json as Record<string, unknown>;
+          const user = isJsonObject(payload.user) ? payload.user : null;
+          const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
+          bcgpt.identity = {
+            connected: payload.connected === true,
+            name: typeof user?.name === "string" ? user.name : null,
+            email: typeof user?.email === "string" ? user.email : null,
+            selectedAccountId:
+              typeof payload.selected_account_id === "string" ||
+              typeof payload.selected_account_id === "number"
+                ? String(payload.selected_account_id)
+                : null,
+            accountsCount: accounts.length,
+            message: typeof payload.message === "string" ? payload.message : null,
+          };
+        }
       }
 
       respond(
@@ -229,6 +264,10 @@ export const pmosHandlers: GatewayRequestHandlers = {
   "pmos.config.global.get": async ({ respond, client }) => {
     try {
       if (!client) throw new Error("client context required");
+      if (!isSuperAdmin(client)) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "super_admin role required"));
+        return;
+      }
       const config = loadConfig() as unknown;
       respond(
         true,
@@ -243,6 +282,10 @@ export const pmosHandlers: GatewayRequestHandlers = {
   "pmos.config.global.set": async ({ params, respond, client }) => {
     try {
       if (!client) throw new Error("client context required");
+      if (!isSuperAdmin(client)) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "super_admin role required"));
+        return;
+      }
       const p = params as Record<string, unknown> | undefined;
       const patch = p?.patch;
       if (!isJsonObject(patch)) {
@@ -339,7 +382,8 @@ export const pmosHandlers: GatewayRequestHandlers = {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { readWorkspaceConnectors, writeWorkspaceConnectors } = await import("../workspace-connectors.js");
       const existing = (await readWorkspaceConnectors(workspaceId)) ?? {};
-      const next = { ...existing, ...(connectors as Record<string, unknown>) };
+      const merged = deepMergeJson(existing, connectors as Record<string, unknown>);
+      const next = isJsonObject(merged) ? merged : existing;
       await writeWorkspaceConnectors(workspaceId, next);
       respond(true, { ok: true, workspaceId, connectors: next }, undefined);
     } catch (err) {

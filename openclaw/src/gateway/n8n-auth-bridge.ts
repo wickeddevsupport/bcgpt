@@ -300,12 +300,26 @@ async function ensureWorkspaceUserViaInvitation(params: {
   n8nBaseUrl: string;
   email: string;
   name?: string | null;
+  role?: PmosAuthUser["role"] | null;
 }): Promise<{ email: string; password: string; cookie: string } | null> {
   const { workspaceId, n8nBaseUrl } = params;
 
   const wc = await readWorkspaceConnectors(workspaceId);
   const existing = wc?.ops?.user as { email?: string; password?: string } | undefined;
-  if (existing?.email && existing?.password) {
+  const requestedEmail = String(params.email ?? "").trim().toLowerCase();
+  const existingEmail = String(existing?.email ?? "").trim().toLowerCase();
+  const existingIsSynthetic =
+    existingEmail.endsWith("@openclaw.local") || existingEmail.startsWith("pmos-");
+  const requestedLooksReal = Boolean(requestedEmail && !requestedEmail.endsWith("@openclaw.local"));
+  const shouldPreferRequestedIdentity = Boolean(
+    existing?.email &&
+      existing?.password &&
+      requestedLooksReal &&
+      existingIsSynthetic &&
+      existingEmail !== requestedEmail,
+  );
+
+  if (existing?.email && existing?.password && !shouldPreferRequestedIdentity) {
     const existingCookie = await loginToN8n(n8nBaseUrl, existing.email, existing.password);
     if (existingCookie) {
       sessionCache.set(workspaceId, {
@@ -342,8 +356,6 @@ async function ensureWorkspaceUserViaInvitation(params: {
 
   const { randomBytes } = await import("node:crypto");
   const password = randomBytes(24).toString("base64url");
-  const requestedEmail = String(params.email ?? "").trim().toLowerCase();
-  const existingEmail = String(existing?.email ?? "").trim().toLowerCase();
   const emailCandidates = Array.from(
     new Set(
       [
@@ -381,7 +393,9 @@ async function ensureWorkspaceUserViaInvitation(params: {
           "content-type": "application/json",
           accept: "application/json",
         },
-        body: JSON.stringify([{ email: candidateEmail, role: "global:member" }]),
+        body: JSON.stringify([
+          { email: candidateEmail, role: params.role === "super_admin" ? "global:admin" : "global:member" },
+        ]),
       });
       if (!inviteRes.ok) {
         const text = await inviteRes.text().catch(() => "");
@@ -414,7 +428,25 @@ async function ensureWorkspaceUserViaInvitation(params: {
       console.warn("[n8n-auth] invite error:", String(err));
     }
   }
-  if (!inviteeId || !provisionedEmail) return null;
+  if (!inviteeId || !provisionedEmail) {
+    // Migration fallback: if we attempted to move away from synthetic identity but
+    // invitation flow failed, keep existing workspace creds functional.
+    if (existing?.email && existing?.password) {
+      const existingCookie = await loginToN8n(n8nBaseUrl, existing.email, existing.password);
+      if (existingCookie) {
+        sessionCache.set(workspaceId, {
+          cookie: existingCookie,
+          expiresAt: Date.now() + SESSION_TTL_MS,
+        });
+        return {
+          email: existing.email.trim().toLowerCase(),
+          password: existing.password,
+          cookie: existingCookie,
+        };
+      }
+    }
+    return null;
+  }
 
   // Accept invitation (skipAuth) and extract the n8n-auth cookie.
   let cookie: string | null = null;
@@ -463,7 +495,7 @@ async function ensureWorkspaceUserViaInvitation(params: {
 export async function getOrCreateWorkspaceN8nCookie(params: {
   workspaceId: string;
   n8nBaseUrl: string;
-  pmosUser?: Pick<PmosAuthUser, "email" | "name"> | null;
+  pmosUser?: Pick<PmosAuthUser, "email" | "name" | "role"> | null;
 }): Promise<string | null> {
   const { workspaceId, n8nBaseUrl } = params;
 
@@ -481,6 +513,7 @@ export async function getOrCreateWorkspaceN8nCookie(params: {
       n8nBaseUrl,
       email: emailHint,
       name: nameHint,
+      role: params.pmosUser?.role ?? null,
     });
   };
 
@@ -529,10 +562,13 @@ export async function buildN8nAuthHeaders(
 
   // Optional last-resort: owner fallback is explicitly opt-in.
   // Default behavior is strict workspace-scoped identity to avoid shared-admin context.
+  // For non-GET requests, never use owner fallback to avoid creating resources under
+  // shared owner identity.
+  const reqMethod = String(req.method ?? "GET").trim().toUpperCase();
   const allowOwnerFallback = ["1", "true", "yes"].includes(
     String(process.env.N8N_ALLOW_OWNER_FALLBACK ?? "").trim().toLowerCase(),
   );
-  if (allowOwnerFallback) {
+  if (allowOwnerFallback && reqMethod === "GET") {
     const ownerCookie = await getOwnerCookie(n8nBaseUrl);
     if (ownerCookie) return { Cookie: ownerCookie };
   }

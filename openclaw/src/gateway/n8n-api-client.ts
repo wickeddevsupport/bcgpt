@@ -5,9 +5,10 @@
  * Used by chat-to-workflow, live-flow-builder, and other modules.
  */
 
-import { readWorkspaceConnectors, writeWorkspaceConnectors } from "./workspace-connectors.js";
-import { readLocalN8nConfig } from "./pmos-ops-proxy.js";
+import { readWorkspaceConnectors } from "./workspace-connectors.js";
+import { ensureWorkspaceN8nTag, readLocalN8nConfig } from "./pmos-ops-proxy.js";
 import { getOrCreateWorkspaceN8nCookie } from "./n8n-auth-bridge.js";
+import { resolvePmosUserByWorkspaceId } from "./pmos-auth.js";
 import { loadConfig } from "../config/config.js";
 
 export interface N8nWorkflow {
@@ -89,6 +90,27 @@ function resolveGlobalOpsUrlFromConfig(): string | null {
   return normalizeBaseUrl(readConfigString(cfg, ["pmos", "connectors", "ops", "url"]));
 }
 
+function sameBaseUrl(left: string | null | undefined, right: string | null | undefined): boolean {
+  const l = normalizeBaseUrl(left ?? null);
+  const r = normalizeBaseUrl(right ?? null);
+  return Boolean(l && r && l === r);
+}
+
+function appendWorkspaceTag(
+  tags: Array<string | { id: string; name?: string }> | undefined,
+  tagId: string,
+): Array<string | { id: string; name?: string }> {
+  const list = Array.isArray(tags) ? [...tags] : [];
+  const hasTag = list.some((tag) => {
+    if (typeof tag === "string") return tag === tagId;
+    return Boolean(tag && typeof tag === "object" && tag.id === tagId);
+  });
+  if (!hasTag) {
+    list.push(tagId);
+  }
+  return list;
+}
+
 /**
  * Get the n8n base URL and auth cookie for a workspace
  */
@@ -108,23 +130,43 @@ async function getN8nContext(workspaceId: string): Promise<{
     normalizeBaseUrl(localN8n?.url ?? null) ??
     resolveGlobalOpsUrlFromConfig() ??
     "https://ops.wickedlab.io";
-  
+
+  // Use workspace owner identity as hint so embedded n8n users map to PMOS users
+  // instead of generic synthetic aliases.
+  const owner = await resolvePmosUserByWorkspaceId(workspaceId).catch(() => null);
+
   // Use the auto-provisioning flow from n8n-auth-bridge
   // This will create workspace credentials if they don't exist yet
-  const cookie = await getOrCreateWorkspaceN8nCookie({ 
-    workspaceId, 
-    n8nBaseUrl: baseUrl 
-  });
-  
+  let cookie: string | null = null;
+  try {
+    cookie = await getOrCreateWorkspaceN8nCookie({
+      workspaceId,
+      n8nBaseUrl: baseUrl,
+      pmosUser: owner
+        ? {
+            email: owner.email,
+            name: owner.name,
+            role: owner.role,
+          }
+        : null,
+    });
+  } catch {
+    cookie = null;
+  }
+
   // Also check for API key
   const opsApiKey = wc?.ops?.apiKey as string | undefined;
-  
-  const hasWorkspaceCredentials = Boolean(cookie || opsApiKey?.trim());
-  
+  const apiKey = opsApiKey?.trim() || null;
+
+  // In embedded mode we require workspace cookie auth to avoid creating resources
+  // under shared owner/api-key context.
+  const embeddedRuntime = sameBaseUrl(baseUrl, localN8n?.url ?? null);
+  const hasWorkspaceCredentials = embeddedRuntime ? Boolean(cookie) : Boolean(cookie || apiKey);
+
   return {
     baseUrl: baseUrl.replace(/\/+$/, ""),
     cookie,
-    apiKey: opsApiKey?.trim() || null,
+    apiKey: embeddedRuntime ? null : apiKey,
     hasWorkspaceCredentials,
   };
 }
@@ -157,13 +199,25 @@ export async function createN8nWorkflow(
   } else {
     return { ok: false, error: "No n8n authentication available" };
   }
-  
+
+  const workspaceTagId = await ensureWorkspaceN8nTag(workspaceId, baseUrl);
+  if (!workspaceTagId) {
+    return {
+      ok: false,
+      error:
+        "Unable to enforce workspace isolation in n8n (workspace tag setup failed). Check embedded n8n owner credentials and retry.",
+    };
+  }
+
+  const tags = appendWorkspaceTag(workflow.tags, workspaceTagId);
+
   try {
     const res = await fetch(`${baseUrl}/rest/workflows`, {
       method: "POST",
       headers,
       body: JSON.stringify({
         ...workflow,
+        tags,
         active: false, // Ensure workflows are created inactive
       }),
     });

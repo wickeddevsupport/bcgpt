@@ -222,7 +222,7 @@ export function titleForTab(tab: Tab) {
     case "connections":
       return "Connections";
     case "command-center":
-      return "Command Center";
+      return "Projects";
     case "admin":
       return "Admin";
     case "agents":
@@ -271,7 +271,7 @@ export function subtitleForTab(tab: Tab) {
     case "connections":
       return "Connect the services your AI agents will use: Slack, GitHub, Email, and more.";
     case "command-center":
-      return "Plan and execute multi-step operations with approvals and history.";
+      return "Basecamp project management center with live summaries and AI operations.";
     case "admin":
       return "Workspace identity, roles, members, and Wicked OS audit feed.";
     case "agents":

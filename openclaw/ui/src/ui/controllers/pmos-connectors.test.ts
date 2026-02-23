@@ -20,6 +20,9 @@ function createBaseState(): PmosConnectorsState {
     pmosConnectorsLastChecked: null,
     pmosIntegrationsSaving: false,
     pmosIntegrationsError: null,
+    pmosN8nCredentials: null,
+    pmosN8nCredentialsLoading: false,
+    pmosN8nCredentialsError: null,
   };
 }
 
@@ -43,40 +46,27 @@ describe("pmos-connectors", () => {
     expect(state.pmosOpsUrl).toBe("https://ops.wickedlab.io");
   });
 
-  it("saves ops + bcgpt config and prunes deprecated activepieces connector keys", async () => {
+  it("saves ops + bcgpt config into workspace connectors", async () => {
     const state = createBaseState();
     state.pmosOpsUrl = "https://ops.example.test/";
     state.pmosBcgptUrl = "https://bcgpt.example.test/";
     state.pmosBcgptApiKeyDraft = "bcgpt-key";
 
-    let latestConfig: Record<string, unknown> = {
-      pmos: {
-        connectors: {
-          activepieces: {
-            url: "https://flow.example.test",
-            projectId: "legacy-project",
-            apiKey: "legacy-key",
-          },
-          bcgpt: {
-            url: "https://bcgpt.old.test",
-          },
-        },
-      },
-    };
-
-    let persistedRaw = "";
     const request = vi.fn(async (method: string, params: any) => {
-      if (method === "config.get") {
-        return {
-          hash: "h1",
-          raw: JSON.stringify(latestConfig),
-          config: latestConfig,
-        };
-      }
-      if (method === "config.set") {
-        persistedRaw = String(params?.raw ?? "");
-        latestConfig = JSON.parse(persistedRaw) as Record<string, unknown>;
+      if (method === "pmos.connectors.workspace.set") {
+        expect(params.connectors.ops.url).toBe("https://ops.example.test");
+        expect(params.connectors.bcgpt.url).toBe("https://bcgpt.example.test");
+        expect(params.connectors.bcgpt.apiKey).toBe("bcgpt-key");
         return { ok: true };
+      }
+      if (method === "pmos.connectors.workspace.get") {
+        return {
+          workspaceId: "ws-test",
+          connectors: {
+            ops: { url: "https://ops.example.test" },
+            bcgpt: { url: "https://bcgpt.example.test" },
+          },
+        };
       }
       throw new Error(`Unexpected method ${method}`);
     });
@@ -85,10 +75,49 @@ describe("pmos-connectors", () => {
 
     await savePmosConnectorsConfig(state);
 
-    const parsed = JSON.parse(persistedRaw) as any;
-    expect(parsed.pmos.connectors.ops.url).toBe("https://ops.example.test");
-    expect(parsed.pmos.connectors.bcgpt.url).toBe("https://bcgpt.example.test");
-    expect(parsed.pmos.connectors.bcgpt.apiKey).toBe("bcgpt-key");
-    expect(parsed.pmos.connectors.activepieces).toBeUndefined();
+    expect(state.pmosOpsUrl).toBe("https://ops.example.test");
+    expect(state.pmosBcgptUrl).toBe("https://bcgpt.example.test");
+    expect(state.pmosBcgptApiKeyDraft).toBe("");
+    expect(request).toHaveBeenCalledWith("pmos.connectors.workspace.set", expect.any(Object));
+    expect(request).toHaveBeenCalledWith("pmos.connectors.workspace.get", {});
+  });
+
+  it("clears workspace bcgpt api key explicitly", async () => {
+    const state = createBaseState();
+    state.pmosOpsUrl = "https://ops.example.test/";
+    state.pmosBcgptUrl = "https://bcgpt.example.test/";
+    state.pmosBcgptApiKeyDraft = "";
+
+    const request = vi.fn(async (method: string, params: any) => {
+      if (method === "pmos.connectors.workspace.set") {
+        expect(params.connectors.ops.url).toBe("https://ops.example.test");
+        expect(params.connectors.bcgpt.url).toBe("https://bcgpt.example.test");
+        expect(params.connectors.bcgpt.apiKey).toBeNull();
+        return { ok: true };
+      }
+      if (method === "pmos.connectors.workspace.get") {
+        return {
+          workspaceId: "ws-test",
+          connectors: {
+            ops: { url: "https://ops.example.test" },
+            bcgpt: { url: "https://bcgpt.example.test", apiKey: null },
+          },
+        };
+      }
+      throw new Error(`Unexpected method ${method}`);
+    });
+
+    state.client = { request } as any;
+
+    await savePmosConnectorsConfig(state, { clearBcgptKey: true });
+
+    expect(request).toHaveBeenCalledWith(
+      "pmos.connectors.workspace.set",
+      expect.objectContaining({
+        connectors: expect.objectContaining({
+          bcgpt: expect.objectContaining({ apiKey: null }),
+        }),
+      }),
+    );
   });
 });

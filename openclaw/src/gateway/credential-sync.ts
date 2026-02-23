@@ -155,17 +155,18 @@ async function resolveBasecampConnectorConfig(
   const cfg = loadConfig() as unknown;
   const wc = await readWorkspaceConnectors(workspaceId).catch(() => null);
 
-  // Keep openclaw.json as the primary source of truth, with workspace connectors as fallback.
+  // Workspace connector config is primary (per-tenant secrets).
+  // Global openclaw.json acts as shared fallback/defaults.
   const configBaseUrl = normalizeBaseUrl(readConfigString(cfg, ["pmos", "connectors", "bcgpt", "url"]));
   const workspaceBaseUrl = normalizeBaseUrl(
     typeof wc?.bcgpt?.url === "string" ? wc.bcgpt.url : null,
   );
-  const baseUrl = configBaseUrl ?? workspaceBaseUrl ?? "https://bcgpt.wickedlab.io";
+  const baseUrl = workspaceBaseUrl ?? configBaseUrl ?? "https://bcgpt.wickedlab.io";
 
   const configApiKey = readConfigString(cfg, ["pmos", "connectors", "bcgpt", "apiKey"]);
   const workspaceApiKey =
     typeof wc?.bcgpt?.apiKey === "string" ? wc.bcgpt.apiKey.trim() : null;
-  const apiKey = (configApiKey ?? workspaceApiKey ?? "").trim();
+  const apiKey = (workspaceApiKey ?? configApiKey ?? "").trim();
   if (!apiKey) {
     return null;
   }

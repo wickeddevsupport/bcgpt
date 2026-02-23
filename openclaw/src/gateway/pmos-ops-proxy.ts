@@ -310,8 +310,9 @@ async function proxyWorkflowList(params: {
   targetUrl: string;
   extraHeaders?: Record<string, string>;
   workspaceId: string;
+  filterByWorkspace?: boolean;
 }): Promise<void> {
-  const { req, res, targetUrl, extraHeaders, workspaceId } = params;
+  const { req, res, targetUrl, extraHeaders, workspaceId, filterByWorkspace = true } = params;
   const headers = buildForwardHeaders(req, extraHeaders);
   const body = await readBody(req);
 
@@ -334,6 +335,9 @@ async function proxyWorkflowList(params: {
     try {
       const parsed = JSON.parse(rawBuf.toString("utf-8")) as unknown;
       const filtered = (() => {
+        if (!filterByWorkspace) {
+          return parsed;
+        }
         if (parsed && typeof parsed === "object" && Array.isArray((parsed as Record<string, unknown>).data)) {
           const p = parsed as Record<string, unknown>;
           const filteredData = (p.data as unknown[]).filter((wf) => workflowBelongsToWorkspace(wf, workspaceId));
@@ -684,8 +688,16 @@ export async function handleLocalN8nRequest(
       const session = await resolvePmosSessionFromRequest(req);
       if (session.ok) {
         const { workspaceId } = session.user;
+        const filterByWorkspace = session.user.role !== "super_admin";
         if (req.method === "GET" && pathname === "/rest/workflows") {
-          await proxyWorkflowList({ req, res, targetUrl: `${n8n.url}/rest/workflows${url.search}`, extraHeaders: authHeaders, workspaceId });
+          await proxyWorkflowList({
+            req,
+            res,
+            targetUrl: `${n8n.url}/rest/workflows${url.search}`,
+            extraHeaders: authHeaders,
+            workspaceId,
+            filterByWorkspace,
+          });
           return true;
         }
         if ((req.method === "POST" || req.method === "PUT" || req.method === "PATCH") && pathname === "/rest/workflows") {
@@ -906,6 +918,7 @@ export async function handleOpsProxyRequest(
 
     const localN8n = readLocalN8nConfig();
     const { workspaceId } = session.user;
+    const filterByWorkspace = session.user.role !== "super_admin";
     const apiPath = pathname.slice("/api/ops".length) || "/";
 
     if (localN8n) {
@@ -914,7 +927,14 @@ export async function handleOpsProxyRequest(
       // Workspace-aware workflow endpoints
       if (apiPath === "/workflows" || apiPath.startsWith("/workflows/")) {
         if (req.method === "GET" && apiPath === "/workflows") {
-          await proxyWorkflowList({ req, res, targetUrl: `${localN8n.url}/rest/workflows${url.search}`, extraHeaders: authHeaders, workspaceId });
+          await proxyWorkflowList({
+            req,
+            res,
+            targetUrl: `${localN8n.url}/rest/workflows${url.search}`,
+            extraHeaders: authHeaders,
+            workspaceId,
+            filterByWorkspace,
+          });
           return true;
         }
         if ((req.method === "POST" || req.method === "PUT" || req.method === "PATCH") && apiPath === "/workflows") {
