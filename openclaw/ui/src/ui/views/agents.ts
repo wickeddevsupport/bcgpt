@@ -23,6 +23,7 @@ import {
   formatCronState,
   formatNextRun,
 } from "../presenter.ts";
+import { DEFAULT_AGENT_WORKSPACE_PATH } from "../app-defaults.ts";
 
 // Agent mode types for business-friendly UI
 export type AgentMode = "autonomous" | "interactive" | "hybrid";
@@ -82,7 +83,7 @@ export const DEFAULT_CREATE_AGENT_FORM: CreateAgentFormData = {
   name: "",
   id: "",
   purpose: "",
-  workspace: "default",
+  workspace: DEFAULT_AGENT_WORKSPACE_PATH,
   emoji: ":robot:",
   theme: "",
   mode: "hybrid",
@@ -408,7 +409,10 @@ function buildAgentContext(
   const workspaceFromFiles =
     agentFilesList && agentFilesList.agentId === agent.id ? agentFilesList.workspace : null;
   const workspace =
-    workspaceFromFiles || config.entry?.workspace || config.defaults?.workspace || "default";
+    workspaceFromFiles ||
+    config.entry?.workspace ||
+    config.defaults?.workspace ||
+    DEFAULT_AGENT_WORKSPACE_PATH;
   const modelLabel = config.entry?.model
     ? resolveModelLabel(config.entry?.model)
     : resolveModelLabel(config.defaults?.model);
@@ -923,7 +927,10 @@ function renderAgentOverview(params: {
   const workspaceFromFiles =
     agentFilesList && agentFilesList.agentId === agent.id ? agentFilesList.workspace : null;
   const workspace =
-    workspaceFromFiles || config.entry?.workspace || config.defaults?.workspace || "default";
+    workspaceFromFiles ||
+    config.entry?.workspace ||
+    config.defaults?.workspace ||
+    DEFAULT_AGENT_WORKSPACE_PATH;
   const model = config.entry?.model
     ? resolveModelLabel(config.entry?.model)
     : resolveModelLabel(config.defaults?.model);
@@ -2129,7 +2136,7 @@ function renderCreateAgentModal(props: AgentsProps) {
   const previewAgent: Record<string, unknown> = {
     id: form.id.trim() || "<auto-from-name>",
     name: form.name.trim() || "<required>",
-    workspace: form.workspace.trim() || "default",
+    workspace: form.workspace.trim() || DEFAULT_AGENT_WORKSPACE_PATH,
     identity: {
       name: form.name.trim() || "<required>",
       ...(form.emoji.trim() ? { emoji: form.emoji.trim() } : {}),
@@ -2243,7 +2250,7 @@ function renderCreateAgentModal(props: AgentsProps) {
                       .value=${form.workspace}
                       @input=${(e: Event) =>
                         props.onCreateModalFieldChange("workspace", (e.target as HTMLInputElement).value)}
-                      placeholder="default"
+                      placeholder=${DEFAULT_AGENT_WORKSPACE_PATH}
                       ?disabled=${createModalLoading}
                     />
                   </label>
@@ -2438,7 +2445,7 @@ function renderCreateAgentModal(props: AgentsProps) {
                   </div>
                   <div class="agent-kv">
                     <div class="label">Workspace</div>
-                    <div class="mono">${form.workspace.trim() || "default"}</div>
+                    <div class="mono">${form.workspace.trim() || DEFAULT_AGENT_WORKSPACE_PATH}</div>
                   </div>
                   <div class="agent-kv">
                     <div class="label">Mode</div>

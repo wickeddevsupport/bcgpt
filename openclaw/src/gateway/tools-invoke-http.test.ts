@@ -274,6 +274,79 @@ describe("POST /tools/invoke", () => {
     await fs.rm(path.join(stateDir, "pmos-auth.json"), { force: true });
   });
 
+  it("bypasses agent tool-profile filtering for PMOS ops_* HTTP invokes", async () => {
+    const stateDir = process.env.OPENCLAW_STATE_DIR;
+    if (!stateDir) {
+      throw new Error("OPENCLAW_STATE_DIR missing in test environment");
+    }
+    await fs.rm(path.join(stateDir, "pmos-auth.json"), { force: true });
+
+    const signup = await signupPmosUser({
+      name: "Owner",
+      email: "owner@example.com",
+      password: "Passw0rd!",
+    });
+    expect(signup.ok).toBe(true);
+    if (!signup.ok) {
+      throw new Error(signup.error);
+    }
+
+    const registry = createTestRegistry();
+    registry.tools = [
+      {
+        pluginId: "wicked-ops",
+        source: "test",
+        optional: false,
+        names: ["ops_workflows_list"],
+        factory: () => ({
+          name: "ops_workflows_list",
+          description: "test",
+          parameters: {
+            type: "object",
+            additionalProperties: false,
+            properties: {},
+          },
+          execute: async () => ({ ok: true, source: "test-registry" }),
+        }),
+      },
+    ];
+    setTestPluginRegistry(registry);
+
+    const { writeConfigFile } = await import("../config/config.js");
+    await writeConfigFile({
+      tools: { profile: "minimal" },
+      // oxlint-disable-next-line typescript/no-explicit-any
+    } as any);
+
+    const port = await getFreePort();
+    const server = await startGatewayServer(port, { bind: "loopback" });
+
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/tools/invoke`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: `pmos_session=${signup.sessionToken}`,
+        },
+        body: JSON.stringify({
+          tool: "ops_workflows_list",
+          action: "json",
+          args: {},
+          sessionKey: "main",
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.ok).toBe(true);
+      expect(body.result).toMatchObject({ ok: true, source: "test-registry" });
+    } finally {
+      await server.close();
+      resetTestPluginRegistry();
+      await fs.rm(path.join(stateDir, "pmos-auth.json"), { force: true });
+    }
+  });
+
   it("rejects non-ops tools for PMOS sessions", async () => {
     const stateDir = process.env.OPENCLAW_STATE_DIR;
     if (!stateDir) {

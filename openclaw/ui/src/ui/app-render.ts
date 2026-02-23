@@ -54,6 +54,7 @@ import {
 import { loadUsage, loadSessionTimeSeries, loadSessionLogs } from "./controllers/usage.ts";
 import { loadWorkflowRuns } from "./controllers/pmos-workflows.ts";
 import { canManagePmosMembers } from "./controllers/pmos-admin.ts";
+import { DEFAULT_AGENT_WORKSPACE_PATH } from "./app-defaults.ts";
 import type { PmosModelProvider } from "./controllers/pmos-model-auth.ts";
 import { icons } from "./icons.ts";
 import {
@@ -1772,7 +1773,7 @@ export function renderApp(state: AppViewState) {
                       interactive: "messaging",
                       hybrid: "coding",
                     };
-                    const workspace = form.workspace.trim() || "default";
+                    const workspace = form.workspace.trim() || DEFAULT_AGENT_WORKSPACE_PATH;
                     const model = form.model.trim();
                     const skills = Array.from(
                       new Set(form.skills.map((skill) => skill.trim()).filter(Boolean)),
@@ -1805,7 +1806,7 @@ export function renderApp(state: AppViewState) {
                       name: "",
                       id: "",
                       purpose: "",
-                      workspace: "default",
+                      workspace: DEFAULT_AGENT_WORKSPACE_PATH,
                       emoji: ":robot:",
                       theme: "",
                       mode: "hybrid",

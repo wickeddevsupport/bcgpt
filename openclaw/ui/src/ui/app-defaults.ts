@@ -10,6 +10,9 @@ export const DEFAULT_LOG_LEVEL_FILTERS: Record<LogLevel, boolean> = {
   fatal: true,
 };
 
+// Keep new agents on a writable runtime path (container-safe).
+export const DEFAULT_AGENT_WORKSPACE_PATH = "~/.openclaw/workspace";
+
 export const DEFAULT_CRON_FORM: CronFormState = {
   name: "",
   description: "",

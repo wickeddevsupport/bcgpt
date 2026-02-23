@@ -47,7 +47,11 @@ import {
   handleSendChat as handleSendChatInternal,
   removeQueuedMessage as removeQueuedMessageInternal,
 } from "./app-chat.ts";
-import { DEFAULT_CRON_FORM, DEFAULT_LOG_LEVEL_FILTERS } from "./app-defaults.ts";
+import {
+  DEFAULT_AGENT_WORKSPACE_PATH,
+  DEFAULT_CRON_FORM,
+  DEFAULT_LOG_LEVEL_FILTERS,
+} from "./app-defaults.ts";
 import { connectGateway as connectGatewayInternal } from "./app-gateway.ts";
 import {
   handleConnected,
@@ -483,7 +487,7 @@ export class OpenClawApp extends LitElement {
     name: "",
     id: "",
     purpose: "",
-    workspace: "default",
+    workspace: DEFAULT_AGENT_WORKSPACE_PATH,
     emoji: ":robot:",
     theme: "",
     mode: "hybrid",

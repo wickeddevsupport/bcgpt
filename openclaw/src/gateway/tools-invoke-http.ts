@@ -376,7 +376,14 @@ export async function handleToolsInvokeHttpRequest(
     ? filterToolsByPolicy(groupFiltered, subagentPolicyExpanded)
     : groupFiltered;
 
-  const tool = subagentFiltered.find((t) => t.name === toolName);
+  // PMOS UI invokes ops_* tools over HTTP for workflow management.
+  // Keep RBAC from isToolAllowedForPmosSession, but bypass agent/profile tool policy filtering
+  // so workspace users are not blocked by their agent's chat tool profile.
+  const bypassPolicyForPmosOps =
+    usePmosAuth && toolName.startsWith(PMOS_ALLOWED_TOOL_PREFIX);
+  const lookupTools = bypassPolicyForPmosOps ? allTools : subagentFiltered;
+
+  const tool = lookupTools.find((t) => t.name === toolName);
   if (!tool) {
     sendJson(res, 404, {
       ok: false,
