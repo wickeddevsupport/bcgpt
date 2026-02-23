@@ -37,6 +37,103 @@ import {
 } from "../protocol/index.js";
 import { isSuperAdmin, filterByWorkspace } from "../workspace-context.js";
 import { auditLogger } from "../../security/audit-logger.js";
+import type { GatewayClient } from "./types.js";
+
+type JsonRecord = Record<string, unknown>;
+
+function isJsonRecord(value: unknown): value is JsonRecord {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function toJsonRecordArray(value: unknown): JsonRecord[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((entry): entry is JsonRecord => isJsonRecord(entry));
+}
+
+function normalizeAgentIdForCompare(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toLowerCase();
+  return trimmed || null;
+}
+
+function workspaceScopedClient(
+  client: GatewayClient | undefined,
+): { workspaceId: string } | null {
+  if (!client || isSuperAdmin(client)) {
+    return null;
+  }
+  const workspaceId =
+    typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  if (!workspaceId) {
+    return null;
+  }
+  return { workspaceId };
+}
+
+export function mergeWorkspaceScopedAgents(
+  currentConfig: Record<string, unknown> | null | undefined,
+  requestedConfig: unknown,
+  workspaceId: string,
+): { ok: true; config: Record<string, unknown> } | { ok: false; error: string } {
+  const requestedRoot = isJsonRecord(requestedConfig) ? requestedConfig : null;
+  if (!requestedRoot) {
+    return { ok: false, error: "workspace config payload must be an object" };
+  }
+  const requestedAgentsNode = isJsonRecord(requestedRoot.agents) ? requestedRoot.agents : null;
+  const requestedList = requestedAgentsNode ? toJsonRecordArray(requestedAgentsNode.list) : [];
+  const normalizedRequested: JsonRecord[] = [];
+  const requestedIds = new Set<string>();
+  for (const entry of requestedList) {
+    const normalizedId = normalizeAgentIdForCompare(entry.id);
+    if (!normalizedId) {
+      return { ok: false, error: "all agents must include a non-empty id" };
+    }
+    if (requestedIds.has(normalizedId)) {
+      return { ok: false, error: `duplicate agent id "${normalizedId}" in request` };
+    }
+    requestedIds.add(normalizedId);
+    normalizedRequested.push({
+      ...entry,
+      workspaceId,
+    });
+  }
+
+  const base = isJsonRecord(currentConfig) ? currentConfig : {};
+  const baseAgentsNode = isJsonRecord(base.agents) ? base.agents : {};
+  const baseList = toJsonRecordArray(baseAgentsNode.list);
+
+  for (const entry of baseList) {
+    const existingWorkspace =
+      typeof entry.workspaceId === "string" ? entry.workspaceId.trim() : null;
+    if (existingWorkspace === workspaceId) {
+      continue;
+    }
+    const normalizedId = normalizeAgentIdForCompare(entry.id);
+    if (normalizedId && requestedIds.has(normalizedId)) {
+      return {
+        ok: false,
+        error: `agent id "${normalizedId}" already exists in another workspace`,
+      };
+    }
+  }
+
+  const otherWorkspaceAgents = baseList.filter((entry) => {
+    const existingWorkspace =
+      typeof entry.workspaceId === "string" ? entry.workspaceId.trim() : null;
+    return existingWorkspace !== workspaceId;
+  });
+
+  const mergedConfig: Record<string, unknown> = {
+    ...base,
+    agents: {
+      ...baseAgentsNode,
+      list: [...otherWorkspaceAgents, ...normalizedRequested],
+    },
+  };
+  return { ok: true, config: mergedConfig };
+}
 
 function resolveBaseHash(params: unknown): string | null {
   const raw = (params as { baseHash?: unknown })?.baseHash;
@@ -183,16 +280,6 @@ export const configHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    // Only super-admins can modify global config
-    if (client && !isSuperAdmin(client)) {
-      respond(
-        false,
-        undefined,
-        errorShape(ErrorCodes.INVALID_REQUEST, "config modification requires super-admin privileges"),
-      );
-      return;
-    }
-
     const snapshot = await readConfigFileSnapshot();
     if (!requireConfigBaseHash(params, snapshot, respond)) {
       return;
@@ -211,6 +298,69 @@ export const configHandlers: GatewayRequestHandlers = {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, parsedRes.error));
       return;
     }
+
+    const scoped = workspaceScopedClient(client);
+    if (scoped) {
+      const merged = mergeWorkspaceScopedAgents(
+        snapshot.config as Record<string, unknown> | null | undefined,
+        parsedRes.parsed,
+        scoped.workspaceId,
+      );
+      if (!merged.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, merged.error));
+        return;
+      }
+      const validatedScoped = validateConfigObjectWithPlugins(merged.config);
+      if (!validatedScoped.ok) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, "invalid config", {
+            details: { issues: validatedScoped.issues },
+          }),
+        );
+        return;
+      }
+      await writeConfigFile(validatedScoped.config);
+      const redactedScoped = redactConfigObject(validatedScoped.config) as Record<string, unknown>;
+      if (
+        redactedScoped?.agents &&
+        typeof redactedScoped.agents === "object" &&
+        !Array.isArray(redactedScoped.agents)
+      ) {
+        const agentsNode = redactedScoped.agents as Record<string, unknown>;
+        const list = toJsonRecordArray(agentsNode.list);
+        redactedScoped.agents = {
+          ...agentsNode,
+          list: list.filter((entry) => {
+            const entryWorkspace =
+              typeof entry.workspaceId === "string" ? entry.workspaceId.trim() : null;
+            return entryWorkspace === scoped.workspaceId;
+          }),
+        };
+      }
+      respond(
+        true,
+        {
+          ok: true,
+          path: CONFIG_PATH,
+          config: redactedScoped,
+        },
+        undefined,
+      );
+      return;
+    }
+
+    // Only super-admins can modify global config
+    if (client && !isSuperAdmin(client)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, "config modification requires super-admin privileges"),
+      );
+      return;
+    }
+
     const validated = validateConfigObjectWithPlugins(parsedRes.parsed);
     if (!validated.ok) {
       respond(
@@ -260,7 +410,7 @@ export const configHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    // Only super-admins can modify global config
+    // Only super-admins can modify global config via patch.
     if (client && !isSuperAdmin(client)) {
       respond(
         false,
@@ -411,16 +561,6 @@ export const configHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    // Only super-admins can modify global config
-    if (client && !isSuperAdmin(client)) {
-      respond(
-        false,
-        undefined,
-        errorShape(ErrorCodes.INVALID_REQUEST, "config modification requires super-admin privileges"),
-      );
-      return;
-    }
-
     const snapshot = await readConfigFileSnapshot();
     if (!requireConfigBaseHash(params, snapshot, respond)) {
       return;
@@ -442,6 +582,111 @@ export const configHandlers: GatewayRequestHandlers = {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, parsedRes.error));
       return;
     }
+
+    const scoped = workspaceScopedClient(client);
+    if (scoped) {
+      const merged = mergeWorkspaceScopedAgents(
+        snapshot.config as Record<string, unknown> | null | undefined,
+        parsedRes.parsed,
+        scoped.workspaceId,
+      );
+      if (!merged.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, merged.error));
+        return;
+      }
+      const validatedScoped = validateConfigObjectWithPlugins(merged.config);
+      if (!validatedScoped.ok) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, "invalid config", {
+            details: { issues: validatedScoped.issues },
+          }),
+        );
+        return;
+      }
+      await writeConfigFile(validatedScoped.config);
+
+      const sessionKey =
+        typeof (params as { sessionKey?: unknown }).sessionKey === "string"
+          ? (params as { sessionKey?: string }).sessionKey?.trim() || undefined
+          : undefined;
+      const note =
+        typeof (params as { note?: unknown }).note === "string"
+          ? (params as { note?: string }).note?.trim() || undefined
+          : undefined;
+      const restartDelayMsRaw = (params as { restartDelayMs?: unknown }).restartDelayMs;
+      const restartDelayMs =
+        typeof restartDelayMsRaw === "number" && Number.isFinite(restartDelayMsRaw)
+          ? Math.max(0, Math.floor(restartDelayMsRaw))
+          : undefined;
+
+      const payload: RestartSentinelPayload = {
+        kind: "config-apply",
+        status: "ok",
+        ts: Date.now(),
+        sessionKey,
+        message: note ?? null,
+        doctorHint: formatDoctorNonInteractiveHint(),
+        stats: {
+          mode: "config.apply",
+          root: CONFIG_PATH,
+        },
+      };
+      let sentinelPath: string | null = null;
+      try {
+        sentinelPath = await writeRestartSentinel(payload);
+      } catch {
+        sentinelPath = null;
+      }
+      const restart = scheduleGatewaySigusr1Restart({
+        delayMs: restartDelayMs,
+        reason: "config.apply",
+      });
+      const redactedScoped = redactConfigObject(validatedScoped.config) as Record<string, unknown>;
+      if (
+        redactedScoped?.agents &&
+        typeof redactedScoped.agents === "object" &&
+        !Array.isArray(redactedScoped.agents)
+      ) {
+        const agentsNode = redactedScoped.agents as Record<string, unknown>;
+        const list = toJsonRecordArray(agentsNode.list);
+        redactedScoped.agents = {
+          ...agentsNode,
+          list: list.filter((entry) => {
+            const entryWorkspace =
+              typeof entry.workspaceId === "string" ? entry.workspaceId.trim() : null;
+            return entryWorkspace === scoped.workspaceId;
+          }),
+        };
+      }
+      respond(
+        true,
+        {
+          ok: true,
+          path: CONFIG_PATH,
+          config: redactedScoped,
+          restart,
+          sentinel: {
+            path: sentinelPath,
+            payload,
+          },
+        },
+        undefined,
+      );
+      return;
+    }
+
+    // Only super-admins can modify global config
+    if (client && !isSuperAdmin(client)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, "config modification requires super-admin privileges"),
+      );
+      return;
+    }
+
     const validated = validateConfigObjectWithPlugins(parsedRes.parsed);
     if (!validated.ok) {
       respond(
