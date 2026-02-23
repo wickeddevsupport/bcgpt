@@ -362,10 +362,6 @@ export const chatHandlers: GatewayRequestHandlers = {
     });
   },
   "chat.send": async ({ params, respond, context, client }) => {
-    // Set BYOK workspace context for API key resolution
-    const { setByokWorkspaceContext } = await import("../../agents/model-auth.js");
-    setByokWorkspaceContext(client?.pmosWorkspaceId ?? null);
-    
     if (!validateChatSendParams(params)) {
       respond(
         false,
@@ -533,39 +529,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       const commandBody = injectThinking ? `/think ${p.thinking} ${parsedMessage}` : parsedMessage;
       const clientInfo = client?.connect?.client;
 
-      // PMOS multi-tenant: load workspace-scoped config overrides (merged over global config)
-      // and inject BYOK API keys into the in-memory config so model auth is per-workspace.
-      const effectiveCfg = await (async () => {
-        const workspaceId = client?.pmosWorkspaceId?.trim();
-        if (!workspaceId) {
-          return cfg;
-        }
-        try {
-          const { loadEffectiveWorkspaceConfig } = await import("../workspace-config.js");
-          const merged = (await loadEffectiveWorkspaceConfig(workspaceId)) as typeof cfg;
-
-          const { getKey } = await import("../byok-store.js");
-          const providers = ["openai", "anthropic", "google", "zai", "openrouter"] as const;
-          const resolved = await Promise.all(
-            providers.map(async (provider) => ({ provider, key: await getKey(workspaceId, provider) })),
-          );
-
-          for (const entry of resolved) {
-            if (!entry.key) {
-              continue;
-            }
-            const mergedObj = merged as unknown as Record<string, unknown>;
-            const models = (mergedObj.models ??= {}) as Record<string, unknown>;
-            const providerMap = (models.providers ??= {}) as Record<string, unknown>;
-            const providerCfg = (providerMap[entry.provider] ??= {}) as Record<string, unknown>;
-            providerCfg.apiKey = entry.key;
-          }
-
-          return merged;
-        } catch {
-          return cfg;
-        }
-      })();
+      const effectiveCfg = cfg;
       // Inject timestamp so agents know the current date/time.
       // Only BodyForAgent gets the timestamp — Body stays raw for UI display.
       // See: https://github.com/moltbot/moltbot/issues/3658

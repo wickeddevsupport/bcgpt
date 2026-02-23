@@ -20,36 +20,12 @@ import { normalizeProviderId } from "./model-selection.js";
 
 export { ensureAuthProfileStore, resolveAuthProfileOrder } from "./auth-profiles.js";
 
-// PMOS BYOK workspace context - set by PMOS gateway when client connects
-let _currentByokWorkspaceId: string | null = null;
-
 /**
- * Set the current PMOS workspace ID for BYOK lookups.
- * Called by PMOS gateway handlers to enable BYOK auth for the current request.
+ * PMOS compatibility shim.
+ * Workspace-scoped BYOK resolution is disabled; auth is resolved from global config/env/profiles.
  */
 export function setByokWorkspaceContext(workspaceId: string | null): void {
-  _currentByokWorkspaceId = workspaceId;
-}
-
-/**
- * Try to resolve API key from PMOS BYOK store.
- * BYOK store is an encrypted key storage used by PMOS Integrations/Onboarding.
- */
-async function resolveByokApiKey(provider: string): Promise<{ apiKey: string; source: string } | null> {
-  if (!_currentByokWorkspaceId) {
-    return null;
-  }
-  try {
-    // Dynamic import to avoid circular dependencies
-    const { getKey } = await import("../gateway/byok-store.js");
-    const key = await getKey(_currentByokWorkspaceId, provider as import("../gateway/byok-store.js").AIProvider);
-    if (key) {
-      return { apiKey: key, source: "byok-store" };
-    }
-  } catch {
-    // BYOK lookup failed, continue with other sources
-  }
-  return null;
+  void workspaceId;
 }
 
 const AWS_BEARER_ENV = "AWS_BEARER_TOKEN_BEDROCK";
@@ -237,12 +213,6 @@ export async function resolveApiKeyForProvider(params: {
   const customKey = getCustomProviderApiKey(cfg, provider);
   if (customKey) {
     return { apiKey: customKey, source: "models.json", mode: "api-key" };
-  }
-
-  // PMOS BYOK store - check for keys saved via Integrations/Onboarding
-  const byokKey = await resolveByokApiKey(provider);
-  if (byokKey) {
-    return { ...byokKey, mode: "api-key" };
   }
 
   const normalized = normalizeProviderId(provider);

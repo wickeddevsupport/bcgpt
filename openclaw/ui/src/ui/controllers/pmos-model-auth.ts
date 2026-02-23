@@ -1,6 +1,34 @@
 import type { GatewayBrowserClient } from "../gateway.ts";
 
-export type PmosModelProvider = "openai" | "anthropic" | "google" | "zai" | "openrouter" | "kilo" | "moonshot" | "nvidia" | "custom";
+export type PmosModelProvider =
+  | "openai"
+  | "anthropic"
+  | "google"
+  | "zai"
+  | "openrouter"
+  | "kilo"
+  | "moonshot"
+  | "nvidia"
+  | "custom";
+
+export type PmosModelRow = {
+  ref: string;
+  provider: string;
+  modelId: string;
+  alias: string;
+  active: boolean;
+  configured: boolean;
+  inCatalog: boolean;
+  usedBy: string[];
+  workspaceOverride: boolean;
+};
+
+export type PmosAgentModelAssignment = {
+  agentId: string;
+  label: string;
+  modelRef: string | null;
+  inherited: boolean;
+};
 
 export const PMOS_MODEL_PROVIDER_OPTIONS: Array<{
   value: PmosModelProvider;
@@ -18,14 +46,14 @@ export const PMOS_MODEL_PROVIDER_OPTIONS: Array<{
   { value: "custom", label: "Custom (enter manually)", defaultModelId: "" },
 ];
 
-export const PMOS_MODEL_DEFAULTS: Record<PmosModelProvider, string> = PMOS_MODEL_PROVIDER_OPTIONS.reduce(
-  (acc, entry) => {
-    acc[entry.value] = entry.defaultModelId;
-    return acc;
-  },
-  {} as Record<PmosModelProvider, string>,
-);
-
+export const PMOS_MODEL_DEFAULTS: Record<PmosModelProvider, string> =
+  PMOS_MODEL_PROVIDER_OPTIONS.reduce(
+    (acc, entry) => {
+      acc[entry.value] = entry.defaultModelId;
+      return acc;
+    },
+    {} as Record<PmosModelProvider, string>,
+  );
 
 export type PmosModelAuthState = {
   client: GatewayBrowserClient | null;
@@ -37,9 +65,25 @@ export type PmosModelAuthState = {
   pmosModelSaving: boolean;
   pmosModelError: string | null;
   pmosModelConfigured: boolean;
-  // Cached from pmos.byok.list so provider switching can update the "configured" chip without refetching.
+  // Cached providers that currently have keys in config.models.providers.*.apiKey.
   pmosByokProviders?: PmosModelProvider[];
+  // Cached config snapshots for the model manager UX.
+  pmosWorkspaceConfig?: Record<string, unknown> | null;
+  pmosEffectiveConfig?: Record<string, unknown> | null;
+  pmosModelRows?: PmosModelRow[];
+  pmosAgentModelAssignments?: PmosAgentModelAssignment[];
+  pmosModelCatalogLoading?: boolean;
+  pmosModelCatalogError?: string | null;
+  availableModels?: string[];
 };
+
+type GlobalConfigResponse = {
+  config?: unknown;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
 
 function getPath(obj: unknown, path: string[]): unknown {
   let cur: unknown = obj;
@@ -68,6 +112,26 @@ function setPath(obj: Record<string, unknown>, path: string[], value: unknown) {
   }
 }
 
+function deletePath(obj: Record<string, unknown>, path: string[]) {
+  if (path.length === 0) {
+    return;
+  }
+  let cur: Record<string, unknown> = obj;
+  for (let i = 0; i < path.length - 1; i += 1) {
+    const key = path[i]!;
+    const next = cur[key];
+    if (!next || typeof next !== "object" || Array.isArray(next)) {
+      return;
+    }
+    cur = next as Record<string, unknown>;
+  }
+  delete cur[path[path.length - 1]!];
+}
+
+function deepClone<T>(value: T): T {
+  return value && typeof value === "object" ? (JSON.parse(JSON.stringify(value)) as T) : value;
+}
+
 function asNonEmptyString(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
@@ -80,7 +144,7 @@ function isProvider(value: string): value is PmosModelProvider {
   return value in PMOS_MODEL_DEFAULTS;
 }
 
-function parsePrimaryModelRef(value: string | null): { provider: PmosModelProvider; modelId: string } | null {
+function parsePrimaryModelRef(value: string | null): { provider: string; modelId: string } | null {
   if (!value) {
     return null;
   }
@@ -90,19 +154,306 @@ function parsePrimaryModelRef(value: string | null): { provider: PmosModelProvid
   }
   const providerRaw = parts.shift()?.trim().toLowerCase() ?? "";
   const modelId = parts.join("/").trim();
-  if (!isProvider(providerRaw) || !modelId) {
+  if (!providerRaw || !modelId) {
     return null;
   }
   return { provider: providerRaw, modelId };
 }
 
+function normalizeModelRef(modelRef: string): string {
+  const parsed = parsePrimaryModelRef(modelRef);
+  if (!parsed) {
+    return "";
+  }
+  return `${parsed.provider}/${parsed.modelId}`;
+}
+
+function resolvePrimaryModel(value: unknown): string | null {
+  if (typeof value === "string") {
+    const normalized = normalizeModelRef(value);
+    return normalized || null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const primary = (value as { primary?: unknown }).primary;
+  if (typeof primary !== "string") {
+    return null;
+  }
+  const normalized = normalizeModelRef(primary);
+  return normalized || null;
+}
+
+function collectModelRefsFromConfig(cfg: unknown): Set<string> {
+  const refs = new Set<string>();
+  const addRef = (value: unknown) => {
+    if (typeof value !== "string") {
+      return;
+    }
+    const normalized = normalizeModelRef(value);
+    if (normalized) {
+      refs.add(normalized);
+    }
+  };
+
+  addRef(getPath(cfg, ["agents", "defaults", "model", "primary"]));
+  const defaultFallbacks = getPath(cfg, ["agents", "defaults", "model", "fallbacks"]);
+  if (Array.isArray(defaultFallbacks)) {
+    for (const fallback of defaultFallbacks) {
+      addRef(fallback);
+    }
+  }
+
+  const defaultsModels = getPath(cfg, ["agents", "defaults", "models"]);
+  if (isRecord(defaultsModels)) {
+    for (const key of Object.keys(defaultsModels)) {
+      addRef(key);
+    }
+  }
+
+  const agents = getPath(cfg, ["agents", "list"]);
+  if (Array.isArray(agents)) {
+    for (const agent of agents) {
+      if (!isRecord(agent)) {
+        continue;
+      }
+      const modelValue = agent.model;
+      addRef(resolvePrimaryModel(modelValue));
+      if (isRecord(modelValue) && Array.isArray(modelValue.fallbacks)) {
+        for (const fallback of modelValue.fallbacks) {
+          addRef(fallback);
+        }
+      }
+    }
+  }
+
+  return refs;
+}
+
+function readAgentEntries(cfg: unknown): Array<Record<string, unknown>> {
+  const list = getPath(cfg, ["agents", "list"]);
+  if (!Array.isArray(list)) {
+    return [];
+  }
+  return list.filter((entry): entry is Record<string, unknown> => isRecord(entry));
+}
+
+function resolveAgentLabel(entry: Record<string, unknown>): string {
+  const id = typeof entry.id === "string" ? entry.id.trim() : "";
+  const name = typeof entry.name === "string" ? entry.name.trim() : "";
+  if (name) {
+    return name;
+  }
+  const identity = entry.identity;
+  if (isRecord(identity)) {
+    const identityName = identity.name;
+    if (typeof identityName === "string" && identityName.trim()) {
+      return identityName.trim();
+    }
+  }
+  return id || "agent";
+}
+
+function listConfiguredModels(cfg: unknown): Record<string, { alias?: string }> {
+  const raw = getPath(cfg, ["agents", "defaults", "models"]);
+  if (!isRecord(raw)) {
+    return {};
+  }
+  const out: Record<string, { alias?: string }> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const normalizedKey = normalizeModelRef(key);
+    if (!normalizedKey) {
+      continue;
+    }
+    const alias = isRecord(value) ? asNonEmptyString(value.alias) : null;
+    out[normalizedKey] = alias ? { alias } : {};
+  }
+  return out;
+}
+
+function listConfiguredProvidersFromConfig(cfg: unknown): PmosModelProvider[] {
+  const raw = getPath(cfg, ["models", "providers"]);
+  if (!isRecord(raw)) {
+    return [];
+  }
+  const out = new Set<PmosModelProvider>();
+  for (const [providerKey, providerCfg] of Object.entries(raw)) {
+    if (!isRecord(providerCfg)) {
+      continue;
+    }
+    const apiKey = asNonEmptyString(providerCfg.apiKey);
+    if (!apiKey) {
+      continue;
+    }
+    const normalized = providerKey.trim().toLowerCase();
+    if (isProvider(normalized)) {
+      out.add(normalized);
+    }
+  }
+  return Array.from(out);
+}
+
+function resolveProviderConfigKey(cfg: Record<string, unknown>, provider: string): string | null {
+  const providers = getPath(cfg, ["models", "providers"]);
+  if (!isRecord(providers)) {
+    return null;
+  }
+  const normalized = provider.trim().toLowerCase();
+  for (const key of Object.keys(providers)) {
+    if (key.trim().toLowerCase() === normalized) {
+      return key;
+    }
+  }
+  return null;
+}
+
+async function readGlobalConfig(state: PmosModelAuthState): Promise<Record<string, unknown>> {
+  if (!state.client || !state.connected) {
+    return {};
+  }
+  try {
+    const globalRes = await state.client.request<GlobalConfigResponse>("pmos.config.global.get", {});
+    if (isRecord(globalRes.config)) {
+      return deepClone(globalRes.config);
+    }
+  } catch {
+    // Backward compatibility with older gateway builds.
+  }
+  const ws = await state.client.request<{
+    workspaceId: string;
+    workspaceConfig: unknown;
+    effectiveConfig: unknown;
+  }>("pmos.config.workspace.get", {});
+  if (isRecord(ws.effectiveConfig)) {
+    return deepClone(ws.effectiveConfig);
+  }
+  return {};
+}
+
+async function writeGlobalConfig(state: PmosModelAuthState, nextConfig: Record<string, unknown>) {
+  if (!state.client || !state.connected) {
+    return;
+  }
+  try {
+    await state.client.request("pmos.config.global.set", {
+      patch: nextConfig,
+      replace: true,
+    });
+    return;
+  } catch {
+    // Backward compatibility with older gateway builds.
+  }
+  await state.client.request("pmos.config.workspace.set", {
+    patch: nextConfig,
+    replace: true,
+  });
+}
+
+function ensureModelAllowed(config: Record<string, unknown>, modelRef: string) {
+  const normalized = normalizeModelRef(modelRef);
+  if (!normalized) {
+    return;
+  }
+  const existing = getPath(config, ["agents", "defaults", "models", normalized]);
+  if (isRecord(existing)) {
+    return;
+  }
+  setPath(config, ["agents", "defaults", "models", normalized], {});
+}
+
+function setModelAlias(config: Record<string, unknown>, modelRef: string, alias: string) {
+  if (alias.trim()) {
+    setPath(config, ["agents", "defaults", "models", modelRef, "alias"], alias.trim());
+  } else {
+    deletePath(config, ["agents", "defaults", "models", modelRef, "alias"]);
+  }
+}
+
+function clearModelReferences(config: Record<string, unknown>, modelRef: string) {
+  const normalized = normalizeModelRef(modelRef);
+  if (!normalized) {
+    return;
+  }
+
+  const defaultFallbacks = getPath(config, ["agents", "defaults", "model", "fallbacks"]);
+  if (Array.isArray(defaultFallbacks)) {
+    const nextFallbacks = defaultFallbacks
+      .map((entry) => (typeof entry === "string" ? normalizeModelRef(entry) : ""))
+      .filter((entry) => entry && entry !== normalized);
+    if (nextFallbacks.length > 0) {
+      setPath(config, ["agents", "defaults", "model", "fallbacks"], nextFallbacks);
+    } else {
+      deletePath(config, ["agents", "defaults", "model", "fallbacks"]);
+    }
+  }
+
+  const agents = getPath(config, ["agents", "list"]);
+  if (!Array.isArray(agents)) {
+    return;
+  }
+  for (const entry of agents) {
+    if (!isRecord(entry)) {
+      continue;
+    }
+    const explicit = resolvePrimaryModel(entry.model);
+    if (!explicit || explicit !== normalized) {
+      continue;
+    }
+    delete entry.model;
+  }
+}
+
+function setProviderApiKey(
+  config: Record<string, unknown>,
+  provider: string,
+  apiKey: string,
+): boolean {
+  const providerKey = resolveProviderConfigKey(config, provider);
+  if (!providerKey) {
+    return false;
+  }
+  setPath(config, ["models", "providers", providerKey, "apiKey"], apiKey);
+  return true;
+}
+
+function clearProviderApiKey(config: Record<string, unknown>, provider: string): boolean {
+  const providerKey = resolveProviderConfigKey(config, provider);
+  if (!providerKey) {
+    return false;
+  }
+  deletePath(config, ["models", "providers", providerKey, "apiKey"]);
+  return true;
+}
+
+function findMutableAgentEntry(
+  config: Record<string, unknown>,
+  agentIdRaw: string,
+): Record<string, unknown> | null {
+  const agentId = agentIdRaw.trim().toLowerCase();
+  if (!agentId) {
+    return null;
+  }
+  const list = getPath(config, ["agents", "list"]);
+  if (!Array.isArray(list)) {
+    return null;
+  }
+  for (const entry of list) {
+    if (!isRecord(entry) || typeof entry.id !== "string") {
+      continue;
+    }
+    if (entry.id.trim().toLowerCase() === agentId) {
+      return entry;
+    }
+  }
+  return null;
+}
+
 export function hydratePmosModelDraftFromConfig(state: PmosModelAuthState) {
-  // This controller used to hydrate from global config.get (which is shared across workspaces).
-  // For PMOS multi-tenant BYOK, the source of truth is workspace config + encrypted per-workspace BYOK store.
+  // PMOS source of truth: openclaw.json global config.
   state.pmosModelId = state.pmosModelId.trim() || PMOS_MODEL_DEFAULTS[state.pmosModelProvider];
   state.pmosModelAlias = state.pmosModelAlias ?? "";
-  const byokProviders = state.pmosByokProviders ?? [];
-  state.pmosModelConfigured = byokProviders.includes(state.pmosModelProvider);
+  const configuredProviders = state.pmosByokProviders ?? [];
+  state.pmosModelConfigured = configuredProviders.includes(state.pmosModelProvider);
 }
 
 export function setPmosModelProvider(state: PmosModelAuthState, provider: PmosModelProvider) {
@@ -115,15 +466,15 @@ export function setPmosModelProvider(state: PmosModelAuthState, provider: PmosMo
     state.pmosModelId = PMOS_MODEL_DEFAULTS[provider];
   }
   state.pmosModelError = null;
-  const byokProviders = state.pmosByokProviders ?? [];
-  state.pmosModelConfigured = byokProviders.includes(provider);
+  const configuredProviders = state.pmosByokProviders ?? [];
+  state.pmosModelConfigured = configuredProviders.includes(provider);
 }
 
 function hydrateFromEffectiveConfig(state: PmosModelAuthState, cfg: unknown) {
   const primary = asNonEmptyString(getPath(cfg, ["agents", "defaults", "model", "primary"]));
   const parsedPrimary = parsePrimaryModelRef(primary);
   if (parsedPrimary) {
-    state.pmosModelProvider = parsedPrimary.provider;
+    state.pmosModelProvider = isProvider(parsedPrimary.provider) ? parsedPrimary.provider : "custom";
     state.pmosModelId = parsedPrimary.modelId;
   } else {
     state.pmosModelId = state.pmosModelId.trim() || PMOS_MODEL_DEFAULTS[state.pmosModelProvider];
@@ -138,27 +489,103 @@ export async function loadPmosModelWorkspaceState(state: PmosModelAuthState) {
   if (!state.client || !state.connected) {
     return;
   }
+  state.pmosModelCatalogLoading = true;
+  state.pmosModelCatalogError = null;
   state.pmosModelError = null;
   try {
-    const ws = await state.client.request<{
-      workspaceId: string;
-      workspaceConfig: unknown;
-      effectiveConfig: unknown;
-    }>("pmos.config.workspace.get", {});
-    hydrateFromEffectiveConfig(state, ws.effectiveConfig);
+    const [effectiveConfig, modelsResult] = await Promise.all([
+      readGlobalConfig(state),
+      state.client.request<{
+        models?: Array<{ id?: string; provider?: string }>;
+      }>("models.list", {}),
+    ]);
 
-    const byok = await state.client.request<{
-      workspaceId: string;
-      keys: Array<{ provider: string }>;
-    }>("pmos.byok.list", {});
-    const providers = byok.keys
-      .map((k) => (typeof k.provider === "string" ? k.provider.trim() : ""))
-      .filter(Boolean)
-      .filter((p): p is PmosModelProvider => isProvider(p));
+    state.pmosWorkspaceConfig = effectiveConfig;
+    state.pmosEffectiveConfig = effectiveConfig;
+
+    hydrateFromEffectiveConfig(state, effectiveConfig);
+
+    const providers = listConfiguredProvidersFromConfig(effectiveConfig);
     state.pmosByokProviders = providers;
     state.pmosModelConfigured = providers.includes(state.pmosModelProvider);
+
+    const catalogRefs = new Set<string>();
+    const modelsList = Array.isArray(modelsResult.models) ? modelsResult.models : [];
+    for (const model of modelsList) {
+      const provider = typeof model.provider === "string" ? model.provider.trim().toLowerCase() : "";
+      const id = typeof model.id === "string" ? model.id.trim() : "";
+      if (!provider || !id) {
+        continue;
+      }
+      catalogRefs.add(`${provider}/${id}`);
+    }
+
+    const refs = collectModelRefsFromConfig(effectiveConfig);
+    for (const ref of catalogRefs) {
+      refs.add(ref);
+    }
+
+    const defaultsPrimary = resolvePrimaryModel(getPath(effectiveConfig, ["agents", "defaults", "model"]));
+    const configuredModels = listConfiguredModels(effectiveConfig);
+    const agentEntries = readAgentEntries(effectiveConfig);
+
+    const assignments: PmosAgentModelAssignment[] = agentEntries
+      .map((agent) => {
+        const agentId = typeof agent.id === "string" ? agent.id.trim() : "";
+        if (!agentId) {
+          return null;
+        }
+        const explicitModel = resolvePrimaryModel(agent.model);
+        const modelRef = explicitModel ?? defaultsPrimary;
+        if (modelRef) {
+          refs.add(modelRef);
+        }
+        return {
+          agentId,
+          label: resolveAgentLabel(agent),
+          modelRef,
+          inherited: !explicitModel,
+        };
+      })
+      .filter((entry): entry is PmosAgentModelAssignment => Boolean(entry));
+
+    const usageByRef = new Map<string, string[]>();
+    for (const assignment of assignments) {
+      if (!assignment.modelRef) {
+        continue;
+      }
+      const list = usageByRef.get(assignment.modelRef) ?? [];
+      list.push(assignment.label);
+      usageByRef.set(assignment.modelRef, list);
+    }
+
+    const rows: PmosModelRow[] = Array.from(refs)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b))
+      .map((ref) => {
+        const parsed = parsePrimaryModelRef(ref);
+        const provider = parsed?.provider ?? "";
+        return {
+          ref,
+          provider,
+          modelId: parsed?.modelId ?? ref,
+          alias: configuredModels[ref]?.alias ?? "",
+          active: defaultsPrimary === ref,
+          configured: providers.includes(provider as PmosModelProvider),
+          inCatalog: catalogRefs.has(ref),
+          usedBy: usageByRef.get(ref) ?? [],
+          workspaceOverride: Object.prototype.hasOwnProperty.call(configuredModels, ref),
+        };
+      });
+
+    state.pmosModelRows = rows;
+    state.pmosAgentModelAssignments = assignments;
+    state.availableModels = Array.from(refs).sort((a, b) => a.localeCompare(b));
   } catch (err) {
+    state.pmosModelCatalogError = String(err);
     state.pmosModelError = String(err);
+  } finally {
+    state.pmosModelCatalogLoading = false;
   }
 }
 
@@ -179,23 +606,19 @@ export async function savePmosModelConfig(state: PmosModelAuthState) {
   state.pmosModelError = null;
   try {
     const modelRef = `${provider}/${modelId}`;
-    // 1) Persist model selection to workspace config (not global config)
-    const patch: Record<string, unknown> = {};
-    setPath(patch, ["agents", "defaults", "model", "primary"], modelRef);
-    // Deep-merge can't delete; set blank string when alias cleared so hydrate ignores it.
-    setPath(patch, ["agents", "defaults", "models", modelRef, "alias"], alias || "");
-    await state.client.request("pmos.config.workspace.set", { patch });
+    const nextConfig = await readGlobalConfig(state);
+    ensureModelAllowed(nextConfig, modelRef);
+    setPath(nextConfig, ["agents", "defaults", "model", "primary"], modelRef);
+    setModelAlias(nextConfig, modelRef, alias);
 
-    // 2) Persist API key to encrypted workspace BYOK store
-    if (apiKeyDraft) {
-      await state.client.request("pmos.byok.set", {
-        provider,
-        apiKey: apiKeyDraft,
-        defaultModel: modelId,
-        label: `${provider} key`,
-      });
+    if (apiKeyDraft && provider !== "custom") {
+      const applied = setProviderApiKey(nextConfig, provider, apiKeyDraft);
+      if (!applied) {
+        throw new Error(`Provider "${provider}" is missing from config.models.providers.`);
+      }
     }
 
+    await writeGlobalConfig(state, nextConfig);
     state.pmosModelApiKeyDraft = "";
     await loadPmosModelWorkspaceState(state);
   } catch (err) {
@@ -205,6 +628,180 @@ export async function savePmosModelConfig(state: PmosModelAuthState) {
   }
 }
 
+export async function activatePmosModel(state: PmosModelAuthState, modelRef: string) {
+  if (!state.client || !state.connected) {
+    return;
+  }
+  const normalized = normalizeModelRef(modelRef);
+  if (!normalized) {
+    state.pmosModelError = "Invalid model reference.";
+    return;
+  }
+  state.pmosModelSaving = true;
+  state.pmosModelError = null;
+  try {
+    const nextConfig = await readGlobalConfig(state);
+    ensureModelAllowed(nextConfig, normalized);
+    setPath(nextConfig, ["agents", "defaults", "model", "primary"], normalized);
+    await writeGlobalConfig(state, nextConfig);
+    await loadPmosModelWorkspaceState(state);
+  } catch (err) {
+    state.pmosModelError = String(err);
+  } finally {
+    state.pmosModelSaving = false;
+  }
+}
+
+export async function deactivatePmosModel(state: PmosModelAuthState, modelRef: string) {
+  if (!state.client || !state.connected) {
+    return;
+  }
+  const normalized = normalizeModelRef(modelRef);
+  if (!normalized) {
+    state.pmosModelError = "Invalid model reference.";
+    return;
+  }
+  state.pmosModelSaving = true;
+  state.pmosModelError = null;
+  try {
+    const nextConfig = await readGlobalConfig(state);
+    deletePath(nextConfig, ["agents", "defaults", "models", normalized]);
+    const primary = asNonEmptyString(getPath(nextConfig, ["agents", "defaults", "model", "primary"]));
+    if (primary && normalizeModelRef(primary) === normalized) {
+      deletePath(nextConfig, ["agents", "defaults", "model", "primary"]);
+    }
+    await writeGlobalConfig(state, nextConfig);
+    await loadPmosModelWorkspaceState(state);
+  } catch (err) {
+    state.pmosModelError = String(err);
+  } finally {
+    state.pmosModelSaving = false;
+  }
+}
+
+export async function deletePmosModel(state: PmosModelAuthState, modelRef: string) {
+  if (!state.client || !state.connected) {
+    return;
+  }
+  const normalized = normalizeModelRef(modelRef);
+  if (!normalized) {
+    state.pmosModelError = "Invalid model reference.";
+    return;
+  }
+  state.pmosModelSaving = true;
+  state.pmosModelError = null;
+  try {
+    const nextConfig = await readGlobalConfig(state);
+    deletePath(nextConfig, ["agents", "defaults", "models", normalized]);
+    const primary = asNonEmptyString(getPath(nextConfig, ["agents", "defaults", "model", "primary"]));
+    if (primary && normalizeModelRef(primary) === normalized) {
+      deletePath(nextConfig, ["agents", "defaults", "model", "primary"]);
+    }
+    clearModelReferences(nextConfig, normalized);
+    await writeGlobalConfig(state, nextConfig);
+    await loadPmosModelWorkspaceState(state);
+  } catch (err) {
+    state.pmosModelError = String(err);
+  } finally {
+    state.pmosModelSaving = false;
+  }
+}
+
+export async function assignPmosAgentModel(
+  state: PmosModelAuthState,
+  params: { agentId: string; modelRef: string | null },
+) {
+  if (!state.client || !state.connected) {
+    return;
+  }
+  const agentId = params.agentId.trim();
+  if (!agentId) {
+    state.pmosModelError = "Agent id is required.";
+    return;
+  }
+
+  const requested = (params.modelRef ?? "").trim();
+  const normalized = requested ? normalizeModelRef(requested) : "";
+  if (requested && !normalized) {
+    state.pmosModelError = "Invalid model reference.";
+    return;
+  }
+
+  state.pmosModelSaving = true;
+  state.pmosModelError = null;
+  try {
+    const nextConfig = await readGlobalConfig(state);
+    const agentEntry = findMutableAgentEntry(nextConfig, agentId);
+    if (!agentEntry) {
+      throw new Error(`Agent "${agentId}" not found in config.`);
+    }
+
+    if (normalized) {
+      ensureModelAllowed(nextConfig, normalized);
+      agentEntry.model = normalized;
+    } else {
+      delete agentEntry.model;
+    }
+
+    await writeGlobalConfig(state, nextConfig);
+    await loadPmosModelWorkspaceState(state);
+  } catch (err) {
+    state.pmosModelError = String(err);
+  } finally {
+    state.pmosModelSaving = false;
+  }
+}
+
+export async function upsertPmosModelFromRef(
+  state: PmosModelAuthState,
+  params: { modelRef: string; alias?: string; apiKey?: string; activate?: boolean },
+) {
+  if (!state.client || !state.connected) {
+    return;
+  }
+  const normalized = normalizeModelRef(params.modelRef);
+  const parsed = parsePrimaryModelRef(normalized);
+  if (!normalized || !parsed) {
+    state.pmosModelError = "Choose a valid provider/model.";
+    return;
+  }
+
+  const provider = isProvider(parsed.provider) ? parsed.provider : "custom";
+  state.pmosModelProvider = provider;
+  state.pmosModelId = parsed.modelId;
+  state.pmosModelAlias = params.alias?.trim() ?? state.pmosModelAlias;
+  state.pmosModelApiKeyDraft = params.apiKey?.trim() ?? state.pmosModelApiKeyDraft;
+
+  if (params.activate === false) {
+    state.pmosModelSaving = true;
+    state.pmosModelError = null;
+    try {
+      const nextConfig = await readGlobalConfig(state);
+      ensureModelAllowed(nextConfig, normalized);
+      setModelAlias(nextConfig, normalized, state.pmosModelAlias.trim());
+
+      const apiKeyDraft = state.pmosModelApiKeyDraft.trim();
+      if (apiKeyDraft && provider !== "custom") {
+        const applied = setProviderApiKey(nextConfig, provider, apiKeyDraft);
+        if (!applied) {
+          throw new Error(`Provider "${provider}" is missing from config.models.providers.`);
+        }
+      }
+
+      await writeGlobalConfig(state, nextConfig);
+      state.pmosModelApiKeyDraft = "";
+      await loadPmosModelWorkspaceState(state);
+    } catch (err) {
+      state.pmosModelError = String(err);
+    } finally {
+      state.pmosModelSaving = false;
+    }
+    return;
+  }
+
+  await savePmosModelConfig(state);
+}
+
 export async function clearPmosModelApiKey(state: PmosModelAuthState) {
   if (!state.client || !state.connected) {
     return;
@@ -212,12 +809,27 @@ export async function clearPmosModelApiKey(state: PmosModelAuthState) {
   state.pmosModelSaving = true;
   state.pmosModelError = null;
   try {
-    await state.client.request("pmos.byok.remove", { provider: state.pmosModelProvider });
+    const nextConfig = await readGlobalConfig(state);
+    const provider = state.pmosModelProvider;
+    if (provider !== "custom") {
+      clearProviderApiKey(nextConfig, provider);
+    }
     state.pmosModelApiKeyDraft = "";
+    await writeGlobalConfig(state, nextConfig);
     await loadPmosModelWorkspaceState(state);
   } catch (err) {
     state.pmosModelError = String(err);
   } finally {
     state.pmosModelSaving = false;
   }
+}
+
+export async function clearPmosModelApiKeyForRef(state: PmosModelAuthState, modelRef: string) {
+  const parsed = parsePrimaryModelRef(modelRef);
+  if (!parsed || !isProvider(parsed.provider)) {
+    state.pmosModelError = "Unknown provider for selected model.";
+    return;
+  }
+  state.pmosModelProvider = parsed.provider;
+  await clearPmosModelApiKey(state);
 }

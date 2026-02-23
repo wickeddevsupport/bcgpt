@@ -1,6 +1,10 @@
 import { html, nothing } from "lit";
 import type { PmosConnectorsStatus } from "../controllers/pmos-connectors.ts";
-import type { PmosModelProvider } from "../controllers/pmos-model-auth.ts";
+import type {
+  PmosAgentModelAssignment,
+  PmosModelProvider,
+  PmosModelRow,
+} from "../controllers/pmos-model-auth.ts";
 
 export type IntegrationsProps = {
   connected: boolean;
@@ -11,6 +15,8 @@ export type IntegrationsProps = {
   connectorsLoading: boolean;
   connectorsStatus: PmosConnectorsStatus | null;
   connectorsError: string | null;
+
+  // Model manager state
   modelProvider: PmosModelProvider;
   modelId: string;
   modelAlias: string;
@@ -19,23 +25,38 @@ export type IntegrationsProps = {
   modelConfigured: boolean;
   modelError: string | null;
   modelSavedOk?: boolean;
+  modelRefDraft: string;
+  modelRows: PmosModelRow[];
+  modelCatalogLoading: boolean;
+  modelCatalogError: string | null;
+  modelOptions: string[];
+  agentModelAssignments: PmosAgentModelAssignment[];
+
   bcgptSavedOk?: boolean;
   onBcgptUrlChange: (next: string) => void;
   onBcgptApiKeyDraftChange: (next: string) => void;
   onSave: () => void;
   onClearBcgptKey: () => void;
   onRefreshConnectors: () => void;
-  onModelProviderChange: (next: PmosModelProvider) => void;
-  onModelIdChange: (next: string) => void;
+
+  // Model manager handlers
+  onModelRefDraftChange: (next: string) => void;
   onModelAliasChange: (next: string) => void;
   onModelApiKeyDraftChange: (next: string) => void;
   onModelSave: () => void;
+  onModelSaveWithoutActivate: () => void;
   onModelClearKey: () => void;
+  onModelClearKeyForRef: (ref: string) => void;
+  onModelActivate: (ref: string) => void;
+  onModelDeactivate: (ref: string) => void;
+  onModelDelete: (ref: string) => void;
+  onAssignAgentModel: (agentId: string, ref: string | null) => void;
   onOpenAutomations: () => void;
 
   // n8n / Wicked Ops provisioning status
   opsProvisioned?: boolean;
   opsProjectId?: string | null;
+  opsUiHref?: string;
 
   // Basecamp credential setup in n8n
   basecampSetupPending?: boolean;
@@ -50,26 +71,9 @@ export type IntegrationsProps = {
   onRefreshN8nCredentials?: () => void;
 };
 
-type ProviderOption = {
-  value: PmosModelProvider;
-  label: string;
-  icon: string;
-  defaultModel: string;
-  hint: string;
-};
-
-const PROVIDER_OPTIONS: ProviderOption[] = [
-  { value: "openai", label: "OpenAI", icon: "⬡", defaultModel: "gpt-4o", hint: "GPT-4o, o3, etc." },
-  { value: "anthropic", label: "Anthropic", icon: "◆", defaultModel: "claude-opus-4-6", hint: "Claude 3.5 / 4 series" },
-  { value: "google", label: "Google", icon: "✦", defaultModel: "gemini-2.0-flash-exp", hint: "Gemini 2.0 / 1.5" },
-  { value: "openrouter", label: "OpenRouter", icon: "⇄", defaultModel: "openai/gpt-4o", hint: "Route to any model" },
-  { value: "kilo", label: "Kilo", icon: "⚡", defaultModel: "claude-opus-4-6", hint: "Kilo proxy gateway" },
-  { value: "zai", label: "GLM / Z.AI", icon: "◈", defaultModel: "glm-4-air", hint: "GLM-4 series" },
-];
-
 function renderConnectorStatus(label: string, ok: boolean | null, detail?: string | null) {
   const tone = ok === true ? "ok" : ok === false ? "warn" : "";
-  const value = ok === true ? "Connected" : ok === false ? "Failed" : "—";
+  const value = ok === true ? "Connected" : ok === false ? "Failed" : "Unknown";
   return html`
     <div class="stat">
       <div class="stat-label">${label}</div>
@@ -77,6 +81,61 @@ function renderConnectorStatus(label: string, ok: boolean | null, detail?: strin
       ${detail ? html`<div class="muted mono" style="font-size:11px;">${detail}</div>` : nothing}
     </div>
   `;
+}
+
+function renderModelToneChip(text: string, tone: "ok" | "warn" | "muted" = "muted") {
+  const color =
+    tone === "ok"
+      ? "rgba(34,197,94,0.15)"
+      : tone === "warn"
+        ? "rgba(245,158,11,0.15)"
+        : "rgba(148,163,184,0.18)";
+  const border =
+    tone === "ok"
+      ? "rgba(34,197,94,0.35)"
+      : tone === "warn"
+        ? "rgba(245,158,11,0.35)"
+        : "rgba(148,163,184,0.28)";
+  return html`
+    <span
+      style="
+        display:inline-flex;
+        align-items:center;
+        gap:6px;
+        padding:2px 8px;
+        font-size:11px;
+        border-radius:999px;
+        background:${color};
+        border:1px solid ${border};
+      "
+    >${text}</span>
+  `;
+}
+
+function buildModelOptions(rows: PmosModelRow[], options: string[]): string[] {
+  const set = new Set<string>();
+  for (const row of rows) {
+    if (row.ref.trim()) {
+      set.add(row.ref.trim());
+    }
+  }
+  for (const opt of options) {
+    if (opt.trim()) {
+      set.add(opt.trim());
+    }
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
+}
+
+function resolveAgentModelSelectValue(
+  assignment: PmosAgentModelAssignment,
+  options: string[],
+): string {
+  const current = assignment.modelRef?.trim() ?? "";
+  if (!current) {
+    return "";
+  }
+  return options.includes(current) ? current : current;
 }
 
 export function renderIntegrations(props: IntegrationsProps) {
@@ -89,11 +148,35 @@ export function renderIntegrations(props: IntegrationsProps) {
     : "Paste connection key";
 
   const opsRuntime = (() => {
-    if (!ops) return { label: "Unknown", tone: "warn" as const, detail: "Runtime probe not yet completed." };
-    if (ops.reachable === true) return { label: "Ready", tone: "ok" as const, detail: ops.url ?? "/ops-ui/" };
-    if (ops.reachable === false) return { label: "Offline", tone: "warn" as const, detail: ops.error ?? "Embedded runtime is unreachable." };
-    if (ops.configured) return { label: "Starting", tone: "warn" as const, detail: "Configured, waiting for health checks." };
-    return { label: "Not configured", tone: "warn" as const, detail: "No embedded runtime detected." };
+    if (!ops) {
+      return {
+        label: "Unknown",
+        tone: "warn" as const,
+        detail: "Runtime probe not yet completed.",
+      };
+    }
+    if (ops.reachable === true) {
+      return { label: "Ready", tone: "ok" as const, detail: ops.url ?? "/ops-ui/" };
+    }
+    if (ops.reachable === false) {
+      return {
+        label: "Offline",
+        tone: "warn" as const,
+        detail: ops.error ?? "Embedded runtime is unreachable.",
+      };
+    }
+    if (ops.configured) {
+      return {
+        label: "Starting",
+        tone: "warn" as const,
+        detail: "Configured, waiting for health checks.",
+      };
+    }
+    return {
+      label: "Not configured",
+      tone: "warn" as const,
+      detail: "No embedded runtime detected.",
+    };
   })();
 
   const disabledReason = !props.connected
@@ -102,85 +185,59 @@ export function renderIntegrations(props: IntegrationsProps) {
 
   const modelKeyPlaceholder = props.modelConfigured
     ? "Stored (leave blank to keep current key)"
-    : "Paste your provider API key";
+    : "Paste provider API key";
 
-  const selectedProvider = PROVIDER_OPTIONS.find(p => p.value === props.modelProvider) ?? PROVIDER_OPTIONS[0];
   const projectIdShort = props.opsProjectId ? String(props.opsProjectId).slice(0, 8) : null;
+  const modelRows = props.modelRows ?? [];
+  const modelOptions = buildModelOptions(modelRows, props.modelOptions ?? []);
+  const activeModel = modelRows.find((row) => row.active) ?? null;
+  const opsUiHref = props.opsUiHref ?? "/ops-ui/credentials";
 
   return html`
-    <!-- AI Model Configuration — primary card -->
     <section class="card" style="margin-bottom: 18px;">
-      <!-- Status banner -->
-      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 16px;">
+      <div
+        style="
+          display:flex;
+          align-items:flex-start;
+          justify-content:space-between;
+          gap:16px;
+          margin-bottom:16px;
+        "
+      >
         <div>
-          <div class="card-title" style="margin-bottom:4px;">AI Model</div>
+          <div class="card-title" style="margin-bottom:4px;">Model Manager</div>
           <div class="card-sub" style="margin:0;">
-            Powers your Chat, Workflow Builder, and n8n AI Assistant — all from one key.
+            Configure models directly from config, set workspace default, and map models to agents.
           </div>
         </div>
-        ${props.modelConfigured
-          ? html`
-            <div style="display:flex; align-items:center; gap:8px; padding: 8px 14px; background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3); border-radius: 10px;">
-              <span style="color: #22c55e; font-size: 13px;">●</span>
-              <span style="font-size: 13px; font-weight: 500; color: #22c55e;">Active</span>
-              <span style="font-size: 12px; color: var(--text-secondary, #a0a0b0);">
-                ${props.modelProvider} / ${props.modelId.split("/").pop()}
-              </span>
-            </div>`
-          : html`
-            <div style="display:flex; align-items:center; gap:8px; padding: 8px 14px; background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: 10px;">
-              <span style="color: #f59e0b; font-size: 13px;">●</span>
-              <span style="font-size: 13px; font-weight: 500; color: #f59e0b;">Not configured</span>
-            </div>`}
-      </div>
-
-      <!-- Provider selection as cards -->
-      <div style="margin-bottom: 16px;">
-        <div style="font-size: 12px; color: var(--text-secondary, #a0a0b0); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em;">Provider</div>
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
-          ${PROVIDER_OPTIONS.map(opt => html`
-            <button
-              class="provider-card ${props.modelProvider === opt.value ? "selected" : ""}"
-              style="
-                display: flex; flex-direction: column; align-items: flex-start;
-                padding: 10px 12px; border-radius: 10px; cursor: pointer;
-                border: 1.5px solid ${props.modelProvider === opt.value ? "var(--accent-primary, #6366f1)" : "var(--border-color, rgba(255,255,255,0.08))"};
-                background: ${props.modelProvider === opt.value ? "rgba(99,102,241,0.08)" : "var(--bg-elevated, #1a1a24)"};
-                transition: all 0.15s ease; text-align: left;
-              "
-              ?disabled=${!props.connected || props.modelSaving}
-              @click=${() => {
-                props.onModelProviderChange(opt.value);
-                if (!props.modelId || props.modelId === selectedProvider.defaultModel) {
-                  props.onModelIdChange(opt.defaultModel);
-                }
-              }}
-            >
-              <div style="font-size: 18px; margin-bottom: 4px;">${opt.icon}</div>
-              <div style="font-size: 13px; font-weight: 600;">${opt.label}</div>
-              <div style="font-size: 11px; color: var(--text-muted, #6a6a7a);">${opt.hint}</div>
-            </button>
-          `)}
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
+          ${activeModel
+            ? renderModelToneChip(`Active: ${activeModel.ref}`, "ok")
+            : renderModelToneChip("No active model", "warn")}
+          ${props.modelCatalogLoading ? renderModelToneChip("Catalog loading", "muted") : nothing}
         </div>
       </div>
 
-      <!-- Model ID + API Key -->
-      <div class="form-grid" style="margin-bottom: 14px;">
-        <label class="field">
-          <span>Model ID</span>
+      <div class="form-grid" style="margin-bottom: 14px; grid-template-columns: 2fr 1fr;">
+        <label class="field full">
+          <span>Model reference (provider/model)</span>
           <input
-            .value=${props.modelId}
-            @input=${(e: Event) => props.onModelIdChange((e.target as HTMLInputElement).value)}
-            placeholder=${selectedProvider.defaultModel}
+            list="pmos-model-options"
+            .value=${props.modelRefDraft}
+            @input=${(e: Event) => props.onModelRefDraftChange((e.target as HTMLInputElement).value)}
+            placeholder="e.g. zai/glm-5 or openai/gpt-5"
             ?disabled=${!props.connected || props.modelSaving}
           />
+          <datalist id="pmos-model-options">
+            ${modelOptions.map((opt) => html`<option value=${opt}></option>`)}
+          </datalist>
         </label>
         <label class="field">
-          <span>Nickname <span class="muted">(optional)</span></span>
+          <span>Alias</span>
           <input
             .value=${props.modelAlias}
             @input=${(e: Event) => props.onModelAliasChange((e.target as HTMLInputElement).value)}
-            placeholder="e.g. my-main-ai"
+            placeholder="Optional alias"
             ?disabled=${!props.connected || props.modelSaving}
           />
         </label>
@@ -189,7 +246,8 @@ export function renderIntegrations(props: IntegrationsProps) {
           <input
             type="password"
             .value=${props.modelApiKeyDraft}
-            @input=${(e: Event) => props.onModelApiKeyDraftChange((e.target as HTMLInputElement).value)}
+            @input=${(e: Event) =>
+              props.onModelApiKeyDraftChange((e.target as HTMLInputElement).value)}
             placeholder=${modelKeyPlaceholder}
             autocomplete="off"
             ?disabled=${!props.connected || props.modelSaving}
@@ -197,42 +255,170 @@ export function renderIntegrations(props: IntegrationsProps) {
         </label>
       </div>
 
-      <!-- Actions row -->
-      <div class="row" style="gap: 10px; flex-wrap: wrap; align-items: center;">
+      <div class="row" style="gap: 8px; flex-wrap: wrap; align-items:center;">
         <button
           class="btn btn--primary"
-          ?disabled=${!props.connected || props.modelSaving}
+          ?disabled=${!props.connected || props.modelSaving || !props.modelRefDraft.trim()}
           @click=${() => props.onModelSave()}
         >
-          ${props.modelSaving ? "Saving…" : "Save & Activate"}
+          ${props.modelSaving ? "Saving..." : "Save and Activate"}
+        </button>
+        <button
+          class="btn btn--secondary"
+          ?disabled=${!props.connected || props.modelSaving || !props.modelRefDraft.trim()}
+          @click=${() => props.onModelSaveWithoutActivate()}
+        >
+          Save Model
         </button>
         <button
           class="btn btn--secondary"
           ?disabled=${!props.connected || props.modelSaving || !props.modelConfigured}
           @click=${() => props.onModelClearKey()}
-          title="Remove the saved key for the selected provider"
+          title="Remove key for selected provider"
         >
-          Remove key
+          Remove provider key
         </button>
-        ${props.modelSavedOk
-          ? html`<span class="chip chip-ok" style="animation: fadeIn 0.3s ease;">✓ Saved & synced to Workflow Engine</span>`
-          : nothing}
+        ${props.modelSavedOk ? html`<span class="chip chip-ok">Saved</span>` : nothing}
       </div>
 
-      ${props.modelError
-        ? html`<div class="callout danger" style="margin-top: 12px; font-size: 13px;">${props.modelError}</div>`
+      ${props.modelCatalogError
+        ? html`<div class="callout warn" style="margin-top: 10px; font-size: 12px;">${props.modelCatalogError}</div>`
         : nothing}
+      ${props.modelError
+        ? html`<div class="callout danger" style="margin-top: 10px; font-size: 12px;">${props.modelError}</div>`
+        : nothing}
+
+      <div style="margin-top: 18px; border-top: 1px solid var(--border-color, rgba(255,255,255,0.08)); padding-top: 14px;">
+        <div class="card-title" style="font-size: 14px; margin-bottom: 8px;">Configured Models</div>
+        ${modelRows.length === 0
+          ? html`<div class="muted" style="padding: 10px 0;">No configured models yet.</div>`
+          : html`
+              <div class="list" style="display:flex; flex-direction:column; gap:8px;">
+                ${modelRows.map((row) => html`
+                  <div class="list-item" style="padding:10px; border:1px solid var(--border-color, rgba(255,255,255,0.08)); border-radius:10px;">
+                    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:10px;">
+                      <div style="min-width:0; flex:1;">
+                        <div style="font-weight:600;" class="mono">${row.ref}</div>
+                        <div class="muted" style="font-size:12px; margin-top:2px;">
+                          ${row.alias ? `Alias: ${row.alias}` : "No alias"}
+                        </div>
+                        <div class="muted" style="font-size:12px; margin-top:2px;">
+                          ${row.usedBy.length > 0
+                            ? `Used by: ${row.usedBy.join(", ")}`
+                            : "Used by: none"}
+                        </div>
+                      </div>
+                      <div class="row" style="gap:6px; flex-wrap:wrap; justify-content:flex-end;">
+                        ${row.active ? renderModelToneChip("Active", "ok") : nothing}
+                        ${row.configured
+                          ? renderModelToneChip("Key configured", "ok")
+                          : renderModelToneChip("No key", "warn")}
+                        ${row.inCatalog
+                          ? renderModelToneChip("Catalog", "muted")
+                          : renderModelToneChip("Custom", "muted")}
+                        ${row.workspaceOverride
+                          ? renderModelToneChip("Configured in JSON", "muted")
+                          : renderModelToneChip("Catalog only", "muted")}
+                      </div>
+                    </div>
+                    <div class="row" style="margin-top:8px; gap:6px; flex-wrap:wrap;">
+                      ${!row.active
+                        ? html`
+                            <button
+                              class="btn btn--secondary"
+                              ?disabled=${!props.connected || props.modelSaving}
+                              @click=${() => props.onModelActivate(row.ref)}
+                            >
+                              Activate
+                            </button>
+                          `
+                        : nothing}
+                      ${row.workspaceOverride
+                        ? html`
+                            <button
+                              class="btn btn--secondary"
+                              ?disabled=${!props.connected || props.modelSaving}
+                              @click=${() => props.onModelDeactivate(row.ref)}
+                            >
+                              Deactivate
+                            </button>
+                            <button
+                              class="btn btn--secondary"
+                              ?disabled=${!props.connected || props.modelSaving}
+                              @click=${() => {
+                                if (!window.confirm(`Delete model ${row.ref} from openclaw config?`)) {
+                                  return;
+                                }
+                                props.onModelDelete(row.ref);
+                              }}
+                            >
+                              Delete
+                            </button>
+                          `
+                        : nothing}
+                      <button
+                        class="btn btn--secondary"
+                        ?disabled=${!props.connected || props.modelSaving}
+                        @click=${() => props.onModelClearKeyForRef(row.ref)}
+                      >
+                        Remove key
+                      </button>
+                    </div>
+                  </div>
+                `)}
+              </div>
+            `}
+      </div>
+
+      <div style="margin-top: 18px; border-top: 1px solid var(--border-color, rgba(255,255,255,0.08)); padding-top: 14px;">
+        <div class="card-title" style="font-size: 14px; margin-bottom: 8px;">Agent Model Assignment</div>
+        ${props.agentModelAssignments.length === 0
+          ? html`<div class="muted" style="padding: 10px 0;">No agents found.</div>`
+          : html`
+              <div class="list" style="display:flex; flex-direction:column; gap:8px;">
+                ${props.agentModelAssignments.map((assignment) => {
+                  const selected = resolveAgentModelSelectValue(assignment, modelOptions);
+                  return html`
+                    <div class="list-item" style="padding:10px; border:1px solid var(--border-color, rgba(255,255,255,0.08)); border-radius:10px; display:flex; gap:10px; align-items:center; justify-content:space-between;">
+                      <div>
+                        <div style="font-weight:600;">${assignment.label}</div>
+                        <div class="muted" style="font-size:12px;">
+                          ${assignment.inherited ? "Uses workspace default" : "Explicit model"}
+                        </div>
+                      </div>
+                      <label class="field" style="margin:0; min-width:260px;">
+                        <select
+                          .value=${selected}
+                          ?disabled=${!props.connected || props.modelSaving}
+                          @change=${(e: Event) => {
+                            const next = (e.target as HTMLSelectElement).value.trim();
+                            props.onAssignAgentModel(assignment.agentId, next || null);
+                          }}
+                        >
+                          <option value="">Use workspace default</option>
+                          ${!selected || modelOptions.includes(selected)
+                            ? nothing
+                            : html`<option value=${selected}>${selected}</option>`}
+                          ${modelOptions.map((opt) => html`<option value=${opt}>${opt}</option>`)}
+                        </select>
+                      </label>
+                    </div>
+                  `;
+                })}
+              </div>
+            `}
+      </div>
+
       ${disabledReason
         ? html`<div class="muted" style="margin-top: 10px; font-size: 13px;">${disabledReason}</div>`
         : nothing}
     </section>
 
-    <!-- Workflow Engine + Basecamp row -->
     <section class="grid grid-cols-2" style="margin-bottom: 18px;">
       <div class="card">
         <div class="card-title">Workflow Engine</div>
         <div class="card-sub">
-          Your private n8n instance. Runs your automations in an isolated workspace.
+          Your private n8n runtime for automations in your workspace.
         </div>
 
         <div class="stat-grid" style="margin-top: 16px;">
@@ -247,27 +433,30 @@ export function renderIntegrations(props: IntegrationsProps) {
               ${props.opsProvisioned ? "Provisioned" : "Pending"}
             </div>
             ${projectIdShort
-              ? html`<div class="muted" style="font-size:11px; font-family: monospace;">${projectIdShort}…</div>`
+              ? html`<div class="muted" style="font-size:11px; font-family: monospace;">${projectIdShort}...</div>`
               : nothing}
           </div>
         </div>
 
-        <div class="row" style="margin-top: 12px;">
+        <div class="row" style="margin-top: 12px; gap:8px;">
           <button class="btn btn--secondary" @click=${() => props.onOpenAutomations()}>
-            Open Automations →
+            Open Automations
           </button>
+          <a href=${opsUiHref} target="_blank" rel="noreferrer" class="btn btn--secondary">
+            Open Credentials
+          </a>
         </div>
 
         ${ops?.reachable === false
           ? html`<div class="callout warn" style="margin-top: 12px; font-size: 13px;">
-              Workflow runtime is offline. If it just started, wait a moment and refresh status.
+              Workflow runtime is offline. If it just started, wait and refresh status.
             </div>`
           : nothing}
       </div>
 
       <div class="card">
         <div class="card-title">Basecamp</div>
-        <div class="card-sub">Connect your Basecamp account to use it in workflows and chat.</div>
+        <div class="card-sub">Connect your Basecamp account for workflow and chat tools.</div>
 
         <div class="form-grid" style="margin-top: 16px;">
           <label class="field">
@@ -284,7 +473,8 @@ export function renderIntegrations(props: IntegrationsProps) {
             <input
               type="password"
               .value=${props.bcgptApiKeyDraft}
-              @input=${(e: Event) => props.onBcgptApiKeyDraftChange((e.target as HTMLInputElement).value)}
+              @input=${(e: Event) =>
+                props.onBcgptApiKeyDraftChange((e.target as HTMLInputElement).value)}
               placeholder=${bcgptKeyPlaceholder}
               autocomplete="off"
               ?disabled=${!props.connected}
@@ -294,7 +484,7 @@ export function renderIntegrations(props: IntegrationsProps) {
 
         <div class="row" style="margin-top: 14px; gap: 8px; flex-wrap: wrap;">
           <button class="btn btn--primary" ?disabled=${props.saving || !props.connected} @click=${() => props.onSave()}>
-            ${props.saving ? "Saving…" : "Save"}
+            ${props.saving ? "Saving..." : "Save"}
           </button>
           <button
             class="btn btn--secondary"
@@ -303,34 +493,37 @@ export function renderIntegrations(props: IntegrationsProps) {
           >
             Remove key
           </button>
-          ${props.bcgptSavedOk ? html`<span class="chip chip-ok">✓ Saved</span>` : nothing}
-          ${props.basecampSetupOk ? html`<span class="chip chip-ok">✓ Added to Workflow Engine</span>` : nothing}
+          ${props.bcgptSavedOk ? html`<span class="chip chip-ok">Saved</span>` : nothing}
+          ${props.basecampSetupOk ? html`<span class="chip chip-ok">Added to workflow engine</span>` : nothing}
         </div>
 
-        ${props.onSetupBasecamp ? html`
-          <div class="row" style="margin-top: 10px; align-items: center; gap: 10px;">
-            <button
-              class="btn btn--secondary"
-              ?disabled=${!props.connected || props.basecampSetupPending}
-              @click=${() => props.onSetupBasecamp?.()}
-              title="Auto-configure Basecamp credentials in your workflow engine"
-            >
-              ${props.basecampSetupPending ? "Configuring…" : "Sync to Workflow Engine"}
-            </button>
-          </div>
-          ${props.basecampSetupError
-            ? html`<div class="callout danger" style="margin-top: 8px; font-size: 12px;">${props.basecampSetupError}</div>`
-            : nothing}
-        ` : nothing}
+        ${props.onSetupBasecamp
+          ? html`
+              <div class="row" style="margin-top: 10px; align-items: center; gap: 10px;">
+                <button
+                  class="btn btn--secondary"
+                  ?disabled=${!props.connected || props.basecampSetupPending}
+                  @click=${() => props.onSetupBasecamp?.()}
+                  title="Auto-configure Basecamp credentials in workflow engine"
+                >
+                  ${props.basecampSetupPending ? "Configuring..." : "Sync to Workflow Engine"}
+                </button>
+              </div>
+              ${props.basecampSetupError
+                ? html`<div class="callout danger" style="margin-top: 8px; font-size: 12px;">${props.basecampSetupError}</div>`
+                : nothing}
+            `
+          : nothing}
 
-        ${disabledReason ? html`<div class="muted" style="margin-top: 10px; font-size: 13px;">${disabledReason}</div>` : nothing}
+        ${disabledReason
+          ? html`<div class="muted" style="margin-top: 10px; font-size: 13px;">${disabledReason}</div>`
+          : nothing}
       </div>
     </section>
 
-    <!-- Connection Status -->
     <section class="card">
       <div class="card-title">Connection Status</div>
-      <div class="card-sub">Live checks run server-side to avoid browser network restrictions.</div>
+      <div class="card-sub">Server-side health checks for external connectors.</div>
 
       <div class="stat-grid" style="margin-top: 16px;">
         ${renderConnectorStatus("Basecamp API", bcgpt?.reachable ?? null, bcgpt?.healthUrl ?? null)}
@@ -343,7 +536,7 @@ export function renderIntegrations(props: IntegrationsProps) {
           ?disabled=${props.connectorsLoading || !props.connected}
           @click=${() => props.onRefreshConnectors()}
         >
-          ${props.connectorsLoading ? "Checking…" : "Refresh status"}
+          ${props.connectorsLoading ? "Checking..." : "Refresh status"}
         </button>
       </div>
 
@@ -351,15 +544,12 @@ export function renderIntegrations(props: IntegrationsProps) {
         ? html`<div class="callout danger" style="margin-top: 14px;">${props.connectorsError}</div>`
         : nothing}
 
-      ${props.error
-        ? html`<div class="callout danger" style="margin-top: 14px;">${props.error}</div>`
-        : nothing}
+      ${props.error ? html`<div class="callout danger" style="margin-top: 14px;">${props.error}</div>` : nothing}
     </section>
 
-    <!-- n8n Credentials -->
     <section class="card">
       <div class="card-title">Workflow Credentials</div>
-      <div class="card-sub">Credentials available in your n8n workflow engine.</div>
+      <div class="card-sub">Credentials currently available inside your n8n workspace.</div>
 
       <div class="row" style="margin-top: 16px; align-items: center; gap: 10px;">
         <button
@@ -367,10 +557,10 @@ export function renderIntegrations(props: IntegrationsProps) {
           ?disabled=${!props.connected || props.n8nCredentialsLoading}
           @click=${() => props.onRefreshN8nCredentials?.()}
         >
-          ${props.n8nCredentialsLoading ? "Loading…" : "Refresh Credentials"}
+          ${props.n8nCredentialsLoading ? "Loading..." : "Refresh Credentials"}
         </button>
-        <a href="${props.opsProvisioned ? 'https://ops.wickedlab.io/credentials' : '#'}" target="_blank" class="btn btn--secondary" ?disabled=${!props.opsProvisioned}>
-          Manage in n8n →
+        <a href=${opsUiHref} target="_blank" rel="noreferrer" class="btn btn--secondary">
+          Manage in n8n
         </a>
       </div>
 
@@ -380,20 +570,29 @@ export function renderIntegrations(props: IntegrationsProps) {
 
       ${props.n8nCredentials && props.n8nCredentials.length > 0
         ? html`
-          <div class="list" style="margin-top: 12px;">
-            ${props.n8nCredentials.map((cred) => html`
-              <div class="list-item" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border);">
-                <div>
-                  <div style="font-weight: 500;">${cred.name}</div>
-                  <div class="muted" style="font-size: 11px;">${cred.type}</div>
+            <div class="list" style="margin-top: 12px;">
+              ${props.n8nCredentials.map((cred) => html`
+                <div
+                  class="list-item"
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 8px 0;
+                    border-bottom: 1px solid var(--border);
+                  "
+                >
+                  <div>
+                    <div style="font-weight: 500;">${cred.name}</div>
+                    <div class="muted" style="font-size: 11px;">${cred.type}</div>
+                  </div>
+                  <span class="chip chip-ok" style="font-size: 10px;">Ready</span>
                 </div>
-                <span class="chip chip-ok" style="font-size: 10px;">Ready</span>
-              </div>
-            `)}
-          </div>
-        `
+              `)}
+            </div>
+          `
         : props.n8nCredentials && props.n8nCredentials.length === 0
-          ? html`<div class="muted" style="margin-top: 12px; text-align: center; padding: 20px;">No credentials configured. Click "Manage in n8n" to add credentials.</div>`
+          ? html`<div class="muted" style="margin-top: 12px; text-align: center; padding: 20px;">No credentials configured yet.</div>`
           : nothing}
     </section>
   `;

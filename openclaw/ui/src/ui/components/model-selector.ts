@@ -2,31 +2,23 @@
  * ModelSelector - Unified component for AI provider/model selection.
  *
  * This component provides a consistent UI for selecting AI providers and models
- * across Integrations, Agents, Onboarding, and any chat panels.
- *
- * It integrates with the BYOK system to show which providers are configured.
+ * across Integrations, Agents, Onboarding, and chat panels.
  */
 
 import { html, nothing } from "lit";
-import type { PmosModelProvider } from "./controllers/pmos-model-auth.ts";
-import { getModelsForProvider, getModelLabel } from "./model-catalog.ts";
+import type { PmosModelProvider } from "../controllers/pmos-model-auth.ts";
 
 export type ModelSelectorProps = {
-  // Current selection
   provider: PmosModelProvider;
   modelId: string;
-  // Configured providers (from BYOK)
   configuredProviders: PmosModelProvider[];
-  // Callbacks
   onProviderChange: (provider: PmosModelProvider) => void;
   onModelChange: (modelId: string) => void;
-  // Optional: show API key input inline
   showApiKeyInput?: boolean;
   apiKeyDraft?: string;
   onApiKeyChange?: (key: string) => void;
   onApiKeySave?: () => void;
   apiKeySaving?: boolean;
-  // UI state
   disabled?: boolean;
   compact?: boolean;
 };
@@ -40,6 +32,56 @@ const PROVIDER_OPTIONS: Array<{ value: PmosModelProvider; label: string }> = [
   { value: "kilo", label: "Kilo" },
 ];
 
+type ModelCatalogEntry = {
+  id: string;
+  label: string;
+  tier?: "free" | "paid";
+};
+
+const MODEL_CATALOG: Record<PmosModelProvider, ModelCatalogEntry[]> = {
+  google: [
+    { id: "gemini-3-flash-preview", label: "Gemini 3 Flash Preview", tier: "paid" },
+    { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash", tier: "free" },
+  ],
+  openai: [
+    { id: "gpt-5.2", label: "GPT-5.2", tier: "paid" },
+    { id: "gpt-4o", label: "GPT-4o", tier: "paid" },
+  ],
+  anthropic: [
+    { id: "claude-opus-4-6", label: "Claude Opus 4.6", tier: "paid" },
+    { id: "claude-sonnet-4.5", label: "Claude Sonnet 4.5", tier: "paid" },
+  ],
+  zai: [
+    { id: "glm-5", label: "GLM-5", tier: "paid" },
+    { id: "glm-4.7", label: "GLM-4.7", tier: "free" },
+  ],
+  openrouter: [
+    { id: "google/gemini-2.0-flash:free", label: "Gemini 2.0 Flash (Free)", tier: "free" },
+    { id: "openai/gpt-4o", label: "GPT-4o via OpenRouter", tier: "paid" },
+  ],
+  kilo: [
+    { id: "kilo/z-ai/glm-5:free", label: "Kilo GLM-5 (Free)", tier: "free" },
+    { id: "kilo/openai/gpt-4o", label: "Kilo GPT-4o", tier: "paid" },
+  ],
+  moonshot: [{ id: "moonshotai/kimi-k2.5", label: "Kimi K2.5", tier: "paid" }],
+  nvidia: [{ id: "minimaxai/minimax-m2.1", label: "MiniMax M2.1", tier: "paid" }],
+  custom: [],
+};
+
+function getModelsForProvider(provider: PmosModelProvider): ModelCatalogEntry[] {
+  return MODEL_CATALOG[provider] ?? [];
+}
+
+function getModelLabel(modelId: string): string {
+  for (const entries of Object.values(MODEL_CATALOG)) {
+    const match = entries.find((entry) => entry.id === modelId);
+    if (match) {
+      return match.label;
+    }
+  }
+  return modelId || "Model";
+}
+
 export function renderModelSelector(props: ModelSelectorProps) {
   const models = getModelsForProvider(props.provider);
   const isConfigured = props.configuredProviders.includes(props.provider);
@@ -47,7 +89,6 @@ export function renderModelSelector(props: ModelSelectorProps) {
 
   return html`
     <div class="model-selector ${props.compact ? "compact" : ""}">
-      <!-- Provider dropdown -->
       <label class="field">
         <span>AI Provider</span>
         <select
@@ -60,7 +101,7 @@ export function renderModelSelector(props: ModelSelectorProps) {
             const configured = props.configuredProviders.includes(opt.value);
             return html`
               <option value=${opt.value}>
-                ${opt.label}${configured ? " ✓" : ""}
+                ${opt.label}${configured ? " (configured)" : ""}
               </option>
             `;
           })}
@@ -70,22 +111,22 @@ export function renderModelSelector(props: ModelSelectorProps) {
           : html`<span class="chip chip-warn" style="margin-left: 6px;">Needs API key</span>`}
       </label>
 
-      <!-- Model dropdown (if catalog has models for this provider) -->
       ${showModelDropdown
         ? html`
             <label class="field">
               <span>Model</span>
               <select
                 .value=${props.modelId}
-                @change=${(e: Event) =>
-                  props.onModelChange((e.target as HTMLSelectElement).value)}
+                @change=${(e: Event) => props.onModelChange((e.target as HTMLSelectElement).value)}
                 ?disabled=${props.disabled}
               >
-                ${models.map((m) => html`
-                  <option value=${m.id}>
-                    ${m.label}${m.tier === "free" ? " (Free)" : ""}
-                  </option>
-                `)}
+                ${models.map(
+                  (m) => html`
+                    <option value=${m.id}>
+                      ${m.label}${m.tier === "free" ? " (Free)" : ""}
+                    </option>
+                  `,
+                )}
               </select>
             </label>
           `
@@ -95,15 +136,13 @@ export function renderModelSelector(props: ModelSelectorProps) {
               <input
                 type="text"
                 .value=${props.modelId}
-                @input=${(e: Event) =>
-                  props.onModelChange((e.target as HTMLInputElement).value)}
+                @input=${(e: Event) => props.onModelChange((e.target as HTMLInputElement).value)}
                 placeholder="e.g. gpt-4o, claude-3-5-sonnet"
                 ?disabled=${props.disabled}
               />
             </label>
           `}
 
-      <!-- API Key input (if not configured and showApiKeyInput is true) -->
       ${props.showApiKeyInput && !isConfigured
         ? html`
             <label class="field">
@@ -111,8 +150,7 @@ export function renderModelSelector(props: ModelSelectorProps) {
               <input
                 type="password"
                 .value=${props.apiKeyDraft ?? ""}
-                @input=${(e: Event) =>
-                  props.onApiKeyChange?.((e.target as HTMLInputElement).value)}
+                @input=${(e: Event) => props.onApiKeyChange?.((e.target as HTMLInputElement).value)}
                 placeholder="Paste your API key"
                 autocomplete="off"
                 ?disabled=${props.disabled || props.apiKeySaving}
@@ -139,9 +177,6 @@ export function renderModelSelector(props: ModelSelectorProps) {
   `;
 }
 
-/**
- * Compact inline model selector for chat panels
- */
 export type InlineModelSelectorProps = {
   provider: PmosModelProvider;
   modelId: string;
@@ -155,7 +190,7 @@ export function renderInlineModelSelector(props: InlineModelSelectorProps) {
   const isConfigured = props.configuredProviders.includes(props.provider);
 
   return html`
-    <div class="inline-model-selector" style="display: flex; gap: 6px; align-items: center; font-size: 12px;">
+    <div class="inline-model-selector" style="display:flex; gap:6px; align-items:center; font-size:12px;">
       <select
         .value=${props.provider}
         @change=${(e: Event) => {
@@ -165,13 +200,13 @@ export function renderInlineModelSelector(props: InlineModelSelectorProps) {
           props.onChange(newProvider, defaultModel);
         }}
         ?disabled=${props.disabled}
-        style="font-size: 11px; padding: 2px 6px;"
+        style="font-size:11px; padding:2px 6px;"
       >
         ${PROVIDER_OPTIONS.map((opt) => {
           const configured = props.configuredProviders.includes(opt.value);
           return html`
             <option value=${opt.value} ?selected=${props.provider === opt.value}>
-              ${opt.label}${configured ? " ✓" : ""}
+              ${opt.label}${configured ? " (configured)" : ""}
             </option>
           `;
         })}
@@ -180,23 +215,24 @@ export function renderInlineModelSelector(props: InlineModelSelectorProps) {
         ? html`
             <select
               .value=${props.modelId}
-              @change=${(e: Event) =>
-                props.onChange(props.provider, (e.target as HTMLSelectElement).value)}
+              @change=${(e: Event) => props.onChange(props.provider, (e.target as HTMLSelectElement).value)}
               ?disabled=${props.disabled}
-              style="font-size: 11px; padding: 2px 6px;"
+              style="font-size:11px; padding:2px 6px;"
             >
-              ${models.map((m) => html`
-                <option value=${m.id} ?selected=${props.modelId === m.id}>
-                  ${m.tier === "free" ? "🆓 " : ""}${getModelLabel(m.id)}
-                </option>
-              `)}
+              ${models.map(
+                (m) => html`
+                  <option value=${m.id} ?selected=${props.modelId === m.id}>
+                    ${m.tier === "free" ? "Free - " : ""}${getModelLabel(m.id)}
+                  </option>
+                `,
+              )}
             </select>
           `
         : html`
             <span class="muted" style="font-size: 11px;">${getModelLabel(props.modelId)}</span>
           `}
       ${!isConfigured
-        ? html`<span class="chip chip-warn" style="font-size: 10px;">⚠ No key</span>`
+        ? html`<span class="chip chip-warn" style="font-size:10px;">No key</span>`
         : nothing}
     </div>
   `;

@@ -248,6 +248,29 @@ export async function validateKey(
         const body = await res.text().catch(() => "");
         return { valid: false, error: `OpenAI API returned ${res.status}: ${body.slice(0, 200)}` };
       }
+      case "openrouter": {
+        const res = await fetch("https://openrouter.ai/api/v1/auth/key", {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: controller.signal,
+        });
+        if (res.ok) return { valid: true };
+        if (res.status === 401 || res.status === 403) {
+          return { valid: false, error: "Invalid OpenRouter API key" };
+        }
+        const body = await res.text().catch(() => "");
+        return { valid: false, error: `OpenRouter API returned ${res.status}: ${body.slice(0, 200)}` };
+      }
+      case "zai": {
+        const res = await fetch("https://open.bigmodel.cn/api/paas/v4/models", {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: controller.signal,
+        });
+        if (res.ok) return { valid: true };
+        if (res.status === 401 || res.status === 403) {
+          return { valid: false, error: "Invalid Z.AI API key" };
+        }
+        return { valid: false, error: `Z.AI API returned ${res.status}` };
+      }
       case "anthropic": {
         const res = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
@@ -279,14 +302,46 @@ export async function validateKey(
         return { valid: false, error: `Google API returned ${res.status}` };
       }
       case "kilo": {
-        // Kilo is a proxy/gateway provider - validate by checking the endpoint
-        const kiloUrl = process.env.KILO_API_URL || "https://api.kilo.ai";
-        const res = await fetch(`${kiloUrl}/v1/models`, {
+        // Kilo is a gateway provider - validate against the gateway models endpoint.
+        const kiloBase = (process.env.KILO_API_URL || "https://api.kilo.ai/api/gateway")
+          .replace(/\/+$/, "")
+          .replace(/\/chat\/completions$/, "");
+        const res = await fetch(`${kiloBase}/models`, {
           headers: { Authorization: `Bearer ${apiKey}` },
           signal: controller.signal,
         });
         if (res.ok) return { valid: true };
         return { valid: false, error: `Kilo API returned ${res.status}` };
+      }
+      case "moonshot": {
+        const moonshotUrl = (process.env.MOONSHOT_API_URL || "https://api.moonshot.ai").replace(
+          /\/+$/,
+          "",
+        );
+        const res = await fetch(`${moonshotUrl}/v1/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: controller.signal,
+        });
+        if (res.ok) return { valid: true };
+        if (res.status === 401 || res.status === 403) {
+          return { valid: false, error: "Invalid Moonshot API key" };
+        }
+        return { valid: false, error: `Moonshot API returned ${res.status}` };
+      }
+      case "nvidia": {
+        const nvidiaUrl = (process.env.NVIDIA_API_URL || "https://integrate.api.nvidia.com").replace(
+          /\/+$/,
+          "",
+        );
+        const res = await fetch(`${nvidiaUrl}/v1/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: controller.signal,
+        });
+        if (res.ok) return { valid: true };
+        if (res.status === 401 || res.status === 403) {
+          return { valid: false, error: "Invalid NVIDIA API key" };
+        }
+        return { valid: false, error: `NVIDIA API returned ${res.status}` };
       }
       default:
         // For custom/azure providers, we can't validate automatically

@@ -1,5 +1,5 @@
 import type { GatewayRequestHandlers } from "./types.js";
-import { loadConfig } from "../../config/config.js";
+import { loadConfig, writeConfigFile, type OpenClawConfig } from "../../config/config.js";
 import { ErrorCodes, errorShape } from "../protocol/index.js";
 import { formatForLog } from "../ws-log.js";
 import { requireWorkspaceId, isSuperAdmin } from "../workspace-context.js";
@@ -79,6 +79,21 @@ function readConfigString(cfg: unknown, path: string[]): string | null {
 function isReachableStatus(code: number): boolean {
   // 401/403/404 still prove the upstream is alive.
   return code === 401 || code === 403 || code === 404;
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function deepMergeJson(base: unknown, patch: unknown): unknown {
+  if (!isJsonObject(base) || !isJsonObject(patch)) {
+    return patch;
+  }
+  const out: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(patch)) {
+    out[key] = deepMergeJson(out[key], value);
+  }
+  return out;
 }
 
 export const pmosHandlers: GatewayRequestHandlers = {
@@ -211,6 +226,49 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 
+  "pmos.config.global.get": async ({ respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const config = loadConfig() as unknown;
+      respond(
+        true,
+        { config: isJsonObject(config) ? config : {} },
+        undefined,
+      );
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.config.global.set": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const p = params as Record<string, unknown> | undefined;
+      const patch = p?.patch;
+      if (!isJsonObject(patch)) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "patch must be an object"));
+        return;
+      }
+      const replace = p?.replace === true;
+      const current = loadConfig() as unknown;
+      const base = isJsonObject(current) ? current : {};
+      const merged = replace ? patch : deepMergeJson(base, patch);
+      if (!isJsonObject(merged)) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "invalid config payload"));
+        return;
+      }
+      await writeConfigFile(merged as OpenClawConfig);
+      const next = loadConfig() as unknown;
+      respond(
+        true,
+        { ok: true, config: isJsonObject(next) ? next : {} },
+        undefined,
+      );
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
   "pmos.config.workspace.get": async ({ params, respond, client }) => {
     try {
       if (!client) throw new Error("client context required");
@@ -335,12 +393,12 @@ export const pmosHandlers: GatewayRequestHandlers = {
   "pmos.config.get": async ({ respond, client }) => {
     const workspaceId = client?.pmosWorkspaceId;
     if (!workspaceId) {
-      respond({ ok: false, error: "No workspace context" });
+      respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "No workspace context"));
       return;
     }
     const { loadEffectiveWorkspaceConfig } = await import("../workspace-config.js");
     const config = await loadEffectiveWorkspaceConfig(workspaceId);
-    respond({ ok: true, config });
+    respond(true, { ok: true, config }, undefined);
   },
 
   "pmos.byok.list": async ({ respond, client }) => {
@@ -429,8 +487,8 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 
-  "pmos.auth.check": async ({ params, respond, context, client }) => {
-    // Check if a provider has API key available from ANY source (not just BYOK)
+  "pmos.auth.check": async ({ params, respond, client }) => {
+    // Check if a provider has API key available from global auth sources.
     try {
       const p = params as Record<string, unknown> | undefined;
       const provider = typeof p?.provider === "string" ? p.provider.trim() : "";
@@ -439,19 +497,11 @@ export const pmosHandlers: GatewayRequestHandlers = {
         return;
       }
 
-      // Set BYOK workspace context for resolution
-      const { setByokWorkspaceContext } = await import("../../agents/model-auth.js");
-      setByokWorkspaceContext(client?.pmosWorkspaceId ?? null);
-
       const { resolveApiKeyForProvider } = await import("../../agents/model-auth.js");
-      const result = await resolveApiKeyForProvider({
-        provider,
-        cfg: context.cfg,
-        api: context.api,
-      });
+      const result = await resolveApiKeyForProvider({ provider, cfg: loadConfig() });
       respond(true, {
         provider,
-        configured: result.mode !== "none",
+        configured: Boolean(result.apiKey) || result.mode === "aws-sdk",
         source: result.source ?? null,
         mode: result.mode,
       }, undefined);
@@ -818,7 +868,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 
-  // ── AI Workflow Assistant (uses workspace BYOK model) ─────────────
+  // ── AI Workflow Assistant (uses global openclaw.json model config) ─────────────
 
   "pmos.workflow.assist": async ({ params, respond, client }) => {
     try {
@@ -843,15 +893,35 @@ export const pmosHandlers: GatewayRequestHandlers = {
         .filter(m => m.role === "user" || m.role === "assistant")
         .map(m => ({ role: m.role as "user" | "assistant", content: String(m.content) }));
 
-      const { callWorkspaceModel, WORKFLOW_ASSISTANT_SYSTEM_PROMPT } = await import("../workflow-ai.js");
+      const {
+        callWorkspaceModel,
+        WORKFLOW_ASSISTANT_SYSTEM_PROMPT,
+        getWorkspaceN8nNodeCatalog,
+      } = await import("../workflow-ai.js");
 
       // Fetch available credentials and inject into system prompt so AI can reference them
-      const { fetchWorkspaceCredentials, buildCredentialContext } = await import("../credential-sync.js");
+      const {
+        fetchWorkspaceCredentials,
+        buildCredentialContext,
+        autoLinkNodeCredentials,
+      } = await import("../credential-sync.js");
       const availableCredentials = await fetchWorkspaceCredentials(workspaceId).catch(() => []);
       const credentialContext = buildCredentialContext(availableCredentials);
-      const systemPrompt = credentialContext
-        ? `${WORKFLOW_ASSISTANT_SYSTEM_PROMPT}\n${credentialContext}`
-        : WORKFLOW_ASSISTANT_SYSTEM_PROMPT;
+      const liveNodeCatalog = await getWorkspaceN8nNodeCatalog(workspaceId).catch(() => "");
+      const workspaceContext = `## Workspace Context
+- Workspace ID: ${workspaceId}
+- Use node type names from the live workspace catalog when available.
+- Treat openclaw.json + workspace connector data as the source of truth for integration configuration.
+- If required credentials are missing, explicitly tell the user which provider config to add in openclaw.json.
+- If a live node catalog is unavailable, explicitly say so instead of inventing node names.`;
+      const systemPrompt = [
+        WORKFLOW_ASSISTANT_SYSTEM_PROMPT,
+        liveNodeCatalog,
+        credentialContext,
+        workspaceContext,
+      ]
+        .filter((part) => part && part.trim().length > 0)
+        .join("\n\n");
 
       const result = await callWorkspaceModel(workspaceId, systemPrompt, messages, {
         maxTokens: 2048,
@@ -871,7 +941,14 @@ export const pmosHandlers: GatewayRequestHandlers = {
       }
 
       const assistantMessage = typeof parsed.message === "string" ? parsed.message : result.text ?? "";
-      const workflow = parsed.workflow && typeof parsed.workflow === "object" ? parsed.workflow : null;
+      let workflow = parsed.workflow && typeof parsed.workflow === "object" ? parsed.workflow : null;
+      if (workflow && Array.isArray((workflow as { nodes?: unknown[] }).nodes)) {
+        const wf = workflow as { nodes: Array<Record<string, unknown>> };
+        workflow = {
+          ...(workflow as Record<string, unknown>),
+          nodes: autoLinkNodeCredentials(wf.nodes, availableCredentials),
+        };
+      }
 
       respond(true, { ok: true, message: assistantMessage, workflow, providerUsed: result.providerUsed }, undefined);
     } catch (err) {

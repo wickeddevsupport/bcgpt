@@ -37,7 +37,11 @@ import type { SessionLogEntry } from "./views/usage.ts";
 import type { CreateAgentFormData, AgentActivitySummary } from "./views/agents.ts";
 import type { PmosAuthUser } from "./controllers/pmos-auth.ts";
 import type { PmosConnectorsStatus } from "./controllers/pmos-connectors.ts";
-import type { PmosModelProvider } from "./controllers/pmos-model-auth.ts";
+import type {
+  PmosAgentModelAssignment,
+  PmosModelProvider,
+  PmosModelRow,
+} from "./controllers/pmos-model-auth.ts";
 import type {
   WorkflowConnectionSummary,
   WorkflowSummary,
@@ -181,6 +185,13 @@ export type AppViewState = {
   pmosBasecampSetupOk: boolean;
   pmosBasecampSetupError: string | null;
   pmosByokProviders: PmosModelProvider[];
+  pmosModelRows: PmosModelRow[];
+  pmosAgentModelAssignments: PmosAgentModelAssignment[];
+  pmosModelCatalogLoading: boolean;
+  pmosModelCatalogError: string | null;
+  pmosWorkspaceConfig: Record<string, unknown> | null;
+  pmosEffectiveConfig: Record<string, unknown> | null;
+  pmosModelRefDraft: string;
 
   // Real n8n credentials for the Connections page
   pmosRealCredentials: Array<{ id: string; name: string; type: string }> | null;
@@ -473,6 +484,7 @@ export type AppViewState = {
   handlePmosTraceClear: () => void;
   handlePmosAdminLoad: () => Promise<void>;
   handlePmosAdminSave: (opts?: { action?: string; target?: string; detail?: string }) => Promise<void>;
+  _loadWorkspacesList: () => Promise<void>;
   handlePmosMemberUpsert: () => Promise<void>;
   handlePmosMemberRemove: (email: string) => Promise<void>;
   handlePmosIntegrationsLoad: () => Promise<void>;
@@ -480,9 +492,16 @@ export type AppViewState = {
   handlePmosSetupBasecampInN8n: () => Promise<void>;
   handlePmosIntegrationsClearBcgptKey: () => Promise<void>;
   handlePmosModelProviderChange: (next: PmosModelProvider) => void;
+  handlePmosModelRefDraftChange: (next: string) => void;
   handleLoadRealCredentials: () => Promise<void>;
   handlePmosModelSave: () => Promise<void>;
+  handlePmosModelSaveWithoutActivate: () => Promise<void>;
   handlePmosModelClearKey: () => Promise<void>;
+  handlePmosModelClearKeyForRef: (modelRef: string) => Promise<void>;
+  handlePmosModelActivate: (modelRef: string) => Promise<void>;
+  handlePmosModelDeactivate: (modelRef: string) => Promise<void>;
+  handlePmosModelDelete: (modelRef: string) => Promise<void>;
+  handlePmosAssignAgentModel: (agentId: string, modelRef: string | null) => Promise<void>;
   handlePmosApPiecesLoad: () => Promise<void>;
   handlePmosApConnectionsLoad: () => Promise<void>;
   handlePmosApConnectionCreate: () => Promise<void>;

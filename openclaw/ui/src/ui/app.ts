@@ -88,10 +88,18 @@ import {
   type PmosConnectorsStatus,
 } from "./controllers/pmos-connectors.ts";
 import {
+  activatePmosModel,
+  assignPmosAgentModel,
+  clearPmosModelApiKeyForRef,
+  deactivatePmosModel,
+  deletePmosModel,
   clearPmosModelApiKey,
   loadPmosModelWorkspaceState,
   savePmosModelConfig,
   setPmosModelProvider,
+  upsertPmosModelFromRef,
+  type PmosAgentModelAssignment,
+  type PmosModelRow,
   type PmosModelProvider,
 } from "./controllers/pmos-model-auth.ts";
 import {
@@ -305,6 +313,13 @@ export class OpenClawApp extends LitElement {
   @state() pmosBasecampSetupOk = false;
   @state() pmosBasecampSetupError: string | null = null;
   @state() pmosByokProviders: PmosModelProvider[] = [];
+  @state() pmosModelRows: PmosModelRow[] = [];
+  @state() pmosAgentModelAssignments: PmosAgentModelAssignment[] = [];
+  @state() pmosModelCatalogLoading = false;
+  @state() pmosModelCatalogError: string | null = null;
+  @state() pmosWorkspaceConfig: Record<string, unknown> | null = null;
+  @state() pmosEffectiveConfig: Record<string, unknown> | null = null;
+  @state() pmosModelRefDraft = "";
 
   // Real n8n credentials for the Connections page
   @state() pmosRealCredentials: Array<{ id: string; name: string; type: string }> | null = null;
@@ -527,7 +542,7 @@ export class OpenClawApp extends LitElement {
   @state() usageLogFilterHasTools = false;
   @state() usageLogFilterQuery = "";
 
-  // Non-reactive (don’t trigger renders just for timer bookkeeping).
+  // Non-reactive (don't trigger renders just for timer bookkeeping).
   usageQueryDebounceTimer: number | null = null;
 
   @state() cronLoading = false;
@@ -806,6 +821,7 @@ export class OpenClawApp extends LitElement {
     await loadConfig(this);
     hydratePmosConnectorDraftsFromConfig(this);
     await loadPmosModelWorkspaceState(this);
+    this.syncPmosModelDraftRef();
     await loadPmosConnectorsStatus(this);
     await loadPmosN8nCredentials(this);
 
@@ -838,6 +854,7 @@ export class OpenClawApp extends LitElement {
     this.pmosConnectorDraftsInitialized = false;
     hydratePmosConnectorDraftsFromConfig(this);
     await loadPmosModelWorkspaceState(this);
+    this.syncPmosModelDraftRef();
     await loadPmosConnectorsStatus(this);
     await loadPmosN8nCredentials(this);
     this.pmosBcgptSavedOk = true;
@@ -884,6 +901,7 @@ export class OpenClawApp extends LitElement {
     this.pmosConnectorDraftsInitialized = false;
     hydratePmosConnectorDraftsFromConfig(this);
     await loadPmosModelWorkspaceState(this);
+    this.syncPmosModelDraftRef();
     await loadPmosConnectorsStatus(this);
     await loadPmosN8nCredentials(this);
   }
@@ -939,20 +957,115 @@ export class OpenClawApp extends LitElement {
     }
   }
 
+  private syncPmosModelDraftRef() {
+    const modelId = this.pmosModelId.trim();
+    if (!modelId) {
+      this.pmosModelRefDraft = "";
+      return;
+    }
+    this.pmosModelRefDraft = `${this.pmosModelProvider}/${modelId}`;
+  }
+
   handlePmosModelProviderChange(next: PmosModelProvider) {
     setPmosModelProvider(this, next);
+    this.syncPmosModelDraftRef();
+  }
+
+  handlePmosModelRefDraftChange(next: string) {
+    const normalized = next.trim();
+    this.pmosModelRefDraft = normalized;
+    this.pmosModelError = null;
+    const slash = normalized.indexOf("/");
+    if (slash < 1) {
+      return;
+    }
+    const provider = normalized.slice(0, slash).trim().toLowerCase();
+    const modelId = normalized.slice(slash + 1).trim();
+    if (!modelId) {
+      return;
+    }
+    if (
+      provider === "openai" ||
+      provider === "anthropic" ||
+      provider === "google" ||
+      provider === "zai" ||
+      provider === "openrouter" ||
+      provider === "kilo" ||
+      provider === "moonshot" ||
+      provider === "nvidia" ||
+      provider === "custom"
+    ) {
+      this.pmosModelProvider = provider as PmosModelProvider;
+    }
+    this.pmosModelId = modelId;
   }
 
   async handlePmosModelSave() {
-    await savePmosModelConfig(this);
+    const ref = this.pmosModelRefDraft.trim();
+    if (ref) {
+      await upsertPmosModelFromRef(this, {
+        modelRef: ref,
+        alias: this.pmosModelAlias,
+        apiKey: this.pmosModelApiKeyDraft,
+        activate: true,
+      });
+    } else {
+      await savePmosModelConfig(this);
+    }
     await loadPmosModelWorkspaceState(this);
+    this.syncPmosModelDraftRef();
     this.pmosModelSavedOk = true;
     setTimeout(() => { this.pmosModelSavedOk = false; }, 2500);
+  }
+
+  async handlePmosModelSaveWithoutActivate() {
+    const ref = this.pmosModelRefDraft.trim();
+    if (!ref) {
+      this.pmosModelError = "Select or enter a model first.";
+      return;
+    }
+    await upsertPmosModelFromRef(this, {
+      modelRef: ref,
+      alias: this.pmosModelAlias,
+      apiKey: this.pmosModelApiKeyDraft,
+      activate: false,
+    });
+    await loadPmosModelWorkspaceState(this);
+    this.syncPmosModelDraftRef();
+    this.pmosModelSavedOk = true;
+    setTimeout(() => { this.pmosModelSavedOk = false; }, 2500);
+  }
+
+  async handlePmosModelActivate(modelRef: string) {
+    await activatePmosModel(this, modelRef);
+    this.syncPmosModelDraftRef();
+  }
+
+  async handlePmosModelDeactivate(modelRef: string) {
+    await deactivatePmosModel(this, modelRef);
+    this.syncPmosModelDraftRef();
+  }
+
+  async handlePmosModelDelete(modelRef: string) {
+    await deletePmosModel(this, modelRef);
+    this.syncPmosModelDraftRef();
   }
 
   async handlePmosModelClearKey() {
     await clearPmosModelApiKey(this);
     await loadPmosModelWorkspaceState(this);
+    this.syncPmosModelDraftRef();
+  }
+
+  async handlePmosModelClearKeyForRef(modelRef: string) {
+    await clearPmosModelApiKeyForRef(this, modelRef);
+    await loadPmosModelWorkspaceState(this);
+    this.syncPmosModelDraftRef();
+  }
+
+  async handlePmosAssignAgentModel(agentId: string, modelRef: string | null) {
+    await assignPmosAgentModel(this, { agentId, modelRef });
+    this.syncPmosModelDraftRef();
   }
 
   async handlePmosApPiecesLoad() {
@@ -1028,15 +1141,19 @@ export class OpenClawApp extends LitElement {
   }
 
   async handlePmosFlowBuilderGenerate() {
-    await generatePmosFlowBuilderPlan(this);
+    await generatePmosFlowBuilderPlan(
+      this as unknown as Parameters<typeof generatePmosFlowBuilderPlan>[0],
+    );
   }
 
   async handlePmosFlowBuilderCommit() {
-    await commitPmosFlowBuilderPlan(this);
+    await commitPmosFlowBuilderPlan(
+      this as unknown as Parameters<typeof commitPmosFlowBuilderPlan>[0],
+    );
   }
 
   handlePmosFlowBuilderReset() {
-    resetPmosFlowBuilder(this);
+    resetPmosFlowBuilder(this as unknown as Parameters<typeof resetPmosFlowBuilder>[0]);
   }
 
   async handleWorkflowChatSend() {
@@ -1080,12 +1197,12 @@ export class OpenClawApp extends LitElement {
           }) as { success: boolean; workflowId?: string; message?: string };
 
           if (created.success && created.workflowId) {
-            const successMsg = `✓ Workflow created! Open it in the n8n editor to configure credentials and test it. (ID: ${String(created.workflowId).slice(0, 8)}…)`;
+            const successMsg = `Workflow created. Open it in n8n editor to configure credentials and test it. (ID: ${String(created.workflowId).slice(0, 8)}...)`;
             this.workflowChatMessages = [...this.workflowChatMessages, { role: "assistant", content: successMsg }];
             void this.handlePmosApFlowsLoad();
           }
         } catch {
-          // Non-fatal — user can create manually
+          // Non-fatal fallback: user can still create manually.
         }
       }
     } catch (err) {
@@ -1115,15 +1232,20 @@ export class OpenClawApp extends LitElement {
   }
 
   async handlePmosCommandPlan() {
-    await planPmosCommand(this);
+    await planPmosCommand(this as unknown as Parameters<typeof planPmosCommand>[0]);
   }
 
   async handlePmosCommandExecute() {
-    await executePmosCommandPlan(this);
+    await executePmosCommandPlan(
+      this as unknown as Parameters<typeof executePmosCommandPlan>[0],
+    );
   }
 
   async handlePmosCommandApprove(approvalId: string) {
-    await approvePmosCommandStep(this, approvalId);
+    await approvePmosCommandStep(
+      this as unknown as Parameters<typeof approvePmosCommandStep>[0],
+      approvalId,
+    );
   }
 
   handlePmosCommandClearHistory() {
@@ -1141,30 +1263,6 @@ export class OpenClawApp extends LitElement {
     messageOverride?: string,
     opts?: Parameters<typeof handleSendChatInternal>[2],
   ) {
-    const message = (messageOverride ?? this.chatMessage ?? "").trim();
-    
-    // Detect workflow creation intent
-    const workflowKeywords = [
-      "create workflow", "make a workflow", "build workflow", "new workflow",
-      "create automation", "make automation", "build automation", "new automation",
-      "create a flow", "make a flow", "build a flow", "new flow",
-      "set up workflow", "setup workflow", "automate this", "workflow that",
-      "n8n workflow", "create an n8n", "build an n8n"
-    ];
-    const isWorkflowIntent = workflowKeywords.some(kw => 
-      message.toLowerCase().includes(kw));
-    
-    if (isWorkflowIntent) {
-      // Route to workflow assistant
-      this.workflowChatDraft = message;
-      this.workflowChatMessages = []; // Start fresh
-      await this.handleWorkflowChatSend();
-      // Switch to automations tab to show the result
-      this.setTab("automations");
-      return;
-    }
-    
-    // Regular chat
     await handleSendChatInternal(
       this as unknown as Parameters<typeof handleSendChatInternal>[0],
       messageOverride,
@@ -1337,3 +1435,4 @@ export class OpenClawApp extends LitElement {
     return renderApp(this as unknown as AppViewState);
   }
 }
+

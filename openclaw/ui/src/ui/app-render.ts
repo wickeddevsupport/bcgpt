@@ -79,7 +79,7 @@ import { renderAdmin } from "./views/admin.ts";
 import { renderAutomations } from "./views/automations.ts";
 import { renderDashboard } from "./views/dashboard.ts";
 import { renderChannels } from "./views/channels.ts";
-import { renderChat } from "./views/chat.ts";
+import { renderChat, type ChatProps } from "./views/chat.ts";
 import { renderCommandCenter } from "./views/command-center.ts";
 import { renderConfig } from "./views/config.ts";
 import { renderConnections } from "./views/connections.ts";
@@ -328,6 +328,7 @@ export function renderApp(state: AppViewState) {
   const chatSessionParsed = parseAgentSessionKey(state.sessionKey);
   const agentId = chatSessionParsed?.agentId ?? null;
   const agent = agentId ? (agentList.find((entry) => entry.id === agentId) ?? null) : null;
+  const selectedAgentIdentity = agentId ? state.agentIdentityById[agentId] : undefined;
   const workflowsQuery = (state.apFlowsQuery ?? "").trim().toLowerCase();
   const workflowsFiltered = workflowsQuery
     ? (state.apFlows ?? []).filter((flow) =>
@@ -345,8 +346,8 @@ export function renderApp(state: AppViewState) {
     state.setTab("chat");
   }
 
-  // Build chatProps for inline chat panels (dashboard, automations, etc.)
-  const chatProps = {
+  // Build shared chat props for all chat surfaces (chat tab + inline panels).
+  const chatProps: ChatProps = {
     sessionKey: state.sessionKey,
     onSessionKeyChange: (next: string) => {
       state.sessionKey = next;
@@ -371,6 +372,7 @@ export function renderApp(state: AppViewState) {
     showThinking,
     loading: state.chatLoading,
     sending: state.chatSending,
+    canAbort: Boolean(state.chatRunId),
     compactionStatus: state.compactionStatus,
     assistantAvatarUrl: chatAvatarUrl,
     messages: state.chatMessages,
@@ -385,37 +387,51 @@ export function renderApp(state: AppViewState) {
     error: state.lastError,
     sessions: state.sessionsResult,
     focusMode: chatFocus,
-    sidebarOpen: state.chatSidebarOpen,
-    sidebarContent: state.chatSidebarContent,
-    sidebarError: state.chatSidebarError,
+    onRefresh: () => {
+      state.resetToolStream();
+      return Promise.all([loadChatHistory(state), refreshChatAvatar(state)]);
+    },
+    onToggleFocusMode: () => {
+      if (state.onboarding) {
+        return;
+      }
+      state.applySettings({
+        ...state.settings,
+        chatFocusMode: !state.settings.chatFocusMode,
+      });
+    },
+    onChatScroll: (event) => state.handleChatScroll(event),
+    onDraftChange: (next: string) => (state.chatMessage = next),
+    attachments: state.chatAttachments,
+    onAttachmentsChange: (next) => (state.chatAttachments = next),
+    onSend: () => void state.handleSendChat(),
+    onCreateWorkflow: () => state.handleChatCreateWorkflow(),
+    createWorkflowBusy: state.chatCreateWorkflowBusy,
+    onAbort: () => void state.handleAbortChat(),
+    onQueueRemove: (id) => state.removeQueuedMessage(id),
+    onNewSession: () => state.handleSendChat("/new", { restoreDraft: true }),
+    showNewMessages: state.chatNewMessagesBelow && !state.chatManualRefreshInFlight,
+    onScrollToBottom: () => state.scrollToBottom(),
+    sidebarOpen: state.sidebarOpen,
+    sidebarContent: state.sidebarContent,
+    sidebarError: state.sidebarError,
     splitRatio: state.splitRatio,
+    onOpenSidebar: (content: string) => state.handleOpenSidebar(content),
+    onCloseSidebar: () => state.handleCloseSidebar(),
+    onSplitRatioChange: (ratio: number) => state.handleSplitRatioChange(ratio),
     assistantName: state.assistantName,
     assistantAvatar: state.assistantAvatar,
     agentId: agentId,
-    agentName: agent?.identity?.name ?? null,
-    agentEmoji: agent?.identity?.avatar ?? null,
-    attachments: state.chatAttachments,
-    onAttachmentsChange: (attachments: unknown[]) => (state.chatAttachments = attachments as typeof state.chatAttachments),
-    onRefresh: () => void loadChatHistory(state),
-    onToggleFocusMode: () => state.applySettings({ ...state.settings, chatFocusMode: !state.settings.chatFocusMode }),
-    onDraftChange: (next: string) => (state.chatMessage = next),
-    onSend: () => void state.handleSendChat(),
-    onAbort: () => void state.handleAbortChat(),
-    onNewSession: () => {
-      state.sessionKey = "";
-      state.chatMessage = "";
-      state.chatAttachments = [];
-      state.chatMessages = [];
-      state.chatToolMessages = [];
-      state.chatStream = null;
-      state.chatStreamStartedAt = null;
-      state.chatRunId = null;
-      state.chatQueue = [];
-      state.resetToolStream();
-      state.resetChatScroll();
-      void loadChatHistory(state);
-    },
-    onClearError: () => (state.lastError = null),
+    agentName: agent?.name ?? agent?.identity?.name ?? selectedAgentIdentity?.name ?? null,
+    agentEmoji: agent?.identity?.emoji ?? selectedAgentIdentity?.emoji ?? null,
+    agentTheme: agent?.identity?.theme ?? null,
+    onViewMemory: agentId
+      ? () => {
+          state.agentsSelectedId = agentId;
+          state.agentsPanel = "files";
+          state.setTab("agents");
+        }
+      : undefined,
   };
 
   return html`
@@ -613,7 +629,7 @@ export function renderApp(state: AppViewState) {
                     loadConfig(state),
                     state.handlePmosRefreshConnectors(),
                     loadAgents(state),
-                    loadWorkflowRuns(state),
+                    loadWorkflowRuns(state as unknown as Parameters<typeof loadWorkflowRuns>[0]),
                   ]).then(() => undefined),
                 onNavigateTab: (tab) => state.setTab(tab as Tab),
                 onClearTrace: () => state.handlePmosTraceClear(),
@@ -727,7 +743,10 @@ export function renderApp(state: AppViewState) {
                       runs: state.apRuns ?? [],
                       runsLoading: state.apRunsLoading,
                       runsError: state.apRunsError,
-                      onLoadRuns: () => void loadWorkflowRuns(state),
+                      onLoadRuns: () =>
+                        void loadWorkflowRuns(
+                          state as unknown as Parameters<typeof loadWorkflowRuns>[0],
+                        ),
                       templateDeploying: state.apFlowMutating,
                       templateDeployError: state.apFlowMutateError ?? null,
                       templateDeployedOk: state.apFlowTemplateDeployedOk ?? false,
@@ -775,16 +794,18 @@ export function renderApp(state: AppViewState) {
                 modelSaving: state.pmosModelSaving,
                 modelConfigured: state.pmosModelConfigured,
                 modelError: state.pmosModelError,
+                modelRefDraft: state.pmosModelRefDraft,
+                modelRows: state.pmosModelRows,
+                modelCatalogLoading: state.pmosModelCatalogLoading,
+                modelCatalogError: state.pmosModelCatalogError,
+                modelOptions: state.availableModels,
+                agentModelAssignments: state.pmosAgentModelAssignments,
                 onBcgptUrlChange: (next) => (state.pmosBcgptUrl = next),
                 onBcgptApiKeyDraftChange: (next) => (state.pmosBcgptApiKeyDraft = next),
                 onSave: () => state.handlePmosIntegrationsSave(),
                 onClearBcgptKey: () => state.handlePmosIntegrationsClearBcgptKey(),
                 onRefreshConnectors: () => state.handlePmosRefreshConnectors(),
-                onModelProviderChange: (next) => state.handlePmosModelProviderChange(next),
-                onModelIdChange: (next) => {
-                  state.pmosModelId = next;
-                  state.pmosModelError = null;
-                },
+                onModelRefDraftChange: (next) => state.handlePmosModelRefDraftChange(next),
                 onModelAliasChange: (next) => {
                   state.pmosModelAlias = next;
                   state.pmosModelError = null;
@@ -794,21 +815,28 @@ export function renderApp(state: AppViewState) {
                   state.pmosModelError = null;
                 },
                 onModelSave: () => state.handlePmosModelSave(),
+                onModelSaveWithoutActivate: () => state.handlePmosModelSaveWithoutActivate(),
                 onModelClearKey: () => state.handlePmosModelClearKey(),
+                onModelClearKeyForRef: (ref) => state.handlePmosModelClearKeyForRef(ref),
+                onModelActivate: (ref) => state.handlePmosModelActivate(ref),
+                onModelDeactivate: (ref) => state.handlePmosModelDeactivate(ref),
+                onModelDelete: (ref) => state.handlePmosModelDelete(ref),
+                onAssignAgentModel: (agentId, ref) => state.handlePmosAssignAgentModel(agentId, ref),
                 onOpenAutomations: () => state.setTab("automations"),
                 modelSavedOk: state.pmosModelSavedOk,
                 bcgptSavedOk: state.pmosBcgptSavedOk,
                 opsProvisioned: Boolean(state.pmosOpsProvisioningResult?.apiKey) || state.pmosConnectorsStatus?.ops?.reachable === true,
                 opsProjectId: state.pmosOpsProvisioningResult?.projectId ?? null,
+                opsUiHref: `${state.basePath ?? ""}/ops-ui/credentials`,
                 basecampSetupPending: state.pmosBasecampSetupPending,
                 basecampSetupOk: state.pmosBasecampSetupOk,
                 basecampSetupError: state.pmosBasecampSetupError,
                 onSetupBasecamp: () => void state.handlePmosSetupBasecampInN8n(),
                 // n8n Credentials
-                n8nCredentials: state.pmosN8nCredentials,
-                n8nCredentialsLoading: state.pmosN8nCredentialsLoading,
-                n8nCredentialsError: state.pmosN8nCredentialsError,
-                onRefreshN8nCredentials: () => void loadPmosN8nCredentials(state),
+                n8nCredentials: state.pmosRealCredentials ?? undefined,
+                n8nCredentialsLoading: state.pmosRealCredentialsLoading,
+                n8nCredentialsError: state.pmosRealCredentialsError,
+                onRefreshN8nCredentials: () => void state.handleLoadRealCredentials(),
               })
             : nothing
         }
@@ -1846,96 +1874,7 @@ export function renderApp(state: AppViewState) {
             : nothing
         }
 
-        ${
-          state.tab === "chat"
-            ? renderChat({
-                sessionKey: state.sessionKey,
-                onSessionKeyChange: (next) => {
-                  state.sessionKey = next;
-                  state.chatMessage = "";
-                  state.chatAttachments = [];
-                  state.chatStream = null;
-                  state.chatStreamStartedAt = null;
-                  state.chatRunId = null;
-                  state.chatQueue = [];
-                  state.resetToolStream();
-                  state.resetChatScroll();
-                  state.applySettings({
-                    ...state.settings,
-                    sessionKey: next,
-                    lastActiveSessionKey: next,
-                  });
-                  void state.loadAssistantIdentity();
-                  void loadChatHistory(state);
-                  void refreshChatAvatar(state);
-                },
-                thinkingLevel: state.chatThinkingLevel,
-                showThinking,
-                loading: state.chatLoading,
-                sending: state.chatSending,
-                compactionStatus: state.compactionStatus,
-                assistantAvatarUrl: chatAvatarUrl,
-                messages: state.chatMessages,
-                toolMessages: state.chatToolMessages,
-                stream: state.chatStream,
-                streamStartedAt: state.chatStreamStartedAt,
-                draft: state.chatMessage,
-                queue: state.chatQueue,
-                connected: state.connected,
-                canSend: state.connected,
-                disabledReason: chatDisabledReason,
-                error: state.lastError,
-                sessions: state.sessionsResult,
-                focusMode: chatFocus,
-                onRefresh: () => {
-                  state.resetToolStream();
-                  return Promise.all([loadChatHistory(state), refreshChatAvatar(state)]);
-                },
-                onToggleFocusMode: () => {
-                  if (state.onboarding) {
-                    return;
-                  }
-                  state.applySettings({
-                    ...state.settings,
-                    chatFocusMode: !state.settings.chatFocusMode,
-                  });
-                },
-                onChatScroll: (event) => state.handleChatScroll(event),
-                onDraftChange: (next) => (state.chatMessage = next),
-                attachments: state.chatAttachments,
-                onAttachmentsChange: (next) => (state.chatAttachments = next),
-                onSend: () => state.handleSendChat(),
-                onCreateWorkflow: () => state.handleChatCreateWorkflow(),
-                createWorkflowBusy: state.chatCreateWorkflowBusy,
-                canAbort: Boolean(state.chatRunId),
-                onAbort: () => void state.handleAbortChat(),
-                onQueueRemove: (id) => state.removeQueuedMessage(id),
-                onNewSession: () => state.handleSendChat("/new", { restoreDraft: true }),
-                showNewMessages: state.chatNewMessagesBelow && !state.chatManualRefreshInFlight,
-                onScrollToBottom: () => state.scrollToBottom(),
-                // Sidebar props for tool output viewing
-                sidebarOpen: state.sidebarOpen,
-                sidebarContent: state.sidebarContent,
-                sidebarError: state.sidebarError,
-                splitRatio: state.splitRatio,
-                onOpenSidebar: (content: string) => state.handleOpenSidebar(content),
-                onCloseSidebar: () => state.handleCloseSidebar(),
-                onSplitRatioChange: (ratio: number) => state.handleSplitRatioChange(ratio),
-                assistantName: state.assistantName,
-                assistantAvatar: state.assistantAvatar,
-                // Agent context for agent-specific chat
-                agentId: agentId,
-                agentName: agent?.name ?? agent?.identity?.name ?? state.agentIdentityById[agentId]?.name ?? null,
-                agentEmoji: agent?.identity?.emoji ?? state.agentIdentityById[agentId]?.emoji ?? null,
-                agentTheme: agent?.identity?.theme ?? state.agentIdentityById[agentId]?.theme ?? null,
-                onViewMemory: agentId ? () => {
-                  state.agentsSelectedId = agentId;
-                  state.agentsPanel = "files";
-                  state.setTab("agents");
-                } : undefined,
-              })
-            : nothing
-        }
+        ${state.tab === "chat" ? renderChat(chatProps) : nothing}
 
         ${
           state.tab === "config" && canAccessTab(state, "config")
