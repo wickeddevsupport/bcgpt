@@ -77,13 +77,31 @@ async function run() {
     report.agentsNavOk = true;
     await page.waitForTimeout(1500);
 
-    const openCreate = page.getByRole("button", { name: /^Create Agent$/i }).first();
-    await openCreate.waitFor({ state: "visible", timeout: 30000 });
-    await openCreate.click();
-    report.createModalOpened = true;
+    let openCreate = page.getByRole("button", { name: /^\+?\s*New$/i }).first();
+    if (!(await isVisible(openCreate, 1500))) {
+      const manageAgents = page.getByRole("button", { name: /^Manage Agents$/i }).first();
+      if (await isVisible(manageAgents, 1500)) {
+        await manageAgents.click();
+        await page.waitForTimeout(1600);
+      }
+    }
+
+    openCreate = page.getByRole("button", { name: /^\+?\s*New$/i }).first();
+    if (!(await isVisible(openCreate, 1500))) {
+      openCreate = page.getByRole("button", { name: /^Create Agent$/i }).first();
+    }
+    if (!(await isVisible(openCreate, 1500))) {
+      const firstAgent = page.getByRole("button", { name: /Create your first agent/i }).first();
+      if (await isVisible(firstAgent, 1500)) {
+        await firstAgent.click();
+      }
+    } else {
+      await openCreate.click();
+    }
 
     const modal = page.locator('[role="dialog"]', { hasText: "Create Agent" }).first();
     await modal.waitFor({ state: "visible", timeout: 15000 });
+    report.createModalOpened = true;
 
     await modal.locator('input[placeholder="e.g. Sales Agent"]').fill(agentName);
     await modal.getByRole("button", { name: /^Next$/i }).click();

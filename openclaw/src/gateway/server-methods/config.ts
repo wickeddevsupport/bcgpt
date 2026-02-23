@@ -135,6 +135,31 @@ export function mergeWorkspaceScopedAgents(
   return { ok: true, config: mergedConfig };
 }
 
+function stripWorkspaceIdsForValidation(config: Record<string, unknown>): Record<string, unknown> {
+  const agentsNode = isJsonRecord(config.agents) ? config.agents : null;
+  if (!agentsNode) {
+    return config;
+  }
+  const list = toJsonRecordArray(agentsNode.list);
+  if (list.length === 0) {
+    return config;
+  }
+  const strippedList = list.map((entry) => {
+    if (!Object.prototype.hasOwnProperty.call(entry, "workspaceId")) {
+      return entry;
+    }
+    const { workspaceId: _workspaceId, ...rest } = entry;
+    return rest;
+  });
+  return {
+    ...config,
+    agents: {
+      ...agentsNode,
+      list: strippedList,
+    },
+  };
+}
+
 function resolveBaseHash(params: unknown): string | null {
   const raw = (params as { baseHash?: unknown })?.baseHash;
   if (typeof raw !== "string") {
@@ -310,7 +335,9 @@ export const configHandlers: GatewayRequestHandlers = {
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, merged.error));
         return;
       }
-      const validatedScoped = validateConfigObjectWithPlugins(merged.config);
+      const validatedScoped = validateConfigObjectWithPlugins(
+        stripWorkspaceIdsForValidation(merged.config),
+      );
       if (!validatedScoped.ok) {
         respond(
           false,
@@ -594,7 +621,9 @@ export const configHandlers: GatewayRequestHandlers = {
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, merged.error));
         return;
       }
-      const validatedScoped = validateConfigObjectWithPlugins(merged.config);
+      const validatedScoped = validateConfigObjectWithPlugins(
+        stripWorkspaceIdsForValidation(merged.config),
+      );
       if (!validatedScoped.ok) {
         respond(
           false,
