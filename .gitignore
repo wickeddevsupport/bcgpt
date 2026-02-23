@@ -30,3 +30,14 @@ docs/pmos/vision/temp log
 .claude/**
 **/.claude/**
 **/worktrees/**
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+/playwright-*.png
+/playwright-*.json
+/pw-summary-*.png
+/nul
