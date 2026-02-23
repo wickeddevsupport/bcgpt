@@ -442,6 +442,8 @@ export const AgentEntrySchema = z
     id: z.string(),
     default: z.boolean().optional(),
     name: z.string().optional(),
+    // PMOS multi-tenant isolation marker.
+    workspaceId: z.string().optional(),
     workspace: z.string().optional(),
     agentDir: z.string().optional(),
     model: AgentModelSchema.optional(),
