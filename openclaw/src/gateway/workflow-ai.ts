@@ -85,13 +85,27 @@ function resolveOpenAiCompatibleBaseUrl(provider: string, cfg: OpenClawConfig): 
   }
 }
 
+function normalizeProviderAlias(provider: string): string {
+  const normalized = provider.trim().toLowerCase();
+  switch (normalized) {
+    case "open-router":
+      return "openrouter";
+    case "nvidia-nim":
+      return "nvidia";
+    case "z-ai":
+      return "zai";
+    default:
+      return normalized;
+  }
+}
+
 /**
  * Parse "provider/modelId" format stored in agents.defaults.model.primary
  */
 function parsePrimaryRef(ref: unknown): { provider: string; modelId: string } | null {
   if (typeof ref !== "string" || !ref.includes("/")) return null;
   const slash = ref.indexOf("/");
-  const provider = ref.slice(0, slash).trim();
+  const provider = normalizeProviderAlias(ref.slice(0, slash).trim());
   const modelId = ref.slice(slash + 1).trim().replace(/^\/+/, "");
   if (!provider || !modelId) return null;
   return { provider, modelId };
@@ -112,6 +126,38 @@ function resolveSavedModelRefsFromConfig(cfg: OpenClawConfig): unknown[] {
     return [];
   }
   return Object.keys(raw as Record<string, unknown>);
+}
+
+function resolveProviderModelRefsFromConfig(cfg: OpenClawConfig): string[] {
+  const providers = cfg?.models?.providers;
+  if (!providers || typeof providers !== "object" || Array.isArray(providers)) {
+    return [];
+  }
+
+  const refs: string[] = [];
+  for (const [providerKey, providerValue] of Object.entries(providers as Record<string, unknown>)) {
+    if (!providerValue || typeof providerValue !== "object" || Array.isArray(providerValue)) {
+      continue;
+    }
+    const provider = normalizeProviderAlias(providerKey);
+    const models = (providerValue as { models?: unknown }).models;
+    if (!Array.isArray(models)) {
+      continue;
+    }
+    for (const model of models) {
+      if (!model || typeof model !== "object" || Array.isArray(model)) {
+        continue;
+      }
+      const id = typeof (model as { id?: unknown }).id === "string"
+        ? (model as { id: string }).id.trim()
+        : "";
+      if (!id) {
+        continue;
+      }
+      refs.push(`${provider}/${id}`);
+    }
+  }
+  return refs;
 }
 
 function isTemplatedSecretValue(value: string): boolean {
@@ -171,6 +217,9 @@ function resolveConfiguredModelRefs(
     pushRef(fallback);
   }
   for (const modelRef of resolveSavedModelRefsFromConfig(cfg)) {
+    pushRef(modelRef);
+  }
+  for (const modelRef of resolveProviderModelRefsFromConfig(cfg)) {
     pushRef(modelRef);
   }
   return refs;
