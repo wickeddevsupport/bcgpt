@@ -92,7 +92,7 @@ function parsePrimaryRef(ref: unknown): { provider: string; modelId: string } | 
   if (typeof ref !== "string" || !ref.includes("/")) return null;
   const slash = ref.indexOf("/");
   const provider = ref.slice(0, slash).trim();
-  const modelId = ref.slice(slash + 1).trim();
+  const modelId = ref.slice(slash + 1).trim().replace(/^\/+/, "");
   if (!provider || !modelId) return null;
   return { provider, modelId };
 }
@@ -104,6 +104,14 @@ function resolvePrimaryRefFromConfig(cfg: OpenClawConfig): unknown {
 function resolveFallbackRefsFromConfig(cfg: OpenClawConfig): unknown[] {
   const raw = cfg?.agents?.defaults?.model?.fallbacks;
   return Array.isArray(raw) ? raw : [];
+}
+
+function resolveSavedModelRefsFromConfig(cfg: OpenClawConfig): unknown[] {
+  const raw = cfg?.agents?.defaults?.models;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return [];
+  }
+  return Object.keys(raw as Record<string, unknown>);
 }
 
 function isTemplatedSecretValue(value: string): boolean {
@@ -161,6 +169,9 @@ function resolveConfiguredModelRefs(
   pushRef(resolvePrimaryRefFromConfig(cfg));
   for (const fallback of resolveFallbackRefsFromConfig(cfg)) {
     pushRef(fallback);
+  }
+  for (const modelRef of resolveSavedModelRefsFromConfig(cfg)) {
+    pushRef(modelRef);
   }
   return refs;
 }
