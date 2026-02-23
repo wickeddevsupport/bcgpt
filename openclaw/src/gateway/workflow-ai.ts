@@ -21,6 +21,9 @@ interface ModelConfig {
   apiKey: string;
 }
 
+const WORKFLOW_MODEL_CANDIDATE_LIMIT = 3;
+const WORKFLOW_MODEL_CALL_TIMEOUT_MS = 25_000;
+
 function appendV1(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/v1`;
 }
@@ -245,7 +248,38 @@ async function resolveModelConfigs(
       apiKey,
     });
   }
-  return resolved;
+  if (resolved.length <= 1) {
+    return resolved.slice(0, WORKFLOW_MODEL_CANDIDATE_LIMIT);
+  }
+
+  const primary = resolved[0];
+  const remaining = resolved.slice(1);
+  const ordered: ModelConfig[] = [primary];
+  const seenProvider = new Set<string>([primary.provider]);
+
+  // Prefer trying different providers before retrying multiple models from one provider.
+  for (const candidate of remaining) {
+    if (seenProvider.has(candidate.provider)) {
+      continue;
+    }
+    ordered.push(candidate);
+    seenProvider.add(candidate.provider);
+    if (ordered.length >= WORKFLOW_MODEL_CANDIDATE_LIMIT) {
+      return ordered;
+    }
+  }
+
+  for (const candidate of remaining) {
+    if (ordered.includes(candidate)) {
+      continue;
+    }
+    ordered.push(candidate);
+    if (ordered.length >= WORKFLOW_MODEL_CANDIDATE_LIMIT) {
+      return ordered;
+    }
+  }
+
+  return ordered.slice(0, WORKFLOW_MODEL_CANDIDATE_LIMIT);
 }
 
 async function callModelWithConfig(
@@ -287,14 +321,25 @@ async function callModelWithConfig(
           targetBaseUrl: string,
           targetApiKey: string,
         ): Promise<{ ok: boolean; text?: string; status?: number; error?: string }> => {
-          const res = await fetch(`${targetBaseUrl}/chat/completions`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${targetApiKey}`,
-            },
-            body: JSON.stringify(openAiBody),
-          });
+          let res: Response;
+          try {
+            res = await fetch(`${targetBaseUrl}/chat/completions`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${targetApiKey}`,
+              },
+              body: JSON.stringify(openAiBody),
+              signal: AbortSignal.timeout(WORKFLOW_MODEL_CALL_TIMEOUT_MS),
+            });
+          } catch (err) {
+            const errorText = err instanceof Error ? err.message : String(err);
+            return {
+              ok: false,
+              status: 408,
+              error: `${targetProvider} API timeout/error: ${errorText.slice(0, 300)}`,
+            };
+          }
           if (!res.ok) {
             const text = await res.text().catch(() => "");
             return {
@@ -347,15 +392,22 @@ async function callModelWithConfig(
           temperature: 0.4,
         };
 
-        const res = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": apiKey,
-            "anthropic-version": "2023-06-01",
-          },
-          body: JSON.stringify(body),
-        });
+        let res: Response;
+        try {
+          res = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": apiKey,
+              "anthropic-version": "2023-06-01",
+            },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(WORKFLOW_MODEL_CALL_TIMEOUT_MS),
+          });
+        } catch (err) {
+          const errorText = err instanceof Error ? err.message : String(err);
+          return { ok: false, error: `Anthropic API timeout/error: ${errorText.slice(0, 300)}` };
+        }
         if (!res.ok) {
           const text = await res.text().catch(() => "");
           return { ok: false, error: `Anthropic API error ${res.status}: ${text.slice(0, 300)}` };
@@ -386,11 +438,18 @@ async function callModelWithConfig(
         };
 
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`;
-        const res = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
+        let res: Response;
+        try {
+          res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(WORKFLOW_MODEL_CALL_TIMEOUT_MS),
+          });
+        } catch (err) {
+          const errorText = err instanceof Error ? err.message : String(err);
+          return { ok: false, error: `Google API timeout/error: ${errorText.slice(0, 300)}` };
+        }
         if (!res.ok) {
           const text = await res.text().catch(() => "");
           return { ok: false, error: `Google API error ${res.status}: ${text.slice(0, 300)}` };
