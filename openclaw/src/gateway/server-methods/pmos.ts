@@ -1118,6 +1118,8 @@ export const pmosHandlers: GatewayRequestHandlers = {
       const messages = rawMessages
         .filter(m => m.role === "user" || m.role === "assistant")
         .map(m => ({ role: m.role as "user" | "assistant", content: String(m.content) }));
+      const latestUserPrompt =
+        [...messages].reverse().find((entry) => entry.role === "user")?.content ?? "";
 
       const {
         callWorkspaceModel,
@@ -1177,13 +1179,174 @@ export const pmosHandlers: GatewayRequestHandlers = {
         .filter((part) => part && part.trim().length > 0)
         .join("\n\n");
 
+      const buildDeterministicWorkflowFromPrompt = (promptRaw: string) => {
+        const prompt = String(promptRaw ?? "").trim();
+        if (!prompt) {
+          return null;
+        }
+        const lower = prompt.toLowerCase();
+        if (!/(workflow|webhook|automation|n8n|basecamp)/.test(lower)) {
+          return null;
+        }
+
+        const now = Date.now();
+        const nameMatch = prompt.match(/(?:exact\s+name|name)\s+([A-Za-z0-9._:-]+)/i);
+        const workflowName = (nameMatch?.[1] ?? `Workflow_${now}`).trim();
+
+        const pathMatch = prompt.match(
+          /(?:webhook\s+(?:trigger\s+)?path|trigger\s+path|path)\s+([A-Za-z0-9/_-]+)/i,
+        );
+        const webhookPathRaw = (pathMatch?.[1] ?? `wf-${now}`).trim();
+        const webhookPath = webhookPathRaw.replace(/[^A-Za-z0-9/_-]/g, "") || `wf-${now}`;
+
+        let responseBody = JSON.stringify({ ok: true });
+        const jsonMatch = prompt.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            responseBody = JSON.stringify(JSON.parse(jsonMatch[0]));
+          } catch {
+            // Keep default response body if user-provided snippet isn't valid JSON.
+          }
+        }
+
+        const includeBasecamp = /\bbasecamp\b/.test(lower);
+        const includeIfNode = /\bif\b|\bbranch\b/.test(lower);
+
+        const nodes: Array<Record<string, unknown>> = [];
+        const connections: Record<string, unknown> = {};
+        const connect = (from: string, to: string) => {
+          connections[from] = {
+            main: [[{ node: to, type: "main", index: 0 }]],
+          };
+        };
+
+        const webhookNodeName = "Webhook Trigger";
+        nodes.push({
+          id: `wf-node-webhook-${now}`,
+          name: webhookNodeName,
+          type: "n8n-nodes-base.webhookTrigger",
+          typeVersion: 1,
+          position: [280, 280],
+          parameters: {
+            path: webhookPath,
+            httpMethod: "POST",
+            responseMode: "responseNode",
+          },
+        });
+
+        let previousNodeName = webhookNodeName;
+
+        if (includeBasecamp) {
+          const basecampNodeName = "Basecamp";
+          nodes.push({
+            id: `wf-node-basecamp-${now}`,
+            name: basecampNodeName,
+            type: "n8n-nodes-basecamp.basecamp",
+            typeVersion: 1,
+            position: [520, 280],
+            parameters: {
+              resource: "project",
+              operation: "getAll",
+            },
+          });
+          connect(previousNodeName, basecampNodeName);
+          previousNodeName = basecampNodeName;
+        }
+
+        if (includeIfNode) {
+          const ifNodeName = "If";
+          nodes.push({
+            id: `wf-node-if-${now}`,
+            name: ifNodeName,
+            type: "n8n-nodes-base.if",
+            typeVersion: 1,
+            position: [760, 280],
+            parameters: {
+              conditions: {
+                options: {
+                  caseSensitive: true,
+                  typeValidation: "strict",
+                  version: 2,
+                },
+                conditions: [
+                  {
+                    leftValue: "={{$json.ok}}",
+                    rightValue: true,
+                    operator: {
+                      type: "boolean",
+                      operation: "equal",
+                    },
+                  },
+                ],
+                combinator: "and",
+              },
+            },
+          });
+          connect(previousNodeName, ifNodeName);
+          previousNodeName = ifNodeName;
+        }
+
+        const respondNodeName = "Respond to Webhook";
+        nodes.push({
+          id: `wf-node-respond-${now}`,
+          name: respondNodeName,
+          type: "n8n-nodes-base.respondToWebhook",
+          typeVersion: 1,
+          position: [1000, 280],
+          parameters: {
+            respondWith: "json",
+            responseBody,
+          },
+        });
+
+        if (previousNodeName === "If") {
+          connections[previousNodeName] = {
+            main: [
+              [{ node: respondNodeName, type: "main", index: 0 }],
+              [],
+            ],
+          };
+        } else {
+          connect(previousNodeName, respondNodeName);
+        }
+
+        return {
+          name: workflowName,
+          nodes,
+          connections,
+        };
+      };
+
       const result = await callWorkspaceModel(workspaceId, systemPrompt, messages, {
         maxTokens: 2048,
         jsonMode: true,
       });
 
       if (!result.ok) {
-        respond(true, { ok: true, message: result.error ?? "AI model unavailable", workflow: null, providerError: true }, undefined);
+        const fallbackWorkflow = buildDeterministicWorkflowFromPrompt(latestUserPrompt);
+        if (fallbackWorkflow) {
+          respond(
+            true,
+            {
+              ok: true,
+              message:
+                "Primary workflow model is unavailable. Generated a deterministic workflow scaffold from your request.",
+              workflow: {
+                ...fallbackWorkflow,
+                nodes: autoLinkNodeCredentials(fallbackWorkflow.nodes, availableCredentials),
+              },
+              providerError: true,
+            },
+            undefined,
+          );
+          return;
+        }
+
+        respond(
+          true,
+          { ok: true, message: result.error ?? "AI model unavailable", workflow: null, providerError: true },
+          undefined,
+        );
         return;
       }
 
