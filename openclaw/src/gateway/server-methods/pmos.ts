@@ -104,6 +104,188 @@ function deepMergeJson(base: unknown, patch: unknown): unknown {
   return out;
 }
 
+type PmosProjectHealth = "at_risk" | "attention" | "on_track" | "quiet";
+
+type PmosProjectTodoItem = {
+  id: string | null;
+  title: string;
+  status: string | null;
+  dueOn: string | null;
+  projectId: string | null;
+  projectName: string | null;
+  appUrl: string | null;
+};
+
+type PmosProjectCard = {
+  id: string;
+  name: string;
+  status: string;
+  appUrl: string | null;
+  todoLists: number;
+  openTodos: number;
+  overdueTodos: number;
+  dueTodayTodos: number;
+  nextDueOn: string | null;
+  health: PmosProjectHealth;
+};
+
+function stringOrNull(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function numberStringOrNull(value: unknown): string | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return stringOrNull(value);
+}
+
+function parseProjectIdFromAppUrl(appUrl: string | null): string | null {
+  if (!appUrl) return null;
+  const bucketMatch = appUrl.match(/\/buckets\/(\d+)/i);
+  if (bucketMatch?.[1]) return bucketMatch[1];
+  const projectMatch = appUrl.match(/\/projects\/(\d+)/i);
+  if (projectMatch?.[1]) return projectMatch[1];
+  return null;
+}
+
+function normalizeBcgptToolResult(result: unknown): unknown {
+  if (!isJsonObject(result)) {
+    return result;
+  }
+  const content = result.content;
+  if (!Array.isArray(content)) {
+    return result;
+  }
+  for (const item of content) {
+    if (!isJsonObject(item)) continue;
+    const text = stringOrNull(item.text);
+    if (!text) continue;
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      // Keep scanning; some content entries are plain text.
+    }
+  }
+  return result;
+}
+
+async function callBcgptTool(params: {
+  bcgptUrl: string;
+  apiKey: string;
+  toolName: string;
+  toolArgs?: Record<string, unknown>;
+  timeoutMs?: number;
+}): Promise<{ ok: boolean; result: unknown | null; error: string | null }> {
+  const body = {
+    jsonrpc: "2.0",
+    id: `pmos-${params.toolName}-${Date.now()}`,
+    method: "tools/call",
+    params: {
+      name: params.toolName,
+      arguments: params.toolArgs ?? {},
+    },
+  };
+  const rpc = await fetchJson(`${params.bcgptUrl}/mcp`, {
+    method: "POST",
+    timeoutMs: params.timeoutMs ?? 15_000,
+    headers: {
+      "content-type": "application/json",
+      "x-bcgpt-api-key": params.apiKey,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!rpc.ok || !isJsonObject(rpc.json)) {
+    return { ok: false, result: null, error: rpc.error || `${params.toolName} request failed` };
+  }
+
+  const payload = rpc.json as Record<string, unknown>;
+  if (isJsonObject(payload.error)) {
+    const code = stringOrNull(payload.error.code);
+    const message = stringOrNull(payload.error.message);
+    return {
+      ok: false,
+      result: null,
+      error: [code, message].filter(Boolean).join(": ") || `${params.toolName} failed`,
+    };
+  }
+
+  const rawResult = payload.result ?? null;
+  return { ok: true, result: normalizeBcgptToolResult(rawResult), error: null };
+}
+
+function parseProjectList(result: unknown): Array<{ id: string; name: string; status: string; appUrl: string | null }> {
+  const listRaw = (() => {
+    if (isJsonObject(result) && Array.isArray(result.projects)) return result.projects;
+    if (Array.isArray(result)) return result;
+    return [];
+  })();
+
+  const out: Array<{ id: string; name: string; status: string; appUrl: string | null }> = [];
+  for (const item of listRaw) {
+    if (!isJsonObject(item)) continue;
+    const id = numberStringOrNull(item.id);
+    const name = stringOrNull(item.name);
+    if (!id || !name) continue;
+    out.push({
+      id,
+      name,
+      status: stringOrNull(item.status) ?? "active",
+      appUrl: stringOrNull(item.app_url) ?? stringOrNull(item.appUrl),
+    });
+  }
+  return out;
+}
+
+function parseTodoItems(
+  result: unknown,
+  key: string,
+  projectNameById: Map<string, string>,
+): PmosProjectTodoItem[] {
+  if (!isJsonObject(result) || !Array.isArray(result[key])) {
+    return [];
+  }
+  const todos = result[key];
+  const items: PmosProjectTodoItem[] = [];
+  for (const raw of todos) {
+    if (!isJsonObject(raw)) continue;
+    const title = stringOrNull(raw.title);
+    if (!title) continue;
+    const appUrl = stringOrNull(raw.app_url) ?? stringOrNull(raw.appUrl);
+    const project = isJsonObject(raw.project) ? raw.project : null;
+    const projectId =
+      numberStringOrNull(project?.id) ??
+      parseProjectIdFromAppUrl(appUrl);
+    const projectName =
+      stringOrNull(project?.name) ??
+      (projectId ? projectNameById.get(projectId) ?? null : null);
+    items.push({
+      id: numberStringOrNull(raw.id),
+      title,
+      status: stringOrNull(raw.status),
+      dueOn: stringOrNull(raw.due_on),
+      projectId,
+      projectName,
+      appUrl,
+    });
+  }
+  return items;
+}
+
+function projectHealthFromCounts(counts: {
+  openTodos: number;
+  overdueTodos: number;
+  dueTodayTodos: number;
+}): PmosProjectHealth {
+  if (counts.overdueTodos > 0) return "at_risk";
+  if (counts.dueTodayTodos > 0 || counts.openTodos >= 12) return "attention";
+  if (counts.openTodos === 0) return "quiet";
+  return "on_track";
+}
+
 export const pmosHandlers: GatewayRequestHandlers = {
   "pmos.connectors.status": async ({ respond, client }) => {
     try {
@@ -1001,6 +1183,244 @@ export const pmosHandlers: GatewayRequestHandlers = {
   },
 
   // ── Connections: Real n8n credential list ─────────────────────────
+
+  "pmos.projects.snapshot": async ({ respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const cfg = loadConfig() as unknown;
+      const allowGlobalSecrets = isSuperAdmin(client);
+
+      const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
+      const workspaceConnectors = await readWorkspaceConnectors(workspaceId);
+
+      const bcgptUrl = normalizeBaseUrl(
+        (workspaceConnectors?.bcgpt?.url as string | undefined) ??
+          readConfigString(cfg, ["pmos", "connectors", "bcgpt", "url"]) ??
+          process.env.BCGPT_URL ??
+          null,
+        "https://bcgpt.wickedlab.io",
+      );
+      const bcgptApiKey =
+        (workspaceConnectors?.bcgpt?.apiKey as string | undefined)?.trim() ??
+        (allowGlobalSecrets
+          ? readConfigString(cfg, ["pmos", "connectors", "bcgpt", "apiKey"]) ??
+            (process.env.BCGPT_API_KEY?.trim() || null)
+          : null);
+
+      const emptySnapshot = {
+        workspaceId,
+        configured: false,
+        connected: false,
+        connectorUrl: bcgptUrl,
+        identity: null,
+        totals: {
+          projectCount: 0,
+          syncedProjects: 0,
+          openTodos: 0,
+          overdueTodos: 0,
+          dueTodayTodos: 0,
+        },
+        projects: [] as PmosProjectCard[],
+        urgentTodos: [] as PmosProjectTodoItem[],
+        dueTodayTodos: [] as PmosProjectTodoItem[],
+        errors: [] as string[],
+        refreshedAtMs: Date.now(),
+      };
+
+      if (!bcgptApiKey) {
+        respond(
+          true,
+          {
+            ...emptySnapshot,
+            errors: ["BCGPT key is not configured for this workspace."],
+          },
+          undefined,
+        );
+        return;
+      }
+
+      const errors: string[] = [];
+      const start = await fetchJson(`${bcgptUrl}/action/startbcgpt`, {
+        method: "POST",
+        timeoutMs: 12_000,
+        headers: {
+          "content-type": "application/json",
+          "x-bcgpt-api-key": bcgptApiKey,
+        },
+        body: JSON.stringify({}),
+      });
+
+      const startPayload = isJsonObject(start.json) ? start.json : {};
+      if (!start.ok && start.error) {
+        errors.push(`Basecamp identity check failed: ${start.error}`);
+      }
+      const startUser = isJsonObject(startPayload.user) ? startPayload.user : null;
+      const identity = {
+        connected: startPayload.connected === true,
+        name: stringOrNull(startUser?.name),
+        email: stringOrNull(startUser?.email),
+        selectedAccountId:
+          numberStringOrNull(startPayload.selected_account_id),
+        accountsCount: Array.isArray(startPayload.accounts) ? startPayload.accounts.length : 0,
+        message: stringOrNull(startPayload.message),
+      };
+
+      const listProjectsResult = await callBcgptTool({
+        bcgptUrl,
+        apiKey: bcgptApiKey,
+        toolName: "list_projects",
+        toolArgs: {},
+      });
+      if (!listProjectsResult.ok) {
+        errors.push(`Failed to list projects: ${listProjectsResult.error ?? "unknown error"}`);
+      }
+
+      const projects = parseProjectList(listProjectsResult.result);
+      const projectNameById = new Map<string, string>();
+      for (const project of projects) {
+        projectNameById.set(project.id, project.name);
+      }
+
+      const focusProjects = projects.slice(0, 12);
+      const detailsByProjectId = new Map<string, unknown>();
+      await Promise.all(
+        focusProjects.map(async (project) => {
+          const detail = await callBcgptTool({
+            bcgptUrl,
+            apiKey: bcgptApiKey,
+            toolName: "list_todos_for_project",
+            toolArgs: { project: project.id, compact: true, preview_limit: 20 },
+            timeoutMs: 12_000,
+          });
+          if (!detail.ok) {
+            errors.push(`Failed to load todos for ${project.name}: ${detail.error ?? "unknown error"}`);
+            return;
+          }
+          detailsByProjectId.set(project.id, detail.result);
+        }),
+      );
+
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const [overdueRpc, dueTodayRpc] = await Promise.all([
+        callBcgptTool({
+          bcgptUrl,
+          apiKey: bcgptApiKey,
+          toolName: "report_todos_overdue",
+          toolArgs: {},
+          timeoutMs: 15_000,
+        }),
+        callBcgptTool({
+          bcgptUrl,
+          apiKey: bcgptApiKey,
+          toolName: "list_todos_due",
+          toolArgs: { date: todayIso, include_overdue: false },
+          timeoutMs: 15_000,
+        }),
+      ]);
+
+      if (!overdueRpc.ok) {
+        errors.push(`Failed to load overdue todos: ${overdueRpc.error ?? "unknown error"}`);
+      }
+      if (!dueTodayRpc.ok) {
+        errors.push(`Failed to load due-today todos: ${dueTodayRpc.error ?? "unknown error"}`);
+      }
+
+      const overdueTodos = parseTodoItems(overdueRpc.result, "overdue", projectNameById);
+      const dueTodayTodos = parseTodoItems(dueTodayRpc.result, "todos", projectNameById).filter(
+        (todo) => !todo.dueOn || todo.dueOn === todayIso,
+      );
+
+      const overdueByProject = new Map<string, number>();
+      for (const todo of overdueTodos) {
+        if (!todo.projectId) continue;
+        overdueByProject.set(todo.projectId, (overdueByProject.get(todo.projectId) ?? 0) + 1);
+      }
+      const dueTodayByProject = new Map<string, number>();
+      for (const todo of dueTodayTodos) {
+        if (!todo.projectId) continue;
+        dueTodayByProject.set(todo.projectId, (dueTodayByProject.get(todo.projectId) ?? 0) + 1);
+      }
+
+      const cards: PmosProjectCard[] = focusProjects.map((project) => {
+        const detail = detailsByProjectId.get(project.id);
+        const groups = isJsonObject(detail) && Array.isArray(detail.groups) ? detail.groups : [];
+        let openTodos = 0;
+        let todoLists = 0;
+        const dueDates: string[] = [];
+        for (const groupRaw of groups) {
+          if (!isJsonObject(groupRaw)) continue;
+          todoLists += 1;
+          const todosCount = typeof groupRaw.todos_count === "number" && Number.isFinite(groupRaw.todos_count)
+            ? groupRaw.todos_count
+            : 0;
+          openTodos += todosCount;
+          const preview = Array.isArray(groupRaw.todos_preview) ? groupRaw.todos_preview : [];
+          for (const todoRaw of preview) {
+            if (!isJsonObject(todoRaw)) continue;
+            const due = stringOrNull(todoRaw.due_on);
+            if (due) dueDates.push(due);
+          }
+        }
+        const nextDueOn = dueDates
+          .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date))
+          .sort((a, b) => a.localeCompare(b))[0] ?? null;
+        const overdueCount = overdueByProject.get(project.id) ?? 0;
+        const dueTodayCount = dueTodayByProject.get(project.id) ?? 0;
+        return {
+          id: project.id,
+          name: project.name,
+          status: project.status,
+          appUrl: project.appUrl,
+          todoLists,
+          openTodos,
+          overdueTodos: overdueCount,
+          dueTodayTodos: dueTodayCount,
+          nextDueOn,
+          health: projectHealthFromCounts({
+            openTodos,
+            overdueTodos: overdueCount,
+            dueTodayTodos: dueTodayCount,
+          }),
+        };
+      });
+
+      cards.sort((a, b) => {
+        if (b.overdueTodos !== a.overdueTodos) return b.overdueTodos - a.overdueTodos;
+        if (b.dueTodayTodos !== a.dueTodayTodos) return b.dueTodayTodos - a.dueTodayTodos;
+        if (b.openTodos !== a.openTodos) return b.openTodos - a.openTodos;
+        return a.name.localeCompare(b.name);
+      });
+
+      const totals = {
+        projectCount: projects.length,
+        syncedProjects: cards.length,
+        openTodos: cards.reduce((sum, card) => sum + card.openTodos, 0),
+        overdueTodos: overdueTodos.length,
+        dueTodayTodos: dueTodayTodos.length,
+      };
+
+      respond(
+        true,
+        {
+          workspaceId,
+          configured: true,
+          connected: identity.connected,
+          connectorUrl: bcgptUrl,
+          identity,
+          totals,
+          projects: cards,
+          urgentTodos: overdueTodos.slice(0, 20),
+          dueTodayTodos: dueTodayTodos.slice(0, 20),
+          errors: errors.slice(0, 20),
+          refreshedAtMs: Date.now(),
+        },
+        undefined,
+      );
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
 
   "pmos.connections.list": async ({ respond, client }) => {
     try {

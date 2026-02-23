@@ -886,21 +886,16 @@ export function renderApp(state: AppViewState) {
           state.tab === "command-center"
             ? renderCommandCenter({
                 connected: state.connected,
-                planning: state.pmosCommandPlanning,
-                executing: state.pmosCommandExecuting,
-                error: state.pmosCommandError,
-                prompt: state.pmosCommandPrompt,
-                plan: state.pmosCommandPlan,
-                pendingApprovals: state.pmosCommandPendingApprovals,
-                history: state.pmosCommandHistory,
-                onPromptChange: (next) => {
-                  state.pmosCommandPrompt = next;
-                  state.pmosCommandError = null;
+                loading: state.pmosProjectsLoading,
+                error: state.pmosProjectsError ?? state.pmosCommandError,
+                snapshot: state.pmosProjectsSnapshot,
+                chatProps,
+                onRefresh: () => state.handlePmosProjectsLoad(),
+                onOpenIntegrations: () => state.setTab("integrations"),
+                onOpenWorkflows: () => state.setTab("automations"),
+                onPrefillChat: (next) => {
+                  chatProps.onDraftChange(next);
                 },
-                onPlan: () => state.handlePmosCommandPlan(),
-                onExecute: () => state.handlePmosCommandExecute(),
-                onApprove: (approvalId) => state.handlePmosCommandApprove(approvalId),
-                onClearHistory: () => state.handlePmosCommandClearHistory(),
               })
             : nothing
         }

@@ -131,6 +131,10 @@ import {
   type PmosCommandPlanStep,
 } from "./controllers/pmos-command-center.ts";
 import {
+  loadPmosProjectsSnapshot,
+  type PmosProjectsSnapshot,
+} from "./controllers/pmos-projects.ts";
+import {
   applyWorkflowOperationDraft,
   createWorkflowConnection,
   createWorkflow,
@@ -355,6 +359,9 @@ export class OpenClawApp extends LitElement {
   @state() pmosCommandPlan: PmosCommandPlanStep[] = [];
   @state() pmosCommandHistory: PmosCommandHistoryEntry[] = [];
   @state() pmosCommandPendingApprovals: PmosCommandPendingApproval[] = [];
+  @state() pmosProjectsLoading = false;
+  @state() pmosProjectsError: string | null = null;
+  @state() pmosProjectsSnapshot: PmosProjectsSnapshot | null = null;
 
   // PMOS workflows native embed (Phase 2)
   @state() apPiecesLoading = false;
@@ -1242,6 +1249,10 @@ export class OpenClawApp extends LitElement {
       this as unknown as Parameters<typeof approvePmosCommandStep>[0],
       approvalId,
     );
+  }
+
+  async handlePmosProjectsLoad() {
+    await loadPmosProjectsSnapshot(this as unknown as Parameters<typeof loadPmosProjectsSnapshot>[0]);
   }
 
   handlePmosCommandClearHistory() {

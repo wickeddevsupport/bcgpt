@@ -60,6 +60,7 @@ import type {
   PmosCommandPendingApproval,
   PmosCommandPlanStep,
 } from "./controllers/pmos-command-center.ts";
+import type { PmosProjectsSnapshot } from "./controllers/pmos-projects.ts";
 import type {
   PmosFlowGraphEdge,
   PmosFlowGraphNode,
@@ -228,6 +229,9 @@ export type AppViewState = {
   pmosCommandPlan: PmosCommandPlanStep[];
   pmosCommandHistory: PmosCommandHistoryEntry[];
   pmosCommandPendingApprovals: PmosCommandPendingApproval[];
+  pmosProjectsLoading: boolean;
+  pmosProjectsError: string | null;
+  pmosProjectsSnapshot: PmosProjectsSnapshot | null;
 
   // PMOS workflows native embed (Phase 2)
   apPiecesLoading: boolean;
@@ -523,6 +527,7 @@ export type AppViewState = {
   handlePmosApRunsLoad: () => Promise<void>;
   handlePmosApRunSelect: (runId: string) => Promise<void>;
   handlePmosApRunRetry: (strategy: "FROM_FAILED_STEP" | "ON_LATEST_VERSION") => Promise<void>;
+  handlePmosProjectsLoad: () => Promise<void>;
   handlePmosCommandPlan: () => Promise<void>;
   handlePmosCommandExecute: () => Promise<void>;
   handlePmosCommandApprove: (approvalId: string) => Promise<void>;

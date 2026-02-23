@@ -212,6 +212,7 @@ export async function refreshActiveTab(host: SettingsHost) {
       (host as unknown as OpenClawApp).handlePmosIntegrationsLoad(),
       (host as unknown as OpenClawApp).handlePmosApFlowsLoad(),
       (host as unknown as OpenClawApp).handlePmosApRunsLoad(),
+      (host as unknown as OpenClawApp).handlePmosProjectsLoad(),
     ]);
   }
   if (host.tab === "automations") {
