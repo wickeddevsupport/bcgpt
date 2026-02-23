@@ -90,6 +90,19 @@ export function resolveSessionAgentId(params: {
   return resolveSessionAgentIds(params).sessionAgentId;
 }
 
+function resolveWorkspaceDir(rawWorkspace: string): string {
+  const trimmed = rawWorkspace.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("~") || path.isAbsolute(trimmed)) {
+    return resolveUserPath(trimmed);
+  }
+  // Relative workspace entries are mapped into state dir so they remain writable
+  // in containerized deployments where cwd can be read-only.
+  return path.join(resolveStateDir(process.env), "workspaces", trimmed);
+}
+
 function resolveAgentEntry(cfg: OpenClawConfig, agentId: string): AgentEntry | undefined {
   const id = normalizeAgentId(agentId);
   return listAgents(cfg).find((entry) => normalizeAgentId(entry.id) === id);
@@ -167,13 +180,13 @@ export function resolveAgentWorkspaceDir(cfg: OpenClawConfig, agentId: string) {
   const id = normalizeAgentId(agentId);
   const configured = resolveAgentConfig(cfg, id)?.workspace?.trim();
   if (configured) {
-    return resolveUserPath(configured);
+    return resolveWorkspaceDir(configured);
   }
   const defaultAgentId = resolveDefaultAgentId(cfg);
   if (id === defaultAgentId) {
     const fallback = cfg.agents?.defaults?.workspace?.trim();
     if (fallback) {
-      return resolveUserPath(fallback);
+      return resolveWorkspaceDir(fallback);
     }
     return resolveDefaultAgentWorkspaceDir(process.env);
   }

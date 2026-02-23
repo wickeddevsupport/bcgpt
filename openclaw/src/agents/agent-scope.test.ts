@@ -216,6 +216,19 @@ describe("resolveAgentConfig", () => {
     expect(workspace).toBe(path.join(path.resolve(home), ".openclaw", "workspace"));
   });
 
+  it("maps relative configured workspaces into OPENCLAW_STATE_DIR", () => {
+    const stateDir = path.join(path.sep, "srv", "state");
+    vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+    const cfg: OpenClawConfig = {
+      agents: {
+        list: [{ id: "main", workspace: "default" }],
+      },
+    };
+
+    const workspace = resolveAgentWorkspaceDir(cfg, "main");
+    expect(workspace).toBe(path.join(path.resolve(stateDir), "workspaces", "default"));
+  });
+
   it("uses OPENCLAW_HOME for default agentDir", () => {
     const home = path.join(path.sep, "srv", "openclaw-home");
     vi.stubEnv("OPENCLAW_HOME", home);
