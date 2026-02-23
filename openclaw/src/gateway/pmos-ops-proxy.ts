@@ -304,6 +304,129 @@ export function workflowBelongsToWorkspace(workflow: unknown, workspaceId: strin
   });
 }
 
+function parseJsonBuffer(buffer: Buffer): unknown | null {
+  try {
+    return JSON.parse(buffer.toString("utf-8")) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function dataArrayFromPayload(payload: unknown): unknown[] {
+  if (Array.isArray(payload)) return payload;
+  if (payload && typeof payload === "object") {
+    const data = (payload as Record<string, unknown>).data;
+    if (Array.isArray(data)) return data;
+  }
+  return [];
+}
+
+function projectIdsFromPayload(payload: unknown): string[] {
+  const ids = new Set<string>();
+  for (const item of dataArrayFromPayload(payload)) {
+    if (!item || typeof item !== "object") continue;
+    const id = (item as Record<string, unknown>).id;
+    if (typeof id === "string" && id.trim()) ids.add(id);
+  }
+  return Array.from(ids);
+}
+
+function workflowId(workflow: unknown): string | null {
+  if (!workflow || typeof workflow !== "object") return null;
+  const id = (workflow as Record<string, unknown>).id;
+  if (typeof id === "string" && id.trim()) return id;
+  if (typeof id === "number" && Number.isFinite(id)) return String(id);
+  return null;
+}
+
+function applyWorkflowWorkspaceFilter(payload: unknown, workspaceId: string): unknown {
+  if (payload && typeof payload === "object" && Array.isArray((payload as Record<string, unknown>).data)) {
+    const p = payload as Record<string, unknown>;
+    const filteredData = (p.data as unknown[]).filter((wf) => workflowBelongsToWorkspace(wf, workspaceId));
+    return { ...p, data: filteredData, count: filteredData.length };
+  }
+  if (Array.isArray(payload)) {
+    return payload.filter((wf) => workflowBelongsToWorkspace(wf, workspaceId));
+  }
+  return payload;
+}
+
+async function fetchSuperAdminWorkflowsAcrossProjects(params: {
+  targetUrl: string;
+  headers: Record<string, string>;
+  method?: string;
+}): Promise<unknown | null> {
+  const { targetUrl, headers, method } = params;
+  let parsedTarget: URL;
+  try {
+    parsedTarget = new URL(targetUrl);
+  } catch {
+    return null;
+  }
+
+  // If caller already requested a specific project, do not aggregate.
+  if (parsedTarget.searchParams.has("projectId")) return null;
+
+  const projectsUrl = new URL("/rest/projects", parsedTarget.origin).toString();
+  let projectsRes: Response;
+  try {
+    projectsRes = await fetch(projectsUrl, { method: "GET", headers });
+  } catch {
+    return null;
+  }
+  if (!projectsRes.ok) return null;
+
+  let projectsPayload: unknown;
+  try {
+    projectsPayload = await projectsRes.json() as unknown;
+  } catch {
+    return null;
+  }
+
+  const projectIds = projectIdsFromPayload(projectsPayload);
+  if (projectIds.length === 0) {
+    return { data: [], count: 0 };
+  }
+
+  const merged: unknown[] = [];
+  const seenWorkflowIds = new Set<string>();
+  for (const projectId of projectIds) {
+    const query = new URLSearchParams(parsedTarget.search);
+    query.set("projectId", projectId);
+    const projectWorkflowUrl = `${parsedTarget.origin}${parsedTarget.pathname}?${query.toString()}`;
+
+    let workflowsRes: Response;
+    try {
+      workflowsRes = await fetch(projectWorkflowUrl, {
+        method: method ?? "GET",
+        headers,
+      });
+    } catch {
+      continue;
+    }
+    if (!workflowsRes.ok) continue;
+
+    let workflowsPayload: unknown;
+    try {
+      workflowsPayload = await workflowsRes.json() as unknown;
+    } catch {
+      continue;
+    }
+
+    for (const workflow of dataArrayFromPayload(workflowsPayload)) {
+      const id = workflowId(workflow);
+      if (id && seenWorkflowIds.has(id)) continue;
+      if (id) seenWorkflowIds.add(id);
+      merged.push(workflow);
+    }
+  }
+
+  const limitRaw = parsedTarget.searchParams.get("limit");
+  const limit = limitRaw ? Number.parseInt(limitRaw, 10) : Number.NaN;
+  const data = Number.isFinite(limit) && limit > 0 ? merged.slice(0, limit) : merged;
+  return { data, count: data.length };
+}
+
 async function proxyWorkflowList(params: {
   req: IncomingMessage;
   res: ServerResponse;
@@ -315,6 +438,24 @@ async function proxyWorkflowList(params: {
   const { req, res, targetUrl, extraHeaders, workspaceId, filterByWorkspace = true } = params;
   const headers = buildForwardHeaders(req, extraHeaders);
   const body = await readBody(req);
+
+  // n8n workflow visibility can be project-scoped even for elevated users.
+  // For super-admin reads without an explicit projectId, aggregate all project lists.
+  if (!filterByWorkspace) {
+    const aggregate = await fetchSuperAdminWorkflowsAcrossProjects({
+      targetUrl,
+      headers,
+      method: req.method,
+    });
+    if (aggregate !== null) {
+      const json = JSON.stringify(aggregate);
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader("Content-Length", Buffer.byteLength(json));
+      res.end(json);
+      return;
+    }
+  }
 
   let upstream: Response;
   try {
@@ -332,22 +473,9 @@ async function proxyWorkflowList(params: {
 
   if (upstream.ok) {
     const rawBuf = Buffer.from(await upstream.arrayBuffer());
-    try {
-      const parsed = JSON.parse(rawBuf.toString("utf-8")) as unknown;
-      const filtered = (() => {
-        if (!filterByWorkspace) {
-          return parsed;
-        }
-        if (parsed && typeof parsed === "object" && Array.isArray((parsed as Record<string, unknown>).data)) {
-          const p = parsed as Record<string, unknown>;
-          const filteredData = (p.data as unknown[]).filter((wf) => workflowBelongsToWorkspace(wf, workspaceId));
-          return { ...p, data: filteredData, count: filteredData.length };
-        }
-        if (Array.isArray(parsed)) {
-          return parsed.filter((wf) => workflowBelongsToWorkspace(wf, workspaceId));
-        }
-        return parsed;
-      })();
+    const parsed = parseJsonBuffer(rawBuf);
+    if (parsed !== null) {
+      const filtered = filterByWorkspace ? applyWorkflowWorkspaceFilter(parsed, workspaceId) : parsed;
       const filteredStr = JSON.stringify(filtered);
       res.statusCode = upstream.status;
       for (const [k, v] of upstream.headers.entries()) {
@@ -357,16 +485,15 @@ async function proxyWorkflowList(params: {
       res.setHeader("Content-Length", Buffer.byteLength(filteredStr));
       res.end(filteredStr);
       return;
-    } catch {
-      // parse failed — return original buffered response
-      res.statusCode = upstream.status;
-      for (const [k, v] of upstream.headers.entries()) {
-        if (STRIP_RESPONSE_HEADERS.has(k.toLowerCase())) continue;
-        res.setHeader(k, v);
-      }
-      res.end(rawBuf);
-      return;
     }
+    // parse failed - return original buffered response
+    res.statusCode = upstream.status;
+    for (const [k, v] of upstream.headers.entries()) {
+      if (STRIP_RESPONSE_HEADERS.has(k.toLowerCase())) continue;
+      res.setHeader(k, v);
+    }
+    res.end(rawBuf);
+    return;
   }
 
   // Non-OK: stream through
