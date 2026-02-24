@@ -4183,9 +4183,17 @@ app.get("/startbcgpt", async (req, res) => {
     if (sessionKey) {
       setSessionCookie(res, sessionKey);
     } else if (status?.user_key) {
-      const generated = await createSession(null, status.user_key);
-      setSessionCookie(res, generated);
-      status.session_key = generated;
+      try {
+        const generated = await createSession(null, status.user_key);
+        setSessionCookie(res, generated);
+        status.session_key = generated;
+      } catch (sessionError) {
+        // API key auth must work even if session persistence is temporarily unavailable.
+        console.warn(
+          "[startbcgpt] session creation skipped:",
+          sessionError?.code || sessionError?.message || sessionError,
+        );
+      }
     }
     res.json(status);
   } catch (e) {
@@ -4225,9 +4233,17 @@ app.post("/action/startbcgpt", async (req, res) => {
     if (sessionKey) {
       setSessionCookie(res, sessionKey);
     } else if (status?.user_key) {
-      const generated = await createSession(null, status.user_key);
-      setSessionCookie(res, generated);
-      status.session_key = generated;
+      try {
+        const generated = await createSession(null, status.user_key);
+        setSessionCookie(res, generated);
+        status.session_key = generated;
+      } catch (sessionError) {
+        // API key auth must work even if session persistence is temporarily unavailable.
+        console.warn(
+          "[action/startbcgpt] session creation skipped:",
+          sessionError?.code || sessionError?.message || sessionError,
+        );
+      }
     }
     res.json(status);
   } catch (e) {
