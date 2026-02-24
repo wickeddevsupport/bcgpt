@@ -226,12 +226,24 @@ function resolveMainSessionKey(
 ): string | null {
   const snapshot = hello?.snapshot as { sessionDefaults?: SessionDefaultsSnapshot } | undefined;
   const mainSessionKey = snapshot?.sessionDefaults?.mainSessionKey?.trim();
+  const hasSessions = Array.isArray(sessions?.sessions);
+  const sessionHasKey = (key: string) =>
+    Boolean(sessions?.sessions?.some((row) => typeof row.key === "string" && row.key === key));
   if (mainSessionKey) {
-    return mainSessionKey;
+    if (hasSessions && !sessionHasKey(mainSessionKey)) {
+      // Ignore stale hello snapshot defaults once sessions.list has loaded; PMOS workspace
+      // bootstrap/repair may finalize after websocket connect.
+    } else {
+      return mainSessionKey;
+    }
   }
   const mainKey = snapshot?.sessionDefaults?.mainKey?.trim();
   if (mainKey) {
-    return mainKey;
+    if (hasSessions && !sessionHasKey(mainKey)) {
+      // Ignore stale alias when sessions list disproves it.
+    } else {
+      return mainKey;
+    }
   }
   if (sessions?.sessions?.some((row) => row.key === "main")) {
     return "main";
