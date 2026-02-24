@@ -56,6 +56,10 @@ export function renderChatControls(state: AppViewState) {
     state.sessionKey,
     state.sessionsResult,
     mainSessionKey,
+    {
+      includeMissingCurrent:
+        !state.pmosAuthUser?.role || state.pmosAuthUser.role === "super_admin",
+    },
   );
   // Overlay agent names on top of raw session display names
   const sessionOptions = rawOptions.map((opt) => {
@@ -254,9 +258,11 @@ function resolveSessionOptions(
   sessionKey: string,
   sessions: SessionsListResult | null,
   mainSessionKey?: string | null,
+  opts?: { includeMissingCurrent?: boolean },
 ) {
   const seen = new Set<string>();
   const options: Array<{ key: string; displayName?: string }> = [];
+  const includeMissingCurrent = opts?.includeMissingCurrent ?? true;
 
   const resolvedMain = mainSessionKey && sessions?.sessions?.find((s) => s.key === mainSessionKey);
   const resolvedCurrent = sessions?.sessions?.find((s) => s.key === sessionKey);
@@ -271,7 +277,10 @@ function resolveSessionOptions(
   }
 
   // Add current session key next
-  if (!seen.has(sessionKey)) {
+  const canIncludeCurrent =
+    Boolean(sessionKey) &&
+    (!sessions?.sessions || resolvedCurrent || includeMissingCurrent);
+  if (canIncludeCurrent && !seen.has(sessionKey)) {
     seen.add(sessionKey);
     options.push({
       key: sessionKey,
