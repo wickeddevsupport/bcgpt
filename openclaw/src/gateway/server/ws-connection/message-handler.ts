@@ -5,7 +5,6 @@ import type { createSubsystemLogger } from "../../../logging/subsystem.js";
 import type { ResolvedGatewayAuth } from "../../auth.js";
 import type { GatewayRequestContext, GatewayRequestHandlers } from "../../server-methods/types.js";
 import type { GatewayWsClient } from "../ws-types.js";
-import { resolveDefaultAgentId } from "../../../agents/agent-scope.js";
 import { loadConfig } from "../../../config/config.js";
 import { resolveMainSessionKey } from "../../../config/sessions.js";
 import {
@@ -34,7 +33,7 @@ import { isLoopbackAddress, isTrustedProxyAddress, resolveGatewayClientIp } from
 import { resolveNodeCommandAllowlist } from "../../node-command-policy.js";
 import { checkBrowserOrigin } from "../../origin-check.js";
 import { GATEWAY_CLIENT_IDS } from "../../protocol/client-info.js";
-import { normalizeMainKey } from "../../../routing/session-key.js";
+import { DEFAULT_AGENT_ID, normalizeMainKey } from "../../../routing/session-key.js";
 import {
   type ConnectParams,
   ErrorCodes,
@@ -58,10 +57,38 @@ import {
   refreshGatewayHealthSnapshot,
 } from "../health-state.js";
 import { loadEffectiveWorkspaceConfig } from "../../workspace-config.js";
+import { listAgentsForGateway } from "../../session-utils.js";
 
 type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
 
 const DEVICE_SIGNATURE_SKEW_MS = 10 * 60 * 1000;
+
+function buildWorkspaceSessionDefaultsSnapshot(workspaceCfg: unknown, workspaceId: string) {
+  const cfg = (workspaceCfg ?? {}) as {
+    session?: { mainKey?: string; scope?: string };
+    agents?: { list?: Array<{ id?: string; default?: boolean }> };
+  };
+  const listed = listAgentsForGateway(cfg as any);
+  const workspaceAgents = listed.agents.filter(
+    (agent) => typeof agent?.workspaceId === "string" && agent.workspaceId === workspaceId,
+  );
+  const defaultAgentId =
+    (workspaceAgents.some((agent) => agent.id === listed.defaultId) ? listed.defaultId : undefined) ??
+    workspaceAgents[0]?.id ??
+    DEFAULT_AGENT_ID;
+  const mainKey = normalizeMainKey(cfg.session?.mainKey);
+  const scope = cfg.session?.scope ?? "per-sender";
+  const mainSessionKey = resolveMainSessionKey({
+    session: { scope, mainKey },
+    agents: { list: [{ id: defaultAgentId, default: true }] },
+  });
+  return {
+    defaultAgentId,
+    mainKey,
+    mainSessionKey,
+    scope,
+  };
+}
 
 function resolveHostName(hostHeader?: string): string {
   const host = (hostHeader ?? "").trim().toLowerCase();
@@ -864,13 +891,9 @@ export function attachGatewayWsMessageHandler(params: {
         const snapshot = buildGatewaySnapshot();
         if (pmosSession.ok) {
           try {
-            const workspaceCfg = await loadEffectiveWorkspaceConfig(pmosSession.user.workspaceId);
-            snapshot.sessionDefaults = {
-              defaultAgentId: resolveDefaultAgentId(workspaceCfg as any),
-              mainKey: normalizeMainKey((workspaceCfg as any)?.session?.mainKey),
-              mainSessionKey: resolveMainSessionKey(workspaceCfg as any),
-              scope: (workspaceCfg as any)?.session?.scope ?? "per-sender",
-            };
+            const workspaceId = pmosSession.user.workspaceId;
+            const workspaceCfg = await loadEffectiveWorkspaceConfig(workspaceId);
+            snapshot.sessionDefaults = buildWorkspaceSessionDefaultsSnapshot(workspaceCfg, workspaceId);
           } catch (err) {
             logGateway.warn(
               `failed to build workspace-scoped session defaults: ${formatForLog(err)}`,
