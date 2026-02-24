@@ -63,12 +63,19 @@ type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
 
 const DEVICE_SIGNATURE_SKEW_MS = 10 * 60 * 1000;
 
-function buildWorkspaceSessionDefaultsSnapshot(workspaceCfg: unknown, workspaceId: string) {
-  const cfg = (workspaceCfg ?? {}) as {
-    session?: { mainKey?: string; scope?: string };
-    agents?: { list?: Array<{ id?: string; default?: boolean }> };
+function buildWorkspaceSessionDefaultsSnapshot(params: {
+  agentConfig: unknown;
+  sessionConfig?: unknown;
+  workspaceId: string;
+}) {
+  const { agentConfig, sessionConfig, workspaceId } = params;
+  const agentsCfg = (agentConfig ?? {}) as {
+    agents?: { list?: Array<{ id?: string; default?: boolean; workspaceId?: string }> };
   };
-  const listed = listAgentsForGateway(cfg as any);
+  const sessionCfg = ((sessionConfig ?? agentConfig) ?? {}) as {
+    session?: { mainKey?: string; scope?: string };
+  };
+  const listed = listAgentsForGateway(agentsCfg as any);
   const workspaceAgents = listed.agents.filter(
     (agent) => typeof agent?.workspaceId === "string" && agent.workspaceId === workspaceId,
   );
@@ -76,8 +83,8 @@ function buildWorkspaceSessionDefaultsSnapshot(workspaceCfg: unknown, workspaceI
     (workspaceAgents.some((agent) => agent.id === listed.defaultId) ? listed.defaultId : undefined) ??
     workspaceAgents[0]?.id ??
     DEFAULT_AGENT_ID;
-  const mainKey = normalizeMainKey(cfg.session?.mainKey);
-  const scope = cfg.session?.scope ?? "per-sender";
+  const mainKey = normalizeMainKey(sessionCfg.session?.mainKey);
+  const scope = sessionCfg.session?.scope ?? "per-sender";
   const mainSessionKey = resolveMainSessionKey({
     session: { scope, mainKey },
     agents: { list: [{ id: defaultAgentId, default: true }] },
@@ -893,7 +900,11 @@ export function attachGatewayWsMessageHandler(params: {
           try {
             const workspaceId = pmosSession.user.workspaceId;
             const workspaceCfg = await loadEffectiveWorkspaceConfig(workspaceId);
-            snapshot.sessionDefaults = buildWorkspaceSessionDefaultsSnapshot(workspaceCfg, workspaceId);
+            snapshot.sessionDefaults = buildWorkspaceSessionDefaultsSnapshot({
+              agentConfig: loadConfig(),
+              sessionConfig: workspaceCfg,
+              workspaceId,
+            });
           } catch (err) {
             logGateway.warn(
               `failed to build workspace-scoped session defaults: ${formatForLog(err)}`,
