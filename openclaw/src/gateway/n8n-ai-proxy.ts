@@ -18,6 +18,7 @@
 
 import { callWorkspaceModel } from "./workflow-ai.js";
 import { readWorkspaceConnectors } from "./workspace-connectors.js";
+import { getWorkspaceAiContextForPrompt } from "./workspace-ai-context.js";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
@@ -141,7 +142,10 @@ function buildStreamingResponse(sessionId: string, text: string): ReadableStream
 /**
  * Build n8n AI system prompt enriched with context from the request payload.
  */
-function buildN8nAiSystemPrompt(payload: Record<string, unknown>): string {
+function buildN8nAiSystemPrompt(
+  payload: Record<string, unknown>,
+  workspaceContext: string,
+): string {
   const requestPayload = payload.payload as Record<string, unknown> | undefined;
   const type = requestPayload?.type as string | undefined;
 
@@ -179,6 +183,8 @@ When suggesting workflow changes, be specific about node parameters and connecti
 When debugging errors, explain what likely went wrong and provide concrete fix steps.
 Keep responses concise and actionable.
 ${contextSection}
+
+${workspaceContext ? `## Workspace Memory Snapshot\n${workspaceContext}` : ""}
 
 ## Key Information
 - This is OpenClaw's embedded n8n instance (version 1.76.1)
@@ -236,8 +242,13 @@ export async function handleN8nAiChat(req: N8nAiChatRequest): Promise<{
   session.messages.push({ role: "user", content: userText });
   sessionStore.set(sessionId, session);
 
-  // Build system prompt with n8n context
-  const systemPrompt = buildN8nAiSystemPrompt(payload);
+  // Build system prompt with n8n context plus workspace AI snapshot.
+  const workspacePromptContext =
+    (await getWorkspaceAiContextForPrompt(workspaceId, {
+      ensureFresh: false,
+      maxChars: 6000,
+    }).catch(() => "")) ?? "";
+  const systemPrompt = buildN8nAiSystemPrompt(payload, workspacePromptContext);
 
   // Call workspace BYOK model
   const result = await callWorkspaceModel(
@@ -311,7 +322,13 @@ ${JSON.stringify(context, null, 2)}
 
 Return ONLY valid JavaScript code that can run in n8n's ${forNode} node.
 No markdown fences, no explanation — just the code.
-The code should return an array of items: return items.map(item => ({ json: { ...item.json } }));`;
+The code should return an array of items: return items.map(item => ({ json: { ...item.json } }));
+
+Workspace memory snapshot:
+${(await getWorkspaceAiContextForPrompt(workspaceId, {
+    ensureFresh: false,
+    maxChars: 2500,
+  }).catch(() => "")) || "(unavailable)"}`;
 
   const result = await callWorkspaceModel(
     workspaceId,

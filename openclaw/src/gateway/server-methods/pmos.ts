@@ -546,6 +546,63 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 
+  "pmos.context.workspace.get": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const target = typeof params?.workspaceId === "string" ? params.workspaceId.trim() : undefined;
+      if (target && !isSuperAdmin(client)) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "access denied"));
+        return;
+      }
+      const workspaceId = target ?? requireWorkspaceId(client);
+      const { readWorkspaceAiContext, workspaceAiContextPath } = await import(
+        "../workspace-ai-context.js"
+      );
+      const contextMarkdown = (await readWorkspaceAiContext(workspaceId)) ?? "";
+      respond(
+        true,
+        {
+          workspaceId,
+          path: workspaceAiContextPath(workspaceId),
+          context: contextMarkdown,
+          exists: Boolean(contextMarkdown.trim()),
+        },
+        undefined,
+      );
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.context.workspace.refresh": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const target = typeof params?.workspaceId === "string" ? params.workspaceId.trim() : undefined;
+      if (target && !isSuperAdmin(client)) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "access denied"));
+        return;
+      }
+      const workspaceId = target ?? requireWorkspaceId(client);
+      const { refreshWorkspaceAiContext } = await import("../workspace-ai-context.js");
+      const refreshed = await refreshWorkspaceAiContext(workspaceId, {
+        includeLiveCredentials: true,
+      });
+      respond(
+        true,
+        {
+          ok: true,
+          workspaceId: refreshed.workspaceId,
+          path: refreshed.path,
+          generatedAt: refreshed.generatedAt,
+          context: refreshed.markdown,
+        },
+        undefined,
+      );
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
   // Persist or read per-workspace connectors (workspace-admins can set for their workspace)
   "pmos.connectors.workspace.set": async ({ params, respond, client }) => {
     try {
@@ -1126,6 +1183,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
         WORKFLOW_ASSISTANT_SYSTEM_PROMPT,
         getWorkspaceN8nNodeCatalog,
       } = await import("../workflow-ai.js");
+      const { getWorkspaceAiContextForPrompt } = await import("../workspace-ai-context.js");
 
       // Fetch available credentials and inject into system prompt so AI can reference them
       const {
@@ -1164,17 +1222,31 @@ export const pmosHandlers: GatewayRequestHandlers = {
         6000,
         "",
       );
+      const workspaceAiContext = await withTimeout(
+        getWorkspaceAiContextForPrompt(workspaceId, {
+          ensureFresh: true,
+          maxChars: 12_000,
+          credentials: availableCredentials,
+        }).catch(() => ""),
+        4000,
+        "",
+      );
       const workspaceContext = `## Workspace Context
 - Workspace ID: ${workspaceId}
 - Use node type names from the live workspace catalog when available.
 - Treat openclaw.json + workspace connector data as the source of truth for integration configuration.
+- Treat AI_CONTEXT.md as current workspace memory for connectors, models, and agent assignments.
 - If required credentials are missing, explicitly tell the user which provider config to add in openclaw.json.
 - If a live node catalog is unavailable, explicitly say so instead of inventing node names.`;
+      const workspaceMemoryContext = workspaceAiContext
+        ? `## Workspace Memory Snapshot (AI_CONTEXT.md)\n${workspaceAiContext}`
+        : "";
       const systemPrompt = [
         WORKFLOW_ASSISTANT_SYSTEM_PROMPT,
         liveNodeCatalog,
         credentialContext,
         workspaceContext,
+        workspaceMemoryContext,
       ]
         .filter((part) => part && part.trim().length > 0)
         .join("\n\n");

@@ -128,6 +128,12 @@ async function writeStore(store: ByokStore): Promise<void> {
   await ensureDir(path.dirname(p));
   const raw = JSON.stringify(store, null, 2).trimEnd().concat("\n");
   await fs.writeFile(p, raw, { mode: 0o600 });
+  try {
+    const { refreshWorkspaceAiContext } = await import("./workspace-ai-context.js");
+    await refreshWorkspaceAiContext(store.workspaceId);
+  } catch {
+    // Best-effort context snapshot update.
+  }
 }
 
 // ── Public API ─────────────────────────────────────────────────────────

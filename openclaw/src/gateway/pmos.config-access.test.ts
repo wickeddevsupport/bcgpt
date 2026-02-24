@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { pmosHandlers } from "./server-methods/pmos.js";
 import { readWorkspaceConnectors, workspaceConnectorsPath } from "./workspace-connectors.js";
+import { readWorkspaceAiContext } from "./workspace-ai-context.js";
 
 describe("pmos config access + connector merge", () => {
   afterEach(() => {
@@ -72,6 +73,10 @@ describe("pmos config access + connector merge", () => {
     expect(saved?.ops?.projectId).toBe("proj-123");
     expect(saved?.bcgpt?.url).toBe("https://bcgpt.example.test");
     expect(saved?.bcgpt?.apiKey).toBe("bcgpt-123");
+
+    const context = await readWorkspaceAiContext(workspaceId);
+    expect(context).toContain(`Workspace ID: ${workspaceId}`);
+    expect(context).toContain("basecamp apiKey present: yes");
 
     try {
       const fs = await import("node:fs/promises");

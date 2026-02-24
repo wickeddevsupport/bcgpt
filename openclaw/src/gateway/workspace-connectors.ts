@@ -34,4 +34,10 @@ export async function writeWorkspaceConnectors(workspaceId: string, next: Worksp
   await ensureDir(dir);
   const raw = JSON.stringify(next, null, 2).trimEnd().concat("\n");
   await fs.writeFile(workspaceConnectorsPath(workspaceId), raw, "utf-8");
+  try {
+    const { refreshWorkspaceAiContext } = await import("./workspace-ai-context.js");
+    await refreshWorkspaceAiContext(workspaceId);
+  } catch {
+    // Best-effort context snapshot update.
+  }
 }
