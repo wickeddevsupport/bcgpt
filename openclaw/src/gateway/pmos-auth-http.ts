@@ -192,20 +192,26 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
     const existingAgentsList = getPath(existing, ["agents", "list"]);
     const hasAgents = Array.isArray(existingAgentsList) && existingAgentsList.length > 0;
     const repairedAgentsList = Array.isArray(existingAgentsList)
-      ? existingAgentsList.map((entry) => {
-          if (!isRecord(entry)) return entry;
+      ? existingAgentsList.flatMap((entry) => {
+          if (!isRecord(entry)) return [entry];
           const currentWorkspaceId =
             typeof entry.workspaceId === "string" ? entry.workspaceId.trim() : "";
-          if (currentWorkspaceId) {
-            return entry;
+          if (currentWorkspaceId && currentWorkspaceId !== workspaceId) {
+            // Legacy polluted workspace overlays may contain agents copied from other
+            // workspaces. Drop them when this workspace logs in.
+            return [];
           }
-          return { ...entry, workspaceId };
+          if (currentWorkspaceId) {
+            return [entry];
+          }
+          return [{ ...entry, workspaceId }];
         })
       : null;
     const repairedAgentsChanged =
       Array.isArray(existingAgentsList) &&
       Array.isArray(repairedAgentsList) &&
-      repairedAgentsList.some((entry, index) => entry !== existingAgentsList[index]);
+      (repairedAgentsList.length !== existingAgentsList.length ||
+        repairedAgentsList.some((entry, index) => entry !== existingAgentsList[index]));
 
     const sharedModelRef = findSharedWorkspaceModelRef(loadConfig() as unknown);
     const starterName =
