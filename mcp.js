@@ -234,7 +234,27 @@ import * as intelligent from './intelligent-integration.js';
 import { routeToolCall, shouldRoute } from './gateway-router.js';
 
 // ---------- JSON-RPC helpers ----------
-function ok(id, result) { return { jsonrpc: "2.0", id, result }; }
+const MCP_RESULT_INLINE_LIMIT = Number(process.env.MCP_RESULT_INLINE_LIMIT || 200);
+const MCP_RESULT_CHUNK_SIZE = Number(process.env.MCP_RESULT_CHUNK_SIZE || 50);
+const MCP_RESULT_MAX_BYTES = Number(process.env.MCP_RESULT_MAX_BYTES || 450000);
+const MCP_TOOL_RETRIES = Math.max(1, Number(process.env.MCP_TOOL_RETRIES || 2));
+const MCP_TOOL_RETRY_DELAY_MS = Math.max(50, Number(process.env.MCP_TOOL_RETRY_DELAY_MS || 250));
+const SEARCH_QUERY_VARIANTS_MAX = Math.max(1, Number(process.env.SEARCH_QUERY_VARIANTS_MAX || 8));
+
+const RETRYABLE_CODES = new Set([
+  "BASECAMP_FETCH_FAILED",
+  "BASECAMP_REQUEST_FAILED",
+  "BASECAMP_API_ERROR",
+  "CIRCUIT_OPEN",
+  "N8N_REQUEST_FAILED",
+  "N8N_API_ERROR",
+  "TOOL_ERROR",
+  "RESPONSE_TOO_LARGE",
+]);
+
+function ok(id, result) {
+  return { jsonrpc: "2.0", id, result: guardResultPayload(result) };
+}
 function fail(id, error) { return { jsonrpc: "2.0", id, error: normalizeErrorPayload(error) }; }
 function logDebug(...args) {
   if (!process?.env?.DEBUG) return;
@@ -247,6 +267,156 @@ function logCommentDebug(...args) {
 function logPeopleDebug(...args) {
   if (!process?.env?.DEBUG && !process?.env?.PEOPLE_DEBUG) return;
   console.log(...args);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableToolError(error) {
+  if (!error) return false;
+  if (RETRYABLE_CODES.has(error.code)) {
+    if (error.code !== "BASECAMP_API_ERROR") return true;
+    return [429, 500, 502, 503, 504].includes(Number(error.status));
+  }
+  const msg = String(error.message || error).toLowerCase();
+  return (
+    msg.includes("fetch failed") ||
+    msg.includes("econnreset") ||
+    msg.includes("etimedout") ||
+    msg.includes("socket hang up") ||
+    msg.includes("upstream unreachable") ||
+    msg.includes("response too large")
+  );
+}
+
+async function runWithRetries(task, {
+  attempts = MCP_TOOL_RETRIES,
+  baseDelayMs = MCP_TOOL_RETRY_DELAY_MS,
+  shouldRetry = isRetryableToolError,
+  label = "tool_call",
+} = {}) {
+  let lastError = null;
+  const maxAttempts = Math.max(1, Number(attempts) || 1);
+
+  for (let i = 0; i < maxAttempts; i += 1) {
+    try {
+      return await task(i);
+    } catch (error) {
+      lastError = error;
+      const retryable = shouldRetry(error);
+      const isLast = i >= maxAttempts - 1;
+      if (!retryable || isLast) throw error;
+      const delay = Math.max(50, baseDelayMs * (i + 1));
+      console.warn(`[retry] ${label} attempt ${i + 1}/${maxAttempts} failed: ${error?.message || error}. Retrying in ${delay}ms`);
+      await sleep(delay);
+    }
+  }
+  throw lastError || new Error("Retry loop exhausted");
+}
+
+function normalizeSearchVariant(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function addQueryVariant(out, seen, value) {
+  const v = String(value || "").trim();
+  if (!v) return;
+  const key = v.toLowerCase();
+  if (seen.has(key)) return;
+  seen.add(key);
+  out.push(v);
+}
+
+function buildSearchQueryVariants(query, { max = SEARCH_QUERY_VARIANTS_MAX } = {}) {
+  const raw = String(query || "").trim();
+  if (!raw) return [];
+  const out = [];
+  const seen = new Set();
+
+  const normalized = normalizeSearchVariant(raw);
+  const tokens = normalized ? normalized.split(" ").filter(Boolean) : [];
+  const collapsed = tokens.join("");
+  const ampersandSwap = raw.replace(/&/g, " and ");
+  const hyphenSwap = raw.replace(/[-_/]+/g, " ");
+  const compactAlphaNum = raw.replace(/[^a-z0-9]/gi, "");
+
+  addQueryVariant(out, seen, raw);
+  addQueryVariant(out, seen, ampersandSwap);
+  addQueryVariant(out, seen, hyphenSwap);
+  addQueryVariant(out, seen, normalized);
+  if (collapsed.length >= 4) addQueryVariant(out, seen, collapsed);
+  if (compactAlphaNum.length >= 4) addQueryVariant(out, seen, compactAlphaNum);
+  if (tokens.length > 1) {
+    addQueryVariant(out, seen, tokens.slice(0, 2).join(" "));
+    addQueryVariant(out, seen, tokens[tokens.length - 1]);
+  }
+
+  return out.slice(0, Math.max(1, Number(max) || 1));
+}
+
+function safeJsonSize(value) {
+  try {
+    return Buffer.byteLength(JSON.stringify(value), "utf8");
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+function guardResultPayload(result) {
+  if (result == null) return result;
+
+  if (Array.isArray(result)) {
+    if (result.length <= MCP_RESULT_INLINE_LIMIT) return result;
+    const cached = cacheCollection("items", result, { chunkSize: MCP_RESULT_CHUNK_SIZE });
+    return {
+      items: cached.firstChunk,
+      count: result.length,
+      cached: true,
+      chunk_required: true,
+      payload_key: cached.key,
+      chunk_count: cached.chunkCount,
+      export: exportLargePayloadToFile(cached.key)
+    };
+  }
+
+  if (typeof result !== "object") return result;
+
+  const payload = { ...result };
+  let changed = false;
+
+  for (const [key, value] of Object.entries(payload)) {
+    if (!Array.isArray(value)) continue;
+    if (value.length <= MCP_RESULT_INLINE_LIMIT) continue;
+    if (payload[`${key}_payload_key`] || payload.payload_key) continue;
+
+    const cached = cacheCollection(key, value, { chunkSize: MCP_RESULT_CHUNK_SIZE });
+    payload[key] = cached.firstChunk;
+    payload[`${key}_count`] = value.length;
+    payload[`${key}_cached`] = true;
+    payload[`${key}_chunk_required`] = true;
+    payload[`${key}_payload_key`] = cached.key;
+    payload[`${key}_chunk_count`] = cached.chunkCount;
+    payload[`${key}_export`] = exportLargePayloadToFile(cached.key);
+    changed = true;
+  }
+
+  if (payload.chunk_required == null && payload.payload_key && Number(payload.chunk_count) > 1) {
+    payload.chunk_required = true;
+    changed = true;
+  }
+
+  if (!changed) return payload;
+  payload.response_size_bytes = safeJsonSize(payload);
+  if (payload.response_size_bytes > MCP_RESULT_MAX_BYTES) {
+    payload.truncated = true;
+    payload.note = "Response chunked to avoid oversized MCP payloads. Use get_cached_payload_chunk for full data.";
+  }
+  return payload;
 }
 
 function normalizeIdempotencyPath(pathOrUrl) {
@@ -1025,7 +1195,13 @@ async function api(ctx, pathOrUrl, opts = {}) {
     : (path, options) => basecampFetch(ctx.TOKEN, path, { ...options, accountId: ctx.accountId, ua: ctx.ua });
 
   console.log(`[api] Using ${typeof ctx?.basecampFetch === "function" ? "ctx.basecampFetch" : "standalone basecampFetch"} for:`, pathOrUrl);
-  const result = await fetcher(pathOrUrl, requestOpts);
+  const allowOuterRetry = method === "GET" || method === "HEAD" || Boolean(idempotencyKey);
+  const result = allowOuterRetry
+    ? await runWithRetries(
+        () => fetcher(pathOrUrl, requestOpts),
+        { label: `api:${method}:${pathOrUrl}` }
+      )
+    : await fetcher(pathOrUrl, requestOpts);
 
   if (isWrite && idempotencyKey && idempotencyPath) {
     await setIdempotencyResponse(idempotencyKey, result, {
@@ -1039,14 +1215,17 @@ async function api(ctx, pathOrUrl, opts = {}) {
 }
 
 function apiAll(ctx, pathOrUrl, opts = {}) {
-  // If ctx has basecampFetchAll function, use it directly (already has TOKEN and accountId baked in)
-  if (typeof ctx?.basecampFetchAll === "function") {
-    console.log(`[apiAll] Using ctx.basecampFetchAll for:`, pathOrUrl);
-    return ctx.basecampFetchAll(pathOrUrl, opts);
-  }
-  // Otherwise use the standalone function (requires TOKEN)
-  console.log(`[apiAll] Using standalone basecampFetchAll for:`, pathOrUrl);
-  return basecampFetchAll(ctx.TOKEN, pathOrUrl, { ...opts, accountId: ctx.accountId, ua: ctx.ua });
+  const call = () => {
+    // If ctx has basecampFetchAll function, use it directly (already has TOKEN and accountId baked in)
+    if (typeof ctx?.basecampFetchAll === "function") {
+      console.log(`[apiAll] Using ctx.basecampFetchAll for:`, pathOrUrl);
+      return ctx.basecampFetchAll(pathOrUrl, opts);
+    }
+    // Otherwise use the standalone function (requires TOKEN)
+    console.log(`[apiAll] Using standalone basecampFetchAll for:`, pathOrUrl);
+    return basecampFetchAll(ctx.TOKEN, pathOrUrl, { ...opts, accountId: ctx.accountId, ua: ctx.ua });
+  };
+  return runWithRetries(call, { label: `apiAll:${pathOrUrl}` });
 }
 
 function apiAllWithMeta(ctx, pathOrUrl, opts = {}) {
@@ -4169,52 +4348,132 @@ async function repositionCardStep(ctx, projectId, cardId, stepId, position) {
 // Official Basecamp search endpoint: GET /search.json
 // Query params: q (required), type, bucket_id, creator_id, file_type, exclude_chat, page, per_page
 async function searchRecordings(ctx, query, { bucket_id = null, type = null, creator_id = null, file_type = null, exclude_chat = null } = {}) {
-  // Coerce query to string and validate - prevents TypeError when non-strings (e.g., numeric ids) are passed
   const rawQuery = (typeof query === "string" ? query : String(query || "")).trim();
   if (!rawQuery) throw new Error("Search query is required");
 
-  // Build the search endpoint with proper query parameters
-  let path = `/search.json?q=${encodeURIComponent(rawQuery)}`;
+  const searchOnce = async (queryText, filters) => {
+    let path = `/search.json?q=${encodeURIComponent(queryText)}`;
+    if (filters.bucket_id) path += `&bucket_id=${encodeURIComponent(filters.bucket_id)}`;
+    if (filters.type) path += `&type=${encodeURIComponent(filters.type)}`;
+    if (filters.creator_id) path += `&creator_id=${encodeURIComponent(filters.creator_id)}`;
+    if (filters.file_type) path += `&file_type=${encodeURIComponent(filters.file_type)}`;
+    if (filters.exclude_chat != null) path += `&exclude_chat=${filters.exclude_chat ? "true" : "false"}`;
+    path += `&per_page=100&page=1`;
 
-  // Add optional filters
-  if (bucket_id) path += `&bucket_id=${encodeURIComponent(bucket_id)}`;
-  if (type) path += `&type=${encodeURIComponent(type)}`;
-  if (creator_id) path += `&creator_id=${encodeURIComponent(creator_id)}`;
-  if (file_type) path += `&file_type=${encodeURIComponent(file_type)}`;
-  if (exclude_chat != null) path += `&exclude_chat=${exclude_chat ? "true" : "false"}`;
+    console.log(`[searchRecordings] Searching with endpoint: ${path}`);
 
-  // Pagination: per_page and page will be added by apiAll/basecampFetchAll
-  // Force pagination with per_page=100, page=1
-  path += `&per_page=100&page=1`;
+    const results = await runWithRetries(
+      () => apiAllWithMeta(ctx, path),
+      { label: `search_recordings:${queryText}` }
+    );
+    const { items, meta } = unwrapItemsWithMeta(results);
+    const arr = Array.isArray(items) ? items : [];
+    return { arr, meta };
+  };
 
-  console.log(`[searchRecordings] Searching with endpoint: ${path}`);
+  const baseFilters = {
+    bucket_id: bucket_id ? Number(bucket_id) || bucket_id : null,
+    type: type || null,
+    creator_id: creator_id || null,
+    file_type: file_type || null,
+    exclude_chat
+  };
 
-  // apiAll will automatically follow pagination and aggregate all pages
-  const results = await apiAllWithMeta(ctx, path);
-  const { items, meta } = unwrapItemsWithMeta(results);
-  const arr = Array.isArray(items) ? items : [];
+  const filterVariants = [];
+  const seenFilterKeys = new Set();
+  const pushFilterVariant = (filters, reason) => {
+    const key = JSON.stringify(filters || {});
+    if (seenFilterKeys.has(key)) return;
+    seenFilterKeys.add(key);
+    filterVariants.push({ filters, reason });
+  };
 
-  console.log(`[searchRecordings] Found ${arr.length} results for query: "${rawQuery}"`);
+  pushFilterVariant(baseFilters, "primary");
+  if (baseFilters.type) {
+    const relaxedType = { ...baseFilters, type: null };
+    pushFilterVariant(relaxedType, "relax_type");
+  }
+  if (baseFilters.bucket_id) {
+    const globalScope = { ...baseFilters, bucket_id: null };
+    pushFilterVariant(globalScope, "global_scope");
+    if (baseFilters.type) {
+      pushFilterVariant({ ...globalScope, type: null }, "global_scope_relax_type");
+    }
+  }
 
-  const mapped = arr.map((r) => ({
-    id: r.id,
-    type: r.type,
-    title: r.title,
-    plain_text_content: r.plain_text_content,
-    created_at: r.created_at,
-    updated_at: r.updated_at,
-    bucket: r.bucket,
-    bucket_id: r.bucket?.id,
-    creator_id: r.creator?.id,
-    assignee_ids: r.assignee_ids,
-    status: r.status,
-    completed: r.completed,
-    completion: r.completion,
-    app_url: r.app_url,
-    url: r.url,
-  }));
-  if (meta) mapped._meta = meta;
-  return mapped;
+  const queryVariants = buildSearchQueryVariants(rawQuery);
+  const attempts = [];
+  const seen = new Set();
+  const merged = [];
+  let firstMeta = null;
+  let matchedVariant = rawQuery;
+  const minHitsToStop = Math.max(1, Number(process.env.SEARCH_MIN_HITS_TO_STOP || 5));
+
+  for (const filterVariant of filterVariants) {
+    for (const queryVariant of queryVariants) {
+      try {
+        const { arr, meta } = await searchOnce(queryVariant, filterVariant.filters);
+        if (meta && !firstMeta) firstMeta = meta;
+
+        attempts.push({
+          query: queryVariant,
+          reason: filterVariant.reason,
+          count: Array.isArray(arr) ? arr.length : 0
+        });
+
+        if (Array.isArray(arr) && arr.length > 0 && matchedVariant === rawQuery) {
+          matchedVariant = queryVariant;
+        }
+
+        for (const r of arr || []) {
+          if (!r) continue;
+          const key = `${r.type || "recording"}:${r.id || ""}:${r.app_url || r.url || ""}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          merged.push({
+            id: r.id,
+            type: r.type,
+            title: r.title,
+            plain_text_content: r.plain_text_content,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+            bucket: r.bucket,
+            bucket_id: r.bucket?.id,
+            creator_id: r.creator?.id,
+            assignee_ids: r.assignee_ids,
+            status: r.status,
+            completed: r.completed,
+            completion: r.completion,
+            app_url: r.app_url,
+            url: r.url,
+            matched_query: queryVariant
+          });
+        }
+
+        if (merged.length >= minHitsToStop) break;
+      } catch (error) {
+        attempts.push({
+          query: queryVariant,
+          reason: filterVariant.reason,
+          error: error?.message || String(error)
+        });
+        if (!isRetryableToolError(error)) throw error;
+      }
+    }
+    if (merged.length >= minHitsToStop) break;
+  }
+
+  console.log(`[searchRecordings] Found ${merged.length} merged results for query: "${rawQuery}"`);
+
+  const meta = firstMeta || {};
+  merged._meta = {
+    ...meta,
+    attempts,
+    query_variants: queryVariants,
+    matched_query: matchedVariant,
+    fallback_used: attempts.some((a) => a.reason !== "primary")
+  };
+  return merged;
 }
 
 async function searchMetadata(ctx) {
@@ -5531,14 +5790,126 @@ export async function handleMCP(reqBody, ctx) {
       const query = normalizeQuery(args.query);
       if (!query) return fail(id, { code: "BAD_REQUEST", message: "Missing query." });
 
-      const callTool = async (toolName, toolArgs) => {
-        const res = await handleMCP({ jsonrpc: "2.0", id, method: "tools/call", params: { name: toolName, arguments: toolArgs } }, ctx);
-        const payload = res?.result ?? res;
-        if (res?.error || payload?.error) {
-          const err = payload?.error || res?.error;
-          throw toolError(err?.code || "TOOL_ERROR", err?.message || "Tool error", { tool: toolName, data: err });
+      const countPayloadItems = (payload) => {
+        if (!payload) return 0;
+        if (typeof payload.count === "number") return payload.count;
+        if (payload.result && typeof payload.result === "object") return countPayloadItems(payload.result);
+        const keys = [
+          "results", "projects", "people", "cards", "todos", "events",
+          "messages", "comments", "recordings", "workflows", "runs"
+        ];
+        for (const key of keys) {
+          if (Array.isArray(payload[key])) return payload[key].length;
+        }
+        return 0;
+      };
+
+      const withAttemptMeta = (payload, attempts) => {
+        if (!Array.isArray(attempts) || attempts.length <= 1) return payload;
+        if (Array.isArray(payload)) {
+          payload._meta = { ...(payload._meta || {}), tool_attempts: attempts };
+          return payload;
+        }
+        if (payload && typeof payload === "object") {
+          return { ...payload, _meta: { ...(payload._meta || {}), tool_attempts: attempts } };
         }
         return payload;
+      };
+
+      const invokeTool = async (toolName, toolArgs) => {
+        const res = await runWithRetries(
+          async () => {
+            const response = await handleMCP({ jsonrpc: "2.0", id, method: "tools/call", params: { name: toolName, arguments: toolArgs } }, ctx);
+            const responsePayload = response?.result ?? response;
+            if (response?.error || responsePayload?.error) {
+              const err = responsePayload?.error || response?.error;
+              throw toolError(err?.code || "TOOL_ERROR", err?.message || "Tool error", { tool: toolName, data: err });
+            }
+            return response;
+          },
+          { label: `smart_action:${toolName}` }
+        );
+        const payload = res?.result ?? res;
+        return payload;
+      };
+
+      const callTool = async (toolName, toolArgs) => {
+        const isSearchLike = /^search_/.test(toolName) || toolName === "list_person_activity";
+        const attempts = [];
+        const variants = [];
+        const seen = new Set();
+        const pushVariant = (variant, reason) => {
+          const key = JSON.stringify(variant || {});
+          if (seen.has(key)) return;
+          seen.add(key);
+          variants.push({ args: variant, reason });
+        };
+
+        const baseArgs = toolArgs && typeof toolArgs === "object" ? { ...toolArgs } : {};
+        pushVariant(baseArgs, "primary");
+
+        if (isSearchLike && typeof baseArgs.query === "string") {
+          const qVariants = buildSearchQueryVariants(baseArgs.query, { max: 5 });
+          for (const qVariant of qVariants) {
+            if (qVariant.toLowerCase() === String(baseArgs.query).toLowerCase()) continue;
+            pushVariant({ ...baseArgs, query: qVariant }, "query_variant");
+          }
+        }
+
+        if (toolName === "search_recordings") {
+          if (baseArgs.bucket != null) {
+            const relaxed = { ...baseArgs };
+            delete relaxed.bucket;
+            pushVariant(relaxed, "bucket_fallback");
+          }
+          if (baseArgs.bucket_id != null) {
+            const relaxed = { ...baseArgs };
+            delete relaxed.bucket_id;
+            pushVariant(relaxed, "bucket_id_fallback");
+          }
+          if (baseArgs.type) {
+            const relaxed = { ...baseArgs };
+            delete relaxed.type;
+            pushVariant(relaxed, "type_fallback");
+          }
+        }
+
+        let bestPayload = null;
+        let bestCount = -1;
+        let lastError = null;
+
+        for (const variant of variants) {
+          try {
+            const payload = await invokeTool(toolName, variant.args);
+            const count = countPayloadItems(payload);
+            attempts.push({
+              reason: variant.reason,
+              query: variant.args?.query || null,
+              count
+            });
+
+            if (count > bestCount) {
+              bestCount = count;
+              bestPayload = payload;
+            }
+
+            if (!isSearchLike || count > 0) {
+              return withAttemptMeta(payload, attempts);
+            }
+          } catch (error) {
+            lastError = error;
+            attempts.push({
+              reason: variant.reason,
+              query: variant.args?.query || null,
+              error: error?.message || String(error)
+            });
+            if (!isRetryableToolError(error) && variant.reason === "primary") break;
+          }
+        }
+
+        if (bestPayload) return withAttemptMeta(bestPayload, attempts);
+        if (lastError) throw lastError;
+        return withAttemptMeta({}, attempts);
       };
 
       const computeConfidence = ({ analysis, hasProject, hasResources, hasConstraints, keywordBoost }) => {
