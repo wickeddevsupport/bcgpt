@@ -27,8 +27,8 @@
     "",
     "API Key Handling (Critical):",
     "- The user MUST provide their API key before any Basecamp operations.",
-    "- When a user shares their API key, acknowledge it and include it as 'api_key' in EVERY subsequent request body.",
-    "- NEVER forget the API key mid-conversation. Persist it across all tool calls.",
+    "- Prefer header auth (x-api-key) so one API key unlocks all tools automatically.",
+    "- Body-level 'api_key' is optional fallback when header auth is unavailable.",
     "- If a response says 'No API key provided', ask the user for their key.",
     "- The user gets their key from https://bcgpt.wickedlab.io/connect",
     "",
@@ -144,7 +144,11 @@
       }
     }
   },
-  "security": [],
+  "security": [
+    {
+      "apiKey": []
+    }
+  ],
   "paths": {
     "/action/startbcgpt": {
       "post": {

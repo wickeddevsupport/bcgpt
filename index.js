@@ -17,6 +17,9 @@ import {
   getUserAuthCache,
   setUserAuthCache,
   clearUserAuthCache,
+  createSession,
+  bindSession,
+  getSessionUser,
   getApiKeyForUser,
   createApiKeyForUser,
   getUserByApiKey,
@@ -204,22 +207,141 @@ function getHeaderValue(req, name) {
 }
 
 function extractApiKey(req) {
+  const authHeader = normalizeKey(getHeaderValue(req, "authorization"));
+  const bearer = authHeader && /^Bearer\s+/i.test(authHeader)
+    ? normalizeKey(authHeader.replace(/^Bearer\s+/i, ""))
+    : null;
+
   return normalizeKey(
     getHeaderValue(req, "x-bcgpt-api-key") ||
       getHeaderValue(req, "x-api-key") ||
+      bearer ||
+      getCookieValue(req, "bcgpt_api_key") ||
       req?.body?.api_key ||
+      req?.body?.apiKey ||
+      req?.body?.params?.arguments?.api_key ||
+      req?.body?.params?.arguments?.apiKey ||
+      req?.body?.arguments?.api_key ||
+      req?.body?.arguments?.apiKey ||
       req?.query?.api_key ||
       req?.query?.apiKey
   );
 }
 
-async function resolveRequestContext(req, { apiKey: forcedApiKey, userKey: forcedUserKey } = {}) {
+function getCookieValue(req, name) {
+  const cookieHeader = normalizeKey(getHeaderValue(req, "cookie"));
+  if (!cookieHeader || !name) return null;
+  const parts = String(cookieHeader).split(";");
+  for (const part of parts) {
+    const idx = part.indexOf("=");
+    if (idx <= 0) continue;
+    const key = part.slice(0, idx).trim();
+    if (key !== name) continue;
+    const rawValue = part.slice(idx + 1).trim();
+    try {
+      return normalizeKey(decodeURIComponent(rawValue));
+    } catch {
+      return normalizeKey(rawValue);
+    }
+  }
+  return null;
+}
+
+function extractSessionKey(req) {
+  const explicit = normalizeKey(
+    getHeaderValue(req, "x-bcgpt-session-key") ||
+      getHeaderValue(req, "x-session-key") ||
+      req?.body?.session_key ||
+      req?.body?.sessionKey ||
+      req?.body?.params?.session_key ||
+      req?.body?.params?.sessionKey ||
+      req?.body?.params?.arguments?.session_key ||
+      req?.body?.params?.arguments?.sessionKey ||
+      req?.query?.session_key ||
+      req?.query?.sessionKey ||
+      getCookieValue(req, "bcgpt_session")
+  );
+  if (explicit) return explicit;
+
+  const openaiConversationId = normalizeKey(
+    getHeaderValue(req, "x-openai-conversation-id") ||
+      getHeaderValue(req, "openai-conversation-id") ||
+      getHeaderValue(req, "x-chatgpt-conversation-id") ||
+      getHeaderValue(req, "chatgpt-conversation-id")
+  );
+  const openaiEphemeralUserId = normalizeKey(
+    getHeaderValue(req, "x-openai-ephemeral-user-id") ||
+      getHeaderValue(req, "openai-ephemeral-user-id") ||
+      getHeaderValue(req, "x-openai-user-id") ||
+      getHeaderValue(req, "openai-user-id")
+  );
+
+  if (!openaiConversationId && !openaiEphemeralUserId) return null;
+
+  const fingerprint = `${openaiEphemeralUserId || "anonymous"}::${openaiConversationId || "conversation"}`;
+  const digest = crypto.createHash("sha256").update(fingerprint).digest("hex").slice(0, 48);
+  return `oa_${digest}`;
+}
+
+function setSessionCookie(res, sessionKey) {
+  const normalized = normalizeKey(sessionKey);
+  if (!normalized || !res?.append) return;
+  res.append(
+    "Set-Cookie",
+    `bcgpt_session=${encodeURIComponent(normalized)}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=2592000`
+  );
+}
+
+function setApiKeyCookie(res, apiKey) {
+  const normalized = normalizeKey(apiKey);
+  if (!normalized || !res?.append) return;
+  res.append(
+    "Set-Cookie",
+    `bcgpt_api_key=${encodeURIComponent(normalized)}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=2592000`
+  );
+}
+
+async function maybeAttachAuthCookies(req, res, ctx = null) {
+  if (!res?.append) return ctx;
+  try {
+    let resolved = ctx;
+    if (!resolved) {
+      resolved = await resolveRequestContext(req);
+    }
+    if (!resolved) return resolved;
+
+    if (resolved.apiKey) {
+      setApiKeyCookie(res, resolved.apiKey);
+    }
+
+    let sessionKey = resolved.sessionKey;
+    if (!sessionKey && resolved.userKey) {
+      sessionKey = await createSession(null, resolved.userKey);
+      resolved.sessionKey = sessionKey;
+    }
+    if (sessionKey) {
+      if (resolved.userKey) {
+        await bindSession(sessionKey, resolved.userKey);
+      }
+      setSessionCookie(res, sessionKey);
+    }
+    return resolved;
+  } catch {
+    return ctx;
+  }
+}
+
+async function resolveRequestContext(req, { apiKey: forcedApiKey, userKey: forcedUserKey, sessionKey: forcedSessionKey } = {}) {
   const apiKey = normalizeKey(forcedApiKey || extractApiKey(req));
   const explicitUserKey = normalizeKey(forcedUserKey);
+  const sessionKey = normalizeKey(forcedSessionKey || extractSessionKey(req));
 
   let userKey = explicitUserKey || null;
   if (!userKey && apiKey) {
     userKey = await getUserByApiKey(apiKey);
+  }
+  if (!userKey && sessionKey) {
+    userKey = await getSessionUser(sessionKey);
   }
 
   let token = null;
@@ -227,11 +349,22 @@ async function resolveRequestContext(req, { apiKey: forcedApiKey, userKey: force
 
   if (userKey) {
     token = await getUserToken(userKey);
+    if (!token?.access_token) {
+      const keyForUser = await getApiKeyForUser(userKey);
+      if (keyForUser) {
+        await getUserByApiKey(keyForUser, { touch: false });
+        token = await getUserToken(userKey);
+      }
+    }
     auth = await getUserAuthCache(userKey);
+    if (sessionKey) {
+      await bindSession(sessionKey, userKey);
+    }
   }
 
   return {
     apiKey,
+    sessionKey,
     userKey,
     token,
     auth,
@@ -562,6 +695,7 @@ async function basecampFetch(token, path, opts = {}) {
 /* ============ Launchpad auth ============ */
 async function startStatus(req, { apiKey: forcedApiKey } = {}) {
   const apiKey = normalizeKey(forcedApiKey || extractApiKey(req));
+  const sessionKey = normalizeKey(extractSessionKey(req));
   const base = originBase(req);
   const connect_url = `${base}/connect`;
   const stateParam = apiKey ? `?state=${encodeURIComponent(apiKey)}` : "";
@@ -576,6 +710,7 @@ async function startStatus(req, { apiKey: forcedApiKey } = {}) {
       user: null,
       user_key: null,
       api_key: null,
+      session_key: sessionKey,
       selected_account_id: null,
       accounts: [],
       connect_url,
@@ -594,6 +729,7 @@ async function startStatus(req, { apiKey: forcedApiKey } = {}) {
       user: null,
       user_key: ctx.userKey || null,
       api_key: apiKey,
+      session_key: ctx.sessionKey || sessionKey,
       selected_account_id: null,
       accounts: [],
       connect_url,
@@ -635,6 +771,7 @@ async function startStatus(req, { apiKey: forcedApiKey } = {}) {
       },
       user_key: authResult.userKey || ctx.userKey,
       api_key: apiKey,
+      session_key: ctx.sessionKey || sessionKey,
       selected_account_id: selectedMatch ? selected : null,
       accounts,
       connect_url,
@@ -652,6 +789,7 @@ async function startStatus(req, { apiKey: forcedApiKey } = {}) {
       user: null,
       user_key: ctx.userKey || null,
       api_key: apiKey,
+      session_key: ctx.sessionKey || sessionKey,
       selected_account_id: null,
       accounts: [],
       connect_url,
@@ -3816,6 +3954,7 @@ async function buildMcpCtx(req) {
     ua: UA,
     userKey,
     apiKey: ctx.apiKey,
+    sessionKey: ctx.sessionKey,
     authAccounts: auth?.accounts || [],
     startStatus: async (overrides = {}) =>
       await startStatus(req, { apiKey: overrides.apiKey || ctx.apiKey }),
@@ -3972,13 +4111,31 @@ app.get("/auth/basecamp/callback", async (req, res) => {
       apiKey = await createApiKeyForUser(derivedUserKey, token);
     }
 
+    const sessionKey = await createSession(null, derivedUserKey);
+    setApiKeyCookie(res, apiKey);
+    setSessionCookie(res, sessionKey);
+
     res.redirect(`${base}/connect?api_key=${encodeURIComponent(apiKey)}`);
   } catch (e) {
     res.status(500).send(`OAuth failed: ${e?.message || e}`);
   }
 });
 
-app.get("/startbcgpt", async (req, res) => res.json(await startStatus(req)));
+app.get("/startbcgpt", async (req, res) => {
+  const status = await startStatus(req);
+  const sessionKey = status?.session_key || null;
+  if (status?.api_key) {
+    setApiKeyCookie(res, status.api_key);
+  }
+  if (sessionKey) {
+    setSessionCookie(res, sessionKey);
+  } else if (status?.user_key) {
+    const generated = await createSession(null, status.user_key);
+    setSessionCookie(res, generated);
+    status.session_key = generated;
+  }
+  res.json(status);
+});
 
 app.post("/logout", async (req, res) => {
   const ctx = await resolveRequestContext(req);
@@ -3991,7 +4148,19 @@ app.post("/logout", async (req, res) => {
 
 /* ================= Actions ================= */
 app.post("/action/startbcgpt", async (req, res) => {
-  res.json(await startStatus(req));
+  const status = await startStatus(req);
+  const sessionKey = status?.session_key || null;
+  if (status?.api_key) {
+    setApiKeyCookie(res, status.api_key);
+  }
+  if (sessionKey) {
+    setSessionCookie(res, sessionKey);
+  } else if (status?.user_key) {
+    const generated = await createSession(null, status.user_key);
+    setSessionCookie(res, generated);
+    status.session_key = generated;
+  }
+  res.json(status);
 });
 
 app.post("/select_account", async (req, res) => {
@@ -4103,6 +4272,7 @@ app.post("/action/:op", async (req, res) => {
   };
 
   try {
+    await maybeAttachAuthCookies(req, res);
     const result = await runTool(req.params.op, req.body || {}, req);
     const enforceChunks = String(process.env.ACTION_ENFORCE_CHUNK_REQUIRED || "true").toLowerCase() !== "false";
     if (enforceChunks && !["get_cached_payload_chunk", "export_cached_payload"].includes(req.params.op)) {
@@ -4372,6 +4542,7 @@ app.post("/mcp", async (req, res) => {
       // For unprotected methods, still resolve API key to token if it exists
       const apiKey = extractApiKey(req);
       const resolvedCtx = await resolveRequestContext(req, { apiKey });
+      await maybeAttachAuthCookies(req, res, resolvedCtx);
       const ctx = {
         TOKEN: resolvedCtx.token,
         accountId: null,
@@ -4403,6 +4574,7 @@ app.post("/mcp", async (req, res) => {
     if (method === "tools/call" && toolName && toolName.startsWith("flow_")) {
       const apiKey = extractApiKey(req);
       const resolvedCtx = await resolveRequestContext(req, { apiKey });
+      await maybeAttachAuthCookies(req, res, resolvedCtx);
       
       const ctx = {
         TOKEN: resolvedCtx.token,
@@ -4428,6 +4600,7 @@ app.post("/mcp", async (req, res) => {
     }
 
     const ctx = await buildMcpCtx(req);
+    await maybeAttachAuthCookies(req, res, ctx);
     const out = await handleMCP(req.body, ctx);
     res.json(out);
   } catch (e) {
