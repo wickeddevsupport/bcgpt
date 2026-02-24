@@ -1538,12 +1538,51 @@ function normalizeNameMatch(q) {
     .trim();
 }
 
+function normalizeCompactMatch(q) {
+  return String(q || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
 function scoreNameMatch(name, query) {
-  if (!name || !query) return 0;
-  if (name === query) return 3;
-  if (name.startsWith(query)) return 2;
-  if (name.includes(query)) return 1;
-  return 0;
+  const n = normalizeNameMatch(name);
+  const q = normalizeNameMatch(query);
+  if (!n || !q) return 0;
+
+  const nCompact = normalizeCompactMatch(n);
+  const qCompact = normalizeCompactMatch(q);
+  let score = 0;
+
+  if (n === q) score = Math.max(score, 120);
+  if (n.startsWith(q)) score = Math.max(score, 110);
+  if (n.includes(q)) score = Math.max(score, 95);
+
+  if (qCompact && nCompact) {
+    if (nCompact === qCompact) score = Math.max(score, 118);
+    if (nCompact.includes(qCompact)) score = Math.max(score, 108);
+    if (qCompact.includes(nCompact) && nCompact.length >= 4) score = Math.max(score, 85);
+  }
+
+  const queryTokens = q.split(/\s+/).filter((t) => t.length > 1);
+  if (queryTokens.length > 0) {
+    const tokenHits = queryTokens.filter((t) => n.includes(t) || nCompact.includes(normalizeCompactMatch(t))).length;
+    if (tokenHits === queryTokens.length) {
+      score = Math.max(score, 90 + Math.min(15, tokenHits));
+    } else if (tokenHits >= Math.ceil(queryTokens.length / 2)) {
+      score = Math.max(score, 65 + tokenHits * 3);
+    }
+  }
+
+  // Soft fuzzy fallback for near misses, including compact strings like signalandstrand.
+  if (score === 0 && qCompact.length >= 4 && nCompact.length >= 4) {
+    const dist = levenshtein(nCompact, qCompact);
+    const maxLen = Math.max(nCompact.length, qCompact.length);
+    if (dist <= Math.max(2, Math.floor(maxLen * 0.25))) {
+      score = Math.max(score, 45);
+    }
+  }
+
+  return score;
 }
 
 function findNameMatches(items, query, { limit = 5, nameKey = "name" } = {}) {
@@ -1553,7 +1592,7 @@ function findNameMatches(items, query, { limit = 5, nameKey = "name" } = {}) {
   for (const item of (items || [])) {
     const rawName = item?.[nameKey] ?? item?.name ?? item?.title ?? "";
     const n = normalizeNameMatch(rawName);
-    const score = scoreNameMatch(n, q);
+    const score = scoreNameMatch(rawName, query);
     if (!score) continue;
     scored.push({ item, score, nameLen: n.length });
   }
@@ -5937,7 +5976,15 @@ export async function handleMCP(reqBody, ctx) {
       const resolveProjectBestEffort = (rawQuery, projects = []) => {
         if (!projects.length) return { project: null, candidates: [] };
         const lower = String(rawQuery || "").toLowerCase();
-        const direct = projects.filter(p => p?.name && lower.includes(String(p.name).toLowerCase()));
+        const compactQuery = normalizeCompactMatch(rawQuery);
+        const direct = projects.filter((p) => {
+          const name = String(p?.name || "");
+          if (!name) return false;
+          const nameLower = name.toLowerCase();
+          if (lower.includes(nameLower)) return true;
+          const nameCompact = normalizeCompactMatch(name);
+          return Boolean(compactQuery && nameCompact && (compactQuery.includes(nameCompact) || nameCompact.includes(compactQuery)));
+        });
         if (direct.length === 1) return { project: direct[0], candidates: direct };
         if (direct.length > 1) {
           const ranked = [...direct].sort((a, b) => (String(b.name || "").length - String(a.name || "").length));
@@ -5948,9 +5995,116 @@ export async function handleMCP(reqBody, ctx) {
           const picked = resolveBestEffort(projects, hint);
           if (picked) return { project: picked, candidates: [picked] };
         }
+        const fuzzy = projects
+          .map((p) => {
+            const name = String(p?.name || "");
+            const normalized = normalizeNameMatch(name);
+            const compact = normalizeCompactMatch(name);
+            const qNorm = normalizeNameMatch(rawQuery);
+            const qCompact = normalizeCompactMatch(rawQuery);
+            let score = 0;
+            if (qNorm && normalized.includes(qNorm)) score = Math.max(score, 95);
+            if (qCompact && compact && compact.includes(qCompact)) score = Math.max(score, 105);
+
+            const tokens = String(rawQuery || "")
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, " ")
+              .split(/\s+/)
+              .filter((t) => t.length > 1)
+              .filter((t) => !["the", "and", "or", "about", "context", "project", "company", "design"].includes(t));
+            if (tokens.length) {
+              const hits = tokens.filter((t) => normalized.includes(t) || compact.includes(t)).length;
+              if (hits === tokens.length) score = Math.max(score, 90 + Math.min(15, hits));
+              else if (hits >= Math.ceil(tokens.length / 2)) score = Math.max(score, 60 + hits * 3);
+            }
+            return { project: p, score };
+          })
+          .filter((r) => r.score >= 60)
+          .sort((a, b) => b.score - a.score);
+        if (fuzzy.length) {
+          const top = fuzzy[0];
+          const candidates = fuzzy
+            .filter((r) => r.score >= Math.max(70, top.score - 8))
+            .map((r) => r.project);
+          return {
+            project: top.project,
+            candidates: candidates.length ? candidates : [top.project],
+            ambiguous: candidates.length > 1,
+            score: top.score,
+            source: "fuzzy"
+          };
+        }
         const fallback = resolveBestEffort(projects, rawQuery);
         if (fallback) return { project: fallback, candidates: [fallback], ambiguous: true };
         return { project: null, candidates: [] };
+      };
+
+      const resolveProjectFromSearch = async (rawQuery) => {
+        const variants = buildSearchQueryVariants(extractSearchQuery(rawQuery) || rawQuery, { max: 6 });
+        const attempts = [];
+        let best = null;
+
+        for (const variant of variants) {
+          let result;
+          try {
+            result = await searchProjects(ctx, variant, { include_archived_projects: false, limit: 10 });
+          } catch (error) {
+            attempts.push({
+              query: variant,
+              count: 0,
+              error: error?.message || String(error)
+            });
+            continue;
+          }
+
+          const hits = Array.isArray(result?.projects) ? result.projects : [];
+          attempts.push({ query: variant, count: hits.length });
+
+          if (hits.length === 1) {
+            return {
+              project: hits[0],
+              candidates: hits,
+              attempts,
+              source: "search_projects_exact"
+            };
+          }
+          if (hits.length > 1) {
+            const ranked = hits
+              .map((p) => ({
+                project: p,
+                score: scoreNameMatch(String(p?.name || ""), rawQuery)
+              }))
+              .sort((a, b) => b.score - a.score);
+            const top = ranked[0];
+            if (top && (!best || top.score > best.score)) {
+              best = {
+                project: top.project,
+                score: top.score,
+                candidates: ranked
+                  .filter((r) => r.score >= Math.max(70, top.score - 8))
+                  .map((r) => r.project),
+                source_query: variant
+              };
+            }
+          }
+        }
+
+        if (best && best.score >= 70) {
+          return {
+            project: best.project,
+            candidates: best.candidates,
+            attempts,
+            source: "search_projects_fuzzy",
+            score: best.score
+          };
+        }
+
+        return {
+          project: null,
+          candidates: best?.candidates || [],
+          attempts,
+          source: "search_projects_none"
+        };
       };
 
       const extractSearchQuery = (raw) => {
@@ -6019,8 +6173,241 @@ export async function handleMCP(reqBody, ctx) {
         const wantsComments = /comment(s)?/.test(lower);
         const keywordBoost = /(summarize|summary|dump|list all|everything|full|all cards|all todos|all messages)/i.test(query);
         const wantsSummary = /(summarize|summary|overview|status report|project report)/i.test(query);
+        const wantsProjectContext =
+          /\bproject context\b/.test(lower) ||
+          /\bcompany context\b/.test(lower) ||
+          /\bbrand context\b/.test(lower) ||
+          /\bdesign language\b/.test(lower) ||
+          /\bdesign system\b/.test(lower) ||
+          /\bvisual language\b/.test(lower) ||
+          /\bstyle guide\b/.test(lower) ||
+          /\bbrand guide\b/.test(lower) ||
+          /\bmission\b/.test(lower) ||
+          /\bvision\b/.test(lower) ||
+          /\bidentity\b/.test(lower) ||
+          /\bpositioning\b/.test(lower) ||
+          /\bbranding\b/.test(lower) ||
+          /\bcompany\b/.test(lower) ||
+          ((/\babout\b/.test(lower) || /\bcontext\b/.test(lower)) && !/assigned|todo|task|workflow|flow|automation/.test(lower));
         const ctx_intel = new RequestContext(ctx, `smart_action: ${query}`);
         await ctx_intel.preloadEssentials({ loadPeople: true, loadProjects: true });
+
+        const buildContextKeywords = (raw, projectName = "") => {
+          const base = [
+            "brand",
+            "branding",
+            "design",
+            "design language",
+            "visual identity",
+            "tone of voice",
+            "style guide",
+            "brand guidelines",
+            "project brief",
+            "mission",
+            "vision",
+            "positioning",
+            "about",
+          ];
+          const stopTokens = new Set([
+            "what", "tell", "about", "company", "project", "context", "design", "language",
+            "signal", "strand", "the", "and", "for", "with", "from", "please", "give", "me"
+          ]);
+          const keywords = [];
+          const seen = new Set();
+          const add = (value) => {
+            const v = String(value || "").trim();
+            if (!v) return;
+            const key = v.toLowerCase();
+            if (seen.has(key)) return;
+            seen.add(key);
+            keywords.push(v);
+          };
+
+          for (const variant of buildSearchQueryVariants(raw, { max: 6 })) add(variant);
+          for (const variant of buildSearchQueryVariants(searchQuery, { max: 6 })) add(variant);
+          for (const variant of buildSearchQueryVariants(projectName, { max: 4 })) add(variant);
+          for (const token of String(raw || "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, " ")
+            .split(/\s+/)
+            .filter(Boolean)
+            .filter((t) => t.length >= 3 && !stopTokens.has(t))) {
+            add(token);
+          }
+          for (const k of base) add(k);
+          return keywords.slice(0, 12);
+        };
+
+        const summarizeContextItem = (item = {}) => ({
+          id: item.id ?? null,
+          type: item.type || null,
+          title: item.title || item.subject || item.name || null,
+          snippet: truncateText(item.plain_text_content || item.content || item.description || "", 280),
+          status: item.status || null,
+          created_at: item.created_at || null,
+          updated_at: item.updated_at || null,
+          app_url: item.app_url || item.url || null,
+          bucket: item.bucket
+            ? { id: item.bucket.id ?? null, name: item.bucket.name ?? null }
+            : null
+        });
+
+        const gatherProjectContext = async (projectObj) => {
+          const keywords = buildContextKeywords(query, projectObj?.name || "");
+          const keywordCompacts = keywords.map(normalizeCompactMatch).filter(Boolean);
+          const matchesKeyword = (...values) => {
+            const haystack = normalizeCompactMatch(values.filter(Boolean).join(" "));
+            if (!haystack) return false;
+            return keywordCompacts.some((k) => k && haystack.includes(k));
+          };
+
+          const searchRuns = await mapLimit(keywords, 2, async (kw) => {
+            try {
+              const results = await searchProject(ctx, projectObj.id, { query: kw });
+              return { query: kw, count: Array.isArray(results) ? results.length : 0, results };
+            } catch (error) {
+              return { query: kw, count: 0, error: error?.message || String(error), results: [] };
+            }
+          });
+
+          const evidenceMap = new Map();
+          for (const run of searchRuns) {
+            for (const hit of (run.results || [])) {
+              const key = `${hit.type || "recording"}:${hit.id || ""}:${hit.app_url || hit.url || ""}`;
+              if (!evidenceMap.has(key)) evidenceMap.set(key, summarizeContextItem(hit));
+            }
+          }
+
+          const sourceStatus = {
+            search_runs: searchRuns.map((r) => ({ query: r.query, count: r.count, error: r.error || null }))
+          };
+          const safeRead = async (name, fn) => {
+            try {
+              const data = await fn();
+              sourceStatus[name] = { ok: true, count: Array.isArray(data) ? data.length : null };
+              return data;
+            } catch (error) {
+              sourceStatus[name] = { ok: false, error: error?.message || String(error) };
+              return [];
+            }
+          };
+
+          const [todoGroups, boardPayload, messages, documents, uploads] = await Promise.all([
+            safeRead("todos", () => listTodosForProject(ctx, projectObj.id)),
+            safeRead("cards", () =>
+              listProjectCardTableContents(ctx, projectObj.id, {
+                includeDetails: false,
+                includeCards: true,
+                maxCardsPerColumn: 10,
+                cursor: 0,
+                maxBoards: 3,
+                autoAll: true,
+                maxBoardsTotal: 6,
+                cacheOutput: false
+              })
+            ),
+            safeRead("messages", () => listMessages(ctx, projectObj.id, { limit: 80 })),
+            safeRead("documents", () => listDocuments(ctx, projectObj.id, { limit: 80 })),
+            safeRead("uploads", async () => {
+              const vaults = await listVaults(ctx, projectObj.id);
+              const vaultId = vaults?.[0]?.id;
+              if (!vaultId) return [];
+              return listUploads(ctx, projectObj.id, vaultId);
+            })
+          ]);
+
+          const todoMatches = [];
+          for (const group of (todoGroups || [])) {
+            for (const todo of (group.todos || [])) {
+              const title = todoText(todo);
+              const description = String(todo.description || "");
+              if (!matchesKeyword(title, description, group.todolist)) continue;
+              todoMatches.push({
+                id: todo.id,
+                title,
+                description: truncateText(description, 240),
+                todolist: group.todolist,
+                due_on: todo.due_on || todo.due_at || null,
+                completed: Boolean(todo.completed || todo.completed_at),
+                app_url: todo.app_url || todo.url || null
+              });
+            }
+          }
+
+          const cardMatches = [];
+          const boards = Array.isArray(boardPayload?.boards) ? boardPayload.boards : [];
+          for (const board of boards) {
+            for (const column of (board.columns || [])) {
+              for (const card of (column.cards || [])) {
+                if (!matchesKeyword(card.title, card.content, column.title, board.title)) continue;
+                cardMatches.push({
+                  id: card.id,
+                  title: card.title || null,
+                  column: column.title || null,
+                  board: board.title || null,
+                  due_on: card.due_on || null,
+                  status: card.status || null,
+                  app_url: card.app_url || card.url || null
+                });
+              }
+            }
+          }
+
+          const messageMatches = (messages || [])
+            .filter((m) => matchesKeyword(m.subject, m.status))
+            .map((m) => ({
+              id: m.id,
+              subject: m.subject || null,
+              status: m.status || null,
+              created_at: m.created_at || null,
+              app_url: m.app_url || m.url || null
+            }));
+
+          const documentMatches = (documents || [])
+            .filter((d) => matchesKeyword(d.title, d.kind))
+            .map((d) => ({
+              id: d.id,
+              title: d.title || null,
+              kind: d.kind || null,
+              created_at: d.created_at || null,
+              app_url: d.app_url || d.url || null
+            }));
+
+          const uploadMatches = (uploads || [])
+            .filter((u) => matchesKeyword(u.title, u.filename, u.description))
+            .map((u) => ({
+              id: u.id,
+              title: u.title || u.filename || null,
+              filename: u.filename || null,
+              content_type: u.content_type || null,
+              app_url: u.app_url || null
+            }));
+
+          const recordingEvidence = Array.from(evidenceMap.values())
+            .sort((a, b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || "")))
+            .slice(0, 80);
+
+          return {
+            project: { id: projectObj.id, name: projectObj.name },
+            keywords_searched: keywords,
+            source_status: sourceStatus,
+            todo_summary: summarizeTodoGroups(todoGroups || []),
+            recording_evidence: recordingEvidence,
+            todo_matches: todoMatches.slice(0, 80),
+            card_matches: cardMatches.slice(0, 80),
+            message_matches: messageMatches.slice(0, 40),
+            document_matches: documentMatches.slice(0, 40),
+            upload_matches: uploadMatches.slice(0, 40),
+            coverage: {
+              recordings_count: recordingEvidence.length,
+              todos_matched: todoMatches.length,
+              cards_matched: cardMatches.length,
+              messages_matched: messageMatches.length,
+              documents_matched: documentMatches.length,
+              uploads_matched: uploadMatches.length
+            }
+          };
+        };
 
         let project = null;
         let dock = null;
@@ -6038,7 +6425,28 @@ export async function handleMCP(reqBody, ctx) {
           }
         }
 
-        const confidence = computeConfidence({
+        if (!project) {
+          const searched = await resolveProjectFromSearch(query);
+          if (searched?.project) {
+            project = searched.project;
+            dock = await getDock(ctx, project.id);
+            projectResolution = {
+              project,
+              candidates: searched.candidates || [project],
+              ambiguous: Boolean(searched.candidates && searched.candidates.length > 1),
+              source: searched.source || "search_projects",
+              attempts: searched.attempts || []
+            };
+          } else if (searched?.attempts?.length) {
+            projectResolution = {
+              ...projectResolution,
+              source: searched.source || "search_projects",
+              attempts: searched.attempts
+            };
+          }
+        }
+
+        let confidence = computeConfidence({
           analysis,
           hasProject: !!project,
           hasResources: (analysis?.resources || []).length > 0,
@@ -6087,6 +6495,19 @@ export async function handleMCP(reqBody, ctx) {
           const date = analysis.constraints.dueDate || new Date().toISOString().slice(0, 10);
           const result = await intelligent.executeDailyReport(ctx, date);
           return ok(id, { query, action: "daily_report", confidence, result });
+        }
+
+        if (wantsProjectContext && project) {
+          const context = await gatherProjectContext(project);
+          confidence = Math.max(confidence, 0.88);
+          return ok(id, {
+            query,
+            action: "project_context_summary",
+            confidence,
+            project: { id: project.id, name: project.name },
+            result: context,
+            note: "Project context auto-collected from recordings, cards, todos, messages, documents, and uploads."
+          });
         }
 
         if (wantsSummary && project) {
