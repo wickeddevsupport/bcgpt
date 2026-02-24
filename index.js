@@ -338,7 +338,8 @@ async function resolveRequestContext(req, { apiKey: forcedApiKey, userKey: force
 
   let userKey = explicitUserKey || null;
   if (!userKey && apiKey) {
-    userKey = await getUserByApiKey(apiKey);
+    // Avoid a write on every request-path API key lookup (reduces lock pressure).
+    userKey = await getUserByApiKey(apiKey, { touch: false });
   }
   if (!userKey && sessionKey) {
     userKey = await getSessionUser(sessionKey);
@@ -378,9 +379,26 @@ async function fetchAuthorization(token) {
     throw err;
   }
 
-  const r = await fetch("https://launchpad.37signals.com/authorization.json", {
-    headers: { Authorization: `Bearer ${token.access_token}`, "User-Agent": UA },
-  });
+  const timeoutMs = Number(process.env.BASECAMP_AUTH_TIMEOUT_MS || 8000);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let r;
+  try {
+    r = await fetch("https://launchpad.37signals.com/authorization.json", {
+      headers: { Authorization: `Bearer ${token.access_token}`, "User-Agent": UA },
+      signal: controller.signal,
+    });
+  } catch (e) {
+    if (e?.name === "AbortError") {
+      const err = new Error("AUTHORIZATION_TIMEOUT");
+      err.code = "AUTHORIZATION_TIMEOUT";
+      err.timeout_ms = timeoutMs;
+      throw err;
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!r.ok) {
     const err = new Error("AUTHORIZATION_FAILED");
@@ -745,7 +763,7 @@ async function startStatus(req, { apiKey: forcedApiKey } = {}) {
     const authResult = await ensureAuthorization({
       token: ctx.token,
       userKey: ctx.userKey,
-      force: true,
+      force: false,
     });
     const accounts = authResult.auth?.accounts || [];
 
@@ -783,7 +801,41 @@ async function startStatus(req, { apiKey: forcedApiKey } = {}) {
         ? "Connected."
         : "Connected. Select a Basecamp account to continue.",
     };
-  } catch {
+  } catch (e) {
+    // If launchpad auth refresh is slow/unavailable but we still have cached auth
+    // plus a stored token for this API key, return a usable "connected" status.
+    if (ctx.token?.access_token && ctx.auth?.identity) {
+      const accounts = ctx.auth?.accounts || [];
+      let selected = null;
+      let selectedMatch = null;
+      try {
+        selected = await getSelectedAccount(ctx.userKey);
+        selectedMatch = selected ? accounts.find((a) => String(a.id) === String(selected)) : null;
+      } catch {
+        // ignore fallback selection lookup issues
+      }
+      return {
+        connected: true,
+        user: {
+          name: ctx.auth.identity?.name || null,
+          email: ctx.auth.identity?.email_address || null,
+        },
+        user_key: ctx.userKey || null,
+        api_key: apiKey,
+        session_key: ctx.sessionKey || sessionKey,
+        selected_account_id: selectedMatch ? selected : null,
+        accounts,
+        connect_url,
+        reauth_url,
+        select_account_url,
+        select_account_endpoint,
+        logout_url,
+        message:
+          e?.code === "AUTHORIZATION_TIMEOUT"
+            ? "Connected (using cached authorization; live refresh timed out)."
+            : "Connected (using cached authorization).",
+      };
+    }
     return {
       connected: false,
       user: null,

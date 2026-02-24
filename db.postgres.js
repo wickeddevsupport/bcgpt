@@ -12,6 +12,10 @@ if (!DATABASE_URL) {
 
 const poolMaxRaw = process.env.DATABASE_POOL_MAX;
 const poolMax = poolMaxRaw != null && String(poolMaxRaw).trim() !== "" ? Number(poolMaxRaw) : null;
+const DB_CONNECTION_TIMEOUT_MS = Number(process.env.DB_CONNECTION_TIMEOUT_MS || 5000);
+const DB_QUERY_TIMEOUT_MS = Number(process.env.DB_QUERY_TIMEOUT_MS || 10000);
+const DB_STATEMENT_TIMEOUT_MS = Number(process.env.DB_STATEMENT_TIMEOUT_MS || 15000);
+const DB_IDLE_TX_TIMEOUT_MS = Number(process.env.DB_IDLE_TX_TIMEOUT_MS || 15000);
 
 const sslRequired = (() => {
   const mode = String(process.env.PGSSLMODE || "").trim().toLowerCase();
@@ -24,6 +28,10 @@ const pool = new Pool({
   connectionString: DATABASE_URL,
   max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : undefined,
   ssl: sslRequired ? { rejectUnauthorized: false } : undefined,
+  connectionTimeoutMillis: Number.isFinite(DB_CONNECTION_TIMEOUT_MS) ? DB_CONNECTION_TIMEOUT_MS : 5000,
+  query_timeout: Number.isFinite(DB_QUERY_TIMEOUT_MS) ? DB_QUERY_TIMEOUT_MS : 10000,
+  statement_timeout: Number.isFinite(DB_STATEMENT_TIMEOUT_MS) ? DB_STATEMENT_TIMEOUT_MS : 15000,
+  idle_in_transaction_session_timeout: Number.isFinite(DB_IDLE_TX_TIMEOUT_MS) ? DB_IDLE_TX_TIMEOUT_MS : 15000,
 });
 const SCHEMA_LOCK_ID = 904624001;
 const SCHEMA_LOCK_TIMEOUT_MS = Number(process.env.DB_SCHEMA_LOCK_TIMEOUT_MS || 5000);
