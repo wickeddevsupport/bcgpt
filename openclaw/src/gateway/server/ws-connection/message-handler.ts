@@ -34,7 +34,7 @@ import { isLoopbackAddress, isTrustedProxyAddress, resolveGatewayClientIp } from
 import { resolveNodeCommandAllowlist } from "../../node-command-policy.js";
 import { checkBrowserOrigin } from "../../origin-check.js";
 import { GATEWAY_CLIENT_IDS } from "../../protocol/client-info.js";
-import { normalizeMainKey } from "../../routing/session-key.js";
+import { normalizeMainKey } from "../../../routing/session-key.js";
 import {
   type ConnectParams,
   ErrorCodes,
