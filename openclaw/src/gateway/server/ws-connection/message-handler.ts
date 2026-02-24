@@ -5,7 +5,9 @@ import type { createSubsystemLogger } from "../../../logging/subsystem.js";
 import type { ResolvedGatewayAuth } from "../../auth.js";
 import type { GatewayRequestContext, GatewayRequestHandlers } from "../../server-methods/types.js";
 import type { GatewayWsClient } from "../ws-types.js";
+import { resolveDefaultAgentId } from "../../../agents/agent-scope.js";
 import { loadConfig } from "../../../config/config.js";
+import { resolveMainSessionKey } from "../../../config/sessions.js";
 import {
   deriveDeviceIdFromPublicKey,
   normalizeDevicePublicKeyBase64Url,
@@ -32,6 +34,7 @@ import { isLoopbackAddress, isTrustedProxyAddress, resolveGatewayClientIp } from
 import { resolveNodeCommandAllowlist } from "../../node-command-policy.js";
 import { checkBrowserOrigin } from "../../origin-check.js";
 import { GATEWAY_CLIENT_IDS } from "../../protocol/client-info.js";
+import { normalizeMainKey } from "../../routing/session-key.js";
 import {
   type ConnectParams,
   ErrorCodes,
@@ -54,6 +57,7 @@ import {
   incrementPresenceVersion,
   refreshGatewayHealthSnapshot,
 } from "../health-state.js";
+import { loadEffectiveWorkspaceConfig } from "../../workspace-config.js";
 
 type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
 
@@ -858,6 +862,21 @@ export function attachGatewayWsMessageHandler(params: {
         }
 
         const snapshot = buildGatewaySnapshot();
+        if (pmosSession.ok) {
+          try {
+            const workspaceCfg = await loadEffectiveWorkspaceConfig(pmosSession.user.workspaceId);
+            snapshot.sessionDefaults = {
+              defaultAgentId: resolveDefaultAgentId(workspaceCfg as any),
+              mainKey: normalizeMainKey((workspaceCfg as any)?.session?.mainKey),
+              mainSessionKey: resolveMainSessionKey(workspaceCfg as any),
+              scope: (workspaceCfg as any)?.session?.scope ?? "per-sender",
+            };
+          } catch (err) {
+            logGateway.warn(
+              `failed to build workspace-scoped session defaults: ${formatForLog(err)}`,
+            );
+          }
+        }
         const cachedHealth = getHealthCache();
         if (cachedHealth) {
           snapshot.health = cachedHealth;
