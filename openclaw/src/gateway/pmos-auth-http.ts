@@ -11,6 +11,10 @@ import {
 import { readJsonBody } from "./hooks.js";
 
 const MAX_BODY_BYTES = 32 * 1024;
+const DEFAULT_STARTER_AGENT_ID = "assistant";
+const DEFAULT_STARTER_AGENT_NAME = "Workspace Assistant";
+const DEFAULT_STARTER_AGENT_WORKSPACE_BASE = "~/.openclaw/workspaces";
+const SHARED_PROVIDER_PREFER = new Set(["local-ollama", "ollama"]);
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;
@@ -93,6 +97,156 @@ async function warmEmbeddedN8nIdentity(user: WarmIdentityUser): Promise<void> {
     });
   } catch (err) {
     console.warn("[pmos] embedded n8n identity warm-up failed:", String(err));
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function getPath(obj: unknown, path: string[]): unknown {
+  let cur: unknown = obj;
+  for (const key of path) {
+    if (!isRecord(cur)) {
+      return undefined;
+    }
+    cur = cur[key];
+  }
+  return cur;
+}
+
+function slugifyAgentId(input: string): string {
+  const normalized = input
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-_]+|[-_]+$/g, "");
+  return normalized || DEFAULT_STARTER_AGENT_ID;
+}
+
+function findSharedWorkspaceModelRef(cfg: unknown): string | null {
+  const providers = getPath(cfg, ["models", "providers"]);
+  if (!isRecord(providers)) {
+    return null;
+  }
+
+  const entries = Object.entries(providers);
+  const preferred = entries.filter(([name]) => SHARED_PROVIDER_PREFER.has(name.trim().toLowerCase()));
+  const flagged = entries.filter(([, value]) => {
+    if (!isRecord(value)) return false;
+    return value.sharedForWorkspaces === true || value.shared === true;
+  });
+  const ordered: Array<[string, unknown]> = [];
+  const seen = new Set<string>();
+  for (const group of [preferred, flagged, entries]) {
+    for (const entry of group) {
+      if (seen.has(entry[0])) continue;
+      seen.add(entry[0]);
+      ordered.push(entry);
+    }
+  }
+
+  for (const [providerName, providerRaw] of ordered) {
+    const provider = providerName.trim().toLowerCase();
+    if (!provider || !isRecord(providerRaw)) continue;
+    const models = providerRaw.models;
+    if (!Array.isArray(models) || models.length === 0) continue;
+    for (const modelRaw of models) {
+      if (!isRecord(modelRaw)) continue;
+      const id = typeof modelRaw.id === "string" ? modelRaw.id.trim() : "";
+      if (!id) continue;
+      return `${provider}/${id}`;
+    }
+  }
+  return null;
+}
+
+async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise<void> {
+  try {
+    const [{ readWorkspaceConfig, patchWorkspaceConfig }, { loadConfig }] = await Promise.all([
+      import("./workspace-config.js"),
+      import("../config/config.js"),
+    ]);
+    const workspaceId = String(user.workspaceId || "").trim();
+    if (!workspaceId) return;
+
+    const existing = (await readWorkspaceConfig(workspaceId)) ?? {};
+    const existingAgentsList = getPath(existing, ["agents", "list"]);
+    const hasAgents = Array.isArray(existingAgentsList) && existingAgentsList.length > 0;
+
+    const sharedModelRef = findSharedWorkspaceModelRef(loadConfig() as unknown);
+    const starterName =
+      typeof user.name === "string" && user.name.trim()
+        ? `${user.name.trim().split(/\s+/)[0]}'s Assistant`
+        : DEFAULT_STARTER_AGENT_NAME;
+    const starterAgentId = slugifyAgentId(DEFAULT_STARTER_AGENT_ID);
+    const starterWorkspace = `${DEFAULT_STARTER_AGENT_WORKSPACE_BASE}/${workspaceId}/${starterAgentId}`;
+
+    const patch: Record<string, unknown> = {};
+
+    if (!hasAgents) {
+      patch.agents = {
+        defaults: {
+          workspace: starterWorkspace,
+        },
+        list: [
+          {
+            id: starterAgentId,
+            name: starterName,
+            default: true,
+            workspace: starterWorkspace,
+            identity: {
+              name: starterName,
+              emoji: ":robot:",
+              theme: "Workspace Assistant",
+            },
+            tools: { profile: "messaging" },
+            ...(sharedModelRef ? { model: sharedModelRef } : {}),
+          },
+        ],
+      };
+    } else {
+      patch.agents = {
+        defaults: {
+          workspace:
+            typeof getPath(existing, ["agents", "defaults", "workspace"]) === "string"
+              ? getPath(existing, ["agents", "defaults", "workspace"])
+              : starterWorkspace,
+        },
+      };
+    }
+
+    const workspacePrimary = getPath(existing, ["agents", "defaults", "model", "primary"]);
+    if (sharedModelRef && (typeof workspacePrimary !== "string" || !workspacePrimary.trim())) {
+      const modelsMeta = getPath(existing, ["agents", "defaults", "models"]);
+      const hasModelMeta =
+        isRecord(modelsMeta) && Object.prototype.hasOwnProperty.call(modelsMeta, sharedModelRef);
+      patch.agents = {
+        ...(isRecord(patch.agents) ? patch.agents : {}),
+        defaults: {
+          ...(isRecord(getPath(patch, ["agents", "defaults"]))
+            ? (getPath(patch, ["agents", "defaults"]) as Record<string, unknown>)
+            : {}),
+          model: { primary: sharedModelRef },
+          ...(hasModelMeta
+            ? {}
+            : {
+                models: {
+                  [sharedModelRef]: {
+                    alias: "Shared Ollama",
+                  },
+                },
+              }),
+        },
+      };
+    }
+
+    if (Object.keys(patch).length > 0) {
+      await patchWorkspaceConfig(workspaceId, patch);
+    }
+  } catch (err) {
+    console.warn("[pmos] workspace starter bootstrap failed:", String(err));
   }
 }
 
@@ -180,6 +334,7 @@ export async function handlePmosAuthHttpRequest(params: {
     }
     // Warm workspace-scoped embedded n8n auth so the automations iframe opens
     // with the same PMOS user context on first load.
+    await ensureWorkspaceStarterExperience(result.user);
     void warmEmbeddedN8nIdentity(result.user);
     res.setHeader("Set-Cookie", buildPmosSessionCookieValue(result.sessionToken, req));
     sendJson(res, 200, { ok: true, user: result.user });
@@ -195,6 +350,7 @@ export async function handlePmosAuthHttpRequest(params: {
       return true;
     }
     // Same warm-up on login to avoid first-request races in embedded n8n auth.
+    await ensureWorkspaceStarterExperience(result.user);
     void warmEmbeddedN8nIdentity(result.user);
     res.setHeader("Set-Cookie", buildPmosSessionCookieValue(result.sessionToken, req));
     sendJson(res, 200, { ok: true, user: result.user });

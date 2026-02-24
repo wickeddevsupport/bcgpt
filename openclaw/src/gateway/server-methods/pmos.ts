@@ -85,6 +85,17 @@ function readConfigString(cfg: unknown, path: string[]): string | null {
   return trimmed ? trimmed : null;
 }
 
+function getPath(obj: unknown, path: string[]): unknown {
+  let cur: unknown = obj;
+  for (const key of path) {
+    if (!cur || typeof cur !== "object" || Array.isArray(cur)) {
+      return undefined;
+    }
+    cur = (cur as Record<string, unknown>)[key];
+  }
+  return cur;
+}
+
 function isReachableStatus(code: number): boolean {
   // 401/403/404 still prove the upstream is alive.
   return code === 401 || code === 403 || code === 404;
@@ -108,9 +119,13 @@ function deepMergeJson(base: unknown, patch: unknown): unknown {
 function sanitizeWorkspaceConfigResponse(
   client: GatewayClient | null | undefined,
   cfg: unknown,
-  opts?: { filterAgents?: boolean },
+  opts?: { filterAgents?: boolean; workspaceConfig?: unknown; filterSharedProvidersOnly?: boolean },
 ): Record<string, unknown> {
-  const redactedCandidate = redactConfigObject(cfg);
+  let candidate = cfg;
+  if (opts?.filterSharedProvidersOnly && client && !isSuperAdmin(client)) {
+    candidate = filterEffectiveConfigForWorkspaceUi(candidate, opts.workspaceConfig);
+  }
+  const redactedCandidate = redactConfigObject(candidate);
   const redacted = isJsonObject(redactedCandidate)
     ? (redactedCandidate as Record<string, unknown>)
     : {};
@@ -128,6 +143,140 @@ function sanitizeWorkspaceConfigResponse(
       list: filterByWorkspace(agents.list as Array<{ workspaceId?: string }>, client),
     },
   };
+}
+
+const PMOS_SHARED_PROVIDER_ALLOWLIST = new Set(["local-ollama", "ollama"]);
+
+function deepCloneJson<T>(value: T): T {
+  return value && typeof value === "object" ? (JSON.parse(JSON.stringify(value)) as T) : value;
+}
+
+function parseModelRefProvider(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const slash = trimmed.indexOf("/");
+  if (slash <= 0) return null;
+  const provider = trimmed.slice(0, slash).trim().toLowerCase();
+  return provider || null;
+}
+
+function isSharedProviderConfigEntry(entry: unknown): boolean {
+  if (!isJsonObject(entry)) {
+    return false;
+  }
+  return entry.sharedForWorkspaces === true || entry.shared === true;
+}
+
+function isSharedProviderName(name: string, providerEntry?: unknown): boolean {
+  const normalized = name.trim().toLowerCase();
+  if (!normalized) return false;
+  if (PMOS_SHARED_PROVIDER_ALLOWLIST.has(normalized)) return true;
+  return isSharedProviderConfigEntry(providerEntry);
+}
+
+function filterEffectiveConfigForWorkspaceUi(
+  effectiveCfg: unknown,
+  workspaceCfg: unknown,
+): unknown {
+  if (!isJsonObject(effectiveCfg)) {
+    return effectiveCfg;
+  }
+  const next = deepCloneJson(effectiveCfg) as Record<string, unknown>;
+  const effectiveModels = isJsonObject(next.models) ? (next.models as Record<string, unknown>) : null;
+  const effectiveProviders = effectiveModels && isJsonObject(effectiveModels.providers)
+    ? (effectiveModels.providers as Record<string, unknown>)
+    : null;
+  const workspaceProviders = isJsonObject(workspaceCfg)
+    ? getPath(workspaceCfg, ["models", "providers"])
+    : undefined;
+  const workspaceProvidersObj = isJsonObject(workspaceProviders)
+    ? (workspaceProviders as Record<string, unknown>)
+    : null;
+
+  if (effectiveProviders) {
+    const filteredProviders: Record<string, unknown> = {};
+    for (const [providerName, providerValue] of Object.entries(effectiveProviders)) {
+      if (
+        (workspaceProvidersObj && Object.prototype.hasOwnProperty.call(workspaceProvidersObj, providerName)) ||
+        isSharedProviderName(providerName, providerValue)
+      ) {
+        filteredProviders[providerName] = providerValue;
+      }
+    }
+    next.models = {
+      ...effectiveModels,
+      providers: filteredProviders,
+    };
+  }
+
+  const workspaceDefaultsModels = isJsonObject(workspaceCfg)
+    ? getPath(workspaceCfg, ["agents", "defaults", "models"])
+    : undefined;
+  const workspaceDefaultsModelsObj = isJsonObject(workspaceDefaultsModels)
+    ? (workspaceDefaultsModels as Record<string, unknown>)
+    : null;
+  const agents = isJsonObject(next.agents) ? (next.agents as Record<string, unknown>) : null;
+  const defaults = agents && isJsonObject(agents.defaults)
+    ? (agents.defaults as Record<string, unknown>)
+    : null;
+  if (defaults) {
+    const filteredDefaults = { ...defaults } as Record<string, unknown>;
+    const defaultsModels = isJsonObject(defaults.models) ? (defaults.models as Record<string, unknown>) : null;
+    if (defaultsModels) {
+      const keepModels: Record<string, unknown> = {};
+      for (const [modelRef, modelMeta] of Object.entries(defaultsModels)) {
+        const provider = parseModelRefProvider(modelRef);
+        const keepBecauseWorkspace =
+          workspaceDefaultsModelsObj && Object.prototype.hasOwnProperty.call(workspaceDefaultsModelsObj, modelRef);
+        const keepBecauseShared =
+          Boolean(provider) &&
+          effectiveProviders &&
+          isSharedProviderName(provider!, effectiveProviders[provider!]);
+        if (keepBecauseWorkspace || keepBecauseShared) {
+          keepModels[modelRef] = modelMeta;
+        }
+      }
+      filteredDefaults.models = keepModels;
+    }
+
+    const workspacePrimary = isJsonObject(workspaceCfg)
+      ? getPath(workspaceCfg, ["agents", "defaults", "model", "primary"])
+      : undefined;
+    const primary = getPath(defaults, ["model", "primary"]);
+    const primaryProvider = parseModelRefProvider(primary);
+    const sharedPrimary =
+      typeof workspacePrimary === "string" && workspacePrimary.trim()
+        ? workspacePrimary
+        : typeof primary === "string" &&
+            primary.trim() &&
+            primaryProvider &&
+            effectiveProviders &&
+            isSharedProviderName(primaryProvider, effectiveProviders[primaryProvider])
+          ? primary
+          : null;
+    if (sharedPrimary) {
+      if (isJsonObject(filteredDefaults.model)) {
+        filteredDefaults.model = {
+          ...(filteredDefaults.model as Record<string, unknown>),
+          primary: sharedPrimary,
+        };
+      } else {
+        filteredDefaults.model = { primary: sharedPrimary };
+      }
+    } else if (isJsonObject(filteredDefaults.model)) {
+      const modelObj = { ...(filteredDefaults.model as Record<string, unknown>) };
+      delete modelObj.primary;
+      filteredDefaults.model = modelObj;
+    }
+
+    next.agents = {
+      ...agents,
+      defaults: filteredDefaults,
+    };
+  }
+
+  return next;
 }
 
 type PmosProjectHealth = "at_risk" | "attention" | "on_track" | "quiet";
@@ -542,6 +691,8 @@ export const pmosHandlers: GatewayRequestHandlers = {
           workspaceConfig: sanitizeWorkspaceConfigResponse(client, workspaceConfig),
           effectiveConfig: sanitizeWorkspaceConfigResponse(client, effectiveConfig, {
             filterAgents: true,
+            workspaceConfig,
+            filterSharedProvidersOnly: true,
           }),
         },
         undefined,
@@ -595,6 +746,8 @@ export const pmosHandlers: GatewayRequestHandlers = {
           workspaceConfig: sanitizeWorkspaceConfigResponse(client, workspaceConfig),
           effectiveConfig: sanitizeWorkspaceConfigResponse(client, effectiveConfig, {
             filterAgents: true,
+            workspaceConfig,
+            filterSharedProvidersOnly: true,
           }),
         },
         undefined,

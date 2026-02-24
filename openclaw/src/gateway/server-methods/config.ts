@@ -52,6 +52,93 @@ function toJsonRecordArray(value: unknown): JsonRecord[] {
   return value.filter((entry): entry is JsonRecord => isJsonRecord(entry));
 }
 
+const SHARED_MODEL_PROVIDER_ALLOWLIST = new Set(["local-ollama", "ollama"]);
+
+function getPath(obj: unknown, path: string[]): unknown {
+  let cur: unknown = obj;
+  for (const key of path) {
+    if (!isJsonRecord(cur)) {
+      return undefined;
+    }
+    cur = cur[key];
+  }
+  return cur;
+}
+
+function parseModelProviderFromRef(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const slash = trimmed.indexOf("/");
+  if (slash <= 0) return null;
+  const provider = trimmed.slice(0, slash).trim().toLowerCase();
+  return provider || null;
+}
+
+function isSharedProvider(providerName: string, providerEntry: unknown): boolean {
+  const normalized = providerName.trim().toLowerCase();
+  if (!normalized) return false;
+  if (SHARED_MODEL_PROVIDER_ALLOWLIST.has(normalized)) return true;
+  if (!isJsonRecord(providerEntry)) return false;
+  return providerEntry.sharedForWorkspaces === true || providerEntry.shared === true;
+}
+
+function filterSharedModelsForWorkspaceUsers(config: unknown): unknown {
+  if (!isJsonRecord(config)) {
+    return config;
+  }
+  const next = JSON.parse(JSON.stringify(config)) as JsonRecord;
+  const modelsNode = isJsonRecord(next.models) ? (next.models as JsonRecord) : null;
+  const providersNode = modelsNode && isJsonRecord(modelsNode.providers)
+    ? (modelsNode.providers as JsonRecord)
+    : null;
+  const sharedProviderNames = new Set<string>();
+  if (providersNode) {
+    const filteredProviders: JsonRecord = {};
+    for (const [name, value] of Object.entries(providersNode)) {
+      if (isSharedProvider(name, value)) {
+        filteredProviders[name] = value;
+        sharedProviderNames.add(name.trim().toLowerCase());
+      }
+    }
+    next.models = { ...modelsNode, providers: filteredProviders };
+  }
+
+  const agentsNode = isJsonRecord(next.agents) ? (next.agents as JsonRecord) : null;
+  const defaultsNode = agentsNode && isJsonRecord(agentsNode.defaults)
+    ? (agentsNode.defaults as JsonRecord)
+    : null;
+  if (!defaultsNode) {
+    return next;
+  }
+
+  const filteredDefaults: JsonRecord = { ...defaultsNode };
+  const defaultsModels = isJsonRecord(defaultsNode.models) ? (defaultsNode.models as JsonRecord) : null;
+  if (defaultsModels) {
+    const keep: JsonRecord = {};
+    for (const [modelRef, meta] of Object.entries(defaultsModels)) {
+      const provider = parseModelProviderFromRef(modelRef);
+      if (provider && sharedProviderNames.has(provider)) {
+        keep[modelRef] = meta;
+      }
+    }
+    filteredDefaults.models = keep;
+  }
+
+  const primary = getPath(defaultsNode, ["model", "primary"]);
+  const primaryProvider = parseModelProviderFromRef(primary);
+  if (isJsonRecord(filteredDefaults.model)) {
+    const modelObj = { ...(filteredDefaults.model as JsonRecord) };
+    if (!primaryProvider || !sharedProviderNames.has(primaryProvider)) {
+      delete modelObj.primary;
+    }
+    filteredDefaults.model = modelObj;
+  }
+
+  next.agents = { ...agentsNode, defaults: filteredDefaults };
+  return next;
+}
+
 function normalizeAgentIdForCompare(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim().toLowerCase();
@@ -232,20 +319,21 @@ export const configHandlers: GatewayRequestHandlers = {
     const redacted = redactConfigSnapshot(snapshot);
 
     // Filter config to show only workspace-relevant data for non-super-admin users
-    if (
-      client &&
-      !isSuperAdmin(client) &&
-      redacted.config?.agents?.list &&
-      Array.isArray(redacted.config.agents.list)
-    ) {
-      const filteredAgents = filterByWorkspace(redacted.config.agents.list, client);
-      redacted.config = {
-        ...redacted.config,
-        agents: {
-          ...redacted.config.agents,
-          list: filteredAgents,
-        },
-      };
+    if (client && !isSuperAdmin(client) && redacted.config && typeof redacted.config === "object") {
+      const filteredConfig = filterSharedModelsForWorkspaceUsers(redacted.config);
+      if (isJsonRecord(filteredConfig)) {
+        redacted.config = filteredConfig;
+      }
+      if (redacted.config?.agents?.list && Array.isArray(redacted.config.agents.list)) {
+        const filteredAgents = filterByWorkspace(redacted.config.agents.list, client);
+        redacted.config = {
+          ...redacted.config,
+          agents: {
+            ...redacted.config.agents,
+            list: filteredAgents,
+          },
+        };
+      }
     }
 
     respond(true, redacted, undefined);

@@ -670,9 +670,10 @@ export class OpenClawApp extends LitElement {
       return;
     }
     this.lastError = null;
-    if (this.pmosAuthMode === "signup") {
-      this.onboarding = true;
-    }
+    // Starter experience is now auto-provisioned server-side (shared Ollama + starter agent),
+    // so skip onboarding and drop users straight into chat.
+    this.onboarding = false;
+    this.setTab("chat");
     this.connect();
   }
 
