@@ -95,6 +95,7 @@ export function applySettingsFromUrl(host: SettingsHost) {
   const tokenRaw = params.get("token") ?? hashParams.get("token");
   const passwordRaw = params.get("password") ?? hashParams.get("password");
   const sessionRaw = params.get("session") ?? hashParams.get("session");
+  const agentRaw = params.get("agent") ?? hashParams.get("agent");
   const gatewayUrlRaw = params.get("gatewayUrl") ?? hashParams.get("gatewayUrl");
   let shouldCleanUrl = false;
 
@@ -118,8 +119,10 @@ export function applySettingsFromUrl(host: SettingsHost) {
     shouldCleanUrl = true;
   }
 
-  if (sessionRaw != null) {
-    const session = sessionRaw.trim();
+  const sessionFromAgent =
+    agentRaw && agentRaw.trim() ? `agent:${agentRaw.trim()}:main` : null;
+  if (sessionRaw != null || sessionFromAgent) {
+    const session = (sessionRaw ?? sessionFromAgent ?? "").trim();
     if (session) {
       host.sessionKey = session;
       applySettings(host, {
@@ -128,6 +131,12 @@ export function applySettingsFromUrl(host: SettingsHost) {
         lastActiveSessionKey: session,
       });
     }
+  }
+
+  if (agentRaw != null) {
+    params.delete("agent");
+    hashParams.delete("agent");
+    shouldCleanUrl = true;
   }
 
   if (gatewayUrlRaw != null) {
@@ -376,12 +385,14 @@ export function onPopState(host: SettingsHost) {
 
   const url = new URL(window.location.href);
   const session = url.searchParams.get("session")?.trim();
-  if (session) {
-    host.sessionKey = session;
+  const agent = url.searchParams.get("agent")?.trim();
+  const resolvedSession = session || (agent ? `agent:${agent}:main` : "");
+  if (resolvedSession) {
+    host.sessionKey = resolvedSession;
     applySettings(host, {
       ...host.settings,
-      sessionKey: session,
-      lastActiveSessionKey: session,
+      sessionKey: resolvedSession,
+      lastActiveSessionKey: resolvedSession,
     });
   }
 

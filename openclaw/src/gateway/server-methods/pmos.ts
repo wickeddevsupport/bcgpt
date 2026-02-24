@@ -1,8 +1,9 @@
-import type { GatewayRequestHandlers } from "./types.js";
+import type { GatewayClient, GatewayRequestHandlers } from "./types.js";
 import { loadConfig, writeConfigFile, type OpenClawConfig } from "../../config/config.js";
+import { redactConfigObject, restoreRedactedValues } from "../../config/redact-snapshot.js";
 import { ErrorCodes, errorShape } from "../protocol/index.js";
 import { formatForLog } from "../ws-log.js";
-import { requireWorkspaceId, isSuperAdmin } from "../workspace-context.js";
+import { filterByWorkspace, requireWorkspaceId, isSuperAdmin } from "../workspace-context.js";
 
 type ConnectorResult = {
   url: string | null;
@@ -102,6 +103,31 @@ function deepMergeJson(base: unknown, patch: unknown): unknown {
     out[key] = deepMergeJson(out[key], value);
   }
   return out;
+}
+
+function sanitizeWorkspaceConfigResponse(
+  client: GatewayClient | null | undefined,
+  cfg: unknown,
+  opts?: { filterAgents?: boolean },
+): Record<string, unknown> {
+  const redactedCandidate = redactConfigObject(cfg);
+  const redacted = isJsonObject(redactedCandidate)
+    ? (redactedCandidate as Record<string, unknown>)
+    : {};
+  if (!opts?.filterAgents || !client || isSuperAdmin(client)) {
+    return redacted;
+  }
+  const agents = redacted.agents;
+  if (!isJsonObject(agents) || !Array.isArray(agents.list)) {
+    return redacted;
+  }
+  return {
+    ...redacted,
+    agents: {
+      ...agents,
+      list: filterByWorkspace(agents.list as Array<{ workspaceId?: string }>, client),
+    },
+  };
 }
 
 type PmosProjectHealth = "at_risk" | "attention" | "on_track" | "quiet";
@@ -509,7 +535,17 @@ export const pmosHandlers: GatewayRequestHandlers = {
       );
       const workspaceConfig = (await readWorkspaceConfig(workspaceId)) ?? {};
       const effectiveConfig = await loadEffectiveWorkspaceConfig(workspaceId);
-      respond(true, { workspaceId, workspaceConfig, effectiveConfig }, undefined);
+      respond(
+        true,
+        {
+          workspaceId,
+          workspaceConfig: sanitizeWorkspaceConfigResponse(client, workspaceConfig),
+          effectiveConfig: sanitizeWorkspaceConfigResponse(client, effectiveConfig, {
+            filterAgents: true,
+          }),
+        },
+        undefined,
+      );
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }
@@ -531,16 +567,38 @@ export const pmosHandlers: GatewayRequestHandlers = {
         return;
       }
       const replace = p?.replace === true;
-      const { patchWorkspaceConfig, writeWorkspaceConfig, loadEffectiveWorkspaceConfig } =
+      const { patchWorkspaceConfig, readWorkspaceConfig, writeWorkspaceConfig, loadEffectiveWorkspaceConfig } =
         await import("../workspace-config.js");
+      const existingWorkspaceConfig = (await readWorkspaceConfig(workspaceId)) ?? {};
+      let nextPatch: Record<string, unknown>;
+      try {
+        nextPatch = restoreRedactedValues(
+          patch as Record<string, unknown>,
+          existingWorkspaceConfig,
+        ) as Record<string, unknown>;
+      } catch (err) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, String(err)));
+        return;
+      }
       const workspaceConfig = replace
-        ? (patch as Record<string, unknown>)
-        : await patchWorkspaceConfig(workspaceId, patch as Record<string, unknown>);
+        ? nextPatch
+        : await patchWorkspaceConfig(workspaceId, nextPatch);
       if (replace) {
         await writeWorkspaceConfig(workspaceId, workspaceConfig);
       }
       const effectiveConfig = await loadEffectiveWorkspaceConfig(workspaceId);
-      respond(true, { ok: true, workspaceId, workspaceConfig, effectiveConfig }, undefined);
+      respond(
+        true,
+        {
+          ok: true,
+          workspaceId,
+          workspaceConfig: sanitizeWorkspaceConfigResponse(client, workspaceConfig),
+          effectiveConfig: sanitizeWorkspaceConfigResponse(client, effectiveConfig, {
+            filterAgents: true,
+          }),
+        },
+        undefined,
+      );
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }

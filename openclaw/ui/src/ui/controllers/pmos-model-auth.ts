@@ -81,6 +81,8 @@ export type PmosModelAuthState = {
   availableModels?: string[];
 };
 
+const PMOS_SHARED_PROVIDER_ALLOWLIST = new Set(["local-ollama", "ollama"]);
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -291,6 +293,38 @@ function listConfiguredProvidersFromConfig(cfg: unknown): string[] {
   return Array.from(out);
 }
 
+function listSharedProvidersFromEffectiveConfig(cfg: unknown): string[] {
+  const raw = getPath(cfg, ["models", "providers"]);
+  if (!isRecord(raw)) {
+    return [];
+  }
+  const out = new Set<string>();
+  for (const [providerKey, providerCfg] of Object.entries(raw)) {
+    if (!isRecord(providerCfg)) {
+      continue;
+    }
+    const normalized = providerKey.trim().toLowerCase();
+    if (!normalized) {
+      continue;
+    }
+    const explicitlyShared =
+      providerCfg.sharedForWorkspaces === true || providerCfg.shared === true;
+    const allowlistedShared = PMOS_SHARED_PROVIDER_ALLOWLIST.has(normalized);
+    if (!explicitlyShared && !allowlistedShared) {
+      continue;
+    }
+    const hasUsableConfig =
+      asNonEmptyString(providerCfg.baseUrl) ||
+      Array.isArray(providerCfg.models) ||
+      asNonEmptyString(providerCfg.api);
+    if (!hasUsableConfig) {
+      continue;
+    }
+    out.add(normalized);
+  }
+  return Array.from(out);
+}
+
 function resolveProviderConfigKey(cfg: Record<string, unknown>, provider: string): string | null {
   const providers = getPath(cfg, ["models", "providers"]);
   if (!isRecord(providers)) {
@@ -305,21 +339,33 @@ function resolveProviderConfigKey(cfg: Record<string, unknown>, provider: string
   return null;
 }
 
-async function readWorkspaceEffectiveConfig(
+type WorkspaceConfigSnapshot = {
+  workspaceConfig: Record<string, unknown>;
+  effectiveConfig: Record<string, unknown>;
+};
+
+async function readWorkspaceConfigSnapshot(
   state: PmosModelAuthState,
-): Promise<Record<string, unknown>> {
+): Promise<WorkspaceConfigSnapshot> {
   if (!state.client || !state.connected) {
-    return {};
+    return { workspaceConfig: {}, effectiveConfig: {} };
   }
   const ws = await state.client.request<{
     workspaceId: string;
     workspaceConfig: unknown;
     effectiveConfig: unknown;
   }>("pmos.config.workspace.get", {});
-  if (isRecord(ws.effectiveConfig)) {
-    return deepClone(ws.effectiveConfig);
-  }
-  return {};
+  return {
+    workspaceConfig: isRecord(ws.workspaceConfig) ? deepClone(ws.workspaceConfig) : {},
+    effectiveConfig: isRecord(ws.effectiveConfig) ? deepClone(ws.effectiveConfig) : {},
+  };
+}
+
+async function readWorkspaceConfigOverlay(
+  state: PmosModelAuthState,
+): Promise<Record<string, unknown>> {
+  const snapshot = await readWorkspaceConfigSnapshot(state);
+  return snapshot.workspaceConfig;
 }
 
 async function writeWorkspaceConfig(
@@ -395,19 +441,23 @@ function setProviderApiKey(
   apiKey: string,
 ): boolean {
   const providerKey = resolveProviderConfigKey(config, provider);
-  if (!providerKey) {
+  const normalizedProvider = provider.trim().toLowerCase();
+  const targetKey = providerKey || normalizedProvider;
+  if (!targetKey) {
     return false;
   }
-  setPath(config, ["models", "providers", providerKey, "apiKey"], apiKey);
+  setPath(config, ["models", "providers", targetKey, "apiKey"], apiKey);
   return true;
 }
 
 function clearProviderApiKey(config: Record<string, unknown>, provider: string): boolean {
   const providerKey = resolveProviderConfigKey(config, provider);
-  if (!providerKey) {
+  const normalizedProvider = provider.trim().toLowerCase();
+  const targetKey = providerKey || normalizedProvider;
+  if (!targetKey) {
     return false;
   }
-  deletePath(config, ["models", "providers", providerKey, "apiKey"]);
+  deletePath(config, ["models", "providers", targetKey, "apiKey"]);
   return true;
 }
 
@@ -432,6 +482,40 @@ function findMutableAgentEntry(
     }
   }
   return null;
+}
+
+async function updateAgentModelAssignmentViaConfig(
+  state: PmosModelAuthState,
+  params: { agentId: string; modelRef: string | null },
+) {
+  if (!state.client || !state.connected) {
+    return;
+  }
+  const snapshot = await state.client.request<{
+    hash?: string;
+    config?: unknown;
+  }>("config.get", {});
+  const baseHash = typeof snapshot.hash === "string" ? snapshot.hash.trim() : "";
+  if (!baseHash) {
+    throw new Error("Config hash missing; reload and try again.");
+  }
+  if (!isRecord(snapshot.config)) {
+    throw new Error("Config is not loaded yet. Refresh and try again.");
+  }
+  const nextConfig = deepClone(snapshot.config);
+  const agentEntry = findMutableAgentEntry(nextConfig, params.agentId);
+  if (!agentEntry) {
+    throw new Error(`Agent "${params.agentId}" not found in config.`);
+  }
+  if (params.modelRef) {
+    agentEntry.model = params.modelRef;
+  } else {
+    delete agentEntry.model;
+  }
+  await state.client.request("config.set", {
+    raw: JSON.stringify(nextConfig, null, 2),
+    baseHash,
+  });
 }
 
 export function hydratePmosModelDraftFromConfig(state: PmosModelAuthState) {
@@ -484,21 +568,25 @@ export async function loadPmosModelWorkspaceState(state: PmosModelAuthState) {
   state.pmosModelCatalogError = null;
   state.pmosModelError = null;
   try {
-    const [effectiveConfig, modelsResult] = await Promise.all([
-      readWorkspaceEffectiveConfig(state),
+    const [{ workspaceConfig, effectiveConfig }, modelsResult] = await Promise.all([
+      readWorkspaceConfigSnapshot(state),
       state.client.request<{
         models?: Array<{ id?: string; provider?: string }>;
       }>("models.list", {}),
     ]);
 
-    state.pmosWorkspaceConfig = effectiveConfig;
+    state.pmosWorkspaceConfig = workspaceConfig;
     state.pmosEffectiveConfig = effectiveConfig;
 
     hydrateFromEffectiveConfig(state, effectiveConfig);
 
-    const providers = listConfiguredProvidersFromConfig(effectiveConfig);
-    state.pmosByokProviders = providers;
-    state.pmosModelConfigured = providers.includes(state.pmosModelProvider);
+    const workspaceProviders = listConfiguredProvidersFromConfig(workspaceConfig);
+    const sharedProviders = listSharedProvidersFromEffectiveConfig(effectiveConfig);
+    const availableProviders = Array.from(
+      new Set([...workspaceProviders, ...sharedProviders]),
+    );
+    state.pmosByokProviders = workspaceProviders;
+    state.pmosModelConfigured = availableProviders.includes(state.pmosModelProvider);
 
     const catalogRefs = new Set<string>();
     const modelsList = Array.isArray(modelsResult.models) ? modelsResult.models : [];
@@ -517,7 +605,8 @@ export async function loadPmosModelWorkspaceState(state: PmosModelAuthState) {
     }
 
     const defaultsPrimary = resolvePrimaryModel(getPath(effectiveConfig, ["agents", "defaults", "model"]));
-    const configuredModels = listConfiguredModels(effectiveConfig);
+    const workspaceConfiguredModels = listConfiguredModels(workspaceConfig);
+    const effectiveConfiguredModels = listConfiguredModels(effectiveConfig);
     const agentEntries = readAgentEntries(effectiveConfig);
 
     const assignments: PmosAgentModelAssignment[] = agentEntries
@@ -560,12 +649,18 @@ export async function loadPmosModelWorkspaceState(state: PmosModelAuthState) {
           ref,
           provider,
           modelId: parsed?.modelId ?? ref,
-          alias: configuredModels[ref]?.alias ?? "",
+          alias:
+            workspaceConfiguredModels[ref]?.alias ??
+            effectiveConfiguredModels[ref]?.alias ??
+            "",
           active: defaultsPrimary === ref,
-          configured: providers.includes(provider),
+          configured: availableProviders.includes(provider),
           inCatalog: catalogRefs.has(ref),
           usedBy: usageByRef.get(ref) ?? [],
-          workspaceOverride: Object.prototype.hasOwnProperty.call(configuredModels, ref),
+          workspaceOverride: Object.prototype.hasOwnProperty.call(
+            workspaceConfiguredModels,
+            ref,
+          ),
         };
       });
 
@@ -597,7 +692,7 @@ export async function savePmosModelConfig(state: PmosModelAuthState) {
   state.pmosModelError = null;
   try {
     const modelRef = `${provider}/${modelId}`;
-    const nextConfig = await readWorkspaceEffectiveConfig(state);
+    const nextConfig = await readWorkspaceConfigOverlay(state);
     ensureModelAllowed(nextConfig, modelRef);
     setPath(nextConfig, ["agents", "defaults", "model", "primary"], modelRef);
     setModelAlias(nextConfig, modelRef, alias);
@@ -631,7 +726,7 @@ export async function activatePmosModel(state: PmosModelAuthState, modelRef: str
   state.pmosModelSaving = true;
   state.pmosModelError = null;
   try {
-    const nextConfig = await readWorkspaceEffectiveConfig(state);
+    const nextConfig = await readWorkspaceConfigOverlay(state);
     ensureModelAllowed(nextConfig, normalized);
     setPath(nextConfig, ["agents", "defaults", "model", "primary"], normalized);
     await writeWorkspaceConfig(state, nextConfig);
@@ -655,7 +750,7 @@ export async function deactivatePmosModel(state: PmosModelAuthState, modelRef: s
   state.pmosModelSaving = true;
   state.pmosModelError = null;
   try {
-    const nextConfig = await readWorkspaceEffectiveConfig(state);
+    const nextConfig = await readWorkspaceConfigOverlay(state);
     deletePath(nextConfig, ["agents", "defaults", "models", normalized]);
     const primary = asNonEmptyString(getPath(nextConfig, ["agents", "defaults", "model", "primary"]));
     if (primary && normalizeModelRef(primary) === normalized) {
@@ -682,7 +777,7 @@ export async function deletePmosModel(state: PmosModelAuthState, modelRef: strin
   state.pmosModelSaving = true;
   state.pmosModelError = null;
   try {
-    const nextConfig = await readWorkspaceEffectiveConfig(state);
+    const nextConfig = await readWorkspaceConfigOverlay(state);
     deletePath(nextConfig, ["agents", "defaults", "models", normalized]);
     const primary = asNonEmptyString(getPath(nextConfig, ["agents", "defaults", "model", "primary"]));
     if (primary && normalizeModelRef(primary) === normalized) {
@@ -721,20 +816,10 @@ export async function assignPmosAgentModel(
   state.pmosModelSaving = true;
   state.pmosModelError = null;
   try {
-    const nextConfig = await readWorkspaceEffectiveConfig(state);
-    const agentEntry = findMutableAgentEntry(nextConfig, agentId);
-    if (!agentEntry) {
-      throw new Error(`Agent "${agentId}" not found in config.`);
-    }
-
-    if (normalized) {
-      ensureModelAllowed(nextConfig, normalized);
-      agentEntry.model = normalized;
-    } else {
-      delete agentEntry.model;
-    }
-
-    await writeWorkspaceConfig(state, nextConfig);
+    await updateAgentModelAssignmentViaConfig(state, {
+      agentId,
+      modelRef: normalized || null,
+    });
     await loadPmosModelWorkspaceState(state);
   } catch (err) {
     state.pmosModelError = String(err);
@@ -767,7 +852,7 @@ export async function upsertPmosModelFromRef(
     state.pmosModelSaving = true;
     state.pmosModelError = null;
     try {
-      const nextConfig = await readWorkspaceEffectiveConfig(state);
+      const nextConfig = await readWorkspaceConfigOverlay(state);
       ensureModelAllowed(nextConfig, normalized);
       setModelAlias(nextConfig, normalized, state.pmosModelAlias.trim());
 
@@ -800,7 +885,7 @@ export async function clearPmosModelApiKey(state: PmosModelAuthState) {
   state.pmosModelSaving = true;
   state.pmosModelError = null;
   try {
-    const nextConfig = await readWorkspaceEffectiveConfig(state);
+    const nextConfig = await readWorkspaceConfigOverlay(state);
     const provider = state.pmosModelProvider;
     if (provider !== "custom") {
       clearProviderApiKey(nextConfig, provider);

@@ -351,6 +351,12 @@ export function renderApp(state: AppViewState) {
     state.apFlowSelectedId && state.apFlows
       ? state.apFlows.find((flow) => flow.id === state.apFlowSelectedId) ?? null
       : null;
+  const sessionDefaults =
+    (state.hello?.snapshot as { sessionDefaults?: { mainKey?: string } } | undefined)
+      ?.sessionDefaults ?? null;
+  const chatMainKey = sessionDefaults?.mainKey?.trim() || "main";
+  const buildAgentChatHref = (agentId: string) =>
+    `${pathForTab("chat", state.basePath)}?session=${encodeURIComponent(`agent:${agentId}:${chatMainKey}`)}`;
 
   // Auto-exit onboarding once the user has saved an AI key (Step 3 complete)
   if (state.onboarding && state.pmosModelConfigured) {
@@ -716,7 +722,7 @@ export function renderApp(state: AppViewState) {
                 agentActivityById: state.agentActivityById,
                 agentIdentityById: state.agentIdentityById,
                 onOpenAgentChat: (agentId: string) => {
-                  window.location.href = pathForTab("chat", state.basePath) + `?agent=${agentId}`;
+                  window.location.href = buildAgentChatHref(agentId);
                 },
                 // Inline chat panel
                 chatProps,
@@ -1892,7 +1898,7 @@ export function renderApp(state: AppViewState) {
                 // Agent activity and actions
                 agentActivityById: state.agentActivityById,
                 onOpenAgentChat: (agentId: string) => {
-                  window.location.href = pathForTab("chat", state.basePath) + `?agent=${agentId}`;
+                  window.location.href = buildAgentChatHref(agentId);
                 },
                 onPauseAgent: (agentId: string) => {
                   // TODO: Implement pause/resume agent
