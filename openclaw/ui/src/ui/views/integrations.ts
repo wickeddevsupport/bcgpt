@@ -129,6 +129,7 @@ export function renderIntegrations(props: IntegrationsProps) {
   const disabledReason = !props.connected
     ? "Sign in to your workspace to configure integrations."
     : null;
+  const bcgptConnectHref = `${(props.bcgptUrl || "https://bcgpt.wickedlab.io").replace(/\/+$/, "")}/connect`;
 
   const projectIdShort = props.opsProjectId ? String(props.opsProjectId).slice(0, 8) : null;
   const opsUiHref = props.opsUiHref ?? "/ops-ui/credentials";
@@ -203,6 +204,18 @@ export function renderIntegrations(props: IntegrationsProps) {
       <div class="card">
         <div class="card-title">Basecamp</div>
         <div class="card-sub">Connect your Basecamp account for workflow and chat tools.</div>
+        <div class="row" style="margin-top: 10px; gap: 8px; flex-wrap: wrap; align-items: center;">
+          <a
+            href=${bcgptConnectHref}
+            target="_blank"
+            rel="noreferrer"
+            class="btn btn--secondary"
+            title="Open BCGPT connect page to generate/manage your Basecamp connection key"
+          >
+            Open BCGPT Connect
+          </a>
+          <span class="muted mono" style="font-size: 12px;">${bcgptConnectHref}</span>
+        </div>
 
         <div class="form-grid" style="margin-top: 16px;">
           <label class="field">
