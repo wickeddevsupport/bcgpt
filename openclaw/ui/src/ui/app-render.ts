@@ -75,7 +75,11 @@ const debouncedLoadUsage = (state: UsageState) => {
   }
   usageDateDebounceTimeout = window.setTimeout(() => void loadUsage(state), 400);
 };
-import { renderAgents } from "./views/agents.ts";
+import {
+  DEFAULT_CREATE_AGENT_FORM,
+  renderAgents,
+  type CreateAgentFormData,
+} from "./views/agents.ts";
 import { renderAdmin } from "./views/admin.ts";
 import { renderAutomations } from "./views/automations.ts";
 import { renderDashboard } from "./views/dashboard.ts";
@@ -126,7 +130,7 @@ function canAccessTab(state: AppViewState, tab: Tab): boolean {
   if (role === "super_admin") {
     return true;
   }
-  if (tab === "nodes" || tab === "debug" || tab === "logs" || tab === "config") {
+  if (tab === "debug" || tab === "logs" || tab === "nodes") {
     return false;
   }
   return true;
@@ -207,6 +211,62 @@ function toWorkspaceScopedAgentWorkspacePath(workspaceId: string, agentId: strin
   const ws = workspaceId.trim();
   const id = agentId.trim() || "assistant";
   return `~/.openclaw/workspaces/${ws}/${id}`;
+}
+
+function buildDefaultCreateAgentForm(state: AppViewState, agentId = "assistant"): CreateAgentFormData {
+  const wsId = state.pmosAuthUser?.workspaceId?.trim() ?? "";
+  const isWorkspaceScopedUser = Boolean(wsId) && state.pmosAuthUser?.role !== "super_admin";
+  return {
+    ...DEFAULT_CREATE_AGENT_FORM,
+    workspace: isWorkspaceScopedUser
+      ? toWorkspaceScopedAgentWorkspacePath(wsId, agentId)
+      : DEFAULT_AGENT_WORKSPACE_PATH,
+  };
+}
+
+function findConfigAgentEntry(
+  config: Record<string, unknown> | null,
+  agentId: string,
+): Record<string, unknown> | null {
+  const agents = (config?.agents as { list?: unknown } | undefined)?.list;
+  if (!Array.isArray(agents)) {
+    return null;
+  }
+  const entry = agents.find((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      return false;
+    }
+    const id = (item as { id?: unknown }).id;
+    return typeof id === "string" && id === agentId;
+  });
+  return entry && typeof entry === "object" && !Array.isArray(entry)
+    ? (entry as Record<string, unknown>)
+    : null;
+}
+
+function extractAgentModelRef(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const primary = (value as { primary?: unknown }).primary;
+    return typeof primary === "string" ? primary.trim() : "";
+  }
+  return "";
+}
+
+function mapToolsProfileToMode(profile: unknown): "autonomous" | "interactive" | "hybrid" {
+  if (typeof profile !== "string") {
+    return "hybrid";
+  }
+  const normalized = profile.trim().toLowerCase();
+  if (normalized === "full") {
+    return "autonomous";
+  }
+  if (normalized === "messaging") {
+    return "interactive";
+  }
+  return "hybrid";
 }
 
 function renderAuthScreen(state: AppViewState) {
@@ -1766,6 +1826,8 @@ export function renderApp(state: AppViewState) {
                 },
                 // Create Agent Modal
                 createModalOpen: state.createModalOpen,
+                createModalMode: state.createModalMode,
+                createModalEditAgentId: state.createModalEditAgentId,
                 createModalStep: state.createModalStep,
                 createModalLoading: state.createModalLoading,
                 createModalError: state.createModalError,
@@ -1774,26 +1836,20 @@ export function renderApp(state: AppViewState) {
                 configuredProviders: state.pmosByokProviders,
                 availableSkills: state.availableSkills,
                 onCreateModalOpen: () => {
-                  const wsId = state.pmosAuthUser?.workspaceId?.trim() ?? "";
-                  const isWorkspaceScopedUser =
-                    Boolean(wsId) && state.pmosAuthUser?.role !== "super_admin";
-                  const autoAgentId =
-                    toAgentId(state.createModalFormData.id || state.createModalFormData.name) ||
-                    "assistant";
                   state.createModalOpen = true;
+                  state.createModalMode = "create";
+                  state.createModalEditAgentId = null;
                   state.createModalStep = 1;
                   state.createModalError = null;
-                  state.createModalFormData = {
-                    ...state.createModalFormData,
-                    workspace: isWorkspaceScopedUser
-                      ? toWorkspaceScopedAgentWorkspacePath(wsId, autoAgentId)
-                      : state.createModalFormData.workspace || DEFAULT_AGENT_WORKSPACE_PATH,
-                  };
+                  state.createModalFormData = buildDefaultCreateAgentForm(state, "assistant");
                 },
                 onCreateModalCancel: () => {
                   state.createModalOpen = false;
+                  state.createModalMode = "create";
+                  state.createModalEditAgentId = null;
                   state.createModalStep = 1;
                   state.createModalError = null;
+                  state.createModalFormData = buildDefaultCreateAgentForm(state, "assistant");
                 },
                 onCreateModalStepChange: (nextStep) => {
                   state.createModalStep = nextStep;
@@ -1804,14 +1860,15 @@ export function renderApp(state: AppViewState) {
                   const wsId = state.pmosAuthUser?.workspaceId?.trim() ?? "";
                   const isWorkspaceScopedUser =
                     Boolean(wsId) && state.pmosAuthUser?.role !== "super_admin";
-                  if (field === "name") {
+                  const isEditMode = state.createModalMode === "edit";
+                  if (!isEditMode && field === "name") {
                     const currentId = state.createModalFormData.id.trim();
                     const previousAutoId = toAgentId(state.createModalFormData.name);
                     if (!currentId || currentId === previousAutoId) {
                       nextForm.id = toAgentId(String(value));
                     }
                   }
-                  if (isWorkspaceScopedUser && (field === "name" || field === "id")) {
+                  if (!isEditMode && isWorkspaceScopedUser && (field === "name" || field === "id")) {
                     const previousAgentId =
                       toAgentId(state.createModalFormData.id || state.createModalFormData.name) ||
                       "assistant";
@@ -1833,10 +1890,20 @@ export function renderApp(state: AppViewState) {
                     return;
                   }
 
-                  const candidateId = toAgentId(form.id || name);
+                  const isEditMode =
+                    state.createModalMode === "edit" &&
+                    typeof state.createModalEditAgentId === "string" &&
+                    state.createModalEditAgentId.trim().length > 0;
+                  const editAgentId = isEditMode ? state.createModalEditAgentId!.trim() : null;
+                  const requestedId = toAgentId(form.id || name);
+                  const candidateId = editAgentId ?? requestedId;
                   if (!candidateId) {
                     state.createModalError =
                       "Agent ID is invalid. Use letters, numbers, '-' or '_'.";
+                    return;
+                  }
+                  if (isEditMode && requestedId && requestedId !== candidateId) {
+                    state.createModalError = "Agent ID cannot be changed after creation.";
                     return;
                   }
 
@@ -1856,9 +1923,25 @@ export function renderApp(state: AppViewState) {
                     const agentsList = Array.isArray(currentAgents?.list)
                       ? [...currentAgents.list]
                       : [];
+                    const editIndex = isEditMode
+                      ? agentsList.findIndex((entry) => {
+                          if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+                            return false;
+                          }
+                          const id = (entry as { id?: unknown }).id;
+                          return typeof id === "string" && id.trim().toLowerCase() === candidateId;
+                        })
+                      : -1;
+                    if (isEditMode && editIndex < 0) {
+                      state.createModalError = `Agent "${candidateId}" was not found in config.`;
+                      return;
+                    }
 
-                    const duplicateId = agentsList.some((entry) => {
+                    const duplicateId = agentsList.some((entry, index) => {
                       if (!entry || typeof entry !== "object") {
+                        return false;
+                      }
+                      if (isEditMode && index === editIndex) {
                         return false;
                       }
                       const id = (entry as { id?: unknown }).id;
@@ -1889,7 +1972,7 @@ export function renderApp(state: AppViewState) {
                     const emoji = form.emoji.trim();
                     const theme = form.theme.trim() || form.purpose.trim();
 
-                    const newAgent: Record<string, unknown> = {
+                    const nextAgentCore: Record<string, unknown> = {
                       id: candidateId,
                       name,
                       workspace,
@@ -1903,33 +1986,76 @@ export function renderApp(state: AppViewState) {
                       ...(skills.length > 0 ? { skills } : {}),
                     };
 
-                    agentsList.push(newAgent);
+                    if (isEditMode && editIndex >= 0) {
+                      const existingRaw = agentsList[editIndex];
+                      const existing =
+                        existingRaw && typeof existingRaw === "object" && !Array.isArray(existingRaw)
+                          ? ({ ...existingRaw } as Record<string, unknown>)
+                          : {};
+                      const existingIdentityRaw = existing.identity;
+                      const existingIdentity =
+                        existingIdentityRaw &&
+                        typeof existingIdentityRaw === "object" &&
+                        !Array.isArray(existingIdentityRaw)
+                          ? ({ ...existingIdentityRaw } as Record<string, unknown>)
+                          : {};
+                      const existingToolsRaw = existing.tools;
+                      const existingTools =
+                        existingToolsRaw &&
+                        typeof existingToolsRaw === "object" &&
+                        !Array.isArray(existingToolsRaw)
+                          ? ({ ...existingToolsRaw } as Record<string, unknown>)
+                          : {};
+
+                      const nextIdentity: Record<string, unknown> = {
+                        ...existingIdentity,
+                        name,
+                      };
+                      if (emoji) {
+                        nextIdentity.emoji = emoji;
+                      } else {
+                        delete nextIdentity.emoji;
+                      }
+                      if (theme) {
+                        nextIdentity.theme = theme;
+                      } else {
+                        delete nextIdentity.theme;
+                      }
+
+                      const nextTools: Record<string, unknown> = {
+                        ...existingTools,
+                        profile: modeToProfile[form.mode] ?? "coding",
+                      };
+
+                      const nextAgent: Record<string, unknown> = {
+                        ...existing,
+                        ...nextAgentCore,
+                        identity: nextIdentity,
+                        tools: nextTools,
+                      };
+                      if (!model) {
+                        delete nextAgent.model;
+                      }
+                      if (skills.length === 0) {
+                        delete nextAgent.skills;
+                      }
+                      agentsList[editIndex] = nextAgent;
+                    } else {
+                      agentsList.push(nextAgentCore);
+                    }
                     updateConfigFormValue(state, ["agents", "list"], agentsList);
                     await saveConfig(state);
                     await applyConfig(state);
                     await loadAgents(state);
+                    const agentIds = state.agentsList?.agents?.map((entry) => entry.id) ?? [];
+                    if (agentIds.length > 0) {
+                      void loadAgentIdentities(state, agentIds);
+                    }
                     state.agentsSelectedId = candidateId;
-
-                    state.createModalFormData = {
-                      name: "",
-                      id: "",
-                      purpose: "",
-                      workspace:
-                        state.pmosAuthUser?.workspaceId && state.pmosAuthUser.role !== "super_admin"
-                          ? toWorkspaceScopedAgentWorkspacePath(
-                              state.pmosAuthUser.workspaceId,
-                              "assistant",
-                            )
-                          : DEFAULT_AGENT_WORKSPACE_PATH,
-                      emoji: "🤖",
-                      theme: "",
-                      mode: "hybrid",
-                      model: "",
-                      skills: [],
-                      personality: "professional",
-                      autonomousTasks: [],
-                    };
+                    state.createModalFormData = buildDefaultCreateAgentForm(state, "assistant");
                     state.createModalOpen = false;
+                    state.createModalMode = "create";
+                    state.createModalEditAgentId = null;
                     state.createModalStep = 1;
                   } catch (error) {
                     state.createModalError =
@@ -1952,7 +2078,7 @@ export function renderApp(state: AppViewState) {
                   state.setTab("logs");
                 },
                 onEditAgent: async (agentId: string) => {
-                  if (!state.client || !state.connected) {
+                  if (!state.connected) {
                     return;
                   }
                   const agent = state.agentsList?.agents.find((entry) => entry.id === agentId);
@@ -1960,54 +2086,70 @@ export function renderApp(state: AppViewState) {
                     state.agentsError = `Agent "${agentId}" not found.`;
                     return;
                   }
-                  const currentName =
-                    (typeof agent.name === "string" && agent.name.trim()) ||
-                    (typeof agent.identity?.name === "string" && agent.identity.name.trim()) ||
-                    agent.id;
-                  const identity = state.agentIdentityById[agentId] ?? null;
-                  const currentEmoji =
-                    identity?.emoji?.trim() ||
-                    (typeof agent.identity?.emoji === "string" ? agent.identity.emoji.trim() : "") ||
-                    "🤖";
-                  const currentTheme =
-                    (typeof agent.identity?.theme === "string" ? agent.identity.theme.trim() : "");
-
-                  const nextNameRaw = window.prompt("Agent name", currentName);
-                  if (nextNameRaw === null) {
-                    return;
-                  }
-                  const nextName = nextNameRaw.trim();
-                  if (!nextName) {
-                    state.agentsError = "Agent name is required.";
-                    return;
-                  }
-
-                  const nextEmojiRaw = window.prompt("Agent emoji (optional)", currentEmoji);
-                  if (nextEmojiRaw === null) {
-                    return;
-                  }
-                  const nextThemeRaw = window.prompt(
-                    "Agent theme / subtitle (optional)",
-                    currentTheme,
-                  );
-                  if (nextThemeRaw === null) {
-                    return;
-                  }
-
                   try {
                     state.agentsError = null;
-                    await state.client.request("agents.update", {
-                      agentId,
-                      name: nextName,
-                      ...(nextEmojiRaw.trim() ? { emoji: nextEmojiRaw.trim() } : {}),
-                      ...(nextThemeRaw.trim() ? { theme: nextThemeRaw.trim() } : {}),
-                    });
-                    await loadConfig(state);
-                    await loadAgents(state);
-                    const agentIds = state.agentsList?.agents?.map((entry) => entry.id) ?? [];
-                    if (agentIds.length > 0) {
-                      void loadAgentIdentities(state, agentIds);
+                    if (!state.configForm) {
+                      await loadConfig(state);
                     }
+                    const configEntry = findConfigAgentEntry(state.configForm, agentId);
+                    const identity = state.agentIdentityById[agentId] ?? null;
+                    const identityConfig =
+                      configEntry?.identity &&
+                      typeof configEntry.identity === "object" &&
+                      !Array.isArray(configEntry.identity)
+                        ? (configEntry.identity as Record<string, unknown>)
+                        : null;
+                    const toolsConfig =
+                      configEntry?.tools &&
+                      typeof configEntry.tools === "object" &&
+                      !Array.isArray(configEntry.tools)
+                        ? (configEntry.tools as Record<string, unknown>)
+                        : null;
+                    const currentName =
+                      (typeof agent.name === "string" && agent.name.trim()) ||
+                      (typeof agent.identity?.name === "string" && agent.identity.name.trim()) ||
+                      (typeof identityConfig?.name === "string" && identityConfig.name.trim()) ||
+                      agent.id;
+                    const currentEmoji =
+                      identity?.emoji?.trim() ||
+                      (typeof agent.identity?.emoji === "string" ? agent.identity.emoji.trim() : "") ||
+                      (typeof identityConfig?.emoji === "string" ? identityConfig.emoji.trim() : "") ||
+                      DEFAULT_CREATE_AGENT_FORM.emoji;
+                    const currentTheme =
+                      (typeof agent.identity?.theme === "string" ? agent.identity.theme.trim() : "") ||
+                      (typeof identityConfig?.theme === "string" ? identityConfig.theme.trim() : "");
+                    const currentWorkspace =
+                      (typeof configEntry?.workspace === "string" && configEntry.workspace.trim()) ||
+                      buildDefaultCreateAgentForm(state, agentId).workspace;
+                    const currentModel = extractAgentModelRef(configEntry?.model);
+                    const currentSkills = Array.isArray(configEntry?.skills)
+                      ? Array.from(
+                          new Set(
+                            configEntry.skills
+                              .filter((skill): skill is string => typeof skill === "string")
+                              .map((skill) => skill.trim())
+                              .filter(Boolean),
+                          ),
+                        )
+                      : [];
+
+                    state.createModalFormData = {
+                      ...buildDefaultCreateAgentForm(state, agentId),
+                      name: currentName,
+                      id: agentId,
+                      purpose: currentTheme,
+                      workspace: currentWorkspace,
+                      emoji: currentEmoji,
+                      theme: currentTheme,
+                      mode: mapToolsProfileToMode(toolsConfig?.profile),
+                      model: currentModel,
+                      skills: currentSkills,
+                    };
+                    state.createModalMode = "edit";
+                    state.createModalEditAgentId = agentId;
+                    state.createModalStep = 1;
+                    state.createModalError = null;
+                    state.createModalOpen = true;
                   } catch (error) {
                     state.agentsError = error instanceof Error ? error.message : String(error);
                   }

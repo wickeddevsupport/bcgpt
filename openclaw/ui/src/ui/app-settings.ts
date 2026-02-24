@@ -399,20 +399,13 @@ export function onPopState(host: SettingsHost) {
   setTabFromRoute(host, resolved);
 }
 
-const RESTRICTED_TABS: Tab[] = ["nodes", "debug", "logs", "config"];
-
-function isRestrictedTab(tab: Tab): boolean {
-  return RESTRICTED_TABS.includes(tab);
-}
-
 export function setTabFromRoute(host: SettingsHost, next: Tab) {
-  // Check if user has access to this tab based on role
+  // Allow workspace admins to use Config, but keep global-only tabs restricted
+  // until those server methods are workspace-scoped.
   const pmosUser = (host as any).pmosAuthUser;
   const role = pmosUser?.role ?? null;
   const isSuperAdmin = role === "super_admin";
-  
-  // Redirect non-superadmin users away from restricted tabs
-  if (!isSuperAdmin && isRestrictedTab(next)) {
+  if (!isSuperAdmin && (next === "debug" || next === "logs" || next === "nodes")) {
     next = "dashboard";
   }
   

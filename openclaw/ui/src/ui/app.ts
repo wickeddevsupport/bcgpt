@@ -484,6 +484,8 @@ export class OpenClawApp extends LitElement {
   @state() agentSkillsAgentId: string | null = null;
   // Create Agent Modal state
   @state() createModalOpen = false;
+  @state() createModalMode: "create" | "edit" = "create";
+  @state() createModalEditAgentId: string | null = null;
   @state() createModalStep: 1 | 2 | 3 = 1;
   @state() createModalLoading = false;
   @state() createModalError: string | null = null;

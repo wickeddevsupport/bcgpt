@@ -12,7 +12,61 @@ export type SessionsState = {
   sessionsFilterLimit: string;
   sessionsIncludeGlobal: boolean;
   sessionsIncludeUnknown: boolean;
+  sessionKey?: string;
+  settings?: {
+    sessionKey: string;
+    lastActiveSessionKey: string;
+    [key: string]: unknown;
+  };
+  applySettings?: (next: Record<string, unknown>) => void;
+  pmosAuthUser?: { role?: string | null } | null;
+  agentsList?: { defaultId?: string; agents?: Array<{ id: string }> } | null;
 };
+
+function syncWorkspaceSessionSelection(state: SessionsState, res: SessionsListResult): void {
+  const role = state.pmosAuthUser?.role ?? null;
+  if (!role || role === "super_admin") {
+    return;
+  }
+  const availableKeys = Array.isArray(res.sessions)
+    ? res.sessions
+        .map((row) => (typeof row.key === "string" ? row.key.trim() : ""))
+        .filter(Boolean)
+    : [];
+  const currentKey = typeof state.sessionKey === "string" ? state.sessionKey.trim() : "";
+  if (currentKey && availableKeys.includes(currentKey)) {
+    return;
+  }
+  let nextKey = availableKeys[0] ?? "";
+  if (!nextKey) {
+    const fallbackAgentId =
+      (typeof state.agentsList?.defaultId === "string" && state.agentsList.defaultId.trim()) ||
+      (Array.isArray(state.agentsList?.agents) &&
+        typeof state.agentsList.agents[0]?.id === "string" &&
+        state.agentsList.agents[0].id.trim()) ||
+      "";
+    if (fallbackAgentId) {
+      nextKey = `agent:${fallbackAgentId}:main`;
+    }
+  }
+  if (!nextKey || nextKey === currentKey) {
+    return;
+  }
+  state.sessionKey = nextKey;
+  if (state.settings && typeof state.applySettings === "function") {
+    state.applySettings({
+      ...state.settings,
+      sessionKey: nextKey,
+      lastActiveSessionKey: nextKey,
+    });
+  } else if (state.settings) {
+    state.settings = {
+      ...state.settings,
+      sessionKey: nextKey,
+      lastActiveSessionKey: nextKey,
+    };
+  }
+}
 
 export async function loadSessions(
   state: SessionsState,
@@ -49,6 +103,7 @@ export async function loadSessions(
     const res = await state.client.request<SessionsListResult | undefined>("sessions.list", params);
     if (res) {
       state.sessionsResult = res;
+      syncWorkspaceSessionSelection(state, res);
     }
   } catch (err) {
     state.sessionsError = String(err);

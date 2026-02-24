@@ -43,6 +43,39 @@ import {
 import { applySessionsPatchToStore } from "../sessions-patch.js";
 import { resolveSessionKeyFromResolveParams } from "../sessions-resolve.js";
 import { isSuperAdmin } from "../workspace-context.js";
+import type { GatewayClient } from "./types.js";
+
+function resolveWorkspaceSessionAgentIds(
+  cfg: ReturnType<typeof loadConfig>,
+  client?: GatewayClient,
+): Set<string> | null {
+  if (!client || isSuperAdmin(client)) {
+    return null;
+  }
+  const workspaceId =
+    typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  if (!workspaceId) {
+    return new Set<string>();
+  }
+  const { agents } = listAgentsForGateway(cfg);
+  return new Set(
+    agents
+      .filter((a) => (typeof a.workspaceId === "string" ? a.workspaceId.trim() : "") === workspaceId)
+      .map((a) => a.id),
+  );
+}
+
+function isWorkspaceVisibleSessionKey(key: string, workspaceAgentIds: Set<string>): boolean {
+  if (key === "global" || key === "unknown") {
+    return false;
+  }
+  const parsed = parseAgentSessionKey(key);
+  if (!parsed?.agentId) {
+    return false;
+  }
+  const agentId = normalizeAgentId(parsed.agentId);
+  return workspaceAgentIds.has(agentId);
+}
 
 export const sessionsHandlers: GatewayRequestHandlers = {
   "sessions.list": ({ params, respond, client }) => {
@@ -62,23 +95,12 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     const { storePath, store } = loadCombinedSessionStoreForGateway(cfg);
     
     // Apply workspace filtering for PMOS multi-tenant isolation
-    if (client && !isSuperAdmin(client)) {
-      const { agents } = listAgentsForGateway(cfg);
-      const workspaceAgentIds = new Set(
-        agents
-          .filter((a) => a.workspaceId === client.pmosWorkspaceId)
-          .map((a) => a.id)
-      );
-      
+    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client);
+    if (workspaceAgentIds) {
       // Filter store to only include sessions for workspace agents
       const filteredStore: Record<string, SessionEntry> = {};
       for (const [key, entry] of Object.entries(store)) {
-        if (key === "global" || key === "unknown") {
-          continue; // Skip global/unknown sessions for non-super-admin
-        }
-        const parsed = parseAgentSessionKey(key);
-        const agentId = parsed?.agentId ? normalizeAgentId(parsed.agentId) : resolveDefaultAgentId(cfg);
-        if (workspaceAgentIds.has(agentId)) {
+        if (isWorkspaceVisibleSessionKey(key, workspaceAgentIds)) {
           filteredStore[key] = entry;
         }
       }

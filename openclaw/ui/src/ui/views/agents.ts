@@ -28,6 +28,7 @@ import { DEFAULT_AGENT_WORKSPACE_PATH } from "../app-defaults.ts";
 // Agent mode types for business-friendly UI
 export type AgentMode = "autonomous" | "interactive" | "hybrid";
 export type AgentPersonality = "professional" | "friendly" | "technical" | "custom";
+export type CreateAgentModalMode = "create" | "edit";
 
 export type CreateAgentFormData = {
   name: string;
@@ -128,6 +129,8 @@ export type AgentActivitySummary = {
 export type AgentsProps = {
   // Modal state
   createModalOpen: boolean;
+  createModalMode: CreateAgentModalMode;
+  createModalEditAgentId: string | null;
   createModalStep: 1 | 2 | 3;
   createModalLoading: boolean;
   createModalError: string | null;
@@ -2123,10 +2126,19 @@ function renderAgentSkillRow(
 function renderCreateAgentModal(props: AgentsProps) {
   const {
     createModalFormData: form,
+    createModalMode,
     createModalLoading,
     createModalError,
     createModalStep: step,
   } = props;
+  const isEditMode = createModalMode === "edit";
+  const modalTitle = isEditMode ? "Edit Agent" : "Create Agent";
+  const modalSub = isEditMode
+    ? "Update the agent using the same guided setup form."
+    : "Step-by-step setup for faster and cleaner agent creation.";
+  const reviewVerb = isEditMode ? "updating" : "creating";
+  const submitLabel = isEditMode ? "Update Agent" : "Create Agent";
+  const submitLoadingLabel = isEditMode ? "Updating..." : "Creating...";
   const isAutonomous = form.mode === "autonomous";
   const emojiValue = form.emoji.trim();
   const emojiIsPreset = AGENT_EMOJI_OPTIONS.some((option) => option.value === emojiValue);
@@ -2210,8 +2222,8 @@ function renderCreateAgentModal(props: AgentsProps) {
       <div class="exec-approval-card" style="max-width: 920px; width: min(96vw, 920px);">
         <div class="exec-approval-header">
           <div>
-            <div class="exec-approval-title" id="create-agent-title">Create Agent</div>
-            <div class="exec-approval-sub">Step-by-step setup for faster and cleaner agent creation.</div>
+            <div class="exec-approval-title" id="create-agent-title">${modalTitle}</div>
+            <div class="exec-approval-sub">${modalSub}</div>
           </div>
           <button
             class="btn btn--sm"
@@ -2228,7 +2240,7 @@ function renderCreateAgentModal(props: AgentsProps) {
           <div class="row" style="justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
             <div>
               <div class="card-title">Setup Steps</div>
-              <div class="card-sub">Complete each step and review JSON before creating the agent.</div>
+              <div class="card-sub">Complete each step and review JSON before ${reviewVerb} the agent.</div>
             </div>
             <div class="chip-row">
               ${steps.map((item) => {
@@ -2277,8 +2289,15 @@ function renderCreateAgentModal(props: AgentsProps) {
                       @input=${(e: Event) =>
                         props.onCreateModalFieldChange("id", (e.target as HTMLInputElement).value)}
                       placeholder="auto-generated from name"
-                      ?disabled=${createModalLoading}
+                      ?disabled=${createModalLoading || isEditMode}
                     />
+                    ${isEditMode
+                      ? html`
+                          <div class="muted" style="font-size: 11px; margin-top: 4px;">
+                            Agent ID is fixed after creation.
+                          </div>
+                        `
+                      : nothing}
                   </label>
                   <label class="field">
                     <span>Workspace</span>
@@ -2522,7 +2541,9 @@ function renderCreateAgentModal(props: AgentsProps) {
 
               <section class="card" style="margin-top: 12px;">
                 <div class="card-title">Config JSON Preview</div>
-                <div class="card-sub">This is what will be written into agents.list on create.</div>
+                <div class="card-sub">
+                  This is what will be written into agents.list on ${isEditMode ? "update" : "create"}.
+                </div>
                 <textarea
                   class="mono"
                   style="margin-top: 10px; min-height: 170px;"
@@ -2560,7 +2581,7 @@ function renderCreateAgentModal(props: AgentsProps) {
                   @click=${props.onCreateModalSubmit}
                   ?disabled=${createModalLoading || !canSubmit}
                 >
-                  ${createModalLoading ? "Creating..." : "Create Agent"}
+                  ${createModalLoading ? submitLoadingLabel : submitLabel}
                 </button>
               `}
         </div>
