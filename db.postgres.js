@@ -25,6 +25,9 @@ const pool = new Pool({
   max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : undefined,
   ssl: sslRequired ? { rejectUnauthorized: false } : undefined,
 });
+const SCHEMA_LOCK_ID = 904624001;
+const SCHEMA_LOCK_TIMEOUT_MS = Number(process.env.DB_SCHEMA_LOCK_TIMEOUT_MS || 5000);
+const SCHEMA_STATEMENT_TIMEOUT_MS = Number(process.env.DB_SCHEMA_STATEMENT_TIMEOUT_MS || 60000);
 
 function nowSec() {
   return Math.floor(Date.now() / 1000);
@@ -64,8 +67,18 @@ function hashArgs(args) {
 async function ensureSchema() {
   // Ensure the connection is usable.
   await pool.query("SELECT 1");
+  const client = await pool.connect();
+  try {
+    await client.query(`SET lock_timeout TO '${SCHEMA_LOCK_TIMEOUT_MS}ms'`);
+    await client.query(`SET statement_timeout TO '${SCHEMA_STATEMENT_TIMEOUT_MS}ms'`);
+    const lock = await client.query("SELECT pg_try_advisory_lock($1) AS locked", [SCHEMA_LOCK_ID]);
+    if (!lock.rows?.[0]?.locked) {
+      console.warn("[db.postgres] ensureSchema skipped: migration lock already held");
+      return;
+    }
 
-  await pool.query(`
+    try {
+      await client.query(`
     CREATE TABLE IF NOT EXISTS token (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       access_token TEXT NOT NULL,
@@ -475,9 +488,23 @@ async function ensureSchema() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);
+    } finally {
+      try {
+        await client.query("SELECT pg_advisory_unlock($1)", [SCHEMA_LOCK_ID]);
+      } catch {
+        // ignore unlock failures during shutdown race
+      }
+    }
+  } finally {
+    client.release();
+  }
 }
 
-await ensureSchema();
+try {
+  await ensureSchema();
+} catch (err) {
+  console.warn(`[db.postgres] ensureSchema failed, continuing startup: ${err?.message || err}`);
+}
 
 // Token operations (legacy single-user)
 export async function getToken() {
