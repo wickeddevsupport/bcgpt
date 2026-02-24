@@ -203,13 +203,29 @@ export async function handleSendChat(
 }
 
 export async function refreshChat(host: ChatHost, opts?: { scheduleScroll?: boolean }) {
-  await Promise.all([
-    loadChatHistory(host as unknown as OpenClawApp),
-    loadSessions(host as unknown as OpenClawApp, {
+  const pmosRole = (host as unknown as { pmosAuthUser?: { role?: string | null } | null })
+    .pmosAuthUser?.role;
+  const isWorkspaceUser = Boolean(pmosRole && pmosRole !== "super_admin");
+
+  if (isWorkspaceUser) {
+    // For PMOS workspace users, sessions.list may clamp a stale session key from old browser state.
+    // Load sessions first so chat.history never fires against a foreign/invalid session.
+    await loadSessions(host as unknown as OpenClawApp, {
       activeMinutes: CHAT_SESSIONS_ACTIVE_MINUTES,
-    }),
-    refreshChatAvatar(host),
-  ]);
+    });
+    await Promise.all([
+      loadChatHistory(host as unknown as OpenClawApp),
+      refreshChatAvatar(host),
+    ]);
+  } else {
+    await Promise.all([
+      loadChatHistory(host as unknown as OpenClawApp),
+      loadSessions(host as unknown as OpenClawApp, {
+        activeMinutes: CHAT_SESSIONS_ACTIVE_MINUTES,
+      }),
+      refreshChatAvatar(host),
+    ]);
+  }
   if (opts?.scheduleScroll !== false) {
     scheduleChatScroll(host as unknown as Parameters<typeof scheduleChatScroll>[0]);
   }
