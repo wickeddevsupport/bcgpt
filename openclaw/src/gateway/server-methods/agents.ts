@@ -64,11 +64,24 @@ const BOOTSTRAP_FILE_NAMES = [
 const MEMORY_FILE_NAMES = [DEFAULT_MEMORY_FILENAME, DEFAULT_MEMORY_ALT_FILENAME] as const;
 
 const ALLOWED_FILE_NAMES = new Set<string>([...BOOTSTRAP_FILE_NAMES, ...MEMORY_FILE_NAMES]);
+const WORKSPACE_AGENT_PATH_BASE = "~/.openclaw/workspaces";
 
 type FileMeta = {
   size: number;
   updatedAtMs: number;
 };
+
+function resolveWorkspaceScopedAgentPath(
+  client: { pmosWorkspaceId?: string | null } | undefined,
+  agentId: string,
+): string | null {
+  const workspaceId =
+    typeof client?.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  if (!workspaceId) {
+    return null;
+  }
+  return `${WORKSPACE_AGENT_PATH_BASE}/${workspaceId}/${agentId}`;
+}
 
 async function statFile(filePath: string): Promise<FileMeta | null> {
   try {
@@ -260,7 +273,9 @@ export const agentsHandlers: GatewayRequestHandlers = {
       }
     }
 
-    const workspaceDir = resolveUserPath(String(params.workspace ?? "").trim());
+    const forcedWorkspacePath =
+      client && !isSuperAdmin(client) ? resolveWorkspaceScopedAgentPath(client, agentId) : null;
+    const workspaceDir = resolveUserPath(forcedWorkspacePath ?? String(params.workspace ?? "").trim());
 
     // Resolve agentDir against the config we're about to persist (vs the pre-write config),
     // so subsequent resolutions can't disagree about the agent's directory.
@@ -361,10 +376,14 @@ export const agentsHandlers: GatewayRequestHandlers = {
       }
     }
 
+    const forcedWorkspacePath =
+      client && !isSuperAdmin(client) ? resolveWorkspaceScopedAgentPath(client, agentId) : null;
     const workspaceDir =
-      typeof params.workspace === "string" && params.workspace.trim()
-        ? resolveUserPath(params.workspace.trim())
-        : undefined;
+      forcedWorkspacePath
+        ? resolveUserPath(forcedWorkspacePath)
+        : typeof params.workspace === "string" && params.workspace.trim()
+          ? resolveUserPath(params.workspace.trim())
+          : undefined;
 
     const model = resolveOptionalStringParam(params.model);
     const avatar = resolveOptionalStringParam(params.avatar);

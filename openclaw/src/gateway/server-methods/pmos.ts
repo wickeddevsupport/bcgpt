@@ -119,9 +119,17 @@ function deepMergeJson(base: unknown, patch: unknown): unknown {
 function sanitizeWorkspaceConfigResponse(
   client: GatewayClient | null | undefined,
   cfg: unknown,
-  opts?: { filterAgents?: boolean; workspaceConfig?: unknown; filterSharedProvidersOnly?: boolean },
+  opts?: {
+    filterAgents?: boolean;
+    workspaceConfig?: unknown;
+    filterSharedProvidersOnly?: boolean;
+    stripInheritedWorkspaceClones?: boolean;
+  },
 ): Record<string, unknown> {
   let candidate = cfg;
+  if (opts?.stripInheritedWorkspaceClones && client && !isSuperAdmin(client)) {
+    candidate = stripLikelyInheritedWorkspaceOverlayClones(candidate, loadConfig());
+  }
   if (opts?.filterSharedProvidersOnly && client && !isSuperAdmin(client)) {
     candidate = filterEffectiveConfigForWorkspaceUi(candidate, opts.workspaceConfig);
   }
@@ -276,6 +284,127 @@ function filterEffectiveConfigForWorkspaceUi(
     };
   }
 
+  return next;
+}
+
+function deepJsonEqual(a: unknown, b: unknown): boolean {
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
+function stripLikelyInheritedWorkspaceOverlayClones(
+  workspaceCfg: unknown,
+  globalCfg: unknown,
+): unknown {
+  if (!isJsonObject(workspaceCfg) || !isJsonObject(globalCfg)) {
+    return workspaceCfg;
+  }
+  const next = deepCloneJson(workspaceCfg) as Record<string, unknown>;
+  const globalModels = isJsonObject(globalCfg.models) ? (globalCfg.models as Record<string, unknown>) : null;
+  const globalProviders = globalModels && isJsonObject(globalModels.providers)
+    ? (globalModels.providers as Record<string, unknown>)
+    : null;
+  const nextModels = isJsonObject(next.models) ? (next.models as Record<string, unknown>) : null;
+  const nextProviders = nextModels && isJsonObject(nextModels.providers)
+    ? (nextModels.providers as Record<string, unknown>)
+    : null;
+
+  const removedProviderNames = new Set<string>();
+  if (nextProviders && globalProviders) {
+    for (const [providerName, providerValue] of Object.entries(nextProviders)) {
+      const normalized = providerName.trim().toLowerCase();
+      if (!normalized || isSharedProviderName(normalized, providerValue)) {
+        continue;
+      }
+      const globalProvider = globalProviders[providerName];
+      if (!isJsonObject(globalProvider)) {
+        continue;
+      }
+      if (!deepJsonEqual(providerValue, globalProvider)) {
+        continue;
+      }
+      delete nextProviders[providerName];
+      removedProviderNames.add(normalized);
+    }
+    next.models = {
+      ...nextModels,
+      providers: nextProviders,
+    };
+  }
+
+  if (removedProviderNames.size === 0) {
+    return next;
+  }
+
+  const nextAgents = isJsonObject(next.agents) ? (next.agents as Record<string, unknown>) : null;
+  const nextDefaults = nextAgents && isJsonObject(nextAgents.defaults)
+    ? (nextAgents.defaults as Record<string, unknown>)
+    : null;
+  const globalAgents = isJsonObject(globalCfg.agents) ? (globalCfg.agents as Record<string, unknown>) : null;
+  const globalDefaults = globalAgents && isJsonObject(globalAgents.defaults)
+    ? (globalAgents.defaults as Record<string, unknown>)
+    : null;
+  if (!nextDefaults) {
+    return next;
+  }
+
+  const filteredDefaults = { ...nextDefaults } as Record<string, unknown>;
+  const defaultsModels = isJsonObject(nextDefaults.models) ? (nextDefaults.models as Record<string, unknown>) : null;
+  if (defaultsModels) {
+    const keepModels: Record<string, unknown> = {};
+    for (const [modelRef, modelMeta] of Object.entries(defaultsModels)) {
+      const provider = parseModelRefProvider(modelRef);
+      if (!provider || !removedProviderNames.has(provider)) {
+        keepModels[modelRef] = modelMeta;
+        continue;
+      }
+      const globalModelMeta = isJsonObject(globalDefaults?.models)
+        ? (globalDefaults!.models as Record<string, unknown>)[modelRef]
+        : undefined;
+      if (!deepJsonEqual(modelMeta, globalModelMeta)) {
+        // Keep explicit workspace overrides even if the provider name matches a removed clone.
+        keepModels[modelRef] = modelMeta;
+      }
+    }
+    filteredDefaults.models = keepModels;
+  }
+
+  if (isJsonObject(filteredDefaults.model)) {
+    const modelNode = { ...(filteredDefaults.model as Record<string, unknown>) };
+    const primaryProvider = parseModelRefProvider(modelNode.primary);
+    if (primaryProvider && removedProviderNames.has(primaryProvider)) {
+      const globalPrimary = isJsonObject(globalDefaults?.model)
+        ? (globalDefaults!.model as Record<string, unknown>).primary
+        : undefined;
+      if (deepJsonEqual(modelNode.primary, globalPrimary)) {
+        delete modelNode.primary;
+      }
+    }
+    filteredDefaults.model = modelNode;
+  }
+
+  if (
+    typeof filteredDefaults.workspace === "string" &&
+    typeof globalDefaults?.workspace === "string" &&
+    filteredDefaults.workspace.trim() === globalDefaults.workspace.trim()
+  ) {
+    delete filteredDefaults.workspace;
+  }
+  if (
+    typeof filteredDefaults.agentDir === "string" &&
+    typeof globalDefaults?.agentDir === "string" &&
+    filteredDefaults.agentDir.trim() === globalDefaults.agentDir.trim()
+  ) {
+    delete filteredDefaults.agentDir;
+  }
+
+  next.agents = {
+    ...nextAgents,
+    defaults: filteredDefaults,
+  };
   return next;
 }
 
@@ -684,14 +813,20 @@ export const pmosHandlers: GatewayRequestHandlers = {
       );
       const workspaceConfig = (await readWorkspaceConfig(workspaceId)) ?? {};
       const effectiveConfig = await loadEffectiveWorkspaceConfig(workspaceId);
+      const workspaceConfigForUi =
+        client && !isSuperAdmin(client)
+          ? stripLikelyInheritedWorkspaceOverlayClones(workspaceConfig, loadConfig())
+          : workspaceConfig;
       respond(
         true,
         {
           workspaceId,
-          workspaceConfig: sanitizeWorkspaceConfigResponse(client, workspaceConfig),
+          workspaceConfig: sanitizeWorkspaceConfigResponse(client, workspaceConfigForUi, {
+            filterAgents: true,
+          }),
           effectiveConfig: sanitizeWorkspaceConfigResponse(client, effectiveConfig, {
             filterAgents: true,
-            workspaceConfig,
+            workspaceConfig: workspaceConfigForUi,
             filterSharedProvidersOnly: true,
           }),
         },
@@ -738,15 +873,21 @@ export const pmosHandlers: GatewayRequestHandlers = {
         await writeWorkspaceConfig(workspaceId, workspaceConfig);
       }
       const effectiveConfig = await loadEffectiveWorkspaceConfig(workspaceId);
+      const workspaceConfigForUi =
+        client && !isSuperAdmin(client)
+          ? stripLikelyInheritedWorkspaceOverlayClones(workspaceConfig, loadConfig())
+          : workspaceConfig;
       respond(
         true,
         {
           ok: true,
           workspaceId,
-          workspaceConfig: sanitizeWorkspaceConfigResponse(client, workspaceConfig),
+          workspaceConfig: sanitizeWorkspaceConfigResponse(client, workspaceConfigForUi, {
+            filterAgents: true,
+          }),
           effectiveConfig: sanitizeWorkspaceConfigResponse(client, effectiveConfig, {
             filterAgents: true,
-            workspaceConfig,
+            workspaceConfig: workspaceConfigForUi,
             filterSharedProvidersOnly: true,
           }),
         },

@@ -16,6 +16,7 @@ type AgentEntry = NonNullable<NonNullable<OpenClawConfig["agents"]>["list"]>[num
 type ResolvedAgentConfig = {
   name?: string;
   workspace?: string;
+  workspaceId?: string;
   agentDir?: string;
   model?: AgentEntry["model"];
   skills?: AgentEntry["skills"];
@@ -120,6 +121,10 @@ export function resolveAgentConfig(
   return {
     name: typeof entry.name === "string" ? entry.name : undefined,
     workspace: typeof entry.workspace === "string" ? entry.workspace : undefined,
+    workspaceId:
+      typeof (entry as { workspaceId?: unknown }).workspaceId === "string"
+        ? ((entry as { workspaceId?: string }).workspaceId?.trim() || undefined)
+        : undefined,
     agentDir: typeof entry.agentDir === "string" ? entry.agentDir : undefined,
     model:
       typeof entry.model === "string" || (entry.model && typeof entry.model === "object")
@@ -135,6 +140,29 @@ export function resolveAgentConfig(
     sandbox: entry.sandbox,
     tools: entry.tools,
   };
+}
+
+const SHARED_WORKSPACE_PATH_SUFFIXES = [
+  "/.openclaw/workspace",
+  "/.openclaw/workspace-main",
+] as const;
+
+function isSharedWorkspacePath(value: string): boolean {
+  const normalized = value.trim().replace(/\\/g, "/").toLowerCase();
+  if (!normalized) {
+    return true;
+  }
+  if (normalized === "~/.openclaw/workspace" || normalized === "~/.openclaw/workspace-main") {
+    return true;
+  }
+  if (normalized === "/app/openclaw/default") {
+    return true;
+  }
+  return SHARED_WORKSPACE_PATH_SUFFIXES.some((suffix) => normalized.endsWith(suffix));
+}
+
+function resolveWorkspaceScopedWorkspaceDir(workspaceId: string, agentId: string): string {
+  return resolveWorkspaceDir(`~/.openclaw/workspaces/${workspaceId.trim()}/${agentId}`);
 }
 
 export function resolveAgentSkillsFilter(
@@ -178,7 +206,12 @@ export function resolveAgentModelFallbacksOverride(
 
 export function resolveAgentWorkspaceDir(cfg: OpenClawConfig, agentId: string) {
   const id = normalizeAgentId(agentId);
-  const configured = resolveAgentConfig(cfg, id)?.workspace?.trim();
+  const resolved = resolveAgentConfig(cfg, id);
+  const configured = resolved?.workspace?.trim();
+  const workspaceId = resolved?.workspaceId?.trim();
+  if (workspaceId && (!configured || isSharedWorkspacePath(configured))) {
+    return resolveWorkspaceScopedWorkspaceDir(workspaceId, id);
+  }
   if (configured) {
     return resolveWorkspaceDir(configured);
   }
@@ -196,10 +229,15 @@ export function resolveAgentWorkspaceDir(cfg: OpenClawConfig, agentId: string) {
 
 export function resolveAgentDir(cfg: OpenClawConfig, agentId: string) {
   const id = normalizeAgentId(agentId);
-  const configured = resolveAgentConfig(cfg, id)?.agentDir?.trim();
+  const resolved = resolveAgentConfig(cfg, id);
+  const configured = resolved?.agentDir?.trim();
   if (configured) {
     return resolveUserPath(configured);
   }
   const root = resolveStateDir(process.env);
+  const workspaceId = resolved?.workspaceId?.trim();
+  if (workspaceId) {
+    return path.join(root, "workspaces", workspaceId, "agents", id, "agent");
+  }
   return path.join(root, "agents", id, "agent");
 }

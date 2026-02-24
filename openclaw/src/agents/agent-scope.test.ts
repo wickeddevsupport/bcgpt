@@ -238,4 +238,30 @@ describe("resolveAgentConfig", () => {
     const agentDir = resolveAgentDir({} as OpenClawConfig, "main");
     expect(agentDir).toBe(path.join(path.resolve(home), ".openclaw", "agents", "main", "agent"));
   });
+
+  it("scopes workspace and agentDir for workspace-tagged agents when legacy shared paths are present", () => {
+    const home = path.join(path.sep, "srv", "openclaw-home");
+    const stateDir = path.join(path.sep, "srv", "state");
+    vi.stubEnv("OPENCLAW_HOME", home);
+    vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+
+    const cfg: OpenClawConfig = {
+      agents: {
+        list: [
+          {
+            id: "Support Bot",
+            workspace: "~/.openclaw/workspace",
+            workspaceId: "ws-eddie",
+          } as any,
+        ],
+      },
+    };
+
+    expect(resolveAgentWorkspaceDir(cfg, "support-bot")).toBe(
+      path.join(path.resolve(home), ".openclaw", "workspaces", "ws-eddie", "support-bot"),
+    );
+    expect(resolveAgentDir(cfg, "support-bot")).toBe(
+      path.join(path.resolve(stateDir), "workspaces", "ws-eddie", "agents", "support-bot", "agent"),
+    );
+  });
 });

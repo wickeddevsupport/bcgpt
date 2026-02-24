@@ -590,12 +590,16 @@ export async function loadPmosModelWorkspaceState(state: PmosModelAuthState) {
     state.pmosByokProviders = workspaceProviders;
     state.pmosModelConfigured = availableProviders.includes(state.pmosModelProvider);
 
+    const visibleProviders = new Set(availableProviders);
     const catalogRefs = new Set<string>();
     const modelsList = Array.isArray(modelsResult.models) ? modelsResult.models : [];
     for (const model of modelsList) {
       const provider = typeof model.provider === "string" ? model.provider.trim().toLowerCase() : "";
       const id = typeof model.id === "string" ? model.id.trim() : "";
       if (!provider || !id) {
+        continue;
+      }
+      if (visibleProviders.size > 0 && !visibleProviders.has(provider)) {
         continue;
       }
       catalogRefs.add(`${provider}/${id}`);
@@ -664,6 +668,19 @@ export async function loadPmosModelWorkspaceState(state: PmosModelAuthState) {
             ref,
           ),
         };
+      })
+      .filter((row) => {
+        if (!row.provider) {
+          return true;
+        }
+        if (visibleProviders.size === 0) {
+          return true;
+        }
+        if (visibleProviders.has(row.provider)) {
+          return true;
+        }
+        // Keep rows that are actively used/selected so the UI can still explain current state.
+        return row.active || row.usedBy.length > 0 || row.workspaceOverride;
       });
 
     state.pmosModelRows = rows;
