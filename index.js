@@ -4122,45 +4122,69 @@ app.get("/auth/basecamp/callback", async (req, res) => {
 });
 
 app.get("/startbcgpt", async (req, res) => {
-  const status = await startStatus(req);
-  const sessionKey = status?.session_key || null;
-  if (status?.api_key) {
-    setApiKeyCookie(res, status.api_key);
+  try {
+    const status = await startStatus(req);
+    const sessionKey = status?.session_key || null;
+    if (status?.api_key) {
+      setApiKeyCookie(res, status.api_key);
+    }
+    if (sessionKey) {
+      setSessionCookie(res, sessionKey);
+    } else if (status?.user_key) {
+      const generated = await createSession(null, status.user_key);
+      setSessionCookie(res, generated);
+      status.session_key = generated;
+    }
+    res.json(status);
+  } catch (e) {
+    res.status(500).json({
+      ok: false,
+      error: e?.code || "SERVER_ERROR",
+      message: e?.message || String(e),
+    });
   }
-  if (sessionKey) {
-    setSessionCookie(res, sessionKey);
-  } else if (status?.user_key) {
-    const generated = await createSession(null, status.user_key);
-    setSessionCookie(res, generated);
-    status.session_key = generated;
-  }
-  res.json(status);
 });
 
 app.post("/logout", async (req, res) => {
-  const ctx = await resolveRequestContext(req);
-  if (ctx.userKey) {
-    // Only clear auth cache, NOT the token — token must persist for API key access
-    await clearUserAuthCache(ctx.userKey);
+  try {
+    const ctx = await resolveRequestContext(req);
+    if (ctx.userKey) {
+      // Only clear auth cache, NOT the token - token must persist for API key access
+      await clearUserAuthCache(ctx.userKey);
+    }
+    res.json({ ok: true, connected: false, api_key: ctx.apiKey || null, message: "Logged out. API key still works." });
+  } catch (e) {
+    res.status(500).json({
+      ok: false,
+      error: e?.code || "SERVER_ERROR",
+      message: e?.message || String(e),
+    });
   }
-  res.json({ ok: true, connected: false, api_key: ctx.apiKey || null, message: "Logged out. API key still works." });
 });
 
 /* ================= Actions ================= */
 app.post("/action/startbcgpt", async (req, res) => {
-  const status = await startStatus(req);
-  const sessionKey = status?.session_key || null;
-  if (status?.api_key) {
-    setApiKeyCookie(res, status.api_key);
+  try {
+    const status = await startStatus(req);
+    const sessionKey = status?.session_key || null;
+    if (status?.api_key) {
+      setApiKeyCookie(res, status.api_key);
+    }
+    if (sessionKey) {
+      setSessionCookie(res, sessionKey);
+    } else if (status?.user_key) {
+      const generated = await createSession(null, status.user_key);
+      setSessionCookie(res, generated);
+      status.session_key = generated;
+    }
+    res.json(status);
+  } catch (e) {
+    res.status(500).json({
+      ok: false,
+      error: e?.code || "SERVER_ERROR",
+      message: e?.message || String(e),
+    });
   }
-  if (sessionKey) {
-    setSessionCookie(res, sessionKey);
-  } else if (status?.user_key) {
-    const generated = await createSession(null, status.user_key);
-    setSessionCookie(res, generated);
-    status.session_key = generated;
-  }
-  res.json(status);
 });
 
 app.post("/select_account", async (req, res) => {
@@ -4795,3 +4819,4 @@ const minerIntervalMs = Number(process.env.MINER_INTERVAL_MS || 900000);
 setInterval(() => {
   runMiningJob().catch(() => {});
 }, minerIntervalMs);
+
