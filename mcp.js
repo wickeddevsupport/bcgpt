@@ -5963,14 +5963,33 @@ export async function handleMCP(reqBody, ctx) {
 
       const extractProjectHints = (raw) => {
         const hints = [];
-        const quoted = String(raw || "").match(/\"([^\"]+)\"/g) || [];
+        const source = String(raw || "");
+        const quoted = source.match(/\"([^\"]+)\"/g) || [];
         for (const q of quoted) {
           const t = q.replace(/^\"|\"$/g, "").trim();
           if (t) hints.push(t);
         }
-        const projMatch = String(raw || "").match(/project\\s+([^,.;]+)/i);
+        const projMatch = source.match(/project\\s+([^,.;]+)/i);
         if (projMatch?.[1]) hints.push(projMatch[1].trim());
-        return hints;
+        const whatIsAbout = source.match(/what\\s+(.+?)\\s+is\\s+about\\b/i);
+        if (whatIsAbout?.[1]) hints.push(whatIsAbout[1].trim());
+        const aboutMatch = source.match(/about\\s+([^,.;!?]+)/i);
+        if (aboutMatch?.[1]) hints.push(aboutMatch[1].trim());
+        const forMatch = source.match(/(?:for|on)\\s+([a-z0-9&.\\-\\s]{4,})/i);
+        if (forMatch?.[1]) hints.push(forMatch[1].trim());
+        const normalized = hints
+          .map((h) => h.replace(/\\b(company|project|context|design|language|about|including|focus)\\b/gi, " "))
+          .map((h) => h.replace(/\\s+/g, " ").trim())
+          .filter(Boolean);
+        const uniq = [];
+        const seen = new Set();
+        for (const hint of normalized) {
+          const key = hint.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          uniq.push(hint);
+        }
+        return uniq;
       };
 
       const resolveProjectBestEffort = (rawQuery, projects = []) => {
@@ -6040,7 +6059,18 @@ export async function handleMCP(reqBody, ctx) {
       };
 
       const resolveProjectFromSearch = async (rawQuery) => {
-        const variants = buildSearchQueryVariants(extractSearchQuery(rawQuery) || rawQuery, { max: 6 });
+        const hintVariants = extractProjectHints(rawQuery)
+          .flatMap((hint) => buildSearchQueryVariants(hint, { max: 5 }));
+        const baseVariants = buildSearchQueryVariants(extractSearchQuery(rawQuery) || rawQuery, { max: 6 });
+        const variants = [];
+        const seenVariants = new Set();
+        for (const variant of [...hintVariants, ...baseVariants]) {
+          const key = String(variant || "").trim().toLowerCase();
+          if (!key || seenVariants.has(key)) continue;
+          seenVariants.add(key);
+          variants.push(variant);
+          if (variants.length >= 12) break;
+        }
         const attempts = [];
         let best = null;
 
