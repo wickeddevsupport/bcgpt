@@ -272,6 +272,7 @@ export async function handlePmosAuthHttpRequest(params: {
       sendJson(res, 401, { ok: false, authenticated: false, error: "Authentication required." });
       return true;
     }
+    await ensureWorkspaceStarterExperience(session.user);
     sendJson(res, 200, { ok: true, authenticated: true, user: session.user });
     return true;
   }

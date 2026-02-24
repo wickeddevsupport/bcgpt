@@ -1,6 +1,7 @@
 import type { GatewayBrowserClient } from "../gateway.ts";
 
 export const PMOS_KNOWN_MODEL_PROVIDERS = [
+  "local-ollama",
   "openai",
   "anthropic",
   "google",
@@ -39,6 +40,7 @@ export const PMOS_MODEL_PROVIDER_OPTIONS: Array<{
   label: string;
   defaultModelId: string;
 }> = [
+  { value: "local-ollama", label: "Local Ollama (Shared)", defaultModelId: "qwen3:1.7b" },
   { value: "google", label: "Google Gemini", defaultModelId: "gemini-3-flash-preview" },
   { value: "openai", label: "OpenAI", defaultModelId: "gpt-5.2" },
   { value: "anthropic", label: "Anthropic", defaultModelId: "claude-opus-4-6" },

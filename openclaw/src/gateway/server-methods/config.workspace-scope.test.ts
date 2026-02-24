@@ -57,4 +57,33 @@ describe("mergeWorkspaceScopedAgents", () => {
     if (merged.ok) throw new Error("expected merge to fail");
     expect(merged.error).toContain("duplicate agent id");
   });
+
+  it("forces workspace-scoped agent workspace paths for shared defaults", () => {
+    const requested = {
+      agents: {
+        list: [
+          { id: "Sales Agent", workspace: "~/.openclaw/workspace" },
+          { id: "ops_bot" },
+        ],
+      },
+    };
+    const merged = mergeWorkspaceScopedAgents({}, requested, "ws-demo");
+    expect(merged.ok).toBe(true);
+    if (!merged.ok) throw new Error(merged.error);
+    const list = ((merged.config.agents as { list?: unknown[] })?.list ?? []) as Array<Record<string, unknown>>;
+    expect(list).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "Sales Agent",
+          workspaceId: "ws-demo",
+          workspace: "~/.openclaw/workspaces/ws-demo/sales-agent",
+        }),
+        expect.objectContaining({
+          id: "ops_bot",
+          workspaceId: "ws-demo",
+          workspace: "~/.openclaw/workspaces/ws-demo/ops_bot",
+        }),
+      ]),
+    );
+  });
 });

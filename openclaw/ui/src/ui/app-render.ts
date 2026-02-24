@@ -203,6 +203,12 @@ function toAgentId(value: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+function toWorkspaceScopedAgentWorkspacePath(workspaceId: string, agentId: string): string {
+  const ws = workspaceId.trim();
+  const id = agentId.trim() || "assistant";
+  return `~/.openclaw/workspaces/${ws}/${id}`;
+}
+
 function renderAuthScreen(state: AppViewState) {
   const loading = state.pmosAuthLoading;
   const isSignup = state.pmosAuthMode === "signup";
@@ -1768,9 +1774,21 @@ export function renderApp(state: AppViewState) {
                 configuredProviders: state.pmosByokProviders,
                 availableSkills: state.availableSkills,
                 onCreateModalOpen: () => {
+                  const wsId = state.pmosAuthUser?.workspaceId?.trim() ?? "";
+                  const isWorkspaceScopedUser =
+                    Boolean(wsId) && state.pmosAuthUser?.role !== "super_admin";
+                  const autoAgentId =
+                    toAgentId(state.createModalFormData.id || state.createModalFormData.name) ||
+                    "assistant";
                   state.createModalOpen = true;
                   state.createModalStep = 1;
                   state.createModalError = null;
+                  state.createModalFormData = {
+                    ...state.createModalFormData,
+                    workspace: isWorkspaceScopedUser
+                      ? toWorkspaceScopedAgentWorkspacePath(wsId, autoAgentId)
+                      : state.createModalFormData.workspace || DEFAULT_AGENT_WORKSPACE_PATH,
+                  };
                 },
                 onCreateModalCancel: () => {
                   state.createModalOpen = false;
@@ -1783,11 +1801,26 @@ export function renderApp(state: AppViewState) {
                 },
                 onCreateModalFieldChange: (field, value) => {
                   const nextForm = { ...state.createModalFormData, [field]: value };
+                  const wsId = state.pmosAuthUser?.workspaceId?.trim() ?? "";
+                  const isWorkspaceScopedUser =
+                    Boolean(wsId) && state.pmosAuthUser?.role !== "super_admin";
                   if (field === "name") {
                     const currentId = state.createModalFormData.id.trim();
                     const previousAutoId = toAgentId(state.createModalFormData.name);
                     if (!currentId || currentId === previousAutoId) {
                       nextForm.id = toAgentId(String(value));
+                    }
+                  }
+                  if (isWorkspaceScopedUser && (field === "name" || field === "id")) {
+                    const previousAgentId =
+                      toAgentId(state.createModalFormData.id || state.createModalFormData.name) ||
+                      "assistant";
+                    const previousAutoWorkspace =
+                      toWorkspaceScopedAgentWorkspacePath(wsId, previousAgentId);
+                    const currentWorkspace = state.createModalFormData.workspace.trim();
+                    if (!currentWorkspace || currentWorkspace === previousAutoWorkspace) {
+                      const nextAgentId = toAgentId(String(nextForm.id || nextForm.name)) || "assistant";
+                      nextForm.workspace = toWorkspaceScopedAgentWorkspacePath(wsId, nextAgentId);
                     }
                   }
                   state.createModalFormData = nextForm;
@@ -1843,7 +1876,12 @@ export function renderApp(state: AppViewState) {
                       interactive: "messaging",
                       hybrid: "coding",
                     };
-                    const workspace = form.workspace.trim() || DEFAULT_AGENT_WORKSPACE_PATH;
+                    const wsId = state.pmosAuthUser?.workspaceId?.trim() ?? "";
+                    const isWorkspaceScopedUser =
+                      Boolean(wsId) && state.pmosAuthUser?.role !== "super_admin";
+                    const workspace = isWorkspaceScopedUser
+                      ? toWorkspaceScopedAgentWorkspacePath(wsId, candidateId)
+                      : form.workspace.trim() || DEFAULT_AGENT_WORKSPACE_PATH;
                     const model = form.model.trim();
                     const skills = Array.from(
                       new Set(form.skills.map((skill) => skill.trim()).filter(Boolean)),
@@ -1876,7 +1914,13 @@ export function renderApp(state: AppViewState) {
                       name: "",
                       id: "",
                       purpose: "",
-                      workspace: DEFAULT_AGENT_WORKSPACE_PATH,
+                      workspace:
+                        state.pmosAuthUser?.workspaceId && state.pmosAuthUser.role !== "super_admin"
+                          ? toWorkspaceScopedAgentWorkspacePath(
+                              state.pmosAuthUser.workspaceId,
+                              "assistant",
+                            )
+                          : DEFAULT_AGENT_WORKSPACE_PATH,
                       emoji: "🤖",
                       theme: "",
                       mode: "hybrid",

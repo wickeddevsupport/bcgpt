@@ -159,6 +159,34 @@ function workspaceScopedClient(
   return { workspaceId };
 }
 
+const SHARED_AGENT_WORKSPACE_PATHS = new Set(["~/.openclaw/workspace", "~/.openclaw/workspace-main"]);
+
+function workspaceScopedAgentWorkspacePath(workspaceId: string, agentId: string): string {
+  const normalizedAgentId =
+    agentId
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "-")
+      .replace(/[^a-z0-9_-]/g, "")
+      .replace(/-+/g, "-")
+      .replace(/^-+|-+$/g, "") || "assistant";
+  return `~/.openclaw/workspaces/${workspaceId.trim()}/${normalizedAgentId}`;
+}
+
+function normalizeWorkspaceScopedAgentEntry(entry: JsonRecord, workspaceId: string): JsonRecord {
+  const normalizedId = normalizeAgentIdForCompare(entry.id) ?? "assistant";
+  const rawWorkspace = typeof entry.workspace === "string" ? entry.workspace.trim() : "";
+  const useScopedWorkspace =
+    !rawWorkspace || SHARED_AGENT_WORKSPACE_PATHS.has(rawWorkspace.toLowerCase());
+  return {
+    ...entry,
+    ...(useScopedWorkspace
+      ? { workspace: workspaceScopedAgentWorkspacePath(workspaceId, normalizedId) }
+      : {}),
+    workspaceId,
+  };
+}
+
 export function mergeWorkspaceScopedAgents(
   currentConfig: Record<string, unknown> | null | undefined,
   requestedConfig: unknown,
@@ -181,10 +209,7 @@ export function mergeWorkspaceScopedAgents(
       return { ok: false, error: `duplicate agent id "${normalizedId}" in request` };
     }
     requestedIds.add(normalizedId);
-    normalizedRequested.push({
-      ...entry,
-      workspaceId,
-    });
+    normalizedRequested.push(normalizeWorkspaceScopedAgentEntry(entry, workspaceId));
   }
 
   const base = isJsonRecord(currentConfig) ? currentConfig : {};
