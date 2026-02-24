@@ -56,6 +56,46 @@ function deepClone<T>(value: T): T {
   return value && typeof value === "object" ? (JSON.parse(JSON.stringify(value)) as T) : value;
 }
 
+function useWorkspaceScopedPmosAdminConfig(state: Pick<PmosAdminState, "pmosCurrentUserRole">): boolean {
+  return state.pmosCurrentUserRole !== "system_admin";
+}
+
+async function readPmosAdminConfig(state: PmosAdminState): Promise<ConfigSnapshot> {
+  if (!state.client) {
+    throw new Error("Gateway client unavailable.");
+  }
+  if (!useWorkspaceScopedPmosAdminConfig(state)) {
+    return await state.client.request<ConfigSnapshot>("config.get", {});
+  }
+  const res = await state.client.request<{
+    workspaceConfig?: unknown;
+    workspaceId?: string;
+  }>("pmos.config.workspace.get", {});
+  const config = (res.workspaceConfig ?? {}) as Record<string, unknown>;
+  return {
+    hash: `workspace:${typeof res.workspaceId === "string" ? res.workspaceId : "current"}`,
+    config,
+    raw: JSON.stringify(config, null, 2),
+    valid: true,
+    issues: [],
+  } as ConfigSnapshot;
+}
+
+async function writePmosAdminConfig(state: PmosAdminState, nextConfig: DeepRecord, baseHash?: string) {
+  if (!state.client) {
+    throw new Error("Gateway client unavailable.");
+  }
+  if (!useWorkspaceScopedPmosAdminConfig(state)) {
+    const raw = JSON.stringify(nextConfig, null, 2).trimEnd().concat("\n");
+    await state.client.request("config.set", { raw, baseHash });
+    return;
+  }
+  await state.client.request("pmos.config.workspace.set", {
+    patch: nextConfig,
+    replace: true,
+  });
+}
+
 function getPath(obj: unknown, path: string[]): unknown {
   let cur: unknown = obj;
   for (const key of path) {
@@ -262,7 +302,7 @@ export async function loadPmosAdminState(state: PmosAdminState) {
   state.pmosAdminLoading = true;
   state.pmosAdminError = null;
   try {
-    const snapshot = await state.client.request<ConfigSnapshot>("config.get", {});
+    const snapshot = await readPmosAdminConfig(state);
     state.configSnapshot = snapshot;
     state.pmosAdminDraftsInitialized = false;
     hydratePmosAdminFromConfig(state);
@@ -283,9 +323,9 @@ export async function savePmosAdminState(
   state.pmosAdminSaving = true;
   state.pmosAdminError = null;
   try {
-    const snapshot = await state.client.request<ConfigSnapshot>("config.get", {});
+    const snapshot = await readPmosAdminConfig(state);
     const baseHash = snapshot.hash;
-    if (!baseHash) {
+    if (!baseHash && !useWorkspaceScopedPmosAdminConfig(state)) {
       state.pmosAdminError = "Config hash missing; reload and retry.";
       return;
     }
@@ -329,10 +369,13 @@ export async function savePmosAdminState(
     ].slice(0, 200);
     setPath(nextConfig, ["pmos", "audit", "events"], nextAudit);
 
-    const raw = JSON.stringify(nextConfig, null, 2).trimEnd().concat("\n");
-    await state.client.request("config.set", { raw, baseHash });
+    await writePmosAdminConfig(state, nextConfig, baseHash);
 
-    state.configSnapshot = snapshot;
+    state.configSnapshot = {
+      ...(snapshot as ConfigSnapshot),
+      config: deepClone(nextConfig),
+      raw: JSON.stringify(nextConfig, null, 2).trimEnd().concat("\n"),
+    };
     state.pmosAuditEvents = nextAudit;
   } catch (err) {
     state.pmosAdminError = String(err);

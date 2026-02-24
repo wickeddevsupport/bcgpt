@@ -493,31 +493,17 @@ async function updateAgentModelAssignmentViaConfig(
   if (!state.client || !state.connected) {
     return;
   }
-  const snapshot = await state.client.request<{
-    hash?: string;
-    config?: unknown;
-  }>("config.get", {});
-  const baseHash = typeof snapshot.hash === "string" ? snapshot.hash.trim() : "";
-  if (!baseHash) {
-    throw new Error("Config hash missing; reload and try again.");
-  }
-  if (!isRecord(snapshot.config)) {
-    throw new Error("Config is not loaded yet. Refresh and try again.");
-  }
-  const nextConfig = deepClone(snapshot.config);
+  const nextConfig = await readWorkspaceConfigOverlay(state);
   const agentEntry = findMutableAgentEntry(nextConfig, params.agentId);
   if (!agentEntry) {
-    throw new Error(`Agent "${params.agentId}" not found in config.`);
+    throw new Error(`Agent "${params.agentId}" not found in workspace config.`);
   }
   if (params.modelRef) {
     agentEntry.model = params.modelRef;
   } else {
     delete agentEntry.model;
   }
-  await state.client.request("config.set", {
-    raw: JSON.stringify(nextConfig, null, 2),
-    baseHash,
-  });
+  await writeWorkspaceConfig(state, nextConfig);
 }
 
 export function hydratePmosModelDraftFromConfig(state: PmosModelAuthState) {

@@ -15,6 +15,8 @@ const DEFAULT_STARTER_AGENT_ID = "assistant";
 const DEFAULT_STARTER_AGENT_NAME = "Workspace Assistant";
 const DEFAULT_STARTER_AGENT_WORKSPACE_BASE = "~/.openclaw/workspaces";
 const SHARED_PROVIDER_PREFER = new Set(["local-ollama", "ollama"]);
+const DEFAULT_SHARED_THINKING_LEVEL = "low";
+const DEFAULT_SHARED_REASONING_LEVEL = "stream";
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;
@@ -189,6 +191,7 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
       patch.agents = {
         defaults: {
           workspace: starterWorkspace,
+          thinkingDefault: DEFAULT_SHARED_THINKING_LEVEL,
         },
         list: [
           {
@@ -213,6 +216,11 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
             typeof getPath(existing, ["agents", "defaults", "workspace"]) === "string"
               ? getPath(existing, ["agents", "defaults", "workspace"])
               : starterWorkspace,
+          thinkingDefault:
+            typeof getPath(existing, ["agents", "defaults", "thinkingDefault"]) === "string" &&
+            String(getPath(existing, ["agents", "defaults", "thinkingDefault"])).trim()
+              ? getPath(existing, ["agents", "defaults", "thinkingDefault"])
+              : DEFAULT_SHARED_THINKING_LEVEL,
         },
       };
     }
@@ -245,8 +253,47 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
     if (Object.keys(patch).length > 0) {
       await patchWorkspaceConfig(workspaceId, patch);
     }
+
+    await ensureStarterSessionDefaults(starterAgentId);
   } catch (err) {
     console.warn("[pmos] workspace starter bootstrap failed:", String(err));
+  }
+}
+
+async function ensureStarterSessionDefaults(agentIdRaw: string): Promise<void> {
+  try {
+    const [
+      { buildAgentMainSessionKey, normalizeAgentId },
+      { mergeSessionEntry, resolveDefaultSessionStorePath, updateSessionStore },
+    ] = await Promise.all([
+      import("../routing/session-key.js"),
+      import("../config/sessions.js"),
+    ]);
+    const agentId = normalizeAgentId(agentIdRaw);
+    const sessionKey = buildAgentMainSessionKey({ agentId });
+    const storePath = resolveDefaultSessionStorePath(agentId);
+
+    await updateSessionStore(
+      storePath,
+      (store) => {
+        const existing = store[sessionKey];
+        const next = mergeSessionEntry(existing, {
+          thinkingLevel:
+            typeof existing?.thinkingLevel === "string" && existing.thinkingLevel.trim()
+              ? existing.thinkingLevel
+              : DEFAULT_SHARED_THINKING_LEVEL,
+          reasoningLevel:
+            typeof existing?.reasoningLevel === "string" && existing.reasoningLevel.trim()
+              ? existing.reasoningLevel
+              : DEFAULT_SHARED_REASONING_LEVEL,
+        });
+        store[sessionKey] = next;
+        return next;
+      },
+      { activeSessionKey: sessionKey },
+    );
+  } catch (err) {
+    console.warn("[pmos] starter session defaults bootstrap failed:", String(err));
   }
 }
 
