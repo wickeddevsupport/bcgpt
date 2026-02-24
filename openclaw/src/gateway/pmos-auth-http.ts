@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import path from "node:path";
 import {
   buildPmosClearSessionCookieValue,
   buildPmosSessionCookieValue,
@@ -9,6 +10,7 @@ import {
   signupPmosUser,
 } from "./pmos-auth.js";
 import { readJsonBody } from "./hooks.js";
+import { resolveStateDir } from "../config/paths.js";
 
 const MAX_BODY_BYTES = 32 * 1024;
 const DEFAULT_STARTER_AGENT_ID = "assistant";
@@ -127,6 +129,19 @@ function slugifyAgentId(input: string): string {
   return normalized || DEFAULT_STARTER_AGENT_ID;
 }
 
+function resolveWorkspaceAgentSessionStorePath(workspaceId: string, agentId: string): string {
+  const stateDir = resolveStateDir(process.env);
+  return path.join(
+    stateDir,
+    "workspaces",
+    workspaceId.trim(),
+    "agents",
+    slugifyAgentId(agentId),
+    "sessions",
+    "sessions.json",
+  );
+}
+
 function findSharedWorkspaceModelRef(cfg: unknown): string | null {
   const providers = getPath(cfg, ["models", "providers"]);
   if (!isRecord(providers)) {
@@ -176,6 +191,21 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
     const existing = (await readWorkspaceConfig(workspaceId)) ?? {};
     const existingAgentsList = getPath(existing, ["agents", "list"]);
     const hasAgents = Array.isArray(existingAgentsList) && existingAgentsList.length > 0;
+    const repairedAgentsList = Array.isArray(existingAgentsList)
+      ? existingAgentsList.map((entry) => {
+          if (!isRecord(entry)) return entry;
+          const currentWorkspaceId =
+            typeof entry.workspaceId === "string" ? entry.workspaceId.trim() : "";
+          if (currentWorkspaceId) {
+            return entry;
+          }
+          return { ...entry, workspaceId };
+        })
+      : null;
+    const repairedAgentsChanged =
+      Array.isArray(existingAgentsList) &&
+      Array.isArray(repairedAgentsList) &&
+      repairedAgentsList.some((entry, index) => entry !== existingAgentsList[index]);
 
     const sharedModelRef = findSharedWorkspaceModelRef(loadConfig() as unknown);
     const starterName =
@@ -198,6 +228,7 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
             id: starterAgentId,
             name: starterName,
             default: true,
+            workspaceId,
             workspace: starterWorkspace,
             identity: {
               name: starterName,
@@ -222,6 +253,7 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
               ? getPath(existing, ["agents", "defaults", "thinkingDefault"])
               : DEFAULT_SHARED_THINKING_LEVEL,
         },
+        ...(repairedAgentsChanged ? { list: repairedAgentsList } : {}),
       };
     }
 
@@ -254,24 +286,31 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
       await patchWorkspaceConfig(workspaceId, patch);
     }
 
-    await ensureStarterSessionDefaults(starterAgentId);
+    await ensureStarterSessionDefaults({ agentId: starterAgentId, workspaceId });
   } catch (err) {
     console.warn("[pmos] workspace starter bootstrap failed:", String(err));
   }
 }
 
-async function ensureStarterSessionDefaults(agentIdRaw: string): Promise<void> {
+async function ensureStarterSessionDefaults(params: {
+  agentId: string;
+  workspaceId: string;
+}): Promise<void> {
   try {
     const [
       { buildAgentMainSessionKey, normalizeAgentId },
-      { mergeSessionEntry, resolveDefaultSessionStorePath, updateSessionStore },
+      { mergeSessionEntry, updateSessionStore },
     ] = await Promise.all([
       import("../routing/session-key.js"),
       import("../config/sessions.js"),
     ]);
-    const agentId = normalizeAgentId(agentIdRaw);
+    const agentId = normalizeAgentId(params.agentId);
+    const workspaceId = String(params.workspaceId || "").trim();
+    if (!workspaceId) {
+      return;
+    }
     const sessionKey = buildAgentMainSessionKey({ agentId });
-    const storePath = resolveDefaultSessionStorePath(agentId);
+    const storePath = resolveWorkspaceAgentSessionStorePath(workspaceId, agentId);
 
     await updateSessionStore(
       storePath,

@@ -264,4 +264,28 @@ describe("resolveAgentConfig", () => {
       path.join(path.resolve(stateDir), "workspaces", "ws-eddie", "agents", "support-bot", "agent"),
     );
   });
+
+  it("overrides leaked shared agentDir for workspace-tagged agents", () => {
+    const home = path.join(path.sep, "srv", "openclaw-home");
+    const stateDir = path.join(path.sep, "srv", "state");
+    vi.stubEnv("OPENCLAW_HOME", home);
+    vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+
+    const cfg: OpenClawConfig = {
+      agents: {
+        list: [
+          {
+            id: "Support Bot",
+            workspaceId: "ws-eddie",
+            workspace: "~/.openclaw/workspaces/ws-eddie/support-bot",
+            agentDir: "~/.openclaw/agents/support-bot/agent",
+          } as any,
+        ],
+      },
+    };
+
+    expect(resolveAgentDir(cfg, "support-bot")).toBe(
+      path.join(path.resolve(stateDir), "workspaces", "ws-eddie", "agents", "support-bot", "agent"),
+    );
+  });
 });

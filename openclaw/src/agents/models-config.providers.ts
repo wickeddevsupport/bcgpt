@@ -85,6 +85,19 @@ const OLLAMA_DEFAULT_COST = {
   cacheWrite: 0,
 };
 
+function resolveOllamaStreamingDefault(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = (env.OPENCLAW_OLLAMA_STREAMING_DEFAULT ?? env.OLLAMA_STREAMING_DEFAULT ?? "")
+    .trim()
+    .toLowerCase();
+  if (raw === "0" || raw === "false" || raw === "off" || raw === "no") {
+    return false;
+  }
+  if (raw === "1" || raw === "true" || raw === "on" || raw === "yes") {
+    return true;
+  }
+  return true;
+}
+
 export const QIANFAN_BASE_URL = "https://qianfan.baidubce.com/v2";
 export const QIANFAN_DEFAULT_MODEL_ID = "deepseek-v3.2";
 const QIANFAN_DEFAULT_CONTEXT_WINDOW = 98304;
@@ -141,10 +154,10 @@ async function discoverOllamaModels(): Promise<ModelDefinitionConfig[]> {
         cost: OLLAMA_DEFAULT_COST,
         contextWindow: OLLAMA_DEFAULT_CONTEXT_WINDOW,
         maxTokens: OLLAMA_DEFAULT_MAX_TOKENS,
-        // Disable streaming by default for Ollama to avoid SDK issue #1205
-        // See: https://github.com/badlogic/pi-mono/issues/1205
+        // Enable streaming by default for responsive local UX. Allow opt-out via env
+        // if a deployment still needs the old non-streaming workaround.
         params: {
-          streaming: false,
+          streaming: resolveOllamaStreamingDefault(),
         },
       };
     });

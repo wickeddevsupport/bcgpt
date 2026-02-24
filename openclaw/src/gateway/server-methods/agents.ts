@@ -83,6 +83,18 @@ function resolveWorkspaceScopedAgentPath(
   return `${WORKSPACE_AGENT_PATH_BASE}/${workspaceId}/${agentId}`;
 }
 
+function resolveWorkspaceScopedAgentDir(
+  client: { pmosWorkspaceId?: string | null } | undefined,
+  agentId: string,
+): string | null {
+  const workspaceId =
+    typeof client?.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  if (!workspaceId) {
+    return null;
+  }
+  return `~/.openclaw/workspaces/${workspaceId}/agents/${agentId}/agent`;
+}
+
 async function statFile(filePath: string): Promise<FileMeta | null> {
   try {
     const stat = await fs.stat(filePath);
@@ -283,17 +295,14 @@ export const agentsHandlers: GatewayRequestHandlers = {
       agentId,
       name: rawName,
       workspace: workspaceDir,
+      ...(typeof client?.pmosWorkspaceId === "string" && client.pmosWorkspaceId.trim()
+        ? { workspaceId: client.pmosWorkspaceId.trim() }
+        : {}),
     });
-    const agentDir = resolveAgentDir(nextConfig, agentId);
+    const forcedAgentDir =
+      client && !isSuperAdmin(client) ? resolveWorkspaceScopedAgentDir(client, agentId) : null;
+    const agentDir = resolveUserPath(forcedAgentDir ?? resolveAgentDir(nextConfig, agentId));
     nextConfig = applyAgentConfig(nextConfig, { agentId, agentDir });
-
-    // Add workspaceId for multi-tenant isolation
-    if (client) {
-      nextConfig = applyAgentConfig(nextConfig, {
-        agentId,
-        workspaceId: client.pmosWorkspaceId,
-      });
-    }
 
     // Ensure workspace & transcripts exist BEFORE writing config so a failure
     // here does not leave a broken config entry behind.
@@ -388,14 +397,28 @@ export const agentsHandlers: GatewayRequestHandlers = {
     const model = resolveOptionalStringParam(params.model);
     const avatar = resolveOptionalStringParam(params.avatar);
 
-    const nextConfig = applyAgentConfig(cfg, {
+    let nextConfig = applyAgentConfig(cfg, {
       agentId,
       ...(typeof params.name === "string" && params.name.trim()
         ? { name: params.name.trim() }
         : {}),
       ...(workspaceDir ? { workspace: workspaceDir } : {}),
       ...(model ? { model } : {}),
+      ...(typeof client?.pmosWorkspaceId === "string" && client.pmosWorkspaceId.trim()
+        ? { workspaceId: client.pmosWorkspaceId.trim() }
+        : {}),
     });
+
+    // Re-pin agentDir to workspace-scoped path for PMOS workspace users so updates
+    // cannot preserve a previously leaked global agentDir.
+    const forcedAgentDir =
+      client && !isSuperAdmin(client) ? resolveWorkspaceScopedAgentDir(client, agentId) : null;
+    if (forcedAgentDir) {
+      nextConfig = applyAgentConfig(nextConfig, {
+        agentId,
+        agentDir: resolveUserPath(forcedAgentDir),
+      });
+    }
 
     await writeConfigFile(nextConfig);
 

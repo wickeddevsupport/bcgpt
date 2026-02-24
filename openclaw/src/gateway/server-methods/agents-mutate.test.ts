@@ -95,7 +95,11 @@ const { agentsHandlers } = await import("./agents.js");
 /* Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-function makeCall(method: keyof typeof agentsHandlers, params: Record<string, unknown>) {
+function makeCall(
+  method: keyof typeof agentsHandlers,
+  params: Record<string, unknown>,
+  opts?: { client?: Record<string, unknown> | null },
+) {
   const respond = vi.fn();
   const handler = agentsHandlers[method];
   const promise = handler({
@@ -103,7 +107,7 @@ function makeCall(method: keyof typeof agentsHandlers, params: Record<string, un
     respond,
     context: {} as never,
     req: { type: "req" as const, id: "1", method },
-    client: null,
+    client: (opts?.client ?? null) as never,
     isWebchatConnect: () => false,
   });
   return { respond, promise };
@@ -232,6 +236,39 @@ describe("agents.create", () => {
       expect.stringContaining("IDENTITY.md"),
       expect.stringMatching(/- Name: Fancy Agent[\s\S]*- Emoji: 🤖[\s\S]*- Avatar:/),
       "utf-8",
+    );
+  });
+
+  it("pins workspace-scoped agentDir for PMOS workspace users", async () => {
+    const applyCalls: unknown[] = [];
+    mocks.applyAgentConfig.mockImplementation((_cfg, opts) => {
+      applyCalls.push(opts);
+      return {};
+    });
+
+    const { promise } = makeCall(
+      "agents.create",
+      { name: "WS Agent", workspace: "/ignored/by/workspace-user" },
+      {
+        client: {
+          pmosWorkspaceId: "ws-123",
+          pmosRole: "workspace_admin",
+        },
+      },
+    );
+    await promise;
+
+    expect(applyCalls).toContainEqual(
+      expect.objectContaining({
+        agentId: "ws-agent",
+        workspaceId: "ws-123",
+      }),
+    );
+    expect(applyCalls).toContainEqual(
+      expect.objectContaining({
+        agentId: "ws-agent",
+        agentDir: "/resolved/~/.openclaw/workspaces/ws-123/agents/ws-agent/agent",
+      }),
     );
   });
 });

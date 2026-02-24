@@ -13,7 +13,7 @@ describe("Ollama provider", () => {
     expect(providers?.ollama).toBeUndefined();
   });
 
-  it("should disable streaming by default for Ollama models", async () => {
+  it("should enable streaming by default for Ollama models", async () => {
     const agentDir = mkdtempSync(join(tmpdir(), "openclaw-test-"));
     process.env.OLLAMA_API_KEY = "test-key";
 
@@ -25,7 +25,7 @@ describe("Ollama provider", () => {
       expect(providers?.ollama?.apiKey).toBe("OLLAMA_API_KEY");
 
       // Note: discoverOllamaModels() returns empty array in test environments (VITEST env var check)
-      // so we can't test the actual model discovery here. The streaming: false setting
+      // so we can't test the actual model discovery here. The streaming default setting
       // is applied in the model mapping within discoverOllamaModels().
       // The configuration structure itself is validated by TypeScript and the Zod schema.
     } finally {
@@ -33,7 +33,7 @@ describe("Ollama provider", () => {
     }
   });
 
-  it("should have correct model structure with streaming disabled (unit test)", () => {
+  it("should have correct model structure with streaming enabled (unit test)", () => {
     // This test directly verifies the model configuration structure
     // since discoverOllamaModels() returns empty array in test mode
     const mockOllamaModel = {
@@ -45,12 +45,12 @@ describe("Ollama provider", () => {
       contextWindow: 128000,
       maxTokens: 8192,
       params: {
-        streaming: false,
+        streaming: true,
       },
     };
 
     // Verify the model structure matches what discoverOllamaModels() would return
-    expect(mockOllamaModel.params?.streaming).toBe(false);
+    expect(mockOllamaModel.params?.streaming).toBe(true);
     expect(mockOllamaModel.params).toHaveProperty("streaming");
   });
 });
