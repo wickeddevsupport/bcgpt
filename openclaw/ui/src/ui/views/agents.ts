@@ -78,13 +78,36 @@ const DEFAULT_SKILL_OPTIONS = [
   { id: "reports", label: "Reports" },
 ];
 
+const AGENT_EMOJI_OPTIONS = [
+  { value: "🤖", label: "Robot" },
+  { value: "🧠", label: "Brain" },
+  { value: "⚡", label: "Lightning" },
+  { value: "🛠️", label: "Tools" },
+  { value: "📊", label: "Analytics" },
+  { value: "📈", label: "Growth" },
+  { value: "💼", label: "Business" },
+  { value: "🧾", label: "Ops" },
+  { value: "📣", label: "Marketing" },
+  { value: "🎯", label: "Target" },
+  { value: "💬", label: "Chat" },
+  { value: "📨", label: "Inbox" },
+  { value: "🔎", label: "Research" },
+  { value: "🧪", label: "Testing" },
+  { value: "🧩", label: "Workflow" },
+  { value: "🚀", label: "Launch" },
+  { value: "🛡️", label: "Guard" },
+  { value: "📝", label: "Writer" },
+  { value: "🎨", label: "Design" },
+  { value: "💻", label: "Developer" },
+] as const;
+
 // Default form state
 export const DEFAULT_CREATE_AGENT_FORM: CreateAgentFormData = {
   name: "",
   id: "",
   purpose: "",
   workspace: DEFAULT_AGENT_WORKSPACE_PATH,
-  emoji: ":robot:",
+  emoji: "🤖",
   theme: "",
   mode: "hybrid",
   model: "",
@@ -2095,6 +2118,9 @@ function renderCreateAgentModal(props: AgentsProps) {
     createModalStep: step,
   } = props;
   const isAutonomous = form.mode === "autonomous";
+  const emojiValue = form.emoji.trim();
+  const emojiIsPreset = AGENT_EMOJI_OPTIONS.some((option) => option.value === emojiValue);
+  const emojiSelectValue = emojiIsPreset ? emojiValue : "__custom__";
 
   const modeOptions: Array<{ value: AgentMode; label: string; description: string }> = [
     { value: "interactive", label: "Interactive", description: "Optimized for direct chat usage." },
@@ -2255,13 +2281,35 @@ function renderCreateAgentModal(props: AgentsProps) {
                     />
                   </label>
                   <label class="field">
-                    <span>Emoji Or Badge</span>
+                    <span>Emoji</span>
+                    <div class="row" style="gap:8px; align-items:center;">
+                      <select
+                        .value=${emojiSelectValue}
+                        @change=${(e: Event) => {
+                          const next = (e.target as HTMLSelectElement).value;
+                          if (next !== "__custom__") {
+                            props.onCreateModalFieldChange("emoji", next);
+                          }
+                        }}
+                        ?disabled=${createModalLoading}
+                      >
+                        ${AGENT_EMOJI_OPTIONS.map(
+                          (option) =>
+                            html`<option value=${option.value}>${option.value} ${option.label}</option>`,
+                        )}
+                        <option value="__custom__">Custom / badge</option>
+                      </select>
+                      <span class="chip" title="Emoji preview">${emojiValue || "∅"}</span>
+                    </div>
+                  </label>
+                  <label class="field">
+                    <span>Custom Emoji Or Badge</span>
                     <input
                       .value=${form.emoji}
                       @input=${(e: Event) =>
                         props.onCreateModalFieldChange("emoji", (e.target as HTMLInputElement).value)}
-                      placeholder=":robot:"
-                      ?disabled=${createModalLoading}
+                      placeholder="🤖 or WW"
+                      ?disabled=${createModalLoading || emojiSelectValue !== "__custom__"}
                     />
                   </label>
                   <label class="field full">

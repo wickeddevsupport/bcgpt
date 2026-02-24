@@ -198,7 +198,7 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
             workspace: starterWorkspace,
             identity: {
               name: starterName,
-              emoji: ":robot:",
+              emoji: "🤖",
               theme: "Workspace Assistant",
             },
             tools: { profile: "messaging" },

@@ -492,7 +492,7 @@ export class OpenClawApp extends LitElement {
     id: "",
     purpose: "",
     workspace: DEFAULT_AGENT_WORKSPACE_PATH,
-    emoji: ":robot:",
+    emoji: "🤖",
     theme: "",
     mode: "hybrid",
     model: "",
