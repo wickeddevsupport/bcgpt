@@ -5,7 +5,21 @@ export const DB_KIND = "postgres";
 
 const { Pool } = pg;
 
-const DATABASE_URL = String(process.env.DATABASE_URL || "").trim();
+let DATABASE_URL = String(process.env.DATABASE_URL || "").trim();
+const BCGPT_POSTGRES_PASSWORD = String(process.env.BCGPT_POSTGRES_PASSWORD || "").trim();
+if (DATABASE_URL && BCGPT_POSTGRES_PASSWORD) {
+  try {
+    const parsed = new URL(DATABASE_URL);
+    const protocol = String(parsed.protocol || "").toLowerCase();
+    if ((protocol === "postgres:" || protocol === "postgresql:") && !parsed.password) {
+      parsed.password = BCGPT_POSTGRES_PASSWORD;
+      DATABASE_URL = parsed.toString();
+      console.warn("[db.postgres] DATABASE_URL had empty password; repaired from BCGPT_POSTGRES_PASSWORD");
+    }
+  } catch {
+    // Ignore malformed DATABASE_URL here and let the existing validation/error path handle it.
+  }
+}
 if (!DATABASE_URL) {
   throw new Error("DATABASE_URL is required to use the Postgres DB backend.");
 }
