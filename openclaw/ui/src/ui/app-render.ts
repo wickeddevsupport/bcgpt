@@ -1951,6 +1951,96 @@ export function renderApp(state: AppViewState) {
                 onViewAgentLogs: (agentId: string) => {
                   state.setTab("logs");
                 },
+                onEditAgent: async (agentId: string) => {
+                  if (!state.client || !state.connected) {
+                    return;
+                  }
+                  const agent = state.agentsList?.agents.find((entry) => entry.id === agentId);
+                  if (!agent) {
+                    state.agentsError = `Agent "${agentId}" not found.`;
+                    return;
+                  }
+                  const currentName =
+                    (typeof agent.name === "string" && agent.name.trim()) ||
+                    (typeof agent.identity?.name === "string" && agent.identity.name.trim()) ||
+                    agent.id;
+                  const identity = state.agentIdentityById[agentId] ?? null;
+                  const currentEmoji =
+                    identity?.emoji?.trim() ||
+                    (typeof agent.identity?.emoji === "string" ? agent.identity.emoji.trim() : "") ||
+                    "🤖";
+                  const currentTheme =
+                    (typeof agent.identity?.theme === "string" ? agent.identity.theme.trim() : "");
+
+                  const nextNameRaw = window.prompt("Agent name", currentName);
+                  if (nextNameRaw === null) {
+                    return;
+                  }
+                  const nextName = nextNameRaw.trim();
+                  if (!nextName) {
+                    state.agentsError = "Agent name is required.";
+                    return;
+                  }
+
+                  const nextEmojiRaw = window.prompt("Agent emoji (optional)", currentEmoji);
+                  if (nextEmojiRaw === null) {
+                    return;
+                  }
+                  const nextThemeRaw = window.prompt(
+                    "Agent theme / subtitle (optional)",
+                    currentTheme,
+                  );
+                  if (nextThemeRaw === null) {
+                    return;
+                  }
+
+                  try {
+                    state.agentsError = null;
+                    await state.client.request("agents.update", {
+                      agentId,
+                      name: nextName,
+                      ...(nextEmojiRaw.trim() ? { emoji: nextEmojiRaw.trim() } : {}),
+                      ...(nextThemeRaw.trim() ? { theme: nextThemeRaw.trim() } : {}),
+                    });
+                    await loadConfig(state);
+                    await loadAgents(state);
+                    const agentIds = state.agentsList?.agents?.map((entry) => entry.id) ?? [];
+                    if (agentIds.length > 0) {
+                      void loadAgentIdentities(state, agentIds);
+                    }
+                  } catch (error) {
+                    state.agentsError = error instanceof Error ? error.message : String(error);
+                  }
+                },
+                onDeleteAgent: async (agentId: string) => {
+                  if (!state.client || !state.connected) {
+                    return;
+                  }
+                  const agent = state.agentsList?.agents.find((entry) => entry.id === agentId);
+                  const label = agent
+                    ? (typeof agent.name === "string" && agent.name.trim()) ||
+                      (typeof agent.identity?.name === "string" && agent.identity.name.trim()) ||
+                      agent.id
+                    : agentId;
+                  const confirmed = window.confirm(
+                    `Delete agent "${label}"?\n\nThis will remove the agent config and its workspace/session files.`,
+                  );
+                  if (!confirmed) {
+                    return;
+                  }
+                  try {
+                    state.agentsError = null;
+                    await state.client.request("agents.delete", { agentId, deleteFiles: true });
+                    await loadConfig(state);
+                    await loadAgents(state);
+                    const nextIds = state.agentsList?.agents?.map((entry) => entry.id) ?? [];
+                    if (nextIds.length > 0) {
+                      void loadAgentIdentities(state, nextIds);
+                    }
+                  } catch (error) {
+                    state.agentsError = error instanceof Error ? error.message : String(error);
+                  }
+                },
               })
             : nothing
         }

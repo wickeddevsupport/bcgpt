@@ -150,6 +150,8 @@ export type AgentsProps = {
   onOpenAgentChat: (agentId: string) => void;
   onPauseAgent: (agentId: string) => void;
   onViewAgentLogs: (agentId: string) => void;
+  onEditAgent: (agentId: string) => void;
+  onDeleteAgent: (agentId: string) => void;
   loading: boolean;
   error: string | null;
   agentsList: AgentsListResult | null;
@@ -743,6 +745,7 @@ export function renderAgents(props: AgentsProps) {
                 selectedAgent,
                 defaultId,
                 props.agentIdentityById[selectedAgent.id] ?? null,
+                props,
               )}
               ${renderAgentTabs(props.activePanel, (panel) => props.onSelectPanel(panel))}
               ${
@@ -865,6 +868,7 @@ function renderAgentHeader(
   agent: AgentsListResult["agents"][number],
   defaultId: string | null,
   agentIdentity: AgentIdentityResult | null,
+  props: Pick<AgentsProps, "onEditAgent" | "onDeleteAgent">,
 ) {
   const badge = agentBadgeText(agent.id, defaultId);
   const displayName = normalizeAgentLabel(agent);
@@ -883,6 +887,12 @@ function renderAgentHeader(
       </div>
       <div class="agent-header-meta">
         <div class="mono">${agent.id}</div>
+        <div class="row" style="gap: 8px; justify-content: flex-end; flex-wrap: wrap;">
+          <button class="btn btn--sm" @click=${() => props.onEditAgent(agent.id)}>Edit</button>
+          <button class="btn btn--sm danger" @click=${() => props.onDeleteAgent(agent.id)}>
+            Delete
+          </button>
+        </div>
         ${badge ? html`<span class="agent-pill">${badge}</span>` : nothing}
       </div>
     </section>

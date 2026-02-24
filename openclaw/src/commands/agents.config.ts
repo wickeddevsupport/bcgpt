@@ -137,6 +137,8 @@ export function applyAgentConfig(
     workspace?: string;
     agentDir?: string;
     model?: string;
+    emoji?: string;
+    theme?: string;
     workspaceId?: string;
   },
 ): OpenClawConfig {
@@ -145,12 +147,26 @@ export function applyAgentConfig(
   const list = listAgentEntries(cfg);
   const index = findAgentEntryIndex(list, agentId);
   const base = index >= 0 ? list[index] : { id: agentId };
+  const identityBase =
+    base.identity && typeof base.identity === "object" ? { ...base.identity } : undefined;
+  const nextIdentity =
+    params.emoji || params.theme
+      ? {
+          ...(identityBase ?? {}),
+          ...(params.emoji ? { emoji: params.emoji.trim() } : {}),
+          ...(params.theme ? { theme: params.theme.trim() } : {}),
+          ...(name ? { name } : {}),
+        }
+      : name && identityBase
+        ? { ...identityBase, name }
+        : identityBase;
   const nextEntry: AgentEntry = {
     ...base,
     ...(name ? { name } : {}),
     ...(params.workspace ? { workspace: params.workspace } : {}),
     ...(params.agentDir ? { agentDir: params.agentDir } : {}),
     ...(params.model ? { model: params.model } : {}),
+    ...(nextIdentity ? { identity: nextIdentity } : {}),
     ...(params.workspaceId ? { workspaceId: params.workspaceId } : {}),
   };
   const nextList = [...list];

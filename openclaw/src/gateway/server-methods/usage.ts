@@ -21,7 +21,7 @@ import {
   discoverAllSessions,
   type DiscoveredSession,
 } from "../../infra/session-cost-usage.js";
-import { parseAgentSessionKey } from "../../routing/session-key.js";
+import { normalizeAgentId, parseAgentSessionKey } from "../../routing/session-key.js";
 import {
   ErrorCodes,
   errorShape,
@@ -33,6 +33,8 @@ import {
   loadCombinedSessionStoreForGateway,
   loadSessionEntry,
 } from "../session-utils.js";
+import { isSuperAdmin } from "../workspace-context.js";
+import type { GatewayClient } from "./types.js";
 
 const COST_USAGE_CACHE_TTL_MS = 30_000;
 
@@ -120,8 +122,11 @@ async function discoverAllSessionsForUsage(params: {
   config: ReturnType<typeof loadConfig>;
   startMs: number;
   endMs: number;
+  agentIds?: Set<string> | null;
 }): Promise<DiscoveredSessionWithAgent[]> {
-  const agents = listAgentsForGateway(params.config).agents;
+  const agents = listAgentsForGateway(params.config).agents.filter((agent) =>
+    params.agentIds ? params.agentIds.has(normalizeAgentId(agent.id)) : true,
+  );
   const results = await Promise.all(
     agents.map(async (agent) => {
       const sessions = await discoverAllSessions({
@@ -133,6 +138,70 @@ async function discoverAllSessionsForUsage(params: {
     }),
   );
   return results.flat().toSorted((a, b) => b.mtime - a.mtime);
+}
+
+function resolveUsageWorkspaceAgentIds(
+  config: ReturnType<typeof loadConfig>,
+  client?: GatewayClient,
+): Set<string> | null {
+  if (!client || isSuperAdmin(client)) {
+    return null;
+  }
+  const workspaceId = typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  if (!workspaceId) {
+    return null;
+  }
+  const { agents } = listAgentsForGateway(config);
+  return new Set(
+    agents
+      .filter((agent) => agent.workspaceId === workspaceId)
+      .map((agent) => normalizeAgentId(agent.id)),
+  );
+}
+
+function resolveUsageSessionAgentId(
+  config: ReturnType<typeof loadConfig>,
+  key: string,
+): string | null {
+  const trimmed = key.trim();
+  if (!trimmed || trimmed === "global" || trimmed === "unknown") {
+    return null;
+  }
+  const parsed = parseAgentSessionKey(trimmed);
+  if (parsed?.agentId) {
+    return normalizeAgentId(parsed.agentId);
+  }
+  const fallbackDefault = listAgentsForGateway(config).defaultId;
+  return normalizeAgentId(fallbackDefault);
+}
+
+function canAccessUsageSessionKey(
+  config: ReturnType<typeof loadConfig>,
+  key: string,
+  workspaceAgentIds: Set<string> | null,
+): boolean {
+  if (!workspaceAgentIds) {
+    return true;
+  }
+  const agentId = resolveUsageSessionAgentId(config, key);
+  return Boolean(agentId && workspaceAgentIds.has(agentId));
+}
+
+function filterUsageSessionStore(
+  config: ReturnType<typeof loadConfig>,
+  store: Record<string, SessionEntry>,
+  workspaceAgentIds: Set<string> | null,
+): Record<string, SessionEntry> {
+  if (!workspaceAgentIds) {
+    return store;
+  }
+  const filtered: Record<string, SessionEntry> = {};
+  for (const [key, entry] of Object.entries(store)) {
+    if (canAccessUsageSessionKey(config, key, workspaceAgentIds)) {
+      filtered[key] = entry;
+    }
+  }
+  return filtered;
 }
 
 async function loadCostUsageSummaryCached(params: {
@@ -267,7 +336,7 @@ export const usageHandlers: GatewayRequestHandlers = {
     const summary = await loadCostUsageSummaryCached({ startMs, endMs, config });
     respond(true, summary, undefined);
   },
-  "sessions.usage": async ({ respond, params }) => {
+  "sessions.usage": async ({ respond, params, client }) => {
     if (!validateSessionsUsageParams(params)) {
       respond(
         false,
@@ -282,6 +351,7 @@ export const usageHandlers: GatewayRequestHandlers = {
 
     const p = params;
     const config = loadConfig();
+    const workspaceAgentIds = resolveUsageWorkspaceAgentIds(config, client);
     const { startMs, endMs } = parseDateRange({
       startDate: p.startDate,
       endDate: p.endDate,
@@ -289,9 +359,14 @@ export const usageHandlers: GatewayRequestHandlers = {
     const limit = typeof p.limit === "number" && Number.isFinite(p.limit) ? p.limit : 50;
     const includeContextWeight = p.includeContextWeight ?? false;
     const specificKey = typeof p.key === "string" ? p.key.trim() : null;
+    const formatDateLabel = (ms: number) => {
+      const d = new Date(ms);
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+    };
 
     // Load session store for named sessions
-    const { store } = loadCombinedSessionStoreForGateway(config);
+    const { store: rawStore } = loadCombinedSessionStoreForGateway(config);
+    const store = filterUsageSessionStore(config, rawStore, workspaceAgentIds);
     const now = Date.now();
 
     // Merge discovered sessions with store entries
@@ -309,6 +384,38 @@ export const usageHandlers: GatewayRequestHandlers = {
 
     // Optimization: If a specific key is requested, skip full directory scan
     if (specificKey) {
+      if (!canAccessUsageSessionKey(config, specificKey, workspaceAgentIds)) {
+        const emptyResult: SessionsUsageResult = {
+          updatedAt: now,
+          startDate: formatDateLabel(startMs),
+          endDate: formatDateLabel(endMs),
+          sessions: [],
+          totals: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            totalCost: 0,
+            inputCost: 0,
+            outputCost: 0,
+            cacheReadCost: 0,
+            cacheWriteCost: 0,
+            missingCostEntries: 0,
+          },
+          aggregates: {
+            messages: { total: 0, user: 0, assistant: 0, toolCalls: 0, toolResults: 0, errors: 0 },
+            tools: { totalCalls: 0, uniqueTools: 0, tools: [] },
+            byModel: [],
+            byProvider: [],
+            byAgent: [],
+            byChannel: [],
+            daily: [],
+          },
+        };
+        respond(true, emptyResult, undefined);
+        return;
+      }
       const parsed = parseAgentSessionKey(specificKey);
       const agentIdFromKey = parsed?.agentId;
       const keyRest = parsed?.rest ?? specificKey;
@@ -356,6 +463,7 @@ export const usageHandlers: GatewayRequestHandlers = {
         config,
         startMs,
         endMs,
+        agentIds: workspaceAgentIds,
       });
 
       // Build a map of sessionId -> store entry for quick lookup
@@ -744,7 +852,7 @@ export const usageHandlers: GatewayRequestHandlers = {
 
     respond(true, result, undefined);
   },
-  "sessions.usage.timeseries": async ({ respond, params }) => {
+  "sessions.usage.timeseries": async ({ respond, params, client }) => {
     const key = typeof params?.key === "string" ? params.key.trim() : null;
     if (!key) {
       respond(
@@ -756,6 +864,15 @@ export const usageHandlers: GatewayRequestHandlers = {
     }
 
     const config = loadConfig();
+    const workspaceAgentIds = resolveUsageWorkspaceAgentIds(config, client);
+    if (!canAccessUsageSessionKey(config, key, workspaceAgentIds)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, `No transcript found for session: ${key}`),
+      );
+      return;
+    }
     const { entry } = loadSessionEntry(key);
 
     // For discovered sessions (not in store), try using key as sessionId directly
@@ -785,7 +902,7 @@ export const usageHandlers: GatewayRequestHandlers = {
 
     respond(true, timeseries, undefined);
   },
-  "sessions.usage.logs": async ({ respond, params }) => {
+  "sessions.usage.logs": async ({ respond, params, client }) => {
     const key = typeof params?.key === "string" ? params.key.trim() : null;
     if (!key) {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "key is required for logs"));
@@ -798,6 +915,11 @@ export const usageHandlers: GatewayRequestHandlers = {
         : 200;
 
     const config = loadConfig();
+    const workspaceAgentIds = resolveUsageWorkspaceAgentIds(config, client);
+    if (!canAccessUsageSessionKey(config, key, workspaceAgentIds)) {
+      respond(true, { logs: [] }, undefined);
+      return;
+    }
     const { entry } = loadSessionEntry(key);
 
     // For discovered sessions (not in store), try using key as sessionId directly

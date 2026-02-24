@@ -395,6 +395,8 @@ export const agentsHandlers: GatewayRequestHandlers = {
           : undefined;
 
     const model = resolveOptionalStringParam(params.model);
+    const emoji = resolveOptionalStringParam(params.emoji);
+    const theme = resolveOptionalStringParam(params.theme);
     const avatar = resolveOptionalStringParam(params.avatar);
 
     let nextConfig = applyAgentConfig(cfg, {
@@ -404,6 +406,8 @@ export const agentsHandlers: GatewayRequestHandlers = {
         : {}),
       ...(workspaceDir ? { workspace: workspaceDir } : {}),
       ...(model ? { model } : {}),
+      ...(emoji ? { emoji } : {}),
+      ...(theme ? { theme } : {}),
       ...(typeof client?.pmosWorkspaceId === "string" && client.pmosWorkspaceId.trim()
         ? { workspaceId: client.pmosWorkspaceId.trim() }
         : {}),
@@ -427,11 +431,21 @@ export const agentsHandlers: GatewayRequestHandlers = {
       await ensureAgentWorkspace({ dir: workspaceDir, ensureBootstrapFiles: !skipBootstrap });
     }
 
-    if (avatar) {
+    if (emoji || theme || avatar || (typeof params.name === "string" && params.name.trim())) {
       const workspace = workspaceDir ?? resolveAgentWorkspaceDir(nextConfig, agentId);
       await fs.mkdir(workspace, { recursive: true });
       const identityPath = path.join(workspace, DEFAULT_IDENTITY_FILENAME);
-      await fs.appendFile(identityPath, `\n- Avatar: ${sanitizeIdentityLine(avatar)}\n`, "utf-8");
+      const identityLines = [
+        "",
+        ...(typeof params.name === "string" && params.name.trim()
+          ? [`- Name: ${sanitizeIdentityLine(params.name.trim())}`]
+          : []),
+        ...(emoji ? [`- Emoji: ${sanitizeIdentityLine(emoji)}`] : []),
+        ...(theme ? [`- Theme: ${sanitizeIdentityLine(theme)}`] : []),
+        ...(avatar ? [`- Avatar: ${sanitizeIdentityLine(avatar)}`] : []),
+        "",
+      ];
+      await fs.appendFile(identityPath, identityLines.join("\n"), "utf-8");
     }
 
     respond(true, { ok: true, agentId }, undefined);
