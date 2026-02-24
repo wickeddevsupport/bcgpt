@@ -217,7 +217,11 @@ export const agentsHandlers: GatewayRequestHandlers = {
     // Apply workspace filtering for PMOS multi-tenant isolation
     if (client && !isSuperAdmin(client)) {
       const filteredAgents = filterByWorkspace(result.agents, client);
-      respond(true, { ...result, agents: filteredAgents }, undefined);
+      const filteredIds = new Set(filteredAgents.map((agent) => agent.id).filter(Boolean));
+      const defaultId = filteredIds.has(result.defaultId)
+        ? result.defaultId
+        : (filteredAgents[0]?.id ?? result.defaultId);
+      respond(true, { ...result, defaultId, agents: filteredAgents }, undefined);
       return;
     }
     

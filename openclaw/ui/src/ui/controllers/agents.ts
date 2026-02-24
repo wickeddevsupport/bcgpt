@@ -22,11 +22,16 @@ export async function loadAgents(state: AgentsState) {
   try {
     const res = await state.client.request<AgentsListResult>("agents.list", {});
     if (res) {
-      state.agentsList = res;
+      const defaultId =
+        typeof res.defaultId === "string" && res.agents.some((entry) => entry.id === res.defaultId)
+          ? res.defaultId
+          : (res.agents[0]?.id ?? res.defaultId);
+      const normalized = { ...res, defaultId };
+      state.agentsList = normalized;
       const selected = state.agentsSelectedId;
-      const known = res.agents.some((entry) => entry.id === selected);
+      const known = normalized.agents.some((entry) => entry.id === selected);
       if (!selected || !known) {
-        state.agentsSelectedId = res.defaultId ?? res.agents[0]?.id ?? null;
+        state.agentsSelectedId = normalized.defaultId ?? normalized.agents[0]?.id ?? null;
       }
     }
   } catch (err) {
