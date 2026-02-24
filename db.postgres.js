@@ -33,6 +33,31 @@ const pool = new Pool({
   statement_timeout: Number.isFinite(DB_STATEMENT_TIMEOUT_MS) ? DB_STATEMENT_TIMEOUT_MS : 15000,
   idle_in_transaction_session_timeout: Number.isFinite(DB_IDLE_TX_TIMEOUT_MS) ? DB_IDLE_TX_TIMEOUT_MS : 15000,
 });
+const rawPoolQuery = pool.query.bind(pool);
+
+function isPgScramPasswordTypeBug(error) {
+  const msg = String(error?.message || "");
+  return msg.includes("SCRAM-SERVER-FIRST-MESSAGE: client password must be a string");
+}
+
+// Defensive retry for an intermittent pg/connection handshake failure observed in production.
+// This error happens before the SQL is executed, so one retry is safe.
+pool.query = async (...args) => {
+  try {
+    return await rawPoolQuery(...args);
+  } catch (error) {
+    if (!isPgScramPasswordTypeBug(error)) {
+      throw error;
+    }
+    try {
+      const sql = typeof args[0] === "string" ? args[0].replace(/\s+/g, " ").trim().slice(0, 80) : "<non-sql>";
+      console.warn("[db.postgres] retrying query after pg SCRAM password-type error:", sql);
+    } catch {
+      console.warn("[db.postgres] retrying query after pg SCRAM password-type error");
+    }
+    return rawPoolQuery(...args);
+  }
+};
 const SCHEMA_LOCK_ID = 904624001;
 const SCHEMA_LOCK_TIMEOUT_MS = Number(process.env.DB_SCHEMA_LOCK_TIMEOUT_MS || 5000);
 const SCHEMA_STATEMENT_TIMEOUT_MS = Number(process.env.DB_SCHEMA_STATEMENT_TIMEOUT_MS || 60000);
