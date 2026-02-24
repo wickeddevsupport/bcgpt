@@ -119,6 +119,119 @@ function getPath(obj: unknown, path: string[]): unknown {
   return cur;
 }
 
+function deepEqualJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    return a.every((item, index) => deepEqualJson(item, b[index]));
+  }
+  if (isRecord(a) && isRecord(b)) {
+    const aKeys = Object.keys(a);
+    const bKeys = Object.keys(b);
+    if (aKeys.length !== bKeys.length) return false;
+    for (const key of aKeys) {
+      if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
+      if (!deepEqualJson(a[key], b[key])) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+function cloneJsonObject<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => cloneJsonObject(item)) as T;
+  }
+  if (isRecord(value)) {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) {
+      out[key] = cloneJsonObject(item);
+    }
+    return out as T;
+  }
+  return value;
+}
+
+function deletePathPruneEmpty(root: Record<string, unknown>, path: string[]): boolean {
+  if (path.length === 0) return false;
+  const nodes: Record<string, unknown>[] = [root];
+  let cur: unknown = root;
+  for (let i = 0; i < path.length - 1; i += 1) {
+    if (!isRecord(cur)) return false;
+    const next = cur[path[i]];
+    if (!isRecord(next)) return false;
+    nodes.push(next);
+    cur = next;
+  }
+  if (!isRecord(cur)) return false;
+  const lastKey = path[path.length - 1];
+  if (!Object.prototype.hasOwnProperty.call(cur, lastKey)) {
+    return false;
+  }
+  delete cur[lastKey];
+
+  for (let i = path.length - 2; i >= 0; i -= 1) {
+    const parent = nodes[i];
+    const key = path[i];
+    const child = parent[key];
+    if (!isRecord(child)) break;
+    if (Object.keys(child).length > 0) break;
+    delete parent[key];
+  }
+  return true;
+}
+
+function pruneMapEntriesMatchingGlobal(
+  workspaceCfg: Record<string, unknown>,
+  globalCfg: unknown,
+  path: string[],
+): boolean {
+  const workspaceMap = getPath(workspaceCfg, path);
+  if (!isRecord(workspaceMap)) return false;
+  const globalMap = getPath(globalCfg, path);
+  let changed = false;
+  for (const key of Object.keys(workspaceMap)) {
+    const workspaceValue = workspaceMap[key];
+    const globalValue = isRecord(globalMap) ? globalMap[key] : undefined;
+    if (globalValue !== undefined && deepEqualJson(workspaceValue, globalValue)) {
+      delete workspaceMap[key];
+      changed = true;
+    }
+  }
+  if (changed && Object.keys(workspaceMap).length === 0) {
+    deletePathPruneEmpty(workspaceCfg, path);
+  }
+  return changed;
+}
+
+function pruneValueMatchingGlobal(
+  workspaceCfg: Record<string, unknown>,
+  globalCfg: unknown,
+  path: string[],
+): boolean {
+  const workspaceValue = getPath(workspaceCfg, path);
+  if (workspaceValue === undefined) return false;
+  const globalValue = getPath(globalCfg, path);
+  if (globalValue === undefined) return false;
+  if (!deepEqualJson(workspaceValue, globalValue)) return false;
+  return deletePathPruneEmpty(workspaceCfg, path);
+}
+
+function scrubLegacyWorkspaceOverlayCopies(
+  workspaceCfg: Record<string, unknown>,
+  globalCfg: unknown,
+): { cleaned: Record<string, unknown>; changed: boolean } {
+  const cleaned = cloneJsonObject(workspaceCfg);
+  let changed = false;
+
+  changed = pruneMapEntriesMatchingGlobal(cleaned, globalCfg, ["models", "providers"]) || changed;
+  changed = pruneMapEntriesMatchingGlobal(cleaned, globalCfg, ["pmos", "connectors"]) || changed;
+  changed = pruneMapEntriesMatchingGlobal(cleaned, globalCfg, ["agents", "defaults", "models"]) || changed;
+  changed = pruneValueMatchingGlobal(cleaned, globalCfg, ["agents", "defaults", "model"]) || changed;
+
+  return { cleaned, changed };
+}
+
 function slugifyAgentId(input: string): string {
   const normalized = input
     .trim()
@@ -181,14 +294,21 @@ function findSharedWorkspaceModelRef(cfg: unknown): string | null {
 
 async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise<void> {
   try {
-    const [{ readWorkspaceConfig, patchWorkspaceConfig }, { loadConfig }] = await Promise.all([
+    const [{ readWorkspaceConfig, patchWorkspaceConfig, writeWorkspaceConfig }, { loadConfig }] =
+      await Promise.all([
       import("./workspace-config.js"),
       import("../config/config.js"),
     ]);
     const workspaceId = String(user.workspaceId || "").trim();
     if (!workspaceId) return;
 
-    const existing = (await readWorkspaceConfig(workspaceId)) ?? {};
+    const globalCfg = loadConfig() as unknown;
+    let existing = (await readWorkspaceConfig(workspaceId)) ?? {};
+    const scrubbedOverlay = scrubLegacyWorkspaceOverlayCopies(existing, globalCfg);
+    if (scrubbedOverlay.changed) {
+      existing = scrubbedOverlay.cleaned;
+      await writeWorkspaceConfig(workspaceId, existing);
+    }
     const existingAgentsList = getPath(existing, ["agents", "list"]);
     const hasAgents = Array.isArray(existingAgentsList) && existingAgentsList.length > 0;
     const repairedAgentsList = Array.isArray(existingAgentsList)
@@ -213,7 +333,7 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
       (repairedAgentsList.length !== existingAgentsList.length ||
         repairedAgentsList.some((entry, index) => entry !== existingAgentsList[index]));
 
-    const sharedModelRef = findSharedWorkspaceModelRef(loadConfig() as unknown);
+    const sharedModelRef = findSharedWorkspaceModelRef(globalCfg);
     const starterName =
       typeof user.name === "string" && user.name.trim()
         ? `${user.name.trim().split(/\s+/)[0]}'s Assistant`
