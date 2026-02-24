@@ -224,6 +224,13 @@ function scrubLegacyWorkspaceOverlayCopies(
   const cleaned = cloneJsonObject(workspaceCfg);
   let changed = false;
 
+  // Shared local providers are platform-managed; workspace overlays should never
+  // persist per-user apiKey values here (accidental browser autofill can end up
+  // writing passwords into this field).
+  changed =
+    deletePathPruneEmpty(cleaned, ["models", "providers", "local-ollama", "apiKey"]) || changed;
+  changed = deletePathPruneEmpty(cleaned, ["models", "providers", "ollama", "apiKey"]) || changed;
+
   changed = pruneMapEntriesMatchingGlobal(cleaned, globalCfg, ["models", "providers"]) || changed;
   changed = pruneMapEntriesMatchingGlobal(cleaned, globalCfg, ["pmos", "connectors"]) || changed;
   changed = pruneMapEntriesMatchingGlobal(cleaned, globalCfg, ["agents", "defaults", "models"]) || changed;
