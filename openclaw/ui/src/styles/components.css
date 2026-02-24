@@ -1825,29 +1825,132 @@
 }
 
 /* ===========================================
+   Automations
+   =========================================== */
+
+.automations-layout {
+  display: flex;
+  flex-direction: row;
+  flex: 1 1 auto;
+  min-height: 80vh;
+  height: 80vh;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.automations-left-panel {
+  min-width: 240px;
+  max-width: 42%;
+  height: 100%;
+  min-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  background: var(--surface, var(--panel));
+}
+
+.automations-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  overflow: hidden;
+}
+
+.automations-canvas {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 80vh;
+  overflow: hidden;
+}
+
+.automations-center-split {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.automations-chat-panel {
+  flex: 1 1 0;
+  min-width: 300px;
+  max-width: 48%;
+  height: 100%;
+  min-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  background: var(--surface, var(--panel));
+  overflow: hidden;
+}
+
+.automations-chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.automations-chat-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.automations-chat-body .chat {
+  width: 100%;
+  min-height: 0;
+}
+
+/* ===========================================
    Agents
    =========================================== */
 
 .agents-layout {
   display: grid;
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
   gap: 16px;
+  align-items: start;
+  min-height: 0;
 }
 
 .agents-sidebar {
   display: grid;
   gap: 12px;
   align-self: start;
+  min-width: 0;
+  max-height: calc(100vh - 176px);
+  position: sticky;
+  top: 84px;
+  overflow: hidden;
 }
 
 .agents-main {
   display: grid;
   gap: 16px;
+  min-width: 0;
+  align-content: start;
 }
 
 .agent-list {
   display: grid;
   gap: 8px;
+  min-height: 0;
+  max-height: calc(100vh - 260px);
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .agent-row {
@@ -1944,7 +2047,9 @@
 .agent-tabs {
   display: flex;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 2px;
 }
 
 .agent-tab {
@@ -1955,6 +2060,8 @@
   font-weight: 600;
   background: var(--secondary);
   cursor: pointer;
+  flex: 0 0 auto;
+  white-space: nowrap;
   transition:
     border-color var(--duration-fast) ease,
     background var(--duration-fast) ease;
@@ -2506,6 +2613,21 @@
 }
 
 @media (max-width: 980px) {
+  .automations-layout {
+    flex-direction: column;
+    min-height: 72vh;
+    height: 72vh;
+  }
+
+  .automations-left-panel {
+    max-width: 100%;
+  }
+
+  .automations-chat-panel {
+    max-width: 100%;
+    min-width: 0;
+  }
+
   .projects-layout {
     grid-template-columns: 1fr;
   }
@@ -2528,6 +2650,15 @@
 
   .agents-layout {
     grid-template-columns: 1fr;
+  }
+
+  .agents-sidebar {
+    position: static;
+    max-height: none;
+  }
+
+  .agent-list {
+    max-height: 48vh;
   }
 
   .agent-header {

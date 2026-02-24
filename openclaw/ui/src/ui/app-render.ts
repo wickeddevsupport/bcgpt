@@ -461,8 +461,8 @@ export function renderApp(state: AppViewState) {
     assistantAvatarUrl: null,
     messages: state.workflowChatMessages,
     toolMessages: [],
-    stream: null,
-    streamStartedAt: null,
+    stream: state.workflowChatStream,
+    streamStartedAt: state.workflowChatStreamStartedAt,
     draft: state.workflowChatDraft,
     queue: [],
     error: null,
@@ -487,6 +487,8 @@ export function renderApp(state: AppViewState) {
     onNewSession: () => {
       state.workflowChatDraft = "";
       state.workflowChatMessages = [];
+      state.workflowChatStream = null;
+      state.workflowChatStreamStartedAt = null;
     },
     showNewMessages: false,
     onScrollToBottom: undefined,
@@ -828,6 +830,12 @@ export function renderApp(state: AppViewState) {
                       panelTab: (state.automationsPanelTab === "settings" ? "workflows" : state.automationsPanelTab) as "workflows" | "templates" | "runs",
                       onPanelToggle: () => { state.automationsPanelOpen = !state.automationsPanelOpen; },
                       onPanelTabChange: (tab) => { state.automationsPanelTab = tab; },
+                      leftPanelRatio: state.automationsLeftPanelRatio,
+                      centerSplitRatio: state.automationsCenterSplitRatio,
+                      onLeftPanelResize: (ratio) =>
+                        state.handleAutomationsLeftPanelRatioChange(ratio),
+                      onCenterSplitResize: (ratio) =>
+                        state.handleAutomationsCenterSplitRatioChange(ratio),
                       chatOpen: state.automationsChatOpen,
                       currentModel: state.pmosModelConfigured ? `${state.pmosModelProvider}/${state.pmosModelId}` : undefined,
                       currentModelProvider: state.pmosModelConfigured ? state.pmosModelProvider : undefined,

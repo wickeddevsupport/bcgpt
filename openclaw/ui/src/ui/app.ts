@@ -414,9 +414,13 @@ export class OpenClawApp extends LitElement {
   @state() automationsPanelOpen = true;
   @state() automationsPanelTab: "workflows" | "templates" | "settings" | "runs" = "workflows";
   @state() automationsChatOpen = false;
+  @state() automationsLeftPanelRatio = 0.28;
+  @state() automationsCenterSplitRatio = 0.72;
   @state() workflowChatDraft = "";
   @state() workflowChatMessages: Array<{ role: "user" | "assistant"; content: string }> = [];
   @state() workflowChatSending = false;
+  @state() workflowChatStream: string | null = null;
+  @state() workflowChatStreamStartedAt: number | null = null;
 
   // PMOS AI flow builder stream (Phase 5)
   @state() pmosFlowBuilderPrompt = "";
@@ -1167,13 +1171,20 @@ export class OpenClawApp extends LitElement {
     const message = this.workflowChatDraft.trim();
     if (!message || this.workflowChatSending) return;
     this.workflowChatDraft = "";
+    this.workflowChatStreamStartedAt = Date.now();
+    this.workflowChatStream = "Analyzing your request...";
 
-    // Append user message and send full history to the AI
     const history = [...this.workflowChatMessages, { role: "user" as const, content: message }];
     this.workflowChatMessages = history;
     this.workflowChatSending = true;
+    let progressLines = ["Analyzing your request..."];
+    const setProgress = (next: string) => {
+      progressLines = [...progressLines, next];
+      this.workflowChatStream = progressLines.join("\n");
+    };
 
     try {
+      setProgress("Generating workflow plan...");
       const result = await this.client!.request("pmos.workflow.assist", {
         messages: history.map(m => ({ role: m.role, content: m.content })),
       }) as {
@@ -1188,12 +1199,14 @@ export class OpenClawApp extends LitElement {
         providerUsed?: string;
       };
 
+      setProgress("Preparing assistant response...");
       const reply = result.message || "I couldn't process that.";
       this.workflowChatMessages = [...this.workflowChatMessages, { role: "assistant", content: reply }];
 
       // If the AI returned a workflow, auto-create it in n8n
       if (result.workflow && typeof result.workflow === "object" && result.workflow.nodes?.length) {
         try {
+          setProgress("Applying workflow to n8n...");
           const created = await this.client!.request("pmos.workflow.confirm", {
             workflow: {
               name: result.workflow.name || "AI-Generated Workflow",
@@ -1206,17 +1219,41 @@ export class OpenClawApp extends LitElement {
           if (created.success && created.workflowId) {
             const successMsg = `Workflow created. Open it in n8n editor to configure credentials and test it. (ID: ${String(created.workflowId).slice(0, 8)}...)`;
             this.workflowChatMessages = [...this.workflowChatMessages, { role: "assistant", content: successMsg }];
+            setProgress("Workflow created successfully.");
             void this.handlePmosApFlowsLoad();
+          } else if (created.message) {
+            this.workflowChatMessages = [
+              ...this.workflowChatMessages,
+              { role: "assistant", content: `Workflow generation succeeded but creation failed: ${created.message}` },
+            ];
+            setProgress("Workflow creation failed.");
           }
         } catch {
           // Non-fatal fallback: user can still create manually.
+          this.workflowChatMessages = [
+            ...this.workflowChatMessages,
+            {
+              role: "assistant",
+              content:
+                "Workflow plan is ready, but auto-create failed. You can retry from this chat or create it manually in the editor.",
+            },
+          ];
+          setProgress("Auto-create failed, plan kept in chat.");
         }
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       this.workflowChatMessages = [...this.workflowChatMessages, { role: "assistant", content: `Error: ${errMsg}` }];
+      setProgress("Request failed.");
     } finally {
       this.workflowChatSending = false;
+      window.setTimeout(() => {
+        if (this.workflowChatSending) {
+          return;
+        }
+        this.workflowChatStream = null;
+        this.workflowChatStreamStartedAt = null;
+      }, 400);
     }
   }
 
@@ -1440,6 +1477,16 @@ export class OpenClawApp extends LitElement {
     const newRatio = Math.max(0.4, Math.min(0.7, ratio));
     this.splitRatio = newRatio;
     this.applySettings({ ...this.settings, splitRatio: newRatio });
+  }
+
+  handleAutomationsLeftPanelRatioChange(ratio: number) {
+    const newRatio = Math.max(0.18, Math.min(0.42, ratio));
+    this.automationsLeftPanelRatio = newRatio;
+  }
+
+  handleAutomationsCenterSplitRatioChange(ratio: number) {
+    const newRatio = Math.max(0.45, Math.min(0.85, ratio));
+    this.automationsCenterSplitRatio = newRatio;
   }
 
   render() {

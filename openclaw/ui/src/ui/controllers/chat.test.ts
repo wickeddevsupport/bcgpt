@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { handleChatEvent, type ChatEventPayload, type ChatState } from "./chat.ts";
+import { describe, expect, it, vi } from "vitest";
+import {
+  handleChatEvent,
+  loadChatHistory,
+  type ChatEventPayload,
+  type ChatState,
+} from "./chat.ts";
 
 function createState(overrides: Partial<ChatState> = {}): ChatState {
   return {
@@ -91,5 +96,52 @@ describe("handleChatEvent", () => {
     expect(state.chatRunId).toBe(null);
     expect(state.chatStream).toBe(null);
     expect(state.chatStreamStartedAt).toBe(null);
+  });
+
+  it("keeps pending optimistic user message during history refresh while run is active", async () => {
+    const pendingMessage = {
+      role: "user",
+      content: [{ type: "text", text: "hello workflow" }],
+      timestamp: 1,
+      __openclaw: { kind: "pending-user", runId: "run-1" },
+    };
+    const state = createState({
+      sessionKey: "main",
+      chatRunId: "run-1",
+      chatMessages: [pendingMessage],
+      client: {
+        request: vi.fn().mockResolvedValue({
+          messages: [],
+          thinkingLevel: "off",
+        }),
+      } as unknown as ChatState["client"],
+    });
+
+    await loadChatHistory(state);
+    expect(state.chatMessages).toHaveLength(1);
+    expect((state.chatMessages[0] as { role?: string }).role).toBe("user");
+  });
+
+  it("clears pending marker when own run final event arrives", () => {
+    const state = createState({
+      sessionKey: "main",
+      chatRunId: "run-1",
+      chatMessages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "hello" }],
+          timestamp: 1,
+          __openclaw: { kind: "pending-user", runId: "run-1" },
+        },
+      ],
+    });
+
+    const payload: ChatEventPayload = {
+      runId: "run-1",
+      sessionKey: "main",
+      state: "final",
+    };
+    expect(handleChatEvent(state, payload)).toBe("final");
+    expect((state.chatMessages[0] as { __openclaw?: unknown }).__openclaw).toBeUndefined();
   });
 });

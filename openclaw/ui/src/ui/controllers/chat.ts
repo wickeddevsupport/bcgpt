@@ -27,6 +27,92 @@ export type ChatEventPayload = {
   errorMessage?: string;
 };
 
+type PendingChatMarker = {
+  kind?: unknown;
+  runId?: unknown;
+};
+
+function readPendingMarker(message: unknown): PendingChatMarker | null {
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+  const raw = (message as Record<string, unknown>).__openclaw;
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  return raw as PendingChatMarker;
+}
+
+function isPendingMessageForRun(message: unknown, runId: string | null): boolean {
+  if (!runId) {
+    return false;
+  }
+  const marker = readPendingMarker(message);
+  return marker?.kind === "pending-user" && marker.runId === runId;
+}
+
+function comparableMessageKey(message: unknown): string {
+  const raw = message as Record<string, unknown>;
+  const role = typeof raw.role === "string" ? raw.role : "unknown";
+  const text = extractText(message).trim();
+  if (text) {
+    return `${role}:${text}`;
+  }
+  try {
+    return `${role}:${JSON.stringify(raw.content ?? null)}`;
+  } catch {
+    return `${role}:${String(raw.content ?? "")}`;
+  }
+}
+
+function mergePendingMessages(params: {
+  history: unknown[];
+  previous: unknown[];
+  activeRunId: string | null;
+}) {
+  if (!params.activeRunId) {
+    return params.history;
+  }
+  const pending = params.previous.filter((message) =>
+    isPendingMessageForRun(message, params.activeRunId),
+  );
+  if (pending.length === 0) {
+    return params.history;
+  }
+  const seen = new Set(params.history.map((message) => comparableMessageKey(message)));
+  const extra = pending.filter((message) => {
+    const key = comparableMessageKey(message);
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+  if (extra.length === 0) {
+    return params.history;
+  }
+  return [...params.history, ...extra];
+}
+
+function clearPendingMarkersForRun(messages: unknown[], runId: string) {
+  if (!runId) {
+    return messages;
+  }
+  let changed = false;
+  const next = messages.map((message) => {
+    const marker = readPendingMarker(message);
+    if (!marker || marker.kind !== "pending-user" || marker.runId !== runId) {
+      return message;
+    }
+    const raw = message as Record<string, unknown>;
+    const patched = { ...raw };
+    delete patched.__openclaw;
+    changed = true;
+    return patched;
+  });
+  return changed ? next : messages;
+}
+
 async function resolveChatReadinessError(state: ChatState): Promise<string | null> {
   if (!state.client || !state.connected) {
     return "Connect to Wicked OS first, then try again.";
@@ -65,6 +151,7 @@ export async function loadChatHistory(state: ChatState) {
   if (!state.client || !state.connected) {
     return;
   }
+  const previousMessages = Array.isArray(state.chatMessages) ? state.chatMessages : [];
   state.chatLoading = true;
   state.lastError = null;
   try {
@@ -75,7 +162,12 @@ export async function loadChatHistory(state: ChatState) {
         limit: 200,
       },
     );
-    state.chatMessages = Array.isArray(res.messages) ? res.messages : [];
+    const historyMessages = Array.isArray(res.messages) ? res.messages : [];
+    state.chatMessages = mergePendingMessages({
+      history: historyMessages,
+      previous: previousMessages,
+      activeRunId: state.chatRunId,
+    });
     state.chatThinkingLevel = res.thinkingLevel ?? null;
   } catch (err) {
     state.lastError = String(err);
@@ -121,6 +213,7 @@ export async function sendChatMessage(
   }
 
   const now = Date.now();
+  const runId = generateUUID();
 
   // Build user message content blocks
   const contentBlocks: Array<{ type: string; text?: string; source?: unknown }> = [];
@@ -143,12 +236,15 @@ export async function sendChatMessage(
       role: "user",
       content: contentBlocks,
       timestamp: now,
+      __openclaw: {
+        kind: "pending-user",
+        runId,
+      },
     },
   ];
 
   state.chatSending = true;
   state.lastError = null;
-  const runId = generateUUID();
   state.chatRunId = runId;
   state.chatStream = "";
   state.chatStreamStartedAt = now;
@@ -242,14 +338,17 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
       }
     }
   } else if (payload.state === "final") {
+    state.chatMessages = clearPendingMarkersForRun(state.chatMessages, payload.runId);
     state.chatStream = null;
     state.chatRunId = null;
     state.chatStreamStartedAt = null;
   } else if (payload.state === "aborted") {
+    state.chatMessages = clearPendingMarkersForRun(state.chatMessages, payload.runId);
     state.chatStream = null;
     state.chatRunId = null;
     state.chatStreamStartedAt = null;
   } else if (payload.state === "error") {
+    state.chatMessages = clearPendingMarkersForRun(state.chatMessages, payload.runId);
     state.chatStream = null;
     state.chatRunId = null;
     state.chatStreamStartedAt = null;

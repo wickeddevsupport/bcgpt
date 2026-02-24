@@ -279,9 +279,13 @@ export type AppViewState = {
   automationsPanelOpen: boolean;
   automationsPanelTab: "workflows" | "templates" | "settings" | "runs";
   automationsChatOpen: boolean;
+  automationsLeftPanelRatio: number;
+  automationsCenterSplitRatio: number;
   workflowChatDraft: string;
   workflowChatMessages: Array<{ role: "user" | "assistant"; content: string }>;
   workflowChatSending: boolean;
+  workflowChatStream: string | null;
+  workflowChatStreamStartedAt: number | null;
 
   // PMOS AI flow builder stream (Phase 5)
   pmosFlowBuilderPrompt: string;
@@ -520,6 +524,8 @@ export type AppViewState = {
   handlePmosApFlowDelete: () => Promise<void>;
   handlePmosApFlowApplyOperation: () => Promise<void>;
   handlePmosApFlowTriggerWebhook: (opts?: { draft?: boolean; sync?: boolean }) => Promise<void>;
+  handleAutomationsLeftPanelRatioChange: (ratio: number) => void;
+  handleAutomationsCenterSplitRatioChange: (ratio: number) => void;
   handlePmosFlowBuilderGenerate: () => Promise<void>;
   handlePmosFlowBuilderCommit: () => Promise<void>;
   handlePmosFlowBuilderReset: () => void;

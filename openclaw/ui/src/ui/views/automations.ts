@@ -57,6 +57,10 @@ export type AutomationsProps = {
   panelTab: "workflows" | "templates" | "runs";
   onPanelToggle: () => void;
   onPanelTabChange: (tab: "workflows" | "templates" | "runs") => void;
+  leftPanelRatio: number;
+  centerSplitRatio: number;
+  onLeftPanelResize: (ratio: number) => void;
+  onCenterSplitResize: (ratio: number) => void;
 
   // AI Chat (right panel)
   chatOpen: boolean;
@@ -322,18 +326,12 @@ export function renderAutomations(props: AutomationsProps) {
 
   // ─── Right chat panel ──────────────────────────────────────────────
   const chatPanel = html`
-    <div style="
-      ${isMobile
-        ? "position: fixed; right: 0; top: 0; height: 100vh; width: 100%; z-index: 100;"
-        : "flex: 0 0 30%; min-width: 280px; max-width: 40%; height: 100%; min-height: 80vh; resize: horizontal; overflow: auto;"}
-      display: flex;
-      flex-direction: column;
-      flex-shrink: 0;
-      border-left: 1px solid var(--border);
-      background: var(--surface, #1e1e1e);
-    ">
+    <div
+      class="automations-chat-panel"
+      style="${isMobile ? "position: fixed; right: 0; top: 0; height: 100vh; width: 100%; z-index: 100;" : ""}"
+    >
       <!-- Header -->
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--border);flex-shrink:0;">
+      <div class="automations-chat-header">
         <div>
           <div style="font-weight:600;font-size:14px;">AI Workflow Assistant</div>
           <div class="muted" style="font-size:11px;">Describe what you want to automate</div>
@@ -346,7 +344,7 @@ export function renderAutomations(props: AutomationsProps) {
         >✕</button>
       </div>
       <!-- Full chat component -->
-      <div style="flex:1;min-height:0;overflow:hidden;">
+      <div class="automations-chat-body">
         ${renderChat(props.chatProps)}
       </div>
     </div>
@@ -410,14 +408,7 @@ export function renderAutomations(props: AutomationsProps) {
       </div>
 
       <!-- main row -->
-      <div style="
-        display: flex;
-        flex-direction: ${isMobile ? "column" : "row"};
-        flex: 1 1 auto;
-        overflow: hidden;
-        min-height: 80vh;
-        height: 80vh;
-      ">
+      <div class="automations-layout">
         <!-- left panel -->
         ${props.panelOpen ? html`
           ${isMobile ? html`
@@ -431,56 +422,73 @@ export function renderAutomations(props: AutomationsProps) {
               "
             ></div>
           ` : nothing}
-          <div style="
-            ${isMobile
+          <div
+            class="automations-left-panel"
+            style="${isMobile
               ? "position: fixed; left: 0; top: 0; width: min(90vw, 360px); height: 100vh; z-index: 90;"
-              : "flex: 0 0 28%; min-width: 240px; max-width: 35%; height: 100%; min-height: 80vh; resize: horizontal; overflow: auto;"}
-            flex-shrink: 0;
-            display: flex;
-            flex-direction: column;
-            border-right: 1px solid var(--border);
-            background: var(--surface, #1e1e1e);
-          ">
+              : `flex: 0 0 ${Math.round(props.leftPanelRatio * 1000) / 10}%;`}"
+          >
             ${props.panelTab === "workflows" ? panelWorkflows : nothing}
             ${props.panelTab === "templates" ? panelTemplates : nothing}
             ${props.panelTab === "runs" ? panelRuns : nothing}
           </div>
+          ${!isMobile ? html`
+            <resizable-divider
+              .splitRatio=${props.leftPanelRatio}
+              .minRatio=${0.18}
+              .maxRatio=${0.42}
+              @resize=${(event: CustomEvent) => props.onLeftPanelResize(event.detail.splitRatio)}
+            ></resizable-divider>
+          ` : nothing}
         ` : nothing}
 
-        <!-- n8n iframe -->
-        <div style="
-          flex:1 1 auto;
-          min-width:0;
-          width:100%;
-          position:relative;
-          display:flex;
-          flex-direction:column;
-          height:100%;
-          min-height:80vh;
-          overflow:hidden;
-        ">
-          <iframe
-            src=${props.embedUrl}
-            title="n8n Workflow Canvas"
-            style="flex:1 1 auto;width:100%;height:100%;min-height:80vh;border:0;display:block;background:#1a1a1a;"
-            allow="clipboard-read; clipboard-write"
-          ></iframe>
+        <div class="automations-main">
+          ${!props.chatOpen || isMobile
+            ? html`
+                <div class="automations-canvas">
+                  <iframe
+                    src=${props.embedUrl}
+                    title="n8n Workflow Canvas"
+                    style="flex:1 1 auto;width:100%;height:100%;min-height:80vh;border:0;display:block;background:#1a1a1a;"
+                    allow="clipboard-read; clipboard-write"
+                  ></iframe>
+                </div>
+                ${props.chatOpen ? chatPanel : nothing}
+              `
+            : html`
+                <div class="automations-center-split">
+                  <div
+                    class="automations-canvas"
+                    style="flex: 0 0 ${Math.round(props.centerSplitRatio * 1000) / 10}%"
+                  >
+                    <iframe
+                      src=${props.embedUrl}
+                      title="n8n Workflow Canvas"
+                      style="flex:1 1 auto;width:100%;height:100%;min-height:80vh;border:0;display:block;background:#1a1a1a;"
+                      allow="clipboard-read; clipboard-write"
+                    ></iframe>
+                  </div>
+                  <resizable-divider
+                    .splitRatio=${props.centerSplitRatio}
+                    .minRatio=${0.45}
+                    .maxRatio=${0.85}
+                    @resize=${(event: CustomEvent) => props.onCenterSplitResize(event.detail.splitRatio)}
+                  ></resizable-divider>
+                  ${chatPanel}
+                </div>
+              `}
         </div>
 
-        <!-- right chat panel -->
-        ${props.chatOpen ? html`
-          ${isMobile ? html`
-            <div
-              @click=${() => props.onChatToggle()}
-              style="
-                position: fixed;
-                inset: 0;
-                background: rgba(0, 0, 0, 0.5);
-                z-index: 99;
-              "
-            ></div>
-          ` : nothing}
-          ${chatPanel}
+        ${props.chatOpen && isMobile ? html`
+          <div
+            @click=${() => props.onChatToggle()}
+            style="
+              position: fixed;
+              inset: 0;
+              background: rgba(0, 0, 0, 0.5);
+              z-index: 99;
+            "
+          ></div>
         ` : nothing}
       </div>
     </div>

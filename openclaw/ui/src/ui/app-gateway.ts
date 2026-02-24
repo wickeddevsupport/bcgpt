@@ -297,6 +297,11 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
       );
     }
     const state = handleChatEvent(host as unknown as OpenClawApp, payload);
+    const foreignFinalWhileBusy =
+      state === "final" &&
+      typeof payload?.runId === "string" &&
+      Boolean(host.chatRunId) &&
+      payload.runId !== host.chatRunId;
     if (state === "final" || state === "error" || state === "aborted") {
       resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
       void flushChatQueueForEvent(host as unknown as Parameters<typeof flushChatQueueForEvent>[0]);
@@ -310,7 +315,7 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
         }
       }
     }
-    if (state === "final") {
+    if (state === "final" && !foreignFinalWhileBusy) {
       void loadChatHistory(host as unknown as OpenClawApp);
     }
     return;
