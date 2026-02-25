@@ -226,7 +226,7 @@ function resolveMainSessionKey(
 ): string | null {
   const snapshot = hello?.snapshot as { sessionDefaults?: SessionDefaultsSnapshot } | undefined;
   const mainSessionKey = snapshot?.sessionDefaults?.mainSessionKey?.trim();
-  const hasSessions = Array.isArray(sessions?.sessions);
+  const hasSessions = Array.isArray(sessions?.sessions) && sessions.sessions.length > 0;
   const sessionHasKey = (key: string) =>
     Boolean(sessions?.sessions?.some((row) => typeof row.key === "string" && row.key === key));
   if (mainSessionKey) {
@@ -291,7 +291,7 @@ function resolveSessionOptions(
   // Add current session key next
   const canIncludeCurrent =
     Boolean(sessionKey) &&
-    (!sessions?.sessions || resolvedCurrent || includeMissingCurrent);
+    (!sessions?.sessions || sessions.sessions.length === 0 || resolvedCurrent || includeMissingCurrent);
   if (canIncludeCurrent && !seen.has(sessionKey)) {
     seen.add(sessionKey);
     options.push({
