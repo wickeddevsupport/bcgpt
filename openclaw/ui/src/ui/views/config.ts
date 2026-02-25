@@ -4,6 +4,8 @@ import { hintForPath, humanize, schemaType, type JsonSchema } from "./config-for
 import { analyzeConfigSchema, renderConfigForm, SECTION_META } from "./config-form.ts";
 
 export type ConfigProps = {
+  scope?: "global" | "workspace";
+  scopeLabel?: string | null;
   raw: string;
   originalRaw: string;
   valid: boolean | null;
@@ -384,6 +386,8 @@ function truncateValue(value: unknown, maxLen = 40): string {
 }
 
 export function renderConfig(props: ConfigProps) {
+  const configScope = props.scope ?? "global";
+  const workspaceScoped = configScope === "workspace";
   const validity = props.valid == null ? "unknown" : props.valid ? "valid" : "invalid";
   const analysis = analyzeConfigSchema(props.schema);
   const formUnsafe = analysis.schema ? analysis.unsupportedPaths.length > 0 : false;
@@ -442,21 +446,33 @@ export function renderConfig(props: ConfigProps) {
     !props.updating &&
     hasChanges &&
     (props.formMode === "raw" ? true : canSaveForm);
-  const canUpdate = props.connected && !props.applying && !props.updating;
+  const canUpdate = !workspaceScoped && props.connected && !props.applying && !props.updating;
 
   return html`
     <div class="config-layout">
       <!-- Sidebar -->
       <aside class="config-sidebar">
-        <div class="config-sidebar__header">
-          <div class="config-sidebar__title">Settings</div>
-          <span
-            class="pill pill--sm ${
-              validity === "valid" ? "pill--ok" : validity === "invalid" ? "pill--danger" : ""
-            }"
-            >${validity}</span
-          >
-        </div>
+          <div class="config-sidebar__header">
+            <div class="config-sidebar__title">Settings</div>
+            <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+              <span class="pill pill--sm">
+                ${workspaceScoped ? "workspace" : "global"}
+              </span>
+              <span
+                class="pill pill--sm ${
+                  validity === "valid" ? "pill--ok" : validity === "invalid" ? "pill--danger" : ""
+                }"
+                >${validity}</span
+              >
+            </div>
+          </div>
+          ${
+            workspaceScoped
+              ? html`<div class="config-status muted" style="margin: 2px 2px 10px 2px;">
+                  Editing workspace config${props.scopeLabel ? ` (${props.scopeLabel})` : ""}. Global server config is hidden.
+                </div>`
+              : nothing
+          }
 
         <!-- Search -->
         <div class="config-search">
@@ -579,12 +595,13 @@ export function renderConfig(props: ConfigProps) {
               ${props.applying ? "Applying…" : "Apply"}
             </button>
             <button
-              class="btn btn--sm"
-              ?disabled=${!canUpdate}
-              @click=${props.onUpdate}
-            >
-              ${props.updating ? "Updating…" : "Update"}
-            </button>
+                class="btn btn--sm"
+                ?disabled=${!canUpdate}
+                @click=${props.onUpdate}
+                title=${workspaceScoped ? "Workspace users cannot run global updates" : ""}
+              >
+                ${props.updating ? "Updating…" : "Update"}
+              </button>
           </div>
         </div>
 

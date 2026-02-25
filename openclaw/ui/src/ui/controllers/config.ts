@@ -1,5 +1,7 @@
 import type { GatewayBrowserClient } from "../gateway.ts";
 import type { ConfigSchemaResponse, ConfigSnapshot, ConfigUiHints } from "../types.ts";
+import type { PmosAuthUser } from "./pmos-auth.ts";
+import JSON5 from "json5";
 import {
   cloneConfigObject,
   removePathValue,
@@ -11,6 +13,7 @@ export type ConfigState = {
   client: GatewayBrowserClient | null;
   connected: boolean;
   applySessionKey: string;
+  pmosAuthUser?: PmosAuthUser | null;
   configLoading: boolean;
   configRaw: string;
   configRawOriginal: string;
@@ -34,6 +37,36 @@ export type ConfigState = {
   lastError: string | null;
 };
 
+function useWorkspaceScopedConfig(state: Pick<ConfigState, "pmosAuthUser">): boolean {
+  const role = state.pmosAuthUser?.role ?? null;
+  return role !== null && role !== "super_admin";
+}
+
+function buildWorkspaceScopedSnapshot(res: {
+  workspaceId?: string;
+  workspaceConfig?: unknown;
+}): ConfigSnapshot {
+  const config =
+    res.workspaceConfig && typeof res.workspaceConfig === "object" && !Array.isArray(res.workspaceConfig)
+      ? (res.workspaceConfig as Record<string, unknown>)
+      : {};
+  return {
+    hash: `workspace:${typeof res.workspaceId === "string" ? res.workspaceId : "current"}`,
+    config,
+    raw: JSON.stringify(config, null, 2),
+    valid: true,
+    issues: [],
+  };
+}
+
+function parseWorkspaceRawConfig(raw: string): Record<string, unknown> {
+  const parsed = JSON5.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Workspace config must be a JSON object.");
+  }
+  return parsed as Record<string, unknown>;
+}
+
 export async function loadConfig(state: ConfigState) {
   if (!state.client || !state.connected) {
     return;
@@ -41,8 +74,16 @@ export async function loadConfig(state: ConfigState) {
   state.configLoading = true;
   state.lastError = null;
   try {
-    const res = await state.client.request<ConfigSnapshot>("config.get", {});
-    applyConfigSnapshot(state, res);
+    if (useWorkspaceScopedConfig(state)) {
+      const res = await state.client.request<{
+        workspaceId?: string;
+        workspaceConfig?: unknown;
+      }>("pmos.config.workspace.get", {});
+      applyConfigSnapshot(state, buildWorkspaceScopedSnapshot(res));
+    } else {
+      const res = await state.client.request<ConfigSnapshot>("config.get", {});
+      applyConfigSnapshot(state, res);
+    }
   } catch (err) {
     state.lastError = String(err);
   } finally {
@@ -106,6 +147,19 @@ export async function saveConfig(state: ConfigState) {
   state.configSaving = true;
   state.lastError = null;
   try {
+    if (useWorkspaceScopedConfig(state)) {
+      const nextConfig =
+        state.configFormMode === "form" && state.configForm
+          ? cloneConfigObject(state.configForm)
+          : parseWorkspaceRawConfig(state.configRaw);
+      await state.client.request("pmos.config.workspace.set", {
+        patch: nextConfig,
+        replace: true,
+      });
+      state.configFormDirty = false;
+      await loadConfig(state);
+      return;
+    }
     const raw =
       state.configFormMode === "form" && state.configForm
         ? serializeConfigForm(state.configForm)
@@ -132,6 +186,11 @@ export async function applyConfig(state: ConfigState) {
   state.configApplying = true;
   state.lastError = null;
   try {
+    if (useWorkspaceScopedConfig(state)) {
+      // Workspace overlays do not use the global config.apply path.
+      await saveConfig(state);
+      return;
+    }
     const raw =
       state.configFormMode === "form" && state.configForm
         ? serializeConfigForm(state.configForm)
@@ -162,6 +221,10 @@ export async function runUpdate(state: ConfigState) {
   state.updateRunning = true;
   state.lastError = null;
   try {
+    if (useWorkspaceScopedConfig(state)) {
+      state.lastError = "Update is only available to super admins.";
+      return;
+    }
     await state.client.request("update.run", {
       sessionKey: state.applySessionKey,
     });

@@ -2292,6 +2292,12 @@ export function renderApp(state: AppViewState) {
         ${
           state.tab === "config" && canAccessTab(state, "config")
             ? renderConfig({
+                scope:
+                  state.pmosAuthUser && state.pmosAuthUser.role !== "super_admin" ? "workspace" : "global",
+                scopeLabel:
+                  state.pmosAuthUser && state.pmosAuthUser.role !== "super_admin"
+                    ? state.pmosAuthUser.workspaceId
+                    : null,
                 raw: state.configRaw,
                 originalRaw: state.configRawOriginal,
                 valid: state.configValid,
