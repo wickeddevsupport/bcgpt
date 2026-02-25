@@ -77,6 +77,73 @@ function isWorkspaceVisibleSessionKey(key: string, workspaceAgentIds: Set<string
   return workspaceAgentIds.has(agentId);
 }
 
+function resolveClientMainSessionKey(
+  cfg: ReturnType<typeof loadConfig>,
+  client?: GatewayClient,
+): string {
+  if (!client || isSuperAdmin(client)) {
+    return resolveMainSessionKey(cfg);
+  }
+  const workspaceId =
+    typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  if (!workspaceId) {
+    return resolveMainSessionKey(cfg);
+  }
+  const listed = listAgentsForGateway(cfg);
+  const workspaceAgents = listed.agents.filter(
+    (agent) => (typeof agent.workspaceId === "string" ? agent.workspaceId.trim() : "") === workspaceId,
+  );
+  const defaultAgentId =
+    (workspaceAgents.some((agent) => agent.id === listed.defaultId) ? listed.defaultId : undefined) ??
+    workspaceAgents[0]?.id;
+  if (!defaultAgentId) {
+    return resolveMainSessionKey(cfg);
+  }
+  return resolveMainSessionKey({
+    session: cfg.session,
+    agents: { list: [{ id: defaultAgentId, default: true }] },
+  } as any);
+}
+
+function withMainSessionFallback(params: {
+  cfg: ReturnType<typeof loadConfig>;
+  storePath: string;
+  store: Record<string, SessionEntry>;
+  opts: typeof validateSessionsListParams extends { } ? any : never;
+  result: ReturnType<typeof listSessionsFromStore>;
+  client?: GatewayClient;
+}) {
+  const { cfg, storePath, store, opts, result, client } = params;
+  const activeMinutes =
+    typeof opts.activeMinutes === "number" && Number.isFinite(opts.activeMinutes)
+      ? Math.max(1, Math.floor(opts.activeMinutes))
+      : undefined;
+  if (activeMinutes === undefined || result.count > 0) {
+    return result;
+  }
+  const mainKey = resolveClientMainSessionKey(cfg, client);
+  if (!mainKey) {
+    return result;
+  }
+  const fallbackResult = listSessionsFromStore({
+    cfg,
+    storePath,
+    store,
+    opts: { ...opts, activeMinutes: undefined, limit: undefined },
+  });
+  const mainRow =
+    fallbackResult.sessions.find((row) => row.key === mainKey) ??
+    (fallbackResult.sessions.length === 1 ? fallbackResult.sessions[0] : undefined);
+  if (!mainRow) {
+    return result;
+  }
+  return {
+    ...result,
+    count: 1,
+    sessions: [mainRow],
+  };
+}
+
 export const sessionsHandlers: GatewayRequestHandlers = {
   "sessions.list": ({ params, respond, client }) => {
     if (!validateSessionsListParams(params)) {
@@ -111,7 +178,18 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         store: filteredStore,
         opts: p,
       });
-      respond(true, result, undefined);
+      respond(
+        true,
+        withMainSessionFallback({
+          cfg,
+          storePath,
+          store: filteredStore,
+          opts: p,
+          result,
+          client,
+        }),
+        undefined,
+      );
       return;
     }
     
@@ -121,7 +199,18 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       store,
       opts: p,
     });
-    respond(true, result, undefined);
+    respond(
+      true,
+      withMainSessionFallback({
+        cfg,
+        storePath,
+        store,
+        opts: p,
+        result,
+        client,
+      }),
+      undefined,
+    );
   },
   "sessions.preview": ({ params, respond, client }) => {
     if (!validateSessionsPreviewParams(params)) {
