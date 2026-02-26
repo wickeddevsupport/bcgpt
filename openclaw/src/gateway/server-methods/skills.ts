@@ -108,7 +108,7 @@ export const skillsHandlers: GatewayRequestHandlers = {
     }
     const cfg = await loadSkillsConfigForClient(client);
     const agentIdRaw = typeof params?.agentId === "string" ? params.agentId.trim() : "";
-    const agentId = agentIdRaw ? normalizeAgentId(agentIdRaw) : resolveDefaultAgentId(cfg);
+    let agentId = agentIdRaw ? normalizeAgentId(agentIdRaw) : resolveDefaultAgentId(cfg);
     if (agentIdRaw) {
       const knownAgents = listAgentIds(cfg);
       if (!knownAgents.includes(agentId)) {
@@ -125,7 +125,14 @@ export const skillsHandlers: GatewayRequestHandlers = {
     if (client && !isSuperAdmin(client)) {
       const { agents } = listAgentsForGateway(cfg);
       const workspaceAgents = filterByWorkspace(agents, client);
-      const hasAccess = workspaceAgents.some((a) => a.id === agentId);
+      let hasAccess = workspaceAgents.some((a) => a.id === agentId);
+      if (!hasAccess && !agentIdRaw) {
+        const fallbackAgentId = workspaceAgents[0]?.id ? normalizeAgentId(workspaceAgents[0].id) : "";
+        if (fallbackAgentId) {
+          agentId = fallbackAgentId;
+          hasAccess = true;
+        }
+      }
       if (!hasAccess) {
         respond(
           false,
@@ -198,7 +205,25 @@ export const skillsHandlers: GatewayRequestHandlers = {
       timeoutMs?: number;
     };
     const cfg = await loadSkillsConfigForClient(client);
-    const workspaceDirRaw = resolveAgentWorkspaceDir(cfg, resolveDefaultAgentId(cfg));
+    let installAgentId = resolveDefaultAgentId(cfg);
+    if (client && !isSuperAdmin(client)) {
+      const { agents } = listAgentsForGateway(cfg);
+      const workspaceAgents = filterByWorkspace(agents, client);
+      const hasAccess = workspaceAgents.some((a) => a.id === installAgentId);
+      if (!hasAccess) {
+        const fallbackAgentId = workspaceAgents[0]?.id ? normalizeAgentId(workspaceAgents[0].id) : "";
+        if (!fallbackAgentId) {
+          respond(
+            false,
+            undefined,
+            errorShape(ErrorCodes.INVALID_REQUEST, "no accessible agent found for workspace"),
+          );
+          return;
+        }
+        installAgentId = fallbackAgentId;
+      }
+    }
+    const workspaceDirRaw = resolveAgentWorkspaceDir(cfg, installAgentId);
     const result = await installSkill({
       workspaceDir: workspaceDirRaw,
       skillName: p.name,
