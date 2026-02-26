@@ -661,6 +661,10 @@ export class OpenClawApp extends LitElement {
   async handlePmosAuthBootstrap() {
     await loadPmosAuthSession(this);
     if (this.pmosAuthAuthenticated) {
+      if (this.pmosAuthUser?.role && this.pmosAuthUser.role !== "super_admin") {
+        this.onboarding = false;
+        this.setTab("chat");
+      }
       this.connect();
     }
   }

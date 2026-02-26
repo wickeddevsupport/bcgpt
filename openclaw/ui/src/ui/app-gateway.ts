@@ -238,11 +238,14 @@ export function connectGateway(host: GatewayHost) {
       resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
       const app = host as unknown as OpenClawApp;
       const loadAgentsPromise = loadAgents(app);
+      const pmosRole = (app as unknown as { pmosAuthUser?: { role?: string | null } | null })
+        .pmosAuthUser?.role;
+      const shouldReconcileWorkspaceSessions = Boolean(pmosRole && pmosRole !== "super_admin");
       void loadNodes(app, { quiet: true });
       void loadDevices(app, { quiet: true });
       // Workspace users can have stale persisted session keys (deleted agent sessions).
-      // Reconcile sessions before the first chat refresh to avoid a noisy "session not found" flash.
-      if (host.tab === "chat") {
+      // Reconcile sessions before the first assistant/chat refresh to avoid noisy startup errors.
+      if (shouldReconcileWorkspaceSessions || host.tab === "chat") {
         await loadAgentsPromise.catch(() => undefined);
         await loadSessions(app).catch(() => undefined);
         void loadAssistantIdentity(app, { sessionKey: host.sessionKey });
