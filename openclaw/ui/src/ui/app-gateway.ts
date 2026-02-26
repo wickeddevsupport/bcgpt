@@ -237,7 +237,6 @@ export function connectGateway(host: GatewayHost) {
       (host as unknown as { chatStreamStartedAt: number | null }).chatStreamStartedAt = null;
       resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
       const app = host as unknown as OpenClawApp;
-      void loadAssistantIdentity(app);
       const loadAgentsPromise = loadAgents(app);
       void loadNodes(app, { quiet: true });
       void loadDevices(app, { quiet: true });
@@ -246,6 +245,9 @@ export function connectGateway(host: GatewayHost) {
       if (host.tab === "chat") {
         await loadAgentsPromise.catch(() => undefined);
         await loadSessions(app).catch(() => undefined);
+        void loadAssistantIdentity(app, { sessionKey: host.sessionKey });
+      } else {
+        void loadAssistantIdentity(app);
       }
       void refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0]);
       // Auto-refresh connector status on connect so opsProvisioned is populated
