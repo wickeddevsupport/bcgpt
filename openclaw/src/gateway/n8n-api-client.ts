@@ -63,6 +63,10 @@ export interface N8nNodeType {
   description?: string;
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function readConfigString(cfg: unknown, path: string[]): string | null {
   let current: unknown = cfg;
   for (const part of path) {
@@ -138,20 +142,28 @@ async function getN8nContext(workspaceId: string): Promise<{
   // Use the auto-provisioning flow from n8n-auth-bridge
   // This will create workspace credentials if they don't exist yet
   let cookie: string | null = null;
-  try {
-    cookie = await getOrCreateWorkspaceN8nCookie({
-      workspaceId,
-      n8nBaseUrl: baseUrl,
-      pmosUser: owner
-        ? {
-            email: owner.email,
-            name: owner.name,
-            role: owner.role,
-          }
-        : null,
-    });
-  } catch {
-    cookie = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      cookie = await getOrCreateWorkspaceN8nCookie({
+        workspaceId,
+        n8nBaseUrl: baseUrl,
+        pmosUser: owner
+          ? {
+              email: owner.email,
+              name: owner.name,
+              role: owner.role,
+            }
+          : null,
+      });
+    } catch {
+      cookie = null;
+    }
+    if (cookie) {
+      break;
+    }
+    if (attempt < 2) {
+      await delay(500 * (attempt + 1));
+    }
   }
 
   // Also check for API key

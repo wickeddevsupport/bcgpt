@@ -55,6 +55,10 @@ type EmbeddedOpsContext = {
   workspaceId?: string | null;
 };
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function resolveEmbeddedOpsContext(workspaceId?: string | null): Promise<EmbeddedOpsContext | null> {
   const local = readLocalN8nConfig();
   if (!local) {
@@ -66,11 +70,20 @@ async function resolveEmbeddedOpsContext(workspaceId?: string | null): Promise<E
   if (workspaceId) {
     const wsId = String(workspaceId).trim();
     const pmosUser = await resolvePmosUserByWorkspaceId(wsId).catch(() => null);
-    const cookie = await getOrCreateWorkspaceN8nCookie({
-      workspaceId: wsId,
-      n8nBaseUrl: local.url,
-      pmosUser,
-    });
+    let cookie: string | null = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      cookie = await getOrCreateWorkspaceN8nCookie({
+        workspaceId: wsId,
+        n8nBaseUrl: local.url,
+        pmosUser,
+      }).catch(() => null);
+      if (cookie) {
+        break;
+      }
+      if (attempt < 2) {
+        await delay(500 * (attempt + 1));
+      }
+    }
     if (!cookie) {
       throw new Error("Unable to authenticate embedded n8n for this workspace.");
     }
