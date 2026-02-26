@@ -188,7 +188,7 @@ async function opsRequestEmbedded(params: {
     }
 
     if (params.workspaceId) {
-      const tagId = await ensureWorkspaceN8nTag(params.workspaceId, ctx.baseUrl);
+      const tagId = await ensureWorkspaceN8nTag(params.workspaceId, ctx.baseUrl, ctx.headers);
       if (!tagId) {
         throw new Error("Unable to ensure workspace tag for embedded n8n.");
       }

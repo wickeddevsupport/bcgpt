@@ -200,7 +200,7 @@ export async function createN8nWorkflow(
     return { ok: false, error: "No n8n authentication available" };
   }
 
-  const workspaceTagId = await ensureWorkspaceN8nTag(workspaceId, baseUrl);
+  const workspaceTagId = await ensureWorkspaceN8nTag(workspaceId, baseUrl, headers);
   if (!workspaceTagId) {
     return {
       ok: false,

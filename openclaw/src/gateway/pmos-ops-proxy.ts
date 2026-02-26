@@ -250,25 +250,25 @@ function workspaceTagName(workspaceId: string): string {
   return `pmos-${hash}`; // 23 chars
 }
 
-export async function ensureWorkspaceN8nTag(workspaceId: string, n8nBaseUrl: string): Promise<string | null> {
-  const cached = workspaceTagCache.get(workspaceId);
-  if (cached) return cached;
-
+async function ensureWorkspaceN8nTagWithHeaders(params: {
+  workspaceId: string;
+  n8nBaseUrl: string;
+  authHeaders: Record<string, string>;
+}): Promise<string | null> {
+  const { workspaceId, n8nBaseUrl, authHeaders } = params;
   const tagName = workspaceTagName(workspaceId);
   const base = n8nBaseUrl.replace(/\/+$/, "");
-  const ownerCookie = await getOwnerCookie(n8nBaseUrl);
-  if (!ownerCookie) return null;
+  const headersBase = { ...authHeaders, accept: "application/json" };
 
   try {
     // Find existing tag
     const listRes = await fetch(`${base}/rest/tags`, {
-      headers: { Cookie: ownerCookie, accept: "application/json" },
+      headers: headersBase,
     });
     if (listRes.ok) {
-      const data = await listRes.json() as { data?: Array<{ id: string; name: string }> };
+      const data = (await listRes.json()) as { data?: Array<{ id: string; name: string }> };
       const match = (data.data ?? []).find((t) => t.name === tagName);
       if (match?.id) {
-        workspaceTagCache.set(workspaceId, match.id);
         return match.id;
       }
     }
@@ -276,20 +276,59 @@ export async function ensureWorkspaceN8nTag(workspaceId: string, n8nBaseUrl: str
     // Create tag
     const createRes = await fetch(`${base}/rest/tags`, {
       method: "POST",
-      headers: { Cookie: ownerCookie, "content-type": "application/json", accept: "application/json" },
+      headers: { ...headersBase, "content-type": "application/json" },
       body: JSON.stringify({ name: tagName }),
     });
     if (createRes.ok) {
-      const data = await createRes.json() as { id?: string; data?: { id: string } };
-      const id = data.id ?? data.data?.id;
-      if (id) {
-        workspaceTagCache.set(workspaceId, id);
-        return id;
-      }
+      const data = (await createRes.json()) as { id?: string; data?: { id: string } };
+      return data.id ?? data.data?.id ?? null;
     }
   } catch {
-    // best-effort
+    // best-effort; caller may try another auth strategy
   }
+  return null;
+}
+
+export async function ensureWorkspaceN8nTag(
+  workspaceId: string,
+  n8nBaseUrl: string,
+  preferredAuthHeaders?: Record<string, string> | null,
+): Promise<string | null> {
+  const cached = workspaceTagCache.get(workspaceId);
+  if (cached) return cached;
+
+  const authCandidates: Array<Record<string, string>> = [];
+  if (preferredAuthHeaders && typeof preferredAuthHeaders === "object") {
+    const filtered: Record<string, string> = {};
+    for (const [k, v] of Object.entries(preferredAuthHeaders)) {
+      if (typeof v !== "string" || !v.trim()) continue;
+      const lower = k.toLowerCase();
+      if (lower === "cookie" || lower === "x-n8n-api-key" || lower === "authorization") {
+        filtered[k] = v;
+      }
+    }
+    if (Object.keys(filtered).length > 0) {
+      authCandidates.push(filtered);
+    }
+  }
+
+  const ownerCookie = await getOwnerCookie(n8nBaseUrl);
+  if (ownerCookie) {
+    authCandidates.push({ Cookie: ownerCookie });
+  }
+
+  for (const authHeaders of authCandidates) {
+    const id = await ensureWorkspaceN8nTagWithHeaders({
+      workspaceId,
+      n8nBaseUrl,
+      authHeaders,
+    });
+    if (id) {
+      workspaceTagCache.set(workspaceId, id);
+      return id;
+    }
+  }
+
   return null;
 }
 
@@ -523,7 +562,7 @@ async function proxyWorkflowCreate(params: {
   // Workspace isolation: inject workspace tag ID into the workflow body.
   // Also ensure `active` is a boolean. If it's missing/invalid, n8n may insert NULL and
   // fail with SQLITE_CONSTRAINT (workflow_entity.active) on some setups.
-  const tagId = await ensureWorkspaceN8nTag(workspaceId, n8nBaseUrl);
+  const tagId = await ensureWorkspaceN8nTag(workspaceId, n8nBaseUrl, extraHeaders ?? null);
   if (body.length > 0) {
     try {
       const parsed = JSON.parse(body.toString("utf-8")) as Record<string, unknown>;
