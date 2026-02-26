@@ -197,6 +197,30 @@ async function moveToTrashBestEffort(pathname: string): Promise<void> {
   }
 }
 
+async function loadAgentsConfigForClient(
+  client: { pmosWorkspaceId?: string | null } | undefined,
+): Promise<ReturnType<typeof loadConfig>> {
+  let cfg = loadConfig();
+  if (!client || isSuperAdmin(client)) {
+    return cfg;
+  }
+  const workspaceId =
+    typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  if (!workspaceId) {
+    return cfg;
+  }
+  try {
+    const { loadEffectiveWorkspaceConfig } = await import("../workspace-config.js");
+    const effectiveCfg = await loadEffectiveWorkspaceConfig(workspaceId);
+    if (effectiveCfg && typeof effectiveCfg === "object") {
+      cfg = effectiveCfg as typeof cfg;
+    }
+  } catch {
+    // Fall back to global config if effective workspace config cannot be loaded.
+  }
+  return cfg;
+}
+
 export const agentsHandlers: GatewayRequestHandlers = {
   "agents.list": async ({ params, respond, client }) => {
     if (!validateAgentsListParams(params)) {
@@ -211,23 +235,10 @@ export const agentsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    let cfg = loadConfig();
+    let cfg = await loadAgentsConfigForClient(client);
 
     // Apply workspace filtering for PMOS multi-tenant isolation
     if (client && !isSuperAdmin(client)) {
-      const workspaceId =
-        typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
-      if (workspaceId) {
-        try {
-          const { loadEffectiveWorkspaceConfig } = await import("../workspace-config.js");
-          const effectiveCfg = await loadEffectiveWorkspaceConfig(workspaceId);
-          if (effectiveCfg && typeof effectiveCfg === "object") {
-            cfg = effectiveCfg as typeof cfg;
-          }
-        } catch {
-          // Fall back to global config if effective workspace config cannot be loaded.
-        }
-      }
       const result = listAgentsForGateway(cfg);
       const filteredAgents = filterByWorkspace(result.agents, client);
       const filteredIds = new Set(filteredAgents.map((agent) => agent.id).filter(Boolean));
@@ -566,7 +577,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    const cfg = loadConfig();
+    const cfg = await loadAgentsConfigForClient(client);
     const agentId = resolveAgentIdOrError(String(params.agentId ?? ""), cfg);
     if (!agentId) {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "unknown agent id"));
@@ -603,7 +614,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    const cfg = loadConfig();
+    const cfg = await loadAgentsConfigForClient(client);
     const agentId = resolveAgentIdOrError(String(params.agentId ?? ""), cfg);
     if (!agentId) {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "unknown agent id"));
@@ -678,7 +689,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    const cfg = loadConfig();
+    const cfg = await loadAgentsConfigForClient(client);
     const agentId = resolveAgentIdOrError(String(params.agentId ?? ""), cfg);
     if (!agentId) {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "unknown agent id"));
