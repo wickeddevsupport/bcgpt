@@ -183,6 +183,10 @@ export function deriveSessionTitle(
 
 export function loadSessionEntry(sessionKey: string) {
   const cfg = loadConfig();
+  return loadSessionEntryForConfig(cfg, sessionKey);
+}
+
+export function loadSessionEntryForConfig(cfg: OpenClawConfig, sessionKey: string) {
   const sessionCfg = cfg.session;
   const canonicalKey = resolveSessionStoreKey({ cfg, sessionKey });
   const agentId = resolveSessionStoreAgentId(cfg, canonicalKey);

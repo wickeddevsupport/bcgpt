@@ -262,6 +262,14 @@ function resolveWorkspaceAgentSessionStorePath(workspaceId: string, agentId: str
   );
 }
 
+function resolveWorkspaceSessionStoreTemplate(workspaceId: string): string {
+  const trimmed = String(workspaceId || "").trim();
+  if (!trimmed) {
+    return "";
+  }
+  return `${DEFAULT_STARTER_AGENT_WORKSPACE_BASE}/${trimmed}/agents/{agentId}/sessions/sessions.json`;
+}
+
 function findSharedWorkspaceModelRef(cfg: unknown): string | null {
   const providers = getPath(cfg, ["models", "providers"]);
   if (!isRecord(providers)) {
@@ -349,6 +357,7 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
     const starterWorkspace = `${DEFAULT_STARTER_AGENT_WORKSPACE_BASE}/${workspaceId}/${starterAgentId}`;
 
     const patch: Record<string, unknown> = {};
+    const workspaceSessionStore = resolveWorkspaceSessionStoreTemplate(workspaceId);
 
     if (!hasAgents) {
       patch.agents = {
@@ -413,6 +422,22 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
               }),
         },
       };
+    }
+
+    const existingSessionStore = getPath(existing, ["session", "store"]);
+    if (workspaceSessionStore) {
+      const currentStore =
+        typeof existingSessionStore === "string" ? existingSessionStore.trim() : "";
+      const shouldSetWorkspaceStore =
+        !currentStore ||
+        !currentStore.includes(`/workspaces/${workspaceId}/`) ||
+        !currentStore.includes("{agentId}");
+      if (shouldSetWorkspaceStore) {
+        patch.session = {
+          ...(isRecord(patch.session) ? (patch.session as Record<string, unknown>) : {}),
+          store: workspaceSessionStore,
+        };
+      }
     }
 
     if (Object.keys(patch).length > 0) {

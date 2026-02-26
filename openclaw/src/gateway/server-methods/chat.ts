@@ -9,6 +9,7 @@ import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { dispatchInboundMessage } from "../../auto-reply/dispatch.js";
 import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.js";
 import { createReplyPrefixOptions } from "../../channels/reply-prefix.js";
+import { loadConfig } from "../../config/config.js";
 import { resolveSendPolicy } from "../../sessions/send-policy.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../../utils/message-channel.js";
 import {
@@ -32,7 +33,7 @@ import {
 import { getMaxChatHistoryMessagesBytes } from "../server-constants.js";
 import {
   capArrayByJsonBytes,
-  loadSessionEntry,
+  loadSessionEntryForConfig,
   readSessionMessages,
   resolveSessionModelRef,
 } from "../session-utils.js";
@@ -50,6 +51,30 @@ type TranscriptAppendResult = {
 };
 
 type AppendMessageArg = Parameters<SessionManager["appendMessage"]>[0];
+
+async function loadChatConfigForClient(
+  client: GatewayRequestHandlers["chat.send"] extends (args: infer A) => void ? A["client"] : never,
+): Promise<ReturnType<typeof loadConfig>> {
+  let cfg = loadConfig();
+  if (!client || isSuperAdmin(client)) {
+    return cfg;
+  }
+  const workspaceId =
+    typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  if (!workspaceId) {
+    return cfg;
+  }
+  try {
+    const { loadEffectiveWorkspaceConfig } = await import("../workspace-config.js");
+    const effectiveCfg = await loadEffectiveWorkspaceConfig(workspaceId);
+    if (effectiveCfg && typeof effectiveCfg === "object") {
+      cfg = effectiveCfg as typeof cfg;
+    }
+  } catch {
+    // Fall back to global config if workspace effective config cannot be loaded.
+  }
+  return cfg;
+}
 
 function resolveTranscriptPath(params: {
   sessionId: string;
@@ -241,7 +266,8 @@ export const chatHandlers: GatewayRequestHandlers = {
       sessionKey: string;
       limit?: number;
     };
-    const { cfg, storePath, entry } = loadSessionEntry(sessionKey);
+    const cfg = await loadChatConfigForClient(client);
+    const { storePath, entry } = loadSessionEntryForConfig(cfg, sessionKey);
 
     // Check workspace ownership for non-super-admin users
     if (!canAccessSession(sessionKey, cfg, client)) {
@@ -288,7 +314,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       verboseLevel,
     });
   },
-  "chat.abort": ({ params, respond, context, client }) => {
+  "chat.abort": async ({ params, respond, context, client }) => {
     if (!validateChatAbortParams(params)) {
       respond(
         false,
@@ -306,7 +332,7 @@ export const chatHandlers: GatewayRequestHandlers = {
     };
 
     // Check workspace ownership for non-super-admin users
-    const { cfg } = loadSessionEntry(sessionKey);
+    const cfg = await loadChatConfigForClient(client);
     if (!canAccessSession(sessionKey, cfg, client)) {
       respond(
         false,
@@ -438,7 +464,8 @@ export const chatHandlers: GatewayRequestHandlers = {
       }
     }
     const rawSessionKey = p.sessionKey;
-    const { cfg, entry, canonicalKey: sessionKey } = loadSessionEntry(rawSessionKey);
+    const cfg = await loadChatConfigForClient(client);
+    const { entry, canonicalKey: sessionKey } = loadSessionEntryForConfig(cfg, rawSessionKey);
 
     // Check workspace ownership for non-super-admin users
     if (!canAccessSession(rawSessionKey, cfg, client)) {
@@ -615,7 +642,7 @@ export const chatHandlers: GatewayRequestHandlers = {
             let message: Record<string, unknown> | undefined;
             if (combinedReply) {
               const { storePath: latestStorePath, entry: latestEntry } =
-                loadSessionEntry(sessionKey);
+                loadSessionEntryForConfig(effectiveCfg, sessionKey);
               const sessionId = latestEntry?.sessionId ?? entry?.sessionId ?? clientRunId;
               const appended = appendAssistantTranscriptMessage({
                 message: combinedReply,
@@ -716,7 +743,8 @@ export const chatHandlers: GatewayRequestHandlers = {
 
     // Load session to find transcript file
     const rawSessionKey = p.sessionKey;
-    const { cfg, storePath, entry } = loadSessionEntry(rawSessionKey);
+    const cfg = await loadChatConfigForClient(client);
+    const { storePath, entry } = loadSessionEntryForConfig(cfg, rawSessionKey);
 
     // Check workspace ownership for non-super-admin users
     if (!canAccessSession(rawSessionKey, cfg, client)) {

@@ -671,7 +671,16 @@ export async function loadPmosModelWorkspaceState(state: PmosModelAuthState) {
 
     state.pmosModelRows = rows;
     state.pmosAgentModelAssignments = assignments;
-    state.availableModels = Array.from(refs).sort((a, b) => a.localeCompare(b));
+    const selectableRefs = collectModelRefsFromConfig(effectiveConfig);
+    if (defaultsPrimary) {
+      selectableRefs.add(defaultsPrimary);
+    }
+    for (const assignment of assignments) {
+      if (assignment.modelRef) {
+        selectableRefs.add(assignment.modelRef);
+      }
+    }
+    state.availableModels = Array.from(selectableRefs).sort((a, b) => a.localeCompare(b));
   } catch (err) {
     state.pmosModelCatalogError = String(err);
     state.pmosModelError = String(err);
