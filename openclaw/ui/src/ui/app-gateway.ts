@@ -225,7 +225,7 @@ export function connectGateway(host: GatewayHost) {
     password: host.password.trim() ? host.password : undefined,
     clientName: "openclaw-control-ui",
     mode: "webchat",
-    onHello: (hello) => {
+    onHello: async (hello) => {
       host.connected = true;
       host.lastError = null;
       host.hello = hello;
@@ -236,14 +236,21 @@ export function connectGateway(host: GatewayHost) {
       (host as unknown as { chatStream: string | null }).chatStream = null;
       (host as unknown as { chatStreamStartedAt: number | null }).chatStreamStartedAt = null;
       resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
-      void loadAssistantIdentity(host as unknown as OpenClawApp);
-      void loadAgents(host as unknown as OpenClawApp);
-      void loadNodes(host as unknown as OpenClawApp, { quiet: true });
-      void loadDevices(host as unknown as OpenClawApp, { quiet: true });
+      const app = host as unknown as OpenClawApp;
+      void loadAssistantIdentity(app);
+      const loadAgentsPromise = loadAgents(app);
+      void loadNodes(app, { quiet: true });
+      void loadDevices(app, { quiet: true });
+      // Workspace users can have stale persisted session keys (deleted agent sessions).
+      // Reconcile sessions before the first chat refresh to avoid a noisy "session not found" flash.
+      if (host.tab === "chat") {
+        await loadAgentsPromise.catch(() => undefined);
+        await loadSessions(app).catch(() => undefined);
+      }
       void refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0]);
       // Auto-refresh connector status on connect so opsProvisioned is populated
       // immediately (no manual "Provision" click required).
-      void (host as unknown as OpenClawApp).handlePmosRefreshConnectors();
+      void app.handlePmosRefreshConnectors();
     },
     onClose: ({ code, reason }) => {
       host.connected = false;

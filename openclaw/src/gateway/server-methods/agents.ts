@@ -198,7 +198,7 @@ async function moveToTrashBestEffort(pathname: string): Promise<void> {
 }
 
 export const agentsHandlers: GatewayRequestHandlers = {
-  "agents.list": ({ params, respond, client }) => {
+  "agents.list": async ({ params, respond, client }) => {
     if (!validateAgentsListParams(params)) {
       respond(
         false,
@@ -211,11 +211,24 @@ export const agentsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const cfg = loadConfig();
-    const result = listAgentsForGateway(cfg);
-    
+    let cfg = loadConfig();
+
     // Apply workspace filtering for PMOS multi-tenant isolation
     if (client && !isSuperAdmin(client)) {
+      const workspaceId =
+        typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+      if (workspaceId) {
+        try {
+          const { loadEffectiveWorkspaceConfig } = await import("../workspace-config.js");
+          const effectiveCfg = await loadEffectiveWorkspaceConfig(workspaceId);
+          if (effectiveCfg && typeof effectiveCfg === "object") {
+            cfg = effectiveCfg as typeof cfg;
+          }
+        } catch {
+          // Fall back to global config if effective workspace config cannot be loaded.
+        }
+      }
+      const result = listAgentsForGateway(cfg);
       const filteredAgents = filterByWorkspace(result.agents, client);
       const filteredIds = new Set(filteredAgents.map((agent) => agent.id).filter(Boolean));
       const defaultId = filteredIds.has(result.defaultId)
@@ -224,7 +237,8 @@ export const agentsHandlers: GatewayRequestHandlers = {
       respond(true, { ...result, defaultId, agents: filteredAgents }, undefined);
       return;
     }
-    
+
+    const result = listAgentsForGateway(cfg);
     respond(true, result, undefined);
   },
   "agents.create": async ({ params, respond, client }) => {

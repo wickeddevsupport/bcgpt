@@ -1975,6 +1975,7 @@ export function renderApp(state: AppViewState) {
                     const nextAgentCore: Record<string, unknown> = {
                       id: candidateId,
                       name,
+                      ...(isWorkspaceScopedUser ? { workspaceId: wsId } : {}),
                       workspace,
                       identity: {
                         name,

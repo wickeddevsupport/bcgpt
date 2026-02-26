@@ -124,7 +124,7 @@ export function renderAutomations(props: AutomationsProps) {
   const panelWorkflows = html`
     <div style="padding: 12px; display: flex; flex-direction: column; gap: 10px; height: 100%; overflow-y: auto;">
       ${connectedReason ? html`<div class="muted" style="font-size:12px;">${connectedReason}</div>` : nothing}
-      ${projectMissing ? html`<div class="muted" style="font-size:12px;">Set a project in <button class="btn btn--sm" @click=${() => props.onOpenIntegrations()}>Integrations</button></div>` : nothing}
+      ${projectMissing ? html`<div class="muted" style="font-size:12px;">Project is optional for generic workflows. Set one in <button class="btn btn--sm" @click=${() => props.onOpenIntegrations()}>Integrations</button> for project-specific automations.</div>` : nothing}
 
       <div>
         <div class="card-title" style="margin-bottom:8px;">Create workflow</div>
@@ -135,12 +135,12 @@ export function renderAutomations(props: AutomationsProps) {
             @input=${(e: Event) => props.onCreateNameChange((e.target as HTMLInputElement).value)}
             @keydown=${(e: KeyboardEvent) => { if (e.key === "Enter" && props.createName.trim() && !props.creating) props.onCreate(); }}
             placeholder="Flow name..."
-            ?disabled=${!props.connected || projectMissing || props.creating}
+            ?disabled=${!props.connected || props.creating}
           />
           <button
             class="btn btn--primary btn--sm"
             @click=${() => props.onCreate()}
-            ?disabled=${!props.connected || projectMissing || props.creating || !props.createName.trim()}
+            ?disabled=${!props.connected || props.creating || !props.createName.trim()}
           >${props.creating ? "..." : "Create"}</button>
         </div>
         ${props.createError ? html`<div class="muted" style="color:var(--color-danger);font-size:11px;margin-top:4px;">${props.createError}</div>` : nothing}
@@ -152,9 +152,9 @@ export function renderAutomations(props: AutomationsProps) {
           .value=${props.flowsQuery}
           @input=${(e: Event) => props.onFlowsQueryChange((e.target as HTMLInputElement).value)}
           placeholder="Search flows..."
-          ?disabled=${!props.connected || projectMissing}
+          ?disabled=${!props.connected}
         />
-        <button class="btn btn--sm" @click=${() => props.onRefresh()} ?disabled=${!props.connected || projectMissing || props.loading}>
+        <button class="btn btn--sm" @click=${() => props.onRefresh()} ?disabled=${!props.connected || props.loading}>
           ${props.loading ? "..." : "↻"}
         </button>
       </div>
