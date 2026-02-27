@@ -10,6 +10,8 @@ title: "Ollama"
 
 Ollama is a local LLM runtime that makes it easy to run open-source models on your machine. OpenClaw integrates with Ollama's OpenAI-compatible API and can **auto-discover tool-capable models** when you opt in with `OLLAMA_API_KEY` (or an auth profile) and do not define an explicit `models.providers.ollama` entry.
 
+OpenClaw's canonical provider id is `ollama`. For PMOS/workspace compatibility, `local-ollama` is still accepted as a legacy alias.
+
 ## Quick start
 
 1. Install Ollama: [https://ollama.ai](https://ollama.ai)
@@ -50,7 +52,11 @@ openclaw config set models.providers.ollama.apiKey "ollama-local"
 
 ## Model discovery (implicit provider)
 
-When you set `OLLAMA_API_KEY` (or an auth profile) and **do not** define `models.providers.ollama`, OpenClaw discovers models from the local Ollama instance at `http://127.0.0.1:11434`:
+When you set `OLLAMA_API_KEY` (or an auth profile) and **do not** define `models.providers.ollama`, OpenClaw discovers models from Ollama:
+
+- Default discovery endpoint: `http://127.0.0.1:11434/api/tags`
+- Override discovery endpoint with `OPENCLAW_OLLAMA_API_BASE_URL` (or `OLLAMA_API_BASE_URL`)
+- Override OpenAI base URL with `OPENCLAW_OLLAMA_BASE_URL` (or `OLLAMA_BASE_URL`)
 
 - Queries `/api/tags` and `/api/show`
 - Keeps only models that report `tools` capability
@@ -87,6 +93,23 @@ The simplest way to enable Ollama is via environment variable:
 ```bash
 export OLLAMA_API_KEY="ollama-local"
 ```
+
+### Environment URL overrides (implicit discovery)
+
+If Ollama runs on another host (or behind a reverse proxy), set these env vars instead of defining an explicit provider:
+
+```bash
+# Used for model discovery (/api/tags)
+export OPENCLAW_OLLAMA_API_BASE_URL="https://bot.wickedlab.io"
+
+# Used for OpenAI-compatible completions (/v1/*)
+export OPENCLAW_OLLAMA_BASE_URL="https://bot.wickedlab.io/v1"
+```
+
+Legacy aliases are also supported:
+
+- `OLLAMA_API_BASE_URL` (same meaning as `OPENCLAW_OLLAMA_API_BASE_URL`)
+- `OLLAMA_BASE_URL` (same meaning as `OPENCLAW_OLLAMA_BASE_URL`)
 
 ### Explicit setup (manual models)
 
@@ -228,7 +251,7 @@ Make sure Ollama is running and that you set `OLLAMA_API_KEY` (or an auth profil
 ollama serve
 ```
 
-And that the API is accessible:
+And that the API is accessible (replace host if using `OPENCLAW_OLLAMA_API_BASE_URL`):
 
 ```bash
 curl http://localhost:11434/api/tags

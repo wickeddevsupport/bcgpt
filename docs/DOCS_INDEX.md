@@ -1,6 +1,6 @@
 # OpenClaw Documentation Index
 
-**Last Updated:** 2026-02-19
+**Last Updated:** 2026-02-27
 
 ---
 
@@ -81,6 +81,8 @@ docs/
 - Coolify container management
 - Container architecture (bcgpt, pmos)
 - Deployment verification
+- PMOS shared Ollama defaults on Coolify (`OPENCLAW_OLLAMA_API_BASE_URL`, `OPENCLAW_OLLAMA_BASE_URL`, `PMOS_DEFAULT_OLLAMA_MODEL`)
+- PMOS provider canonicalization: use `ollama` (legacy `local-ollama` remains accepted)
 
 ---
 
@@ -112,6 +114,7 @@ ssh -i C:\Users\rjnd\.ssh\bcgpt_hetzner deploy@46.225.102.175
 |---------|-----|---------|
 | OpenClaw PMOS | https://os.wickedlab.io | Main product UI (includes embedded n8n) |
 | OpenClaw n8n Editor | https://os.wickedlab.io/ops-ui/ | Embedded n8n editor route |
+| PMOS Shared Ollama | https://bot.wickedlab.io | Shared Ollama endpoint for workspace defaults |
 | BCGPT MCP | https://bcgpt.wickedlab.io | MCP server |
 
 ---

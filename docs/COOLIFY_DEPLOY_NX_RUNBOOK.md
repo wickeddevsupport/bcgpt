@@ -1,6 +1,6 @@
 # Coolify Deploy + Nx Runbook
 
-**Last Updated:** 2026-02-19  
+**Last Updated:** 2026-02-27  
 **Related:** [`NEXT_STEPS.md`](NEXT_STEPS.md), [`N8N_INTEGRATION_GUIDE.md`](N8N_INTEGRATION_GUIDE.md)
 
 ---
@@ -85,12 +85,17 @@ Set these in Coolify service env vars/secrets:
 - `N8N_OWNER_PASSWORD` (required for workspace user auto-provisioning)
 - `BCGPT_URL` (if BCGPT connector is used)
 - `BCGPT_API_KEY` (if BCGPT connector auth is required)
+- `OLLAMA_API_KEY` (recommended for PMOS shared Ollama default model; any non-empty value is fine for local/self-hosted Ollama)
+- `OPENCLAW_OLLAMA_API_BASE_URL` (recommended for PMOS shared Ollama tags API; example: `https://bot.wickedlab.io`)
+- `OPENCLAW_OLLAMA_BASE_URL` (recommended for PMOS shared Ollama OpenAI API; example: `https://bot.wickedlab.io/v1`)
+- `PMOS_DEFAULT_OLLAMA_MODEL` (recommended PMOS starter model id; example: `qwen3:1.7b`)
 
 Notes:
 
 - Activepieces install is disabled by default in `postinstall`; enable only for legacy path with `ENABLE_ACTIVEPIECES_INSTALL=true`.
 - `pmos-activepieces` is now force-disabled in runtime plugin resolution; if it appears in logs, the container is running an older image.
 - Keep Coolify API token out of git. Store in secret manager only.
+- PMOS canonical provider id is `ollama`; `local-ollama` remains accepted as a legacy alias for compatibility.
 
 ---
 
@@ -192,6 +197,15 @@ End-to-end smoke:
 PMOS_URL=https://os.wickedlab.io \
 OPENCLAW_GATEWAY_TOKEN=<OPENCLAW_GATEWAY_TOKEN> \
 node openclaw/scripts/pmos-smoke.mjs
+```
+
+Optional UI chat smoke (workspace account):
+
+```bash
+PMOS_BASE_URL=https://os.wickedlab.io \
+PMOS_EMAIL=<WORKSPACE_USER_EMAIL> \
+PMOS_PASSWORD=<WORKSPACE_USER_PASSWORD> \
+node tests/pmos-rohit-regression-probe.cjs
 ```
 
 `pmos-smoke.mjs` now verifies:

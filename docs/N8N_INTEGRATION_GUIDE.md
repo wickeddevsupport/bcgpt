@@ -1,6 +1,6 @@
 # n8n Integration Guide
 
-**Last Updated:** 2026-02-18
+**Last Updated:** 2026-02-27
 **Related:** [`OPENCLAW_AUTOMATION_OS.md`](OPENCLAW_AUTOMATION_OS.md), [`COOLIFY_DEPLOY_NX_RUNBOOK.md`](COOLIFY_DEPLOY_NX_RUNBOOK.md)
 
 ---
@@ -28,6 +28,7 @@ OpenClaw uses n8n as its workflow automation engine, replacing Activepieces. Thi
 - Embedded workspace isolation is tag-based. Tag names are derived from a short workspace hash (n8n tag names are limited to 24 chars).
 - If `POST /api/ops/workflows` returns `502 ... fetch failed` (while `GET /api/ops/workflows` works), the gateway is forwarding unsupported request headers (notably `Expect: 100-continue` and `Keep-Alive`). Fix is in `openclaw/src/gateway/pmos-ops-proxy.ts` (`STRIP_REQUEST_HEADERS`).
 - The Control UI "Wicked OS Access Key" field is **legacy/manual** access only. Normal users should sign in via PMOS auth; they should not need to paste a key to use embedded workflows.
+- PMOS shared-model defaults can be bootstrapped with Ollama via env vars: `OLLAMA_API_KEY`, `OPENCLAW_OLLAMA_API_BASE_URL`, `OPENCLAW_OLLAMA_BASE_URL`, `PMOS_DEFAULT_OLLAMA_MODEL`.
 
 ### Build/Deploy Model (Vendored n8n)
 
@@ -181,6 +182,12 @@ N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true # Recommended hardening
 
 # Embedded-first runtime behavior
 PMOS_ALLOW_REMOTE_OPS_FALLBACK=0      # Default: do not attempt remote-ops provisioning on signup/login
+
+# PMOS shared Ollama defaults (recommended for workspace bootstrap)
+OLLAMA_API_KEY=ollama-local
+OPENCLAW_OLLAMA_API_BASE_URL=https://bot.wickedlab.io
+OPENCLAW_OLLAMA_BASE_URL=https://bot.wickedlab.io/v1
+PMOS_DEFAULT_OLLAMA_MODEL=qwen3:1.7b
 ```
 
 ---
