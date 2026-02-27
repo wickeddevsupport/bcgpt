@@ -36,6 +36,10 @@ function sanitizeSchema(schema) {
   return clone;
 }
 
+function isFlowToolsEnabled() {
+  return String(process.env.ENABLE_FLOW_TOOLS || "false").toLowerCase() === "true";
+}
+
 export function getTools() {
   const tools = [
     tool("startbcgpt", "Show connection status, current user (name/email), plus re-auth and logout links.", {
@@ -1630,9 +1634,11 @@ export function getTools() {
     tools.push(tool(endpoint.name, endpoint.description, sanitizeSchema(endpoint.inputSchema)));
   }
 
-  // Append flow tools (flow_* for Activepieces integration)
-  for (const flowTool of getFlowTools() || []) {
-    tools.push(flowTool);
+  // Append flow tools (flow_* for Activepieces integration) only when explicitly enabled.
+  if (isFlowToolsEnabled()) {
+    for (const flowTool of getFlowTools() || []) {
+      tools.push(flowTool);
+    }
   }
 
   // Append Wave 1 PM OS Foundation tools

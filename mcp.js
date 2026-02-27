@@ -119,6 +119,8 @@ const WAVE8_TOOLS = new Set([
   'set_persona', 'predict_outcome'
 ]);
 
+const FLOW_TOOLS_ENABLED = String(process.env.ENABLE_FLOW_TOOLS || "false").toLowerCase() === "true";
+
 /**
  * Wave 1: Non-blocking context tracker.
  * Extracts entity references from tool results and saves to session_memory.
@@ -4852,7 +4854,7 @@ export async function handleMCP(reqBody, ctx) {
     // GATEWAY ROUTING: Route pmos_* and flow_* tools to appropriate services
     if (shouldRoute(name)) {
       try {
-        const routedResponse = await routeToolCall(name, args);
+        const routedResponse = await routeToolCall(name, args, ctx);
         
         if (routedResponse.error) {
           return fail(id, {
@@ -4873,6 +4875,12 @@ export async function handleMCP(reqBody, ctx) {
 
     // FLOW TOOLS: Handle flow_* tools locally (native Activepieces integration)
     if (name.startsWith('flow_')) {
+      if (!FLOW_TOOLS_ENABLED) {
+        return fail(id, {
+          code: "TOOL_DISABLED",
+          message: "flow_* tools are disabled on this server. Use Basecamp tools only.",
+        });
+      }
       try {
         console.log(`[MCP] Handling flow tool locally: ${name}`, { userKey });
         const result = await handleFlowTool(name, args, userKey);
@@ -4922,7 +4930,12 @@ export async function handleMCP(reqBody, ctx) {
             const url = typeof pathResult === 'string' ? pathResult : pathResult.path;
             const method = ep.method || 'GET';
             const body = method !== 'GET' && method !== 'DELETE' ? ep.buildBody?.(toolArgs) : undefined;
-            return basecampFetch(req, url, { method, body: body ? JSON.stringify(body) : undefined });
+            return basecampFetch(ctx.TOKEN, url, {
+              method,
+              body: body ? JSON.stringify(body) : undefined,
+              accountId: ctx.accountId,
+              ua: ctx.ua,
+            });
           }
           throw new Error(`Cannot execute undo tool: ${toolName}`);
         };
@@ -4969,7 +4982,12 @@ export async function handleMCP(reqBody, ctx) {
             const url = typeof pathResult === 'string' ? pathResult : pathResult.path;
             const method = ep.method || 'GET';
             const body = method !== 'GET' && method !== 'DELETE' ? ep.buildBody?.(toolArgs) : undefined;
-            return basecampFetch(req, url, { method, body: body ? JSON.stringify(body) : undefined });
+            return basecampFetch(ctx.TOKEN, url, {
+              method,
+              body: body ? JSON.stringify(body) : undefined,
+              accountId: ctx.accountId,
+              ua: ctx.ua,
+            });
           }
           throw new Error(`Cannot execute tool: ${toolName}`);
         };
@@ -4999,7 +5017,12 @@ export async function handleMCP(reqBody, ctx) {
             const url = typeof pathResult === 'string' ? pathResult : pathResult.path;
             const method = ep.method || 'GET';
             const body = method !== 'GET' && method !== 'DELETE' ? ep.buildBody?.(toolArgs) : undefined;
-            return basecampFetch(req, url, { method, body: body ? JSON.stringify(body) : undefined });
+            return basecampFetch(ctx.TOKEN, url, {
+              method,
+              body: body ? JSON.stringify(body) : undefined,
+              accountId: ctx.accountId,
+              ua: ctx.ua,
+            });
           }
           throw new Error(`Cannot execute tool: ${toolName}`);
         };
@@ -5078,7 +5101,11 @@ export async function handleMCP(reqBody, ctx) {
     // whoami
     if (name === "whoami") {
       if (!TOKEN?.access_token) {
-        return fail(id, { code: "NOT_AUTHENTICATED", message: "Not connected. Run /startbcgpt to get the auth link." });
+        return fail(id, {
+          code: "NOT_AUTHENTICATED",
+          message:
+            "API key authenticated, but no linked Basecamp OAuth token is available. Run /startbcgpt to connect Basecamp.",
+        });
       }
       return ok(id, { accountId, user: null, accounts: authAccounts || [] });
     }
@@ -5091,7 +5118,8 @@ export async function handleMCP(reqBody, ctx) {
         if (toolName === "mcp_call") return fail(id, { code: "INVALID_TOOL", message: "Nested mcp_call is not allowed." });
 
         const toolList = getTools().map(t => t.name);
-        const isRoutedNamespaceTool = toolName.startsWith("pmos_") || toolName.startsWith("flow_");
+        const isRoutedNamespaceTool =
+          toolName.startsWith("pmos_") || (FLOW_TOOLS_ENABLED && toolName.startsWith("flow_"));
         if (!toolList.includes(toolName) && !isRoutedNamespaceTool) {
           return fail(id, { code: "UNKNOWN_TOOL", message: `Unknown tool: ${toolName}` });
         }
@@ -5127,7 +5155,11 @@ export async function handleMCP(reqBody, ctx) {
 
     // Everything else requires auth
     if (!TOKEN?.access_token) {
-      return fail(id, { code: "NOT_AUTHENTICATED", message: "Not connected. Run /startbcgpt to get the auth link." });
+      return fail(id, {
+        code: "NOT_AUTHENTICATED",
+        message:
+          "API key authenticated, but this tool requires a linked Basecamp OAuth token. Run /startbcgpt to connect Basecamp.",
+      });
     }
 
     if (name === "list_accounts") return ok(id, buildListPayload("accounts", authAccounts || []));
@@ -10377,7 +10409,11 @@ export async function handleMCP(reqBody, ctx) {
       return fail(id, { code: "NO_MATCH", message: `No ${e.label} matched your input.` });
     }
     if (e?.code === "NOT_AUTHENTICATED") {
-      return fail(id, { code: "NOT_AUTHENTICATED", message: "Not connected. Run /startbcgpt to get the auth link." });
+      return fail(id, {
+        code: "NOT_AUTHENTICATED",
+        message:
+          "API key authenticated, but no linked Basecamp OAuth token is available. Run /startbcgpt to connect Basecamp.",
+      });
     }
     if (e?.code === "BASECAMP_API_ERROR" && (e.status === 404 || e.status === 403)) {
       const tool = inferToolFromName(params?.name);

@@ -11,11 +11,27 @@ const FLOW_URL = process.env.FLOW_URL || 'https://flow.wickedlab.io';
 /**
  * Forward MCP tool call to another service
  */
-async function forwardToolCall(targetUrl, toolName, args) {
+async function forwardToolCall(targetUrl, toolName, args, ctx = {}) {
   try {
+    const headers = {
+      'Content-Type': 'application/json',
+    };
+    if (ctx?.apiKey) {
+      headers['x-api-key'] = String(ctx.apiKey);
+      headers['x-bcgpt-api-key'] = String(ctx.apiKey);
+      headers['authorization'] = `Bearer ${ctx.apiKey}`;
+    }
+    if (ctx?.sessionKey) {
+      headers['x-session-key'] = String(ctx.sessionKey);
+      headers['x-bcgpt-session-key'] = String(ctx.sessionKey);
+    }
+    if (ctx?.userKey) {
+      headers['x-user-key'] = String(ctx.userKey);
+    }
+
     const response = await fetch(`${targetUrl}/mcp`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         jsonrpc: '2.0',
         id: Date.now(),
@@ -43,11 +59,11 @@ async function forwardToolCall(targetUrl, toolName, args) {
  * Route tool call to appropriate service based on prefix
  * Returns null if tool should be handled by BCGPT
  */
-export async function routeToolCall(toolName, args) {
+export async function routeToolCall(toolName, args, ctx = {}) {
   // PMOS tools (intelligence layer)
   if (toolName.startsWith('pmos_')) {
     console.log(`[Gateway] Routing ${toolName} to PMOS`);
-    return await forwardToolCall(PMOS_URL, toolName, args);
+    return await forwardToolCall(PMOS_URL, toolName, args, ctx);
   }
   
   // Flow tools are handled locally in BCGPT (native Activepieces integration)

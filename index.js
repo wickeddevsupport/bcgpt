@@ -173,6 +173,7 @@ const ACTIVEPIECES_PROXY_TARGET = process.env.ACTIVEPIECES_PROXY_TARGET || "http
 // Explicitly require ACTIVEPIECES_PROXY_ENABLED=true. Having a host set should not implicitly enable proxying.
 const ACTIVEPIECES_PROXY_ENABLED = String(process.env.ACTIVEPIECES_PROXY_ENABLED || "").toLowerCase() === "true";
 const ACTIVEPIECES_PROXY_ACTIVE = ACTIVEPIECES_PROXY_ENABLED && Boolean(ACTIVEPIECES_PROXY_HOST);
+const FLOW_TOOLS_ENABLED = String(process.env.ENABLE_FLOW_TOOLS || "false").toLowerCase() === "true";
 
 let MINER_RUNNING = false;
 let MINER_LAST_RESULT = null;
@@ -483,7 +484,19 @@ async function pickAccountId(auth, userKey) {
     return id;
   }
 
-  // 4) Otherwise, require explicit selection via /select_account
+  // 4) Auto-select first authorized account for API-key-first workflows (default ON).
+  const autoSelectFirst = String(process.env.BASECAMP_AUTO_SELECT_FIRST_ACCOUNT || "true").toLowerCase() !== "false";
+  if (autoSelectFirst && accounts[0]?.id != null) {
+    const id = accounts[0].id;
+    try {
+      await setSelectedAccount(userKey, String(id));
+    } catch {
+      // ignore
+    }
+    return id;
+  }
+
+  // 5) Otherwise, require explicit selection via /select_account
   const err = new Error("ACCOUNT_NOT_SELECTED");
   err.code = "ACCOUNT_NOT_SELECTED";
   err.accounts = accounts;
@@ -935,7 +948,7 @@ async function handleFlowTool(name, args, userKey = null) {
   }
 
   if (!userKey) {
-    throw new Error('User authentication required for flow tools');
+    throw new Error('API key is missing or not mapped to a user/workspace. Flow tools require a valid BCGPT API key mapping.');
   }
 
   async function apiFetch(endpoint, options = {}) {
@@ -4663,7 +4676,7 @@ app.post("/mcp", async (req, res) => {
     }
 
     // FLOW TOOLS: Can work with just API key (no Basecamp auth required)
-    if (method === "tools/call" && toolName && toolName.startsWith("flow_")) {
+    if (FLOW_TOOLS_ENABLED && method === "tools/call" && toolName && toolName.startsWith("flow_")) {
       const apiKey = extractApiKey(req);
       const resolvedCtx = await resolveRequestContext(req, { apiKey });
       await maybeAttachAuthCookies(req, res, resolvedCtx);
