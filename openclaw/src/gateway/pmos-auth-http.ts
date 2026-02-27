@@ -16,6 +16,7 @@ const MAX_BODY_BYTES = 32 * 1024;
 const DEFAULT_STARTER_AGENT_ID = "assistant";
 const DEFAULT_STARTER_AGENT_NAME = "Workspace Assistant";
 const DEFAULT_STARTER_AGENT_WORKSPACE_BASE = "~/.openclaw/workspaces";
+const DEFAULT_STARTER_OLLAMA_MODEL_ID = "qwen3:1.7b";
 const SHARED_PROVIDER_PREFER = new Set(["local-ollama", "ollama"]);
 const DEFAULT_SHARED_THINKING_LEVEL = "low";
 const DEFAULT_SHARED_REASONING_LEVEL = "stream";
@@ -270,6 +271,22 @@ function resolveWorkspaceSessionStoreTemplate(workspaceId: string): string {
   return `${DEFAULT_STARTER_AGENT_WORKSPACE_BASE}/${trimmed}/agents/{agentId}/sessions/sessions.json`;
 }
 
+function hasOllamaEnvConfigured(): boolean {
+  const key = (process.env.OLLAMA_API_KEY ?? process.env.OPENCLAW_OLLAMA_API_KEY ?? "").trim();
+  return key.length > 0;
+}
+
+function resolveStarterOllamaModelId(): string {
+  const configured =
+    (
+      process.env.PMOS_DEFAULT_OLLAMA_MODEL ??
+      process.env.OPENCLAW_PMOS_DEFAULT_OLLAMA_MODEL ??
+      ""
+    )
+      .trim();
+  return configured || DEFAULT_STARTER_OLLAMA_MODEL_ID;
+}
+
 function findSharedWorkspaceModelRef(cfg: unknown): string | null {
   const providers = getPath(cfg, ["models", "providers"]);
   if (!isRecord(providers)) {
@@ -303,6 +320,9 @@ function findSharedWorkspaceModelRef(cfg: unknown): string | null {
       if (!id) continue;
       return `${provider}/${id}`;
     }
+  }
+  if (hasOllamaEnvConfigured()) {
+    return `ollama/${resolveStarterOllamaModelId()}`;
   }
   return null;
 }

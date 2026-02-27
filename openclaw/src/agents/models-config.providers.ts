@@ -74,8 +74,7 @@ const QWEN_PORTAL_DEFAULT_COST = {
   cacheWrite: 0,
 };
 
-const OLLAMA_BASE_URL = "http://127.0.0.1:11434/v1";
-const OLLAMA_API_BASE_URL = "http://127.0.0.1:11434";
+const DEFAULT_OLLAMA_API_BASE_URL = "http://127.0.0.1:11434";
 const OLLAMA_DEFAULT_CONTEXT_WINDOW = 128000;
 const OLLAMA_DEFAULT_MAX_TOKENS = 8192;
 const OLLAMA_DEFAULT_COST = {
@@ -84,6 +83,46 @@ const OLLAMA_DEFAULT_COST = {
   cacheRead: 0,
   cacheWrite: 0,
 };
+
+function trimTrailingSlash(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
+function resolveOllamaBaseUrls(
+  env: NodeJS.ProcessEnv = process.env,
+): { baseUrl: string; apiBaseUrl: string } {
+  const configuredBase =
+    trimTrailingSlash(
+      (env.OPENCLAW_OLLAMA_BASE_URL ?? env.OLLAMA_BASE_URL ?? "").trim(),
+    ) || "";
+  const configuredApiBase =
+    trimTrailingSlash(
+      (env.OPENCLAW_OLLAMA_API_BASE_URL ?? env.OLLAMA_API_BASE_URL ?? "").trim(),
+    ) || "";
+
+  const apiBaseUrl = (() => {
+    if (configuredApiBase) {
+      return configuredApiBase;
+    }
+    if (configuredBase) {
+      return configuredBase.endsWith("/v1")
+        ? configuredBase.slice(0, -3)
+        : configuredBase;
+    }
+    return DEFAULT_OLLAMA_API_BASE_URL;
+  })();
+
+  const baseUrl = (() => {
+    if (configuredBase) {
+      return configuredBase.endsWith("/v1")
+        ? configuredBase
+        : `${configuredBase}/v1`;
+    }
+    return `${apiBaseUrl}/v1`;
+  })();
+
+  return { baseUrl, apiBaseUrl };
+}
 
 function resolveOllamaStreamingDefault(env: NodeJS.ProcessEnv = process.env): boolean {
   const raw = (env.OPENCLAW_OLLAMA_STREAMING_DEFAULT ?? env.OLLAMA_STREAMING_DEFAULT ?? "")
@@ -130,7 +169,8 @@ async function discoverOllamaModels(): Promise<ModelDefinitionConfig[]> {
     return [];
   }
   try {
-    const response = await fetch(`${OLLAMA_API_BASE_URL}/api/tags`, {
+    const { apiBaseUrl } = resolveOllamaBaseUrls();
+    const response = await fetch(`${apiBaseUrl}/api/tags`, {
       signal: AbortSignal.timeout(5000),
     });
     if (!response.ok) {
@@ -425,8 +465,9 @@ async function buildVeniceProvider(): Promise<ProviderConfig> {
 
 async function buildOllamaProvider(): Promise<ProviderConfig> {
   const models = await discoverOllamaModels();
+  const { baseUrl } = resolveOllamaBaseUrls();
   return {
-    baseUrl: OLLAMA_BASE_URL,
+    baseUrl,
     api: "openai-completions",
     models,
   };

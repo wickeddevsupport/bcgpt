@@ -33,6 +33,31 @@ describe("Ollama provider", () => {
     }
   });
 
+  it("uses OPENCLAW_OLLAMA_BASE_URL when configured", async () => {
+    const agentDir = mkdtempSync(join(tmpdir(), "openclaw-test-"));
+    const previousKey = process.env.OLLAMA_API_KEY;
+    const previousBase = process.env.OPENCLAW_OLLAMA_BASE_URL;
+
+    try {
+      process.env.OLLAMA_API_KEY = "test-key";
+      process.env.OPENCLAW_OLLAMA_BASE_URL = "http://ollama:11434";
+
+      const providers = await resolveImplicitProviders({ agentDir });
+      expect(providers?.ollama?.baseUrl).toBe("http://ollama:11434/v1");
+    } finally {
+      if (previousKey === undefined) {
+        delete process.env.OLLAMA_API_KEY;
+      } else {
+        process.env.OLLAMA_API_KEY = previousKey;
+      }
+      if (previousBase === undefined) {
+        delete process.env.OPENCLAW_OLLAMA_BASE_URL;
+      } else {
+        process.env.OPENCLAW_OLLAMA_BASE_URL = previousBase;
+      }
+    }
+  });
+
   it("should have correct model structure with streaming enabled (unit test)", () => {
     // This test directly verifies the model configuration structure
     // since discoverOllamaModels() returns empty array in test mode

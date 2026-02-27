@@ -512,6 +512,30 @@ describe("getApiKeyForModel", () => {
     }
   });
 
+  it("accepts OLLAMA_API_KEY for local-ollama alias", async () => {
+    const previous = process.env.OLLAMA_API_KEY;
+
+    try {
+      process.env.OLLAMA_API_KEY = "ollama-local-key";
+
+      vi.resetModules();
+      const { resolveApiKeyForProvider } = await import("./model-auth.js");
+
+      const resolved = await resolveApiKeyForProvider({
+        provider: "local-ollama",
+        store: { version: 1, profiles: {} },
+      });
+      expect(resolved.apiKey).toBe("ollama-local-key");
+      expect(resolved.source).toContain("OLLAMA_API_KEY");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.OLLAMA_API_KEY;
+      } else {
+        process.env.OLLAMA_API_KEY = previous;
+      }
+    }
+  });
+
   it("strips embedded CR/LF from ANTHROPIC_API_KEY", async () => {
     const previous = process.env.ANTHROPIC_API_KEY;
 

@@ -1,6 +1,7 @@
 import type { GatewayBrowserClient } from "../gateway.ts";
 
 export const PMOS_KNOWN_MODEL_PROVIDERS = [
+  "ollama",
   "local-ollama",
   "openai",
   "anthropic",
@@ -40,7 +41,7 @@ export const PMOS_MODEL_PROVIDER_OPTIONS: Array<{
   label: string;
   defaultModelId: string;
 }> = [
-  { value: "local-ollama", label: "Local Ollama (Shared)", defaultModelId: "qwen3:1.7b" },
+  { value: "ollama", label: "Local Ollama (Shared)", defaultModelId: "qwen3:1.7b" },
   { value: "google", label: "Google Gemini", defaultModelId: "gemini-3-flash-preview" },
   { value: "openai", label: "OpenAI", defaultModelId: "gpt-5.2" },
   { value: "anthropic", label: "Anthropic", defaultModelId: "claude-opus-4-6" },
@@ -60,6 +61,7 @@ export const PMOS_MODEL_DEFAULTS: Record<string, string> =
     },
     {} as Record<string, string>,
   );
+PMOS_MODEL_DEFAULTS["local-ollama"] = PMOS_MODEL_DEFAULTS.ollama ?? "qwen3:1.7b";
 
 export type PmosModelAuthState = {
   client: GatewayBrowserClient | null;
@@ -144,8 +146,16 @@ function asNonEmptyString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function normalizePmosProvider(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "local-ollama") {
+    return "ollama";
+  }
+  return normalized;
+}
+
 function getDefaultModelIdForProvider(provider: string): string {
-  return PMOS_MODEL_DEFAULTS[provider.trim().toLowerCase()] ?? "";
+  return PMOS_MODEL_DEFAULTS[normalizePmosProvider(provider)] ?? "";
 }
 
 function parsePrimaryModelRef(value: string | null): { provider: string; modelId: string } | null {
@@ -156,7 +166,7 @@ function parsePrimaryModelRef(value: string | null): { provider: string; modelId
   if (parts.length < 2) {
     return null;
   }
-  const providerRaw = parts.shift()?.trim().toLowerCase() ?? "";
+  const providerRaw = normalizePmosProvider(parts.shift() ?? "");
   const modelId = parts.join("/").trim();
   if (!providerRaw || !modelId) {
     return null;
@@ -289,7 +299,7 @@ function listConfiguredProvidersFromConfig(cfg: unknown): string[] {
     if (!apiKey) {
       continue;
     }
-    const normalized = providerKey.trim().toLowerCase();
+    const normalized = normalizePmosProvider(providerKey);
     out.add(normalized);
   }
   return Array.from(out);
@@ -305,7 +315,7 @@ function listSharedProvidersFromEffectiveConfig(cfg: unknown): string[] {
     if (!isRecord(providerCfg)) {
       continue;
     }
-    const normalized = providerKey.trim().toLowerCase();
+    const normalized = normalizePmosProvider(providerKey);
     if (!normalized) {
       continue;
     }
@@ -332,9 +342,9 @@ function resolveProviderConfigKey(cfg: Record<string, unknown>, provider: string
   if (!isRecord(providers)) {
     return null;
   }
-  const normalized = provider.trim().toLowerCase();
+  const normalized = normalizePmosProvider(provider);
   for (const key of Object.keys(providers)) {
-    if (key.trim().toLowerCase() === normalized) {
+    if (normalizePmosProvider(key) === normalized) {
       return key;
     }
   }
@@ -508,7 +518,7 @@ async function updateAgentModelAssignmentViaConfig(
 
 export function hydratePmosModelDraftFromConfig(state: PmosModelAuthState) {
   // PMOS source of truth: workspace effective config (global + workspace overlay).
-  state.pmosModelProvider = state.pmosModelProvider.trim().toLowerCase() || "custom";
+  state.pmosModelProvider = normalizePmosProvider(state.pmosModelProvider) || "custom";
   state.pmosModelId = state.pmosModelId.trim() || getDefaultModelIdForProvider(state.pmosModelProvider);
   state.pmosModelAlias = state.pmosModelAlias ?? "";
   const configuredProviders = state.pmosByokProviders ?? [];
@@ -516,7 +526,7 @@ export function hydratePmosModelDraftFromConfig(state: PmosModelAuthState) {
 }
 
 export function setPmosModelProvider(state: PmosModelAuthState, provider: PmosModelProvider) {
-  const normalized = provider.trim().toLowerCase();
+  const normalized = normalizePmosProvider(provider);
   if (!normalized || state.pmosModelProvider === normalized) {
     return;
   }

@@ -19,6 +19,12 @@ services:
       # Required when binding to LAN (0.0.0.0) behind Traefik.
       OPENCLAW_GATEWAY_TOKEN: "${OPENCLAW_GATEWAY_TOKEN}"
 
+      # Shared Ollama defaults for PMOS workspaces (Coolify-hosted endpoint).
+      OLLAMA_API_KEY: "${OLLAMA_API_KEY:-ollama-local}"
+      OPENCLAW_OLLAMA_API_BASE_URL: "${OPENCLAW_OLLAMA_API_BASE_URL:-https://bot.wickedlab.io}"
+      OPENCLAW_OLLAMA_BASE_URL: "${OPENCLAW_OLLAMA_BASE_URL:-https://bot.wickedlab.io/v1}"
+      PMOS_DEFAULT_OLLAMA_MODEL: "${PMOS_DEFAULT_OLLAMA_MODEL:-qwen3:1.7b}"
+
       # Embedded-first behavior. Only allow remote ops provisioning if explicitly enabled.
       PMOS_ALLOW_REMOTE_OPS_FALLBACK: "${PMOS_ALLOW_REMOTE_OPS_FALLBACK:-0}"
 
