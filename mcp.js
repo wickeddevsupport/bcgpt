@@ -4667,7 +4667,31 @@ async function getProjectConstruction(ctx, templateId, constructionId) {
 
 // ========== TOOLS (DOCK TOOLS) ==========
 async function getDockTool(ctx, projectId, toolId) {
-  return api(ctx, `/buckets/${projectId}/dock/tools/${toolId}.json`);
+  const id = Number(toolId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw toolError("INVALID_INPUT", "tool_id must be a positive integer.", { status: 400 });
+  }
+  const dock = await getDock(ctx, projectId);
+  const tool = (dock || []).find((d) => Number(d?.id) === id);
+  if (!tool) {
+    throw toolError("RESOURCE_NOT_FOUND", `Dock tool ${id} not found for this project.`, {
+      tool: "dock_tools",
+      projectId,
+      status: 404,
+    });
+  }
+
+  // Prefer returning the dock item directly. If URL is available, enrich with live payload when accessible.
+  if (tool?.url) {
+    try {
+      const payload = await api(ctx, tool.url);
+      return { ...tool, payload };
+    } catch (e) {
+      if (!isApiError(e, 403) && !isApiError(e, 404)) throw e;
+    }
+  }
+
+  return tool;
 }
 
 async function createDockTool(ctx, projectId, body) {
@@ -7358,7 +7382,12 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "get_message_board") {
       try {
         const p = await projectByName(ctx, args.project);
-        const boardId = firstDefined(args.message_board_id, args.board_id);
+        let boardId = firstDefined(args.message_board_id, args.board_id);
+        if (!boardId) {
+          const boards = await listMessageBoards(ctx, p.id);
+          boardId = boards?.[0]?.id;
+        }
+        if (!boardId) throw new Error("No message board found for this project.");
         const board = await getMessageBoard(ctx, p.id, Number(boardId));
         return ok(id, { project: { id: p.id, name: p.name }, message_board: board });
       } catch (e) {
@@ -8825,7 +8854,13 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "get_vault") {
       try {
         const p = await projectByName(ctx, args.project);
-        const vault = await getVault(ctx, p.id, Number(args.vault_id));
+        let vaultId = Number(args.vault_id);
+        if (!vaultId) {
+          const { tool } = await requireDockTool(ctx, p.id, ["vault", "documents", "vaults"], "vault");
+          vaultId = Number(tool?.id);
+        }
+        if (!vaultId) throw new Error("vault_id is required.");
+        const vault = await getVault(ctx, p.id, vaultId);
         return ok(id, { project: { id: p.id, name: p.name }, vault });
       } catch (e) {
         return fail(id, { code: "GET_VAULT_ERROR", message: e.message });
@@ -8880,7 +8915,8 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "get_campfire") {
       try {
         const p = await projectByName(ctx, args.project);
-        const chat = await resolveCampfire(ctx, p.id, args.chat_id ? Number(args.chat_id) : null);
+        const chatId = firstDefined(args.chat_id, args.campfire_id);
+        const chat = await resolveCampfire(ctx, p.id, chatId ? Number(chatId) : null);
         if (!chat) return fail(id, { code: "CAMPFIRE_NOT_FOUND", message: "Campfire not found or not enabled." });
         return ok(id, { project: { id: p.id, name: p.name }, campfire: chat });
       } catch (e) {
@@ -8891,8 +8927,9 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "list_campfire_lines") {
       try {
         const p = await projectByName(ctx, args.project);
-        const lines = await listCampfireLines(ctx, p.id, Number(args.chat_id), { limit: args.limit });
-        return ok(id, { project: { id: p.id, name: p.name }, chat_id: Number(args.chat_id), ...buildListPayload("lines", lines) });
+        const chatId = Number(firstDefined(args.chat_id, args.campfire_id));
+        const lines = await listCampfireLines(ctx, p.id, chatId, { limit: args.limit });
+        return ok(id, { project: { id: p.id, name: p.name }, chat_id: chatId, ...buildListPayload("lines", lines) });
       } catch (e) {
         return fail(id, { code: "LIST_CAMPFIRE_LINES_ERROR", message: e.message });
       }
@@ -8901,8 +8938,9 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "get_campfire_line") {
       try {
         const p = await projectByName(ctx, args.project);
-        const line = await getCampfireLine(ctx, p.id, Number(args.chat_id), Number(args.line_id));
-        return ok(id, { project: { id: p.id, name: p.name }, chat_id: Number(args.chat_id), line });
+        const chatId = Number(firstDefined(args.chat_id, args.campfire_id));
+        const line = await getCampfireLine(ctx, p.id, chatId, Number(args.line_id));
+        return ok(id, { project: { id: p.id, name: p.name }, chat_id: chatId, line });
       } catch (e) {
         return fail(id, { code: "GET_CAMPFIRE_LINE_ERROR", message: e.message });
       }
@@ -8915,7 +8953,8 @@ export async function handleMCP(reqBody, ctx) {
         const body = (args.body && typeof args.body === "object" && !Array.isArray(args.body)) ? { ...args.body } : {};
         const content = firstDefined(extractContent(body), extractContent(args));
         if (content != null && body.content == null) body.content = content;
-        const line = await createCampfireLine(ctx, p.id, Number(args.chat_id), body);
+        const chatId = Number(firstDefined(args.chat_id, args.campfire_id));
+        const line = await createCampfireLine(ctx, p.id, chatId, body);
         return ok(id, { message: "Campfire line created", project: { id: p.id, name: p.name }, line });
       } catch (e) {
         const known = toolFailResult(id, e);
@@ -8928,7 +8967,8 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         await requireDockTool(ctx, p.id, ["chat", "campfire", "campfires"], "campfire");
-        const result = await deleteCampfireLine(ctx, p.id, Number(args.chat_id), Number(args.line_id));
+        const chatId = Number(firstDefined(args.chat_id, args.campfire_id));
+        const result = await deleteCampfireLine(ctx, p.id, chatId, Number(args.line_id));
         return ok(id, { project: { id: p.id, name: p.name }, ...result });
       } catch (e) {
         const known = toolFailResult(id, e);
@@ -8940,8 +8980,9 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "list_chatbots") {
       try {
         const p = await projectByName(ctx, args.project);
-        const bots = await listChatbots(ctx, p.id, Number(args.chat_id));
-        return ok(id, { project: { id: p.id, name: p.name }, chat_id: Number(args.chat_id), ...buildListPayload("chatbots", bots) });
+        const chatId = Number(firstDefined(args.chat_id, args.campfire_id));
+        const bots = await listChatbots(ctx, p.id, chatId);
+        return ok(id, { project: { id: p.id, name: p.name }, chat_id: chatId, ...buildListPayload("chatbots", bots) });
       } catch (e) {
         return fail(id, { code: "LIST_CHATBOTS_ERROR", message: e.message });
       }
@@ -8951,8 +8992,9 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const chatbotId = firstDefined(args.chatbot_id, args.integration_id);
-        const bot = await getChatbot(ctx, p.id, Number(args.chat_id), Number(chatbotId));
-        return ok(id, { project: { id: p.id, name: p.name }, chat_id: Number(args.chat_id), chatbot: bot });
+        const chatId = Number(firstDefined(args.chat_id, args.campfire_id));
+        const bot = await getChatbot(ctx, p.id, chatId, Number(chatbotId));
+        return ok(id, { project: { id: p.id, name: p.name }, chat_id: chatId, chatbot: bot });
       } catch (e) {
         return fail(id, { code: "GET_CHATBOT_ERROR", message: e.message });
       }
@@ -8962,7 +9004,8 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         await requireDockTool(ctx, p.id, ["chat", "campfire", "campfires"], "campfire");
-        const bot = await createChatbot(ctx, p.id, Number(args.chat_id), args.body || {});
+        const chatId = Number(firstDefined(args.chat_id, args.campfire_id));
+        const bot = await createChatbot(ctx, p.id, chatId, args.body || {});
         return ok(id, { message: "Chatbot created", project: { id: p.id, name: p.name }, chatbot: bot });
       } catch (e) {
         const known = toolFailResult(id, e);
@@ -8976,7 +9019,8 @@ export async function handleMCP(reqBody, ctx) {
         const p = await projectByName(ctx, args.project);
         await requireDockTool(ctx, p.id, ["chat", "campfire", "campfires"], "campfire");
         const chatbotId = firstDefined(args.chatbot_id, args.integration_id);
-        const bot = await updateChatbot(ctx, p.id, Number(args.chat_id), Number(chatbotId), args.body || {});
+        const chatId = Number(firstDefined(args.chat_id, args.campfire_id));
+        const bot = await updateChatbot(ctx, p.id, chatId, Number(chatbotId), args.body || {});
         return ok(id, { message: "Chatbot updated", project: { id: p.id, name: p.name }, chatbot: bot });
       } catch (e) {
         const known = toolFailResult(id, e);
@@ -8990,7 +9034,8 @@ export async function handleMCP(reqBody, ctx) {
         const p = await projectByName(ctx, args.project);
         await requireDockTool(ctx, p.id, ["chat", "campfire", "campfires"], "campfire");
         const chatbotId = firstDefined(args.chatbot_id, args.integration_id);
-        const result = await deleteChatbot(ctx, p.id, Number(args.chat_id), Number(chatbotId));
+        const chatId = Number(firstDefined(args.chat_id, args.campfire_id));
+        const result = await deleteChatbot(ctx, p.id, chatId, Number(chatbotId));
         return ok(id, { project: { id: p.id, name: p.name }, ...result });
       } catch (e) {
         const known = toolFailResult(id, e);
@@ -9272,8 +9317,14 @@ export async function handleMCP(reqBody, ctx) {
 
     if (name === "project_timeline") {
       try {
-        const data = await projectTimeline(ctx, Number(args.project_id), args.query || "");
-        return ok(id, { project_id: Number(args.project_id), ...buildListPayload("events", data) });
+        let projectId = Number(args.project_id);
+        if (!projectId && args.project) {
+          const p = await projectByName(ctx, args.project);
+          projectId = p.id;
+        }
+        if (!projectId) throw new Error("project_id or project is required.");
+        const data = await projectTimeline(ctx, projectId, args.query || "");
+        return ok(id, { project_id: projectId, ...buildListPayload("events", data) });
       } catch (e) {
         return fail(id, { code: "PROJECT_TIMELINE_ERROR", message: e.message });
       }
@@ -9299,8 +9350,14 @@ export async function handleMCP(reqBody, ctx) {
 
     if (name === "project_timesheet") {
       try {
-        const data = await projectTimesheet(ctx, Number(args.project_id), args.query || "");
-        return ok(id, { project_id: Number(args.project_id), ...buildListPayload("entries", data) });
+        let projectId = Number(args.project_id);
+        if (!projectId && args.project) {
+          const p = await projectByName(ctx, args.project);
+          projectId = p.id;
+        }
+        if (!projectId) throw new Error("project_id or project is required.");
+        const data = await projectTimesheet(ctx, projectId, args.query || "");
+        return ok(id, { project_id: projectId, ...buildListPayload("entries", data) });
       } catch (e) {
         return fail(id, { code: "PROJECT_TIMESHEET_ERROR", message: e.message });
       }
@@ -9318,7 +9375,13 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "get_inbox") {
       try {
         const p = await projectByName(ctx, args.project);
-        const inbox = await getInbox(ctx, p.id, Number(args.inbox_id));
+        let inboxId = Number(args.inbox_id);
+        if (!inboxId) {
+          const { tool } = await requireDockTool(ctx, p.id, ["inbox", "inboxes"], "inbox");
+          inboxId = Number(tool?.id);
+        }
+        if (!inboxId) throw new Error("inbox_id is required.");
+        const inbox = await getInbox(ctx, p.id, inboxId);
         return ok(id, { project: { id: p.id, name: p.name }, inbox });
       } catch (e) {
         return fail(id, { code: "GET_INBOX_ERROR", message: e.message });
@@ -9328,8 +9391,14 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "list_inbox_forwards") {
       try {
         const p = await projectByName(ctx, args.project);
-        const forwards = await listInboxForwards(ctx, p.id, Number(args.inbox_id));
-        return ok(id, { project: { id: p.id, name: p.name }, ...buildListPayload("forwards", forwards) });
+        let inboxId = Number(args.inbox_id);
+        if (!inboxId) {
+          const { tool } = await requireDockTool(ctx, p.id, ["inbox", "inboxes"], "inbox");
+          inboxId = Number(tool?.id);
+        }
+        if (!inboxId) throw new Error("inbox_id is required.");
+        const forwards = await listInboxForwards(ctx, p.id, inboxId);
+        return ok(id, { project: { id: p.id, name: p.name }, inbox_id: inboxId, ...buildListPayload("forwards", forwards) });
       } catch (e) {
         return fail(id, { code: "LIST_INBOX_FORWARDS_ERROR", message: e.message });
       }
@@ -9368,7 +9437,13 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "get_questionnaire") {
       try {
         const p = await projectByName(ctx, args.project);
-        const q = await getQuestionnaire(ctx, p.id, Number(args.questionnaire_id));
+        let questionnaireId = Number(args.questionnaire_id);
+        if (!questionnaireId) {
+          const { tool } = await requireDockTool(ctx, p.id, ["questionnaire", "questionnaires"], "questionnaire");
+          questionnaireId = Number(tool?.id);
+        }
+        if (!questionnaireId) throw new Error("questionnaire_id is required.");
+        const q = await getQuestionnaire(ctx, p.id, questionnaireId);
         return ok(id, { project: { id: p.id, name: p.name }, questionnaire: q });
       } catch (e) {
         return fail(id, { code: "GET_QUESTIONNAIRE_ERROR", message: e.message });
@@ -9378,7 +9453,13 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "list_questions") {
       try {
         const p = await projectByName(ctx, args.project);
-        const questions = await listQuestions(ctx, p.id, Number(args.questionnaire_id));
+        let questionnaireId = Number(args.questionnaire_id);
+        if (!questionnaireId) {
+          const { tool } = await requireDockTool(ctx, p.id, ["questionnaire", "questionnaires"], "questionnaire");
+          questionnaireId = Number(tool?.id);
+        }
+        if (!questionnaireId) throw new Error("questionnaire_id is required.");
+        const questions = await listQuestions(ctx, p.id, questionnaireId);
         return ok(id, { project: { id: p.id, name: p.name }, ...buildListPayload("questions", questions) });
       } catch (e) {
         return fail(id, { code: "LIST_QUESTIONS_ERROR", message: e.message });
@@ -9728,7 +9809,13 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "get_todoset") {
       try {
         const p = await projectByName(ctx, args.project);
-        const todoset = await getTodoset(ctx, p.id, Number(args.todoset_id));
+        let todosetId = Number(args.todoset_id);
+        if (!todosetId) {
+          const { tool } = await requireDockTool(ctx, p.id, ["todoset", "todos", "todo_set"], "todoset");
+          todosetId = Number(tool?.id);
+        }
+        if (!todosetId) throw new Error("todoset_id is required.");
+        const todoset = await getTodoset(ctx, p.id, todosetId);
         return ok(id, { project: { id: p.id, name: p.name }, todoset });
       } catch (e) {
         return fail(id, { code: "GET_TODOSET_ERROR", message: e.message });
@@ -9772,7 +9859,13 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "get_schedule") {
       try {
         const p = await projectByName(ctx, args.project);
-        const schedule = await getSchedule(ctx, p.id, Number(args.schedule_id));
+        let scheduleId = Number(args.schedule_id);
+        if (!scheduleId) {
+          const { tool } = await requireDockTool(ctx, p.id, ["schedule", "schedules"], "schedule");
+          scheduleId = Number(tool?.id);
+        }
+        if (!scheduleId) throw new Error("schedule_id is required.");
+        const schedule = await getSchedule(ctx, p.id, scheduleId);
         return ok(id, { project: { id: p.id, name: p.name }, schedule });
       } catch (e) {
         return fail(id, { code: "GET_SCHEDULE_ERROR", message: e.message });
