@@ -9247,7 +9247,13 @@ export async function handleMCP(reqBody, ctx) {
 
     if (name === "report_schedules_upcoming") {
       try {
-        const data = await reportSchedulesUpcoming(ctx, args.query || "");
+        // Basecamp requires a `since` date for this endpoint; default to today.
+        let query = args.query || "";
+        if (!query.includes("since=")) {
+          const today = new Date().toISOString().slice(0, 10);
+          query = query ? `${query}&since=${today}` : `since=${today}`;
+        }
+        const data = await reportSchedulesUpcoming(ctx, query);
         return ok(id, { ...buildListPayload("upcoming", data) });
       } catch (e) {
         return fail(id, { code: "REPORT_SCHEDULES_UPCOMING_ERROR", message: e.message });
