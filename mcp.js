@@ -2283,7 +2283,8 @@ async function getCard(ctx, projectId, cardId) {
 
 async function resolveCardRecordingId(ctx, projectId, cardId) {
   const card = await getCard(ctx, projectId, cardId);
-  const recordingId = card?.recording?.id || card?.recording_id || null;
+  // Cards ARE recordings in Basecamp — card.id is the recording_id
+  const recordingId = card?.recording?.id || card?.recording_id || card?.id || null;
   return { card, recording_id: recordingId };
 }
 
