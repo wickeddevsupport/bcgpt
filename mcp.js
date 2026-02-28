@@ -55,7 +55,7 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { basecampFetch, basecampFetchAll } from "./basecamp.js";
-import { resolveByName, resolveBestEffort } from "./resolvers.js";
+import { resolveByName, resolveBestEffort, levenshtein } from "./resolvers.js";
 import {
   indexSearchItem,
   searchIndex,
