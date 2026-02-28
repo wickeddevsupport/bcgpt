@@ -4812,9 +4812,9 @@ export async function handleMCP(reqBody, ctx) {
     }
 
     if (method === "tools/list") {
-      return ok(id, {
-        tools: getTools(),
-      });
+      // Return full tool list bypassing guardResultPayload chunking.
+      // MCP clients need all tools in one response; chunking to 50 makes 291 tools invisible.
+      return { jsonrpc: "2.0", id, result: { tools: getTools() } };
     }
 
     if (method === "ping") {
