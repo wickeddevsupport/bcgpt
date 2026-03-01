@@ -768,15 +768,14 @@ export const pmosHandlers: GatewayRequestHandlers = {
           null,
         "https://bcgpt.wickedlab.io",
       );
-      // Workspace-scoped key takes precedence; fall back to global shared key
+      // Only use workspace-scoped key — user must save their own key before auto-connect fires
       const bcgptKey =
         ((workspaceConnectors?.bcgpt?.apiKey as string | undefined)?.trim()) ||
-        readConfigString(cfg, ["pmos", "connectors", "bcgpt", "apiKey"])?.trim() ||
-        process.env.BCGPT_API_KEY?.trim() ||
         null;
 
       if (!bcgptKey) {
-        respond(true, { connected: false, configured: false, message: "No BCGPT API key configured" }, undefined);
+        // No key saved yet — silently skip, no error
+        respond(true, { connected: false, configured: false, message: "No API key saved — visit Integrations to connect Basecamp" }, undefined);
         return;
       }
 

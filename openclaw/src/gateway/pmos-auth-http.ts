@@ -549,9 +549,9 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
           (globalCfg as unknown as { pmos?: { connectors?: { bcgpt?: { url?: string } } } })?.pmos?.connectors?.bcgpt?.url?.trim() ||
           process.env.BCGPT_URL?.trim() ||
           "https://bcgpt.wickedlab.io";
+        // Only auto-ping if the workspace has its own saved API key — don't fall back to global key
         const bcgptKey =
           ((wc?.bcgpt as Record<string, unknown> | undefined)?.apiKey as string | undefined)?.trim() ||
-          process.env.BCGPT_API_KEY?.trim() ||
           null;
         if (bcgptKey) {
           const resp = await fetch(`${bcgptUrl}/action/startbcgpt`, {
