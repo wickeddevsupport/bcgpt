@@ -358,6 +358,17 @@ async function resolveRequestContext(req, { apiKey: forcedApiKey, userKey: force
         token = await getUserToken(userKey);
       }
     }
+    // Auto-refresh if access_token is expired and we have a refresh_token
+    if (token?.refresh_token && token?.expires_in && token?.created_at) {
+      const expiresAt = (token.created_at + token.expires_in) - 300; // 5-min buffer
+      if (Math.floor(Date.now() / 1000) >= expiresAt) {
+        try {
+          token = await refreshUserAccessToken(userKey, token.refresh_token);
+        } catch (e) {
+          console.warn(`[auth] token auto-refresh failed for user ${userKey}:`, e?.message);
+        }
+      }
+    }
     auth = await getUserAuthCache(userKey);
     if (sessionKey) {
       await bindSession(sessionKey, userKey);
@@ -371,6 +382,35 @@ async function resolveRequestContext(req, { apiKey: forcedApiKey, userKey: force
     token,
     auth,
   };
+}
+
+/**
+ * Refresh an expired Basecamp OAuth access_token using the stored refresh_token.
+ * Stores the new token in the DB and returns it.
+ */
+async function refreshUserAccessToken(userKey, refreshToken) {
+  if (!refreshToken) throw new Error("NO_REFRESH_TOKEN");
+  const r = await fetch("https://launchpad.37signals.com/authorization/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": UA },
+    body: new URLSearchParams({
+      type: "refresh",
+      refresh_token: refreshToken,
+      client_id: process.env.BASECAMP_CLIENT_ID,
+      client_secret: process.env.BASECAMP_CLIENT_SECRET,
+    }),
+  });
+  const token = await r.json();
+  if (!r.ok || !token?.access_token) {
+    const err = new Error(token?.error_description || token?.error || "TOKEN_REFRESH_FAILED");
+    err.code = "TOKEN_REFRESH_FAILED";
+    throw err;
+  }
+  // Preserve the existing refresh_token if the new one isn't provided
+  if (!token.refresh_token) token.refresh_token = refreshToken;
+  await setUserToken(token, userKey);
+  console.log(`[auth] token auto-refreshed for user ${userKey}`);
+  return token;
 }
 
 async function fetchAuthorization(token) {
@@ -4001,14 +4041,35 @@ async function buildMcpCtx(req) {
   let accountId = null;
 
   if (ctx.token?.access_token) {
-    const authResult = await ensureAuthorization({
-      token: ctx.token,
-      userKey: ctx.userKey,
-      force: false,
-    });
-    auth = authResult.auth;
-    userKey = authResult.userKey || userKey;
-    accountId = await pickAccountId(auth, userKey);
+    try {
+      const authResult = await ensureAuthorization({
+        token: ctx.token,
+        userKey: ctx.userKey,
+        force: false,
+      });
+      auth = authResult.auth;
+      userKey = authResult.userKey || userKey;
+      accountId = await pickAccountId(auth, userKey);
+    } catch (e) {
+      // If Launchpad returned 401, the token expired — try to refresh and re-authorize
+      const isAuthFailure = e?.code === "AUTHORIZATION_FAILED" && e?.status === 401;
+      if (isAuthFailure && ctx.token?.refresh_token) {
+        try {
+          ctx.token = await refreshUserAccessToken(userKey || ctx.userKey, ctx.token.refresh_token);
+          const authResult = await ensureAuthorization({ token: ctx.token, userKey: userKey || ctx.userKey, force: true });
+          auth = authResult.auth;
+          userKey = authResult.userKey || userKey;
+          accountId = await pickAccountId(auth, userKey);
+        } catch (refreshErr) {
+          console.warn(`[buildMcpCtx] token refresh + re-auth failed:`, refreshErr?.message);
+          // Fall through — auth remains null, tools will fail with NOT_AUTHENTICATED
+        }
+      } else if (!isAuthFailure) {
+        // Re-throw non-auth errors
+        throw e;
+      }
+      // auth 401 without refresh_token: silently fall through (user needs to re-connect)
+    }
   }
 
   console.log(`[buildMcpCtx] accountId retrieved: ${accountId} (type: ${typeof accountId})`);
@@ -4025,17 +4086,40 @@ async function buildMcpCtx(req) {
       await startStatus(req, { apiKey: overrides.apiKey || ctx.apiKey }),
 
     // Provide both single-request AND auto-paginated versions to MCP
-    basecampFetch: async (path, opts = {}) =>
-      basecampFetchCore(ctx.token, path, { ...opts, ua: UA, accountId }),
+    // Retry on 401 by refreshing the OAuth token once then re-attempting.
+    basecampFetch: async (path, opts = {}) => {
+      try {
+        return await basecampFetchCore(ctx.token, path, { ...opts, ua: UA, accountId });
+      } catch (e) {
+        if (e?.status === 401 && ctx.token?.refresh_token) {
+          try {
+            ctx.token = await refreshUserAccessToken(userKey, ctx.token.refresh_token);
+            return await basecampFetchCore(ctx.token, path, { ...opts, ua: UA, accountId });
+          } catch { throw e; }
+        }
+        throw e;
+      }
+    },
 
-    basecampFetchAll: async (path, opts = {}) =>
-      basecampFetchAllCore(ctx.token, path, (() => {
+    basecampFetchAll: async (path, opts = {}) => {
+      const makeOpts = () => {
         const out = { ...opts, ua: UA, accountId };
-        // allow overrides, otherwise let basecampFetchAll defaults apply
         if (opts.maxPages != null) out.maxPages = opts.maxPages;
         if (opts.pageDelayMs != null) out.pageDelayMs = opts.pageDelayMs;
         return out;
-      })()),
+      };
+      try {
+        return await basecampFetchAllCore(ctx.token, path, makeOpts());
+      } catch (e) {
+        if (e?.status === 401 && ctx.token?.refresh_token) {
+          try {
+            ctx.token = await refreshUserAccessToken(userKey, ctx.token.refresh_token);
+            return await basecampFetchAllCore(ctx.token, path, makeOpts());
+          } catch { throw e; }
+        }
+        throw e;
+      }
+    },
   };
 }
 

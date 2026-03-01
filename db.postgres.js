@@ -180,10 +180,12 @@ async function ensureSchema() {
     );
     CREATE INDEX IF NOT EXISTS idx_user_api_keys_user_key ON user_api_keys(user_key);
 
-    -- Migration: add access_token column if missing (existing installs)
+    -- Migration: add access_token / refresh_token columns if missing (existing installs)
     DO $$ BEGIN
       ALTER TABLE user_api_keys ADD COLUMN IF NOT EXISTS access_token TEXT;
       ALTER TABLE user_api_keys ADD COLUMN IF NOT EXISTS token_type TEXT DEFAULT 'Bearer';
+      ALTER TABLE user_api_keys ADD COLUMN IF NOT EXISTS refresh_token TEXT;
+      ALTER TABLE user_token ADD COLUMN IF NOT EXISTS refresh_token TEXT;
     EXCEPTION WHEN OTHERS THEN NULL;
     END $$;
 
@@ -635,15 +637,17 @@ export async function getUserToken(userKey) {
   const key = normalizeUserKey(userKey);
   if (!key) return null;
   const res = await pool.query(
-    "SELECT access_token, token_type, expires_in, user_key FROM user_token WHERE user_key = $1",
+    "SELECT access_token, refresh_token, token_type, expires_in, created_at, user_key FROM user_token WHERE user_key = $1",
     [key]
   );
   const row = res.rows[0];
   if (!row) return null;
   return {
     access_token: row.access_token,
+    refresh_token: row.refresh_token || null,
     token_type: row.token_type,
     expires_in: row.expires_in,
+    created_at: typeof row.created_at === 'number' ? row.created_at : Math.floor(new Date(row.created_at || 0).getTime() / 1000),
     user_key: row.user_key,
   };
 }
@@ -654,22 +658,24 @@ export async function setUserToken(token, userKey) {
   const now = nowSec();
   await pool.query(
     `
-      INSERT INTO user_token (user_key, access_token, token_type, expires_in, created_at, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $5)
+      INSERT INTO user_token (user_key, access_token, refresh_token, token_type, expires_in, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $6)
       ON CONFLICT (user_key) DO UPDATE SET
         access_token = EXCLUDED.access_token,
+        refresh_token = COALESCE(EXCLUDED.refresh_token, user_token.refresh_token),
         token_type = EXCLUDED.token_type,
         expires_in = EXCLUDED.expires_in,
-        updated_at = EXCLUDED.updated_at
+        updated_at = EXCLUDED.updated_at,
+        created_at = EXCLUDED.created_at
     `,
-    [key, token.access_token, token.token_type || "Bearer", token.expires_in, now]
+    [key, token.access_token, token.refresh_token || null, token.token_type || "Bearer", token.expires_in, now]
   );
 
   // Also sync to user_api_keys so the token is never lost
   try {
     await pool.query(
-      "UPDATE user_api_keys SET access_token = $1, token_type = $2 WHERE user_key = $3",
-      [token.access_token, token.token_type || "Bearer", key]
+      "UPDATE user_api_keys SET access_token = $1, refresh_token = COALESCE($2, refresh_token), token_type = $3 WHERE user_key = $4",
+      [token.access_token, token.refresh_token || null, token.token_type || "Bearer", key]
     );
   } catch { /* ignore — api key may not exist yet */ }
 }
@@ -678,6 +684,28 @@ export async function clearUserToken(userKey) {
   const key = normalizeUserKey(userKey);
   if (!key) return;
   await pool.query("DELETE FROM user_token WHERE user_key = $1", [key]);
+}
+
+export async function listUserTokenCandidates(limit = 20) {
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 200));
+  const res = await pool.query(
+    `
+      SELECT user_key, access_token, refresh_token, token_type, expires_in, updated_at
+      FROM user_token
+      WHERE access_token IS NOT NULL
+      ORDER BY updated_at DESC
+      LIMIT $1
+    `,
+    [safeLimit]
+  );
+  return (res.rows || []).map((row) => ({
+    user_key: row.user_key,
+    access_token: row.access_token,
+    refresh_token: row.refresh_token || null,
+    token_type: row.token_type || "Bearer",
+    expires_in: row.expires_in ?? null,
+    updated_at: row.updated_at ?? null,
+  }));
 }
 
 // User-scoped auth cache operations
@@ -827,7 +855,7 @@ export async function createApiKeyForUser(userKey, token = null) {
 export async function getUserByApiKey(apiKey, { touch = true } = {}) {
   const key = normalizeApiKey(apiKey);
   if (!key) return null;
-  const res = await pool.query("SELECT user_key, access_token, token_type FROM user_api_keys WHERE api_key = $1", [key]);
+  const res = await pool.query("SELECT user_key, access_token, refresh_token, token_type FROM user_api_keys WHERE api_key = $1", [key]);
   const row = res.rows[0];
   const userKey = row?.user_key || null;
   if (!userKey) return null;
@@ -841,13 +869,14 @@ export async function getUserByApiKey(apiKey, { touch = true } = {}) {
     if (!existing.rows.length) {
       const now = nowSec();
       await pool.query(
-        `INSERT INTO user_token (user_key, access_token, token_type, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $4)
+        `INSERT INTO user_token (user_key, access_token, refresh_token, token_type, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $5)
          ON CONFLICT (user_key) DO UPDATE SET
            access_token = EXCLUDED.access_token,
+           refresh_token = COALESCE(EXCLUDED.refresh_token, user_token.refresh_token),
            token_type = EXCLUDED.token_type,
            updated_at = EXCLUDED.updated_at`,
-        [userKey, row.access_token, row.token_type || "Bearer", now]
+        [userKey, row.access_token, row.refresh_token || null, row.token_type || "Bearer", now]
       );
     }
   }
@@ -869,18 +898,20 @@ export async function bindApiKeyToUser(apiKey, userKey, token = null) {
 
   const accessToken = token?.access_token || null;
   const tokenType = token?.token_type || "Bearer";
+  const refreshToken = token?.refresh_token || null;
   const now = nowSec();
   await pool.query(
     `
-      INSERT INTO user_api_keys (api_key, user_key, access_token, token_type, created_at, last_used_at)
-      VALUES ($1, $2, $3, $4, $5, $5)
+      INSERT INTO user_api_keys (api_key, user_key, access_token, refresh_token, token_type, created_at, last_used_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $6)
       ON CONFLICT (api_key) DO UPDATE SET
         user_key = EXCLUDED.user_key,
         access_token = COALESCE(EXCLUDED.access_token, user_api_keys.access_token),
+        refresh_token = COALESCE(EXCLUDED.refresh_token, user_api_keys.refresh_token),
         token_type = COALESCE(EXCLUDED.token_type, user_api_keys.token_type),
         last_used_at = EXCLUDED.last_used_at
     `,
-    [key, ukey, accessToken, tokenType, now]
+    [key, ukey, accessToken, refreshToken, tokenType, now]
   );
   return key;
 }

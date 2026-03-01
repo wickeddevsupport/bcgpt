@@ -430,13 +430,15 @@ export function clearAuthCache() {
 export function getUserToken(userKey) {
   const key = normalizeUserKey(userKey);
   if (!key) return null;
-  const stmt = db.prepare("SELECT access_token, token_type, expires_in, user_key FROM user_token WHERE user_key = ?");
+  const stmt = db.prepare("SELECT access_token, refresh_token, token_type, expires_in, created_at, user_key FROM user_token WHERE user_key = ?");
   const row = stmt.get(key);
   if (!row) return null;
   return {
     access_token: row.access_token,
+    refresh_token: row.refresh_token || null,
     token_type: row.token_type,
     expires_in: row.expires_in,
+    created_at: row.created_at || null,
     user_key: row.user_key,
   };
 }
@@ -445,16 +447,20 @@ export function setUserToken(token, userKey) {
   const key = normalizeUserKey(userKey);
   if (!key || !token?.access_token) return;
   const now = Math.floor(Date.now() / 1000);
+  // Migration: add refresh_token column if it doesn't exist yet
+  try { db.exec("ALTER TABLE user_token ADD COLUMN refresh_token TEXT"); } catch { /* already exists */ }
   const stmt = db.prepare(`
-    INSERT INTO user_token (user_key, access_token, token_type, expires_in, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO user_token (user_key, access_token, refresh_token, token_type, expires_in, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(user_key) DO UPDATE SET
       access_token = excluded.access_token,
+      refresh_token = COALESCE(excluded.refresh_token, refresh_token),
       token_type = excluded.token_type,
       expires_in = excluded.expires_in,
-      updated_at = excluded.updated_at
+      updated_at = excluded.updated_at,
+      created_at = excluded.created_at
   `);
-  stmt.run(key, token.access_token, token.token_type || "Bearer", token.expires_in, now, now);
+  stmt.run(key, token.access_token, token.refresh_token || null, token.token_type || "Bearer", token.expires_in, now, now);
   console.log(`[DB] User token stored/updated`);
 }
 
