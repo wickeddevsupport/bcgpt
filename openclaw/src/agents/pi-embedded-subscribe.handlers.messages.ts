@@ -146,12 +146,16 @@ export function handleMessageUpdate(
     ctx.state.lastStreamedAssistantCleaned = cleanedText;
 
     if (shouldEmit) {
+      // Extract thinking from the raw buffer so the chat UI can stream it live.
+      // Works for inline-thinking models (DeepSeek, Qwen3) that embed <thinking> tags.
+      const thinkingText = extractThinkingFromTaggedStream(ctx.state.deltaBuffer) || undefined;
       emitAgentEvent({
         runId: ctx.params.runId,
         stream: "assistant",
         data: {
           text: cleanedText,
           delta: deltaText,
+          thinking: thinkingText,
           mediaUrls: hasMedia ? mediaUrls : undefined,
         },
       });
@@ -160,6 +164,7 @@ export function handleMessageUpdate(
         data: {
           text: cleanedText,
           delta: deltaText,
+          thinking: thinkingText,
           mediaUrls: hasMedia ? mediaUrls : undefined,
         },
       });

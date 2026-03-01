@@ -1,6 +1,6 @@
 import type { GatewayBrowserClient } from "../gateway.ts";
 import type { ChatAttachment } from "../ui-types.ts";
-import { extractText } from "../chat/message-extract.ts";
+import { extractText, extractThinking } from "../chat/message-extract.ts";
 import { generateUUID } from "../uuid.ts";
 
 export type ChatState = {
@@ -332,9 +332,13 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
   if (payload.state === "delta") {
     const next = extractText(payload.message);
     if (typeof next === "string") {
+      // Encode live thinking as inline tags so renderStreamingGroup can display it.
+      // extractThinkingCached and extractTextCached in grouped-render already handle this format.
+      const thinking = extractThinking(payload.message);
+      const streamText = thinking ? `<thinking>${thinking}</thinking>\n${next}` : next;
       const current = state.chatStream ?? "";
-      if (!current || next.length >= current.length) {
-        state.chatStream = next;
+      if (!current || streamText.length >= current.length) {
+        state.chatStream = streamText;
       }
     }
   } else if (payload.state === "final") {

@@ -227,7 +227,13 @@ export function createAgentEventHandler({
   clearAgentRunContext,
   toolEventRecipients,
 }: AgentEventHandlerOptions) {
-  const emitChatDelta = (sessionKey: string, clientRunId: string, seq: number, text: string) => {
+  const emitChatDelta = (
+    sessionKey: string,
+    clientRunId: string,
+    seq: number,
+    text: string,
+    thinking?: string,
+  ) => {
     chatRunState.buffers.set(clientRunId, text);
     const now = Date.now();
     const last = chatRunState.deltaSentAt.get(clientRunId) ?? 0;
@@ -235,6 +241,11 @@ export function createAgentEventHandler({
       return;
     }
     chatRunState.deltaSentAt.set(clientRunId, now);
+    const content: Array<{ type: string; text?: string; thinking?: string }> = [];
+    if (thinking) {
+      content.push({ type: "thinking", thinking });
+    }
+    content.push({ type: "text", text });
     const payload = {
       runId: clientRunId,
       sessionKey,
@@ -242,7 +253,7 @@ export function createAgentEventHandler({
       state: "delta" as const,
       message: {
         role: "assistant",
-        content: [{ type: "text", text }],
+        content,
         timestamp: now,
       },
     };
@@ -370,7 +381,11 @@ export function createAgentEventHandler({
     if (sessionKey) {
       nodeSendToSession(sessionKey, "agent", isToolEvent ? toolPayload : agentPayload);
       if (!isAborted && evt.stream === "assistant" && typeof evt.data?.text === "string") {
-        emitChatDelta(sessionKey, clientRunId, evt.seq, evt.data.text);
+        const thinkingText =
+          typeof evt.data?.thinking === "string" && evt.data.thinking
+            ? evt.data.thinking
+            : undefined;
+        emitChatDelta(sessionKey, clientRunId, evt.seq, evt.data.text, thinkingText);
       } else if (!isAborted && (lifecyclePhase === "end" || lifecyclePhase === "error")) {
         if (chatLink) {
           const finished = chatRunState.registry.shift(evt.runId);
