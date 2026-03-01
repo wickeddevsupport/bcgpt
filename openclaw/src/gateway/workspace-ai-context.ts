@@ -479,6 +479,79 @@ function describeWorkspaceConfigSection(input: {
   ].join("\n");
 }
 
+function describeN8nSection(connectors: WorkspaceConnectors | null, credentials: WorkspaceAiCredential[]): string {
+  const raw = isRecord(connectors) ? connectors : {};
+  const ops = isRecord(raw.ops) ? raw.ops : {};
+  const opsUrl = asNonEmptyString(ops.url);
+  const opsApiKeySet = Boolean(asNonEmptyString(ops.apiKey));
+  const n8nConnected = Boolean(opsUrl || opsApiKeySet);
+
+  const lines: string[] = ["## n8n Automation Integration"];
+
+  if (!n8nConnected) {
+    lines.push("- status: NOT CONFIGURED — no n8n/ops connection set for this workspace");
+    lines.push("- To connect: go to Integrations → Automation → configure n8n URL and credentials");
+    lines.push("- Once connected, use pmos_n8n_* tools to create and manage automation workflows");
+    return lines.join("\n");
+  }
+
+  lines.push("- status: CONNECTED — n8n is available");
+  if (opsUrl) lines.push(`- url: ${opsUrl}`);
+
+  const credCount = credentials.length;
+  if (credCount > 0) {
+    const credNames = credentials.slice(0, 12).map((c) => `${c.name} (${c.type})`);
+    lines.push(
+      `- credentials configured: ${credCount} — ${credNames.join(", ")}${credCount > 12 ? ", ..." : ""}`,
+    );
+  } else {
+    lines.push("- credentials: none yet — call pmos_n8n_list_credentials for live list");
+  }
+
+  lines.push("");
+  lines.push("### n8n Workflow Tools (pmos_n8n_*)");
+  lines.push("- **pmos_n8n_list_workflows** — list all workflows");
+  lines.push("- **pmos_n8n_get_workflow(workflow_id)** — get full workflow JSON");
+  lines.push("- **pmos_n8n_create_workflow(name, nodes, connections)** — create a new workflow");
+  lines.push("- **pmos_n8n_execute_workflow(workflow_id)** — test-run a workflow");
+  lines.push("- **pmos_n8n_list_credentials** — list configured services (Slack, GitHub, etc.)");
+  lines.push("- **pmos_n8n_list_node_types** — list available trigger/action node types");
+  lines.push("");
+  lines.push("### Creating Workflows via Chat");
+  lines.push("1. Call pmos_n8n_list_credentials to see what services are connected");
+  lines.push("2. Ask for any required info not already available");
+  lines.push("3. Generate valid n8n workflow JSON (use exact node type names)");
+  lines.push("4. Call pmos_n8n_create_workflow with name/nodes/connections");
+  lines.push("5. Call pmos_n8n_execute_workflow to test, then report the result");
+  lines.push("");
+  lines.push("### Common Node Types");
+  lines.push(
+    "Triggers: scheduleTrigger, webhook, manualTrigger | " +
+      "HTTP/Code: httpRequest, code, set | " +
+      "Logic: if, switch, merge | " +
+      "Services: slack, github, gmail, googleSheets",
+  );
+
+  return lines.join("\n");
+}
+
+function describeProjectManagerSection(): string {
+  return [
+    "## AI Project Manager Role",
+    "You are the AI Project Manager for this PMOS workspace.",
+    "",
+    "**Basecamp**: Use smart_action for queries, specific tools for creation. View projects/todos/schedules/people live.",
+    "**Automation**: Use pmos_n8n_* tools to list, create, and execute n8n workflows through conversation.",
+    "**Web Search**: Use pmos_web_search for documentation, current events, or external research.",
+    "",
+    "Operating principles:",
+    "- Always use tools to get live data — never fabricate project names, IDs, or counts",
+    "- Proactively suggest automations based on Basecamp patterns (overdue todos → Slack alert, etc.)",
+    "- Keep responses concise and actionable",
+    "- When creating workflows: check credentials → gather info → create → test → report",
+  ].join("\n");
+}
+
 function describeCapabilitySection(): string {
   return [
     "## PMOS Surface and Capabilities",
@@ -627,6 +700,10 @@ export function buildWorkspaceAiContextMarkdown(input: WorkspaceAiContextInput):
     }),
     "",
     describeCredentialSection(input.credentials),
+    "",
+    describeN8nSection(input.connectors, input.credentials),
+    "",
+    describeProjectManagerSection(),
     "",
     describeCapabilitySection(),
     "",

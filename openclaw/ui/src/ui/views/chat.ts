@@ -253,6 +253,7 @@ export function renderChat(props: ChatProps) {
               item.startedAt,
               props.onOpenSidebar,
               assistantIdentity,
+              showReasoning,
             );
           }
 

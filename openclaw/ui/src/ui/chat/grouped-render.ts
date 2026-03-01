@@ -74,6 +74,7 @@ export function renderStreamingGroup(
   startedAt: number,
   onOpenSidebar?: (content: string) => void,
   assistant?: AssistantIdentity,
+  showReasoning = false,
 ) {
   const timestamp = new Date(startedAt).toLocaleTimeString([], {
     hour: "numeric",
@@ -91,7 +92,7 @@ export function renderStreamingGroup(
             content: [{ type: "text", text }],
             timestamp: startedAt,
           },
-          { isStreaming: true, showReasoning: false },
+          { isStreaming: true, showReasoning },
           onOpenSidebar,
         )}
         <div class="chat-group-footer">

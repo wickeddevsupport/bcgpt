@@ -1629,6 +1629,60 @@ export function getTools() {
       },
       required: ["path"],
       additionalProperties: false
+    }),
+
+    // ── PMOS n8n Automation Tools ──────────────────────────────────────────────
+    // These are routed via gateway-router to the PMOS gateway /mcp endpoint.
+    tool("pmos_n8n_list_workflows", "List automation workflows in your n8n workspace.", noProps()),
+
+    tool("pmos_n8n_get_workflow", "Get full details of an n8n workflow by ID.", {
+      type: "object",
+      properties: {
+        workflow_id: { type: "string", description: "n8n workflow ID." }
+      },
+      required: ["workflow_id"],
+      additionalProperties: false
+    }),
+
+    tool("pmos_n8n_create_workflow", [
+      "Create a new n8n workflow. Provide name, nodes array, and connections object.",
+      "nodes: array of node objects with id, name, type, typeVersion, position, parameters.",
+      "connections: object mapping source node name → output index → array of connection targets.",
+      "Always call pmos_n8n_list_credentials first to know which credentials are available.",
+      "Use exact n8n node type names (e.g. 'n8n-nodes-base.slack', 'n8n-nodes-base.scheduleTrigger').",
+    ].join(" "), {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Workflow name." },
+        nodes: { type: "array", description: "Array of n8n node objects.", items: { type: "object" } },
+        connections: { type: "object", description: "n8n connections map.", additionalProperties: true }
+      },
+      required: ["name", "nodes", "connections"],
+      additionalProperties: false
+    }),
+
+    tool("pmos_n8n_execute_workflow", "Execute (test run) an n8n workflow by ID.", {
+      type: "object",
+      properties: {
+        workflow_id: { type: "string", description: "n8n workflow ID to execute." }
+      },
+      required: ["workflow_id"],
+      additionalProperties: false
+    }),
+
+    tool("pmos_n8n_list_credentials", "List configured n8n credentials (connected services like Slack, GitHub, etc.).", noProps()),
+
+    tool("pmos_n8n_list_node_types", "List available n8n node types (triggers + actions) for building workflows.", noProps()),
+
+    // ── Web Search ─────────────────────────────────────────────────────────────
+    tool("pmos_web_search", "Search the web using DuckDuckGo (no API key required). Use for current events, documentation, research.", {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Search query." },
+        max_results: { type: "integer", description: "Max results to return (1-10, default 5)." }
+      },
+      required: ["query"],
+      additionalProperties: false
     })
   ];
 
