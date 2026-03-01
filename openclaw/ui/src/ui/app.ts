@@ -118,6 +118,7 @@ import {
   hydratePmosAdminFromConfig,
   loadPmosAdminState,
   removePmosMember,
+  restartGateway,
   savePmosAdminState,
   upsertPmosMember,
   type PmosAuditEvent,
@@ -354,6 +355,8 @@ export class OpenClawApp extends LitElement {
   @state() pmosWorkspacesList: Array<{ workspaceId: string; ownerEmail: string; ownerName: string; ownerRole: string; createdAtMs: number }> = [];
   @state() pmosWorkspacesLoading = false;
   @state() pmosWorkspacesError: string | null = null;
+  @state() pmosGatewayRestarting = false;
+  @state() pmosGatewayRestartError: string | null = null;
 
   // PMOS unified command center (Phase 6)
   @state() pmosCommandPrompt = "";
@@ -814,6 +817,10 @@ export class OpenClawApp extends LitElement {
     hydratePmosAdminFromConfig(this);
   }
 
+  async handleGatewayRestart() {
+    await restartGateway(this);
+  }
+
   async handlePmosAdminSave(opts?: { action?: string; target?: string; detail?: string }) {
     await savePmosAdminState(this, opts);
     await loadPmosAdminState(this);
@@ -1030,10 +1037,14 @@ export class OpenClawApp extends LitElement {
     } else {
       await savePmosModelConfig(this);
     }
-    await loadPmosModelWorkspaceState(this);
+    // Note: loadPmosModelWorkspaceState is already called inside savePmosModelConfig /
+    // upsertPmosModelFromRef. Calling it again here would clear pmosModelError set by the
+    // save functions, masking failures and showing a false "Saved OK" to the user.
     this.syncPmosModelDraftRef();
-    this.pmosModelSavedOk = true;
-    setTimeout(() => { this.pmosModelSavedOk = false; }, 2500);
+    if (!this.pmosModelError) {
+      this.pmosModelSavedOk = true;
+      setTimeout(() => { this.pmosModelSavedOk = false; }, 2500);
+    }
   }
 
   async handlePmosModelSaveWithoutActivate() {
@@ -1048,10 +1059,13 @@ export class OpenClawApp extends LitElement {
       apiKey: this.pmosModelApiKeyDraft,
       activate: false,
     });
-    await loadPmosModelWorkspaceState(this);
+    // Note: loadPmosModelWorkspaceState is already called inside upsertPmosModelFromRef.
+    // Calling it again here would clear pmosModelError, masking save failures.
     this.syncPmosModelDraftRef();
-    this.pmosModelSavedOk = true;
-    setTimeout(() => { this.pmosModelSavedOk = false; }, 2500);
+    if (!this.pmosModelError) {
+      this.pmosModelSavedOk = true;
+      setTimeout(() => { this.pmosModelSavedOk = false; }, 2500);
+    }
   }
 
   async handlePmosModelActivate(modelRef: string) {

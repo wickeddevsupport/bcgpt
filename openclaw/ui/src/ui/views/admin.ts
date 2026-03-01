@@ -48,6 +48,11 @@ export type AdminProps = {
   workspacesLoading?: boolean;
   workspacesError?: string | null;
   onLoadWorkspaces?: () => void;
+
+  // Super-admin: gateway restart
+  restarting?: boolean;
+  restartError?: string | null;
+  onRestart?: () => void;
 };
 
 const ROLE_DESCRIPTIONS: Record<PmosRole, string> = {
@@ -321,6 +326,21 @@ export function renderAdmin(props: AdminProps) {
             ? html`<div class="muted" style="margin-top: 8px;">No workspaces loaded yet.</div>`
             : nothing}
         </div>
+      </section>
+
+      <section class="card" style="margin-top: 18px;">
+        <div class="card-title">Gateway</div>
+        <div class="card-sub">Restart the gateway process. Active connections will reconnect automatically.</div>
+        <div class="row" style="margin-top: 12px;">
+          <button
+            class="btn btn--secondary"
+            ?disabled=${props.restarting}
+            @click=${() => props.onRestart?.()}
+          >
+            ${props.restarting ? "Restarting…" : "Restart Gateway"}
+          </button>
+        </div>
+        ${props.restartError ? html`<div class="callout danger" style="margin-top: 10px;">${props.restartError}</div>` : nothing}
       </section>
     ` : nothing}
   `;

@@ -2,11 +2,21 @@ import type { GatewayRequestHandlers } from "./types.js";
 import { resolveMainSessionKeyFromConfig } from "../../config/sessions.js";
 import { getLastHeartbeatEvent } from "../../infra/heartbeat-events.js";
 import { setHeartbeatsEnabled } from "../../infra/heartbeat-runner.js";
+import { scheduleGatewaySigusr1Restart } from "../../infra/restart.js";
 import { enqueueSystemEvent, isSystemEventContextChanged } from "../../infra/system-events.js";
 import { listSystemPresence, updateSystemPresence } from "../../infra/system-presence.js";
+import { isSuperAdmin } from "../workspace-context.js";
 import { ErrorCodes, errorShape } from "../protocol/index.js";
 
 export const systemHandlers: GatewayRequestHandlers = {
+  "gateway.restart": ({ respond, client }) => {
+    if (!client || !isSuperAdmin(client)) {
+      respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "super_admin role required"));
+      return;
+    }
+    const restart = scheduleGatewaySigusr1Restart({ delayMs: 1500, reason: "gateway.restart" });
+    respond(true, { ok: true, restart }, undefined);
+  },
   "last-heartbeat": ({ respond }) => {
     respond(true, getLastHeartbeatEvent(), undefined);
   },

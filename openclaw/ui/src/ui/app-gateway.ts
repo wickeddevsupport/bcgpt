@@ -240,6 +240,9 @@ export function connectGateway(host: GatewayHost) {
       host.chatRunId = null;
       (host as unknown as { chatStream: string | null }).chatStream = null;
       (host as unknown as { chatStreamStartedAt: number | null }).chatStreamStartedAt = null;
+      // Clear gateway restart flag now that we've reconnected successfully.
+      (host as unknown as { pmosGatewayRestarting: boolean }).pmosGatewayRestarting = false;
+      (host as unknown as { pmosGatewayRestartError: string | null }).pmosGatewayRestartError = null;
       resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
       const app = host as unknown as OpenClawApp;
       const loadAgentsPromise = loadAgents(app);

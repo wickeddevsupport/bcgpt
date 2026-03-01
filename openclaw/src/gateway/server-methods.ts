@@ -49,6 +49,7 @@ const SUPER_ADMIN_ONLY_METHODS = new Set([
   "device.token.rotate",
   "device.token.revoke",
   "update.run",
+  "gateway.restart",
 ]);
 const PAIRING_METHODS = new Set([
   "node.pair.request",

@@ -220,6 +220,8 @@ export type AppViewState = {
   pmosWorkspacesList: Array<{ workspaceId: string; ownerEmail: string; ownerName: string; ownerRole: string; createdAtMs: number }>;
   pmosWorkspacesLoading: boolean;
   pmosWorkspacesError: string | null;
+  pmosGatewayRestarting: boolean;
+  pmosGatewayRestartError: string | null;
 
   // PMOS unified command center (Phase 6)
   pmosCommandPrompt: string;
@@ -496,6 +498,7 @@ export type AppViewState = {
   handlePmosAdminLoad: () => Promise<void>;
   handlePmosAdminSave: (opts?: { action?: string; target?: string; detail?: string }) => Promise<void>;
   _loadWorkspacesList: () => Promise<void>;
+  handleGatewayRestart: () => Promise<void>;
   handlePmosMemberUpsert: () => Promise<void>;
   handlePmosMemberRemove: (email: string) => Promise<void>;
   handlePmosIntegrationsLoad: () => Promise<void>;

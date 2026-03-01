@@ -50,6 +50,9 @@ export type PmosAdminState = {
   pmosMemberDraftStatus: PmosMemberStatus;
 
   pmosAuditEvents: PmosAuditEvent[];
+
+  pmosGatewayRestarting: boolean;
+  pmosGatewayRestartError: string | null;
 };
 
 function deepClone<T>(value: T): T {
@@ -443,4 +446,24 @@ export function removePmosMember(
     return;
   }
   state.pmosMembers = next;
+}
+
+export async function restartGateway(
+  state: Pick<
+    PmosAdminState,
+    "client" | "connected" | "pmosGatewayRestarting" | "pmosGatewayRestartError"
+  >,
+) {
+  if (!state.client || !state.connected) {
+    return;
+  }
+  state.pmosGatewayRestarting = true;
+  state.pmosGatewayRestartError = null;
+  try {
+    await state.client.request("gateway.restart", {});
+  } catch (err) {
+    state.pmosGatewayRestartError = String(err);
+    state.pmosGatewayRestarting = false;
+  }
+  // On success the gateway restarts; the WebSocket will reconnect and clear the flag.
 }
