@@ -6357,6 +6357,16 @@ export async function handleMCP(reqBody, ctx) {
           return ok(id, { query, action: "daily_report", confidence, result });
         }
 
+        // ── List projects intent ───────────────────────────────────
+        const listProjectsIntent =
+          /\b(list|show|all|get|what)\b.*\bprojects?\b/i.test(lower) ||
+          /\bprojects?\b.*(i have|available|i.m on|mine|my|assigned)\b/i.test(lower) ||
+          /\bmy projects?\b/i.test(lower);
+        if (listProjectsIntent && !project && !/\b(find|search|lookup)\b/i.test(lower)) {
+          const result = await callTool("list_projects", {});
+          return ok(id, { query, action: "list_projects", confidence: 0.95, result });
+        }
+
         if (wantsProjectContext && project) {
           const context = await gatherProjectContext(project);
           confidence = Math.max(confidence, 0.88);
@@ -6492,6 +6502,33 @@ export async function handleMCP(reqBody, ctx) {
           }
           const result = await callTool("search_people", { query: person });
           return ok(id, { query, action: "search_people", confidence, result });
+        }
+
+        // ── Campfire / team chat intent ───────────────────────────
+        const campfireIntent = /\b(campfire|team\s*chat|channel|chat\s*line)\b/i.test(lower);
+        if (campfireIntent) {
+          if (project) {
+            const cfResult = await callTool("get_campfire", { project: project.name });
+            const campfireId = cfResult?.campfire?.id || cfResult?.id || null;
+            if (campfireId && (/\b(lines?|messages?|history|recent|show|read)\b/i.test(lower))) {
+              const linesResult = await callTool("list_campfire_lines", { project: project.name, campfire_id: campfireId });
+              return ok(id, { query, action: "list_campfire_lines", confidence: 0.9, project: { id: project.id, name: project.name }, result: linesResult });
+            }
+            return ok(id, { query, action: "get_campfire", confidence: 0.9, project: { id: project.id, name: project.name }, result: cfResult });
+          }
+          const result = await callTool("list_campfires", {});
+          return ok(id, { query, action: "list_campfires", confidence: 0.85, result });
+        }
+
+        // ── Schedule / upcoming events intent ─────────────────────
+        const scheduleIntent = /\b(schedule|upcoming|calendar)\b/i.test(lower) || (/\bevents?\b/i.test(lower) && !/\b(create|add|new)\b/i.test(lower));
+        if (scheduleIntent && !/\b(create|add|new)\b/i.test(lower)) {
+          if (project) {
+            const result = await callTool("list_schedule_entries", { project: project.name });
+            return ok(id, { query, action: "list_schedule_entries", confidence: 0.9, project: { id: project.id, name: project.name }, result });
+          }
+          const result = await callTool("report_schedules_upcoming", {});
+          return ok(id, { query, action: "report_schedules_upcoming", confidence: 0.85, result });
         }
 
         if (/project/.test(lower) && /(find|search|lookup)/.test(lower)) {

@@ -13,6 +13,12 @@ export type WorkspaceAiCredential = {
   type: string;
 };
 
+type BcgptWorkspaceData = {
+  accounts?: Array<{ id: string; name: string; product?: string }>;
+  projects?: Array<{ id: string; name: string; accountId: string }>;
+  error?: string;
+};
+
 type WorkspaceAiContextInput = {
   workspaceId: string;
   generatedAt: string;
@@ -28,6 +34,7 @@ type WorkspaceAiContextInput = {
     updatedAt: string;
   }>;
   credentials: WorkspaceAiCredential[];
+  bcgptData?: BcgptWorkspaceData | null;
 };
 
 export type RefreshWorkspaceAiContextOptions = {
@@ -287,6 +294,99 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
     .join("\n");
 }
 
+function describeBcgptSection(input: {
+  connectors: WorkspaceConnectors | null;
+  bcgptData: BcgptWorkspaceData | null;
+}): string {
+  const raw = isRecord(input.connectors) ? input.connectors : {};
+  const bcgpt = isRecord(raw.bcgpt) ? raw.bcgpt : {};
+  const bcgptUrl = asNonEmptyString(bcgpt.url);
+  const bcgptApiKey = asNonEmptyString(bcgpt.apiKey);
+
+  if (!bcgptUrl && !bcgptApiKey) {
+    return [
+      "## Basecamp Integration (bcgpt MCP Server)",
+      "- status: NOT CONFIGURED — no Basecamp API key set for this workspace",
+      "- To connect: go to Integrations → Basecamp → enter your bcgpt API key",
+    ].join("\n");
+  }
+
+  const serverUrl = bcgptUrl ?? "https://bcgpt.wickedlab.io";
+
+  const lines: string[] = [
+    "## Basecamp Integration (bcgpt MCP Server)",
+    `- status: CONNECTED — Basecamp API key is set for this workspace`,
+    `- server: ${serverUrl}`,
+    "- protocol: MCP (Model Context Protocol) — Basecamp tools available",
+    "",
+    "### Available Basecamp Tool Categories",
+    "- **Projects**: list_projects, get_project, search_projects",
+    "- **Todos**: get_todoset, list_todolists, get_todolist, list_todos, create_todo, update_todo, complete_todo, get_todo",
+    "- **Messages**: get_message_board, list_messages, create_message, get_message, update_message",
+    "- **Documents**: get_vault, list_documents, create_document, get_document, update_document",
+    "- **Card Tables (Kanban)**: list_card_tables, get_card_table, list_card_table_columns, create_card, update_card, move_card",
+    "- **Schedules**: get_schedule, list_schedule_entries, create_schedule_entry, get_schedule_entry",
+    "- **Campfire (Chat)**: get_campfire, list_campfire_lines, create_campfire_line",
+    "- **People**: list_people, get_person, search_people",
+    "- **Reports**: list_recordings, get_recording, report_todos_assigned",
+    "- **Webhooks**: list_webhooks, create_webhook, destroy_webhook",
+    "- **Raw API**: basecamp_raw — make any GET request to the Basecamp API",
+  ];
+
+  // Include live Basecamp account/project data if available
+  const data = input.bcgptData;
+  if (data) {
+    if (data.accounts && data.accounts.length > 0) {
+      lines.push("");
+      lines.push("### Connected Basecamp Accounts");
+      for (const acct of data.accounts.slice(0, 5)) {
+        lines.push(`- ${acct.name} (id: ${acct.id}, type: ${acct.product ?? "basecamp"})`);
+      }
+    }
+    if (data.projects && data.projects.length > 0) {
+      lines.push("");
+      lines.push("### Recent Projects (most recently active first)");
+      for (const proj of data.projects.slice(0, 10)) {
+        lines.push(`- ${proj.name} (id: ${proj.id}, account: ${proj.accountId})`);
+      }
+    }
+    if (data.error) {
+      lines.push("");
+      lines.push(`- Note: live data partially unavailable — ${data.error}`);
+    }
+  } else {
+    lines.push("");
+    lines.push("- Live project data: not yet loaded (will populate on next context refresh)");
+  }
+
+  lines.push("");
+  lines.push("### Primary Entry Point: smart_action");
+  lines.push("- **Use `smart_action` first** for almost any Basecamp query — it routes to the right tool automatically");
+  lines.push("- `smart_action` handles: list projects, project summary, project context (docs/cards/todos/messages),");
+  lines.push("  assigned todos, due-date queries, person queries (activity/assignments/membership),");
+  lines.push("  card/kanban search, campfire/team chat, upcoming schedule, daily reports, search");
+  lines.push("- Example queries for smart_action:");
+  lines.push('  - "show my projects" → routes to list_projects');
+  lines.push('  - "summarize project Acme" → routes to project_summary');
+  lines.push('  - "what todos are due today?" → routes to list_todos_due');
+  lines.push('  - "what am I assigned to?" → routes to list_assigned_to_me');
+  lines.push('  - "who is working on project X?" → routes to assignment_report');
+  lines.push('  - "show campfire for project Y" → routes to get_campfire + list_campfire_lines');
+  lines.push('  - "upcoming events this week" → routes to report_schedules_upcoming');
+  lines.push('  - "find cards about login" → routes to search_cards');
+  lines.push('  - "tell me about the Acme brand" → routes to project_context_summary (docs+messages+cards)');
+  lines.push("- For CREATE operations, use specific tools: create_todo, create_message, create_campfire_line, create_card");
+  lines.push("");
+  lines.push("### How to Use Basecamp Tools");
+  lines.push(`- These tools are available through the bcgpt MCP server at ${serverUrl}`);
+  lines.push("- When the user asks about Basecamp (projects, todos, messages, etc.), use the appropriate tool");
+  lines.push("- Always use tool results as the authoritative source — do not guess Basecamp data");
+  lines.push("- If asked 'what projects do I have', call smart_action with query='show my projects'");
+  lines.push("- The API key is already configured — you do NOT need to ask the user for credentials");
+
+  return lines.join("\n");
+}
+
 function describeModelSection(input: {
   effectiveConfig: JsonObject;
   byokKeys: WorkspaceAiContextInput["byokKeys"];
@@ -405,7 +505,95 @@ function describeAssistantPolicySection(): string {
     "- Use credential presence metadata only (never reveal secret values).",
     "- Prefer deterministic, executable workflows with explicit branching/merge nodes when complexity requires it.",
     "- Use workspace-scoped credentials and avoid cross-workspace assumptions.",
+    "",
+    "## Basecamp-Specific Policy",
+    "- If the Basecamp Integration section shows status CONNECTED, you have access to Basecamp tools.",
+    "- When the user asks ANYTHING about their Basecamp projects, todos, messages, people, or schedule: USE tools to get live data — do not guess or make up project names/IDs/content.",
+    "- PRIMARY TOOL: Use `smart_action` with a natural language query for most Basecamp requests — it routes automatically.",
+    "  - 'what projects do I have?' → smart_action({ query: 'show my projects' })",
+    "  - 'show me my todos' → smart_action({ query: 'what am I assigned to?' })",
+    "  - 'summarize project X' → smart_action({ query: 'summarize project X', project: 'X' })",
+    "  - 'show the schedule' → smart_action({ query: 'upcoming schedule' })",
+    "  - 'what's in campfire?' → smart_action({ query: 'show campfire', project: 'X' })",
+    "- For CREATE operations, use specific tools: create_todo, create_message, create_campfire_line.",
+    "- You are the user's Basecamp assistant: you know their workspace and can act on their behalf when asked.",
+    "- Never reveal the raw API key value. Reference the bcgpt server URL when explaining connectivity.",
+    "- If a Basecamp operation fails, report the error clearly and suggest checking the Basecamp connector configuration.",
   ].join("\n");
+}
+
+/**
+ * Try to fetch live Basecamp account + project data from the bcgpt MCP server.
+ * Best-effort — returns null on any error so callers always get a context even if bcgpt is down.
+ */
+async function fetchBcgptWorkspaceData(
+  bcgptUrl: string,
+  apiKey: string,
+): Promise<BcgptWorkspaceData | null> {
+  try {
+    // Use the bcgpt REST endpoint to get accounts and projects.
+    // Calls /api/basecamp/accounts which returns the user's Basecamp accounts.
+    const base = bcgptUrl.replace(/\/+$/, "");
+
+    // Fetch accounts
+    const accountsRes = await fetch(`${base}/api/basecamp/accounts`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(6000),
+    });
+
+    if (!accountsRes.ok) {
+      return { error: `accounts endpoint returned ${accountsRes.status}` };
+    }
+
+    const accountsJson = (await accountsRes.json()) as unknown;
+    const rawAccounts = Array.isArray(accountsJson)
+      ? accountsJson
+      : Array.isArray((accountsJson as { accounts?: unknown[] }).accounts)
+        ? (accountsJson as { accounts: unknown[] }).accounts
+        : [];
+
+    const accounts: BcgptWorkspaceData["accounts"] = rawAccounts
+      .filter((a): a is Record<string, unknown> => Boolean(a && typeof a === "object"))
+      .map((a) => ({
+        id: String(a.id ?? ""),
+        name: String(a.name ?? ""),
+        product: typeof a.product === "string" ? a.product : undefined,
+      }))
+      .filter((a) => a.id && a.name);
+
+    // Fetch projects from first account
+    let projects: BcgptWorkspaceData["projects"] = [];
+    if (accounts.length > 0) {
+      try {
+        const projRes = await fetch(`${base}/api/basecamp/projects`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(6000),
+        });
+        if (projRes.ok) {
+          const projJson = (await projRes.json()) as unknown;
+          const rawProjects = Array.isArray(projJson)
+            ? projJson
+            : Array.isArray((projJson as { projects?: unknown[] }).projects)
+              ? (projJson as { projects: unknown[] }).projects
+              : [];
+          projects = rawProjects
+            .filter((p): p is Record<string, unknown> => Boolean(p && typeof p === "object"))
+            .map((p) => ({
+              id: String(p.id ?? ""),
+              name: String(p.name ?? ""),
+              accountId: String(p.account_id ?? p.accountId ?? accounts[0]?.id ?? ""),
+            }))
+            .filter((p) => p.id && p.name);
+        }
+      } catch {
+        // projects fetch failed, still return accounts
+      }
+    }
+
+    return { accounts, projects };
+  } catch {
+    return null;
+  }
 }
 
 export function buildWorkspaceAiContextMarkdown(input: WorkspaceAiContextInput): string {
@@ -420,6 +608,11 @@ export function buildWorkspaceAiContextMarkdown(input: WorkspaceAiContextInput):
     }),
     "",
     describeConnectorSection(input.connectors),
+    "",
+    describeBcgptSection({
+      connectors: input.connectors,
+      bcgptData: input.bcgptData ?? null,
+    }),
     "",
     describeModelSection({
       effectiveConfig: input.effectiveConfig,
@@ -479,6 +672,17 @@ export async function refreshWorkspaceAiContext(
     }
   }
 
+  // Best-effort: fetch live Basecamp account/project data from the bcgpt connector
+  let bcgptData: BcgptWorkspaceData | null = null;
+  if (opts.includeLiveCredentials) {
+    const bcgptConnector = isRecord(connectors?.bcgpt) ? connectors.bcgpt : null;
+    const bcgptUrl = asNonEmptyString(bcgptConnector?.url as unknown);
+    const bcgptApiKey = asNonEmptyString(bcgptConnector?.apiKey as unknown);
+    if (bcgptUrl && bcgptApiKey) {
+      bcgptData = await fetchBcgptWorkspaceData(bcgptUrl, bcgptApiKey).catch(() => null);
+    }
+  }
+
   const workspaceConfig = isRecord(workspaceConfigRaw) ? workspaceConfigRaw : {};
   const effectiveConfig = isRecord(effectiveConfigRaw) ? effectiveConfigRaw : {};
   const generatedAt = new Date().toISOString();
@@ -490,6 +694,7 @@ export async function refreshWorkspaceAiContext(
     connectors,
     byokKeys,
     credentials,
+    bcgptData,
   });
 
   const p = workspaceAiContextPath(wsId);

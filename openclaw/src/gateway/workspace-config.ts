@@ -64,10 +64,45 @@ export async function patchWorkspaceConfig(
   return next;
 }
 
+/**
+ * Filter agents.list in the merged effective config to only include agents that
+ * belong to the given workspaceId (i.e. entries with no workspaceId or with
+ * workspaceId matching this workspace). This prevents workspace-agent cross-
+ * contamination when global config accidentally has workspace-scoped entries.
+ */
+function filterAgentsForWorkspace(mergedCfg: JsonObject, workspaceId: string): JsonObject {
+  const agents = mergedCfg.agents;
+  if (!isJsonObject(agents)) {
+    return mergedCfg;
+  }
+  const list = agents.list;
+  if (!Array.isArray(list)) {
+    return mergedCfg;
+  }
+  const wsId = workspaceId.trim();
+  const filtered = list.filter((entry) => {
+    if (!isJsonObject(entry)) {
+      return true; // keep non-object entries as-is
+    }
+    const entryWs = typeof entry.workspaceId === "string" ? entry.workspaceId.trim() : "";
+    // Keep: global agents (no workspaceId) or agents that belong to this workspace
+    return !entryWs || entryWs === wsId;
+  });
+  if (filtered.length === list.length) {
+    return mergedCfg;
+  }
+  return {
+    ...mergedCfg,
+    agents: { ...agents, list: filtered },
+  };
+}
+
 export async function loadEffectiveWorkspaceConfig(workspaceId: string): Promise<JsonObject> {
   const globalCfg = loadConfig() as unknown;
   const globalObject = isJsonObject(globalCfg) ? globalCfg : {};
   const workspaceCfg = (await readWorkspaceConfig(workspaceId)) ?? {};
   const merged = deepMerge(globalObject, workspaceCfg);
-  return isJsonObject(merged) ? merged : globalObject;
+  const mergedObject = isJsonObject(merged) ? merged : globalObject;
+  // Strip any agents from other workspaces that may have leaked into global config
+  return filterAgentsForWorkspace(mergedObject, workspaceId);
 }

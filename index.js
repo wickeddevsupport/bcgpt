@@ -4438,6 +4438,46 @@ app.get("/projects/:projectId", async (req, res) => {
   }
 });
 
+/* ── Workspace AI Context REST helpers ─────────────────────────────────────
+   Called by OpenClaw's workspace-ai-context.ts to populate live Basecamp
+   data (accounts + projects) into the AI context snapshot.
+   Auth: same Bearer token / API key as all other routes.
+*/
+app.get("/api/basecamp/accounts", async (req, res) => {
+  try {
+    const ctx = await requireBasecampContext(req);
+    const accounts = (ctx.auth?.accounts || []).map((a) => ({
+      id: a.id,
+      name: a.name,
+      product: a.product,
+      href: a.href,
+    }));
+    res.json(accounts);
+  } catch (e) {
+    res.status(e.status || 401).json({ error: e.code || "ERROR", message: e.message });
+  }
+});
+
+app.get("/api/basecamp/projects", async (req, res) => {
+  try {
+    const ctx = await requireBasecampContext(req);
+    const data = await basecampFetch(ctx.token, `/${ctx.accountId}/projects.json`, {
+      accountId: ctx.accountId,
+      paginate: true,
+    });
+    const projects = (Array.isArray(data) ? data : []).map((p) => ({
+      id: p.id,
+      name: p.name,
+      status: p.status,
+      updated_at: p.updated_at,
+      account_id: ctx.accountId,
+    }));
+    res.json(projects);
+  } catch (e) {
+    res.status(e.status || 400).json({ error: e.code || "ERROR", message: e.message });
+  }
+});
+
 /* ================= PMOS Chat API ================= */
 
 // Create new chat session

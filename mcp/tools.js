@@ -92,11 +92,22 @@ export function getTools() {
       properties: { project: { type: "string", nullable: true } },
       additionalProperties: false
     }),
-    tool("smart_action", "Smart router: decide which action to call based on natural language query and context.", {
+    tool("smart_action", [
+      "Natural language router for Basecamp — use this as your FIRST TOOL for almost any Basecamp query.",
+      "Pass any plain-English query and it automatically dispatches to the right tool(s).",
+      "Handles: listing all projects, project summaries, project context (brand/docs/cards/todos),",
+      "todo queries (assigned to me, due today, overdue, by person, by project), person queries",
+      "(activity, assignments, membership), card/kanban search, campfire/team chat, upcoming schedule,",
+      "daily reports, automation/workflow queries, search (recordings, entities, index).",
+      "Examples: 'show my projects', 'what todos are due today', 'summarize project Acme',",
+      "'find cards about login', 'who is working on X', 'show campfire for Acme',",
+      "'upcoming events this week', 'list automations', 'search for branding docs'.",
+      "For CREATE operations (create todo, send message, etc.) use the specific tools directly.",
+    ].join(" "), {
       type: "object",
       properties: {
         query: { type: "string" },
-        project: { type: "string", nullable: true }
+        project: { type: "string", nullable: true, description: "Optional: project name to scope the action." }
       },
       required: ["query"],
       additionalProperties: false
