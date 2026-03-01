@@ -331,11 +331,15 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
 
   if (payload.state === "delta") {
     const next = extractText(payload.message);
-    if (typeof next === "string") {
+    const thinking = extractThinking(payload.message);
+    // Update stream whenever we have thinking OR text content.
+    // When only thinking is present (text hasn't started yet), we still surface it
+    // so the UI shows the live reasoning stream instead of a static 3-dot indicator.
+    const textPart = typeof next === "string" ? next : "";
+    if (thinking || textPart) {
       // Encode live thinking as inline tags so renderStreamingGroup can display it.
-      // extractThinkingCached and extractTextCached in grouped-render already handle this format.
-      const thinking = extractThinking(payload.message);
-      const streamText = thinking ? `<thinking>${thinking}</thinking>\n${next}` : next;
+      // extractThinkingCached and extractTextCached in grouped-render handle this format.
+      const streamText = thinking ? `<thinking>${thinking}</thinking>\n${textPart}` : textPart;
       const current = state.chatStream ?? "";
       if (!current || streamText.length >= current.length) {
         state.chatStream = streamText;

@@ -200,7 +200,12 @@ export function renderChat(props: ChatProps) {
   const canAbort = Boolean(props.canAbort && props.onAbort);
   const activeSession = props.sessions?.sessions?.find((row) => row.key === props.sessionKey);
   const reasoningLevel = activeSession?.reasoningLevel ?? "off";
-  const showReasoning = props.showThinking && reasoningLevel !== "off";
+  // Show reasoning whenever the toggle is on, regardless of session's configured reasoningLevel.
+  // reasoningLevel is the budget setting for HOW MUCH thinking to do — not whether the model
+  // is sending thinking tokens. Models may stream thinking regardless of this field.
+  // We keep reading reasoningLevel for other uses (e.g. toolbar icon state), but decouple
+  // reasoning display from it so the toggle always works.
+  const showReasoning = props.showThinking;
   const assistantIdentity = {
     name: props.assistantName,
     avatar: props.assistantAvatar ?? props.assistantAvatarUrl ?? null,

@@ -236,8 +236,12 @@ function renderGroupedMessage(
   const hasImages = images.length > 0;
 
   const extractedText = extractTextCached(message);
+  // During streaming, always extract thinking for full transparency (live reasoning display).
+  // After streaming completes, respect the showReasoning toggle.
   const extractedThinking =
-    opts.showReasoning && role === "assistant" ? extractThinkingCached(message) : null;
+    (opts.isStreaming || opts.showReasoning) && role === "assistant"
+      ? extractThinkingCached(message)
+      : null;
   const markdownBase = extractedText?.trim() ? extractedText : null;
   const reasoningMarkdown = extractedThinking ? formatReasoningMarkdown(extractedThinking) : null;
   const markdown = markdownBase;
@@ -256,7 +260,8 @@ function renderGroupedMessage(
     return html`${toolCards.map((card) => renderToolCardSidebar(card, onOpenSidebar))}`;
   }
 
-  if (!markdown && !hasToolCards && !hasImages) {
+  // Don't return nothing if there's reasoning to show (thinking-only phase during streaming).
+  if (!markdown && !reasoningMarkdown && !hasToolCards && !hasImages) {
     return nothing;
   }
 
