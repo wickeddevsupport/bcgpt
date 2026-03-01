@@ -4203,6 +4203,12 @@ app.get("/connect", (req, res) => {
 
 /* ================= OAuth ================= */
 app.get("/auth/basecamp/start", (req, res) => {
+  if (!process.env.BASECAMP_CLIENT_ID || !process.env.BASECAMP_CLIENT_SECRET) {
+    return res.status(500).send(
+      "OAuth not configured: BASECAMP_CLIENT_ID and/or BASECAMP_CLIENT_SECRET environment variables are missing on the server. " +
+      "Add them to your .env file or host environment and restart the container."
+    );
+  }
   const base = originBase(req);
   const redirectUri = `${base}/auth/basecamp/callback`;
   const state = normalizeKey(req.query.state || req.query.api_key || req.query.apiKey || extractApiKey(req));
