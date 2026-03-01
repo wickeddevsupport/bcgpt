@@ -623,12 +623,15 @@ export const pmosHandlers: GatewayRequestHandlers = {
           null,
         "https://bcgpt.wickedlab.io",
       );
-      const bcgptKey =
-        (workspaceConnectors?.bcgpt?.apiKey as string | undefined) ??
-        (allowGlobalSecrets
-          ? readConfigString(cfg, ["pmos", "connectors", "bcgpt", "apiKey"]) ??
-            (process.env.BCGPT_API_KEY?.trim() || null)
-          : null);
+      // Resolve bcgpt key: workspace-scoped first, then global shared key (env / global config).
+      // Every workspace gets the shared key for connection-check purposes; the key value
+      // is NEVER sent back to the client in the response.
+      const workspaceBcgptKey = (workspaceConnectors?.bcgpt?.apiKey as string | undefined)?.trim() || null;
+      const globalBcgptKey =
+        readConfigString(cfg, ["pmos", "connectors", "bcgpt", "apiKey"])?.trim() ??
+        (process.env.BCGPT_API_KEY?.trim() || null);
+      const bcgptKey = workspaceBcgptKey ?? globalBcgptKey;
+      const bcgptKeyIsShared = !workspaceBcgptKey && Boolean(globalBcgptKey);
 
       const { readLocalN8nConfig } = await import("../pmos-ops-proxy.js");
       const { findVendoredN8nRepo } = await import("../n8n-embed.js");
@@ -648,7 +651,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
         error: null,
       };
 
-      const bcgpt: ConnectorResult = {
+      const bcgpt: ConnectorResult & { shared?: boolean } = {
         url: bcgptUrl,
         configured: Boolean(bcgptKey),
         reachable: null,
@@ -656,6 +659,8 @@ export const pmosHandlers: GatewayRequestHandlers = {
         healthUrl: `${bcgptUrl}/health`,
         mcpUrl: `${bcgptUrl}/mcp`,
         error: null,
+        // shared=true means connection is via server-wide key, not workspace-scoped
+        ...(bcgptKeyIsShared ? { shared: true } : {}),
       };
 
       // Embedded n8n / ops runtime reachability.
@@ -742,6 +747,78 @@ export const pmosHandlers: GatewayRequestHandlers = {
         },
         undefined,
       );
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, formatForLog(err)));
+    }
+  },
+
+  // Lightweight auto-connect: pings /action/startbcgpt with workspace or global BCGPT key.
+  // Called automatically on every gateway connect so the Basecamp session is always warm.
+  "pmos.bcgpt.autoconnect": async ({ respond, client }) => {
+    try {
+      const cfg = loadConfig() as unknown;
+      const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
+      const workspaceId = client?.pmosWorkspaceId ?? undefined;
+      const workspaceConnectors = workspaceId ? await readWorkspaceConnectors(workspaceId) : null;
+
+      const bcgptUrl = normalizeBaseUrl(
+        (workspaceConnectors?.bcgpt?.url as string | undefined) ??
+          readConfigString(cfg, ["pmos", "connectors", "bcgpt", "url"]) ??
+          process.env.BCGPT_URL ??
+          null,
+        "https://bcgpt.wickedlab.io",
+      );
+      // Workspace-scoped key takes precedence; fall back to global shared key
+      const bcgptKey =
+        ((workspaceConnectors?.bcgpt?.apiKey as string | undefined)?.trim()) ||
+        readConfigString(cfg, ["pmos", "connectors", "bcgpt", "apiKey"])?.trim() ||
+        process.env.BCGPT_API_KEY?.trim() ||
+        null;
+
+      if (!bcgptKey) {
+        respond(true, { connected: false, configured: false, message: "No BCGPT API key configured" }, undefined);
+        return;
+      }
+
+      const startResult = await fetchJson(`${bcgptUrl}/action/startbcgpt`, {
+        method: "POST",
+        timeoutMs: 10_000,
+        headers: {
+          "content-type": "application/json",
+          "x-bcgpt-api-key": bcgptKey,
+        },
+        body: JSON.stringify({}),
+      });
+
+      if (!startResult.ok || !isJsonObject(startResult.json)) {
+        respond(true, {
+          connected: false,
+          configured: true,
+          reachable: startResult.status ? startResult.status < 500 : false,
+          error: startResult.error || "BCGPT_UNREACHABLE",
+        }, undefined);
+        return;
+      }
+
+      const payload = startResult.json as Record<string, unknown>;
+      const user = isJsonObject(payload.user) ? payload.user : null;
+      const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
+
+      respond(true, {
+        connected: payload.connected === true,
+        configured: true,
+        reachable: true,
+        name: typeof user?.name === "string" ? user.name : null,
+        email: typeof user?.email === "string" ? user.email : null,
+        accountsCount: accounts.length,
+        selectedAccountId:
+          typeof payload.selected_account_id === "string" || typeof payload.selected_account_id === "number"
+            ? String(payload.selected_account_id)
+            : null,
+        message: typeof payload.message === "string" ? payload.message : null,
+        authLink: typeof payload.auth_link === "string" ? payload.auth_link : null,
+        shared: !((workspaceConnectors?.bcgpt?.apiKey as string | undefined)?.trim()),
+      }, undefined);
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, formatForLog(err)));
     }

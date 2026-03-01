@@ -536,6 +536,44 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
       console.warn("[pmos] workspace ai context refresh failed:", String(err));
     }
 
+    // Non-blocking: auto-ping the bcgpt /action/startbcgpt endpoint to warm up
+    // the Basecamp session on every login (ensures connection is ready for AI tool calls).
+    void (async () => {
+      try {
+        const { readWorkspaceConnectors } = await import("./workspace-connectors.js");
+        const { loadConfig } = await import("../config/config.js");
+        const globalCfg = loadConfig() as Record<string, unknown>;
+        const wc = await readWorkspaceConnectors(workspaceId);
+        const bcgptUrl =
+          ((wc?.bcgpt as Record<string, unknown> | undefined)?.url as string | undefined)?.trim() ||
+          (globalCfg as unknown as { pmos?: { connectors?: { bcgpt?: { url?: string } } } })?.pmos?.connectors?.bcgpt?.url?.trim() ||
+          process.env.BCGPT_URL?.trim() ||
+          "https://bcgpt.wickedlab.io";
+        const bcgptKey =
+          ((wc?.bcgpt as Record<string, unknown> | undefined)?.apiKey as string | undefined)?.trim() ||
+          process.env.BCGPT_API_KEY?.trim() ||
+          null;
+        if (bcgptKey) {
+          const resp = await fetch(`${bcgptUrl}/action/startbcgpt`, {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-bcgpt-api-key": bcgptKey },
+            body: JSON.stringify({}),
+            signal: AbortSignal.timeout(8000),
+          });
+          const payload = (await resp.json()) as Record<string, unknown>;
+          const connected = payload?.connected === true;
+          const name = typeof payload?.user === "object" && payload.user !== null
+            ? (payload.user as Record<string, unknown>).name
+            : null;
+          console.info(
+            `[pmos] bcgpt auto-ping: connected=${connected}, user=${name ?? "—"} (workspace=${workspaceId})`
+          );
+        }
+      } catch (err) {
+        console.warn("[pmos] bcgpt auto-ping failed:", String(err));
+      }
+    })();
+
     await ensureStarterSessionDefaults({ agentId: starterAgentId, workspaceId });
   } catch (err) {
     console.warn("[pmos] workspace starter bootstrap failed:", String(err));

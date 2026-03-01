@@ -266,6 +266,8 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
   const bcgpt = isRecord(raw.bcgpt) ? raw.bcgpt : {};
   const bcgptUrl = asNonEmptyString(bcgpt.url);
   const bcgptApiKeySet = Boolean(asNonEmptyString(bcgpt.apiKey));
+  // Shared key: global BCGPT_API_KEY env var available (server-wide connection)
+  const bcgptSharedKeyAvailable = !bcgptApiKeySet && Boolean(process.env.BCGPT_API_KEY?.trim());
 
   const extraConnectorKeys = Object.keys(raw)
     .filter((key) => key !== "ops" && key !== "bcgpt")
@@ -284,9 +286,9 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
     `- ops projectId: ${opsProjectId ?? "(not set)"}`,
     `- ops user email: ${opsUserEmail ?? "(not set)"}`,
     `- ops user password present: ${yesNo(opsUserPasswordSet)}`,
-    `- basecamp connector configured: ${yesNo(Boolean(bcgptUrl || bcgptApiKeySet))}`,
-    `- basecamp url: ${bcgptUrl ?? "(not set)"}`,
-    `- basecamp apiKey present: ${yesNo(bcgptApiKeySet)}`,
+    `- basecamp connector configured: ${yesNo(Boolean(bcgptUrl || bcgptApiKeySet || bcgptSharedKeyAvailable))}`,
+    `- basecamp url: ${bcgptUrl ?? process.env.BCGPT_URL?.trim() ?? "https://bcgpt.wickedlab.io"}`,
+    `- basecamp apiKey present: ${bcgptApiKeySet ? "yes" : bcgptSharedKeyAvailable ? "yes (shared server key)" : "no"}`,
     extraLines.length > 0 ? "### Additional connectors" : "",
     ...extraLines,
   ]
@@ -303,7 +305,10 @@ function describeBcgptSection(input: {
   const bcgptUrl = asNonEmptyString(bcgpt.url);
   const bcgptApiKey = asNonEmptyString(bcgpt.apiKey);
 
-  if (!bcgptUrl && !bcgptApiKey) {
+  // A connection exists if either the workspace or global key is available,
+  // OR if bcgptData was successfully fetched (meaning the global key worked).
+  const hasConnection = Boolean(bcgptApiKey) || Boolean(input.bcgptData);
+  if (!hasConnection) {
     return [
       "## Basecamp Integration (bcgpt MCP Server)",
       "- status: NOT CONFIGURED — no Basecamp API key set for this workspace",
@@ -312,10 +317,13 @@ function describeBcgptSection(input: {
   }
 
   const serverUrl = bcgptUrl ?? "https://bcgpt.wickedlab.io";
+  const isSharedConnection = !bcgptApiKey && hasConnection;
 
   const lines: string[] = [
     "## Basecamp Integration (bcgpt MCP Server)",
-    `- status: CONNECTED — Basecamp API key is set for this workspace`,
+    isSharedConnection
+      ? `- status: CONNECTED (shared) — using server-wide Basecamp connection`
+      : `- status: CONNECTED — Basecamp API key is set for this workspace`,
     `- server: ${serverUrl}`,
     "- protocol: MCP (Model Context Protocol) — Basecamp tools available",
     "",
@@ -749,14 +757,19 @@ export async function refreshWorkspaceAiContext(
     }
   }
 
-  // Best-effort: fetch live Basecamp account/project data from the bcgpt connector
+  // Best-effort: fetch live Basecamp account/project data from the bcgpt connector.
+  // Falls back to the global BCGPT_API_KEY env var so workspace users on a shared
+  // bcgpt setup see live project data even without a workspace-scoped key.
   let bcgptData: BcgptWorkspaceData | null = null;
   if (opts.includeLiveCredentials) {
     const bcgptConnector = isRecord(connectors?.bcgpt) ? connectors.bcgpt : null;
-    const bcgptUrl = asNonEmptyString(bcgptConnector?.url as unknown);
-    const bcgptApiKey = asNonEmptyString(bcgptConnector?.apiKey as unknown);
-    if (bcgptUrl && bcgptApiKey) {
-      bcgptData = await fetchBcgptWorkspaceData(bcgptUrl, bcgptApiKey).catch(() => null);
+    const workspaceBcgptApiKey = asNonEmptyString(bcgptConnector?.apiKey as unknown);
+    const workspaceBcgptUrl = asNonEmptyString(bcgptConnector?.url as unknown);
+    // Resolve effective key/URL: workspace-scoped first, then global shared fallback
+    const effectiveBcgptApiKey = workspaceBcgptApiKey ?? (process.env.BCGPT_API_KEY?.trim() || null);
+    const effectiveBcgptUrl = workspaceBcgptUrl ?? (process.env.BCGPT_URL?.trim() || null) ?? "https://bcgpt.wickedlab.io";
+    if (effectiveBcgptApiKey) {
+      bcgptData = await fetchBcgptWorkspaceData(effectiveBcgptUrl, effectiveBcgptApiKey).catch(() => null);
     }
   }
 

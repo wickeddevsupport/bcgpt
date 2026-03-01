@@ -264,6 +264,25 @@ export function connectGateway(host: GatewayHost) {
       // Auto-refresh connector status on connect so opsProvisioned is populated
       // immediately (no manual "Provision" click required).
       void app.handlePmosRefreshConnectors();
+      // Auto-connect bcgpt: warm the Basecamp session on every gateway connect.
+      // Runs silently in background — result just logged, not shown in UI.
+      void (async () => {
+        try {
+          const result = await app.client!.request<{
+            connected: boolean; configured: boolean; name?: string | null;
+            email?: string | null; shared?: boolean; authLink?: string | null;
+          }>("pmos.bcgpt.autoconnect", {});
+          if (result?.configured) {
+            console.info(
+              `[bcgpt] auto-connect: connected=${result.connected}, user=${result.name ?? result.email ?? "\u2014"}` +
+              (result.shared ? " (shared key)" : "") +
+              (!result.connected && result.authLink ? ` → auth: ${result.authLink}` : "")
+            );
+          }
+        } catch (err) {
+          console.warn("[bcgpt] auto-connect ping failed:", err);
+        }
+      })();
     },
     onClose: ({ code, reason }) => {
       host.connected = false;
