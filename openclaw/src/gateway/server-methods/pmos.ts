@@ -2151,4 +2151,34 @@ export const pmosHandlers: GatewayRequestHandlers = {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }
   },
+
+  // ── Super-admin: reset all workspaces to a single fresh starter agent ─────────
+
+  "pmos.admin.reset-all-workspaces": async ({ respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      if (!isSuperAdmin(client)) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "super_admin role required"));
+        return;
+      }
+      const [{ listPmosWorkspaces }, { resetWorkspaceToSingleStarter }] = await Promise.all([
+        import("../pmos-auth.js"),
+        import("../pmos-auth-http.js"),
+      ]);
+      const workspaces = await listPmosWorkspaces();
+      const results: Array<{ workspaceId: string; ok: boolean; error?: string }> = [];
+      for (const ws of workspaces) {
+        try {
+          await resetWorkspaceToSingleStarter(ws.workspaceId);
+          results.push({ workspaceId: ws.workspaceId, ok: true });
+        } catch (err) {
+          results.push({ workspaceId: ws.workspaceId, ok: false, error: String(err) });
+        }
+      }
+      const failed = results.filter((r) => !r.ok);
+      respond(true, { results, failed: failed.length }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
 };

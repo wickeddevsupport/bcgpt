@@ -17,7 +17,8 @@ const DEFAULT_STARTER_AGENT_ID = "assistant";
 const DEFAULT_STARTER_AGENT_NAME = "Workspace Assistant";
 const DEFAULT_STARTER_AGENT_WORKSPACE_BASE = "~/.openclaw/workspaces";
 const DEFAULT_STARTER_OLLAMA_MODEL_ID = "qwen3:1.7b";
-const SHARED_PROVIDER_PREFER = new Set(["local-ollama", "ollama"]);
+const SHARED_PROVIDER_PREFER = new Set(["local-ollama", "ollama", "kilo"]);
+const DEFAULT_KILO_FREE_MODEL_REF = "kilo/minimax/minimax-m2.5:free";
 const DEFAULT_SHARED_THINKING_LEVEL = "low";
 const DEFAULT_SHARED_REASONING_LEVEL = "stream";
 const DEPRECATED_MODEL_REF_REPLACEMENTS: Record<string, string> = {
@@ -87,6 +88,7 @@ type WarmIdentityUser = {
   workspaceId: string;
   email?: string | null;
   name?: string | null;
+  role?: import("./pmos-auth.js").PmosRole | null;
 };
 
 async function warmEmbeddedN8nIdentity(user: WarmIdentityUser): Promise<void> {
@@ -104,6 +106,7 @@ async function warmEmbeddedN8nIdentity(user: WarmIdentityUser): Promise<void> {
       pmosUser: {
         email: typeof user.email === "string" ? user.email : "",
         name: typeof user.name === "string" ? user.name : "",
+        role: user.role ?? "member",
       },
     });
   } catch (err) {
@@ -346,10 +349,35 @@ function findSharedWorkspaceModelRef(cfg: unknown): string | null {
       return `${provider}/${id}`;
     }
   }
+  // When KILO_API_KEY env is set, use Kilo free model as the shared default.
+  // Users don't need their own API key — the server key covers free-tier models.
+  if ((process.env.KILO_API_KEY ?? "").trim()) {
+    return DEFAULT_KILO_FREE_MODEL_REF;
+  }
   if (hasOllamaEnvConfigured()) {
     return `ollama/${resolveStarterOllamaModelId()}`;
   }
   return null;
+}
+
+/**
+ * Reset a single workspace: wipe all agents then re-provision the single starter agent.
+ * Called by the super-admin reset-all-workspaces RPC.
+ */
+export async function resetWorkspaceToSingleStarter(workspaceId: string): Promise<void> {
+  const [{ readWorkspaceConfig, writeWorkspaceConfig }] = await Promise.all([
+    import("./workspace-config.js"),
+  ]);
+  const existing = (await readWorkspaceConfig(workspaceId)) ?? {};
+  // Wipe agents list and primary model so ensureWorkspaceStarterExperience rebuilds from scratch.
+  const agents = isRecord(existing.agents) ? { ...existing.agents as Record<string, unknown> } : {};
+  delete agents.list;
+  delete agents.defaults;
+  const cleaned: Record<string, unknown> = { ...existing, agents };
+  if (Object.keys(agents).length === 0) delete cleaned.agents;
+  await writeWorkspaceConfig(workspaceId, cleaned as Record<string, unknown>);
+  // Re-provision: ensureWorkspaceStarterExperience now sees no agents and creates the starter.
+  await ensureWorkspaceStarterExperience({ workspaceId });
 }
 
 async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise<void> {

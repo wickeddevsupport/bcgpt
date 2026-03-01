@@ -118,6 +118,7 @@ import {
   hydratePmosAdminFromConfig,
   loadPmosAdminState,
   removePmosMember,
+  resetAllWorkspaces,
   restartGateway,
   savePmosAdminState,
   upsertPmosMember,
@@ -357,6 +358,10 @@ export class OpenClawApp extends LitElement {
   @state() pmosWorkspacesError: string | null = null;
   @state() pmosGatewayRestarting = false;
   @state() pmosGatewayRestartError: string | null = null;
+
+  @state() pmosWorkspaceResetting = false;
+  @state() pmosWorkspaceResetError: string | null = null;
+  @state() pmosWorkspaceResetResults: Array<{ workspaceId: string; ok: boolean; error?: string }> | null = null;
 
   // PMOS unified command center (Phase 6)
   @state() pmosCommandPrompt = "";
@@ -819,6 +824,14 @@ export class OpenClawApp extends LitElement {
 
   async handleGatewayRestart() {
     await restartGateway(this);
+  }
+
+  async handleResetAllWorkspaces() {
+    await resetAllWorkspaces(this);
+    // Refresh workspace list after reset
+    if (this.pmosWorkspaceResetError === null) {
+      await this._loadWorkspacesList();
+    }
   }
 
   async handlePmosAdminSave(opts?: { action?: string; target?: string; detail?: string }) {

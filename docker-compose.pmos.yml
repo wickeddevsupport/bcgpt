@@ -34,6 +34,8 @@ services:
       # Keep permissions on n8n settings file tight (n8n will enforce/auto-fix on startup).
       N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "${N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS:-true}"
 
+      # Shared Kilo API key — covers free-tier models for all workspaces (no per-user key needed).
+      KILO_API_KEY: "${KILO_API_KEY:-}"
       # Optional model auth (add in Coolify env vars if/when needed).
       CLAUDE_AI_SESSION_KEY: "${CLAUDE_AI_SESSION_KEY:-}"
       CLAUDE_WEB_SESSION_KEY: "${CLAUDE_WEB_SESSION_KEY:-}"

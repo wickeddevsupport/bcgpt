@@ -317,6 +317,7 @@ export function resolveEnvApiKey(provider: string): EnvApiKeyResult | null {
     qianfan: "QIANFAN_API_KEY",
     ollama: "OLLAMA_API_KEY",
     "local-ollama": "OLLAMA_API_KEY",
+    kilo: "KILO_API_KEY",
   };
   const envVar = envMap[normalized];
   if (!envVar) {

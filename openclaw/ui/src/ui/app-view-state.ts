@@ -223,6 +223,11 @@ export type AppViewState = {
   pmosGatewayRestarting: boolean;
   pmosGatewayRestartError: string | null;
 
+  // Super-admin: reset all workspace agents
+  pmosWorkspaceResetting: boolean;
+  pmosWorkspaceResetError: string | null;
+  pmosWorkspaceResetResults: Array<{ workspaceId: string; ok: boolean; error?: string }> | null;
+
   // PMOS unified command center (Phase 6)
   pmosCommandPrompt: string;
   pmosCommandPlanning: boolean;
@@ -499,6 +504,7 @@ export type AppViewState = {
   handlePmosAdminSave: (opts?: { action?: string; target?: string; detail?: string }) => Promise<void>;
   _loadWorkspacesList: () => Promise<void>;
   handleGatewayRestart: () => Promise<void>;
+  handleResetAllWorkspaces: () => Promise<void>;
   handlePmosMemberUpsert: () => Promise<void>;
   handlePmosMemberRemove: (email: string) => Promise<void>;
   handlePmosIntegrationsLoad: () => Promise<void>;

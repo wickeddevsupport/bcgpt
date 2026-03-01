@@ -100,6 +100,8 @@ const BASE_METHODS = [
   "pmos.byok.set",
   "pmos.byok.remove",
   "pmos.byok.validate",
+  // Super-admin: reset all workspace agents
+  "pmos.admin.reset-all-workspaces",
 ];
 
 export function listGatewayMethods(): string[] {

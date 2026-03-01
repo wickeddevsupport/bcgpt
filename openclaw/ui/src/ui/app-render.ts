@@ -1083,6 +1083,10 @@ export function renderApp(state: AppViewState) {
                 restarting: state.pmosGatewayRestarting,
                 restartError: state.pmosGatewayRestartError,
                 onRestart: () => void state.handleGatewayRestart(),
+                workspaceResetting: state.pmosWorkspaceResetting,
+                workspaceResetError: state.pmosWorkspaceResetError,
+                workspaceResetResults: state.pmosWorkspaceResetResults,
+                onResetAllWorkspaces: () => void state.handleResetAllWorkspaces(),
               })
             : nothing
         }

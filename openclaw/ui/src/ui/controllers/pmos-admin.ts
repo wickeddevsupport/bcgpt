@@ -53,6 +53,10 @@ export type PmosAdminState = {
 
   pmosGatewayRestarting: boolean;
   pmosGatewayRestartError: string | null;
+
+  pmosWorkspaceResetting: boolean;
+  pmosWorkspaceResetError: string | null;
+  pmosWorkspaceResetResults: Array<{ workspaceId: string; ok: boolean; error?: string }> | null;
 };
 
 function deepClone<T>(value: T): T {
@@ -372,7 +376,7 @@ export async function savePmosAdminState(
     ].slice(0, 200);
     setPath(nextConfig, ["pmos", "audit", "events"], nextAudit);
 
-    await writePmosAdminConfig(state, nextConfig, baseHash);
+    await writePmosAdminConfig(state, nextConfig, baseHash ?? undefined);
 
     state.configSnapshot = {
       ...(snapshot as ConfigSnapshot),
@@ -446,6 +450,31 @@ export function removePmosMember(
     return;
   }
   state.pmosMembers = next;
+}
+
+export async function resetAllWorkspaces(
+  state: Pick<
+    PmosAdminState,
+    "client" | "connected" | "pmosWorkspaceResetting" | "pmosWorkspaceResetError" | "pmosWorkspaceResetResults"
+  >,
+) {
+  if (!state.client || !state.connected) {
+    return;
+  }
+  state.pmosWorkspaceResetting = true;
+  state.pmosWorkspaceResetError = null;
+  state.pmosWorkspaceResetResults = null;
+  try {
+    const res = await state.client.request<{ results: Array<{ workspaceId: string; ok: boolean; error?: string }>; failed: number }>("pmos.admin.reset-all-workspaces", {});
+    state.pmosWorkspaceResetResults = res.results ?? [];
+    if ((res.failed ?? 0) > 0) {
+      state.pmosWorkspaceResetError = `${res.failed} workspace(s) failed to reset.`;
+    }
+  } catch (err) {
+    state.pmosWorkspaceResetError = String(err);
+  } finally {
+    state.pmosWorkspaceResetting = false;
+  }
 }
 
 export async function restartGateway(

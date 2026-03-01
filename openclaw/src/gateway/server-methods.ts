@@ -50,6 +50,7 @@ const SUPER_ADMIN_ONLY_METHODS = new Set([
   "device.token.revoke",
   "update.run",
   "gateway.restart",
+  "pmos.admin.reset-all-workspaces",
 ]);
 const PAIRING_METHODS = new Set([
   "node.pair.request",

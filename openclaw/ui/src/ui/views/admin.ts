@@ -53,6 +53,12 @@ export type AdminProps = {
   restarting?: boolean;
   restartError?: string | null;
   onRestart?: () => void;
+
+  // Super-admin: reset all workspace agents
+  workspaceResetting?: boolean;
+  workspaceResetError?: string | null;
+  workspaceResetResults?: Array<{ workspaceId: string; ok: boolean; error?: string }> | null;
+  onResetAllWorkspaces?: () => void;
 };
 
 const ROLE_DESCRIPTIONS: Record<PmosRole, string> = {
@@ -326,6 +332,26 @@ export function renderAdmin(props: AdminProps) {
             ? html`<div class="muted" style="margin-top: 8px;">No workspaces loaded yet.</div>`
             : nothing}
         </div>
+      </section>
+
+      <section class="card" style="margin-top: 18px;">
+        <div class="card-title">Workspaces — Reset</div>
+        <div class="card-sub">Delete all agents from every workspace and re-provision a single starter agent with Kilo Free as the default model. This is irreversible.</div>
+        <div class="row" style="margin-top: 12px;">
+          <button
+            class="btn btn--danger"
+            ?disabled=${props.workspaceResetting}
+            @click=${() => props.onResetAllWorkspaces?.()}
+          >
+            ${props.workspaceResetting ? "Resetting…" : "Reset All Workspaces"}
+          </button>
+        </div>
+        ${props.workspaceResetError ? html`<div class="callout danger" style="margin-top: 10px;">${props.workspaceResetError}</div>` : nothing}
+        ${(props.workspaceResetResults ?? []).length > 0 ? html`
+          <div class="callout" style="margin-top: 10px;">
+            Reset complete: ${(props.workspaceResetResults ?? []).filter(r => r.ok).length}/${(props.workspaceResetResults ?? []).length} workspaces OK.
+          </div>
+        ` : nothing}
       </section>
 
       <section class="card" style="margin-top: 18px;">
