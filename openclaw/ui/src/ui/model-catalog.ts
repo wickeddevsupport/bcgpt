@@ -152,8 +152,8 @@ export const MODEL_CATALOG: ModelCatalog = {
   ],
   kilo: [
     {
-      id: "kilo/z-ai/glm-5:free",
-      label: "GLM 5 Free (Kilo)",
+      id: "kilo/minimax/minimax-m2.5:free",
+      label: "MiniMax M2.5 Free (Kilo)",
       tier: "free",
       description: "Free via Kilo gateway",
       supportsTools: true,

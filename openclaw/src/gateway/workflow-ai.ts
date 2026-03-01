@@ -23,6 +23,7 @@ interface ModelConfig {
 
 const WORKFLOW_MODEL_CANDIDATE_LIMIT = 3;
 const WORKFLOW_MODEL_CALL_TIMEOUT_MS = 25_000;
+const API_KEY_OPTIONAL_PROVIDERS = new Set(["ollama", "local-ollama"]);
 
 function appendV1(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/v1`;
@@ -32,6 +33,15 @@ function resolveKiloBaseUrl(): string {
   const raw = (process.env.KILO_API_URL ?? "https://api.kilo.ai/api/gateway").trim();
   const normalized = raw.replace(/\/+$/, "");
   return normalized.replace(/\/chat\/completions$/, "");
+}
+
+function resolveOllamaBaseUrl(rawBaseUrl?: string | null): string {
+  const raw = (rawBaseUrl ?? process.env.OLLAMA_API_URL ?? process.env.OPENCLAW_OLLAMA_API_URL ?? "http://host.docker.internal:11434/v1").trim();
+  const normalized = raw.replace(/\/+$/, "");
+  if (/\/v1$/i.test(normalized)) {
+    return normalized;
+  }
+  return `${normalized}/v1`;
 }
 
 function resolveProviderBaseUrlFromConfig(
@@ -55,6 +65,9 @@ function resolveOpenAiCompatibleBaseUrl(provider: string, cfg: OpenClawConfig): 
     // Kilo may be stored with a fully-qualified endpoint; normalize back to base.
     if (provider === "kilo") {
       return configuredBaseUrl.replace(/\/chat\/completions$/, "");
+    }
+    if (provider === "ollama" || provider === "local-ollama") {
+      return resolveOllamaBaseUrl(configuredBaseUrl);
     }
     return configuredBaseUrl;
   }
@@ -82,6 +95,9 @@ function resolveOpenAiCompatibleBaseUrl(provider: string, cfg: OpenClawConfig): 
         process.env.OPENAI_API_BASE_URL ??
         "https://api.openai.com/v1"
       ).replace(/\/+$/, "");
+    case "ollama":
+    case "local-ollama":
+      return resolveOllamaBaseUrl();
     case "openai":
     default:
       return "https://api.openai.com/v1";
@@ -95,6 +111,8 @@ function normalizeProviderAlias(provider: string): string {
       return "openrouter";
     case "nvidia-nim":
       return "nvidia";
+    case "local_ollama":
+      return "local-ollama";
     case "z-ai":
       return "zai";
     default:
@@ -239,13 +257,14 @@ async function resolveModelConfigs(
   const resolved: ModelConfig[] = [];
   for (const ref of refs) {
     const apiKey = await resolveProviderApiKey(ref.provider, cfg, workspaceId);
-    if (!apiKey || isTemplatedSecretValue(apiKey)) {
+    const requiresApiKey = !API_KEY_OPTIONAL_PROVIDERS.has(ref.provider);
+    if (requiresApiKey && (!apiKey || isTemplatedSecretValue(apiKey))) {
       continue;
     }
     resolved.push({
       provider: ref.provider,
       modelId: ref.modelId,
-      apiKey,
+      apiKey: apiKey ?? "",
     });
   }
   if (resolved.length <= 1) {
@@ -301,34 +320,40 @@ async function callModelWithConfig(
       case "moonshot":
       case "nvidia":
       case "azure":
+      case "ollama":
+      case "local-ollama":
       case "custom": {
         const baseUrl = resolveOpenAiCompatibleBaseUrl(provider, cfg);
-        const openAiBody: Record<string, unknown> = {
-          model: modelId,
-          messages: [
-            { role: "system", content: systemPrompt },
-            ...messages.map(m => ({ role: m.role === "system" ? "user" : m.role, content: m.content })),
-          ],
-          max_tokens: maxTokens,
-          temperature: 0.4,
-        };
-        if (opts.jsonMode) {
-          openAiBody.response_format = { type: "json_object" };
-        }
 
         const callOpenAiCompatible = async (
           targetProvider: string,
           targetBaseUrl: string,
           targetApiKey: string,
+          targetModelId: string,
         ): Promise<{ ok: boolean; text?: string; status?: number; error?: string }> => {
+          const openAiBody: Record<string, unknown> = {
+            model: targetModelId,
+            messages: [
+              { role: "system", content: systemPrompt },
+              ...messages.map(m => ({ role: m.role === "system" ? "user" : m.role, content: m.content })),
+            ],
+            max_tokens: maxTokens,
+            temperature: 0.4,
+          };
+          if (opts.jsonMode) {
+            openAiBody.response_format = { type: "json_object" };
+          }
+          const headers: Record<string, string> = {
+            "Content-Type": "application/json",
+          };
+          if (targetApiKey.trim()) {
+            headers.Authorization = `Bearer ${targetApiKey}`;
+          }
           let res: Response;
           try {
             res = await fetch(`${targetBaseUrl}/chat/completions`, {
               method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${targetApiKey}`,
-              },
+              headers,
               body: JSON.stringify(openAiBody),
               signal: AbortSignal.timeout(WORKFLOW_MODEL_CALL_TIMEOUT_MS),
             });
@@ -352,7 +377,7 @@ async function callModelWithConfig(
           return { ok: true, text: data.choices?.[0]?.message?.content ?? "" };
         };
 
-        const primary = await callOpenAiCompatible(provider, baseUrl, apiKey);
+        const primary = await callOpenAiCompatible(provider, baseUrl, apiKey, modelId);
         if (primary.ok) {
           return { ok: true, text: primary.text, providerUsed: provider };
         }
@@ -367,6 +392,7 @@ async function callModelWithConfig(
               "openrouter",
               "https://openrouter.ai/api/v1",
               openRouterKey,
+              modelId,
             );
             if (fallback.ok) {
               return {

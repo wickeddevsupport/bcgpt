@@ -20,6 +20,12 @@ const DEFAULT_STARTER_OLLAMA_MODEL_ID = "qwen3:1.7b";
 const SHARED_PROVIDER_PREFER = new Set(["local-ollama", "ollama"]);
 const DEFAULT_SHARED_THINKING_LEVEL = "low";
 const DEFAULT_SHARED_REASONING_LEVEL = "stream";
+const DEPRECATED_MODEL_REF_REPLACEMENTS: Record<string, string> = {
+  "kilo/z-ai/glm-5:free": "kilo/minimax/minimax-m2.5:free",
+  "kilo/glm-5:free": "kilo/minimax/minimax-m2.5:free",
+  "kilo/z-ai/glm-5": "kilo/minimax/minimax-m2.5:free",
+  "kilo/glm-5": "kilo/minimax/minimax-m2.5:free",
+};
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;
@@ -287,6 +293,25 @@ function resolveStarterOllamaModelId(): string {
   return configured || DEFAULT_STARTER_OLLAMA_MODEL_ID;
 }
 
+function resolveDeprecatedModelRefReplacement(modelRef: string): string | null {
+  const normalized = modelRef.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  return DEPRECATED_MODEL_REF_REPLACEMENTS[normalized] ?? null;
+}
+
+function resolveModelAlias(modelRef: string): string {
+  const normalized = modelRef.trim().toLowerCase();
+  if (normalized.startsWith("ollama/") || normalized.startsWith("local-ollama/")) {
+    return "Shared Ollama";
+  }
+  if (normalized.startsWith("kilo/")) {
+    return "Kilo Free";
+  }
+  return "Workspace Default";
+}
+
 function findSharedWorkspaceModelRef(cfg: unknown): string | null {
   const providers = getPath(cfg, ["models", "providers"]);
   if (!isRecord(providers)) {
@@ -420,23 +445,33 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
     }
 
     const workspacePrimary = getPath(existing, ["agents", "defaults", "model", "primary"]);
-    if (sharedModelRef && (typeof workspacePrimary !== "string" || !workspacePrimary.trim())) {
+    const workspacePrimaryRef =
+      typeof workspacePrimary === "string" ? workspacePrimary.trim() : "";
+    const deprecatedPrimaryReplacement = workspacePrimaryRef
+      ? resolveDeprecatedModelRefReplacement(workspacePrimaryRef)
+      : null;
+    const desiredPrimaryRef =
+      deprecatedPrimaryReplacement && deprecatedPrimaryReplacement !== workspacePrimaryRef
+        ? deprecatedPrimaryReplacement
+        : (!workspacePrimaryRef && sharedModelRef ? sharedModelRef : null);
+
+    if (desiredPrimaryRef) {
       const modelsMeta = getPath(existing, ["agents", "defaults", "models"]);
       const hasModelMeta =
-        isRecord(modelsMeta) && Object.prototype.hasOwnProperty.call(modelsMeta, sharedModelRef);
+        isRecord(modelsMeta) && Object.prototype.hasOwnProperty.call(modelsMeta, desiredPrimaryRef);
       patch.agents = {
         ...(isRecord(patch.agents) ? patch.agents : {}),
         defaults: {
           ...(isRecord(getPath(patch, ["agents", "defaults"]))
             ? (getPath(patch, ["agents", "defaults"]) as Record<string, unknown>)
             : {}),
-          model: { primary: sharedModelRef },
+          model: { primary: desiredPrimaryRef },
           ...(hasModelMeta
             ? {}
             : {
                 models: {
-                  [sharedModelRef]: {
-                    alias: "Shared Ollama",
+                  [desiredPrimaryRef]: {
+                    alias: resolveModelAlias(desiredPrimaryRef),
                   },
                 },
               }),
@@ -462,6 +497,15 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
 
     if (Object.keys(patch).length > 0) {
       await patchWorkspaceConfig(workspaceId, patch);
+    }
+
+    try {
+      const { refreshWorkspaceAiContext } = await import("./workspace-ai-context.js");
+      await refreshWorkspaceAiContext(workspaceId, {
+        includeLiveCredentials: true,
+      });
+    } catch (err) {
+      console.warn("[pmos] workspace ai context refresh failed:", String(err));
     }
 
     await ensureStarterSessionDefaults({ agentId: starterAgentId, workspaceId });

@@ -398,7 +398,11 @@ function describeAssistantPolicySection(): string {
     "## Assistant Policy",
     "- Treat this snapshot and the live node catalog as authoritative.",
     "- Do not ask the user to paste keys that are already marked as present.",
+    "- Treat Basecamp/BCGPT connector state here as the default workspace memory baseline.",
+    "- Prefer workspace-scoped n8n credentials and connector bindings over global assumptions.",
     "- If required connector or key is missing, report exactly what is missing and where to configure it.",
+    "- When answering questions about Basecamp data, first verify connector+credential readiness from this snapshot.",
+    "- Use credential presence metadata only (never reveal secret values).",
     "- Prefer deterministic, executable workflows with explicit branching/merge nodes when complexity requires it.",
     "- Use workspace-scoped credentials and avoid cross-workspace assumptions.",
   ].join("\n");

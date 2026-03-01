@@ -2,7 +2,7 @@ import { CURRENT_SESSION_VERSION, SessionManager } from "@mariozechner/pi-coding
 import fs from "node:fs";
 import path from "node:path";
 import type { MsgContext } from "../../auto-reply/templating.js";
-import type { GatewayRequestContext, GatewayRequestHandlers } from "./types.js";
+import type { GatewayClient, GatewayRequestContext, GatewayRequestHandlers } from "./types.js";
 import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { resolveThinkingDefault } from "../../agents/model-selection.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
@@ -53,7 +53,7 @@ type TranscriptAppendResult = {
 type AppendMessageArg = Parameters<SessionManager["appendMessage"]>[0];
 
 async function loadChatConfigForClient(
-  client: GatewayRequestHandlers["chat.send"] extends (args: infer A) => void ? A["client"] : never,
+  client: GatewayClient | null,
 ): Promise<ReturnType<typeof loadConfig>> {
   let cfg = loadConfig();
   if (!client || isSuperAdmin(client)) {
@@ -234,7 +234,7 @@ function broadcastChatError(params: {
 function canAccessSession(
   sessionKey: string,
   cfg: ReturnType<typeof loadConfig>,
-  client: GatewayRequestHandlers["chat.send"] extends (args: infer A) => void ? A["client"] : never,
+  client: GatewayClient | null,
 ): boolean {
   if (!client || isSuperAdmin(client)) {
     return true;
@@ -247,6 +247,41 @@ function canAccessSession(
   );
 
   return workspaceAgentIds.has(target.agentId);
+}
+
+async function buildWorkspaceSystemPrompt(
+  client: GatewayClient | null,
+): Promise<string> {
+  const workspaceId =
+    typeof client?.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  if (!workspaceId) {
+    return "";
+  }
+
+  try {
+    const { getWorkspaceAiContextForPrompt } = await import("../workspace-ai-context.js");
+    const snapshot = await getWorkspaceAiContextForPrompt(workspaceId, {
+      ensureFresh: true,
+      includeLiveCredentials: true,
+      maxChars: 10_000,
+    });
+    const trimmed = snapshot.trim();
+    if (!trimmed) {
+      return "";
+    }
+    return [
+      "## PMOS Workspace Runtime Context",
+      `- Workspace ID: ${workspaceId}`,
+      "- This context is trusted runtime state generated from workspace config/connectors/credentials.",
+      "- Use this snapshot as default memory for Basecamp, BCGPT, n8n nodes, and credential availability.",
+      "- Never ask the user to re-enter a credential that is already marked present in this context.",
+      "- When required auth is missing, tell the user exactly which connector/key is missing and where to set it.",
+      "",
+      trimmed,
+    ].join("\n");
+  } catch {
+    return "";
+  }
 }
 
 export const chatHandlers: GatewayRequestHandlers = {
@@ -480,6 +515,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       cfg,
       overrideMs: p.timeoutMs,
     });
+    const workspaceSystemPrompt = await buildWorkspaceSystemPrompt(client);
     const now = Date.now();
     const clientRunId = p.idempotencyKey;
 
@@ -579,6 +615,7 @@ export const chatHandlers: GatewayRequestHandlers = {
         SenderName: clientInfo?.displayName,
         SenderUsername: clientInfo?.displayName,
         GatewayClientScopes: client?.connect?.scopes,
+        GroupSystemPrompt: workspaceSystemPrompt || undefined,
       };
 
       const agentId = resolveSessionAgentId({

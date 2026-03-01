@@ -60,7 +60,8 @@ const MODEL_CATALOG: Record<PmosModelProvider, ModelCatalogEntry[]> = {
     { id: "openai/gpt-4o", label: "GPT-4o via OpenRouter", tier: "paid" },
   ],
   kilo: [
-    { id: "kilo/z-ai/glm-5:free", label: "Kilo GLM-5 (Free)", tier: "free" },
+    { id: "kilo/minimax/minimax-m2.5:free", label: "Kilo MiniMax M2.5 (Free)", tier: "free" },
+    { id: "kilo/z-ai/glm-4:free", label: "Kilo GLM-4 (Free)", tier: "free" },
     { id: "kilo/openai/gpt-4o", label: "Kilo GPT-4o", tier: "paid" },
   ],
   moonshot: [{ id: "moonshotai/kimi-k2.5", label: "Kimi K2.5", tier: "paid" }],
