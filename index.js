@@ -352,16 +352,23 @@ async function resolveRequestContext(req, { apiKey: forcedApiKey, userKey: force
   if (userKey) {
     token = await getUserToken(userKey);
     if (!token?.access_token) {
+      console.log(`[auth] API key found but user_token missing/null for userKey=${userKey} — attempting auto-heal via api key lookup`);
       const keyForUser = await getApiKeyForUser(userKey);
       if (keyForUser) {
-        await getUserByApiKey(keyForUser, { touch: false });
+        await getUserByApiKey(keyForUser, { touch: false }); // triggers auto-heal in db layer
         token = await getUserToken(userKey);
+        if (token?.access_token) {
+          console.log(`[auth] Auto-heal succeeded for userKey=${userKey}`);
+        } else {
+          console.log(`[auth] Auto-heal failed — user_token still null for userKey=${userKey}. User must re-connect via /connect`);
+        }
       }
     }
     // Auto-refresh if access_token is expired and we have a refresh_token
     if (token?.refresh_token && token?.expires_in && token?.created_at) {
       const expiresAt = (token.created_at + token.expires_in) - 300; // 5-min buffer
       if (Math.floor(Date.now() / 1000) >= expiresAt) {
+        console.log(`[auth] Token near/past expiry for userKey=${userKey} — auto-refreshing`);
         try {
           token = await refreshUserAccessToken(userKey, token.refresh_token);
         } catch (e) {
@@ -373,6 +380,8 @@ async function resolveRequestContext(req, { apiKey: forcedApiKey, userKey: force
     if (sessionKey) {
       await bindSession(sessionKey, userKey);
     }
+  } else if (apiKey) {
+    console.log(`[auth] API key provided but no matching userKey found — key may not be registered`);
   }
 
   return {
@@ -4299,6 +4308,36 @@ app.get("/startbcgpt", async (req, res) => {
       error: e?.code || "SERVER_ERROR",
       message: e?.message || String(e),
     });
+  }
+});
+
+// Diagnostic endpoint: check auth state for the provided API key
+app.get("/debug/auth", async (req, res) => {
+  try {
+    const ctx = await resolveRequestContext(req);
+    if (!ctx.apiKey) {
+      return res.status(401).json({ ok: false, error: "NO_API_KEY", message: "Provide x-bcgpt-api-key header or api_key query param" });
+    }
+    const connectUrl = `${originBase(req)}/connect`;
+    const hasToken = !!ctx.token?.access_token;
+    const hasRefreshToken = !!ctx.token?.refresh_token;
+    const expiresAt = (ctx.token?.created_at && ctx.token?.expires_in)
+      ? ctx.token.created_at + ctx.token.expires_in
+      : null;
+    const isExpired = expiresAt ? Math.floor(Date.now() / 1000) > expiresAt : null;
+    return res.json({
+      ok: true,
+      api_key_found: !!ctx.userKey,
+      user_key: ctx.userKey,
+      has_basecamp_token: hasToken,
+      has_refresh_token: hasRefreshToken,
+      token_expires_at: expiresAt,
+      token_is_expired: isExpired,
+      action_needed: !hasToken ? `Re-connect Basecamp at: ${connectUrl}` : (isExpired && !hasRefreshToken ? `Token expired, no refresh token — re-connect at: ${connectUrl}` : null),
+      connect_url: connectUrl,
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e?.code || "SERVER_ERROR", message: e?.message || String(e) });
   }
 });
 

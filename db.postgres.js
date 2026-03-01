@@ -821,22 +821,23 @@ export async function createApiKeyForUser(userKey, token = null) {
   if (existing) {
     if (token?.access_token) {
       await pool.query(
-        "UPDATE user_api_keys SET access_token = $1, token_type = $2 WHERE api_key = $3",
-        [token.access_token, token.token_type || "Bearer", existing]
+        "UPDATE user_api_keys SET access_token = $1, refresh_token = COALESCE($2, refresh_token), token_type = $3 WHERE api_key = $4",
+        [token.access_token, token.refresh_token || null, token.token_type || "Bearer", existing]
       );
     }
     return existing;
   }
 
   const accessToken = token?.access_token || null;
+  const refreshToken = token?.refresh_token || null;
   const tokenType = token?.token_type || "Bearer";
   const now = nowSec();
   for (let attempt = 0; attempt < 5; attempt++) {
     const apiKey = generateApiKey();
     try {
       await pool.query(
-        "INSERT INTO user_api_keys (api_key, user_key, access_token, token_type, created_at, last_used_at) VALUES ($1, $2, $3, $4, $5, $5)",
-        [apiKey, key, accessToken, tokenType, now]
+        "INSERT INTO user_api_keys (api_key, user_key, access_token, refresh_token, token_type, created_at, last_used_at) VALUES ($1, $2, $3, $4, $5, $6, $6)",
+        [apiKey, key, accessToken, refreshToken, tokenType, now]
       );
       return apiKey;
     } catch (e) {
@@ -863,10 +864,12 @@ export async function getUserByApiKey(apiKey, { touch = true } = {}) {
     await pool.query("UPDATE user_api_keys SET last_used_at = $1 WHERE api_key = $2", [nowSec(), key]);
   }
 
-  // Auto-heal: if user_token is missing but api_key has the token, restore it
+  // Auto-heal: if user_token is missing or stale but api_key has the token, restore/sync it
   if (row.access_token) {
-    const existing = await pool.query("SELECT user_key FROM user_token WHERE user_key = $1", [userKey]);
-    if (!existing.rows.length) {
+    const existing = await pool.query("SELECT user_key, access_token FROM user_token WHERE user_key = $1", [userKey]);
+    const needsInsert = !existing.rows.length;
+    const needsUpdate = !needsInsert && existing.rows[0]?.access_token !== row.access_token;
+    if (needsInsert || needsUpdate) {
       const now = nowSec();
       await pool.query(
         `INSERT INTO user_token (user_key, access_token, refresh_token, token_type, created_at, updated_at)

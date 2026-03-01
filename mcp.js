@@ -4765,7 +4765,7 @@ async function getTodoset(ctx, projectId, todosetId) {
 // ---------- MCP handler ----------
 export async function handleMCP(reqBody, ctx) {
   const { id, method, params } = reqBody || {};
-  const { TOKEN, accountId, startStatus, authAccounts, userKey } = ctx || {};
+  const { TOKEN, accountId, startStatus, authAccounts, userKey, apiKey } = ctx || {};
 
   try {
     if (method === "initialize") {
@@ -4899,10 +4899,11 @@ export async function handleMCP(reqBody, ctx) {
     // whoami
     if (name === "whoami") {
       if (!TOKEN?.access_token) {
+        const connectUrl = `${process.env.APP_BASE_URL || "https://bcgpt.wickedlab.io"}/connect`;
         return fail(id, {
           code: "NOT_AUTHENTICATED",
-          message:
-            "API key authenticated, but no linked Basecamp OAuth token is available. Run /startbcgpt to connect Basecamp.",
+          message: `API key authenticated, but no linked Basecamp OAuth token found. Please re-connect your Basecamp account at: ${connectUrl}`,
+          connect_url: connectUrl,
         });
       }
       return ok(id, { accountId, user: null, accounts: authAccounts || [] });
@@ -4953,10 +4954,11 @@ export async function handleMCP(reqBody, ctx) {
 
     // Everything else requires auth
     if (!TOKEN?.access_token) {
+      const connectUrl = `${process.env.APP_BASE_URL || "https://bcgpt.wickedlab.io"}/connect`;
       return fail(id, {
         code: "NOT_AUTHENTICATED",
-        message:
-          "API key authenticated, but this tool requires a linked Basecamp OAuth token. Run /startbcgpt to connect Basecamp.",
+        message: `API key authenticated, but Basecamp OAuth token is missing. Please re-connect your Basecamp account at: ${connectUrl}`,
+        connect_url: connectUrl,
       });
     }
 

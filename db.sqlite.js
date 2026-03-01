@@ -461,6 +461,18 @@ export function setUserToken(token, userKey) {
       created_at = excluded.created_at
   `);
   stmt.run(key, token.access_token, token.refresh_token || null, token.token_type || "Bearer", token.expires_in, now, now);
+
+  // Also sync to user_api_keys so the token is never lost (mirror Postgres behaviour)
+  try {
+    // Ensure columns exist first
+    try { db.exec("ALTER TABLE user_api_keys ADD COLUMN access_token TEXT"); } catch { /* already exists */ }
+    try { db.exec("ALTER TABLE user_api_keys ADD COLUMN refresh_token TEXT"); } catch { /* already exists */ }
+    try { db.exec("ALTER TABLE user_api_keys ADD COLUMN token_type TEXT DEFAULT 'Bearer'"); } catch { /* already exists */ }
+    db.prepare(
+      "UPDATE user_api_keys SET access_token = ?, refresh_token = COALESCE(?, refresh_token), token_type = ? WHERE user_key = ?"
+    ).run(token.access_token, token.refresh_token || null, token.token_type || "Bearer", key);
+  } catch { /* ignore — api key may not exist yet */ }
+
   console.log(`[DB] User token stored/updated`);
 }
 
@@ -581,22 +593,41 @@ export function getApiKeyForUser(userKey) {
   return row?.api_key || null;
 }
 
-export function createApiKeyForUser(userKey) {
+export function createApiKeyForUser(userKey, token = null) {
   const key = normalizeUserKey(userKey);
   if (!key) return null;
   const existing = getApiKeyForUser(key);
-  if (existing) return existing;
+  if (existing) {
+    if (token?.access_token) {
+      try {
+        try { db.exec("ALTER TABLE user_api_keys ADD COLUMN access_token TEXT"); } catch { /* exists */ }
+        try { db.exec("ALTER TABLE user_api_keys ADD COLUMN refresh_token TEXT"); } catch { /* exists */ }
+        try { db.exec("ALTER TABLE user_api_keys ADD COLUMN token_type TEXT DEFAULT 'Bearer'"); } catch { /* exists */ }
+        db.prepare(
+          "UPDATE user_api_keys SET access_token = ?, refresh_token = COALESCE(?, refresh_token), token_type = ? WHERE api_key = ?"
+        ).run(token.access_token, token.refresh_token || null, token.token_type || "Bearer", existing);
+      } catch { /* ignore */ }
+    }
+    return existing;
+  }
+
+  try { db.exec("ALTER TABLE user_api_keys ADD COLUMN access_token TEXT"); } catch { /* exists */ }
+  try { db.exec("ALTER TABLE user_api_keys ADD COLUMN refresh_token TEXT"); } catch { /* exists */ }
+  try { db.exec("ALTER TABLE user_api_keys ADD COLUMN token_type TEXT DEFAULT 'Bearer'"); } catch { /* exists */ }
 
   const now = Math.floor(Date.now() / 1000);
+  const accessToken = token?.access_token || null;
+  const refreshToken = token?.refresh_token || null;
+  const tokenType = token?.token_type || "Bearer";
   const stmt = db.prepare(`
-    INSERT INTO user_api_keys (api_key, user_key, created_at, last_used_at)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO user_api_keys (api_key, user_key, access_token, refresh_token, token_type, created_at, last_used_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (let attempt = 0; attempt < 5; attempt++) {
     const apiKey = generateApiKey();
     try {
-      stmt.run(apiKey, key, now, now);
+      stmt.run(apiKey, key, accessToken, refreshToken, tokenType, now, now);
       return apiKey;
     } catch (e) {
       if (String(e?.message || e).includes("UNIQUE")) continue;
@@ -610,17 +641,45 @@ export function createApiKeyForUser(userKey) {
 export function getUserByApiKey(apiKey, { touch = true } = {}) {
   const key = normalizeApiKey(apiKey);
   if (!key) return null;
-  const stmt = db.prepare("SELECT user_key FROM user_api_keys WHERE api_key = ?");
+  // Ensure token columns exist (lazy migration)
+  try { db.exec("ALTER TABLE user_api_keys ADD COLUMN access_token TEXT"); } catch { /* exists */ }
+  try { db.exec("ALTER TABLE user_api_keys ADD COLUMN refresh_token TEXT"); } catch { /* exists */ }
+  try { db.exec("ALTER TABLE user_api_keys ADD COLUMN token_type TEXT DEFAULT 'Bearer'"); } catch { /* exists */ }
+  const stmt = db.prepare("SELECT user_key, access_token, refresh_token, token_type FROM user_api_keys WHERE api_key = ?");
   const row = stmt.get(key);
   if (!row?.user_key) return null;
+  const userKey = row.user_key;
   if (touch) {
     const touchStmt = db.prepare("UPDATE user_api_keys SET last_used_at = ? WHERE api_key = ?");
     touchStmt.run(Math.floor(Date.now() / 1000), key);
   }
-  return row.user_key;
+
+  // Auto-heal: if user_token is missing or stale but api_key has the token, restore/sync it
+  if (row.access_token) {
+    try {
+      try { db.exec("ALTER TABLE user_token ADD COLUMN refresh_token TEXT"); } catch { /* exists */ }
+      const existing = db.prepare("SELECT user_key, access_token FROM user_token WHERE user_key = ?").get(userKey);
+      const needsInsert = !existing;
+      const needsUpdate = !needsInsert && existing.access_token !== row.access_token;
+      if (needsInsert || needsUpdate) {
+        const now = Math.floor(Date.now() / 1000);
+        db.prepare(`
+          INSERT INTO user_token (user_key, access_token, refresh_token, token_type, expires_in, created_at, updated_at)
+          VALUES (?, ?, ?, ?, NULL, ?, ?)
+          ON CONFLICT(user_key) DO UPDATE SET
+            access_token = excluded.access_token,
+            refresh_token = COALESCE(excluded.refresh_token, refresh_token),
+            token_type = excluded.token_type,
+            updated_at = excluded.updated_at
+        `).run(userKey, row.access_token, row.refresh_token || null, row.token_type || "Bearer", now, now);
+      }
+    } catch { /* ignore auto-heal errors */ }
+  }
+
+  return userKey;
 }
 
-export function bindApiKeyToUser(apiKey, userKey) {
+export function bindApiKeyToUser(apiKey, userKey, token = null) {
   const key = normalizeApiKey(apiKey);
   const ukey = normalizeUserKey(userKey);
   if (!key || !ukey) return null;
@@ -630,15 +689,25 @@ export function bindApiKeyToUser(apiKey, userKey) {
     err.code = "API_KEY_IN_USE";
     throw err;
   }
+  // Ensure token columns exist
+  try { db.exec("ALTER TABLE user_api_keys ADD COLUMN access_token TEXT"); } catch { /* exists */ }
+  try { db.exec("ALTER TABLE user_api_keys ADD COLUMN refresh_token TEXT"); } catch { /* exists */ }
+  try { db.exec("ALTER TABLE user_api_keys ADD COLUMN token_type TEXT DEFAULT 'Bearer'"); } catch { /* exists */ }
   const now = Math.floor(Date.now() / 1000);
+  const accessToken = token?.access_token || null;
+  const refreshToken = token?.refresh_token || null;
+  const tokenType = token?.token_type || "Bearer";
   const stmt = db.prepare(`
-    INSERT INTO user_api_keys (api_key, user_key, created_at, last_used_at)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO user_api_keys (api_key, user_key, access_token, refresh_token, token_type, created_at, last_used_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(api_key) DO UPDATE SET
       user_key = excluded.user_key,
+      access_token = COALESCE(excluded.access_token, access_token),
+      refresh_token = COALESCE(excluded.refresh_token, refresh_token),
+      token_type = COALESCE(excluded.token_type, token_type),
       last_used_at = excluded.last_used_at
   `);
-  stmt.run(key, ukey, now, now);
+  stmt.run(key, ukey, accessToken, refreshToken, tokenType, now, now);
   return key;
 }
 
