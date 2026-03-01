@@ -123,6 +123,17 @@ export function toSanitizedMarkdownHtml(markdown: string): string {
   return sanitized;
 }
 
+/**
+ * Lightweight renderer for in-progress streaming text.
+ * Avoids the expensive marked.parse() + DOMPurify.sanitize() path.
+ * Full markdown is rendered once streaming completes.
+ */
+export function toStreamingHtml(text: string): string {
+  const input = text.trim();
+  if (!input) return "";
+  return escapeHtml(input).replace(/\n/g, "<br>");
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")

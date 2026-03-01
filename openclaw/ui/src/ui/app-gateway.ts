@@ -33,6 +33,11 @@ import {
 import { loadSessions } from "./controllers/sessions.ts";
 import { GatewayBrowserClient } from "./gateway.ts";
 
+// Per-host rAF coalescing state for chat delta events.
+// Batches rapid-fire deltas so at most one Lit re-render fires per animation frame.
+const pendingChatDelta = new WeakMap<object, ChatEventPayload>();
+const chatDeltaRafId = new WeakMap<object, number>();
+
 type GatewayHost = {
   settings: UiSettings;
   password: string;
@@ -308,6 +313,38 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
         payload.sessionKey,
       );
     }
+
+    // For streaming deltas, coalesce via rAF: only one Lit re-render per animation frame.
+    if (payload?.state === "delta") {
+      pendingChatDelta.set(host, payload);
+      if (!chatDeltaRafId.has(host)) {
+        chatDeltaRafId.set(
+          host,
+          requestAnimationFrame(() => {
+            chatDeltaRafId.delete(host);
+            const pending = pendingChatDelta.get(host);
+            if (pending) {
+              pendingChatDelta.delete(host);
+              handleChatEvent(host as unknown as OpenClawApp, pending);
+            }
+          }),
+        );
+      }
+      return;
+    }
+
+    // For final/error/aborted: cancel any pending delta rAF and apply immediately.
+    const pendingRaf = chatDeltaRafId.get(host);
+    if (pendingRaf !== undefined) {
+      cancelAnimationFrame(pendingRaf);
+      chatDeltaRafId.delete(host);
+      const pending = pendingChatDelta.get(host);
+      if (pending) {
+        pendingChatDelta.delete(host);
+        handleChatEvent(host as unknown as OpenClawApp, pending);
+      }
+    }
+
     const state = handleChatEvent(host as unknown as OpenClawApp, payload);
     const foreignFinalWhileBusy =
       state === "final" &&
