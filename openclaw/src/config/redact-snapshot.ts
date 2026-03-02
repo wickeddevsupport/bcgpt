@@ -153,9 +153,12 @@ export function restoreRedactedValues(incoming: unknown, original: unknown): unk
   for (const [key, value] of Object.entries(incoming as Record<string, unknown>)) {
     if (isSensitiveKey(key) && value === REDACTED_SENTINEL) {
       if (!(key in orig)) {
-        throw new Error(
-          `config write rejected: "${key}" is redacted; set an explicit value instead of ${REDACTED_SENTINEL}`,
-        );
+        // The redacted value doesn't exist in the workspace config (it may exist
+        // only in global config). Skip it rather than throwing — treating the
+        // sentinel as "keep unchanged / don't write" prevents global-only
+        // credentials (e.g. NVIDIA_API_KEY set in openclaw.json) from blocking
+        // workspace config saves.
+        continue;
       }
       result[key] = orig[key];
     } else if (typeof value === "object" && value !== null) {
