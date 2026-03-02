@@ -90,8 +90,13 @@ COPY package.json nx.json ./
 # Install local Nx deps and skip root scripts to keep image builds fast and reliable.
 RUN npm install --ignore-scripts --no-audit --no-fund --no-package-lock
 
-# OpenClaw workspace (includes ui/, packages/, extensions/)
-COPY openclaw/ ./openclaw/
+# Clone OpenClaw from upstream on every build so we always run the latest version.
+# Override OPENCLAW_REF to pin a specific tag or commit, e.g. v2026.2.9 or a commit SHA.
+ARG OPENCLAW_REPO=https://github.com/openclaw/openclaw.git
+ARG OPENCLAW_REF=main
+RUN apt-get update && apt-get install -y --no-install-recommends git && \
+    rm -rf /var/lib/apt/lists/* && \
+    git clone --depth 1 --branch "${OPENCLAW_REF}" "${OPENCLAW_REPO}" openclaw
 
 # Install OpenClaw workspace deps (includes ui)
 RUN corepack pnpm --dir openclaw install --frozen-lockfile
