@@ -55,6 +55,16 @@ export function parseList(input: string): string[] {
     .filter((v) => v.length > 0);
 }
 
+const THINKING_TAG_MARKERS_RE = /<\s*\/?(?:think(?:ing)?|thought|antthinking)\b[^<>]*>/gi;
+
 export function stripThinkingTags(value: string): string {
-  return stripReasoningTagsFromText(value, { mode: "preserve", trim: "start" });
+  const result = stripReasoningTagsFromText(value, { mode: "preserve", trim: "start" });
+  // Fallback: if stripping left nothing but the original had content, the model
+  // wrapped its entire response inside <think>…</think> (common for reasoning
+  // models like giga-potato). Extract and return the content inside the tags.
+  if (!result.trim() && value.trim()) {
+    const thinkContent = value.replace(THINKING_TAG_MARKERS_RE, "").trim();
+    if (thinkContent) return thinkContent;
+  }
+  return result;
 }
