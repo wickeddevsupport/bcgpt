@@ -310,10 +310,12 @@ export class OpenClawApp extends LitElement {
   @state() pmosOpsSavingManualKey = false;
 
   // PMOS model auth quick setup (admin UX)
-  @state() pmosModelProvider: PmosModelProvider = "google";
-  @state() pmosModelId = "gemini-3-flash-preview";
-  @state() pmosModelAlias = "gemini";
+  @state() pmosModelProvider: PmosModelProvider = "kilo";
+  @state() pmosModelId = "minimax/minimax-m2.5:free";
+  @state() pmosModelAlias = "";
   @state() pmosModelApiKeyDraft = "";
+  @state() pmosModelBaseUrl = "";
+  @state() pmosModelApiType = "";
   @state() pmosModelSaving = false;
   @state() pmosModelSavedOk = false;
   @state() pmosModelError: string | null = null;
@@ -1035,6 +1037,11 @@ export class OpenClawApp extends LitElement {
     if (!modelId) {
       return;
     }
+    // When provider changes through the ref input, auto-fill URL/API type if empty or
+    // if the current value matches the previous provider's default.
+    if (this.pmosModelProvider !== provider) {
+      setPmosModelProvider(this, provider as PmosModelProvider);
+    }
     this.pmosModelProvider = provider as PmosModelProvider;
     this.pmosModelId = modelId;
   }
@@ -1046,14 +1053,13 @@ export class OpenClawApp extends LitElement {
         modelRef: ref,
         alias: this.pmosModelAlias,
         apiKey: this.pmosModelApiKeyDraft,
+        baseUrl: this.pmosModelBaseUrl,
+        apiType: this.pmosModelApiType,
         activate: true,
       });
     } else {
       await savePmosModelConfig(this);
     }
-    // Note: loadPmosModelWorkspaceState is already called inside savePmosModelConfig /
-    // upsertPmosModelFromRef. Calling it again here would clear pmosModelError set by the
-    // save functions, masking failures and showing a false "Saved OK" to the user.
     this.syncPmosModelDraftRef();
     if (!this.pmosModelError) {
       this.pmosModelSavedOk = true;
@@ -1071,10 +1077,10 @@ export class OpenClawApp extends LitElement {
       modelRef: ref,
       alias: this.pmosModelAlias,
       apiKey: this.pmosModelApiKeyDraft,
+      baseUrl: this.pmosModelBaseUrl,
+      apiType: this.pmosModelApiType,
       activate: false,
     });
-    // Note: loadPmosModelWorkspaceState is already called inside upsertPmosModelFromRef.
-    // Calling it again here would clear pmosModelError, masking save failures.
     this.syncPmosModelDraftRef();
     if (!this.pmosModelError) {
       this.pmosModelSavedOk = true;

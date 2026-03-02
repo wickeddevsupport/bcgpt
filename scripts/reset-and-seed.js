@@ -43,6 +43,15 @@ function wsConfigFor(wsId) {
               contextWindow: 200000,
               maxTokens: 64000,
             },
+            {
+              id: 'minimax/minimax-m2.5:free',
+              name: 'MiniMax M2.5 (Free via Kilo)',
+              reasoning: false,
+              input: ['text'],
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+              contextWindow: 1000000,
+              maxTokens: 64000,
+            },
           ],
         },
       },
@@ -59,6 +68,7 @@ function wsConfigFor(wsId) {
         },
         models: {
           'kilo/auto-free': { alias: 'Kilo (Auto Free)' },
+          'kilo/minimax/minimax-m2.5:free': { alias: 'MiniMax M2.5 (Free)' },
         },
       },
       list: [

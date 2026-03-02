@@ -38,22 +38,30 @@ export type ConfigState = {
 };
 
 function useWorkspaceScopedConfig(state: Pick<ConfigState, "pmosAuthUser">): boolean {
-  const role = state.pmosAuthUser?.role ?? null;
-  return role !== null && role !== "super_admin";
+  // All authenticated users (including super_admin) use workspace-scoped config so that
+  // the Config panel, Model panel, and Agent panel all read/write the SAME config source.
+  // Super-admin–only global settings will be routed to a dedicated admin page later.
+  return state.pmosAuthUser != null;
 }
 
 function buildWorkspaceScopedSnapshot(res: {
   workspaceId?: string;
   workspaceConfig?: unknown;
+  effectiveConfig?: unknown;
 }): ConfigSnapshot {
-  const config =
-    res.workspaceConfig && typeof res.workspaceConfig === "object" && !Array.isArray(res.workspaceConfig)
-      ? (res.workspaceConfig as Record<string, unknown>)
-      : {};
+  // Show the effective (merged global+workspace) config for display so the form
+  // is pre-populated with inherited global settings. Saves still go to the
+  // workspace overlay via pmos.config.workspace.set.
+  const displayConfig =
+    res.effectiveConfig && typeof res.effectiveConfig === "object" && !Array.isArray(res.effectiveConfig)
+      ? (res.effectiveConfig as Record<string, unknown>)
+      : res.workspaceConfig && typeof res.workspaceConfig === "object" && !Array.isArray(res.workspaceConfig)
+        ? (res.workspaceConfig as Record<string, unknown>)
+        : {};
   return {
     hash: `workspace:${typeof res.workspaceId === "string" ? res.workspaceId : "current"}`,
-    config,
-    raw: JSON.stringify(config, null, 2),
+    config: displayConfig,
+    raw: JSON.stringify(displayConfig, null, 2),
     valid: true,
     issues: [],
   };
@@ -78,6 +86,7 @@ export async function loadConfig(state: ConfigState) {
       const res = await state.client.request<{
         workspaceId?: string;
         workspaceConfig?: unknown;
+        effectiveConfig?: unknown;
       }>("pmos.config.workspace.get", {});
       applyConfigSnapshot(state, buildWorkspaceScopedSnapshot(res));
     } else {

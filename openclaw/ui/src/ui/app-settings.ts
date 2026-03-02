@@ -254,6 +254,9 @@ export async function refreshActiveTab(host: SettingsHost) {
   if (host.tab === "agents") {
     await loadAgents(host as unknown as OpenClawApp);
     await loadConfig(host as unknown as OpenClawApp);
+    // Ensure availableModels is populated so the agent model selector works even
+    // when the user navigates directly to the agents tab without visiting models tab.
+    await (host as unknown as OpenClawApp).handlePmosIntegrationsLoad();
     const agentIds = host.agentsList?.agents?.map((entry) => entry.id) ?? [];
     if (agentIds.length > 0) {
       void loadAgentIdentities(host as unknown as OpenClawApp, agentIds);

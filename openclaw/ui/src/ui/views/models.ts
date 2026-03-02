@@ -5,6 +5,10 @@ export type ModelsProps = {
   connected: boolean;
   modelAlias: string;
   modelApiKeyDraft: string;
+  /** API base URL for the selected provider (e.g. https://api.kilo.ai/v1) */
+  modelBaseUrl: string;
+  /** API type for the provider (e.g. openai-completions, anthropic-messages) */
+  modelApiType: string;
   modelSaving: boolean;
   modelConfigured: boolean;
   modelError: string | null;
@@ -18,6 +22,8 @@ export type ModelsProps = {
   onModelRefDraftChange: (next: string) => void;
   onModelAliasChange: (next: string) => void;
   onModelApiKeyDraftChange: (next: string) => void;
+  onModelBaseUrlChange: (next: string) => void;
+  onModelApiTypeChange: (next: string) => void;
   onModelSave: () => void;
   onModelSaveWithoutActivate: () => void;
   onModelClearKey: () => void;
@@ -215,6 +221,8 @@ export function renderModels(props: ModelsProps) {
       ref: draftRef || "provider/model-id",
       alias: props.modelAlias || "",
       apiKey: props.modelApiKeyDraft || "",
+      baseUrl: props.modelBaseUrl || "",
+      apiType: props.modelApiType || "",
       activate: true,
     },
     null,
@@ -296,6 +304,34 @@ export function renderModels(props: ModelsProps) {
               ?disabled=${!props.connected || props.modelSaving}
             />
           </label>
+          <label class="field">
+            <span>API Base URL</span>
+            <input
+              type="url"
+              .value=${props.modelBaseUrl}
+              @input=${(e: Event) =>
+                props.onModelBaseUrlChange((e.target as HTMLInputElement).value)}
+              placeholder="e.g. https://api.kilo.ai/v1 (auto-filled for known providers)"
+              ?disabled=${!props.connected || props.modelSaving}
+            />
+          </label>
+          <label class="field">
+            <span>API Type</span>
+            <input
+              list="pmos-model-api-type-options"
+              .value=${props.modelApiType}
+              @input=${(e: Event) =>
+                props.onModelApiTypeChange((e.target as HTMLInputElement).value)}
+              placeholder="e.g. openai-completions (auto-filled for known providers)"
+              ?disabled=${!props.connected || props.modelSaving}
+            />
+            <datalist id="pmos-model-api-type-options">
+              <option value="openai-completions"></option>
+              <option value="openai-responses"></option>
+              <option value="anthropic-messages"></option>
+              <option value="google-generative-ai"></option>
+            </datalist>
+          </label>
           <label class="field full">
             <span>Model reference preview</span>
             <input class="mono" .value=${draftRef} readonly placeholder="provider/model-id" ?disabled=${true} />
@@ -369,6 +405,8 @@ export function renderModels(props: ModelsProps) {
               props.onModelRefDraftChange(nextRef);
               props.onModelAliasChange(typeof parsed.alias === "string" ? parsed.alias : "");
               props.onModelApiKeyDraftChange(typeof parsed.apiKey === "string" ? parsed.apiKey : "");
+              props.onModelBaseUrlChange(typeof parsed.baseUrl === "string" ? parsed.baseUrl : "");
+              props.onModelApiTypeChange(typeof parsed.apiType === "string" ? parsed.apiType : "");
             }}
           >
             Apply JSON To Form

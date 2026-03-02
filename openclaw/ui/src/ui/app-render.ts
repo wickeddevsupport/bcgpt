@@ -970,6 +970,8 @@ export function renderApp(state: AppViewState) {
                 connected: state.connected,
                 modelAlias: state.pmosModelAlias,
                 modelApiKeyDraft: state.pmosModelApiKeyDraft,
+                modelBaseUrl: state.pmosModelBaseUrl,
+                modelApiType: state.pmosModelApiType,
                 modelSaving: state.pmosModelSaving,
                 modelConfigured: state.pmosModelConfigured,
                 modelError: state.pmosModelError,
@@ -987,6 +989,14 @@ export function renderApp(state: AppViewState) {
                 },
                 onModelApiKeyDraftChange: (next) => {
                   state.pmosModelApiKeyDraft = next;
+                  state.pmosModelError = null;
+                },
+                onModelBaseUrlChange: (next) => {
+                  state.pmosModelBaseUrl = next;
+                  state.pmosModelError = null;
+                },
+                onModelApiTypeChange: (next) => {
+                  state.pmosModelApiType = next;
                   state.pmosModelError = null;
                 },
                 onModelSave: () => state.handlePmosModelSave(),

@@ -47,7 +47,7 @@ export const PMOS_MODEL_PROVIDER_OPTIONS: Array<{
   { value: "anthropic", label: "Anthropic", defaultModelId: "claude-opus-4-6" },
   { value: "zai", label: "GLM (Z.AI)", defaultModelId: "glm-4.7" },
   { value: "openrouter", label: "OpenRouter", defaultModelId: "google/gemini-2.0-flash:free" },
-  { value: "kilo", label: "Kilo", defaultModelId: "kilo/minimax/minimax-m2.5:free" },
+  { value: "kilo", label: "Kilo (Free)", defaultModelId: "minimax/minimax-m2.5:free" },
   { value: "moonshot", label: "Kimi (Moonshot)", defaultModelId: "moonshotai/kimi-k2.5" },
   { value: "nvidia", label: "NVIDIA NIM", defaultModelId: "minimaxai/minimax-m2.1" },
   { value: "custom", label: "Custom (enter manually)", defaultModelId: "" },
@@ -70,6 +70,10 @@ export type PmosModelAuthState = {
   pmosModelId: string;
   pmosModelAlias: string;
   pmosModelApiKeyDraft: string;
+  /** API base URL for the selected provider (e.g. https://api.kilo.ai/v1). Written to models.providers.{p}.baseUrl */
+  pmosModelBaseUrl: string;
+  /** API type override for the provider (e.g. openai-completions, anthropic-messages). Written to models.providers.{p}.api */
+  pmosModelApiType: string;
   pmosModelSaving: boolean;
   pmosModelError: string | null;
   pmosModelConfigured: boolean;
@@ -473,6 +477,49 @@ function clearProviderApiKey(config: Record<string, unknown>, provider: string):
   return true;
 }
 
+/** Known API base URLs for providers that require explicit configuration. */
+const PROVIDER_DEFAULT_BASE_URLS: Record<string, string> = {
+  kilo: "https://api.kilo.ai/api/gateway",
+  openrouter: "https://openrouter.ai/api/v1",
+  moonshot: "https://api.moonshot.cn/v1",
+  nvidia: "https://integrate.api.nvidia.com/v1",
+  zai: "https://open.bigmodel.cn/api/paas/v4",
+};
+
+/** Default API type for each provider (determines request format). */
+const PROVIDER_DEFAULT_API_TYPES: Record<string, string> = {
+  kilo: "openai-completions",
+  openrouter: "openai-completions",
+  moonshot: "openai-completions",
+  nvidia: "openai-completions",
+  zai: "openai-completions",
+  openai: "openai-completions",
+  anthropic: "anthropic-messages",
+  google: "google-generative-ai",
+};
+
+function setProviderBaseUrl(
+  config: Record<string, unknown>,
+  provider: string,
+  baseUrl: string,
+): void {
+  if (!baseUrl.trim()) return;
+  const providerKey = resolveProviderConfigKey(config, provider) ?? provider.trim().toLowerCase();
+  if (!providerKey) return;
+  setPath(config, ["models", "providers", providerKey, "baseUrl"], baseUrl.trim());
+}
+
+function setProviderApiType(
+  config: Record<string, unknown>,
+  provider: string,
+  apiType: string,
+): void {
+  if (!apiType.trim()) return;
+  const providerKey = resolveProviderConfigKey(config, provider) ?? provider.trim().toLowerCase();
+  if (!providerKey) return;
+  setPath(config, ["models", "providers", providerKey, "api"], apiType.trim());
+}
+
 function findMutableAgentEntry(
   config: Record<string, unknown>,
   agentIdRaw: string,
@@ -504,10 +551,32 @@ async function updateAgentModelAssignmentViaConfig(
     return;
   }
   const nextConfig = await readWorkspaceConfigOverlay(state);
-  const agentEntry = findMutableAgentEntry(nextConfig, params.agentId);
+  let agentEntry = findMutableAgentEntry(nextConfig, params.agentId);
+
   if (!agentEntry) {
-    throw new Error(`Agent "${params.agentId}" not found in workspace config.`);
+    // Agent may be defined in the global config (effective config). Create a minimal
+    // workspace overlay entry for it so the model assignment can be persisted.
+    const effectiveConfig = isRecord(state.pmosEffectiveConfig) ? state.pmosEffectiveConfig : {};
+    const globalAgentEntry = findMutableAgentEntry(effectiveConfig, params.agentId);
+    if (!globalAgentEntry) {
+      throw new Error(`Agent "${params.agentId}" not found in config.`);
+    }
+
+    // Mirror the agent id (and optionally key identity fields) into the workspace overlay.
+    const agentId = params.agentId.trim();
+    const list = getPath(nextConfig, ["agents", "list"]);
+    const nextList = Array.isArray(list) ? [...list] : [];
+    const stub: Record<string, unknown> = { id: agentId };
+    nextList.push(stub);
+    setPath(nextConfig, ["agents", "list"], nextList);
+
+    // Re-resolve the mutable entry that we just pushed.
+    agentEntry = findMutableAgentEntry(nextConfig, agentId);
+    if (!agentEntry) {
+      throw new Error(`Failed to create workspace override for agent "${agentId}".`);
+    }
   }
+
   if (params.modelRef) {
     agentEntry.model = params.modelRef;
   } else {
@@ -521,6 +590,8 @@ export function hydratePmosModelDraftFromConfig(state: PmosModelAuthState) {
   state.pmosModelProvider = normalizePmosProvider(state.pmosModelProvider) || "custom";
   state.pmosModelId = state.pmosModelId.trim() || getDefaultModelIdForProvider(state.pmosModelProvider);
   state.pmosModelAlias = state.pmosModelAlias ?? "";
+  state.pmosModelBaseUrl = state.pmosModelBaseUrl ?? "";
+  state.pmosModelApiType = state.pmosModelApiType ?? "";
   const configuredProviders = state.pmosByokProviders ?? [];
   state.pmosModelConfigured = configuredProviders.includes(state.pmosModelProvider);
 }
@@ -530,13 +601,24 @@ export function setPmosModelProvider(state: PmosModelAuthState, provider: PmosMo
   if (!normalized || state.pmosModelProvider === normalized) {
     return;
   }
-  const previousDefault = getDefaultModelIdForProvider(state.pmosModelProvider);
+  const previousProvider = state.pmosModelProvider;
+  const previousDefault = getDefaultModelIdForProvider(previousProvider);
   state.pmosModelProvider = normalized;
   if (!state.pmosModelId.trim() || (previousDefault && state.pmosModelId === previousDefault)) {
     const nextDefault = getDefaultModelIdForProvider(normalized);
     if (nextDefault) {
       state.pmosModelId = nextDefault;
     }
+  }
+  // Auto-populate base URL and API type for well-known providers when the field is
+  // empty or was previously auto-filled (matches the old provider's default).
+  const prevBaseUrl = PROVIDER_DEFAULT_BASE_URLS[previousProvider] ?? "";
+  if (!state.pmosModelBaseUrl.trim() || state.pmosModelBaseUrl === prevBaseUrl) {
+    state.pmosModelBaseUrl = PROVIDER_DEFAULT_BASE_URLS[normalized] ?? "";
+  }
+  const prevApiType = PROVIDER_DEFAULT_API_TYPES[previousProvider] ?? "";
+  if (!state.pmosModelApiType.trim() || state.pmosModelApiType === prevApiType) {
+    state.pmosModelApiType = PROVIDER_DEFAULT_API_TYPES[normalized] ?? "";
   }
   state.pmosModelError = null;
   const configuredProviders = state.pmosByokProviders ?? [];
@@ -556,6 +638,14 @@ function hydrateFromEffectiveConfig(state: PmosModelAuthState, cfg: unknown) {
   const modelRef = `${state.pmosModelProvider}/${state.pmosModelId}`;
   const alias = asNonEmptyString(getPath(cfg, ["agents", "defaults", "models", modelRef, "alias"])) ?? "";
   state.pmosModelAlias = alias;
+
+  // Hydrate provider-level config (baseUrl, api type) so the form reflects current state.
+  const providerKey = normalizePmosProvider(state.pmosModelProvider);
+  const providerCfg = getPath(cfg, ["models", "providers", providerKey]);
+  if (isRecord(providerCfg)) {
+    state.pmosModelBaseUrl = asNonEmptyString(providerCfg.baseUrl) ?? state.pmosModelBaseUrl ?? "";
+    state.pmosModelApiType = asNonEmptyString(providerCfg.api) ?? state.pmosModelApiType ?? "";
+  }
 }
 
 export async function loadPmosModelWorkspaceState(state: PmosModelAuthState) {
@@ -579,11 +669,15 @@ export async function loadPmosModelWorkspaceState(state: PmosModelAuthState) {
     hydrateFromEffectiveConfig(state, effectiveConfig);
 
     const workspaceProviders = listConfiguredProvidersFromConfig(workspaceConfig);
+    // Also count providers that have an API key in effective config (includes global config).
+    // This ensures that models configured by superadmin via the Config panel are treated as
+    // "configured" in the model panel, keeping both panels in sync.
+    const effectiveConfiguredProviders = listConfiguredProvidersFromConfig(effectiveConfig);
     const sharedProviders = listSharedProvidersFromEffectiveConfig(effectiveConfig);
     const availableProviders = Array.from(
-      new Set([...workspaceProviders, ...sharedProviders]),
+      new Set([...workspaceProviders, ...effectiveConfiguredProviders, ...sharedProviders]),
     );
-    state.pmosByokProviders = workspaceProviders;
+    state.pmosByokProviders = Array.from(new Set([...workspaceProviders, ...effectiveConfiguredProviders]));
     state.pmosModelConfigured = availableProviders.includes(state.pmosModelProvider);
 
     const visibleProviders = new Set(availableProviders);
@@ -722,10 +816,17 @@ export async function savePmosModelConfig(state: PmosModelAuthState) {
     setModelAlias(nextConfig, modelRef, alias);
 
     if (apiKeyDraft && provider !== "custom") {
-      const applied = setProviderApiKey(nextConfig, provider, apiKeyDraft);
-      if (!applied) {
-        throw new Error(`Provider "${provider}" is missing from config.models.providers.`);
-      }
+      setProviderApiKey(nextConfig, provider, apiKeyDraft);
+    }
+
+    // Auto-apply base URL and API type for well-known providers that require them.
+    const baseUrl = (state.pmosModelBaseUrl ?? "").trim() || PROVIDER_DEFAULT_BASE_URLS[provider] || "";
+    const apiType = (state.pmosModelApiType ?? "").trim() || PROVIDER_DEFAULT_API_TYPES[provider] || "";
+    if (baseUrl && provider !== "custom") {
+      setProviderBaseUrl(nextConfig, provider, baseUrl);
+    }
+    if (apiType && provider !== "custom") {
+      setProviderApiType(nextConfig, provider, apiType);
     }
 
     await writeWorkspaceConfig(state, nextConfig);
@@ -854,7 +955,7 @@ export async function assignPmosAgentModel(
 
 export async function upsertPmosModelFromRef(
   state: PmosModelAuthState,
-  params: { modelRef: string; alias?: string; apiKey?: string; activate?: boolean },
+  params: { modelRef: string; alias?: string; apiKey?: string; baseUrl?: string; apiType?: string; activate?: boolean },
 ) {
   if (!state.client || !state.connected) {
     return;
@@ -871,6 +972,8 @@ export async function upsertPmosModelFromRef(
   state.pmosModelId = parsed.modelId;
   state.pmosModelAlias = params.alias?.trim() ?? state.pmosModelAlias;
   state.pmosModelApiKeyDraft = params.apiKey?.trim() ?? state.pmosModelApiKeyDraft;
+  if (params.baseUrl !== undefined) state.pmosModelBaseUrl = params.baseUrl;
+  if (params.apiType !== undefined) state.pmosModelApiType = params.apiType;
 
   if (params.activate === false) {
     state.pmosModelSaving = true;
@@ -882,11 +985,13 @@ export async function upsertPmosModelFromRef(
 
       const apiKeyDraft = state.pmosModelApiKeyDraft.trim();
       if (apiKeyDraft && provider !== "custom") {
-        const applied = setProviderApiKey(nextConfig, provider, apiKeyDraft);
-        if (!applied) {
-          throw new Error(`Provider "${provider}" is missing from config.models.providers.`);
-        }
+        setProviderApiKey(nextConfig, provider, apiKeyDraft);
       }
+
+      const baseUrl = (state.pmosModelBaseUrl ?? "").trim() || PROVIDER_DEFAULT_BASE_URLS[provider] || "";
+      const apiType = (state.pmosModelApiType ?? "").trim() || PROVIDER_DEFAULT_API_TYPES[provider] || "";
+      if (baseUrl && provider !== "custom") setProviderBaseUrl(nextConfig, provider, baseUrl);
+      if (apiType && provider !== "custom") setProviderApiType(nextConfig, provider, apiType);
 
       await writeWorkspaceConfig(state, nextConfig);
       state.pmosModelApiKeyDraft = "";

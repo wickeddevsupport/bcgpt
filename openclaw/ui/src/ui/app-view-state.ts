@@ -177,6 +177,8 @@ export type AppViewState = {
   pmosModelId: string;
   pmosModelAlias: string;
   pmosModelApiKeyDraft: string;
+  pmosModelBaseUrl: string;
+  pmosModelApiType: string;
   pmosModelSaving: boolean;
   pmosModelSavedOk: boolean;
   pmosModelError: string | null;
