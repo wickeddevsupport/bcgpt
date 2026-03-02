@@ -263,7 +263,6 @@ async function buildWorkspaceSystemPrompt(
     const snapshot = await getWorkspaceAiContextForPrompt(workspaceId, {
       ensureFresh: true,
       includeLiveCredentials: true,
-      maxChars: 10_000,
     });
     const trimmed = snapshot.trim();
     if (!trimmed) {

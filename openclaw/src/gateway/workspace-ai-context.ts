@@ -43,7 +43,7 @@ export type RefreshWorkspaceAiContextOptions = {
 };
 
 const WORKSPACE_AI_CONTEXT_FILENAME = "AI_CONTEXT.md";
-const DEFAULT_PROMPT_CONTEXT_MAX_CHARS = 10_000;
+const DEFAULT_PROMPT_CONTEXT_MAX_CHARS = 30_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));

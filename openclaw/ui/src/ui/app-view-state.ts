@@ -293,6 +293,9 @@ export type AppViewState = {
   workflowChatSending: boolean;
   workflowChatStream: string | null;
   workflowChatStreamStartedAt: number | null;
+  workflowChatPendingWorkflow: { name: string; nodes: unknown[]; connections: Record<string, unknown> } | null;
+  handleWorkflowChatConfirm: () => Promise<void>;
+  handleWorkflowChatCancelWorkflow: () => void;
 
   // PMOS AI flow builder stream (Phase 5)
   pmosFlowBuilderPrompt: string;

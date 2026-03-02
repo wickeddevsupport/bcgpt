@@ -287,6 +287,20 @@ function filterEffectiveConfigForWorkspaceUi(
   return next;
 }
 
+/**
+ * Remove ops.user sub-object from connectors before returning to client.
+ * The ops.user object contains the n8n provisioned password and email which
+ * the client UI doesn't need and should not be exposed to the browser.
+ */
+function stripOpsUserFromConnectors(connectors: Record<string, unknown>): Record<string, unknown> {
+  const ops = connectors.ops;
+  if (!isJsonObject(ops) || !("user" in ops)) {
+    return connectors;
+  }
+  const { user: _user, ...opsWithoutUser } = ops as Record<string, unknown>;
+  return { ...connectors, ops: opsWithoutUser };
+}
+
 function deepJsonEqual(a: unknown, b: unknown): boolean {
   try {
     return JSON.stringify(a) === JSON.stringify(b);
@@ -1071,7 +1085,10 @@ export const pmosHandlers: GatewayRequestHandlers = {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
       const connectors = (await readWorkspaceConnectors(workspaceId)) ?? {};
-      respond(true, { workspaceId, connectors }, undefined);
+      // Strip ops.user sub-object (contains n8n provisioned password) — not needed by the client UI.
+      // api keys (ops.apiKey, bcgpt.apiKey) are kept as-is so the UI can display configured status.
+      const safeConnectors = isSuperAdmin(client) ? connectors : stripOpsUserFromConnectors(connectors);
+      respond(true, { workspaceId, connectors: safeConnectors }, undefined);
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }
@@ -1109,7 +1126,9 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
     const { loadEffectiveWorkspaceConfig } = await import("../workspace-config.js");
     const config = await loadEffectiveWorkspaceConfig(workspaceId);
-    respond(true, { ok: true, config }, undefined);
+    // Redact sensitive fields before returning to non-super-admin clients.
+    const safeConfig = client && isSuperAdmin(client) ? config : redactConfigObject(config);
+    respond(true, { ok: true, config: safeConfig }, undefined);
   },
 
   "pmos.byok.list": async ({ respond, client }) => {

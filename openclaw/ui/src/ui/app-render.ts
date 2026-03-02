@@ -561,6 +561,7 @@ export function renderApp(state: AppViewState) {
       state.workflowChatMessages = [];
       state.workflowChatStream = null;
       state.workflowChatStreamStartedAt = null;
+      state.workflowChatPendingWorkflow = null;
     },
     showNewMessages: false,
     onScrollToBottom: undefined,
@@ -917,6 +918,9 @@ export function renderApp(state: AppViewState) {
                       chatSending: state.workflowChatSending,
                       onChatDraftChange: (next) => { state.workflowChatDraft = next; },
                       onChatSend: () => void state.handleWorkflowChatSend(),
+                      pendingWorkflow: state.workflowChatPendingWorkflow,
+                      onConfirmWorkflow: () => void state.handleWorkflowChatConfirm(),
+                      onCancelWorkflow: () => state.handleWorkflowChatCancelWorkflow(),
                       // Full chat props for inline chat panel
                       chatProps: workflowChatProps,
                     })}

@@ -72,6 +72,9 @@ export type AutomationsProps = {
   chatSending: boolean;
   onChatDraftChange: (next: string) => void;
   onChatSend: () => void;
+  pendingWorkflow?: { name: string; nodes: unknown[]; connections: Record<string, unknown> } | null;
+  onConfirmWorkflow?: () => void;
+  onCancelWorkflow?: () => void;
   // Full chat props for inline chat panel
   chatProps: ChatProps;
 
@@ -347,6 +350,17 @@ export function renderAutomations(props: AutomationsProps) {
       <div class="automations-chat-body">
         ${renderChat(props.chatProps)}
       </div>
+      ${props.pendingWorkflow ? html`
+        <div class="automations-chat-confirm-bar">
+          <div class="automations-chat-confirm-label">
+            <strong>Ready to create:</strong> ${props.pendingWorkflow.name}
+          </div>
+          <div class="automations-chat-confirm-actions">
+            <button class="btn btn--sm" @click=${() => props.onCancelWorkflow?.()}>Cancel</button>
+            <button class="btn btn--sm btn--primary" @click=${() => props.onConfirmWorkflow?.()}>Create Workflow</button>
+          </div>
+        </div>
+      ` : nothing}
     </div>
   `;
 

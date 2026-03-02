@@ -429,6 +429,7 @@ export class OpenClawApp extends LitElement {
   @state() workflowChatSending = false;
   @state() workflowChatStream: string | null = null;
   @state() workflowChatStreamStartedAt: number | null = null;
+  @state() workflowChatPendingWorkflow: { name: string; nodes: unknown[]; connections: Record<string, unknown> } | null = null;
 
   // PMOS AI flow builder stream (Phase 5)
   @state() pmosFlowBuilderPrompt = "";
@@ -1237,43 +1238,14 @@ export class OpenClawApp extends LitElement {
       const reply = result.message || "I couldn't process that.";
       this.workflowChatMessages = [...this.workflowChatMessages, { role: "assistant", content: reply }];
 
-      // If the AI returned a workflow, auto-create it in n8n
+      // If the AI returned a workflow, store it for explicit user confirmation
       if (result.workflow && typeof result.workflow === "object" && result.workflow.nodes?.length) {
-        try {
-          setProgress("Applying workflow to n8n...");
-          const created = await this.client!.request("pmos.workflow.confirm", {
-            workflow: {
-              name: result.workflow.name || "AI-Generated Workflow",
-              nodes: result.workflow.nodes,
-              connections: result.workflow.connections ?? {},
-            },
-            confirmed: true,
-          }) as { success: boolean; workflowId?: string; message?: string };
-
-          if (created.success && created.workflowId) {
-            const successMsg = `Workflow created. Open it in n8n editor to configure credentials and test it. (ID: ${String(created.workflowId).slice(0, 8)}...)`;
-            this.workflowChatMessages = [...this.workflowChatMessages, { role: "assistant", content: successMsg }];
-            setProgress("Workflow created successfully.");
-            void this.handlePmosApFlowsLoad();
-          } else if (created.message) {
-            this.workflowChatMessages = [
-              ...this.workflowChatMessages,
-              { role: "assistant", content: `Workflow generation succeeded but creation failed: ${created.message}` },
-            ];
-            setProgress("Workflow creation failed.");
-          }
-        } catch {
-          // Non-fatal fallback: user can still create manually.
-          this.workflowChatMessages = [
-            ...this.workflowChatMessages,
-            {
-              role: "assistant",
-              content:
-                "Workflow plan is ready, but auto-create failed. You can retry from this chat or create it manually in the editor.",
-            },
-          ];
-          setProgress("Auto-create failed, plan kept in chat.");
-        }
+        this.workflowChatPendingWorkflow = {
+          name: result.workflow.name || "AI-Generated Workflow",
+          nodes: result.workflow.nodes,
+          connections: result.workflow.connections ?? {},
+        };
+        setProgress("Workflow ready — confirm to create in n8n.");
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -1289,6 +1261,47 @@ export class OpenClawApp extends LitElement {
         this.workflowChatStreamStartedAt = null;
       }, 400);
     }
+  }
+
+  async handleWorkflowChatConfirm() {
+    const pending = this.workflowChatPendingWorkflow;
+    if (!pending || !this.client) return;
+    this.workflowChatPendingWorkflow = null;
+    this.workflowChatSending = true;
+    try {
+      const created = await this.client.request("pmos.workflow.confirm", {
+        workflow: pending,
+        confirmed: true,
+      }) as { success: boolean; workflowId?: string; message?: string };
+      if (created.success && created.workflowId) {
+        this.workflowChatMessages = [
+          ...this.workflowChatMessages,
+          { role: "assistant", content: `Workflow "${pending.name}" created. Open it in the n8n editor to configure credentials and test it. (ID: ${String(created.workflowId).slice(0, 8)}...)` },
+        ];
+        void this.handlePmosApFlowsLoad();
+      } else {
+        this.workflowChatMessages = [
+          ...this.workflowChatMessages,
+          { role: "assistant", content: `Workflow creation failed: ${created.message || "Unknown error"}` },
+        ];
+      }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.workflowChatMessages = [
+        ...this.workflowChatMessages,
+        { role: "assistant", content: `Workflow creation failed: ${errMsg}` },
+      ];
+    } finally {
+      this.workflowChatSending = false;
+    }
+  }
+
+  handleWorkflowChatCancelWorkflow() {
+    this.workflowChatPendingWorkflow = null;
+    this.workflowChatMessages = [
+      ...this.workflowChatMessages,
+      { role: "assistant", content: "Workflow cancelled. Let me know if you'd like to adjust anything." },
+    ];
   }
 
   async handlePmosApRunsLoad() {
