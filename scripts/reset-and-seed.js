@@ -164,6 +164,15 @@ if (global.agents?.defaults?.model) {
   global.agents.defaults.model.fallbacks = [];
 }
 
+// Ensure gateway.controlUi allows non-loopback access (required by upstream openclaw
+// when the Control UI is served through a reverse-proxy / Coolify ingress).
+global.gateway = global.gateway || {};
+global.gateway.controlUi = global.gateway.controlUi || {};
+global.gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback = true;
+
+// Remove custom keys that upstream openclaw schema no longer accepts
+delete global.pmos;
+
 // Update global meta
 global.meta = { ...global.meta, lastTouchedAt: new Date().toISOString() };
 
