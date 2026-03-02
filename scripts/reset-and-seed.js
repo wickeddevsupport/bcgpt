@@ -170,6 +170,18 @@ global.gateway = global.gateway || {};
 global.gateway.controlUi = global.gateway.controlUi || {};
 global.gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback = true;
 
+// Set the gateway auth token. Upstream openclaw uses gateway.auth.token
+// (gateway.token is the deprecated form — will cause a config error).
+const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || '';
+if (GATEWAY_TOKEN) {
+  global.gateway.auth = global.gateway.auth || {};
+  global.gateway.auth.token = GATEWAY_TOKEN;
+  delete global.gateway.token; // remove deprecated field
+}
+
+// Trust internal Coolify / Docker proxy ranges for correct client-IP detection
+global.gateway.trustedProxies = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'];
+
 // Remove custom keys that upstream openclaw schema no longer accepts
 delete global.pmos;
 
