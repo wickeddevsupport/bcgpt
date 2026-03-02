@@ -1898,6 +1898,97 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 
+  // ── Workspace Chat (direct AI, no agent session — same approach as n8n AI Agent) ────────────────
+
+  "pmos.chat.send": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+
+      const p = params as {
+        messages?: Array<{ role: string; content: string }>;
+      } | null;
+
+      const rawMessages: Array<{ role: string; content: string }> = Array.isArray(p?.messages)
+        ? [...p.messages]
+        : [];
+
+      if (rawMessages.length === 0) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "messages required"));
+        return;
+      }
+
+      const messages = rawMessages
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .map((m) => ({ role: m.role as "user" | "assistant", content: String(m.content) }));
+
+      const { callWorkspaceModel } = await import("../workflow-ai.js");
+      const { getWorkspaceAiContextForPrompt } = await import("../workspace-ai-context.js");
+
+      const withTimeout = async <T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> => {
+        let t: ReturnType<typeof setTimeout> | null = null;
+        try {
+          return await Promise.race([
+            promise,
+            new Promise<T>((resolve) => {
+              t = setTimeout(() => resolve(fallback), ms);
+            }),
+          ]);
+        } finally {
+          if (t) clearTimeout(t);
+        }
+      };
+
+      const workspaceAiContext = await withTimeout(
+        getWorkspaceAiContextForPrompt(workspaceId, {
+          ensureFresh: true,
+          maxChars: 12_000,
+        }).catch(() => ""),
+        4000,
+        "",
+      );
+
+      const systemPrompt = [
+        `You are a helpful AI assistant for this PMOS workspace (ID: ${workspaceId}).`,
+        "",
+        "You help users with: project management (Basecamp projects, todos, tasks, assignments), n8n workflow automation, BCGPT operations, and general workspace questions.",
+        "",
+        "## Instructions",
+        "- Answer directly and concisely. Never introduce yourself or restate your role on every message.",
+        "- Use workspace memory context silently — never quote it back verbatim unless the user explicitly asks.",
+        "- If a required credential or connector is missing, tell the user exactly what to configure and where.",
+        "- For n8n workflow requests, describe the workflow clearly in plain text. The user can use the Automations panel to generate actual workflow JSON.",
+        "- Be action-oriented: when asked for help, provide it immediately.",
+        "",
+        ...(workspaceAiContext ? [`## Workspace Memory Snapshot\n${workspaceAiContext}`] : []),
+      ].join("\n");
+
+      const result = await callWorkspaceModel(workspaceId, systemPrompt, messages, {
+        maxTokens: 2048,
+      });
+
+      if (!result.ok) {
+        respond(
+          true,
+          {
+            ok: false,
+            message: `AI model unavailable: ${result.error ?? "unknown error"}. Please check your model configuration in Settings → AI Model Setup.`,
+          },
+          undefined,
+        );
+        return;
+      }
+
+      respond(
+        true,
+        { ok: true, message: result.text ?? "", providerUsed: result.providerUsed },
+        undefined,
+      );
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
   // ── Connections: Real n8n credential list ─────────────────────────
 
   "pmos.projects.snapshot": async ({ respond, client }) => {
