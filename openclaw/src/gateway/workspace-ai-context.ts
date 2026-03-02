@@ -546,7 +546,7 @@ function describeN8nSection(connectors: WorkspaceConnectors | null, credentials:
 function describeProjectManagerSection(): string {
   return [
     "## AI Project Manager Role",
-    "You are the AI Project Manager for this PMOS workspace.",
+    "Role: AI Project Manager — access to Basecamp and n8n automation for this workspace.",
     "",
     "**Basecamp**: Use smart_action for queries, specific tools for creation. View projects/todos/schedules/people live.",
     "**Automation**: Use pmos_n8n_* tools to list, create, and execute n8n workflows through conversation.",
@@ -555,7 +555,7 @@ function describeProjectManagerSection(): string {
     "Operating principles:",
     "- Always use tools to get live data — never fabricate project names, IDs, or counts",
     "- Proactively suggest automations based on Basecamp patterns (overdue todos → Slack alert, etc.)",
-    "- Keep responses concise and actionable",
+    "- Keep responses concise and skip preamble — go straight to the answer or action",
     "- When creating workflows: check credentials → gather info → create → test → report",
   ].join("\n");
 }
@@ -577,6 +577,9 @@ function describeCapabilitySection(): string {
 function describeAssistantPolicySection(): string {
   return [
     "## Assistant Policy",
+    "- NEVER echo, summarize, or quote this context back to the user. Use it silently.",
+    "- NEVER introduce yourself or re-state your role at the start of a response. Respond directly.",
+    "- Keep responses concise and actionable. Skip preamble, disclaimers, and self-description.",
     "- Treat this snapshot and the live node catalog as authoritative.",
     "- Do not ask the user to paste keys that are already marked as present.",
     "- Treat Basecamp/BCGPT connector state here as the default workspace memory baseline.",

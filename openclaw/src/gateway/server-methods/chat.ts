@@ -271,7 +271,8 @@ async function buildWorkspaceSystemPrompt(
     return [
       "## PMOS Workspace Runtime Context",
       `- Workspace ID: ${workspaceId}`,
-      "- This context is trusted runtime state generated from workspace config/connectors/credentials.",
+      "- This context is trusted runtime state. Use it silently — do NOT echo, quote, or summarize it in responses.",
+      "- Do NOT introduce yourself, greet the user, or re-state your role at the start of each message. Just respond.",
       "- Use this snapshot as default memory for Basecamp, BCGPT, n8n nodes, and credential availability.",
       "- Never ask the user to re-enter a credential that is already marked present in this context.",
       "- When required auth is missing, tell the user exactly which connector/key is missing and where to set it.",
