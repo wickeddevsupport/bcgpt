@@ -914,9 +914,12 @@ export const pmosHandlers: GatewayRequestHandlers = {
           workspaceConfig: sanitizeWorkspaceConfigResponse(client, workspaceConfigForUi, {
             filterAgents: true,
           }),
+          // Use the raw (unstripped) workspaceConfig when filtering effectiveConfig so that
+          // providers identical to global config are not incorrectly removed from the
+          // effective config returned to the UI (stripping them would hide configured models).
           effectiveConfig: sanitizeWorkspaceConfigResponse(client, effectiveConfig, {
             filterAgents: true,
-            workspaceConfig: workspaceConfigForUi,
+            workspaceConfig: workspaceConfig,
             filterSharedProvidersOnly: true,
           }),
         },
@@ -975,9 +978,12 @@ export const pmosHandlers: GatewayRequestHandlers = {
           workspaceConfig: sanitizeWorkspaceConfigResponse(client, workspaceConfigForUi, {
             filterAgents: true,
           }),
+          // Use the raw (unstripped) workspaceConfig when filtering effectiveConfig so that
+          // providers identical to global config are not incorrectly removed from the
+          // effective config returned to the UI (stripping them would hide configured models).
           effectiveConfig: sanitizeWorkspaceConfigResponse(client, effectiveConfig, {
             filterAgents: true,
-            workspaceConfig: workspaceConfigForUi,
+            workspaceConfig: workspaceConfig,
             filterSharedProvidersOnly: true,
           }),
         },
