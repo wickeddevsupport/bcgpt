@@ -25,6 +25,23 @@ const WORKFLOW_MODEL_CANDIDATE_LIMIT = 3;
 const WORKFLOW_MODEL_CALL_TIMEOUT_MS = 90_000;
 const API_KEY_OPTIONAL_PROVIDERS = new Set(["ollama", "local-ollama"]);
 
+/**
+ * Wraps res.json() in a Promise.race so slow body streaming cannot block indefinitely.
+ * The AbortSignal on fetch() only cancels the initial connection; once headers are received
+ * the body can still stream at any rate. This helper enforces a hard deadline on body parsing.
+ */
+function resJsonWithTimeout<T>(res: Response, timeoutMs: number): Promise<T> {
+  return Promise.race([
+    res.json() as Promise<T>,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`json_body_timeout_${timeoutMs}ms — model may be streaming too slowly`)),
+        timeoutMs,
+      )
+    ),
+  ]);
+}
+
 function appendV1(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/v1`;
 }
@@ -373,7 +390,7 @@ async function callModelWithConfig(
               error: `${targetProvider} API error ${res.status}: ${text.slice(0, 300)}`,
             };
           }
-          const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
+          const data = await resJsonWithTimeout<{ choices?: Array<{ message?: { content?: string } }> }>(res, WORKFLOW_MODEL_CALL_TIMEOUT_MS);
           return { ok: true, text: data.choices?.[0]?.message?.content ?? "" };
         };
 
@@ -438,7 +455,7 @@ async function callModelWithConfig(
           const text = await res.text().catch(() => "");
           return { ok: false, error: `Anthropic API error ${res.status}: ${text.slice(0, 300)}` };
         }
-        const data = await res.json() as { content?: Array<{ type: string; text?: string }> };
+        const data = await resJsonWithTimeout<{ content?: Array<{ type: string; text?: string }> }>(res, WORKFLOW_MODEL_CALL_TIMEOUT_MS);
         const text = data.content?.find(c => c.type === "text")?.text ?? "";
         return { ok: true, text, providerUsed: "anthropic" };
       }
@@ -480,9 +497,9 @@ async function callModelWithConfig(
           const text = await res.text().catch(() => "");
           return { ok: false, error: `Google API error ${res.status}: ${text.slice(0, 300)}` };
         }
-        const data = await res.json() as {
+        const data = await resJsonWithTimeout<{
           candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
-        };
+        }>(res, WORKFLOW_MODEL_CALL_TIMEOUT_MS);
         const text = data.candidates?.[0]?.content?.parts?.map(p => p.text ?? "").join("") ?? "";
         return { ok: true, text, providerUsed: "google" };
       }
@@ -629,7 +646,7 @@ export async function callWorkspaceModelAgentLoop(
           break; // API error, try next model
         }
 
-        const data = (await res.json()) as {
+        const data = await resJsonWithTimeout<{
           choices?: Array<{
             message?: {
               role?: string;
@@ -638,7 +655,7 @@ export async function callWorkspaceModelAgentLoop(
             };
             finish_reason?: string;
           }>;
-        };
+        }>(res, WORKFLOW_MODEL_CALL_TIMEOUT_MS);
 
         const assistantMsg = data.choices?.[0]?.message;
         if (!assistantMsg) break;
