@@ -2072,26 +2072,65 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const credentialContext = buildCredentialContext(availableCredentials);
 
       const systemPrompt = [
-        `You are an AI assistant for this workspace (ID: ${workspaceId}) that can DIRECTLY CREATE and MANAGE automation workflows in n8n.`,
+        `You are an intelligent AI assistant for OpenClaw workspace (ID: ${workspaceId}) — a unified project management and automation platform powered by BCgpt.`,
         "",
-        "## Critical Behaviour Rules",
-        "- When asked to create a workflow: CALL pmos_n8n_create_workflow immediately — do NOT output JSON for the user to import manually.",
-        "- Always call pmos_n8n_list_credentials FIRST to discover available integrations before building any workflow.",
-        "- Only ask the user for info you truly cannot infer or find yourself (e.g. a specific Slack channel name, a Discord webhook URL they own).",
-        "- After creating a workflow, tell the user the workflow name and ID, and what they should do next (e.g. activate it, set up a Basecamp webhook).",
-        "- For project management questions, answer directly from workspace context.",
-        "- Never describe a workflow in plain text and tell the user to import it — just create it.",
+        "## What is OpenClaw / BCgpt",
+        "OpenClaw combines Basecamp project management with an embedded n8n automation engine and BCgpt AI layer.",
+        "- **Basecamp layer**: Projects, todos, messages, people, schedules, card tables — all accessible via BCgpt tools.",
+        "- **n8n automation layer**: Visual workflow builder embedded in the platform — you can CREATE and EDIT workflows directly.",
+        "- **BCgpt API**: An intelligent Basecamp integration layer with a smart router (`smart_action`) and full MCP tool set.",
         "",
-        "## Available n8n Tools",
-        "- **pmos_n8n_list_credentials** — see which services are connected (Basecamp, Slack, GitHub, etc.)",
-        "- **pmos_n8n_list_workflows** — list existing n8n workflows",
-        "- **pmos_n8n_create_workflow** — CREATE a workflow in n8n right now",
-        "- **pmos_n8n_get_workflow** — get full details of a specific workflow by ID",
-        "- **pmos_n8n_execute_workflow** — test-run a workflow",
-        "- **pmos_n8n_list_node_types** — list available trigger and action node types (call when unsure of exact type names)",
+        "## BCgpt API Reference",
+        "BCgpt exposes Basecamp data via MCP (Model Context Protocol) and an OpenAPI compatibility layer:",
+        "- `POST /mcp` — MCP JSON-RPC endpoint. Auth: `x-bcgpt-api-key` header.",
+        "- `POST /action/:operation` — OpenAPI wrapper for individual tools.",
+        "- `smart_action({query})` — Natural-language router. Tell it what you want in plain English; it calls the right Basecamp tools, handles pagination, and returns structured summaries. Best for: listing things, searching, getting project data.",
+        "- `basecamp_raw({method, path, body})` — Raw Basecamp API access for anything not covered by named tools.",
+        "",
+        "## How to Think and Respond",
+        "",
+        "### Analyze, don't dump",
+        "- Never output raw lists of IDs, raw JSON payloads, or unannotated tool results at the user.",
+        "- When you retrieve data (credentials, workflows, todos, projects), INTERPRET it: what matters for this user's question?",
+        "- Example: Instead of listing 50 node types, say 'You have Slack, GitHub, and Basecamp nodes connected — I'll use those.'",
+        "",
+        "### Be proactive, not lazy",
+        "- Don't ask the user for information you can discover with a tool call.",
+        "- Always call `pmos_n8n_list_credentials` before building any workflow so you know what's actually connected.",
+        "- If the user asks about a project or person, call the appropriate tool to find the answer rather than guessing.",
+        "",
+        "### Always provide next steps",
+        "Every response should tell the user what to do next. Examples:",
+        "- 'Activate the workflow by clicking the toggle in the top right of the n8n editor.'",
+        "- 'Copy the webhook URL from the Webhook Trigger node and paste it into Basecamp project settings → Webhooks.'",
+        "- 'Check your Slack credential is pointing to the #alerts channel.'",
+        "- 'Open the Executions tab to verify the workflow ran correctly.'",
+        "",
+        "### Workflow creation rules",
+        "- When asked to CREATE a workflow: call `pmos_n8n_create_workflow` immediately — never output JSON for the user to import.",
+        "- When asked to EDIT/UPDATE/FIX a workflow: call `pmos_n8n_update_workflow` on the existing workflow ID.",
+        "- Always call `pmos_n8n_list_credentials` first so credential IDs are correct in node parameters.",
+        "- For Basecamp nodes: always use `n8n-nodes-basecamp.basecamp`, always include credentials, use `findByName` to resolve project names.",
+        "- Position nodes left-to-right: trigger at [250, 300], each next node at x+250.",
+        "- Build complete, runnable workflows — no manual rewiring needed.",
+        "",
+        "### Project management questions",
+        "- Answer from workspace context when available.",
+        "- For live data (todos, messages, people), call the appropriate tool to get fresh information.",
+        "- Summarize results meaningfully: 'There are 7 open todos in Project X — 3 are overdue. The most recent message was from Alice yesterday about the deploy.'",
+        "",
+        "## Available Tools",
+        "**n8n Workflow Tools:**",
+        "- `pmos_n8n_list_credentials` — see which services are connected (Basecamp, Slack, GitHub, etc.)",
+        "- `pmos_n8n_list_workflows` — list existing n8n workflows with names and IDs",
+        "- `pmos_n8n_create_workflow` — CREATE a new workflow in n8n right now",
+        "- `pmos_n8n_update_workflow` — UPDATE an existing workflow (by ID)",
+        "- `pmos_n8n_get_workflow` — get full definition of a specific workflow by ID",
+        "- `pmos_n8n_execute_workflow` — test-run a workflow by ID",
+        "- `pmos_n8n_list_node_types` — list available trigger and action node types",
         "",
         ...(credentialContext ? [credentialContext, ""] : []),
-        ...(workspaceAiContext ? [`## Workspace Memory\n${workspaceAiContext}`] : []),
+        ...(workspaceAiContext ? ["## Workspace Memory", workspaceAiContext] : []),
       ].join("\n");
 
       // ── Tool definitions (OpenAI function-calling format) ────────────────────
@@ -2173,6 +2212,24 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             },
           },
         },
+        {
+          type: "function" as const,
+          function: {
+            name: "pmos_n8n_update_workflow",
+            description: "Update an existing n8n workflow (edit nodes, connections, or name). Use when the user says 'add', 'modify', 'fix', 'change', or 'update' an existing workflow.",
+            parameters: {
+              type: "object",
+              required: ["workflow_id", "name", "nodes", "connections"],
+              additionalProperties: false,
+              properties: {
+                workflow_id: { type: "string", description: "The n8n workflow ID to update" },
+                name: { type: "string", description: "Workflow name (can keep existing)" },
+                nodes: { type: "array", description: "Full updated array of n8n node objects" },
+                connections: { type: "object", description: "Full updated connections object" },
+              },
+            },
+          },
+        },
       ];
 
       // ── Tool executor — calls n8n-api-client directly ────────────────────────
@@ -2181,6 +2238,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           listN8nCredentials,
           listN8nWorkflows,
           createN8nWorkflow,
+          updateN8nWorkflow,
           getN8nWorkflow,
           executeN8nWorkflow,
           listN8nNodeTypes,
@@ -2242,6 +2300,29 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             const r = await executeN8nWorkflow(workspaceId, id);
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to execute workflow" });
             return JSON.stringify({ success: true, executionId: r.executionId ?? "unknown" });
+          }
+          case "pmos_n8n_update_workflow": {
+            const wfId = String(args.workflow_id ?? "").trim();
+            const wfName = String(args.name ?? "").trim();
+            const wfNodes = Array.isArray(args.nodes) ? args.nodes : [];
+            const wfConnections =
+              args.connections && typeof args.connections === "object"
+                ? (args.connections as Record<string, unknown>)
+                : {};
+            if (!wfId) return JSON.stringify({ error: "workflow_id is required" });
+            if (!wfName) return JSON.stringify({ error: "name is required" });
+            const ur = await updateN8nWorkflow(workspaceId, wfId, {
+              name: wfName,
+              nodes: wfNodes as Parameters<typeof updateN8nWorkflow>[2]["nodes"],
+              connections: wfConnections,
+            });
+            if (!ur.ok) return JSON.stringify({ error: ur.error ?? "Failed to update workflow" });
+            return JSON.stringify({
+              success: true,
+              workflowId: wfId,
+              workflowName: wfName,
+              message: `Workflow "${wfName}" (ID: ${wfId}) updated successfully.`,
+            });
           }
           default:
             return JSON.stringify({ error: `Unknown tool: ${toolName}` });
