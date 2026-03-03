@@ -1898,7 +1898,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 
-  // ── Workspace Chat (direct AI, no agent session — same approach as n8n AI Agent) ────────────────
+  // ── Workspace Chat (agentic — can directly create/modify n8n workflows via tool calls) ────────────────
 
   "pmos.chat.send": async ({ params, respond, client }) => {
     try {
@@ -1922,8 +1922,12 @@ export const pmosHandlers: GatewayRequestHandlers = {
         .filter((m) => m.role === "user" || m.role === "assistant")
         .map((m) => ({ role: m.role as "user" | "assistant", content: String(m.content) }));
 
-      const { callWorkspaceModel } = await import("../workflow-ai.js");
+      const { callWorkspaceModelAgentLoop } = await import("../workflow-ai.js");
       const { getWorkspaceAiContextForPrompt } = await import("../workspace-ai-context.js");
+      const {
+        fetchWorkspaceCredentials,
+        buildCredentialContext,
+      } = await import("../credential-sync.js");
 
       const withTimeout = async <T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> => {
         let t: ReturnType<typeof setTimeout> | null = null;
@@ -1939,33 +1943,206 @@ export const pmosHandlers: GatewayRequestHandlers = {
         }
       };
 
-      const workspaceAiContext = await withTimeout(
-        getWorkspaceAiContextForPrompt(workspaceId, {
-          ensureFresh: true,
-          maxChars: 12_000,
-        }).catch(() => ""),
-        4000,
-        "",
-      );
+      const [workspaceAiContext, availableCredentials] = await Promise.all([
+        withTimeout(
+          getWorkspaceAiContextForPrompt(workspaceId, { ensureFresh: true, maxChars: 10_000 }).catch(() => ""),
+          4000,
+          "",
+        ),
+        withTimeout(
+          fetchWorkspaceCredentials(workspaceId).catch(() => []),
+          5000,
+          [] as Awaited<ReturnType<typeof fetchWorkspaceCredentials>>,
+        ),
+      ]);
+
+      const credentialContext = buildCredentialContext(availableCredentials);
 
       const systemPrompt = [
-        `You are a helpful AI assistant for this PMOS workspace (ID: ${workspaceId}).`,
+        `You are an AI assistant for this workspace (ID: ${workspaceId}) that can DIRECTLY CREATE and MANAGE automation workflows in n8n.`,
         "",
-        "You help users with: project management (Basecamp projects, todos, tasks, assignments), n8n workflow automation, BCGPT operations, and general workspace questions.",
+        "## Critical Behaviour Rules",
+        "- When asked to create a workflow: CALL pmos_n8n_create_workflow immediately — do NOT output JSON for the user to import manually.",
+        "- Always call pmos_n8n_list_credentials FIRST to discover available integrations before building any workflow.",
+        "- Only ask the user for info you truly cannot infer or find yourself (e.g. a specific Slack channel name, a Discord webhook URL they own).",
+        "- After creating a workflow, tell the user the workflow name and ID, and what they should do next (e.g. activate it, set up a Basecamp webhook).",
+        "- For project management questions, answer directly from workspace context.",
+        "- Never describe a workflow in plain text and tell the user to import it — just create it.",
         "",
-        "## Instructions",
-        "- Answer directly and concisely. Never introduce yourself or restate your role on every message.",
-        "- Use workspace memory context silently — never quote it back verbatim unless the user explicitly asks.",
-        "- If a required credential or connector is missing, tell the user exactly what to configure and where.",
-        "- For n8n workflow requests, describe the workflow clearly in plain text. The user can use the Automations panel to generate actual workflow JSON.",
-        "- Be action-oriented: when asked for help, provide it immediately.",
+        "## Available n8n Tools",
+        "- **pmos_n8n_list_credentials** — see which services are connected (Basecamp, Slack, GitHub, etc.)",
+        "- **pmos_n8n_list_workflows** — list existing n8n workflows",
+        "- **pmos_n8n_create_workflow** — CREATE a workflow in n8n right now",
+        "- **pmos_n8n_get_workflow** — get full details of a specific workflow by ID",
+        "- **pmos_n8n_execute_workflow** — test-run a workflow",
+        "- **pmos_n8n_list_node_types** — list available trigger and action node types (call when unsure of exact type names)",
         "",
-        ...(workspaceAiContext ? [`## Workspace Memory Snapshot\n${workspaceAiContext}`] : []),
+        ...(credentialContext ? [credentialContext, ""] : []),
+        ...(workspaceAiContext ? [`## Workspace Memory\n${workspaceAiContext}`] : []),
       ].join("\n");
 
-      const result = await callWorkspaceModel(workspaceId, systemPrompt, messages, {
-        maxTokens: 2048,
-      });
+      // ── Tool definitions (OpenAI function-calling format) ────────────────────
+      const tools = [
+        {
+          type: "function" as const,
+          function: {
+            name: "pmos_n8n_list_credentials",
+            description: "List available n8n credentials/integrations configured for this workspace (Basecamp, Slack, GitHub, etc.)",
+            parameters: { type: "object", properties: {}, additionalProperties: false },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "pmos_n8n_list_workflows",
+            description: "List existing n8n workflows in this workspace",
+            parameters: { type: "object", properties: {}, additionalProperties: false },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "pmos_n8n_list_node_types",
+            description: "List available n8n node types (triggers and actions). Call this when you need to know exact node type names.",
+            parameters: { type: "object", properties: {}, additionalProperties: false },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "pmos_n8n_create_workflow",
+            description: "Create a new n8n workflow. Always call pmos_n8n_list_credentials first to know which credential IDs to use in node parameters.",
+            parameters: {
+              type: "object",
+              required: ["name", "nodes", "connections"],
+              additionalProperties: false,
+              properties: {
+                name: { type: "string", description: "Descriptive workflow name" },
+                nodes: {
+                  type: "array",
+                  description: "Array of n8n node objects, each with: id, name, type, typeVersion, position [x,y], parameters, and optionally credentials",
+                },
+                connections: {
+                  type: "object",
+                  description: "Connections object mapping source node name → { main: [[{ node, type, index }]] }",
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "pmos_n8n_get_workflow",
+            description: "Get full details of an existing n8n workflow by ID",
+            parameters: {
+              type: "object",
+              required: ["workflow_id"],
+              additionalProperties: false,
+              properties: {
+                workflow_id: { type: "string", description: "The n8n workflow ID" },
+              },
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "pmos_n8n_execute_workflow",
+            description: "Execute (test-run) an n8n workflow by ID",
+            parameters: {
+              type: "object",
+              required: ["workflow_id"],
+              additionalProperties: false,
+              properties: {
+                workflow_id: { type: "string", description: "The n8n workflow ID to execute" },
+              },
+            },
+          },
+        },
+      ];
+
+      // ── Tool executor — calls n8n-api-client directly ────────────────────────
+      const executeTool = async (toolName: string, args: Record<string, unknown>): Promise<string> => {
+        const {
+          listN8nCredentials,
+          listN8nWorkflows,
+          createN8nWorkflow,
+          getN8nWorkflow,
+          executeN8nWorkflow,
+          listN8nNodeTypes,
+        } = await import("../n8n-api-client.js");
+
+        switch (toolName) {
+          case "pmos_n8n_list_credentials": {
+            const r = await listN8nCredentials(workspaceId);
+            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to list credentials" });
+            return JSON.stringify({
+              credentials: (r.credentials ?? []).map((c) => ({ id: c.id, name: c.name, type: c.type })),
+            });
+          }
+          case "pmos_n8n_list_workflows": {
+            const r = await listN8nWorkflows(workspaceId);
+            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to list workflows" });
+            return JSON.stringify({
+              workflows: (r.workflows ?? []).map((w) => ({ id: w.id, name: w.name, active: w.active })),
+            });
+          }
+          case "pmos_n8n_list_node_types": {
+            const r = await listN8nNodeTypes(workspaceId);
+            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to list node types" });
+            return JSON.stringify({ nodeTypes: (r.nodeTypes ?? []).slice(0, 200) });
+          }
+          case "pmos_n8n_create_workflow": {
+            const name = String(args.name ?? "").trim();
+            const nodes = Array.isArray(args.nodes) ? args.nodes : [];
+            const connections =
+              args.connections && typeof args.connections === "object"
+                ? (args.connections as Record<string, unknown>)
+                : {};
+            if (!name) return JSON.stringify({ error: "name is required" });
+            if (!nodes.length) return JSON.stringify({ error: "nodes array is required and must not be empty" });
+            const r = await createN8nWorkflow(workspaceId, {
+              name,
+              active: false,
+              nodes: nodes as Parameters<typeof createN8nWorkflow>[1]["nodes"],
+              connections,
+            });
+            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to create workflow" });
+            return JSON.stringify({
+              success: true,
+              workflowId: r.workflow?.id,
+              workflowName: name,
+              message: `Workflow "${name}" created successfully! ID: ${r.workflow?.id}. It's currently inactive — activate it in the Workflows panel when ready.`,
+            });
+          }
+          case "pmos_n8n_get_workflow": {
+            const id = String(args.workflow_id ?? "").trim();
+            if (!id) return JSON.stringify({ error: "workflow_id is required" });
+            const r = await getN8nWorkflow(workspaceId, id);
+            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to get workflow" });
+            return JSON.stringify(r.workflow);
+          }
+          case "pmos_n8n_execute_workflow": {
+            const id = String(args.workflow_id ?? "").trim();
+            if (!id) return JSON.stringify({ error: "workflow_id is required" });
+            const r = await executeN8nWorkflow(workspaceId, id);
+            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to execute workflow" });
+            return JSON.stringify({ success: true, executionId: r.executionId ?? "unknown" });
+          }
+          default:
+            return JSON.stringify({ error: `Unknown tool: ${toolName}` });
+        }
+      };
+
+      const result = await callWorkspaceModelAgentLoop(
+        workspaceId,
+        systemPrompt,
+        messages,
+        tools,
+        executeTool,
+        { maxTokens: 2048, maxIterations: 6 },
+      );
 
       if (!result.ok) {
         respond(

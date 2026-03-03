@@ -533,6 +533,172 @@ export async function callWorkspaceModel(
   return { ok: false, error: compact || "Model call failed for configured workflow assistant models." };
 }
 
+// ─── Agentic tool-calling loop ────────────────────────────────────────────────
+
+export type ChatToolDefinition = {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+};
+
+type AssistantToolCall = {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+};
+
+/**
+ * Agentic model call with tool support (OpenAI-compatible providers).
+ * Loops up to maxIterations times, executing tool calls and feeding results back.
+ * Falls back to plain callWorkspaceModel for non-OpenAI-compatible providers (Anthropic, Google).
+ */
+export async function callWorkspaceModelAgentLoop(
+  workspaceId: string,
+  systemPrompt: string,
+  userMessages: Array<{ role: "user" | "assistant"; content: string }>,
+  tools: ChatToolDefinition[],
+  executeTool: (name: string, args: Record<string, unknown>) => Promise<string>,
+  opts: { maxTokens?: number; maxIterations?: number } = {},
+): Promise<{ ok: boolean; text?: string; error?: string; providerUsed?: string }> {
+  const wsId = String(workspaceId ?? "").trim();
+  const cfg = wsId
+    ? ((await loadEffectiveWorkspaceConfig(wsId)) as OpenClawConfig)
+    : loadConfig();
+  const configs = await resolveModelConfigs(cfg, wsId || null);
+  if (!configs.length) {
+    return {
+      ok: false,
+      error:
+        "No AI model configured for this workspace (set agents.defaults.model.primary and provider apiKey in workspace config, or add a BYOK key).",
+    };
+  }
+
+  const maxIterations = opts.maxIterations ?? 6;
+  const maxTokens = opts.maxTokens ?? 2048;
+
+  for (const modelConfig of configs) {
+    const { provider, modelId, apiKey } = modelConfig;
+
+    // Non-OpenAI-compatible providers: fall back to plain text call (no tool support)
+    if (provider === "anthropic" || provider === "google") {
+      const fallback = await callModelWithConfig(cfg, modelConfig, systemPrompt, userMessages, { maxTokens });
+      if (fallback.ok) return fallback;
+      continue;
+    }
+
+    const baseUrl = resolveOpenAiCompatibleBaseUrl(provider, cfg);
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (apiKey.trim()) headers.Authorization = `Bearer ${apiKey}`;
+
+    // Build message array — tool messages interleaved after each tool call round
+    const agentMessages: Array<Record<string, unknown>> = [
+      { role: "system", content: systemPrompt },
+      ...userMessages.map((m) => ({ role: m.role, content: m.content })),
+    ];
+
+    let providerUsed = provider;
+    let succeeded = false;
+
+    try {
+      for (let iteration = 0; iteration < maxIterations; iteration++) {
+        const body: Record<string, unknown> = {
+          model: modelId,
+          messages: agentMessages,
+          max_tokens: maxTokens,
+          temperature: 0.35,
+          tools,
+          tool_choice: "auto",
+        };
+
+        let res: Response;
+        try {
+          res = await fetch(`${baseUrl}/chat/completions`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(WORKFLOW_MODEL_CALL_TIMEOUT_MS),
+          });
+        } catch {
+          break; // network error, try next model
+        }
+
+        if (!res.ok) {
+          break; // API error, try next model
+        }
+
+        const data = (await res.json()) as {
+          choices?: Array<{
+            message?: {
+              role?: string;
+              content?: string | null;
+              tool_calls?: AssistantToolCall[];
+            };
+            finish_reason?: string;
+          }>;
+        };
+
+        const assistantMsg = data.choices?.[0]?.message;
+        if (!assistantMsg) break;
+
+        const toolCalls = assistantMsg.tool_calls;
+
+        if (!toolCalls?.length) {
+          // No tool calls — final text response
+          return {
+            ok: true,
+            text: assistantMsg.content ?? "",
+            providerUsed,
+          };
+        }
+
+        // Add assistant message (with tool_calls) to context
+        agentMessages.push({
+          role: "assistant",
+          content: assistantMsg.content ?? null,
+          tool_calls: toolCalls,
+        });
+
+        // Execute each tool and append results
+        for (const tc of toolCalls) {
+          let toolResult: string;
+          try {
+            const args = JSON.parse(tc.function.arguments ?? "{}") as Record<string, unknown>;
+            toolResult = await executeTool(tc.function.name, args);
+          } catch (err) {
+            toolResult = JSON.stringify({
+              error: `Tool execution failed: ${err instanceof Error ? err.message : String(err)}`,
+            });
+          }
+          agentMessages.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            content: toolResult,
+          });
+        }
+        // Loop continues with tool results injected
+      }
+
+      // Max iterations reached — return last assistant text if any
+      const lastText = [...agentMessages]
+        .reverse()
+        .find((m) => m.role === "assistant" && m.content);
+      if (lastText?.content) {
+        return { ok: true, text: String(lastText.content), providerUsed };
+      }
+      succeeded = false;
+    } catch {
+      // try next model config
+    }
+
+    if (succeeded) break;
+  }
+
+  return { ok: false, error: "Model call failed for all configured providers." };
+}
+
 // ─── n8n node catalog for the system prompt ──────────────────────────────────
 
 // Dynamic n8n node catalog - fetches from n8n API with caching
