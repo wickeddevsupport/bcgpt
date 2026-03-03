@@ -162,9 +162,13 @@ async function run() {
     console.log("✅ Login OK");
     await page.screenshot({ path: "pw-bc-complex-login.png", fullPage: true });
 
+    // ── VISIT CHAT TAB FIRST (ensures workflow assistant card loads correctly on Workflows page) ──
+    await clickNav(page, "Chat");
+    await sleep(1200);
+
     // ── NAVIGATE TO WORKFLOWS ──────────────────────────────────────────────
     await clickNav(page, "Workflows");
-    await sleep(1800);
+    await sleep(2000);
 
     // Ensure AI assistant panel is visible
     const aiHeader = page.getByText("AI Workflow Assistant", { exact: false }).first();
@@ -174,9 +178,21 @@ async function run() {
       await aiHeader.waitFor({ state: "visible", timeout: 15000 }).catch(() => {});
     }
 
-    const chatCards = page.locator("section.card.chat:visible");
-    const cardCount = await chatCards.count();
-    const chatCard = chatCards.nth(Math.max(cardCount - 1, 0));
+    // Prefer the card that CONTAINS "AI Workflow Assistant" header, fall back to last card.
+    let chatCard;
+    const wfAssistCards = page.locator("section.card.chat", {
+      has: page.getByText("AI Workflow Assistant", { exact: false }),
+    });
+    const wfAssistCount = await wfAssistCards.count();
+    if (wfAssistCount > 0) {
+      chatCard = wfAssistCards.first();
+      console.log("🎯 Found workflow assistant card by header text");
+    } else {
+      const allCards = page.locator("section.card.chat:visible");
+      const allCount = await allCards.count();
+      chatCard = allCards.nth(Math.max(allCount - 1, 0));
+      console.log(`⚠️ Falling back to last of ${allCount} visible chat cards`);
+    }
     const textarea = chatCard.locator("textarea").first();
 
     // ── SEND COMPLEX WORKFLOW CREATION PROMPT ─────────────────────────────
@@ -190,10 +206,30 @@ async function run() {
     await sendButton.click();
     console.log(`📤 Prompt sent: creating "${WF_NAME}"...`);
 
-    // Wait for mention of the workflow name in AI response (up to 3 min for complex workflow)
-    const mentioned = await waitForText(chatCard, WF_NAME, 180000);
-    console.log(`📥 AI response mention of workflow name: ${mentioned}`);
-    await sleep(3000);
+    // ── WAIT: poll WS frames for workflow_ready / workflowCreated (max 3 min) ──────
+    // The workflow assistant uses pushProgress events — not DOM chat bubbles — so we
+    // poll the captured WS frames directly instead of waiting for a DOM text match.
+    const MAX_WAIT_MS = 180000;
+    const pollStart = Date.now();
+    let earlyExit = false;
+    while (Date.now() - pollStart < MAX_WAIT_MS) {
+      const scanFrames = wsFrames.slice(frameStart);
+      for (const sf of scanFrames) {
+        if (typeof sf.payload !== "string" || sf.dir !== "recv") continue;
+        const p = safeJson(sf.payload);
+        if (!p || typeof p !== "object") continue;
+        // workflow_ready progress event
+        if (p.type === "event" && p.event === "pmos.workflow.assist.progress") {
+          if (p.payload && p.payload.type === "workflow_ready") { earlyExit = true; break; }
+        }
+        // final pmos.workflow.assist response
+        if (p.type === "res" && p.payload && p.payload.workflowCreated === true) { earlyExit = true; break; }
+      }
+      if (earlyExit) break;
+      await sleep(2000);
+    }
+    console.log(`📥 WS wait done (earlyExit=${earlyExit}, elapsed=${Math.round((Date.now() - pollStart) / 1000)}s)`);
+    await sleep(2000); // brief settle
 
     // ── ANALYZE WS FRAMES ─────────────────────────────────────────────────
     const frames = wsFrames.slice(frameStart);
@@ -368,6 +404,7 @@ function printSummary(r) {
   console.log("  Basecamp Complex Workflow E2E Summary");
   console.log("═══════════════════════════════════════════");
   console.log(`  Login:                   ${r.login.ok ? "✅" : "❌"}`);
+  console.log(`  WS assist routed:        ${wc.wsAssistSeen ? "✅ pmos.workflow.assist" : "❌ (wrong agent)"}`);
   console.log(`  Workflow created:        ${wc.workflowCreated ? "✅ " + wc.workflowId : "❌"}`);
   console.log(`  Total nodes:             ${wc.totalNodes}`);
   console.log(`  node_added events:       ${wc.nodeAddedCount} (streaming)`);

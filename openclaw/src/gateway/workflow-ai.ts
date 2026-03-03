@@ -1213,7 +1213,7 @@ Response:
   "workflow": {
     "name": "Basecamp Todo to Slack and GitHub",
     "nodes": [
-      {"id": "trigger-1", "name": "Incoming Todo Webhook", "type": "n8n-nodes-base.webhookTrigger", "typeVersion": 1, "position": [250, 300], "parameters": {"path": "basecamp-todo","responseMode":"onReceived"}},
+      {"id": "trigger-1", "name": "Incoming Todo Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 1, "position": [250, 300], "parameters": {"path": "basecamp-todo","responseMode":"onReceived"}},
       {"id": "set-1", "name": "Format Todo Data", "type": "n8n-nodes-base.set", "typeVersion": 3, "position": [500, 300], "parameters": {"values": {"string": [{"name": "title", "value": "={{ $json.title }}"}, {"name": "description", "value": "={{ $json.content }}"}]}}},
       {"id": "slack-1", "name": "Notify Slack", "type": "n8n-nodes-base.slack", "typeVersion": 1, "position": [750, 300], "parameters": {"resource": "message", "operation": "post", "channel": "#notifications", "text": "New Basecamp Todo: {{$json.title}}"}},
       {"id": "filter-1", "name": "Check Priority", "type": "n8n-nodes-base.if", "typeVersion": 1, "position": [1000, 300], "parameters": {"conditions": {"string": [{"value1": "={{ $json.priority }}", "value2": "high"}]}}},

@@ -2096,19 +2096,127 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         return;
       }
 
-      // Stream the response text token-by-token for a live typing effect
+      // ── JSON-response fallback ─────────────────────────────────────────────
+      // The system prompt asks the AI to return JSON: {message, workflow?}.
+      // If the AI returned a workflow object in text (no tool_calls used),
+      // parse and create it directly so models without function-calling still work.
       const finalText = result.text ?? "";
-      if (finalText && client?.connId) {
+      if (!createdWorkflowId && finalText.trim().startsWith("{")) {
+        try {
+          const aiJson = JSON.parse(finalText.trim()) as Record<string, unknown>;
+          const wfData = aiJson.workflow as Record<string, unknown> | undefined;
+          if (wfData && typeof wfData.name === "string" && Array.isArray(wfData.nodes)) {
+            const wfName = wfData.name.trim();
+            let wfNodes = wfData.nodes as Array<Record<string, unknown>>;
+            const wfConns = (wfData.connections && typeof wfData.connections === "object")
+              ? wfData.connections as Record<string, unknown>
+              : {};
+            if (wfName && wfNodes.length > 0) {
+              // Apply the same type corrections as the tool handler
+              const JSON_TYPE_CORRECTIONS: Record<string, string> = {
+                "n8n-nodes-base.webhookTrigger": "n8n-nodes-base.webhook",
+                "n8n-nodes-base.cron": "n8n-nodes-base.scheduleTrigger",
+                "n8n-nodes-base.interval": "n8n-nodes-base.scheduleTrigger",
+                "n8n-nodes-base.function": "n8n-nodes-base.code",
+                "n8n-nodes-base.functionItem": "n8n-nodes-base.code",
+                "n8n-nodes-base.itemListsMerge": "n8n-nodes-base.merge",
+                "n8n-nodes-base.googleSheetsRowTrigger": "n8n-nodes-base.googleSheetsTrigger",
+                "n8n-nodes-base.rssFeedRead": "n8n-nodes-base.rssFeedReadTrigger",
+              };
+              wfNodes = wfNodes.map((node) => {
+                const t = String(node.type ?? "");
+                if (t.toLowerCase().includes("basecamp") && t !== "n8n-nodes-basecamp.basecamp") {
+                  return { ...node, type: "n8n-nodes-basecamp.basecamp" };
+                }
+                if (JSON_TYPE_CORRECTIONS[t]) return { ...node, type: JSON_TYPE_CORRECTIONS[t] };
+                return node;
+              });
+              // Inject Basecamp credentials
+              const hasBasecampNode = wfNodes.some(
+                (n) => String(n.type ?? "") === "n8n-nodes-basecamp.basecamp",
+              );
+              if (hasBasecampNode) {
+                const { listN8nCredentials: listCreds } = await import("../n8n-api-client.js");
+                const credR2 = await listCreds(workspaceId);
+                const bcCred = (credR2.ok ? (credR2.credentials ?? []) : []).find(
+                  (c) => c.type === "basecampApi",
+                );
+                if (bcCred) {
+                  wfNodes = wfNodes.map((node) => {
+                    if (String(node.type ?? "") === "n8n-nodes-basecamp.basecamp") {
+                      const existing = node.credentials as Record<string, unknown> | undefined;
+                      if (!existing?.basecampApi) {
+                        return {
+                          ...node,
+                          credentials: {
+                            ...(existing ?? {}),
+                            basecampApi: { id: bcCred.id, name: bcCred.name },
+                          },
+                        };
+                      }
+                    }
+                    return node;
+                  });
+                }
+              }
+              // Emit per-node streaming events
+              pushProgress(`🔧 Building workflow "${wfName}" with ${wfNodes.length} nodes...`);
+              for (const node of wfNodes) {
+                const nodeName = String(node.name ?? "node");
+                const nodeType = String(node.type ?? "");
+                pushProgress({
+                  type: "node_added",
+                  nodeName,
+                  nodeType: nodeType.split(".").pop() ?? nodeType,
+                  step: `➕ Adding node: ${nodeName}`,
+                });
+                await new Promise<void>((res) => setTimeout(res, 30));
+              }
+              const { createN8nWorkflow: createWf } = await import("../n8n-api-client.js");
+              const createR = await createWf(workspaceId, {
+                name: wfName,
+                active: false,
+                nodes: wfNodes as Parameters<typeof createWf>[1]["nodes"],
+                connections: wfConns,
+              });
+              if (createR.ok && createR.workflow?.id) {
+                createdWorkflowId = createR.workflow.id;
+                createdWorkflowName = wfName;
+                pushProgress({ type: "workflow_ready", workflowId: createdWorkflowId });
+                pushProgress(`✅ Workflow "${wfName}" created with ${wfNodes.length} nodes!`);
+              }
+            }
+          }
+        } catch {
+          // Not valid JSON or workflow extraction failed — stream text as-is
+        }
+      }
+
+      // Extract human-readable message from JSON response if applicable
+      let displayMessage = finalText;
+      if (finalText.trim().startsWith("{")) {
+        try {
+          const msgJson = JSON.parse(finalText.trim()) as Record<string, unknown>;
+          if (typeof msgJson.message === "string" && msgJson.message.trim()) {
+            displayMessage = msgJson.message;
+          }
+        } catch {
+          // use raw text
+        }
+      }
+
+      // Stream the response text token-by-token for a live typing effect
+      if (displayMessage && client?.connId) {
         const CHUNK = 4; // characters per push (~80 chars/sec at 50ms interval)
-        for (let i = 0; i < finalText.length; i += CHUNK) {
-          pushProgress({ type: "token", text: finalText.slice(i, i + CHUNK) });
+        for (let i = 0; i < displayMessage.length; i += CHUNK) {
+          pushProgress({ type: "token", text: displayMessage.slice(i, i + CHUNK) });
           await new Promise<void>((r) => setTimeout(r, 12));
         }
       }
 
       respond(true, {
         ok: true,
-        message: finalText,
+        message: displayMessage,
         workflowCreated: Boolean(createdWorkflowId),
         workflowId: createdWorkflowId,
         workflowName: createdWorkflowName,
