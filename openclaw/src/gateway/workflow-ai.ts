@@ -22,7 +22,7 @@ interface ModelConfig {
 }
 
 const WORKFLOW_MODEL_CANDIDATE_LIMIT = 3;
-const WORKFLOW_MODEL_CALL_TIMEOUT_MS = 25_000;
+const WORKFLOW_MODEL_CALL_TIMEOUT_MS = 90_000;
 const API_KEY_OPTIONAL_PROVIDERS = new Set(["ollama", "local-ollama"]);
 
 function appendV1(baseUrl: string): string {

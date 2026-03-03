@@ -2073,7 +2073,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         messages,
         tools,
         executeTool,
-        { maxTokens: 8192, maxIterations: 6 },
+        { maxTokens: 2048, maxIterations: 6 },
       );
 
       if (!result.ok) {
@@ -2131,7 +2131,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             workspaceId,
             systemPrompt,
             messages,
-            { maxTokens: 8192, jsonMode: true },
+            { maxTokens: 4096, jsonMode: true },
           );
           if (retryResult.ok && retryResult.text && retryResult.text.trim().length > 10) {
             finalText = retryResult.text;
