@@ -2073,7 +2073,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         messages,
         tools,
         executeTool,
-        { maxTokens: 2048, maxIterations: 6 },
+        { maxTokens: 8192, maxIterations: 6 },
       );
 
       if (!result.ok) {
@@ -2122,7 +2122,13 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       if (!createdWorkflowId && jsonCandidate) {
         try {
           const aiJson = JSON.parse(jsonCandidate) as Record<string, unknown>;
-          const wfData = aiJson.workflow as Record<string, unknown> | undefined;
+          // Handle {message, workflow: {...}} wrapper OR direct {name, nodes, connections} object
+          const wfData: Record<string, unknown> | undefined =
+            (aiJson.workflow && typeof aiJson.workflow === "object" && !Array.isArray(aiJson.workflow))
+              ? aiJson.workflow as Record<string, unknown>
+              : (typeof aiJson.name === "string" && Array.isArray(aiJson.nodes))
+                ? aiJson
+                : undefined;
           if (wfData && typeof wfData.name === "string" && Array.isArray(wfData.nodes)) {
             const wfName = wfData.name.trim();
             let wfNodes = wfData.nodes as Array<Record<string, unknown>>;
@@ -2212,9 +2218,10 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
 
       // Extract human-readable message from JSON response if applicable
       let displayMessage = finalText;
-      if (finalText.trim().startsWith("{")) {
+      const displayJsonCandidate = extractJsonFromText(finalText);
+      if (displayJsonCandidate) {
         try {
-          const msgJson = JSON.parse(finalText.trim()) as Record<string, unknown>;
+          const msgJson = JSON.parse(displayJsonCandidate) as Record<string, unknown>;
           if (typeof msgJson.message === "string" && msgJson.message.trim()) {
             displayMessage = msgJson.message;
           }
@@ -2239,6 +2246,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         workflowId: createdWorkflowId,
         workflowName: createdWorkflowName,
         providerUsed: result.providerUsed,
+        _debugModelText: finalText.slice(0, 800),
       }, undefined);
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));

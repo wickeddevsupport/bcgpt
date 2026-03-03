@@ -50,6 +50,7 @@ const results = {
     credentialAutoInjected: false, // basecampApi auto-set on nodes
     recvTail: [],
     wsError: null,
+    debugModelText: null,
   },
   workflowExecution: {
     attempted: false,
@@ -283,6 +284,9 @@ async function run() {
           results.workflowCreation.workflowCreated = true;
           results.workflowCreation.workflowId = String(payload.workflowId);
         }
+        if (payload._debugModelText) {
+          results.workflowCreation.debugModelText = String(payload._debugModelText);
+        }
       }
     }
 
@@ -290,6 +294,9 @@ async function run() {
     results.workflowCreation.recvTail = recvTail;
     console.log(`🔧 node_added streaming events: ${results.workflowCreation.nodeAddedCount}`);
     console.log(`🆔 Workflow ID: ${results.workflowCreation.workflowId}`);
+    if (results.workflowCreation.debugModelText) {
+      console.log(`🤖 Model text (first 200 chars): ${results.workflowCreation.debugModelText.slice(0, 200)}`);
+    }
 
     // ── RETRIEVE AND AUDIT WORKFLOW ────────────────────────────────────────
     if (results.workflowCreation.workflowId) {
