@@ -562,6 +562,7 @@ export function renderApp(state: AppViewState) {
       state.workflowChatStream = null;
       state.workflowChatStreamStartedAt = null;
       state.workflowChatPendingWorkflow = null;
+      state.workflowChatSteps = [];
     },
     showNewMessages: false,
     onScrollToBottom: undefined,
@@ -923,6 +924,7 @@ export function renderApp(state: AppViewState) {
                       onCancelWorkflow: () => state.handleWorkflowChatCancelWorkflow(),
                       // Full chat props for inline chat panel
                       chatProps: workflowChatProps,
+                      chatSteps: state.workflowChatSteps ?? [],
                     })}
               </div>`
             : nothing

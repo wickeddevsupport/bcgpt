@@ -431,13 +431,34 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
   }
 
   if (evt.event === "pmos.workflow.assist.progress") {
-    const payload = evt.payload as { step?: string } | undefined;
-    const step = typeof payload?.step === "string" ? payload.step : null;
-    if (step) {
+    const payload = evt.payload as { step?: string; type?: string; text?: string; workflowId?: string } | undefined;
+    if (!payload) return;
+
+    // Typed payload: token stream (AI response text)
+    if (payload.type === "token" && typeof payload.text === "string") {
       const app = host as unknown as { workflowChatStream: string | null };
-      app.workflowChatStream = app.workflowChatStream
-        ? app.workflowChatStream + "\n" + step
-        : step;
+      app.workflowChatStream = (app.workflowChatStream && !app.workflowChatStream.startsWith("🔧") && !app.workflowChatStream.startsWith("🧠")
+        ? app.workflowChatStream
+        : "") + payload.text;
+      return;
+    }
+
+    // Typed payload: workflow created/updated — navigate iframe immediately
+    if (payload.type === "workflow_ready" && typeof payload.workflowId === "string") {
+      const app = host as unknown as { apFlowSelectedId: string | null; n8nEmbedVersion: number };
+      app.apFlowSelectedId = payload.workflowId;
+      app.n8nEmbedVersion = (app.n8nEmbedVersion ?? 0) + 1;
+      return;
+    }
+
+    // Step progress (tool activity, loading indicators)
+    const step = typeof payload.step === "string" ? payload.step
+      : (payload.type === "step" && typeof payload.text === "string" ? payload.text : null);
+    if (step) {
+      const app = host as unknown as { workflowChatStream: string | null; workflowChatSteps: string[] };
+      app.workflowChatSteps = [...(app.workflowChatSteps ?? []), step];
+      // Show current step as activity indicator (replaced when tokens arrive)
+      app.workflowChatStream = "🔧 " + step;
     }
   }
 }

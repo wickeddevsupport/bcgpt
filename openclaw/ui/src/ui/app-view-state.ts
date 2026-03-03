@@ -296,6 +296,7 @@ export type AppViewState = {
   workflowChatSending: boolean;
   workflowChatStream: string | null;
   workflowChatStreamStartedAt: number | null;
+  workflowChatSteps: string[];
   workflowChatPendingWorkflow: { name: string; nodes: unknown[]; connections: Record<string, unknown> } | null;
   handleWorkflowChatConfirm: () => Promise<void>;
   handleWorkflowChatCancelWorkflow: () => void;

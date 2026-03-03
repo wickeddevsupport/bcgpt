@@ -1614,6 +1614,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
       const p = params as {
         messages?: Array<{ role: string; content: string }>;
         message?: string;
+        currentWorkflowId?: string;
       } | null;
 
       const rawMessages: Array<{ role: string; content: string }> = Array.isArray(p?.messages) ? [...p.messages] : [];
@@ -1691,13 +1692,38 @@ export const pmosHandlers: GatewayRequestHandlers = {
       const workspaceMemoryContext = workspaceAiContext
         ? `## Workspace Memory Snapshot (AI_CONTEXT.md)\n${workspaceAiContext}`
         : "";
+
+      // If a workflow is currently open in the canvas, fetch and inject its full details
+      const currentWorkflowId = typeof p?.currentWorkflowId === "string" ? p.currentWorkflowId.trim() : null;
+      let currentWorkflowContext = "";
+      if (currentWorkflowId) {
+        const { getN8nWorkflow } = await import("../n8n-api-client.js");
+        const wfResult = await withTimeout(
+          getN8nWorkflow(workspaceId, currentWorkflowId).catch(() => ({ ok: false as const })),
+          4000,
+          { ok: false as const },
+        );
+        if (wfResult.ok && wfResult.workflow) {
+          const wf = wfResult.workflow as { id: string; name: string; active: boolean; nodes: unknown[]; connections: unknown };
+          currentWorkflowContext = `## Currently Open Workflow in Canvas
+- Workflow ID: ${wf.id}
+- Name: ${wf.name}
+- Active: ${wf.active}
+- Nodes (${Array.isArray(wf.nodes) ? wf.nodes.length : 0} total): ${JSON.stringify(wf.nodes, null, 2)}
+- Connections: ${JSON.stringify(wf.connections, null, 2)}
+
+When the user asks to edit, modify, add, remove or update this workflow, use pmos_n8n_update_workflow with workflow_id="${wf.id}".`;
+        }
+      }
       const agentBehaviorRules = [
         "## Critical Behaviour Rules (Automations AI)",
         "- When asked to create or build a workflow: CALL pmos_n8n_create_workflow IMMEDIATELY — never output JSON for the user to import manually.",
         "- Always call pmos_n8n_list_credentials FIRST to discover which integrations are available.",
         "- After creating a workflow, tell the user its name and ID, and what they should do next (e.g. activate it, add a webhook).",
         "- Never describe a workflow in text and say 'import it' — use the tool to create it directly.",
-        "- Available tools: pmos_n8n_list_credentials, pmos_n8n_list_workflows, pmos_n8n_list_node_types, pmos_n8n_create_workflow, pmos_n8n_get_workflow, pmos_n8n_execute_workflow.",
+        "- When the user asks to edit/modify/add nodes/remove nodes from an EXISTING workflow (especially one currently open in the canvas): call pmos_n8n_get_workflow first to fetch current state, then call pmos_n8n_update_workflow with the FULL updated nodes+connections.",
+        "- pmos_n8n_update_workflow replaces the entire workflow — always include ALL existing nodes plus any new ones.",
+        "- Available tools: pmos_n8n_list_credentials, pmos_n8n_list_workflows, pmos_n8n_list_node_types, pmos_n8n_create_workflow, pmos_n8n_get_workflow, pmos_n8n_update_workflow, pmos_n8n_execute_workflow.",
       ].join("\n");
       const systemPrompt = [
         WORKFLOW_ASSISTANT_SYSTEM_PROMPT,
@@ -1705,6 +1731,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
         liveNodeCatalog,
         credentialContext,
         workspaceContext,
+        currentWorkflowContext,
         workspaceMemoryContext,
       ]
         .filter((part) => part && part.trim().length > 0)
@@ -1777,6 +1804,30 @@ export const pmosHandlers: GatewayRequestHandlers = {
         {
           type: "function" as const,
           function: {
+            name: "pmos_n8n_update_workflow",
+            description: "Update an existing n8n workflow — add, remove or modify nodes and connections. Always call pmos_n8n_get_workflow first to retrieve current state, then include ALL nodes (existing + modified) in the update.",
+            parameters: {
+              type: "object",
+              required: ["workflow_id", "nodes", "connections"],
+              additionalProperties: false,
+              properties: {
+                workflow_id: { type: "string", description: "The n8n workflow ID to update" },
+                name: { type: "string", description: "Optional new name for the workflow" },
+                nodes: {
+                  type: "array",
+                  description: "Complete array of ALL node objects for the workflow (existing + new/updated)",
+                },
+                connections: {
+                  type: "object",
+                  description: "Complete connections object (all existing + new connections)",
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
             name: "pmos_n8n_execute_workflow",
             description: "Execute (test-run) an n8n workflow by ID",
             parameters: {
@@ -1792,11 +1843,14 @@ export const pmosHandlers: GatewayRequestHandlers = {
       ];
 
       // ── Progress push helper ──────────────────────────────────────────────
-      const pushProgress = (step: string) => {
+      const pushProgress = (stepOrPayload: string | Record<string, unknown>) => {
         if (client?.connId) {
+          const payload = typeof stepOrPayload === "string"
+            ? { step: stepOrPayload }
+            : stepOrPayload;
           context.broadcastToConnIds(
             "pmos.workflow.assist.progress",
-            { step },
+            payload,
             new Set([client.connId]),
           );
         }
@@ -1859,12 +1913,36 @@ export const pmosHandlers: GatewayRequestHandlers = {
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to create workflow" });
             createdWorkflowId = r.workflow?.id;
             createdWorkflowName = name;
+            // Navigate the canvas to the new workflow immediately (live creation feel)
+            if (createdWorkflowId) {
+              pushProgress({ type: "workflow_ready", workflowId: createdWorkflowId });
+            }
             pushProgress(`✅ Workflow "${name}" created!`);
             return JSON.stringify({
               success: true,
               workflowId: r.workflow?.id,
               workflowName: name,
               message: `Workflow "${name}" created successfully! ID: ${r.workflow?.id}. It's currently inactive — activate it in the Workflows panel when ready.`,
+            });
+          }
+          case "pmos_n8n_update_workflow": {
+            const id = String(args.workflow_id ?? "").trim();
+            if (!id) return JSON.stringify({ error: "workflow_id is required" });
+            const { updateN8nWorkflow } = await import("../n8n-api-client.js");
+            pushProgress(`Updating workflow...`);
+            const r = await updateN8nWorkflow(workspaceId, id, {
+              ...(typeof args.name === "string" ? { name: args.name } : {}),
+              ...(Array.isArray(args.nodes) ? { nodes: args.nodes as Parameters<typeof createN8nWorkflow>[1]["nodes"] } : {}),
+              ...(args.connections && typeof args.connections === "object" ? { connections: args.connections as Record<string, unknown> } : {}),
+            });
+            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to update workflow" });
+            // Push workflow_ready so the canvas refreshes immediately
+            pushProgress({ type: "workflow_ready", workflowId: id });
+            pushProgress(`✅ Workflow updated!`);
+            return JSON.stringify({
+              success: true,
+              workflowId: id,
+              message: `Workflow updated successfully. The canvas will reload to show the changes.`,
             });
           }
           case "pmos_n8n_get_workflow": {
@@ -1910,9 +1988,19 @@ export const pmosHandlers: GatewayRequestHandlers = {
         return;
       }
 
+      // Stream the response text token-by-token for a live typing effect
+      const finalText = result.text ?? "";
+      if (finalText && client?.connId) {
+        const CHUNK = 4; // characters per push (~80 chars/sec at 50ms interval)
+        for (let i = 0; i < finalText.length; i += CHUNK) {
+          pushProgress({ type: "token", text: finalText.slice(i, i + CHUNK) });
+          await new Promise<void>((r) => setTimeout(r, 12));
+        }
+      }
+
       respond(true, {
         ok: true,
-        message: result.text ?? "",
+        message: finalText,
         workflowCreated: Boolean(createdWorkflowId),
         workflowId: createdWorkflowId,
         workflowName: createdWorkflowName,

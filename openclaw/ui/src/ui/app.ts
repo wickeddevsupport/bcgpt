@@ -432,6 +432,7 @@ export class OpenClawApp extends LitElement {
   @state() workflowChatSending = false;
   @state() workflowChatStream: string | null = null;
   @state() workflowChatStreamStartedAt: number | null = null;
+  @state() workflowChatSteps: string[] = [];
   @state() workflowChatPendingWorkflow: { name: string; nodes: unknown[]; connections: Record<string, unknown> } | null = null;
 
   // PMOS AI flow builder stream (Phase 5)
@@ -1214,7 +1215,9 @@ export class OpenClawApp extends LitElement {
     if (!message || this.workflowChatSending) return;
     this.workflowChatDraft = "";
     this.workflowChatStreamStartedAt = Date.now();
-    this.workflowChatStream = "Thinking...";
+    // Start with empty stream (reading indicator) — server drives steps/tokens via progress events
+    this.workflowChatStream = "";
+    this.workflowChatSteps = [];
 
     const history = [...this.workflowChatMessages, { role: "user" as const, content: message }];
     this.workflowChatMessages = history;
@@ -1223,6 +1226,7 @@ export class OpenClawApp extends LitElement {
     try {
       const result = await this.client!.request("pmos.workflow.assist", {
         messages: history.map(m => ({ role: m.role, content: m.content })),
+        currentWorkflowId: this.apFlowSelectedId ?? undefined,
       }) as {
         ok: boolean;
         message: string;
@@ -1235,12 +1239,13 @@ export class OpenClawApp extends LitElement {
       const reply = result.message || "I couldn't process that.";
       this.workflowChatMessages = [...this.workflowChatMessages, { role: "assistant", content: reply }];
 
-      // Workflow was created directly by the AI tool — refresh the list and navigate iframe
-      if (result.workflowCreated) {
-        if (result.workflowId) {
-          this.apFlowSelectedId = result.workflowId;
-        }
+      // workflow_ready progress event already navigated the iframe during streaming;
+      // fallback: if server returned workflowId but event wasn't received, navigate now
+      if (result.workflowCreated && result.workflowId && this.apFlowSelectedId !== result.workflowId) {
+        this.apFlowSelectedId = result.workflowId;
         this.n8nEmbedVersion = (this.n8nEmbedVersion ?? 0) + 1;
+      }
+      if (result.workflowCreated) {
         void this.handlePmosApFlowsLoad();
       }
     } catch (err) {
