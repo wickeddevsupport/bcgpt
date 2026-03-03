@@ -760,6 +760,188 @@ function isWorkspaceTriggerNode(nodeName: string): boolean {
   return lower.includes("trigger") || lower.endsWith(".trigger");
 }
 
+// ─── Basecamp node cheatsheet (always injected — authoritative reference) ──────
+
+const BASECAMP_NODE_CHEATSHEET = `
+## ⭐ Custom Basecamp Node — Complete Reference (n8n-nodes-basecamp.basecamp)
+
+This is YOUR custom Basecamp integration node. It is ALWAYS available when Basecamp is connected.
+Node type: \`n8n-nodes-basecamp.basecamp\`
+Credential type: \`basecampApi\` (auto-linked — include "credentials" key in every Basecamp node)
+
+### All Resources and Operations
+
+#### Resource: \`project\`
+| Operation | Key Parameters |
+|-----------|---------------|
+| \`getAll\` | \`includeArchived: false\` |
+| \`get\` | \`projectId: "ID"\` |
+| \`findByName\` | \`projectName: "My Project"\` |
+| \`create\` | \`name: "Name"\`, \`description: "Desc"\` |
+| \`update\` | \`projectId: "ID"\`, \`name: "New Name"\` |
+| \`trash\` | \`projectId: "ID"\` |
+
+#### Resource: \`todo\`
+| Operation | Key Parameters |
+|-----------|---------------|
+| \`create\` | \`projectId\`, \`todolistId\`, \`content\` (required); additionalFields: \`due_on\`, \`assignee_ids\`, \`notes\` |
+| \`get\` | \`projectId\`, \`todoId\` |
+| \`update\` | \`projectId\`, \`todoId\`, \`content\`; additionalFields optional |
+| \`complete\` | \`projectId\`, \`todoId\` |
+| \`uncomplete\` | \`projectId\`, \`todoId\` |
+| \`delete\` | \`projectId\`, \`todoId\` |
+
+#### Resource: \`todolist\`
+| Operation | Key Parameters |
+|-----------|---------------|
+| \`getAll\` | \`projectId\` |
+| \`get\` | \`projectId\`, \`todolistId\` |
+| \`create\` | \`projectId\`, \`name\`; optional \`description\` |
+| \`update\` | \`projectId\`, \`todolistId\`, optional \`name\` |
+| \`delete\` | \`projectId\`, \`todolistId\` |
+
+#### Resource: \`message\`
+| Operation | Key Parameters |
+|-----------|---------------|
+| \`create\` | \`projectId\`, \`subject\`; optional \`content\` (HTML) |
+| \`get\` | \`projectId\`, \`messageId\` |
+| \`update\` | \`projectId\`, \`messageId\`; optional \`subject\`, \`content\` |
+| \`delete\` | \`projectId\`, \`messageId\` |
+
+#### Resource: \`person\`
+| Operation | Key Parameters |
+|-----------|---------------|
+| \`getAll\` | no params needed (lists all account people) |
+
+#### Resource: \`card\` (Kanban)
+| Operation | Key Parameters |
+|-----------|---------------|
+| \`getAll\` | \`projectId\` |
+| \`get\` | \`projectId\`, \`cardId\` |
+| \`create\` | \`projectId\`, \`title\`; optional \`content\`, \`due_on\`, \`assignee_ids\` |
+| \`update\` | \`projectId\`, \`cardId\`; optional fields |
+
+#### Resource: \`comment\`
+| Operation | Key Parameters |
+|-----------|---------------|
+| \`getAll\` | \`projectId\`, \`recordingId\`, \`recordingType\` (e.g. "Todo") |
+| \`create\` | \`projectId\`, \`recordingId\`, \`recordingType\`, \`content\` |
+| \`delete\` | \`projectId\`, \`commentId\` |
+
+### Complete Node JSON Examples
+
+#### Get All Projects
+\`\`\`json
+{
+  "id": "bc-1",
+  "name": "Get Basecamp Projects",
+  "type": "n8n-nodes-basecamp.basecamp",
+  "typeVersion": 1,
+  "position": [500, 300],
+  "parameters": {
+    "resource": "project",
+    "operation": "getAll",
+    "includeArchived": false
+  },
+  "credentials": { "basecampApi": { "id": "CRED_ID", "name": "CRED_NAME" } }
+}
+\`\`\`
+
+#### Create a Todo (with dynamic project/list from previous node)
+\`\`\`json
+{
+  "id": "bc-2",
+  "name": "Create Basecamp Todo",
+  "type": "n8n-nodes-basecamp.basecamp",
+  "typeVersion": 1,
+  "position": [750, 300],
+  "parameters": {
+    "resource": "todo",
+    "operation": "create",
+    "projectId": "={{ $json.projectId }}",
+    "todolistId": "={{ $json.todolistId }}",
+    "content": "={{ $json.title }}",
+    "additionalFields": {
+      "due_on": "={{ $json.dueDate }}",
+      "notes": "={{ $json.description }}"
+    }
+  },
+  "credentials": { "basecampApi": { "id": "CRED_ID", "name": "CRED_NAME" } }
+}
+\`\`\`
+
+#### Post a Message to a Project
+\`\`\`json
+{
+  "id": "bc-3",
+  "name": "Post Basecamp Message",
+  "type": "n8n-nodes-basecamp.basecamp",
+  "typeVersion": 1,
+  "position": [750, 300],
+  "parameters": {
+    "resource": "message",
+    "operation": "create",
+    "projectId": "={{ $json.projectId }}",
+    "subject": "={{ $json.title }}",
+    "content": "<p>={{ $json.body }}</p>"
+  },
+  "credentials": { "basecampApi": { "id": "CRED_ID", "name": "CRED_NAME" } }
+}
+\`\`\`
+
+#### Find Project by Name then Get its Todo Lists
+Chain these two nodes: first find project by name, then get its todo lists.
+\`\`\`json
+[
+  {
+    "id": "bc-find-1",
+    "name": "Find Project",
+    "type": "n8n-nodes-basecamp.basecamp",
+    "typeVersion": 1,
+    "position": [500, 300],
+    "parameters": { "resource": "project", "operation": "findByName", "projectName": "My Project Name" },
+    "credentials": { "basecampApi": { "id": "CRED_ID", "name": "CRED_NAME" } }
+  },
+  {
+    "id": "bc-lists-1",
+    "name": "Get Todo Lists",
+    "type": "n8n-nodes-basecamp.basecamp",
+    "typeVersion": 1,
+    "position": [750, 300],
+    "parameters": { "resource": "todolist", "operation": "getAll", "projectId": "={{ $json.id.toString() }}" },
+    "credentials": { "basecampApi": { "id": "CRED_ID", "name": "CRED_NAME" } }
+  }
+]
+\`\`\`
+
+### Expression Reference for Chaining Nodes
+- \`={{ $json.id.toString() }}\` — convert numeric Basecamp ID to string
+- \`={{ $json.projectId }}\` — pass projectId from previous node output
+- \`={{ $node["Get Projects"].json[0].id.toString() }}\` — access first item from a named node
+- \`={{ $json.name }}\` — use the name field from previous output
+- \`={{ $json.title }}\` — use the title field (for todos, cards)
+
+### Design Patterns for Basecamp Workflows
+
+**Pattern 1: Create todo from webhook data**
+Webhook Trigger → Set (format data) → Basecamp (todo: create) → Respond to Webhook
+
+**Pattern 2: Auto-notify on new Basecamp data**
+Schedule Trigger → Basecamp (project: getAll) → Split In Batches → Basecamp (todo: getAll) → Filter (check due soon) → Slack (notify) / Gmail (send email)
+
+**Pattern 3: Sync between Basecamp and other tools**
+Webhook → Basecamp (findByName project) → Basecamp (todolist: getAll) → Code (pick first list) → Basecamp (todo: create) → GitHub (issue: create)
+
+**Pattern 4: Status board update**  
+Schedule Trigger → Basecamp (todo: getAll) → Filter (completed) → Google Sheets (append) → Slack (summary)
+
+### CRITICAL: When User Mentions Basecamp
+- ALWAYS use \`n8n-nodes-basecamp.basecamp\` — never invent a different type name
+- ALWAYS include the \`credentials\` key — the credential name will be auto-linked
+- Use \`findByName\` operation when the user mentions a project by name (so runtime resolves the ID)
+- Chain nodes: get project → get todolists → create todo (3-node pattern for full context)
+- For numeric IDs from previous nodes always call \`.toString()\` in the expression
+`;
 function formatWorkspaceNodeRow(row: WorkspaceNodeCatalogRow): string {
   const detail = (row.description ?? row.displayName ?? "").trim();
   return detail ? `- ${row.name} - ${detail}` : `- ${row.name}`;
@@ -858,12 +1040,14 @@ const N8N_NODE_CATALOG_FALLBACK = `
 - n8n-nodes-base.githubTrigger — Trigger on GitHub events (push, PR, issue, etc.)
 - n8n-nodes-base.googleSheetsRowTrigger — Trigger on new row in Google Sheets
 
-### Basecamp (custom node — uses connected Basecamp account)
-- n8n-nodes-basecamp.basecamp — Resource: project, todo, todolist, message, card, comment, document, file, person
-  Operations on todo: getAll, get, create, update, complete, uncomplete, delete
-  Operations on project: getAll, get, create
-  Operations on message: getAll, get, create, update, delete
-  Operations on todolist: getAll, get, create, update, delete
+### Custom Basecamp Node (YOUR custom integration — always use this for Basecamp)
+- n8n-nodes-basecamp.basecamp — Resources: project, todo, todolist, message, card, comment, person
+  — project ops: getAll, get, findByName, create, update, trash
+  — todo ops: create, get, update, complete, uncomplete, delete
+  — todolist ops: getAll, get, create, update, delete
+  — message ops: create, get, update, delete
+  — person ops: getAll
+  — credential: basecampApi (auto-linked from workspace)
 
 ### Communication
 - n8n-nodes-base.slack — Send messages, create channels, update users (credentials: Slack OAuth)
@@ -899,6 +1083,7 @@ const N8N_NODE_CATALOG_FALLBACK = `
 - n8n-nodes-base.merge — Merge data from multiple branches
 - n8n-nodes-base.splitInBatches — Process items in batches
 - n8n-nodes-base.filter — Keep only items matching a condition
+- n8n-nodes-base.respondToWebhook — Send custom HTTP response from webhook workflow
 
 ### CRM & Sales
 - n8n-nodes-base.hubspot — Read/write HubSpot contacts, deals, companies
@@ -916,6 +1101,8 @@ If a section titled "Available n8n Node Types (live from this workspace)" is pre
 Do not invent node types. Use only node type names that exist in the provided live catalog when available.
 
 ${N8N_NODE_CATALOG_FALLBACK}
+
+${BASECAMP_NODE_CHEATSHEET}
 
 ## How to respond
 
@@ -945,7 +1132,10 @@ Always respond with a JSON object in this exact format:
 ## Rules
 - Use REAL n8n node type names exactly as listed above (e.g., "n8n-nodes-base.slack" not "slack")
 - If a live workspace node catalog is provided, use ONLY node names from that live catalog
-- The Basecamp node is "n8n-nodes-basecamp.basecamp" — it uses the connected Basecamp account from Integrations
+- ALWAYS use "n8n-nodes-basecamp.basecamp" for ALL Basecamp operations — full parameter reference is in the Basecamp Node Reference section above
+- Use the findByName operation when the user mentions a Basecamp project by name (avoids hardcoding IDs)
+- Chain nodes for full context: findByName → todolist:getAll → todo:create (3-node pattern)
+- Always include the credentials key on every Basecamp node
 - Position nodes left-to-right: trigger at x=250, each subsequent node at x+250
 - Keep node parameters minimal — the user can configure details in the n8n editor
 - If the user asks a question, answer it clearly without generating a workflow
