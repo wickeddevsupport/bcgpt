@@ -429,6 +429,17 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
       host.execApprovalQueue = removeExecApproval(host.execApprovalQueue, resolved.id);
     }
   }
+
+  if (evt.event === "pmos.workflow.assist.progress") {
+    const payload = evt.payload as { step?: string } | undefined;
+    const step = typeof payload?.step === "string" ? payload.step : null;
+    if (step) {
+      const app = host as unknown as { workflowChatStream: string | null };
+      app.workflowChatStream = app.workflowChatStream
+        ? app.workflowChatStream + "\n" + step
+        : step;
+    }
+  }
 }
 
 export function applySnapshot(host: GatewayHost, hello: GatewayHelloOk) {

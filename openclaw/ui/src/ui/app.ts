@@ -1213,50 +1213,34 @@ export class OpenClawApp extends LitElement {
     if (!message || this.workflowChatSending) return;
     this.workflowChatDraft = "";
     this.workflowChatStreamStartedAt = Date.now();
-    this.workflowChatStream = "Analyzing your request...";
+    this.workflowChatStream = "Thinking...";
 
     const history = [...this.workflowChatMessages, { role: "user" as const, content: message }];
     this.workflowChatMessages = history;
     this.workflowChatSending = true;
-    let progressLines = ["Analyzing your request..."];
-    const setProgress = (next: string) => {
-      progressLines = [...progressLines, next];
-      this.workflowChatStream = progressLines.join("\n");
-    };
 
     try {
-      setProgress("Generating workflow plan...");
       const result = await this.client!.request("pmos.workflow.assist", {
         messages: history.map(m => ({ role: m.role, content: m.content })),
       }) as {
         ok: boolean;
         message: string;
-        workflow?: {
-          name: string;
-          nodes: unknown[];
-          connections: Record<string, unknown>;
-        } | null;
-        providerError?: boolean;
+        workflowCreated?: boolean;
+        workflowId?: string;
+        workflowName?: string;
         providerUsed?: string;
       };
 
-      setProgress("Preparing assistant response...");
       const reply = result.message || "I couldn't process that.";
       this.workflowChatMessages = [...this.workflowChatMessages, { role: "assistant", content: reply }];
 
-      // If the AI returned a workflow, store it for explicit user confirmation
-      if (result.workflow && typeof result.workflow === "object" && result.workflow.nodes?.length) {
-        this.workflowChatPendingWorkflow = {
-          name: result.workflow.name || "AI-Generated Workflow",
-          nodes: result.workflow.nodes,
-          connections: result.workflow.connections ?? {},
-        };
-        setProgress("Workflow ready — confirm to create in n8n.");
+      // Workflow was created directly by the AI tool — refresh the workflow list
+      if (result.workflowCreated) {
+        void this.handlePmosApFlowsLoad();
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       this.workflowChatMessages = [...this.workflowChatMessages, { role: "assistant", content: `Error: ${errMsg}` }];
-      setProgress("Request failed.");
     } finally {
       this.workflowChatSending = false;
       window.setTimeout(() => {

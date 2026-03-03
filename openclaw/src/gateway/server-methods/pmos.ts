@@ -1606,7 +1606,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
 
   // ── AI Workflow Assistant (uses global openclaw.json model config) ─────────────
 
-  "pmos.workflow.assist": async ({ params, respond, client }) => {
+  "pmos.workflow.assist": async ({ params, respond, client, context }) => {
     try {
       if (!client) throw new Error("client context required");
       const workspaceId = requireWorkspaceId(client);
@@ -1628,11 +1628,9 @@ export const pmosHandlers: GatewayRequestHandlers = {
       const messages = rawMessages
         .filter(m => m.role === "user" || m.role === "assistant")
         .map(m => ({ role: m.role as "user" | "assistant", content: String(m.content) }));
-      const latestUserPrompt =
-        [...messages].reverse().find((entry) => entry.role === "user")?.content ?? "";
 
       const {
-        callWorkspaceModel,
+        callWorkspaceModelAgentLoop,
         WORKFLOW_ASSISTANT_SYSTEM_PROMPT,
         getWorkspaceN8nNodeCatalog,
       } = await import("../workflow-ai.js");
@@ -1642,7 +1640,6 @@ export const pmosHandlers: GatewayRequestHandlers = {
       const {
         fetchWorkspaceCredentials,
         buildCredentialContext,
-        autoLinkNodeCredentials,
       } = await import("../credential-sync.js");
       const withTimeout = async <T>(
         promise: Promise<T>,
@@ -1694,8 +1691,17 @@ export const pmosHandlers: GatewayRequestHandlers = {
       const workspaceMemoryContext = workspaceAiContext
         ? `## Workspace Memory Snapshot (AI_CONTEXT.md)\n${workspaceAiContext}`
         : "";
+      const agentBehaviorRules = [
+        "## Critical Behaviour Rules (Automations AI)",
+        "- When asked to create or build a workflow: CALL pmos_n8n_create_workflow IMMEDIATELY — never output JSON for the user to import manually.",
+        "- Always call pmos_n8n_list_credentials FIRST to discover which integrations are available.",
+        "- After creating a workflow, tell the user its name and ID, and what they should do next (e.g. activate it, add a webhook).",
+        "- Never describe a workflow in text and say 'import it' — use the tool to create it directly.",
+        "- Available tools: pmos_n8n_list_credentials, pmos_n8n_list_workflows, pmos_n8n_list_node_types, pmos_n8n_create_workflow, pmos_n8n_get_workflow, pmos_n8n_execute_workflow.",
+      ].join("\n");
       const systemPrompt = [
         WORKFLOW_ASSISTANT_SYSTEM_PROMPT,
+        agentBehaviorRules,
         liveNodeCatalog,
         credentialContext,
         workspaceContext,
@@ -1704,195 +1710,214 @@ export const pmosHandlers: GatewayRequestHandlers = {
         .filter((part) => part && part.trim().length > 0)
         .join("\n\n");
 
-      const buildDeterministicWorkflowFromPrompt = (promptRaw: string) => {
-        const prompt = String(promptRaw ?? "").trim();
-        if (!prompt) {
-          return null;
-        }
-        const lower = prompt.toLowerCase();
-        if (!/(workflow|webhook|automation|n8n|basecamp)/.test(lower)) {
-          return null;
-        }
-
-        const now = Date.now();
-        const nameMatch = prompt.match(/(?:exact\s+name|name)\s+([A-Za-z0-9._:-]+)/i);
-        const workflowName = (nameMatch?.[1] ?? `Workflow_${now}`).trim();
-
-        const pathMatch = prompt.match(
-          /(?:webhook\s+(?:trigger\s+)?path|trigger\s+path|path)\s+([A-Za-z0-9/_-]+)/i,
-        );
-        const webhookPathRaw = (pathMatch?.[1] ?? `wf-${now}`).trim();
-        const webhookPath = webhookPathRaw.replace(/[^A-Za-z0-9/_-]/g, "") || `wf-${now}`;
-
-        let responseBody = JSON.stringify({ ok: true });
-        const jsonMatch = prompt.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          try {
-            responseBody = JSON.stringify(JSON.parse(jsonMatch[0]));
-          } catch {
-            // Keep default response body if user-provided snippet isn't valid JSON.
-          }
-        }
-
-        const includeBasecamp = /\bbasecamp\b/.test(lower);
-        const includeIfNode = /\bif\b|\bbranch\b/.test(lower);
-
-        const nodes: Array<Record<string, unknown>> = [];
-        const connections: Record<string, unknown> = {};
-        const connect = (from: string, to: string) => {
-          connections[from] = {
-            main: [[{ node: to, type: "main", index: 0 }]],
-          };
-        };
-
-        const webhookNodeName = "Webhook Trigger";
-        nodes.push({
-          id: `wf-node-webhook-${now}`,
-          name: webhookNodeName,
-          type: "n8n-nodes-base.webhookTrigger",
-          typeVersion: 1,
-          position: [280, 280],
-          parameters: {
-            path: webhookPath,
-            httpMethod: "POST",
-            responseMode: "responseNode",
+      // ── Tool definitions ─────────────────────────────────────────────────
+      const tools = [
+        {
+          type: "function" as const,
+          function: {
+            name: "pmos_n8n_list_credentials",
+            description: "List available n8n credentials/integrations configured for this workspace (Basecamp, Slack, GitHub, etc.)",
+            parameters: { type: "object", properties: {}, additionalProperties: false },
           },
-        });
-
-        let previousNodeName = webhookNodeName;
-
-        if (includeBasecamp) {
-          const basecampNodeName = "Basecamp";
-          nodes.push({
-            id: `wf-node-basecamp-${now}`,
-            name: basecampNodeName,
-            type: "n8n-nodes-basecamp.basecamp",
-            typeVersion: 1,
-            position: [520, 280],
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "pmos_n8n_list_workflows",
+            description: "List existing n8n workflows in this workspace",
+            parameters: { type: "object", properties: {}, additionalProperties: false },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "pmos_n8n_list_node_types",
+            description: "List available n8n node types (triggers and actions). Call this when you need to know exact node type names.",
+            parameters: { type: "object", properties: {}, additionalProperties: false },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "pmos_n8n_create_workflow",
+            description: "Create a new n8n workflow. Always call pmos_n8n_list_credentials first to know which credential IDs to use.",
             parameters: {
-              resource: "project",
-              operation: "getAll",
-            },
-          });
-          connect(previousNodeName, basecampNodeName);
-          previousNodeName = basecampNodeName;
-        }
-
-        if (includeIfNode) {
-          const ifNodeName = "If";
-          nodes.push({
-            id: `wf-node-if-${now}`,
-            name: ifNodeName,
-            type: "n8n-nodes-base.if",
-            typeVersion: 1,
-            position: [760, 280],
-            parameters: {
-              conditions: {
-                options: {
-                  caseSensitive: true,
-                  typeValidation: "strict",
-                  version: 2,
+              type: "object",
+              required: ["name", "nodes", "connections"],
+              additionalProperties: false,
+              properties: {
+                name: { type: "string", description: "Descriptive workflow name" },
+                nodes: {
+                  type: "array",
+                  description: "Array of n8n node objects, each with: id, name, type, typeVersion, position [x,y], parameters, and optionally credentials",
                 },
-                conditions: [
-                  {
-                    leftValue: "={{$json.ok}}",
-                    rightValue: true,
-                    operator: {
-                      type: "boolean",
-                      operation: "equal",
-                    },
-                  },
-                ],
-                combinator: "and",
+                connections: {
+                  type: "object",
+                  description: "Connections object mapping source node name → { main: [[{ node, type, index }]] }",
+                },
               },
             },
-          });
-          connect(previousNodeName, ifNodeName);
-          previousNodeName = ifNodeName;
-        }
-
-        const respondNodeName = "Respond to Webhook";
-        nodes.push({
-          id: `wf-node-respond-${now}`,
-          name: respondNodeName,
-          type: "n8n-nodes-base.respondToWebhook",
-          typeVersion: 1,
-          position: [1000, 280],
-          parameters: {
-            respondWith: "json",
-            responseBody,
           },
-        });
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "pmos_n8n_get_workflow",
+            description: "Get full details of an existing n8n workflow by ID",
+            parameters: {
+              type: "object",
+              required: ["workflow_id"],
+              additionalProperties: false,
+              properties: {
+                workflow_id: { type: "string", description: "The n8n workflow ID" },
+              },
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "pmos_n8n_execute_workflow",
+            description: "Execute (test-run) an n8n workflow by ID",
+            parameters: {
+              type: "object",
+              required: ["workflow_id"],
+              additionalProperties: false,
+              properties: {
+                workflow_id: { type: "string", description: "The n8n workflow ID to execute" },
+              },
+            },
+          },
+        },
+      ];
 
-        if (previousNodeName === "If") {
-          connections[previousNodeName] = {
-            main: [
-              [{ node: respondNodeName, type: "main", index: 0 }],
-              [],
-            ],
-          };
-        } else {
-          connect(previousNodeName, respondNodeName);
+      // ── Progress push helper ──────────────────────────────────────────────
+      const pushProgress = (step: string) => {
+        if (client?.connId) {
+          context.broadcastToConnIds(
+            "pmos.workflow.assist.progress",
+            { step },
+            new Set([client.connId]),
+          );
         }
-
-        return {
-          name: workflowName,
-          nodes,
-          connections,
-        };
       };
 
-      const result = await callWorkspaceModel(workspaceId, systemPrompt, messages, {
-        maxTokens: 2048,
-        jsonMode: true,
-      });
+      // ── Track created workflow for UI refresh ──────────────────────────
+      let createdWorkflowId: string | undefined;
+      let createdWorkflowName: string | undefined;
+
+      // ── Tool executor ────────────────────────────────────────────────────
+      const executeTool = async (toolName: string, args: Record<string, unknown>): Promise<string> => {
+        const {
+          listN8nCredentials,
+          listN8nWorkflows,
+          createN8nWorkflow,
+          getN8nWorkflow,
+          executeN8nWorkflow,
+          listN8nNodeTypes,
+        } = await import("../n8n-api-client.js");
+
+        switch (toolName) {
+          case "pmos_n8n_list_credentials": {
+            pushProgress("Checking available integrations...");
+            const r = await listN8nCredentials(workspaceId);
+            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to list credentials" });
+            return JSON.stringify({
+              credentials: (r.credentials ?? []).map((c) => ({ id: c.id, name: c.name, type: c.type })),
+            });
+          }
+          case "pmos_n8n_list_workflows": {
+            pushProgress("Loading existing workflows...");
+            const r = await listN8nWorkflows(workspaceId);
+            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to list workflows" });
+            return JSON.stringify({
+              workflows: (r.workflows ?? []).map((w) => ({ id: w.id, name: w.name, active: w.active })),
+            });
+          }
+          case "pmos_n8n_list_node_types": {
+            pushProgress("Looking up available node types...");
+            const r = await listN8nNodeTypes(workspaceId);
+            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to list node types" });
+            return JSON.stringify({ nodeTypes: (r.nodeTypes ?? []).slice(0, 200) });
+          }
+          case "pmos_n8n_create_workflow": {
+            const name = String(args.name ?? "").trim();
+            const nodes = Array.isArray(args.nodes) ? args.nodes : [];
+            const connections =
+              args.connections && typeof args.connections === "object"
+                ? (args.connections as Record<string, unknown>)
+                : {};
+            if (!name) return JSON.stringify({ error: "name is required" });
+            if (!nodes.length) return JSON.stringify({ error: "nodes array is required and must not be empty" });
+            pushProgress(`Building workflow "${name}"...`);
+            const r = await createN8nWorkflow(workspaceId, {
+              name,
+              active: false,
+              nodes: nodes as Parameters<typeof createN8nWorkflow>[1]["nodes"],
+              connections,
+            });
+            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to create workflow" });
+            createdWorkflowId = r.workflow?.id;
+            createdWorkflowName = name;
+            pushProgress(`✅ Workflow "${name}" created!`);
+            return JSON.stringify({
+              success: true,
+              workflowId: r.workflow?.id,
+              workflowName: name,
+              message: `Workflow "${name}" created successfully! ID: ${r.workflow?.id}. It's currently inactive — activate it in the Workflows panel when ready.`,
+            });
+          }
+          case "pmos_n8n_get_workflow": {
+            const id = String(args.workflow_id ?? "").trim();
+            if (!id) return JSON.stringify({ error: "workflow_id is required" });
+            const r = await getN8nWorkflow(workspaceId, id);
+            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to get workflow" });
+            return JSON.stringify(r.workflow);
+          }
+          case "pmos_n8n_execute_workflow": {
+            const id = String(args.workflow_id ?? "").trim();
+            if (!id) return JSON.stringify({ error: "workflow_id is required" });
+            pushProgress("Executing workflow...");
+            const r = await executeN8nWorkflow(workspaceId, id);
+            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to execute workflow" });
+            return JSON.stringify({ success: true, executionId: r.executionId ?? "unknown" });
+          }
+          default:
+            return JSON.stringify({ error: `Unknown tool: ${toolName}` });
+        }
+      };
+
+      pushProgress("Thinking...");
+      const result = await callWorkspaceModelAgentLoop(
+        workspaceId,
+        systemPrompt,
+        messages,
+        tools,
+        executeTool,
+        { maxTokens: 2048, maxIterations: 6 },
+      );
 
       if (!result.ok) {
-        const fallbackWorkflow = buildDeterministicWorkflowFromPrompt(latestUserPrompt);
-        if (fallbackWorkflow) {
-          respond(
-            true,
-            {
-              ok: true,
-              message:
-                "Primary workflow model is unavailable. Generated a deterministic workflow scaffold from your request.",
-              workflow: {
-                ...fallbackWorkflow,
-                nodes: autoLinkNodeCredentials(fallbackWorkflow.nodes, availableCredentials),
-              },
-              providerError: true,
-            },
-            undefined,
-          );
-          return;
-        }
-
         respond(
           true,
-          { ok: true, message: result.error ?? "AI model unavailable", workflow: null, providerError: true },
+          {
+            ok: true,
+            message: `AI model unavailable: ${result.error ?? "unknown error"}. Please check your model configuration in Settings → AI Model Setup.`,
+            workflowCreated: false,
+          },
           undefined,
         );
         return;
       }
 
-      let parsed: { message?: string; workflow?: unknown } = {};
-      try {
-        parsed = JSON.parse(result.text ?? "{}") as typeof parsed;
-      } catch {
-        parsed = { message: result.text ?? "" };
-      }
-
-      const assistantMessage = typeof parsed.message === "string" ? parsed.message : result.text ?? "";
-      let workflow = parsed.workflow && typeof parsed.workflow === "object" ? parsed.workflow : null;
-      if (workflow && Array.isArray((workflow as { nodes?: unknown[] }).nodes)) {
-        const wf = workflow as { nodes: Array<Record<string, unknown>> };
-        workflow = {
-          ...(workflow as Record<string, unknown>),
-          nodes: autoLinkNodeCredentials(wf.nodes, availableCredentials),
-        };
-      }
-
-      respond(true, { ok: true, message: assistantMessage, workflow, providerUsed: result.providerUsed }, undefined);
+      respond(true, {
+        ok: true,
+        message: result.text ?? "",
+        workflowCreated: Boolean(createdWorkflowId),
+        workflowId: createdWorkflowId,
+        workflowName: createdWorkflowName,
+        providerUsed: result.providerUsed,
+      }, undefined);
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }
