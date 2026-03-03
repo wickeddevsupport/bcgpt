@@ -1141,7 +1141,7 @@ If a section titled "Current Workflow (open in editor)" is present in the conver
 
 If a section titled "Available n8n Node Types (live from this workspace)" is present below, treat it as the source of truth for available nodes.
 Do not invent node types. Use only node type names that exist in the provided live catalog when available.
-⚠️ EXCEPTION: ALWAYS use `n8n-nodes-basecamp.basecamp` for ALL Basecamp operations — regardless of what the live catalog shows. This custom node is GUARANTEED to be installed. NEVER use `n8n-nodes-base.basecamp`, `@n8n/n8n-nodes-langchain.basecamp`, or any other basecamp type name.
+WARNING - EXCEPTION: ALWAYS use 'n8n-nodes-basecamp.basecamp' for ALL Basecamp operations - regardless of what the live catalog shows. This custom node is GUARANTEED to be installed. NEVER use 'n8n-nodes-base.basecamp', '@n8n/n8n-nodes-langchain.basecamp', or any other basecamp type name.
 
 ${N8N_NODE_CATALOG_FALLBACK}
 

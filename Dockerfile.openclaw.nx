@@ -102,8 +102,8 @@ COPY --from=n8n_vendor /app/openclaw/vendor/n8n /app/openclaw/vendor/n8n
 # openclaw-control-ui is built last to ensure dist/control-ui is present at runtime.
 ENV NX_DAEMON=false
 ARG OPENCLAW_NX_PROJECTS="openclaw-app,openclaw-control-ui"
-RUN ./node_modules/.bin/nx run-many -t build --projects=$OPENCLAW_NX_PROJECTS --output-style=stream \
-  && ./node_modules/.bin/nx run openclaw-control-ui:build --output-style=stream
+RUN ./node_modules/.bin/nx run-many -t build --projects=$OPENCLAW_NX_PROJECTS --output-style=stream --skip-nx-cache \
+  && ./node_modules/.bin/nx run openclaw-control-ui:build --output-style=stream --skip-nx-cache
 
 # Force pnpm for UI build (Bun may fail on ARM/Synology architectures)
 ENV OPENCLAW_PREFER_PNPM=1
