@@ -1642,8 +1642,6 @@ export const pmosHandlers: GatewayRequestHandlers = {
         WORKFLOW_ASSISTANT_SYSTEM_PROMPT,
         getWorkspaceN8nNodeCatalog,
       } = await import("../workflow-ai.js");
-      const { getWorkspaceAiContextForPrompt } = await import("../workspace-ai-context.js");
-
       // Fetch available credentials and inject into system prompt so AI can reference them
       const {
         fetchWorkspaceCredentials,
@@ -1680,25 +1678,14 @@ export const pmosHandlers: GatewayRequestHandlers = {
         6000,
         "",
       );
-      const workspaceAiContext = await withTimeout(
-        getWorkspaceAiContextForPrompt(workspaceId, {
-          ensureFresh: true,
-          maxChars: 12_000,
-          credentials: availableCredentials,
-        }).catch(() => ""),
-        4000,
-        "",
-      );
+      // NOTE: Workspace memory (AI_CONTEXT.md) is intentionally NOT included in the workflow
+      // assistant prompt — it causes models to treat workflow requests as memory recall queries.
       const workspaceContext = `## Workspace Context
 - Workspace ID: ${workspaceId}
 - Use node type names from the live workspace catalog when available.
 - Treat openclaw.json + workspace connector data as the source of truth for integration configuration.
-- Treat AI_CONTEXT.md as current workspace memory for connectors, models, and agent assignments.
 - If required credentials are missing, explicitly tell the user which provider config to add in openclaw.json.
 - If a live node catalog is unavailable, explicitly say so instead of inventing node names.`;
-      const workspaceMemoryContext = workspaceAiContext
-        ? `## Workspace Memory Snapshot (AI_CONTEXT.md)\n${workspaceAiContext}`
-        : "";
 
       // If a workflow is currently open in the canvas, fetch and inject its full details
       const currentWorkflowId = typeof p?.currentWorkflowId === "string" ? p.currentWorkflowId.trim() : null;
@@ -1739,7 +1726,6 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         credentialContext,
         workspaceContext,
         currentWorkflowContext,
-        workspaceMemoryContext,
       ]
         .filter((part) => part && part.trim().length > 0)
         .join("\n\n");
@@ -2107,10 +2093,35 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       // The system prompt asks the AI to return JSON: {message, workflow?}.
       // If the AI returned a workflow object in text (no tool_calls used),
       // parse and create it directly so models without function-calling still work.
+      // Handles: bare JSON, markdown-fenced ```json ... ```, or JSON embedded in text.
       const finalText = result.text ?? "";
-      if (!createdWorkflowId && finalText.trim().startsWith("{")) {
+      const extractJsonFromText = (text: string): string | null => {
+        const trimmed = text.trim();
+        // 1. Bare JSON
+        if (trimmed.startsWith("{")) return trimmed;
+        // 2. Markdown fence: ```json ... ``` or ``` ... ```
+        const fenceMatch = trimmed.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+        if (fenceMatch) return fenceMatch[1];
+        // 3. Largest {...} block in the text
+        const firstBrace = trimmed.indexOf("{");
+        if (firstBrace !== -1) {
+          let depth = 0;
+          let lastClose = -1;
+          for (let i = firstBrace; i < trimmed.length; i++) {
+            if (trimmed[i] === "{") depth++;
+            else if (trimmed[i] === "}") {
+              depth--;
+              if (depth === 0) { lastClose = i; break; }
+            }
+          }
+          if (lastClose !== -1) return trimmed.slice(firstBrace, lastClose + 1);
+        }
+        return null;
+      };
+      const jsonCandidate = !createdWorkflowId ? extractJsonFromText(finalText) : null;
+      if (!createdWorkflowId && jsonCandidate) {
         try {
-          const aiJson = JSON.parse(finalText.trim()) as Record<string, unknown>;
+          const aiJson = JSON.parse(jsonCandidate) as Record<string, unknown>;
           const wfData = aiJson.workflow as Record<string, unknown> | undefined;
           if (wfData && typeof wfData.name === "string" && Array.isArray(wfData.nodes)) {
             const wfName = wfData.name.trim();
