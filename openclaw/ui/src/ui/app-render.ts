@@ -848,7 +848,7 @@ export function renderApp(state: AppViewState) {
                       integrationsHref: pathForTab("integrations", state.basePath),
                       projectId: state.pmosOpsProvisioningResult?.projectId ?? "embedded",
                       onOpenIntegrations: () => state.setTab("integrations"),
-                      embedUrl: buildOpsUiEmbedUrl(basePath, state.apFlowSelectedId),
+                      embedUrl: buildOpsUiEmbedUrl(basePath, state.apFlowSelectedId) + (state.n8nEmbedVersion ? `?v=${state.n8nEmbedVersion}` : ""),
                       selectedFlowLabel: selectedWorkflow
                         ? selectedWorkflow.displayName ?? selectedWorkflow.id
                         : null,

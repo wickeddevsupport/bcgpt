@@ -276,6 +276,7 @@ export type AppViewState = {
   apFlowCreateSaving: boolean;
   apFlowCreateError: string | null;
   apFlowSelectedId: string | null;
+  n8nEmbedVersion: number;
   apFlowDetailsLoading: boolean;
   apFlowDetailsError: string | null;
   apFlowDetails: unknown | null;

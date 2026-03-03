@@ -412,6 +412,7 @@ export class OpenClawApp extends LitElement {
   @state() apFlowCreateSaving = false;
   @state() apFlowCreateError: string | null = null;
   @state() apFlowSelectedId: string | null = null;
+  @state() n8nEmbedVersion = 0;
   @state() apFlowDetailsLoading = false;
   @state() apFlowDetailsError: string | null = null;
   @state() apFlowDetails: unknown | null = null;
@@ -1234,8 +1235,12 @@ export class OpenClawApp extends LitElement {
       const reply = result.message || "I couldn't process that.";
       this.workflowChatMessages = [...this.workflowChatMessages, { role: "assistant", content: reply }];
 
-      // Workflow was created directly by the AI tool — refresh the workflow list
+      // Workflow was created directly by the AI tool — refresh the list and navigate iframe
       if (result.workflowCreated) {
+        if (result.workflowId) {
+          this.apFlowSelectedId = result.workflowId;
+        }
+        this.n8nEmbedVersion = (this.n8nEmbedVersion ?? 0) + 1;
         void this.handlePmosApFlowsLoad();
       }
     } catch (err) {
