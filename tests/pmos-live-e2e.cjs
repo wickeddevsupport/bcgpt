@@ -27,6 +27,7 @@ const results = {
       hookPath: `pw-e2e-${runTs}`,
       wsAssistSeen: false,
       assistReturnedWorkflow: false,
+      workflowCreated: false,
       assistMessage: null,
       wsConfirmSeen: false,
       wsConfirmSuccess: false,
@@ -296,7 +297,7 @@ async function run() {
       }
       if (frame.dir !== "recv") continue;
       recvTail.push(frame.payload.length > 900 ? `${frame.payload.slice(0, 900)}...` : frame.payload);
-      if (recvTail.length > 6) recvTail.shift();
+      if (recvTail.length > 10) recvTail.shift();
 
       const parsed = safeJsonParse(frame.payload);
       if (!parsed || typeof parsed !== "object") continue;
@@ -305,9 +306,27 @@ async function run() {
         results.workflowPanel.createViaSend.wsError = String(parsed.error);
       }
 
+      // Detect workflow_ready progress event (new API: direct tool creation)
+      if (parsed.type === "event" && parsed.event === "pmos.workflow.assist.progress") {
+        const evPayload = parsed.payload;
+        if (evPayload && typeof evPayload === "object" && evPayload.type === "workflow_ready" && evPayload.workflowId) {
+          results.workflowPanel.createViaSend.wsConfirmSuccess = true;
+          results.workflowPanel.createViaSend.wsConfirmWorkflowId = String(evPayload.workflowId);
+          results.workflowPanel.createViaSend.workflowCreated = true;
+        }
+      }
+
       const payload = parsed.payload;
       if (!payload || typeof payload !== "object") continue;
 
+      // New API: workflowCreated flag in final pmos.workflow.assist response
+      if (payload.workflowCreated === true && payload.workflowId) {
+        results.workflowPanel.createViaSend.workflowCreated = true;
+        results.workflowPanel.createViaSend.wsConfirmSuccess = true;
+        results.workflowPanel.createViaSend.wsConfirmWorkflowId = String(payload.workflowId);
+      }
+
+      // Old API: success flag from pmos.workflow.confirm
       if (payload.success === true) {
         const possibleId = payload.workflowId ?? payload.id ?? null;
         if (possibleId) {
@@ -316,6 +335,7 @@ async function run() {
         }
       }
 
+      // Old API: workflow JSON returned inline
       if ("workflow" in payload) {
         results.workflowPanel.createViaSend.assistReturnedWorkflow = Boolean(payload.workflow);
       }

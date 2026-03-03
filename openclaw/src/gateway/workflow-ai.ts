@@ -989,12 +989,19 @@ function buildWorkspaceNodeCatalog(nodeTypes: WorkspaceNodeCatalogRow[]): string
   const triggerLines = trimWorkspaceNodeRows(triggers.map(formatWorkspaceNodeRow), triggerLimit);
   const actionLines = trimWorkspaceNodeRows(actions.map(formatWorkspaceNodeRow), actionLimit);
 
+  // Always inject the custom Basecamp node at the top — even if n8n's REST API doesn't surface it.
+  const basecampCustomEntry = "- n8n-nodes-basecamp.basecamp | Basecamp (Custom BCgpt Node) | ALWAYS use this for ALL Basecamp operations";
+  const customSection = customLines.length > 0
+    ? [basecampCustomEntry, ...customLines.filter(l => !l.includes("n8n-nodes-basecamp"))].join("\n")
+    : basecampCustomEntry;
+
   return `
 ## Available n8n Node Types (live from this workspace)
 Use this live catalog as the source of truth for node type names.
+⚠️ IMPORTANT: ALWAYS use \`n8n-nodes-basecamp.basecamp\` for ANY Basecamp operation — this is the custom BCgpt node. NEVER use \`n8n-nodes-base.basecamp\` or any other basecamp variant.
 
-### Custom/Community Nodes
-${customLines.length > 0 ? customLines.join("\n") : "- None detected"}
+### Custom/Community Nodes (ALWAYS AVAILABLE)
+${customSection}
 
 ### Triggers
 ${triggerLines.length > 0 ? triggerLines.join("\n") : "- None detected"}
@@ -1132,8 +1139,9 @@ If a section titled "Current Workflow (open in editor)" is present in the conver
 
 ## Node Catalog
 
-If a section titled "Available n8n Node Types (live from this workspace)" is present below, treat it as the source of truth.
+If a section titled "Available n8n Node Types (live from this workspace)" is present below, treat it as the source of truth for available nodes.
 Do not invent node types. Use only node type names that exist in the provided live catalog when available.
+⚠️ EXCEPTION: ALWAYS use `n8n-nodes-basecamp.basecamp` for ALL Basecamp operations — regardless of what the live catalog shows. This custom node is GUARANTEED to be installed. NEVER use `n8n-nodes-base.basecamp`, `@n8n/n8n-nodes-langchain.basecamp`, or any other basecamp type name.
 
 ${N8N_NODE_CATALOG_FALLBACK}
 
@@ -1186,8 +1194,8 @@ Always respond with a JSON object in this exact format:
 
 ## Node Construction Rules
 - Use REAL n8n node type names exactly as listed (e.g., "n8n-nodes-base.slack" not "slack")
-- If a live workspace node catalog is provided, use ONLY node names from that catalog
-- ALWAYS use "n8n-nodes-basecamp.basecamp" for ALL Basecamp operations
+- If a live workspace node catalog is provided, use ONLY node names from that catalog — with ONE exception:
+- ALWAYS use "n8n-nodes-basecamp.basecamp" for ALL Basecamp operations — this overrides any live catalog. NEVER use any other Basecamp node type.
 - Use the findByName operation when the user mentions a Basecamp project by name (avoids hardcoding IDs)
 - Chain nodes for full context: findByName → todolist:getAll → todo:create (3-node pattern)
 - Always include the credentials key on every Basecamp node

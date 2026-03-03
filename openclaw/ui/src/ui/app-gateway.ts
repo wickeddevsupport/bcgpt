@@ -431,7 +431,7 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
   }
 
   if (evt.event === "pmos.workflow.assist.progress") {
-    const payload = evt.payload as { step?: string; type?: string; text?: string; workflowId?: string } | undefined;
+    const payload = evt.payload as { step?: string; type?: string; text?: string; workflowId?: string; nodeName?: string; nodeType?: string } | undefined;
     if (!payload) return;
 
     // Typed payload: token stream (AI response text)
@@ -440,6 +440,16 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
       app.workflowChatStream = (app.workflowChatStream && !app.workflowChatStream.startsWith("🔧") && !app.workflowChatStream.startsWith("🧠")
         ? app.workflowChatStream
         : "") + payload.text;
+      return;
+    }
+
+    // Typed payload: live node being added to canvas during workflow creation
+    if (payload.type === "node_added" && typeof (payload as Record<string, unknown>).nodeName === "string") {
+      const p = payload as Record<string, unknown>;
+      const app = host as unknown as { workflowChatSteps: string[]; workflowChatStream: string | null };
+      const nodeLabel = `➕ Adding node: ${p.nodeName} (${p.nodeType ?? "node"})`;
+      app.workflowChatSteps = [...(app.workflowChatSteps ?? []), nodeLabel];
+      app.workflowChatStream = "🔧 " + nodeLabel;
       return;
     }
 

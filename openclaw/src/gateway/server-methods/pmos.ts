@@ -1891,19 +1891,93 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           case "pmos_n8n_list_node_types": {
             pushProgress("Looking up available node types...");
             const r = await listN8nNodeTypes(workspaceId);
-            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to list node types" });
-            return JSON.stringify({ nodeTypes: (r.nodeTypes ?? []).slice(0, 200) });
+            // Always inject the custom Basecamp node at the top regardless of what n8n returns.
+            const BASECAMP_CUSTOM_NODE = {
+              name: "n8n-nodes-basecamp.basecamp",
+              displayName: "Basecamp (BCgpt Custom Node)",
+              description: "Full Basecamp integration — projects, todos, messages, events, files, and more. ALWAYS use this node type for Basecamp.",
+              group: ["custom"],
+              version: 1,
+            };
+            const liveNodes = r.ok ? (r.nodeTypes ?? []) : [];
+            // Deduplicate: remove any basecamp entry from live list (we inject ours at top)
+            const filteredLiveNodes = liveNodes.filter(
+              (n) => !String(n.name ?? "").toLowerCase().includes("basecamp")
+            );
+            const nodeTypes = [BASECAMP_CUSTOM_NODE, ...filteredLiveNodes].slice(0, 201);
+            return JSON.stringify({ nodeTypes });
           }
           case "pmos_n8n_create_workflow": {
             const name = String(args.name ?? "").trim();
-            const nodes = Array.isArray(args.nodes) ? args.nodes : [];
+            let nodes = Array.isArray(args.nodes) ? args.nodes : [];
             const connections =
               args.connections && typeof args.connections === "object"
                 ? (args.connections as Record<string, unknown>)
                 : {};
             if (!name) return JSON.stringify({ error: "name is required" });
             if (!nodes.length) return JSON.stringify({ error: "nodes array is required and must not be empty" });
-            pushProgress(`Building workflow "${name}"...`);
+
+            // ── Node type validation & auto-correction ───────────────────────────
+            // Auto-correct any Basecamp node that isn't our custom node.
+            let correctedCount = 0;
+            nodes = nodes.map((node: Record<string, unknown>) => {
+              const t = String(node.type ?? "");
+              if (t.toLowerCase().includes("basecamp") && t !== "n8n-nodes-basecamp.basecamp") {
+                correctedCount++;
+                return { ...node, type: "n8n-nodes-basecamp.basecamp" };
+              }
+              return node;
+            });
+            if (correctedCount > 0) {
+              pushProgress(`⚙️ Auto-corrected ${correctedCount} Basecamp node(s) to use the custom BCgpt node.`);
+            }
+
+            // ── Credential check for Basecamp nodes ────────────────────────────
+            const hasBasecampNode = nodes.some((n: Record<string, unknown>) =>
+              String(n.type ?? "") === "n8n-nodes-basecamp.basecamp"
+            );
+            if (hasBasecampNode) {
+              const credR = await listN8nCredentials(workspaceId);
+              const creds = credR.ok ? (credR.credentials ?? []) : [];
+              const basecampCred = creds.find((c) => c.type === "basecampApi");
+              if (!basecampCred) {
+                return JSON.stringify({
+                  error: "Basecamp credential not configured",
+                  userMessage: "⚠️ Your Basecamp integration is not set up yet. Please go to **Settings → Integrations** and add your Basecamp API key before creating this workflow. Once configured, I'll build the workflow automatically.",
+                  actionRequired: "configure_basecamp_credential",
+                });
+              }
+              // Inject the credential ID into any Basecamp node that's missing it
+              const basecampCredId = basecampCred.id;
+              nodes = nodes.map((node: Record<string, unknown>) => {
+                if (String(node.type ?? "") === "n8n-nodes-basecamp.basecamp") {
+                  const existingCred = node.credentials as Record<string, unknown> | undefined;
+                  if (!existingCred?.basecampApi) {
+                    return {
+                      ...node,
+                      credentials: {
+                        ...(existingCred ?? {}),
+                        basecampApi: { id: basecampCredId, name: basecampCred.name },
+                      },
+                    };
+                  }
+                }
+                return node;
+              });
+            }
+
+            // ── Per-node streaming ───────────────────────────────────────────────
+            // Push one step event per node so UI shows live "building" feel.
+            pushProgress(`🔧 Building workflow "${name}" with ${nodes.length} nodes...`);
+            for (const node of nodes) {
+              const nodeName = String((node as Record<string, unknown>).name ?? "node");
+              const nodeType = String((node as Record<string, unknown>).type ?? "");
+              const displayType = nodeType.split(".").pop() ?? nodeType;
+              pushProgress({ type: "node_added", nodeName, nodeType: displayType, step: `➕ Adding node: ${nodeName} (${displayType})` });
+              // Small yield to let the event flush
+              await new Promise((res) => setTimeout(res, 30));
+            }
+
             const r = await createN8nWorkflow(workspaceId, {
               name,
               active: false,
@@ -1917,12 +1991,13 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             if (createdWorkflowId) {
               pushProgress({ type: "workflow_ready", workflowId: createdWorkflowId });
             }
-            pushProgress(`✅ Workflow "${name}" created!`);
+            pushProgress(`✅ Workflow "${name}" created with ${nodes.length} nodes!`);
             return JSON.stringify({
               success: true,
               workflowId: r.workflow?.id,
               workflowName: name,
-              message: `Workflow "${name}" created successfully! ID: ${r.workflow?.id}. It's currently inactive — activate it in the Workflows panel when ready.`,
+              nodeCount: nodes.length,
+              message: `Workflow "${name}" created successfully with ${nodes.length} nodes! ID: ${r.workflow?.id}. It's currently inactive — activate it in the Workflows panel when ready.`,
             });
           }
           case "pmos_n8n_update_workflow": {
