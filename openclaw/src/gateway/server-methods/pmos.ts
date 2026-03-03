@@ -2094,7 +2094,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       // If the AI returned a workflow object in text (no tool_calls used),
       // parse and create it directly so models without function-calling still work.
       // Handles: bare JSON, markdown-fenced ```json ... ```, or JSON embedded in text.
-      const finalText = result.text ?? "";
+      let finalText = result.text ?? "";
       const extractJsonFromText = (text: string): string | null => {
         const trimmed = text.trim();
         // 1. Bare JSON
@@ -2118,6 +2118,28 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         }
         return null;
       };
+
+      // ── JSON-mode retry ────────────────────────────────────────────────────
+      // If the agent loop returned plain prose (model doesn't use tool_calls AND
+      // didn't output JSON), retry once using callWorkspaceModel with
+      // response_format:json_object forced, so the model MUST return JSON.
+      if (!createdWorkflowId && result.ok && !extractJsonFromText(finalText)) {
+        try {
+          const { callWorkspaceModel: callWsJson } = await import("../workflow-ai.js");
+          pushProgress("Formulating automation plan...");
+          const retryResult = await callWsJson(
+            workspaceId,
+            systemPrompt,
+            messages,
+            { maxTokens: 8192, jsonMode: true },
+          );
+          if (retryResult.ok && retryResult.text && retryResult.text.trim().length > 10) {
+            finalText = retryResult.text;
+          }
+        } catch {
+          // retry failed — proceed with original text
+        }
+      }
       const jsonCandidate = !createdWorkflowId ? extractJsonFromText(finalText) : null;
       if (!createdWorkflowId && jsonCandidate) {
         try {
