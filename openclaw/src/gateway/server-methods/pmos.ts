@@ -1891,7 +1891,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           case "pmos_n8n_list_node_types": {
             pushProgress("Looking up available node types...");
             const r = await listN8nNodeTypes(workspaceId);
-            // Always inject the custom Basecamp node at the top regardless of what n8n returns.
+            // Always inject the custom Basecamp node + all essential core n8n nodes,
+            // regardless of what the live n8n REST API returns (it often returns empty).
             const BASECAMP_CUSTOM_NODE = {
               name: "n8n-nodes-basecamp.basecamp",
               displayName: "Basecamp (BCgpt Custom Node)",
@@ -1899,12 +1900,28 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               group: ["custom"],
               version: 1,
             };
+            const CORE_N8N_NODES = [
+              { name: "n8n-nodes-base.manualTrigger", displayName: "Manual Trigger", description: "Start workflow manually", group: ["trigger"], version: 1 },
+              { name: "n8n-nodes-base.scheduleTrigger", displayName: "Schedule Trigger", description: "Trigger on a cron schedule (daily, hourly, etc.)", group: ["trigger"], version: 1 },
+              { name: "n8n-nodes-base.webhook", displayName: "Webhook", description: "HTTP webhook trigger — use this type name, NOT webhookTrigger", group: ["trigger"], version: 1 },
+              { name: "n8n-nodes-base.if", displayName: "IF", description: "Branch workflow on a condition (true/false)", group: ["transform"], version: 1 },
+              { name: "n8n-nodes-base.switch", displayName: "Switch", description: "Route items to multiple output branches", group: ["transform"], version: 1 },
+              { name: "n8n-nodes-base.merge", displayName: "Merge", description: "Merge data from multiple branches", group: ["transform"], version: 1 },
+              { name: "n8n-nodes-base.code", displayName: "Code", description: "Execute custom JavaScript or Python", group: ["transform"], version: 1 },
+              { name: "n8n-nodes-base.set", displayName: "Edit Fields (Set)", description: "Set or map field values", group: ["transform"], version: 1 },
+              { name: "n8n-nodes-base.filter", displayName: "Filter", description: "Keep only items matching a condition", group: ["transform"], version: 1 },
+              { name: "n8n-nodes-base.httpRequest", displayName: "HTTP Request", description: "Make HTTP GET/POST/PUT/DELETE requests", group: ["output"], version: 1 },
+              { name: "n8n-nodes-base.splitInBatches", displayName: "Loop Over Items", description: "Process items in batches", group: ["transform"], version: 1 },
+              { name: "n8n-nodes-base.noOp", displayName: "No Operation", description: "Pass-through node", group: ["organization"], version: 1 },
+            ];
             const liveNodes = r.ok ? (r.nodeTypes ?? []) : [];
-            // Deduplicate: remove any basecamp entry from live list (we inject ours at top)
+            // Remove any basecamp entry from live list (we inject ours at top),
+            // and remove any live nodes that duplicate our core list.
+            const coreNames = new Set(["n8n-nodes-basecamp.basecamp", ...CORE_N8N_NODES.map(n => n.name)]);
             const filteredLiveNodes = liveNodes.filter(
-              (n) => !String(n.name ?? "").toLowerCase().includes("basecamp")
+              (n) => !coreNames.has(String(n.name ?? "")) && !String(n.name ?? "").toLowerCase().includes("basecamp")
             );
-            const nodeTypes = [BASECAMP_CUSTOM_NODE, ...filteredLiveNodes].slice(0, 201);
+            const nodeTypes = [BASECAMP_CUSTOM_NODE, ...CORE_N8N_NODES, ...filteredLiveNodes].slice(0, 250);
             return JSON.stringify({ nodeTypes });
           }
           case "pmos_n8n_create_workflow": {
@@ -1918,18 +1935,34 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             if (!nodes.length) return JSON.stringify({ error: "nodes array is required and must not be empty" });
 
             // ── Node type validation & auto-correction ───────────────────────────
-            // Auto-correct any Basecamp node that isn't our custom node.
+            // Correct wrong node type names that the AI commonly uses.
+            const NODE_TYPE_CORRECTIONS: Record<string, string> = {
+              "n8n-nodes-base.webhookTrigger": "n8n-nodes-base.webhook",
+              "n8n-nodes-base.cron": "n8n-nodes-base.scheduleTrigger",
+              "n8n-nodes-base.interval": "n8n-nodes-base.scheduleTrigger",
+              "n8n-nodes-base.function": "n8n-nodes-base.code",
+              "n8n-nodes-base.functionItem": "n8n-nodes-base.code",
+              "n8n-nodes-base.itemListsMerge": "n8n-nodes-base.merge",
+              "n8n-nodes-base.googleSheetsRowTrigger": "n8n-nodes-base.googleSheetsTrigger",
+              "n8n-nodes-base.rssFeedRead": "n8n-nodes-base.rssFeedReadTrigger",
+            };
             let correctedCount = 0;
             nodes = nodes.map((node: Record<string, unknown>) => {
               const t = String(node.type ?? "");
+              // Auto-correct Basecamp nodes to use our custom node
               if (t.toLowerCase().includes("basecamp") && t !== "n8n-nodes-basecamp.basecamp") {
                 correctedCount++;
                 return { ...node, type: "n8n-nodes-basecamp.basecamp" };
               }
+              // Auto-correct known wrong n8n type names
+              if (NODE_TYPE_CORRECTIONS[t]) {
+                correctedCount++;
+                return { ...node, type: NODE_TYPE_CORRECTIONS[t] };
+              }
               return node;
             });
             if (correctedCount > 0) {
-              pushProgress(`⚙️ Auto-corrected ${correctedCount} Basecamp node(s) to use the custom BCgpt node.`);
+              pushProgress(`⚙️ Auto-corrected ${correctedCount} node type(s) to valid n8n names.`);
             }
 
             // ── Credential check for Basecamp nodes ────────────────────────────
@@ -2335,23 +2368,53 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             });
           }
           case "pmos_n8n_list_node_types": {
-            const r = await listN8nNodeTypes(workspaceId);
-            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to list node types" });
-            return JSON.stringify({ nodeTypes: (r.nodeTypes ?? []).slice(0, 200) });
+            const r2 = await listN8nNodeTypes(workspaceId);
+            const BASECAMP_NODE2 = { name: "n8n-nodes-basecamp.basecamp", displayName: "Basecamp (BCgpt Custom Node)", description: "Full Basecamp integration. ALWAYS use this for Basecamp.", group: ["custom"], version: 1 };
+            const CORE_NODES2 = [
+              { name: "n8n-nodes-base.manualTrigger", displayName: "Manual Trigger", group: ["trigger"], version: 1 },
+              { name: "n8n-nodes-base.scheduleTrigger", displayName: "Schedule Trigger", group: ["trigger"], version: 1 },
+              { name: "n8n-nodes-base.webhook", displayName: "Webhook", description: "HTTP webhook trigger — type is webhook NOT webhookTrigger", group: ["trigger"], version: 1 },
+              { name: "n8n-nodes-base.if", displayName: "IF", group: ["transform"], version: 1 },
+              { name: "n8n-nodes-base.switch", displayName: "Switch", group: ["transform"], version: 1 },
+              { name: "n8n-nodes-base.merge", displayName: "Merge", group: ["transform"], version: 1 },
+              { name: "n8n-nodes-base.code", displayName: "Code", group: ["transform"], version: 1 },
+              { name: "n8n-nodes-base.set", displayName: "Edit Fields (Set)", group: ["transform"], version: 1 },
+              { name: "n8n-nodes-base.filter", displayName: "Filter", group: ["transform"], version: 1 },
+              { name: "n8n-nodes-base.httpRequest", displayName: "HTTP Request", group: ["output"], version: 1 },
+              { name: "n8n-nodes-base.splitInBatches", displayName: "Loop Over Items", group: ["transform"], version: 1 },
+            ];
+            const live2 = (r2.ok ? (r2.nodeTypes ?? []) : []).filter(
+              (n: { name?: string }) => n.name !== "n8n-nodes-basecamp.basecamp" && !CORE_NODES2.some(c => c.name === n.name)
+            );
+            return JSON.stringify({ nodeTypes: [BASECAMP_NODE2, ...CORE_NODES2, ...live2].slice(0, 250) });
           }
           case "pmos_n8n_create_workflow": {
             const name = String(args.name ?? "").trim();
-            const nodes = Array.isArray(args.nodes) ? args.nodes : [];
+            let nodes2 = Array.isArray(args.nodes) ? [...args.nodes] : [];
             const connections =
               args.connections && typeof args.connections === "object"
                 ? (args.connections as Record<string, unknown>)
                 : {};
             if (!name) return JSON.stringify({ error: "name is required" });
-            if (!nodes.length) return JSON.stringify({ error: "nodes array is required and must not be empty" });
+            if (!nodes2.length) return JSON.stringify({ error: "nodes array is required and must not be empty" });
+            // Auto-correct wrong node type names
+            const TYPE_FIXES2: Record<string, string> = {
+              "n8n-nodes-base.webhookTrigger": "n8n-nodes-base.webhook",
+              "n8n-nodes-base.cron": "n8n-nodes-base.scheduleTrigger",
+              "n8n-nodes-base.interval": "n8n-nodes-base.scheduleTrigger",
+              "n8n-nodes-base.function": "n8n-nodes-base.code",
+              "n8n-nodes-base.functionItem": "n8n-nodes-base.code",
+            };
+            nodes2 = nodes2.map((node: Record<string, unknown>) => {
+              const t = String(node.type ?? "");
+              if (t.toLowerCase().includes("basecamp") && t !== "n8n-nodes-basecamp.basecamp") return { ...node, type: "n8n-nodes-basecamp.basecamp" };
+              if (TYPE_FIXES2[t]) return { ...node, type: TYPE_FIXES2[t] };
+              return node;
+            });
             const r = await createN8nWorkflow(workspaceId, {
               name,
               active: false,
-              nodes: nodes as Parameters<typeof createN8nWorkflow>[1]["nodes"],
+              nodes: nodes2 as Parameters<typeof createN8nWorkflow>[1]["nodes"],
               connections,
             });
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to create workflow" });

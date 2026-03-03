@@ -1038,14 +1038,14 @@ const N8N_NODE_CATALOG_FALLBACK = `
 ## Available n8n Node Types
 
 ### Triggers (workflow starts with one of these)
-- n8n-nodes-base.webhookTrigger — HTTP webhook (any HTTP call triggers the workflow)
+- n8n-nodes-base.webhook — HTTP webhook (any inbound HTTP call triggers the workflow; NOT webhookTrigger)
 - n8n-nodes-base.scheduleTrigger — Cron schedule (e.g. every day at 9am)
 - n8n-nodes-base.manualTrigger — Manual execution only
 - n8n-nodes-base.emailReadImap — Trigger on new email via IMAP
-- n8n-nodes-base.rss — Trigger on new RSS feed item
+- n8n-nodes-base.rssFeedReadTrigger — Trigger on new RSS feed item
 - n8n-nodes-base.slackTrigger — Trigger on Slack events (messages, reactions, etc.)
 - n8n-nodes-base.githubTrigger — Trigger on GitHub events (push, PR, issue, etc.)
-- n8n-nodes-base.googleSheetsRowTrigger — Trigger on new row in Google Sheets
+- n8n-nodes-base.googleSheetsTrigger — Trigger on new row in Google Sheets
 
 ### Custom Basecamp Node (YOUR custom integration — always use this for Basecamp)
 - n8n-nodes-basecamp.basecamp — Resources: project, todo, todolist, message, card, comment, person
