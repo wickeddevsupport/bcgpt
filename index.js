@@ -803,11 +803,14 @@ async function startStatus(req, { apiKey: forcedApiKey } = {}) {
   }
 
   const ctx = await resolveRequestContext(req, { apiKey });
-  if (!ctx.token?.access_token) {
+
+  // API key is invalid (no user found in DB) — this is the only hard "not connected" case.
+  if (!ctx.userKey) {
     return {
       connected: false,
+      basecamp_connected: false,
       user: null,
-      user_key: ctx.userKey || null,
+      user_key: null,
       api_key: apiKey,
       session_key: ctx.sessionKey || sessionKey,
       selected_account_id: null,
@@ -817,7 +820,28 @@ async function startStatus(req, { apiKey: forcedApiKey } = {}) {
       select_account_url,
       select_account_endpoint,
       logout_url,
-      message: "Not connected. Use the auth link to connect Basecamp.",
+      message: "API key not recognized. Visit the connect page to generate a valid key.",
+    };
+  }
+
+  // API key is valid — connected=true regardless of Basecamp OAuth state.
+  // Basecamp OAuth is a separate concern (basecamp_connected field).
+  if (!ctx.token?.access_token) {
+    return {
+      connected: true,
+      basecamp_connected: false,
+      user: null,
+      user_key: ctx.userKey,
+      api_key: apiKey,
+      session_key: ctx.sessionKey || sessionKey,
+      selected_account_id: null,
+      accounts: [],
+      connect_url,
+      reauth_url,
+      select_account_url,
+      select_account_endpoint,
+      logout_url,
+      message: "API key connected. Basecamp OAuth not yet linked — use the auth link to connect Basecamp tools.",
     };
   }
 
@@ -845,6 +869,7 @@ async function startStatus(req, { apiKey: forcedApiKey } = {}) {
 
     return {
       connected: true,
+      basecamp_connected: true,
       user: {
         name: authResult.auth.identity?.name || null,
         email: authResult.auth.identity?.email_address || null,
@@ -878,6 +903,7 @@ async function startStatus(req, { apiKey: forcedApiKey } = {}) {
       }
       return {
         connected: true,
+        basecamp_connected: true,
         user: {
           name: ctx.auth.identity?.name || null,
           email: ctx.auth.identity?.email_address || null,
@@ -899,7 +925,8 @@ async function startStatus(req, { apiKey: forcedApiKey } = {}) {
       };
     }
     return {
-      connected: false,
+      connected: true,
+      basecamp_connected: false,
       user: null,
       user_key: ctx.userKey || null,
       api_key: apiKey,

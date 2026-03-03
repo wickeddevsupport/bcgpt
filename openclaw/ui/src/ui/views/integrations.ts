@@ -259,14 +259,15 @@ export function renderIntegrations(props: IntegrationsProps) {
         ${bcgptIdentity
           ? html`
               <div class="callout" style="margin-top: 10px; font-size: 12px;">
-                <div><strong>Status:</strong> ${bcgptIdentity.connected ? "Connected" : "Not connected"}</div>
+                <div><strong>API Key:</strong> ${bcgptIdentity.connected ? html`<span style="color:#22c55e">✓ Valid</span>` : html`<span style="color:#f87171">✗ Not recognized</span>`}</div>
+                <div><strong>Basecamp OAuth:</strong> ${(bcgptIdentity as Record<string,unknown>).basecampConnected ? html`<span style="color:#22c55e">✓ Linked</span>` : html`<span style="color:#f59e0b">⚠ Not linked — <a href=${`${(props.bcgptUrl || "https://bcgpt.wickedlab.io").replace(/\/+$/, "")}/connect`} target="_blank" rel="noreferrer">Connect Basecamp</a></span>`}</div>
                 ${bcgptIdentity.name || bcgptIdentity.email
                   ? html`<div><strong>User:</strong> ${bcgptIdentity.name ?? "-"} ${bcgptIdentity.email ? html`<span class="mono">(${bcgptIdentity.email})</span>` : nothing}</div>`
                   : nothing}
                 ${bcgptIdentity.selectedAccountId
                   ? html`<div><strong>Selected account:</strong> <span class="mono">${bcgptIdentity.selectedAccountId}</span></div>`
                   : nothing}
-                ${typeof bcgptIdentity.accountsCount === "number"
+                ${typeof bcgptIdentity.accountsCount === "number" && bcgptIdentity.accountsCount > 0
                   ? html`<div><strong>Authorized accounts:</strong> ${bcgptIdentity.accountsCount}</div>`
                   : nothing}
                 ${bcgptIdentity.message

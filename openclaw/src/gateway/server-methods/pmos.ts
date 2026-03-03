@@ -737,8 +737,13 @@ export const pmosHandlers: GatewayRequestHandlers = {
           const payload = bcgptIdentity.json as Record<string, unknown>;
           const user = isJsonObject(payload.user) ? payload.user : null;
           const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
+          // connected=true means API key is valid; basecamp_connected=true means OAuth is also linked.
+          // We report connected=true when the API key is recognized (payload.connected).
+          const apiKeyOk = payload.connected === true;
+          const basecampOk = payload.basecamp_connected === true;
           bcgpt.identity = {
-            connected: payload.connected === true,
+            connected: apiKeyOk,
+            basecampConnected: basecampOk,
             name: typeof user?.name === "string" ? user.name : null,
             email: typeof user?.email === "string" ? user.email : null,
             selectedAccountId:
@@ -818,7 +823,9 @@ export const pmosHandlers: GatewayRequestHandlers = {
       const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
 
       respond(true, {
+        // connected = API key is valid (payload.connected); basecampConnected = OAuth is linked too
         connected: payload.connected === true,
+        basecampConnected: payload.basecamp_connected === true,
         configured: true,
         reachable: true,
         name: typeof user?.name === "string" ? user.name : null,

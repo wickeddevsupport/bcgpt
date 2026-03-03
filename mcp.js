@@ -4896,17 +4896,21 @@ export async function handleMCP(reqBody, ctx) {
       );
     }
 
-    // whoami
+    // whoami — returns API key identity; Basecamp fields are optional (null if no OAuth)
     if (name === "whoami") {
       if (!TOKEN?.access_token) {
         const connectUrl = `${process.env.APP_BASE_URL || "https://bcgpt.wickedlab.io"}/connect`;
-        return fail(id, {
-          code: "NOT_AUTHENTICATED",
-          message: `API key authenticated, but no linked Basecamp OAuth token found. Please re-connect your Basecamp account at: ${connectUrl}`,
+        return ok(id, {
+          api_key_ok: true,
+          accountId: null,
+          user: null,
+          accounts: [],
+          basecamp_connected: false,
           connect_url: connectUrl,
+          message: "API key valid. Basecamp OAuth not linked — connect at the URL above to use Basecamp tools.",
         });
       }
-      return ok(id, { accountId, user: null, accounts: authAccounts || [] });
+      return ok(id, { api_key_ok: true, basecamp_connected: true, accountId, user: null, accounts: authAccounts || [] });
     }
 
     // mcp_call: proxy to any MCP tool by name
@@ -4952,13 +4956,15 @@ export async function handleMCP(reqBody, ctx) {
       }
     }
 
-    // Everything else requires auth
+    // Basecamp tools require a linked OAuth token (auto-refreshed on each request).
+    // pmos_* and flow_* tools are already routed above and do not reach this gate.
     if (!TOKEN?.access_token) {
       const connectUrl = `${process.env.APP_BASE_URL || "https://bcgpt.wickedlab.io"}/connect`;
       return fail(id, {
-        code: "NOT_AUTHENTICATED",
-        message: `API key authenticated, but Basecamp OAuth token is missing. Please re-connect your Basecamp account at: ${connectUrl}`,
+        code: "BASECAMP_OAUTH_REQUIRED",
+        message: `This Basecamp tool requires OAuth. Your API key is valid — connect your Basecamp account at: ${connectUrl}`,
         connect_url: connectUrl,
+        api_key_ok: true,
       });
     }
 
