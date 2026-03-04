@@ -336,12 +336,22 @@ async function getAuthorizationHeader(
   workspaceId: string,
   ctx: ActivepiecesContext,
 ): Promise<string | null> {
+  let userSignInError: unknown = null;
+  if (ctx.userEmail && ctx.userPassword) {
+    try {
+      const userToken = await signInWithWorkspaceUser(workspaceId, ctx);
+      if (userToken?.token) {
+        return `Bearer ${userToken.token}`;
+      }
+    } catch (err) {
+      userSignInError = err;
+    }
+  }
   if (ctx.apiKey) {
     return `Bearer ${ctx.apiKey}`;
   }
-  const userToken = await signInWithWorkspaceUser(workspaceId, ctx);
-  if (userToken?.token) {
-    return `Bearer ${userToken.token}`;
+  if (userSignInError) {
+    throw userSignInError;
   }
   return null;
 }
@@ -349,29 +359,46 @@ async function getAuthorizationHeader(
 async function getContext(workspaceId: string): Promise<ActivepiecesContext> {
   const wc = await readWorkspaceConnectors(workspaceId).catch(() => null);
   const cfg = loadConfig() as unknown;
+  const workspaceOps = toObject(wc?.ops);
+  const workspaceActivepieces = toObject(wc?.activepieces);
 
   const baseUrl = normalizeBaseUrl(
-    readString(wc?.ops?.url) ??
-      readConfigString(cfg, ["pmos", "connectors", "ops", "url"]) ??
+    readString(workspaceActivepieces?.url) ??
+      readString(workspaceOps?.url) ??
+      readConfigString(cfg, ["pmos", "connectors", "activepieces", "url"]) ??
       process.env.ACTIVEPIECES_URL ??
       process.env.FLOW_URL ??
+      readConfigString(cfg, ["pmos", "connectors", "ops", "url"]) ??
       process.env.OPS_URL ??
       DEFAULT_BASE_URL,
   );
 
   const apiKey =
-    readString(wc?.ops?.apiKey) ??
-    readConfigString(cfg, ["pmos", "connectors", "ops", "apiKey"]) ??
+    readString(workspaceActivepieces?.apiKey) ??
+    readString(workspaceOps?.apiKey) ??
+    readConfigString(cfg, ["pmos", "connectors", "activepieces", "apiKey"]) ??
     readString(process.env.ACTIVEPIECES_API_KEY) ??
+    readConfigString(cfg, ["pmos", "connectors", "ops", "apiKey"]) ??
     readString(process.env.OPS_API_KEY);
 
   const projectId =
-    readString(wc?.ops?.projectId) ??
+    readString(workspaceActivepieces?.projectId) ??
+    readString(workspaceOps?.projectId) ??
+    readConfigString(cfg, ["pmos", "connectors", "activepieces", "projectId"]) ??
+    readString(process.env.ACTIVEPIECES_PROJECT_ID) ??
     readConfigString(cfg, ["pmos", "connectors", "ops", "projectId"]) ??
-    readString(process.env.ACTIVEPIECES_PROJECT_ID);
+    readString(process.env.OPS_PROJECT_ID);
 
-  const userEmail = readString(wc?.ops?.user?.email) ?? null;
-  const userPassword = readString(wc?.ops?.user?.password) ?? null;
+  const opsUser = toObject(workspaceOps?.user);
+  const activepiecesUser = toObject(workspaceActivepieces?.user);
+  const userEmail =
+    readString(activepiecesUser?.email) ??
+    readString(opsUser?.email) ??
+    null;
+  const userPassword =
+    readString(activepiecesUser?.password) ??
+    readString(opsUser?.password) ??
+    null;
 
   return {
     baseUrl,
