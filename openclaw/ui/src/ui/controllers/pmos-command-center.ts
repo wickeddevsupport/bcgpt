@@ -193,7 +193,7 @@ function parsePrompt(promptRaw: string): PmosCommandPlanStep[] {
       `Create flow: ${displayName || "Untitled"}`,
       { displayName: displayName || "Untitled Flow" },
       "low",
-      "Creates a new n8n workflow.",
+      "Creates a new Activepieces workflow.",
     );
   }
 

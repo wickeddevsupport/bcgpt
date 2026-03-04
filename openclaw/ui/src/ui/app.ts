@@ -1303,7 +1303,7 @@ export class OpenClawApp extends LitElement {
       if (created.success && created.workflowId) {
         this.workflowChatMessages = [
           ...this.workflowChatMessages,
-          { role: "assistant", content: `Workflow "${pending.name}" created. Open it in the n8n editor to configure credentials and test it. (ID: ${String(created.workflowId).slice(0, 8)}...)` },
+          { role: "assistant", content: `Workflow "${pending.name}" created. Open it in the Activepieces editor to configure credentials and test it. (ID: ${String(created.workflowId).slice(0, 8)}...)` },
         ];
         void this.handlePmosApFlowsLoad();
       } else {
