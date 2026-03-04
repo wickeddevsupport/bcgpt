@@ -19,6 +19,7 @@ const { chromium } = require("playwright");
 const BASE_URL = process.env.PMOS_BASE_URL || "https://os.wickedlab.io";
 const EMAIL = process.env.PMOS_EMAIL;
 const PASSWORD = process.env.PMOS_PASSWORD;
+const NO_ARTIFACTS = process.env.PMOS_E2E_NO_ARTIFACTS === "1";
 
 if (!EMAIL || !PASSWORD) {
   console.error("Missing PMOS_EMAIL or PMOS_PASSWORD env vars.");
@@ -73,6 +74,20 @@ function safeJson(s) {
   } catch {
     return null;
   }
+}
+
+async function maybeScreenshot(page, path) {
+  if (NO_ARTIFACTS) {
+    return;
+  }
+  await page.screenshot({ path, fullPage: true }).catch(() => {});
+}
+
+function maybeWriteJson(path, value) {
+  if (NO_ARTIFACTS) {
+    return;
+  }
+  fs.writeFileSync(path, JSON.stringify(value, null, 2));
 }
 
 async function isVisible(loc, timeout = 1500) {
@@ -161,7 +176,7 @@ async function run() {
     await page.getByRole("button", { name: /sign out/i }).first().waitFor({ state: "visible", timeout: 60000 });
     results.login.ok = true;
     console.log("✅ Login OK");
-    await page.screenshot({ path: "pw-bc-complex-login.png", fullPage: true });
+    await maybeScreenshot(page, "pw-bc-complex-login.png");
 
     // ── VISIT CHAT TAB FIRST (ensures workflow assistant card loads correctly on Workflows page) ──
     await clickNav(page, "Chat");
@@ -389,16 +404,20 @@ async function run() {
       console.log(`▶️  Execution OK: ${results.workflowExecution.executionOk}, ID: ${results.workflowExecution.executionId}`);
     }
 
-    await page.screenshot({ path: "pw-bc-complex-final.png", fullPage: true });
+    await maybeScreenshot(page, "pw-bc-complex-final.png");
 
   } catch (err) {
     results.errors.push(String(err));
     console.error("Test error:", err);
-    await page.screenshot({ path: "pw-bc-complex-error.png", fullPage: true }).catch(() => {});
+    await maybeScreenshot(page, "pw-bc-complex-error.png");
   } finally {
     const outFile = `playwright-basecamp-complex-${runTs}.json`;
-    fs.writeFileSync(outFile, JSON.stringify(results, null, 2));
-    console.log(`\n📋 Results written to ${outFile}`);
+    maybeWriteJson(outFile, results);
+    if (NO_ARTIFACTS) {
+      console.log("\n📋 Results file write skipped (PMOS_E2E_NO_ARTIFACTS=1)");
+    } else {
+      console.log(`\n📋 Results written to ${outFile}`);
+    }
     printSummary(results);
     await context.close();
     await browser.close();
@@ -432,7 +451,7 @@ function printSummary(r) {
 run().catch((err) => {
   results.errors.push(String(err));
   try {
-    fs.writeFileSync(`playwright-basecamp-complex-err-${runTs}.json`, JSON.stringify(results, null, 2));
+    maybeWriteJson(`playwright-basecamp-complex-err-${runTs}.json`, results);
   } catch {}
   console.error(err);
   process.exit(1);

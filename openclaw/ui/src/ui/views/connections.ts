@@ -94,7 +94,7 @@ export function renderConnections(props: ConnectionsProps) {
           ? html`
             <a
               class="btn btn--primary"
-              href="${props.opsUiHref ?? "/ops-ui/credentials"}"
+              href="${props.opsUiHref ?? "/ops-ui/connections"}"
               target="_parent"
               style="text-decoration: none;"
             >
@@ -131,7 +131,7 @@ export function renderConnections(props: ConnectionsProps) {
               ? html`
                 <a
                   class="btn btn--primary"
-                  href="${props.opsUiHref ?? "/ops-ui/credentials"}"
+                  href="${props.opsUiHref ?? "/ops-ui/connections"}"
                   target="_parent"
                   style="text-decoration: none;"
                 >
@@ -169,7 +169,7 @@ export function renderConnections(props: ConnectionsProps) {
           <!-- "Add more" footer -->
           <div class="muted" style="font-size: 12px; text-align: center; margin-top: 8px;">
             ${opsProvisioned
-              ? html`To add more credentials, <a href="${props.opsUiHref ?? "/ops-ui/credentials"}" target="_parent">open the Workflow Engine</a>.`
+              ? html`To add more credentials, <a href="${props.opsUiHref ?? "/ops-ui/connections"}" target="_parent">open the Workflow Engine</a>.`
               : html`Set up the Workflow Engine in <button class="link-btn" @click=${() => props.onOpenIntegrations()}>Integrations</button> to add more.`}
           </div>
         `}
@@ -177,3 +177,4 @@ export function renderConnections(props: ConnectionsProps) {
 }
 
 export default renderConnections;
+

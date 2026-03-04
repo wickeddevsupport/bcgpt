@@ -215,7 +215,7 @@ function toWorkspaceScopedAgentWorkspacePath(workspaceId: string, agentId: strin
 
 function buildDefaultCreateAgentForm(state: AppViewState, agentId = "assistant"): CreateAgentFormData {
   const wsId = state.pmosAuthUser?.workspaceId?.trim() ?? "";
-  const isWorkspaceScopedUser = Boolean(wsId) && state.pmosAuthUser?.role !== "super_admin";
+  const isWorkspaceScopedUser = Boolean(wsId);
   return {
     ...DEFAULT_CREATE_AGENT_FORM,
     workspace: isWorkspaceScopedUser
@@ -849,7 +849,12 @@ export function renderApp(state: AppViewState) {
                       integrationsHref: pathForTab("integrations", state.basePath),
                       projectId: state.pmosOpsProvisioningResult?.projectId ?? "embedded",
                       onOpenIntegrations: () => state.setTab("integrations"),
-                      embedUrl: buildOpsUiEmbedUrl(basePath, state.apFlowSelectedId) + (state.n8nEmbedVersion ? `?v=${state.n8nEmbedVersion}` : ""),
+                      embedUrl:
+                        buildOpsUiEmbedUrl(
+                          basePath,
+                          state.apFlowSelectedId,
+                          state.pmosOpsProvisioningResult?.projectId ?? null,
+                        ) + (state.n8nEmbedVersion ? `?v=${state.n8nEmbedVersion}` : ""),
                       selectedFlowLabel: selectedWorkflow
                         ? selectedWorkflow.displayName ?? selectedWorkflow.id
                         : null,
@@ -952,7 +957,7 @@ export function renderApp(state: AppViewState) {
                 bcgptSavedOk: state.pmosBcgptSavedOk,
                 opsProvisioned: Boolean(state.pmosOpsProvisioningResult?.apiKey) || state.pmosConnectorsStatus?.ops?.reachable === true,
                 opsProjectId: state.pmosOpsProvisioningResult?.projectId ?? null,
-                opsUiHref: `${state.basePath ?? ""}/ops-ui/credentials`,
+                opsUiHref: `${state.basePath ?? ""}/ops-ui/connections`,
                 basecampSetupPending: state.pmosBasecampSetupPending,
                 basecampSetupOk: state.pmosBasecampSetupOk,
                 basecampSetupError: state.pmosBasecampSetupError,
@@ -1029,7 +1034,7 @@ export function renderApp(state: AppViewState) {
                   onRefresh: () => void state.handleLoadRealCredentials(),
                   onAddCredential: () => state.setTab("automations"),
                   onOpenIntegrations: () => state.setTab("integrations"),
-                  opsUiHref: `${state.basePath ?? ""}/ops-ui/credentials`,
+                  opsUiHref: `${state.basePath ?? ""}/ops-ui/connections`,
                 });
               })()
             : nothing
@@ -1983,8 +1988,7 @@ export function renderApp(state: AppViewState) {
                       hybrid: "coding",
                     };
                     const wsId = state.pmosAuthUser?.workspaceId?.trim() ?? "";
-                    const isWorkspaceScopedUser =
-                      Boolean(wsId) && state.pmosAuthUser?.role !== "super_admin";
+                    const isWorkspaceScopedUser = Boolean(wsId);
                     const workspace = isWorkspaceScopedUser
                       ? toWorkspaceScopedAgentWorkspacePath(wsId, candidateId)
                       : form.workspace.trim() || DEFAULT_AGENT_WORKSPACE_PATH;

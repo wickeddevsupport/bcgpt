@@ -1,4 +1,4 @@
-import type { GatewayClient, GatewayRequestHandlers } from "./types.js";
+﻿import type { GatewayClient, GatewayRequestHandlers } from "./types.js";
 import { loadConfig, writeConfigFile, type OpenClawConfig } from "../../config/config.js";
 import { redactConfigObject, restoreRedactedValues } from "../../config/redact-snapshot.js";
 import { ErrorCodes, errorShape } from "../protocol/index.js";
@@ -622,13 +622,21 @@ export const pmosHandlers: GatewayRequestHandlers = {
       const opsUrlRaw =
         (workspaceConnectors?.ops?.url as string | undefined) ??
         readConfigString(cfg, ["pmos", "connectors", "ops", "url"]) ??
+        process.env.ACTIVEPIECES_URL ??
+        process.env.FLOW_URL ??
         process.env.OPS_URL ??
         null;
-      const opsUrl = normalizeBaseUrl(opsUrlRaw, "https://ops.wickedlab.io");
+      const opsUrl = normalizeBaseUrl(opsUrlRaw, "https://flow.wickedlab.io");
       const opsProjectId =
         (workspaceConnectors?.ops?.projectId as string | undefined) ??
         readConfigString(cfg, ["pmos", "connectors", "ops", "projectId"]) ??
+        process.env.ACTIVEPIECES_PROJECT_ID ??
         null;
+      const workspaceOpsApiKey = (workspaceConnectors?.ops?.apiKey as string | undefined)?.trim() || null;
+      const globalOpsApiKey =
+        readConfigString(cfg, ["pmos", "connectors", "ops", "apiKey"])?.trim() ??
+        (process.env.ACTIVEPIECES_API_KEY?.trim() || process.env.OPS_API_KEY?.trim() || null);
+      const opsApiKey = workspaceOpsApiKey ?? (allowGlobalSecrets ? globalOpsApiKey : null);
 
       const bcgptUrl = normalizeBaseUrl(
         (workspaceConnectors?.bcgpt?.url as string | undefined) ??
@@ -647,21 +655,16 @@ export const pmosHandlers: GatewayRequestHandlers = {
       const bcgptKey = workspaceBcgptKey ?? globalBcgptKey;
       const bcgptKeyIsShared = !workspaceBcgptKey && Boolean(globalBcgptKey);
 
-      const { readLocalN8nConfig } = await import("../pmos-ops-proxy.js");
-      const { findVendoredN8nRepo } = await import("../n8n-embed.js");
-      const localN8n = readLocalN8nConfig();
-      const vendoredRepo = findVendoredN8nRepo();
-
       const ops: ConnectorResult = {
-        url: localN8n?.url ?? opsUrl,
+        url: opsUrl,
         projectId: opsProjectId,
-        configured: Boolean(localN8n || vendoredRepo || (opsUrlRaw && opsUrlRaw.trim())),
+        configured: Boolean((opsUrlRaw && opsUrlRaw.trim()) || opsApiKey),
         reachable: null,
         authOk: null,
-        mode: localN8n || vendoredRepo ? "embedded" : "remote",
+        mode: "remote",
         editorUrl: "/ops-ui/",
-        vendoredRepo,
-        healthUrl: localN8n ? `${localN8n.url}/healthz` : null,
+        vendoredRepo: null,
+        healthUrl: `${opsUrl}/api/v1/flags`,
         error: null,
       };
 
@@ -677,22 +680,36 @@ export const pmosHandlers: GatewayRequestHandlers = {
         ...(bcgptKeyIsShared ? { shared: true } : {}),
       };
 
-      // Embedded n8n / ops runtime reachability.
-      if (localN8n) {
-        const localHealth = await fetchJson(`${localN8n.url}/healthz`, { method: "GET", timeoutMs: 3500 });
-        ops.reachable = localHealth.ok || isReachableStatus(localHealth.status);
-        if (!ops.reachable) {
-          ops.error = localHealth.error || "EMBEDDED_N8N_UNREACHABLE";
-        }
-      } else if (vendoredRepo) {
-        ops.reachable = false;
-        ops.error = "Vendored n8n is present but runtime is not running (N8N_LOCAL_URL missing).";
-      } else if (opsUrlRaw && opsUrlRaw.trim()) {
-        const remoteHealth = await fetchJson(`${opsUrl}/healthz`, { method: "GET", timeoutMs: 3500 });
+      if (opsUrlRaw && opsUrlRaw.trim()) {
+        const remoteHealth = await fetchJson(`${opsUrl}/api/v1/flags`, { method: "GET", timeoutMs: 3500 });
         ops.reachable = remoteHealth.ok || isReachableStatus(remoteHealth.status);
         if (!ops.reachable) {
-          ops.error = remoteHealth.error || "OPS_REMOTE_UNREACHABLE";
+          ops.error = remoteHealth.error || "ACTIVEPIECES_UNREACHABLE";
         }
+      }
+
+      if (opsApiKey) {
+        const authProbeQuery = new URLSearchParams();
+        if (opsProjectId) {
+          authProbeQuery.set("projectId", opsProjectId);
+          authProbeQuery.set("limit", "1");
+        }
+        const authProbeEndpoint = opsProjectId
+          ? `${opsUrl}/api/v1/flows?${authProbeQuery.toString()}`
+          : `${opsUrl}/api/v1/projects`;
+        const authProbe = await fetchJson(authProbeEndpoint, {
+          method: "GET",
+          timeoutMs: 5000,
+          headers: {
+            authorization: `Bearer ${opsApiKey}`,
+          },
+        });
+        ops.authOk = authProbe.ok;
+        if (!authProbe.ok && !ops.error) {
+          ops.error = authProbe.error || "ACTIVEPIECES_AUTH_FAILED";
+        }
+      } else {
+        ops.authOk = false;
       }
 
       // BCGPT reachability
@@ -787,14 +804,14 @@ export const pmosHandlers: GatewayRequestHandlers = {
           null,
         "https://bcgpt.wickedlab.io",
       );
-      // Only use workspace-scoped key — user must save their own key before auto-connect fires
+      // Only use workspace-scoped key â€” user must save their own key before auto-connect fires
       const bcgptKey =
         ((workspaceConnectors?.bcgpt?.apiKey as string | undefined)?.trim()) ||
         null;
 
       if (!bcgptKey) {
-        // No key saved yet — silently skip, no error
-        respond(true, { connected: false, configured: false, message: "No API key saved — visit Integrations to connect Basecamp" }, undefined);
+        // No key saved yet â€” silently skip, no error
+        respond(true, { connected: false, configured: false, message: "No API key saved â€” visit Integrations to connect Basecamp" }, undefined);
         return;
       }
 
@@ -1098,7 +1115,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
       const connectors = (await readWorkspaceConnectors(workspaceId)) ?? {};
-      // Strip ops.user sub-object (contains n8n provisioned password) — not needed by the client UI.
+      // Strip ops.user sub-object (contains n8n provisioned password) â€” not needed by the client UI.
       // api keys (ops.apiKey, bcgpt.apiKey) are kept as-is so the UI can display configured status.
       const safeConnectors = isSuperAdmin(client) ? connectors : stripOpsUserFromConnectors(connectors);
       respond(true, { workspaceId, connectors: safeConnectors }, undefined);
@@ -1129,7 +1146,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 
-  // ── BYOK (Bring Your Own Keys) ──────────────────────────────────────
+  // â”€â”€ BYOK (Bring Your Own Keys) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   "pmos.config.get": async ({ respond, client }) => {
     const workspaceId = client?.pmosWorkspaceId;
@@ -1253,7 +1270,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 
-  // ── Chat-to-Workflow Creation ──────────────────────────────────────
+  // â”€â”€ Chat-to-Workflow Creation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   "pmos.workflow.create": async ({ params, respond, client }) => {
     try {
@@ -1310,7 +1327,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 
-  // ── Multi-Agent Orchestration ──────────────────────────────────────
+  // â”€â”€ Multi-Agent Orchestration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   "pmos.agent.parallel": async ({ params, respond, client }) => {
     try {
@@ -1422,7 +1439,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 
-  // ── Live Flow Builder ──────────────────────────────────────────────
+  // â”€â”€ Live Flow Builder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   "pmos.flow.canvas.subscribe": async ({ params, respond, client }) => {
     try {
@@ -1611,7 +1628,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 
-  // ── AI Workflow Assistant (uses global openclaw.json model config) ─────────────
+  // â”€â”€ AI Workflow Assistant (uses global openclaw.json model config) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   "pmos.workflow.assist": async ({ params, respond, client, context }) => {
     try {
@@ -1679,7 +1696,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
         "",
       );
       // NOTE: Workspace memory (AI_CONTEXT.md) is intentionally NOT included in the workflow
-      // assistant prompt — it causes models to treat workflow requests as memory recall queries.
+      // assistant prompt â€” it causes models to treat workflow requests as memory recall queries.
       const workspaceContext = `## Workspace Context
 - Workspace ID: ${workspaceId}
 - Use node type names from the live workspace catalog when available.
@@ -1706,18 +1723,18 @@ export const pmosHandlers: GatewayRequestHandlers = {
 - Nodes (${Array.isArray(wf.nodes) ? wf.nodes.length : 0} total): ${JSON.stringify(wf.nodes, null, 2)}
 - Connections: ${JSON.stringify(wf.connections, null, 2)}
 
-When the user asks to edit, modify, add, remove or update this workflow, use pmos_n8n_update_workflow with workflow_id="${wf.id}".`;
+When the user asks to edit, modify, add, remove or update this workflow, use pmos_ops_update_workflow with workflow_id="${wf.id}".`;
         }
       }
       const agentBehaviorRules = [
         "## Critical Behaviour Rules (Automations AI)",
-        "- When asked to create or build a workflow: CALL pmos_n8n_create_workflow IMMEDIATELY — never output JSON for the user to import manually.",
-        "- Always call pmos_n8n_list_credentials FIRST to discover which integrations are available.",
+        "- When asked to create or build a workflow: CALL pmos_ops_create_workflow IMMEDIATELY â€” never output JSON for the user to import manually.",
+        "- Always call pmos_ops_list_credentials FIRST to discover which integrations are available.",
         "- After creating a workflow, tell the user its name and ID, and what they should do next (e.g. activate it, add a webhook).",
-        "- Never describe a workflow in text and say 'import it' — use the tool to create it directly.",
-        "- When the user asks to edit/modify/add nodes/remove nodes from an EXISTING workflow (especially one currently open in the canvas): call pmos_n8n_get_workflow first to fetch current state, then call pmos_n8n_update_workflow with the FULL updated nodes+connections.",
-        "- pmos_n8n_update_workflow replaces the entire workflow — always include ALL existing nodes plus any new ones.",
-        "- Available tools: pmos_n8n_list_credentials, pmos_n8n_list_workflows, pmos_n8n_list_node_types, pmos_n8n_create_workflow, pmos_n8n_get_workflow, pmos_n8n_update_workflow, pmos_n8n_execute_workflow.",
+        "- Never describe a workflow in text and say 'import it' â€” use the tool to create it directly.",
+        "- When the user asks to edit/modify/add nodes/remove nodes from an EXISTING workflow (especially one currently open in the canvas): call pmos_ops_get_workflow first to fetch current state, then call pmos_ops_update_workflow with the FULL updated nodes+connections.",
+        "- pmos_ops_update_workflow replaces the entire workflow â€” always include ALL existing nodes plus any new ones.",
+        "- Available tools: pmos_ops_list_credentials, pmos_ops_list_workflows, pmos_ops_list_node_types, pmos_ops_create_workflow, pmos_ops_get_workflow, pmos_ops_update_workflow, pmos_ops_execute_workflow.",
       ].join("\n");
       const systemPrompt = [
         WORKFLOW_ASSISTANT_SYSTEM_PROMPT,
@@ -1730,37 +1747,37 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         .filter((part) => part && part.trim().length > 0)
         .join("\n\n");
 
-      // ── Tool definitions ─────────────────────────────────────────────────
+      // â”€â”€ Tool definitions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const tools = [
         {
           type: "function" as const,
           function: {
-            name: "pmos_n8n_list_credentials",
-            description: "List available n8n credentials/integrations configured for this workspace (Basecamp, Slack, GitHub, etc.)",
+            name: "pmos_ops_list_credentials",
+            description: "List available workflow-engine credentials/integrations configured for this workspace (Basecamp, Slack, GitHub, etc.)",
             parameters: { type: "object", properties: {}, additionalProperties: false },
           },
         },
         {
           type: "function" as const,
           function: {
-            name: "pmos_n8n_list_workflows",
-            description: "List existing n8n workflows in this workspace",
+            name: "pmos_ops_list_workflows",
+            description: "List existing workflow-engine flows in this workspace",
             parameters: { type: "object", properties: {}, additionalProperties: false },
           },
         },
         {
           type: "function" as const,
           function: {
-            name: "pmos_n8n_list_node_types",
-            description: "List available n8n node types (triggers and actions). Call this when you need to know exact node type names.",
+            name: "pmos_ops_list_node_types",
+            description: "List available workflow node types (triggers and actions). Node types are exposed in n8n-compatible names.",
             parameters: { type: "object", properties: {}, additionalProperties: false },
           },
         },
         {
           type: "function" as const,
           function: {
-            name: "pmos_n8n_create_workflow",
-            description: "Create a new n8n workflow. Always call pmos_n8n_list_credentials first to know which credential IDs to use.",
+            name: "pmos_ops_create_workflow",
+            description: "Create a new workflow-engine flow. Always call pmos_ops_list_credentials first to know which credential IDs to use.",
             parameters: {
               type: "object",
               required: ["name", "nodes", "connections"],
@@ -1769,11 +1786,11 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                 name: { type: "string", description: "Descriptive workflow name" },
                 nodes: {
                   type: "array",
-                  description: "Array of n8n node objects, each with: id, name, type, typeVersion, position [x,y], parameters, and optionally credentials",
+                  description: "Array of workflow node objects, each with: id, name, type, typeVersion, position [x,y], parameters, and optionally credentials",
                 },
                 connections: {
                   type: "object",
-                  description: "Connections object mapping source node name → { main: [[{ node, type, index }]] }",
+                  description: "Connections object mapping source node name â†’ { main: [[{ node, type, index }]] }",
                 },
               },
             },
@@ -1782,14 +1799,14 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         {
           type: "function" as const,
           function: {
-            name: "pmos_n8n_get_workflow",
-            description: "Get full details of an existing n8n workflow by ID",
+            name: "pmos_ops_get_workflow",
+            description: "Get full details of an existing workflow-engine flow by ID",
             parameters: {
               type: "object",
               required: ["workflow_id"],
               additionalProperties: false,
               properties: {
-                workflow_id: { type: "string", description: "The n8n workflow ID" },
+                workflow_id: { type: "string", description: "The workflow-engine flow ID" },
               },
             },
           },
@@ -1797,14 +1814,14 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         {
           type: "function" as const,
           function: {
-            name: "pmos_n8n_update_workflow",
-            description: "Update an existing n8n workflow — add, remove or modify nodes and connections. Always call pmos_n8n_get_workflow first to retrieve current state, then include ALL nodes (existing + modified) in the update.",
+            name: "pmos_ops_update_workflow",
+            description: "Update an existing workflow-engine flow â€” add, remove or modify nodes and connections. Always call pmos_ops_get_workflow first to retrieve current state, then include ALL nodes (existing + modified) in the update.",
             parameters: {
               type: "object",
               required: ["workflow_id", "nodes", "connections"],
               additionalProperties: false,
               properties: {
-                workflow_id: { type: "string", description: "The n8n workflow ID to update" },
+                workflow_id: { type: "string", description: "The workflow-engine flow ID to update" },
                 name: { type: "string", description: "Optional new name for the workflow" },
                 nodes: {
                   type: "array",
@@ -1821,21 +1838,21 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         {
           type: "function" as const,
           function: {
-            name: "pmos_n8n_execute_workflow",
-            description: "Execute (test-run) an n8n workflow by ID",
+            name: "pmos_ops_execute_workflow",
+            description: "Execute (test-run) a workflow-engine flow by ID",
             parameters: {
               type: "object",
               required: ["workflow_id"],
               additionalProperties: false,
               properties: {
-                workflow_id: { type: "string", description: "The n8n workflow ID to execute" },
+                workflow_id: { type: "string", description: "The workflow-engine flow ID to execute" },
               },
             },
           },
         },
       ];
 
-      // ── Progress push helper ──────────────────────────────────────────────
+      // â”€â”€ Progress push helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const pushProgress = (stepOrPayload: string | Record<string, unknown>) => {
         if (client?.connId) {
           const payload = typeof stepOrPayload === "string"
@@ -1849,11 +1866,11 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         }
       };
 
-      // ── Track created workflow for UI refresh ──────────────────────────
+      // â”€â”€ Track created workflow for UI refresh â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       let createdWorkflowId: string | undefined;
       let createdWorkflowName: string | undefined;
 
-      // ── Tool executor ────────────────────────────────────────────────────
+      // â”€â”€ Tool executor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const executeTool = async (toolName: string, args: Record<string, unknown>): Promise<string> => {
         const {
           listN8nCredentials,
@@ -1864,8 +1881,12 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           listN8nNodeTypes,
         } = await import("../n8n-api-client.js");
 
-        switch (toolName) {
-          case "pmos_n8n_list_credentials": {
+        const normalizedToolName = toolName.startsWith("pmos_n8n_")
+          ? `pmos_ops_${toolName.slice("pmos_n8n_".length)}`
+          : toolName;
+
+        switch (normalizedToolName) {
+          case "pmos_ops_list_credentials": {
             pushProgress("Checking available integrations...");
             const r = await listN8nCredentials(workspaceId);
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to list credentials" });
@@ -1873,7 +1894,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               credentials: (r.credentials ?? []).map((c) => ({ id: c.id, name: c.name, type: c.type })),
             });
           }
-          case "pmos_n8n_list_workflows": {
+          case "pmos_ops_list_workflows": {
             pushProgress("Loading existing workflows...");
             const r = await listN8nWorkflows(workspaceId);
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to list workflows" });
@@ -1881,7 +1902,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               workflows: (r.workflows ?? []).map((w) => ({ id: w.id, name: w.name, active: w.active })),
             });
           }
-          case "pmos_n8n_list_node_types": {
+          case "pmos_ops_list_node_types": {
             pushProgress("Looking up available node types...");
             const r = await listN8nNodeTypes(workspaceId);
             // Always inject the custom Basecamp node + all essential core n8n nodes,
@@ -1889,14 +1910,14 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             const BASECAMP_CUSTOM_NODE = {
               name: "n8n-nodes-basecamp.basecamp",
               displayName: "Basecamp (BCgpt Custom Node)",
-              description: "Full Basecamp integration — projects, todos, messages, events, files, and more. ALWAYS use this node type for Basecamp.",
+              description: "Full Basecamp integration â€” projects, todos, messages, events, files, and more. ALWAYS use this node type for Basecamp.",
               group: ["custom"],
               version: 1,
             };
             const CORE_N8N_NODES = [
               { name: "n8n-nodes-base.manualTrigger", displayName: "Manual Trigger", description: "Start workflow manually", group: ["trigger"], version: 1 },
               { name: "n8n-nodes-base.scheduleTrigger", displayName: "Schedule Trigger", description: "Trigger on a cron schedule (daily, hourly, etc.)", group: ["trigger"], version: 1 },
-              { name: "n8n-nodes-base.webhook", displayName: "Webhook", description: "HTTP webhook trigger — use this type name, NOT webhookTrigger", group: ["trigger"], version: 1 },
+              { name: "n8n-nodes-base.webhook", displayName: "Webhook", description: "HTTP webhook trigger â€” use this type name, NOT webhookTrigger", group: ["trigger"], version: 1 },
               { name: "n8n-nodes-base.if", displayName: "IF", description: "Branch workflow on a condition (true/false)", group: ["transform"], version: 1 },
               { name: "n8n-nodes-base.switch", displayName: "Switch", description: "Route items to multiple output branches", group: ["transform"], version: 1 },
               { name: "n8n-nodes-base.merge", displayName: "Merge", description: "Merge data from multiple branches", group: ["transform"], version: 1 },
@@ -1917,7 +1938,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             const nodeTypes = [BASECAMP_CUSTOM_NODE, ...CORE_N8N_NODES, ...filteredLiveNodes].slice(0, 250);
             return JSON.stringify({ nodeTypes });
           }
-          case "pmos_n8n_create_workflow": {
+          case "pmos_ops_create_workflow": {
             const name = String(args.name ?? "").trim();
             let nodes = Array.isArray(args.nodes) ? args.nodes : [];
             const connections =
@@ -1927,7 +1948,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             if (!name) return JSON.stringify({ error: "name is required" });
             if (!nodes.length) return JSON.stringify({ error: "nodes array is required and must not be empty" });
 
-            // ── Node type validation & auto-correction ───────────────────────────
+            // â”€â”€ Node type validation & auto-correction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             // Correct wrong node type names that the AI commonly uses.
             const NODE_TYPE_CORRECTIONS: Record<string, string> = {
               "n8n-nodes-base.webhookTrigger": "n8n-nodes-base.webhook",
@@ -1955,10 +1976,10 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               return node;
             });
             if (correctedCount > 0) {
-              pushProgress(`⚙️ Auto-corrected ${correctedCount} node type(s) to valid n8n names.`);
+              pushProgress(`âš™ï¸ Auto-corrected ${correctedCount} node type(s) to valid n8n names.`);
             }
 
-            // ── Credential check for Basecamp nodes ────────────────────────────
+            // â”€â”€ Credential check for Basecamp nodes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             const hasBasecampNode = nodes.some((n: Record<string, unknown>) =>
               String(n.type ?? "") === "n8n-nodes-basecamp.basecamp"
             );
@@ -1969,7 +1990,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               if (!basecampCred) {
                 return JSON.stringify({
                   error: "Basecamp credential not configured",
-                  userMessage: "⚠️ Your Basecamp integration is not set up yet. Please go to **Settings → Integrations** and add your Basecamp API key before creating this workflow. Once configured, I'll build the workflow automatically.",
+                  userMessage: "âš ï¸ Your Basecamp integration is not set up yet. Please go to **Settings â†’ Integrations** and add your Basecamp API key before creating this workflow. Once configured, I'll build the workflow automatically.",
                   actionRequired: "configure_basecamp_credential",
                 });
               }
@@ -1992,14 +2013,14 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               });
             }
 
-            // ── Per-node streaming ───────────────────────────────────────────────
+            // â”€â”€ Per-node streaming â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             // Push one step event per node so UI shows live "building" feel.
-            pushProgress(`🔧 Building workflow "${name}" with ${nodes.length} nodes...`);
+            pushProgress(`ðŸ”§ Building workflow "${name}" with ${nodes.length} nodes...`);
             for (const node of nodes) {
               const nodeName = String((node as Record<string, unknown>).name ?? "node");
               const nodeType = String((node as Record<string, unknown>).type ?? "");
               const displayType = nodeType.split(".").pop() ?? nodeType;
-              pushProgress({ type: "node_added", nodeName, nodeType: displayType, step: `➕ Adding node: ${nodeName} (${displayType})` });
+              pushProgress({ type: "node_added", nodeName, nodeType: displayType, step: `âž• Adding node: ${nodeName} (${displayType})` });
               // Small yield to let the event flush
               await new Promise((res) => setTimeout(res, 30));
             }
@@ -2017,16 +2038,16 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             if (createdWorkflowId) {
               pushProgress({ type: "workflow_ready", workflowId: createdWorkflowId });
             }
-            pushProgress(`✅ Workflow "${name}" created with ${nodes.length} nodes!`);
+            pushProgress(`âœ… Workflow "${name}" created with ${nodes.length} nodes!`);
             return JSON.stringify({
               success: true,
               workflowId: r.workflow?.id,
               workflowName: name,
               nodeCount: nodes.length,
-              message: `Workflow "${name}" created successfully with ${nodes.length} nodes! ID: ${r.workflow?.id}. It's currently inactive — activate it in the Workflows panel when ready.`,
+              message: `Workflow "${name}" created successfully with ${nodes.length} nodes! ID: ${r.workflow?.id}. It's currently inactive â€” activate it in the Workflows panel when ready.`,
             });
           }
-          case "pmos_n8n_update_workflow": {
+          case "pmos_ops_update_workflow": {
             const id = String(args.workflow_id ?? "").trim();
             if (!id) return JSON.stringify({ error: "workflow_id is required" });
             const { updateN8nWorkflow } = await import("../n8n-api-client.js");
@@ -2039,21 +2060,21 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to update workflow" });
             // Push workflow_ready so the canvas refreshes immediately
             pushProgress({ type: "workflow_ready", workflowId: id });
-            pushProgress(`✅ Workflow updated!`);
+            pushProgress(`âœ… Workflow updated!`);
             return JSON.stringify({
               success: true,
               workflowId: id,
               message: `Workflow updated successfully. The canvas will reload to show the changes.`,
             });
           }
-          case "pmos_n8n_get_workflow": {
+          case "pmos_ops_get_workflow": {
             const id = String(args.workflow_id ?? "").trim();
             if (!id) return JSON.stringify({ error: "workflow_id is required" });
             const r = await getN8nWorkflow(workspaceId, id);
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to get workflow" });
             return JSON.stringify(r.workflow);
           }
-          case "pmos_n8n_execute_workflow": {
+          case "pmos_ops_execute_workflow": {
             const id = String(args.workflow_id ?? "").trim();
             if (!id) return JSON.stringify({ error: "workflow_id is required" });
             pushProgress("Executing workflow...");
@@ -2081,7 +2102,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           true,
           {
             ok: true,
-            message: `AI model unavailable: ${result.error ?? "unknown error"}. Please check your model configuration in Settings → AI Model Setup.`,
+            message: `AI model unavailable: ${result.error ?? "unknown error"}. Please check your model configuration in Settings â†’ AI Model Setup.`,
             workflowCreated: false,
           },
           undefined,
@@ -2089,7 +2110,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         return;
       }
 
-      // ── JSON-response fallback ─────────────────────────────────────────────
+      // â”€â”€ JSON-response fallback â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       // The system prompt asks the AI to return JSON: {message, workflow?}.
       // If the AI returned a workflow object in text (no tool_calls used),
       // parse and create it directly so models without function-calling still work.
@@ -2119,7 +2140,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         return null;
       };
 
-      // ── JSON-mode retry ────────────────────────────────────────────────────
+      // â”€â”€ JSON-mode retry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       // If the agent loop returned plain prose (model doesn't use tool_calls AND
       // didn't output JSON), retry once using callWorkspaceModel with
       // response_format:json_object forced, so the model MUST return JSON.
@@ -2137,7 +2158,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             finalText = retryResult.text;
           }
         } catch {
-          // retry failed — proceed with original text
+          // retry failed â€” proceed with original text
         }
       }
       const jsonCandidate = !createdWorkflowId ? extractJsonFromText(finalText) : null;
@@ -2206,7 +2227,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                 }
               }
               // Emit per-node streaming events
-              pushProgress(`🔧 Building workflow "${wfName}" with ${wfNodes.length} nodes...`);
+              pushProgress(`ðŸ”§ Building workflow "${wfName}" with ${wfNodes.length} nodes...`);
               for (const node of wfNodes) {
                 const nodeName = String(node.name ?? "node");
                 const nodeType = String(node.type ?? "");
@@ -2214,7 +2235,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                   type: "node_added",
                   nodeName,
                   nodeType: nodeType.split(".").pop() ?? nodeType,
-                  step: `➕ Adding node: ${nodeName}`,
+                  step: `âž• Adding node: ${nodeName}`,
                 });
                 await new Promise<void>((res) => setTimeout(res, 30));
               }
@@ -2229,12 +2250,12 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                 createdWorkflowId = createR.workflow.id;
                 createdWorkflowName = wfName;
                 pushProgress({ type: "workflow_ready", workflowId: createdWorkflowId });
-                pushProgress(`✅ Workflow "${wfName}" created with ${wfNodes.length} nodes!`);
+                pushProgress(`âœ… Workflow "${wfName}" created with ${wfNodes.length} nodes!`);
               }
             }
           }
         } catch {
-          // Not valid JSON or workflow extraction failed — stream text as-is
+          // Not valid JSON or workflow extraction failed â€” stream text as-is
         }
       }
 
@@ -2275,7 +2296,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     }
   },
 
-  // ── Workspace Chat (agentic — can directly create/modify n8n workflows via tool calls) ────────────────
+  // â”€â”€ Workspace Chat (agentic â€” can directly create/modify workflow-engine flows via tool calls) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   "pmos.chat.send": async ({ params, respond, client }) => {
     try {
@@ -2336,98 +2357,98 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const credentialContext = buildCredentialContext(availableCredentials);
 
       const systemPrompt = [
-        `You are an intelligent AI assistant for OpenClaw workspace (ID: ${workspaceId}) — a unified project management and automation platform powered by BCgpt.`,
+        `You are an intelligent AI assistant for OpenClaw workspace (ID: ${workspaceId}) â€” a unified project management and automation platform powered by BCgpt.`,
         "",
         "## What is OpenClaw / BCgpt",
-        "OpenClaw combines Basecamp project management with an embedded n8n automation engine and BCgpt AI layer.",
-        "- **Basecamp layer**: Projects, todos, messages, people, schedules, card tables — all accessible via BCgpt tools.",
-        "- **n8n automation layer**: Visual workflow builder embedded in the platform — you can CREATE and EDIT workflows directly.",
+        "OpenClaw combines Basecamp project management with an embedded Activepieces workflow engine and BCgpt AI layer.",
+        "- **Basecamp layer**: Projects, todos, messages, people, schedules, card tables â€” all accessible via BCgpt tools.",
+        "- **Workflow engine layer (Activepieces)**: Visual workflow builder embedded in the platform â€” you can CREATE and EDIT flows directly.",
         "- **BCgpt API**: An intelligent Basecamp integration layer with a smart router (`smart_action`) and full MCP tool set.",
         "",
         "## BCgpt API Reference",
         "BCgpt exposes Basecamp data via MCP (Model Context Protocol) and an OpenAPI compatibility layer:",
-        "- `POST /mcp` — MCP JSON-RPC endpoint. Auth: `x-bcgpt-api-key` header.",
-        "- `POST /action/:operation` — OpenAPI wrapper for individual tools.",
-        "- `smart_action({query})` — Natural-language router. Tell it what you want in plain English; it calls the right Basecamp tools, handles pagination, and returns structured summaries. Best for: listing things, searching, getting project data.",
-        "- `basecamp_raw({method, path, body})` — Raw Basecamp API access for anything not covered by named tools.",
+        "- `POST /mcp` â€” MCP JSON-RPC endpoint. Auth: `x-bcgpt-api-key` header.",
+        "- `POST /action/:operation` â€” OpenAPI wrapper for individual tools.",
+        "- `smart_action({query})` â€” Natural-language router. Tell it what you want in plain English; it calls the right Basecamp tools, handles pagination, and returns structured summaries. Best for: listing things, searching, getting project data.",
+        "- `basecamp_raw({method, path, body})` â€” Raw Basecamp API access for anything not covered by named tools.",
         "",
         "## How to Think and Respond",
         "",
         "### Analyze, don't dump",
         "- Never output raw lists of IDs, raw JSON payloads, or unannotated tool results at the user.",
         "- When you retrieve data (credentials, workflows, todos, projects), INTERPRET it: what matters for this user's question?",
-        "- Example: Instead of listing 50 node types, say 'You have Slack, GitHub, and Basecamp nodes connected — I'll use those.'",
+        "- Example: Instead of listing 50 node types, say 'You have Slack, GitHub, and Basecamp nodes connected â€” I'll use those.'",
         "",
         "### Be proactive, not lazy",
         "- Don't ask the user for information you can discover with a tool call.",
-        "- Always call `pmos_n8n_list_credentials` before building any workflow so you know what's actually connected.",
+        "- Always call `pmos_ops_list_credentials` before building any workflow so you know what's actually connected.",
         "- If the user asks about a project or person, call the appropriate tool to find the answer rather than guessing.",
         "",
         "### Always provide next steps",
         "Every response should tell the user what to do next. Examples:",
-        "- 'Activate the workflow by clicking the toggle in the top right of the n8n editor.'",
-        "- 'Copy the webhook URL from the Webhook Trigger node and paste it into Basecamp project settings → Webhooks.'",
+        "- 'Activate the workflow by clicking the toggle in the top right of the workflow editor.'",
+        "- 'Copy the webhook URL from the Webhook Trigger node and paste it into Basecamp project settings â†’ Webhooks.'",
         "- 'Check your Slack credential is pointing to the #alerts channel.'",
         "- 'Open the Executions tab to verify the workflow ran correctly.'",
         "",
         "### Workflow creation rules",
-        "- When asked to CREATE a workflow: call `pmos_n8n_create_workflow` immediately — never output JSON for the user to import.",
-        "- When asked to EDIT/UPDATE/FIX a workflow: call `pmos_n8n_update_workflow` on the existing workflow ID.",
-        "- Always call `pmos_n8n_list_credentials` first so credential IDs are correct in node parameters.",
+        "- When asked to CREATE a workflow: call `pmos_ops_create_workflow` immediately â€” never output JSON for the user to import.",
+        "- When asked to EDIT/UPDATE/FIX a workflow: call `pmos_ops_update_workflow` on the existing workflow ID.",
+        "- Always call `pmos_ops_list_credentials` first so credential IDs are correct in node parameters.",
         "- For Basecamp nodes: always use `n8n-nodes-basecamp.basecamp`, always include credentials, use `findByName` to resolve project names.",
         "- Position nodes left-to-right: trigger at [250, 300], each next node at x+250.",
-        "- Build complete, runnable workflows — no manual rewiring needed.",
+        "- Build complete, runnable workflows â€” no manual rewiring needed.",
         "",
         "### Project management questions",
         "- Answer from workspace context when available.",
         "- For live data (todos, messages, people), call the appropriate tool to get fresh information.",
-        "- Summarize results meaningfully: 'There are 7 open todos in Project X — 3 are overdue. The most recent message was from Alice yesterday about the deploy.'",
+        "- Summarize results meaningfully: 'There are 7 open todos in Project X â€” 3 are overdue. The most recent message was from Alice yesterday about the deploy.'",
         "",
         "## Available Tools",
-        "**n8n Workflow Tools:**",
-        "- `pmos_n8n_list_credentials` — see which services are connected (Basecamp, Slack, GitHub, etc.)",
-        "- `pmos_n8n_list_workflows` — list existing n8n workflows with names and IDs",
-        "- `pmos_n8n_create_workflow` — CREATE a new workflow in n8n right now",
-        "- `pmos_n8n_update_workflow` — UPDATE an existing workflow (by ID)",
-        "- `pmos_n8n_get_workflow` — get full definition of a specific workflow by ID",
-        "- `pmos_n8n_execute_workflow` — test-run a workflow by ID",
-        "- `pmos_n8n_list_node_types` — list available trigger and action node types",
+        "**Workflow Engine Tools:**",
+        "- `pmos_ops_list_credentials` â€” see which services are connected (Basecamp, Slack, GitHub, etc.)",
+        "- `pmos_ops_list_workflows` â€” list existing workflow-engine flows with names and IDs",
+        "- `pmos_ops_create_workflow` â€” CREATE a new workflow-engine flow right now",
+        "- `pmos_ops_update_workflow` â€” UPDATE an existing workflow (by ID)",
+        "- `pmos_ops_get_workflow` â€” get full definition of a specific workflow by ID",
+        "- `pmos_ops_execute_workflow` â€” test-run a workflow by ID",
+        "- `pmos_ops_list_node_types` â€” list available trigger and action node types",
         "",
         ...(credentialContext ? [credentialContext, ""] : []),
         ...(workspaceAiContext ? ["## Workspace Memory", workspaceAiContext] : []),
       ].join("\n");
 
-      // ── Tool definitions (OpenAI function-calling format) ────────────────────
+      // â”€â”€ Tool definitions (OpenAI function-calling format) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const tools = [
         {
           type: "function" as const,
           function: {
-            name: "pmos_n8n_list_credentials",
-            description: "List available n8n credentials/integrations configured for this workspace (Basecamp, Slack, GitHub, etc.)",
+            name: "pmos_ops_list_credentials",
+            description: "List available workflow-engine credentials/integrations configured for this workspace (Basecamp, Slack, GitHub, etc.)",
             parameters: { type: "object", properties: {}, additionalProperties: false },
           },
         },
         {
           type: "function" as const,
           function: {
-            name: "pmos_n8n_list_workflows",
-            description: "List existing n8n workflows in this workspace",
+            name: "pmos_ops_list_workflows",
+            description: "List existing workflow-engine flows in this workspace",
             parameters: { type: "object", properties: {}, additionalProperties: false },
           },
         },
         {
           type: "function" as const,
           function: {
-            name: "pmos_n8n_list_node_types",
-            description: "List available n8n node types (triggers and actions). Call this when you need to know exact node type names.",
+            name: "pmos_ops_list_node_types",
+            description: "List available workflow node types (triggers and actions). Node types are exposed in n8n-compatible names.",
             parameters: { type: "object", properties: {}, additionalProperties: false },
           },
         },
         {
           type: "function" as const,
           function: {
-            name: "pmos_n8n_create_workflow",
-            description: "Create a new n8n workflow. Always call pmos_n8n_list_credentials first to know which credential IDs to use in node parameters.",
+            name: "pmos_ops_create_workflow",
+            description: "Create a new workflow-engine flow. Always call pmos_ops_list_credentials first to know which credential IDs to use in node parameters.",
             parameters: {
               type: "object",
               required: ["name", "nodes", "connections"],
@@ -2436,11 +2457,11 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                 name: { type: "string", description: "Descriptive workflow name" },
                 nodes: {
                   type: "array",
-                  description: "Array of n8n node objects, each with: id, name, type, typeVersion, position [x,y], parameters, and optionally credentials",
+                  description: "Array of workflow node objects, each with: id, name, type, typeVersion, position [x,y], parameters, and optionally credentials",
                 },
                 connections: {
                   type: "object",
-                  description: "Connections object mapping source node name → { main: [[{ node, type, index }]] }",
+                  description: "Connections object mapping source node name â†’ { main: [[{ node, type, index }]] }",
                 },
               },
             },
@@ -2449,14 +2470,14 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         {
           type: "function" as const,
           function: {
-            name: "pmos_n8n_get_workflow",
-            description: "Get full details of an existing n8n workflow by ID",
+            name: "pmos_ops_get_workflow",
+            description: "Get full details of an existing workflow-engine flow by ID",
             parameters: {
               type: "object",
               required: ["workflow_id"],
               additionalProperties: false,
               properties: {
-                workflow_id: { type: "string", description: "The n8n workflow ID" },
+                workflow_id: { type: "string", description: "The workflow-engine flow ID" },
               },
             },
           },
@@ -2464,14 +2485,14 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         {
           type: "function" as const,
           function: {
-            name: "pmos_n8n_execute_workflow",
-            description: "Execute (test-run) an n8n workflow by ID",
+            name: "pmos_ops_execute_workflow",
+            description: "Execute (test-run) a workflow-engine flow by ID",
             parameters: {
               type: "object",
               required: ["workflow_id"],
               additionalProperties: false,
               properties: {
-                workflow_id: { type: "string", description: "The n8n workflow ID to execute" },
+                workflow_id: { type: "string", description: "The workflow-engine flow ID to execute" },
               },
             },
           },
@@ -2479,16 +2500,16 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         {
           type: "function" as const,
           function: {
-            name: "pmos_n8n_update_workflow",
-            description: "Update an existing n8n workflow (edit nodes, connections, or name). Use when the user says 'add', 'modify', 'fix', 'change', or 'update' an existing workflow.",
+            name: "pmos_ops_update_workflow",
+            description: "Update an existing workflow-engine flow (edit nodes, connections, or name). Use when the user says 'add', 'modify', 'fix', 'change', or 'update' an existing workflow.",
             parameters: {
               type: "object",
               required: ["workflow_id", "name", "nodes", "connections"],
               additionalProperties: false,
               properties: {
-                workflow_id: { type: "string", description: "The n8n workflow ID to update" },
+                workflow_id: { type: "string", description: "The workflow-engine flow ID to update" },
                 name: { type: "string", description: "Workflow name (can keep existing)" },
-                nodes: { type: "array", description: "Full updated array of n8n node objects" },
+                nodes: { type: "array", description: "Full updated array of workflow node objects" },
                 connections: { type: "object", description: "Full updated connections object" },
               },
             },
@@ -2496,7 +2517,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         },
       ];
 
-      // ── Tool executor — calls n8n-api-client directly ────────────────────────
+      // â”€â”€ Tool executor â€” calls n8n-api-client directly â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const executeTool = async (toolName: string, args: Record<string, unknown>): Promise<string> => {
         const {
           listN8nCredentials,
@@ -2508,28 +2529,32 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           listN8nNodeTypes,
         } = await import("../n8n-api-client.js");
 
-        switch (toolName) {
-          case "pmos_n8n_list_credentials": {
+        const normalizedToolName = toolName.startsWith("pmos_n8n_")
+          ? `pmos_ops_${toolName.slice("pmos_n8n_".length)}`
+          : toolName;
+
+        switch (normalizedToolName) {
+          case "pmos_ops_list_credentials": {
             const r = await listN8nCredentials(workspaceId);
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to list credentials" });
             return JSON.stringify({
               credentials: (r.credentials ?? []).map((c) => ({ id: c.id, name: c.name, type: c.type })),
             });
           }
-          case "pmos_n8n_list_workflows": {
+          case "pmos_ops_list_workflows": {
             const r = await listN8nWorkflows(workspaceId);
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to list workflows" });
             return JSON.stringify({
               workflows: (r.workflows ?? []).map((w) => ({ id: w.id, name: w.name, active: w.active })),
             });
           }
-          case "pmos_n8n_list_node_types": {
+          case "pmos_ops_list_node_types": {
             const r2 = await listN8nNodeTypes(workspaceId);
             const BASECAMP_NODE2 = { name: "n8n-nodes-basecamp.basecamp", displayName: "Basecamp (BCgpt Custom Node)", description: "Full Basecamp integration. ALWAYS use this for Basecamp.", group: ["custom"], version: 1 };
             const CORE_NODES2 = [
               { name: "n8n-nodes-base.manualTrigger", displayName: "Manual Trigger", group: ["trigger"], version: 1 },
               { name: "n8n-nodes-base.scheduleTrigger", displayName: "Schedule Trigger", group: ["trigger"], version: 1 },
-              { name: "n8n-nodes-base.webhook", displayName: "Webhook", description: "HTTP webhook trigger — type is webhook NOT webhookTrigger", group: ["trigger"], version: 1 },
+              { name: "n8n-nodes-base.webhook", displayName: "Webhook", description: "HTTP webhook trigger â€” type is webhook NOT webhookTrigger", group: ["trigger"], version: 1 },
               { name: "n8n-nodes-base.if", displayName: "IF", group: ["transform"], version: 1 },
               { name: "n8n-nodes-base.switch", displayName: "Switch", group: ["transform"], version: 1 },
               { name: "n8n-nodes-base.merge", displayName: "Merge", group: ["transform"], version: 1 },
@@ -2544,7 +2569,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             );
             return JSON.stringify({ nodeTypes: [BASECAMP_NODE2, ...CORE_NODES2, ...live2].slice(0, 250) });
           }
-          case "pmos_n8n_create_workflow": {
+          case "pmos_ops_create_workflow": {
             const name = String(args.name ?? "").trim();
             let nodes2 = Array.isArray(args.nodes) ? [...args.nodes] : [];
             const connections =
@@ -2578,24 +2603,24 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               success: true,
               workflowId: r.workflow?.id,
               workflowName: name,
-              message: `Workflow "${name}" created successfully! ID: ${r.workflow?.id}. It's currently inactive — activate it in the Workflows panel when ready.`,
+              message: `Workflow "${name}" created successfully! ID: ${r.workflow?.id}. It's currently inactive â€” activate it in the Workflows panel when ready.`,
             });
           }
-          case "pmos_n8n_get_workflow": {
+          case "pmos_ops_get_workflow": {
             const id = String(args.workflow_id ?? "").trim();
             if (!id) return JSON.stringify({ error: "workflow_id is required" });
             const r = await getN8nWorkflow(workspaceId, id);
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to get workflow" });
             return JSON.stringify(r.workflow);
           }
-          case "pmos_n8n_execute_workflow": {
+          case "pmos_ops_execute_workflow": {
             const id = String(args.workflow_id ?? "").trim();
             if (!id) return JSON.stringify({ error: "workflow_id is required" });
             const r = await executeN8nWorkflow(workspaceId, id);
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to execute workflow" });
             return JSON.stringify({ success: true, executionId: r.executionId ?? "unknown" });
           }
-          case "pmos_n8n_update_workflow": {
+          case "pmos_ops_update_workflow": {
             const wfId = String(args.workflow_id ?? "").trim();
             const wfName = String(args.name ?? "").trim();
             const wfNodes = Array.isArray(args.nodes) ? args.nodes : [];
@@ -2637,7 +2662,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           true,
           {
             ok: false,
-            message: `AI model unavailable: ${result.error ?? "unknown error"}. Please check your model configuration in Settings → AI Model Setup.`,
+            message: `AI model unavailable: ${result.error ?? "unknown error"}. Please check your model configuration in Settings â†’ AI Model Setup.`,
           },
           undefined,
         );
@@ -2654,7 +2679,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     }
   },
 
-  // ── Connections: Real n8n credential list ─────────────────────────
+  // â”€â”€ Connections: Real n8n credential list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   "pmos.projects.snapshot": async ({ respond, client }) => {
     try {
@@ -2906,7 +2931,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     }
   },
 
-  // ── Super-admin: Workspace List ────────────────────────────────────
+  // â”€â”€ Super-admin: Workspace List â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   "pmos.workspaces.list": async ({ respond, client }) => {
     try {
@@ -2923,7 +2948,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     }
   },
 
-  // ── Basecamp credential setup in n8n ──────────────────────────────
+  // â”€â”€ Basecamp credential setup in workflow engine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   "pmos.ops.setup.basecamp": async ({ params, respond, client }) => {
     try {
@@ -2940,7 +2965,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const { upsertBasecampCredential } = await import("../n8n-api-client.js");
       const result = await upsertBasecampCredential(workspaceId, bcgptUrl, bcgptApiKey);
       if (!result.ok) {
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to configure Basecamp credential in n8n"));
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to configure Basecamp credential in workflow engine"));
         return;
       }
       respond(true, { ok: true, credentialId: result.credentialId, message: "Basecamp credential configured in your workflow engine." }, undefined);
@@ -2949,7 +2974,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     }
   },
 
-  // ── n8n Credentials Management ─────────────────────────────────────
+  // â”€â”€ Workflow Engine Credentials Management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   "pmos.n8n.credentials.list": async ({ respond, client }) => {
     try {
@@ -2958,7 +2983,23 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const { listN8nCredentials } = await import("../n8n-api-client.js");
       const result = await listN8nCredentials(workspaceId);
       if (!result.ok) {
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to list n8n credentials"));
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to list workflow-engine credentials"));
+        return;
+      }
+      respond(true, { credentials: result.credentials }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.ops.credentials.list": async ({ respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const { listN8nCredentials } = await import("../n8n-api-client.js");
+      const result = await listN8nCredentials(workspaceId);
+      if (!result.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to list workflow-engine credentials"));
         return;
       }
       respond(true, { credentials: result.credentials }, undefined);
@@ -2979,7 +3020,28 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const { createN8nCredential } = await import("../n8n-api-client.js");
       const result = await createN8nCredential(workspaceId, p.name, p.type, p.data || {});
       if (!result.ok) {
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to create n8n credential"));
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to create workflow-engine credential"));
+        return;
+      }
+      respond(true, { ok: true, credentialId: result.credentialId }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.ops.credentials.create": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const p = params as { name?: string; type?: string; data?: Record<string, unknown> } | null;
+      if (!p?.name || !p?.type) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "name and type required"));
+        return;
+      }
+      const { createN8nCredential } = await import("../n8n-api-client.js");
+      const result = await createN8nCredential(workspaceId, p.name, p.type, p.data || {});
+      if (!result.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to create workflow-engine credential"));
         return;
       }
       respond(true, { ok: true, credentialId: result.credentialId }, undefined);
@@ -3000,7 +3062,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const { deleteN8nCredential } = await import("../n8n-api-client.js");
       const result = await deleteN8nCredential(workspaceId, p.credentialId);
       if (!result.ok) {
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to delete n8n credential"));
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to delete workflow-engine credential"));
         return;
       }
       respond(true, { ok: true }, undefined);
@@ -3009,7 +3071,28 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     }
   },
 
-  // ── Super-admin: reset all workspaces to a single fresh starter agent ─────────
+  "pmos.ops.credentials.delete": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const p = params as { credentialId?: string } | null;
+      if (!p?.credentialId) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "credentialId required"));
+        return;
+      }
+      const { deleteN8nCredential } = await import("../n8n-api-client.js");
+      const result = await deleteN8nCredential(workspaceId, p.credentialId);
+      if (!result.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to delete workflow-engine credential"));
+        return;
+      }
+      respond(true, { ok: true }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  // â”€â”€ Super-admin: reset all workspaces to a single fresh starter agent â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   "pmos.admin.reset-all-workspaces": async ({ respond, client }) => {
     try {
@@ -3039,3 +3122,5 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     }
   },
 };
+
+

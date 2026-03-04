@@ -20,7 +20,10 @@ export const BUNDLED_ENABLED_BY_DEFAULT = new Set<string>([
   "talk-voice",
 ]);
 
-const FORCE_DISABLED_PLUGIN_IDS = new Set<string>(["pmos-activepieces"]);
+const FORCE_DISABLED_PLUGIN_IDS = new Set<string>([
+  "pmos-activepieces",
+  "pmos-activepieces.archived",
+]);
 
 const normalizeList = (value: unknown): string[] => {
   if (!Array.isArray(value)) {

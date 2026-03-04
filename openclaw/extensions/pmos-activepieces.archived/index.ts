@@ -107,7 +107,7 @@ async function apRequest(params: {
 
 function jsonToolResult(payload: unknown) {
   return {
-    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+    content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
     details: payload,
   };
 }
@@ -164,12 +164,16 @@ function resolveToolParams(toolCallIdOrParams: unknown, maybeParams?: unknown): 
 }
 
 export default {
-  id: "pmos-activepieces",
+  id: "pmos-activepieces.archived",
   name: "PMOS Activepieces",
   register(api: OpenClawPluginApi) {
     api.logger.info("[pmos-activepieces] registering tools");
 
-    api.registerTool({
+    const registerTool = (tool: unknown, opts?: Parameters<OpenClawPluginApi['registerTool']>[1]) => {
+      api.registerTool(tool as Parameters<OpenClawPluginApi["registerTool"]>[0], opts);
+    };
+
+    registerTool({
       name: "flow_projects_list",
       description:
         "List Activepieces projects. Note: this often requires a USER principal; service keys may be forbidden.",
@@ -180,7 +184,7 @@ export default {
       },
     });
 
-    api.registerTool({
+    registerTool({
       name: "flow_pieces_list",
       description: "List available Activepieces pieces (integrations).",
       parameters: {
@@ -221,7 +225,7 @@ export default {
       },
     });
 
-    api.registerTool({
+    registerTool({
       name: "flow_connections_list",
       description: "List Activepieces app connections. Requires projectId (param or configured default).",
       parameters: {
@@ -255,7 +259,7 @@ export default {
       },
     });
 
-    api.registerTool({
+    registerTool({
       name: "flow_flows_list",
       description: "List Activepieces flows. Requires projectId (param or configured default).",
       parameters: {
@@ -286,7 +290,7 @@ export default {
       },
     });
 
-    api.registerTool({
+    registerTool({
       name: "flow_flow_get",
       description: "Get an Activepieces flow by id.",
       parameters: {
@@ -308,7 +312,7 @@ export default {
       },
     });
 
-    api.registerTool({
+    registerTool({
       name: "flow_flow_create",
       description: "Create an Activepieces flow (requires projectId).",
       parameters: {
@@ -344,7 +348,7 @@ export default {
       },
     });
 
-    api.registerTool({
+    registerTool({
       name: "flow_flow_operation",
       description:
         "Apply a FlowOperationRequest to a flow (rename, enable/disable, publish, add/update steps).",
@@ -380,7 +384,7 @@ export default {
       },
     });
 
-    api.registerTool({
+    registerTool({
       name: "flow_flow_delete",
       description: "Delete an Activepieces flow by id.",
       parameters: {
@@ -406,7 +410,7 @@ export default {
       },
     });
 
-    api.registerTool({
+    registerTool({
       name: "flow_flow_trigger",
       description:
         "Trigger an Activepieces webhook flow by id (calls /api/v1/webhooks/:flowId). Use draft/sync flags for testing.",
@@ -450,7 +454,7 @@ export default {
       },
     });
 
-    api.registerTool({
+    registerTool({
       name: "flow_flow_runs_list",
       description:
         "List Activepieces flow runs (requires projectId). Optionally filter by flowId.",
@@ -486,7 +490,7 @@ export default {
       },
     });
 
-    api.registerTool({
+    registerTool({
       name: "flow_flow_run_get",
       description: "Get an Activepieces flow run by id.",
       parameters: {
@@ -508,7 +512,7 @@ export default {
       },
     });
 
-    api.registerTool({
+    registerTool({
       name: "flow_flow_run_retry",
       description: "Retry an Activepieces flow run by id (requires projectId).",
       parameters: {
@@ -542,7 +546,7 @@ export default {
       },
     });
 
-    api.registerTool({
+    registerTool({
       name: "flow_connection_upsert",
       description:
         "Upsert an Activepieces app connection (project scope). Body should match UpsertAppConnectionRequestBody.",
@@ -575,7 +579,7 @@ export default {
       },
     });
 
-    api.registerTool({
+    registerTool({
       name: "flow_connection_delete",
       description: "Delete an Activepieces app connection by id.",
       parameters: {
@@ -601,7 +605,7 @@ export default {
       },
     });
 
-    api.registerTool({
+    registerTool({
       name: "flow_connection_update",
       description:
         "Update an Activepieces app connection metadata/displayName by id (does not update secret value).",

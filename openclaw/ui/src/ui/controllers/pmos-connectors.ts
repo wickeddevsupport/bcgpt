@@ -91,7 +91,7 @@ export function hydratePmosConnectorDraftsFromConfig(state: PmosConnectorsState)
       ? status.ops.url
       : typeof getPath(cfg, ["pmos", "connectors", "ops", "url"]) === "string"
         ? (getPath(cfg, ["pmos", "connectors", "ops", "url"]) as string)
-        : "") || "https://ops.wickedlab.io";
+        : "") || "https://flow.wickedlab.io";
   const bcgptUrl =
     (typeof status?.bcgpt?.url === "string" && status.bcgpt.url.trim()
       ? status.bcgpt.url
@@ -99,7 +99,7 @@ export function hydratePmosConnectorDraftsFromConfig(state: PmosConnectorsState)
         ? (getPath(cfg, ["pmos", "connectors", "bcgpt", "url"]) as string)
         : "") || "https://bcgpt.wickedlab.io";
 
-  state.pmosOpsUrl = normalizeUrl(opsUrl, "https://ops.wickedlab.io");
+  state.pmosOpsUrl = normalizeUrl(opsUrl, "https://flow.wickedlab.io");
   state.pmosBcgptUrl = normalizeUrl(bcgptUrl, "https://bcgpt.wickedlab.io");
   state.pmosConnectorDraftsInitialized = true;
 }
@@ -131,7 +131,7 @@ export async function savePmosConnectorsConfig(
   state.pmosIntegrationsSaving = true;
   state.pmosIntegrationsError = null;
   try {
-    const opsUrl = normalizeUrl(state.pmosOpsUrl, "https://ops.wickedlab.io");
+    const opsUrl = normalizeUrl(state.pmosOpsUrl, "https://flow.wickedlab.io");
     const bcgptUrl = normalizeUrl(state.pmosBcgptUrl, "https://bcgpt.wickedlab.io");
     const bcgptKey = state.pmosBcgptApiKeyDraft.trim();
 
@@ -155,8 +155,8 @@ export async function savePmosConnectorsConfig(
     const opsSaved = getPath(workspaceConnectors.connectors, ["ops", "url"]);
     const bcgptSaved = getPath(workspaceConnectors.connectors, ["bcgpt", "url"]);
     state.pmosOpsUrl = normalizeUrl(
-      typeof opsSaved === "string" ? opsSaved : "https://ops.wickedlab.io",
-      "https://ops.wickedlab.io",
+      typeof opsSaved === "string" ? opsSaved : "https://flow.wickedlab.io",
+      "https://flow.wickedlab.io",
     );
     state.pmosBcgptUrl = normalizeUrl(
       typeof bcgptSaved === "string" ? bcgptSaved : "https://bcgpt.wickedlab.io",
@@ -177,7 +177,7 @@ export async function loadPmosN8nCredentials(state: PmosConnectorsState) {
   state.pmosN8nCredentialsLoading = true;
   state.pmosN8nCredentialsError = null;
   try {
-    const result = await state.client.request<{ credentials?: Array<{ id: string; name: string; type: string }> }>("pmos.n8n.credentials.list", {});
+    const result = await state.client.request<{ credentials?: Array<{ id: string; name: string; type: string }> }>("pmos.ops.credentials.list", {});
     state.pmosN8nCredentials = result.credentials ?? [];
   } catch (err) {
     state.pmosN8nCredentialsError = String(err);

@@ -49,16 +49,23 @@ describe("normalizePluginsConfig", () => {
     expect(result.slots.memory).toBe("memory-core");
   });
 
-  it("always disables deprecated pmos-activepieces plugin", () => {
+  it("always disables deprecated pmos-activepieces plugins", () => {
     const plugins = normalizePluginsConfig({
       entries: {
         "pmos-activepieces": {
           enabled: true,
         },
+        "pmos-activepieces.archived": {
+          enabled: true,
+        },
       },
-      allow: ["pmos-activepieces"],
+      allow: ["pmos-activepieces", "pmos-activepieces.archived"],
     });
     expect(resolveEnableState("pmos-activepieces", "bundled", plugins)).toEqual({
+      enabled: false,
+      reason: "deprecated plugin disabled",
+    });
+    expect(resolveEnableState("pmos-activepieces.archived", "bundled", plugins)).toEqual({
       enabled: false,
       reason: "deprecated plugin disabled",
     });

@@ -1,15 +1,34 @@
 /**
- * n8n API Client
+ * Workflow Engine API Client (Activepieces compatibility layer)
  *
- * Provides a clean interface for n8n REST API operations.
- * Used by chat-to-workflow, live-flow-builder, and other modules.
+ * This module keeps the historical `n8n-api-client` exports stable so existing
+ * PMOS server-method handlers and chat tools continue to work while the
+ * underlying runtime is Activepieces.
  */
 
-import { readWorkspaceConnectors } from "./workspace-connectors.js";
-import { ensureWorkspaceN8nTag, readLocalN8nConfig } from "./pmos-ops-proxy.js";
-import { getOrCreateWorkspaceN8nCookie } from "./n8n-auth-bridge.js";
-import { resolvePmosUserByWorkspaceId } from "./pmos-auth.js";
 import { loadConfig } from "../config/config.js";
+import { readWorkspaceConnectors } from "./workspace-connectors.js";
+
+const DEFAULT_BASE_URL = "https://flow.wickedlab.io";
+
+type JsonObject = Record<string, unknown>;
+
+type ActivepiecesContext = {
+  baseUrl: string;
+  apiKey: string | null;
+  projectId: string | null;
+  userEmail: string | null;
+  userPassword: string | null;
+  hasWorkspaceCredentials: boolean;
+};
+
+type CachedUserToken = {
+  token: string;
+  projectId: string | null;
+  expiresAt: number;
+};
+
+const userTokenCache = new Map<string, CachedUserToken>();
 
 export interface N8nWorkflow {
   id: string;
@@ -42,7 +61,7 @@ export interface N8nExecution {
   stoppedAt?: string;
   workflowId: string;
   workflowName?: string;
-  status: 'running' | 'success' | 'failed' | 'canceled' | 'crashed' | 'waiting';
+  status: "running" | "success" | "failed" | "canceled" | "crashed" | "waiting";
   data?: {
     resultData?: {
       runData?: Record<string, unknown>;
@@ -63,10 +82,6 @@ export interface N8nNodeType {
   description?: string;
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function readConfigString(cfg: unknown, path: string[]): string | null {
   let current: unknown = cfg;
   for (const part of path) {
@@ -82,313 +97,556 @@ function readConfigString(cfg: unknown, path: string[]): string | null {
   return trimmed ? trimmed : null;
 }
 
-function normalizeBaseUrl(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  const value = raw.trim();
-  if (!value) return null;
-  return value.replace(/\/+$/, "");
-}
-
-function resolveGlobalOpsUrlFromConfig(): string | null {
-  const cfg = loadConfig() as unknown;
-  return normalizeBaseUrl(readConfigString(cfg, ["pmos", "connectors", "ops", "url"]));
-}
-
-function sameBaseUrl(left: string | null | undefined, right: string | null | undefined): boolean {
-  const l = normalizeBaseUrl(left ?? null);
-  const r = normalizeBaseUrl(right ?? null);
-  return Boolean(l && r && l === r);
-}
-
-function appendWorkspaceTag(
-  tags: Array<string | { id: string; name?: string }> | undefined,
-  tagId: string,
-): Array<string | { id: string; name?: string }> {
-  const list = Array.isArray(tags) ? [...tags] : [];
-  const hasTag = list.some((tag) => {
-    if (typeof tag === "string") return tag === tagId;
-    return Boolean(tag && typeof tag === "object" && tag.id === tagId);
-  });
-  if (!hasTag) {
-    list.push(tagId);
+function normalizeBaseUrl(raw: string | null | undefined): string {
+  const value = String(raw ?? "").trim();
+  if (!value) {
+    return DEFAULT_BASE_URL;
   }
-  return list;
+  return value.endsWith("/") ? value.slice(0, -1) : value;
 }
 
-/**
- * Get the n8n base URL and auth cookie for a workspace
- */
-async function getN8nContext(workspaceId: string): Promise<{
-  baseUrl: string;
-  cookie: string | null;
-  apiKey: string | null;
-  hasWorkspaceCredentials: boolean;
-}> {
-  const wc = await readWorkspaceConnectors(workspaceId);
-  const workspaceOpsUrl = normalizeBaseUrl(
-    typeof wc?.ops?.url === "string" ? wc.ops.url : null,
-  );
-  const localN8n = readLocalN8nConfig();
-  const baseUrl =
-    workspaceOpsUrl ??
-    normalizeBaseUrl(localN8n?.url ?? null) ??
-    resolveGlobalOpsUrlFromConfig() ??
-    "https://ops.wickedlab.io";
-
-  // Use workspace owner identity as hint so embedded n8n users map to PMOS users
-  // instead of generic synthetic aliases.
-  const owner = await resolvePmosUserByWorkspaceId(workspaceId).catch(() => null);
-
-  // Use the auto-provisioning flow from n8n-auth-bridge
-  // This will create workspace credentials if they don't exist yet
-  let cookie: string | null = null;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      cookie = await getOrCreateWorkspaceN8nCookie({
-        workspaceId,
-        n8nBaseUrl: baseUrl,
-        pmosUser: owner
-          ? {
-              email: owner.email,
-              name: owner.name,
-              role: owner.role,
-            }
-          : null,
-      });
-    } catch {
-      cookie = null;
-    }
-    if (cookie) {
-      break;
-    }
-    if (attempt < 2) {
-      await delay(500 * (attempt + 1));
-    }
+function readString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
   }
+  const trimmed = value.trim();
+  return trimmed || null;
+}
 
-  // Also check for API key
-  const opsApiKey = wc?.ops?.apiKey as string | undefined;
-  const apiKey = opsApiKey?.trim() || null;
+function readId(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
+}
 
-  // In embedded mode we require workspace cookie auth to avoid creating resources
-  // under shared owner/api-key context.
-  const embeddedRuntime = sameBaseUrl(baseUrl, localN8n?.url ?? null);
-  const hasWorkspaceCredentials = embeddedRuntime ? Boolean(cookie) : Boolean(cookie || apiKey);
+function toObject(value: unknown): JsonObject | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as JsonObject;
+}
 
+function toArrayObjects(value: unknown): JsonObject[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((entry): entry is JsonObject => Boolean(toObject(entry)));
+}
+
+function mapRunStatus(statusRaw: string | null): N8nExecution["status"] {
+  const status = String(statusRaw ?? "").toLowerCase();
+  if (status.includes("success")) return "success";
+  if (status.includes("fail") || status.includes("error")) return "failed";
+  if (status.includes("cancel")) return "canceled";
+  if (status.includes("crash")) return "crashed";
+  if (status.includes("wait")) return "waiting";
+  return "running";
+}
+
+function getCompatMetadata(flow: JsonObject): JsonObject {
+  const metadata = toObject(flow.metadata);
+  const compat = toObject(metadata?.n8nCompat);
+  return compat ?? {};
+}
+
+function toWorkflow(entry: JsonObject): N8nWorkflow {
+  const compat = getCompatMetadata(entry);
+  const nodes = Array.isArray(compat.nodes) ? compat.nodes : [];
+  const mappedNodes: N8nWorkflow["nodes"] = nodes
+    .map((node, index) => {
+      const obj = toObject(node);
+      const fallbackId = `node-${index + 1}`;
+      const id = readId(obj?.id) ?? fallbackId;
+      const name = readString(obj?.name) ?? id;
+      const type = readString(obj?.type) ?? "activepieces.step";
+      const typeVersionRaw = obj?.typeVersion;
+      const typeVersion =
+        typeof typeVersionRaw === "number" && Number.isFinite(typeVersionRaw)
+          ? typeVersionRaw
+          : 1;
+      const positionRaw = Array.isArray(obj?.position) ? obj?.position : null;
+      const position: [number, number] =
+        positionRaw && positionRaw.length >= 2
+          ? [Number(positionRaw[0]) || 0, Number(positionRaw[1]) || 0]
+          : [250 + index * 220, 300];
+      return {
+        id,
+        name,
+        type,
+        typeVersion,
+        position,
+        parameters: toObject(obj?.parameters) ?? {},
+      };
+    })
+    .filter(Boolean);
+
+  const status = readString(entry.status) ?? "DISABLED";
   return {
-    baseUrl: baseUrl.replace(/\/+$/, ""),
-    cookie,
-    apiKey: embeddedRuntime ? null : apiKey,
-    hasWorkspaceCredentials,
+    id: readId(entry.id) ?? "",
+    name:
+      readString(entry.displayName) ??
+      readString(entry.name) ??
+      readId(entry.id) ??
+      "Untitled Workflow",
+    active: status.toUpperCase() === "ENABLED",
+    nodes: mappedNodes,
+    connections: toObject(compat.connections) ?? {},
+    settings: toObject(compat.settings) ?? {},
+    tags: Array.isArray(compat.tags)
+      ? compat.tags.map((tag) => {
+          const tagId = readId(tag);
+          if (tagId) return tagId;
+          const tagObj = toObject(tag);
+          return readString(tagObj?.name) ?? String(tag);
+        })
+      : [],
+    triggerCount: typeof entry.scheduleCount === "number" ? entry.scheduleCount : undefined,
+    updatedAt: readString(entry.updated) ?? readString(entry.updatedAt) ?? undefined,
+    versionId: readId(toObject(entry.version)?.id) ?? undefined,
   };
 }
 
+function toExecution(entry: JsonObject): N8nExecution {
+  const workflowId =
+    readId(entry.flowId) ??
+    readId(toObject(entry.flowVersion)?.flowId) ??
+    readId(toObject(entry.flowVersion)?.id) ??
+    "";
+  const status = mapRunStatus(readString(entry.status));
+  return {
+    id: readId(entry.id) ?? "",
+    finished: status !== "running" && status !== "waiting",
+    mode: readString(entry.environment) ?? "manual",
+    startedAt: readString(entry.startTime) ?? readString(entry.created) ?? new Date().toISOString(),
+    stoppedAt: readString(entry.finishTime) ?? readString(entry.updatedAt) ?? undefined,
+    workflowId,
+    workflowName: readString(toObject(entry.flowVersion)?.displayName) ?? undefined,
+    status,
+    data: {
+      resultData: {
+        runData: toObject(entry.steps) ?? {},
+        error: toObject(entry.error) ?? undefined,
+      },
+    },
+  };
+}
+
+async function requestJson(params: {
+  ctx: ActivepiecesContext;
+  workspaceId: string;
+  endpoint: string;
+  method?: string;
+  body?: unknown;
+}): Promise<unknown> {
+  const { ctx, workspaceId } = params;
+  const method = (params.method ?? "GET").toUpperCase();
+  const endpoint = params.endpoint.replace(/^\/+/, "");
+  const url = `${ctx.baseUrl}/api/v1/${endpoint}`;
+
+  const authHeader = await getAuthorizationHeader(workspaceId, ctx);
+  if (!authHeader) {
+    throw new Error("No workflow-engine authentication configured for this workspace.");
+  }
+
+  const headers: Record<string, string> = {
+    authorization: authHeader,
+    accept: "application/json",
+  };
+  if (params.body !== undefined) {
+    headers["content-type"] = "application/json";
+  }
+
+  const res = await fetch(url, {
+    method,
+    headers,
+    body: params.body !== undefined ? JSON.stringify(params.body) : undefined,
+  });
+
+  const text = await res.text().catch(() => "");
+  const parsed = (() => {
+    if (!text) return null;
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      return text;
+    }
+  })();
+
+  if (!res.ok) {
+    const detail = typeof parsed === "string" ? parsed : text;
+    throw new Error(`Workflow engine API ${res.status} ${res.statusText}: ${detail}`.trim());
+  }
+
+  return parsed ?? { ok: true };
+}
+
+async function signInWithWorkspaceUser(
+  workspaceId: string,
+  ctx: ActivepiecesContext,
+): Promise<CachedUserToken | null> {
+  if (!ctx.userEmail || !ctx.userPassword) {
+    return null;
+  }
+
+  const cached = userTokenCache.get(workspaceId);
+  if (cached && cached.expiresAt > Date.now() + 30_000) {
+    return cached;
+  }
+
+  const endpoint = `${ctx.baseUrl}/api/v1/authentication/sign-in`;
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+    },
+    body: JSON.stringify({
+      email: ctx.userEmail,
+      password: ctx.userPassword,
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Workflow engine sign-in failed (${res.status}): ${text}`.trim());
+  }
+
+  const payload = (await res.json().catch(() => null)) as JsonObject | null;
+  const token = readString(payload?.token);
+  if (!token) {
+    return null;
+  }
+
+  const next: CachedUserToken = {
+    token,
+    projectId: readId(payload?.projectId),
+    // JWT expiry isn't decoded here; use a short cache window and re-auth often.
+    expiresAt: Date.now() + 10 * 60 * 1000,
+  };
+  userTokenCache.set(workspaceId, next);
+  return next;
+}
+
+async function getAuthorizationHeader(
+  workspaceId: string,
+  ctx: ActivepiecesContext,
+): Promise<string | null> {
+  if (ctx.apiKey) {
+    return `Bearer ${ctx.apiKey}`;
+  }
+  const userToken = await signInWithWorkspaceUser(workspaceId, ctx);
+  if (userToken?.token) {
+    return `Bearer ${userToken.token}`;
+  }
+  return null;
+}
+
+async function getContext(workspaceId: string): Promise<ActivepiecesContext> {
+  const wc = await readWorkspaceConnectors(workspaceId).catch(() => null);
+  const cfg = loadConfig() as unknown;
+
+  const baseUrl = normalizeBaseUrl(
+    readString(wc?.ops?.url) ??
+      readConfigString(cfg, ["pmos", "connectors", "ops", "url"]) ??
+      process.env.ACTIVEPIECES_URL ??
+      process.env.FLOW_URL ??
+      process.env.OPS_URL ??
+      DEFAULT_BASE_URL,
+  );
+
+  const apiKey =
+    readString(wc?.ops?.apiKey) ??
+    readConfigString(cfg, ["pmos", "connectors", "ops", "apiKey"]) ??
+    readString(process.env.ACTIVEPIECES_API_KEY) ??
+    readString(process.env.OPS_API_KEY);
+
+  const projectId =
+    readString(wc?.ops?.projectId) ??
+    readConfigString(cfg, ["pmos", "connectors", "ops", "projectId"]) ??
+    readString(process.env.ACTIVEPIECES_PROJECT_ID);
+
+  const userEmail = readString(wc?.ops?.user?.email) ?? null;
+  const userPassword = readString(wc?.ops?.user?.password) ?? null;
+
+  return {
+    baseUrl,
+    apiKey,
+    projectId,
+    userEmail,
+    userPassword,
+    hasWorkspaceCredentials: Boolean(apiKey || (userEmail && userPassword)),
+  };
+}
+
+async function resolveProjectId(
+  workspaceId: string,
+  ctx: ActivepiecesContext,
+): Promise<string> {
+  if (ctx.projectId) {
+    return ctx.projectId;
+  }
+
+  const tokenCache = userTokenCache.get(workspaceId);
+  if (tokenCache?.projectId) {
+    ctx.projectId = tokenCache.projectId;
+    return tokenCache.projectId;
+  }
+
+  const projects = await requestJson({
+    workspaceId,
+    ctx,
+    endpoint: "projects",
+  });
+  const obj = toObject(projects);
+  const rows = toArrayObjects(obj?.data ?? projects);
+  const first = rows[0];
+  const projectId = readId(first?.id);
+  if (!projectId) {
+    throw new Error("No workflow project found. Configure ops.projectId in workspace connectors.");
+  }
+  ctx.projectId = projectId;
+  return projectId;
+}
+
+async function updateFlowMetadata(params: {
+  workspaceId: string;
+  ctx: ActivepiecesContext;
+  workflowId: string;
+  metadataPatch: JsonObject;
+}): Promise<void> {
+  const flowRaw = await requestJson({
+    workspaceId: params.workspaceId,
+    ctx: params.ctx,
+    endpoint: `flows/${encodeURIComponent(params.workflowId)}`,
+  });
+  const flow = toObject(flowRaw) ?? {};
+  const currentMetadata = toObject(flow.metadata) ?? {};
+  const merged = { ...currentMetadata, ...params.metadataPatch };
+
+  await requestJson({
+    workspaceId: params.workspaceId,
+    ctx: params.ctx,
+    endpoint: `flows/${encodeURIComponent(params.workflowId)}`,
+    method: "POST",
+    body: {
+      type: "UPDATE_METADATA",
+      request: { metadata: merged },
+    },
+  });
+}
+
+async function changeFlowStatus(params: {
+  workspaceId: string;
+  ctx: ActivepiecesContext;
+  workflowId: string;
+  active: boolean;
+}): Promise<void> {
+  await requestJson({
+    workspaceId: params.workspaceId,
+    ctx: params.ctx,
+    endpoint: `flows/${encodeURIComponent(params.workflowId)}`,
+    method: "POST",
+    body: {
+      type: "CHANGE_STATUS",
+      request: { status: params.active ? "ENABLED" : "DISABLED" },
+    },
+  });
+}
+
 /**
- * Create a workflow in n8n
+ * Create a workflow in the workflow engine
  */
 export async function createN8nWorkflow(
   workspaceId: string,
-  workflow: Omit<N8nWorkflow, 'id'>,
+  workflow: Omit<N8nWorkflow, "id">,
 ): Promise<{ ok: boolean; workflow?: N8nWorkflow; error?: string }> {
-  const { baseUrl, cookie, apiKey, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
-  
-  if (!hasWorkspaceCredentials) {
-    return { 
-      ok: false, 
-      error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." 
-    };
-  }
-  
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    "accept": "application/json",
-  };
-  
-  if (cookie) {
-    headers["Cookie"] = cookie;
-  } else if (apiKey) {
-    headers["X-N8N-API-KEY"] = apiKey;
-  } else {
-    return { ok: false, error: "No n8n authentication available" };
-  }
-
-  const workspaceTagId = await ensureWorkspaceN8nTag(workspaceId, baseUrl, headers);
-  if (!workspaceTagId) {
-    return {
-      ok: false,
-      error:
-        "Unable to enforce workspace isolation in n8n (workspace tag setup failed). Check embedded n8n owner credentials and retry.",
-    };
-  }
-
-  const tags = appendWorkspaceTag(workflow.tags, workspaceTagId);
-
   try {
-    const res = await fetch(`${baseUrl}/rest/workflows`, {
+    const ctx = await getContext(workspaceId);
+    if (!ctx.hasWorkspaceCredentials) {
+      return {
+        ok: false,
+        error:
+          "No workflow-engine credentials configured for your workspace. Configure Activepieces URL/key in Integrations first.",
+      };
+    }
+
+    const projectId = await resolveProjectId(workspaceId, ctx);
+    const createdRaw = await requestJson({
+      workspaceId,
+      ctx,
+      endpoint: "flows",
       method: "POST",
-      headers,
-      body: JSON.stringify({
-        ...workflow,
-        tags,
-        active: false, // Ensure workflows are created inactive
-      }),
-    });
-    
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      return { ok: false, error: `n8n API error: ${res.status} ${text.slice(0, 200)}` };
-    }
-    
-    const data = await res.json() as { id?: string; data?: { id: string } };
-    const createdId = data.id || data.data?.id;
-    
-    if (!createdId) {
-      return { ok: false, error: "n8n did not return workflow ID" };
-    }
-    
-    return {
-      ok: true,
-      workflow: {
-        ...workflow,
-        id: createdId,
+      body: {
+        displayName: workflow.name,
+        projectId,
       },
-    };
+    });
+
+    const created = toObject(createdRaw) ?? {};
+    const workflowId = readId(created.id);
+    if (!workflowId) {
+      return { ok: false, error: "Workflow engine did not return flow id." };
+    }
+
+    await updateFlowMetadata({
+      workspaceId,
+      ctx,
+      workflowId,
+      metadataPatch: {
+        n8nCompat: {
+          nodes: workflow.nodes,
+          connections: workflow.connections,
+          settings: workflow.settings ?? {},
+          tags: workflow.tags ?? [],
+        },
+      },
+    });
+
+    if (workflow.active) {
+      await changeFlowStatus({ workspaceId, ctx, workflowId, active: true });
+    }
+
+    const fullRaw = await requestJson({
+      workspaceId,
+      ctx,
+      endpoint: `flows/${encodeURIComponent(workflowId)}`,
+    });
+
+    return { ok: true, workflow: toWorkflow(toObject(fullRaw) ?? {}) };
   } catch (err) {
-    return { ok: false, error: `Failed to create workflow: ${err}` };
+    return { ok: false, error: `Failed to create workflow: ${String(err)}` };
   }
 }
 
 /**
- * Update a workflow in n8n
+ * Update a workflow in the workflow engine
  */
 export async function updateN8nWorkflow(
   workspaceId: string,
   workflowId: string,
   updates: Partial<N8nWorkflow>,
 ): Promise<{ ok: boolean; workflow?: N8nWorkflow; error?: string }> {
-  const { baseUrl, cookie, apiKey, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
-
-  if (!hasWorkspaceCredentials) {
-    return { ok: false, error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." };
-  }
-  
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    "accept": "application/json",
-  };
-  
-  if (cookie) {
-    headers["Cookie"] = cookie;
-  } else if (apiKey) {
-    headers["X-N8N-API-KEY"] = apiKey;
-  } else {
-    return { ok: false, error: "No n8n authentication available" };
-  }
-  
   try {
-    const res = await fetch(`${baseUrl}/rest/workflows/${workflowId}`, {
-      method: "PATCH",
-      headers,
-      body: JSON.stringify(updates),
-    });
-    
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      return { ok: false, error: `n8n API error: ${res.status} ${text.slice(0, 200)}` };
+    const ctx = await getContext(workspaceId);
+    if (!ctx.hasWorkspaceCredentials) {
+      return {
+        ok: false,
+        error:
+          "No workflow-engine credentials configured for your workspace. Configure Activepieces URL/key in Integrations first.",
+      };
     }
-    
-    const data = await res.json() as N8nWorkflow | { data?: N8nWorkflow };
-    const workflow = 'data' in data ? data.data : data;
-    
-    return { ok: true, workflow };
+
+    if (typeof updates.name === "string" && updates.name.trim()) {
+      await requestJson({
+        workspaceId,
+        ctx,
+        endpoint: `flows/${encodeURIComponent(workflowId)}`,
+        method: "POST",
+        body: {
+          type: "CHANGE_NAME",
+          request: { displayName: updates.name.trim() },
+        },
+      });
+    }
+
+    if (typeof updates.active === "boolean") {
+      await changeFlowStatus({
+        workspaceId,
+        ctx,
+        workflowId,
+        active: updates.active,
+      });
+    }
+
+    if (Array.isArray(updates.nodes) || toObject(updates.connections) || toObject(updates.settings)) {
+      await updateFlowMetadata({
+        workspaceId,
+        ctx,
+        workflowId,
+        metadataPatch: {
+          n8nCompat: {
+            nodes: Array.isArray(updates.nodes) ? updates.nodes : [],
+            connections: toObject(updates.connections) ?? {},
+            settings: toObject(updates.settings) ?? {},
+            tags: Array.isArray(updates.tags) ? updates.tags : [],
+          },
+        },
+      });
+    }
+
+    const raw = await requestJson({
+      workspaceId,
+      ctx,
+      endpoint: `flows/${encodeURIComponent(workflowId)}`,
+    });
+
+    return { ok: true, workflow: toWorkflow(toObject(raw) ?? {}) };
   } catch (err) {
-    return { ok: false, error: `Failed to update workflow: ${err}` };
+    return { ok: false, error: `Failed to update workflow: ${String(err)}` };
   }
 }
 
 /**
- * Get a workflow from n8n
+ * Get a workflow
  */
 export async function getN8nWorkflow(
   workspaceId: string,
   workflowId: string,
 ): Promise<{ ok: boolean; workflow?: N8nWorkflow; error?: string }> {
-  const { baseUrl, cookie, apiKey, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
-
-  if (!hasWorkspaceCredentials) {
-    return { ok: false, error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." };
-  }
-  
-  const headers: Record<string, string> = {
-    "accept": "application/json",
-  };
-  
-  if (cookie) {
-    headers["Cookie"] = cookie;
-  } else if (apiKey) {
-    headers["X-N8N-API-KEY"] = apiKey;
-  } else {
-    return { ok: false, error: "No n8n authentication available" };
-  }
-  
   try {
-    const res = await fetch(`${baseUrl}/rest/workflows/${workflowId}`, {
-      method: "GET",
-      headers,
-    });
-    
-    if (!res.ok) {
-      return { ok: false, error: `Workflow not found: ${workflowId}` };
+    const ctx = await getContext(workspaceId);
+    if (!ctx.hasWorkspaceCredentials) {
+      return {
+        ok: false,
+        error:
+          "No workflow-engine credentials configured for your workspace. Configure Activepieces URL/key in Integrations first.",
+      };
     }
-    
-    const data = await res.json() as N8nWorkflow | { data?: N8nWorkflow };
-    const workflow = 'data' in data ? data.data : data;
-    
-    return { ok: true, workflow };
+
+    const raw = await requestJson({
+      workspaceId,
+      ctx,
+      endpoint: `flows/${encodeURIComponent(workflowId)}`,
+    });
+
+    return { ok: true, workflow: toWorkflow(toObject(raw) ?? {}) };
   } catch (err) {
-    return { ok: false, error: `Failed to get workflow: ${err}` };
+    return { ok: false, error: `Failed to get workflow: ${String(err)}` };
   }
 }
 
 /**
- * Delete a workflow from n8n
+ * Delete a workflow
  */
 export async function deleteN8nWorkflow(
   workspaceId: string,
   workflowId: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const { baseUrl, cookie, apiKey, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
-
-  if (!hasWorkspaceCredentials) {
-    return { ok: false, error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." };
-  }
-  
-  const headers: Record<string, string> = {
-    "accept": "application/json",
-  };
-  
-  if (cookie) {
-    headers["Cookie"] = cookie;
-  } else if (apiKey) {
-    headers["X-N8N-API-KEY"] = apiKey;
-  } else {
-    return { ok: false, error: "No n8n authentication available" };
-  }
-  
   try {
-    const res = await fetch(`${baseUrl}/rest/workflows/${workflowId}`, {
-      method: "DELETE",
-      headers,
-    });
-    
-    if (!res.ok && res.status !== 204) {
-      const text = await res.text().catch(() => "");
-      return { ok: false, error: `n8n API error: ${res.status} ${text.slice(0, 200)}` };
+    const ctx = await getContext(workspaceId);
+    if (!ctx.hasWorkspaceCredentials) {
+      return {
+        ok: false,
+        error:
+          "No workflow-engine credentials configured for your workspace. Configure Activepieces URL/key in Integrations first.",
+      };
     }
-    
+
+    await requestJson({
+      workspaceId,
+      ctx,
+      endpoint: `flows/${encodeURIComponent(workflowId)}`,
+      method: "DELETE",
+    });
+
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: `Failed to delete workflow: ${err}` };
+    return { ok: false, error: `Failed to delete workflow: ${String(err)}` };
   }
 }
 
@@ -404,92 +662,83 @@ export async function setWorkflowActive(
 }
 
 /**
- * Execute a workflow manually
+ * Execute a workflow (webhook trigger path)
  */
 export async function executeN8nWorkflow(
   workspaceId: string,
   workflowId: string,
 ): Promise<{ ok: boolean; executionId?: string; error?: string }> {
-  const { baseUrl, cookie, apiKey, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
-
-  if (!hasWorkspaceCredentials) {
-    return { ok: false, error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." };
-  }
-  
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    "accept": "application/json",
-  };
-  
-  if (cookie) {
-    headers["Cookie"] = cookie;
-  } else if (apiKey) {
-    headers["X-N8N-API-KEY"] = apiKey;
-  } else {
-    return { ok: false, error: "No n8n authentication available" };
-  }
-  
   try {
-    const res = await fetch(`${baseUrl}/rest/workflows/${workflowId}/execute`, {
-      method: "POST",
-      headers,
-    });
-    
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      return { ok: false, error: `n8n API error: ${res.status} ${text.slice(0, 200)}` };
+    const ctx = await getContext(workspaceId);
+    if (!ctx.hasWorkspaceCredentials) {
+      return {
+        ok: false,
+        error:
+          "No workflow-engine credentials configured for your workspace. Configure Activepieces URL/key in Integrations first.",
+      };
     }
-    
-    const data = await res.json() as { executionId?: string; data?: { executionId?: string } };
-    const executionId = data.executionId || data.data?.executionId;
-    
-    return { ok: true, executionId };
+
+    const response = await requestJson({
+      workspaceId,
+      ctx,
+      endpoint: `webhooks/${encodeURIComponent(workflowId)}/sync`,
+      method: "POST",
+      body: {},
+    }).catch(async () => {
+      return requestJson({
+        workspaceId,
+        ctx,
+        endpoint: `webhooks/${encodeURIComponent(workflowId)}`,
+        method: "POST",
+        body: {},
+      });
+    });
+
+    const runId = readId(toObject(response)?.id) ?? readId(toObject(response)?.flowRunId);
+    if (runId) {
+      return { ok: true, executionId: runId };
+    }
+
+    const projectId = await resolveProjectId(workspaceId, ctx);
+    const latestRuns = await requestJson({
+      workspaceId,
+      ctx,
+      endpoint: `flow-runs?projectId=${encodeURIComponent(projectId)}&flowId=${encodeURIComponent(workflowId)}&limit=1`,
+    });
+    const latestObj = toObject(latestRuns);
+    const first = toArrayObjects(latestObj?.data)[0];
+    return { ok: true, executionId: readId(first?.id) ?? undefined };
   } catch (err) {
-    return { ok: false, error: `Failed to execute workflow: ${err}` };
+    return { ok: false, error: `Failed to execute workflow: ${String(err)}` };
   }
 }
 
 /**
- * Get execution status
+ * Get execution details
  */
 export async function getN8nExecution(
   workspaceId: string,
   executionId: string,
 ): Promise<{ ok: boolean; execution?: N8nExecution; error?: string }> {
-  const { baseUrl, cookie, apiKey, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
-
-  if (!hasWorkspaceCredentials) {
-    return { ok: false, error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." };
-  }
-  
-  const headers: Record<string, string> = {
-    "accept": "application/json",
-  };
-  
-  if (cookie) {
-    headers["Cookie"] = cookie;
-  } else if (apiKey) {
-    headers["X-N8N-API-KEY"] = apiKey;
-  } else {
-    return { ok: false, error: "No n8n authentication available" };
-  }
-  
   try {
-    const res = await fetch(`${baseUrl}/rest/executions/${executionId}`, {
-      method: "GET",
-      headers,
-    });
-    
-    if (!res.ok) {
-      return { ok: false, error: `Execution not found: ${executionId}` };
+    const ctx = await getContext(workspaceId);
+    if (!ctx.hasWorkspaceCredentials) {
+      return {
+        ok: false,
+        error:
+          "No workflow-engine credentials configured for your workspace. Configure Activepieces URL/key in Integrations first.",
+      };
     }
-    
-    const data = await res.json() as N8nExecution | { data?: N8nExecution };
-    const execution = 'data' in data ? data.data : data;
-    
-    return { ok: true, execution };
+
+    const raw = await requestJson({
+      workspaceId,
+      ctx,
+      endpoint: `flow-runs/${encodeURIComponent(executionId)}`,
+    });
+
+    return { ok: true, execution: toExecution(toObject(raw) ?? {}) };
   } catch (err) {
-    return { ok: false, error: `Failed to get execution: ${err}` };
+    return { ok: false, error: `Failed to get execution: ${String(err)}` };
   }
 }
 
@@ -499,191 +748,91 @@ export async function getN8nExecution(
 export async function listN8nWorkflows(
   workspaceId: string,
 ): Promise<{ ok: boolean; workflows?: N8nWorkflow[]; error?: string }> {
-  const { baseUrl, cookie, apiKey, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
-
-  if (!hasWorkspaceCredentials) {
-    return { ok: false, error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." };
-  }
-  
-  const headers: Record<string, string> = {
-    "accept": "application/json",
-  };
-  
-  if (cookie) {
-    headers["Cookie"] = cookie;
-  } else if (apiKey) {
-    headers["X-N8N-API-KEY"] = apiKey;
-  } else {
-    return { ok: false, error: "No n8n authentication available" };
-  }
-  
   try {
-    const res = await fetch(`${baseUrl}/rest/workflows`, {
-      method: "GET",
-      headers,
-    });
-    
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      return { ok: false, error: `n8n API error: ${res.status} ${text.slice(0, 200)}` };
+    const ctx = await getContext(workspaceId);
+    if (!ctx.hasWorkspaceCredentials) {
+      return {
+        ok: false,
+        error:
+          "No workflow-engine credentials configured for your workspace. Configure Activepieces URL/key in Integrations first.",
+      };
     }
-    
-    const data = await res.json() as { data?: N8nWorkflow[] } | N8nWorkflow[];
-    const workflows = Array.isArray(data) ? data : (data.data || []);
-    
-    return { ok: true, workflows };
+
+    const projectId = await resolveProjectId(workspaceId, ctx);
+    const raw = await requestJson({
+      workspaceId,
+      ctx,
+      endpoint: `flows?projectId=${encodeURIComponent(projectId)}&limit=200`,
+    });
+
+    const rows = toArrayObjects(toObject(raw)?.data);
+    return {
+      ok: true,
+      workflows: rows.map((row) => toWorkflow(row)),
+    };
   } catch (err) {
-    return { ok: false, error: `Failed to list workflows: ${err}` };
+    return { ok: false, error: `Failed to list workflows: ${String(err)}` };
   }
 }
 
 /**
- * List node types available in n8n for a workspace.
- * This uses workspace authentication and includes custom nodes loaded in that runtime.
+ * List available node/piece types
  */
-function parseNodeTypeRows(payload: unknown): Array<{ row: Record<string, unknown>; fallbackName?: string }> {
-  const rows: Array<{ row: Record<string, unknown>; fallbackName?: string }> = [];
-
-  if (Array.isArray(payload)) {
-    for (const value of payload) {
-      if (value && typeof value === "object" && !Array.isArray(value)) {
-        rows.push({ row: value as Record<string, unknown> });
-      }
-    }
-    return rows;
-  }
-
-  if (!payload || typeof payload !== "object") {
-    return rows;
-  }
-
-  const obj = payload as Record<string, unknown>;
-  const listFields = ["data", "nodeTypes", "types", "items"];
-  for (const key of listFields) {
-    const value = obj[key];
-    if (!Array.isArray(value)) continue;
-    for (const entry of value) {
-      if (entry && typeof entry === "object" && !Array.isArray(entry)) {
-        rows.push({ row: entry as Record<string, unknown> });
-      }
-    }
-  }
-  if (rows.length > 0) {
-    return rows;
-  }
-
-  const mapSource =
-    obj.data && typeof obj.data === "object" && !Array.isArray(obj.data)
-      ? (obj.data as Record<string, unknown>)
-      : obj;
-  for (const [name, value] of Object.entries(mapSource)) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      continue;
-    }
-    rows.push({
-      row: value as Record<string, unknown>,
-      fallbackName: name,
-    });
-  }
-
-  return rows;
-}
-
-function parseN8nNodeTypes(payload: unknown): N8nNodeType[] {
-  const rows = parseNodeTypeRows(payload);
-  const byName = new Map<string, N8nNodeType>();
-
-  for (const { row, fallbackName } of rows) {
-    const nameCandidate =
-      (typeof row.name === "string" && row.name.trim()) ||
-      (fallbackName && fallbackName.trim()) ||
-      "";
-    if (!nameCandidate || byName.has(nameCandidate)) {
-      continue;
-    }
-
-    byName.set(nameCandidate, {
-      name: nameCandidate,
-      displayName: typeof row.displayName === "string" ? row.displayName : undefined,
-      description: typeof row.description === "string" ? row.description : undefined,
-    });
-  }
-
-  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
-}
-
 export async function listN8nNodeTypes(
   workspaceId: string,
 ): Promise<{ ok: boolean; nodeTypes?: N8nNodeType[]; error?: string }> {
-  const { baseUrl, cookie, apiKey, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
-
-  if (!hasWorkspaceCredentials) {
-    return {
-      ok: false,
-      error:
-        "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first.",
-    };
-  }
-
-  const authVariants: Array<{ label: "cookie" | "apiKey"; headers: Record<string, string> }> = [];
-  if (cookie) {
-    authVariants.push({ label: "cookie", headers: { Cookie: cookie } });
-  }
-  if (apiKey) {
-    authVariants.push({ label: "apiKey", headers: { "X-N8N-API-KEY": apiKey } });
-  }
-  if (authVariants.length === 0) {
-    return { ok: false, error: "No n8n authentication available" };
-  }
-
-  const endpointVariants: Array<{ path: string; cookieOnly?: boolean }> = [
-    { path: "/rest/node-types" },
-    // n8n UI catalog endpoint in recent versions (cookie auth).
-    { path: "/types/nodes.json", cookieOnly: true },
-    { path: "/api/v1/node-types" },
-    { path: "/rest/types/nodes" },
-  ];
-
-  const attempts: string[] = [];
-  for (const endpoint of endpointVariants) {
-    for (const auth of authVariants) {
-      if (endpoint.cookieOnly && auth.label !== "cookie") {
-        continue;
-      }
-      try {
-        const res = await fetch(`${baseUrl}${endpoint.path}`, {
-          method: "GET",
-          headers: {
-            accept: "application/json",
-            ...auth.headers,
-          },
-        });
-        const text = await res.text().catch(() => "");
-        attempts.push(`${endpoint.path}(${auth.label})=${res.status}`);
-        if (!res.ok) {
-          continue;
-        }
-
-        let payload: unknown = null;
-        try {
-          payload = text ? (JSON.parse(text) as unknown) : null;
-        } catch {
-          payload = null;
-        }
-        const nodeTypes = parseN8nNodeTypes(payload);
-        if (nodeTypes.length > 0) {
-          return { ok: true, nodeTypes };
-        }
-      } catch (err) {
-        attempts.push(`${endpoint.path}(${auth.label})=ERR:${String(err).slice(0, 80)}`);
-      }
+  try {
+    const ctx = await getContext(workspaceId);
+    if (!ctx.hasWorkspaceCredentials) {
+      return {
+        ok: false,
+        error:
+          "No workflow-engine credentials configured for your workspace. Configure Activepieces URL/key in Integrations first.",
+      };
     }
-  }
 
-  return {
-    ok: false,
-    error: `Failed to list node types. Tried ${attempts.join(", ") || "no endpoints"}`,
-  };
+    const projectId = await resolveProjectId(workspaceId, ctx);
+    const raw = await requestJson({
+      workspaceId,
+      ctx,
+      endpoint: `pieces?projectId=${encodeURIComponent(projectId)}&limit=200`,
+    });
+
+    const rows = toArrayObjects(toObject(raw)?.data);
+
+    const coreCompat: N8nNodeType[] = [
+      {
+        name: "n8n-nodes-basecamp.basecamp",
+        displayName: "Basecamp (BCgpt Custom Node)",
+        description: "Basecamp automation via BCgpt compatibility layer.",
+      },
+      { name: "activepieces.trigger.webhook", displayName: "Webhook Trigger", description: "HTTP webhook trigger" },
+      { name: "activepieces.action.http", displayName: "HTTP Request", description: "Send HTTP request" },
+      { name: "activepieces.action.code", displayName: "Code", description: "Run custom code" },
+    ];
+
+    const pieceTypes: N8nNodeType[] = rows
+      .map((piece) => {
+        const name = readString(piece.name);
+        if (!name) return null;
+        const displayName = readString(piece.displayName) ?? name;
+        const description = readString(piece.description) ?? readString(piece.summary) ?? undefined;
+        return {
+          name: `activepieces.${name}`,
+          displayName,
+          description,
+        } as N8nNodeType;
+      })
+      .filter((entry): entry is N8nNodeType => Boolean(entry));
+
+    const merged = [...coreCompat, ...pieceTypes].filter(
+      (item, idx, arr) => arr.findIndex((x) => x.name === item.name) === idx,
+    );
+
+    return { ok: true, nodeTypes: merged };
+  } catch (err) {
+    return { ok: false, error: `Failed to list node types: ${String(err)}` };
+  }
 }
 
 /**
@@ -693,158 +842,124 @@ export async function cancelN8nExecution(
   workspaceId: string,
   executionId: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const { baseUrl, cookie, apiKey, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
-
-  if (!hasWorkspaceCredentials) {
-    return { ok: false, error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." };
-  }
-  
-  const headers: Record<string, string> = {
-    "accept": "application/json",
-  };
-  
-  if (cookie) {
-    headers["Cookie"] = cookie;
-  } else if (apiKey) {
-    headers["X-N8N-API-KEY"] = apiKey;
-  } else {
-    return { ok: false, error: "No n8n authentication available" };
-  }
-  
   try {
-    const res = await fetch(`${baseUrl}/rest/executions/${executionId}/stop`, {
-      method: "POST",
-      headers,
-    });
-    
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      return { ok: false, error: `n8n API error: ${res.status} ${text.slice(0, 200)}` };
+    const ctx = await getContext(workspaceId);
+    if (!ctx.hasWorkspaceCredentials) {
+      return {
+        ok: false,
+        error:
+          "No workflow-engine credentials configured for your workspace. Configure Activepieces URL/key in Integrations first.",
+      };
     }
-    
+    const projectId = await resolveProjectId(workspaceId, ctx);
+
+    await requestJson({
+      workspaceId,
+      ctx,
+      endpoint: "flow-runs/cancel",
+      method: "POST",
+      body: {
+        projectId,
+        flowRunIds: [executionId],
+      },
+    });
+
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: `Failed to cancel execution: ${err}` };
+    return { ok: false, error: `Failed to cancel execution: ${String(err)}` };
   }
 }
 
+function credentialTypeFromInput(type: string, data: Record<string, unknown>) {
+  const lowered = type.trim().toLowerCase();
+  if (lowered.includes("basic") || (readString(data.username) && readString(data.password))) {
+    return "BASIC_AUTH" as const;
+  }
+  if (lowered.includes("no_auth") || lowered === "none" || lowered === "noauth") {
+    return "NO_AUTH" as const;
+  }
+  return "SECRET_TEXT" as const;
+}
+
+function buildCredentialValue(
+  connType: "SECRET_TEXT" | "BASIC_AUTH" | "NO_AUTH",
+  data: Record<string, unknown>,
+) {
+  if (connType === "BASIC_AUTH") {
+    return {
+      type: "BASIC_AUTH",
+      username: readString(data.username) ?? "",
+      password: readString(data.password) ?? "",
+    };
+  }
+  if (connType === "NO_AUTH") {
+    return { type: "NO_AUTH" };
+  }
+
+  const secretText =
+    readString(data.secret_text) ??
+    readString(data.apiKey) ??
+    readString(data.token) ??
+    readString(data.password) ??
+    JSON.stringify(data);
+  return {
+    type: "SECRET_TEXT",
+    secret_text: secretText,
+  };
+}
+
 /**
- * Upsert the Basecamp credential (basecampApi) in n8n.
- * Creates if not found, updates if already exists.
- * This lets users automatically configure the Basecamp node after saving their BCGPT key.
+ * Upsert Basecamp credential in workflow engine
  */
 export async function upsertBasecampCredential(
   workspaceId: string,
   bcgptUrl: string,
   bcgptApiKey: string,
 ): Promise<{ ok: boolean; credentialId?: string; error?: string }> {
-  const { baseUrl, cookie, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
-
-  if (!hasWorkspaceCredentials) {
-    return { ok: false, error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." };
-  }
-
-  if (!cookie) {
-    return { ok: false, error: "n8n not reachable or not authenticated" };
-  }
-
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    "accept": "application/json",
-    "Cookie": cookie,
-  };
-
-  // Fetch existing credentials to see if basecampApi already exists
-  let existingId: string | null = null;
-  try {
-    const listRes = await fetch(`${baseUrl}/rest/credentials`, { method: "GET", headers });
-    if (listRes.ok) {
-      const listData = await listRes.json() as { data?: Array<{ id: string; type: string; name: string }> } | Array<{ id: string; type: string; name: string }>;
-      const list = Array.isArray(listData) ? listData : (listData.data ?? []);
-      const found = list.find((c) => c.type === "basecampApi");
-      if (found) existingId = found.id;
-    }
-  } catch {
-    // ignore list error — will try create
-  }
-
-  const credentialBody = {
-    name: "Basecamp (OpenClaw)",
-    type: "basecampApi",
-    data: { baseUrl: bcgptUrl, apiKey: bcgptApiKey },
-  };
-
-  try {
-    if (existingId) {
-      const res = await fetch(`${baseUrl}/rest/credentials/${existingId}`, {
-        method: "PATCH",
-        headers,
-        body: JSON.stringify({ data: credentialBody.data }),
-      });
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        return { ok: false, error: `Failed to update credential: ${res.status} ${text.slice(0, 200)}` };
-      }
-      return { ok: true, credentialId: existingId };
-    } else {
-      const res = await fetch(`${baseUrl}/rest/credentials`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(credentialBody),
-      });
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        return { ok: false, error: `Failed to create credential: ${res.status} ${text.slice(0, 200)}` };
-      }
-      const data = await res.json() as { id?: string; data?: { id: string } };
-      const credentialId = data.id || data.data?.id;
-      return { ok: true, credentialId };
-    }
-  } catch (err) {
-    return { ok: false, error: `Credential upsert failed: ${err}` };
-  }
+  return createN8nCredential(workspaceId, "Basecamp (OpenClaw)", "basecamp", {
+    bcgptUrl,
+    apiKey: bcgptApiKey,
+  });
 }
 
 /**
- * List all credentials in n8n
+ * List credentials (app connections)
  */
 export async function listN8nCredentials(
   workspaceId: string,
 ): Promise<{ ok: boolean; credentials?: Array<{ id: string; name: string; type: string }>; error?: string }> {
-  const { baseUrl, cookie, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
-
-  if (!hasWorkspaceCredentials) {
-    return { ok: false, error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." };
-  }
-
-  if (!cookie) {
-    return { ok: false, error: "n8n not reachable or not authenticated" };
-  }
-
   try {
-    const res = await fetch(`${baseUrl}/rest/credentials`, {
-      method: "GET",
-      headers: {
-        "accept": "application/json",
-        "Cookie": cookie,
-      },
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      return { ok: false, error: `Failed to list credentials: ${res.status} ${text.slice(0, 200)}` };
+    const ctx = await getContext(workspaceId);
+    if (!ctx.hasWorkspaceCredentials) {
+      return {
+        ok: false,
+        error:
+          "No workflow-engine credentials configured for your workspace. Configure Activepieces URL/key in Integrations first.",
+      };
     }
 
-    const data = await res.json() as { data?: Array<{ id: string; name: string; type: string }> } | Array<{ id: string; name: string; type: string }>;
-    const credentials = Array.isArray(data) ? data : (data.data ?? []);
+    const projectId = await resolveProjectId(workspaceId, ctx);
+    const raw = await requestJson({
+      workspaceId,
+      ctx,
+      endpoint: `app-connections?projectId=${encodeURIComponent(projectId)}&limit=200`,
+    });
+
+    const rows = toArrayObjects(toObject(raw)?.data);
+    const credentials = rows.map((row) => ({
+      id: readId(row.id) ?? "",
+      name: readString(row.displayName) ?? readString(row.externalId) ?? "Unnamed Connection",
+      type: readString(row.pieceName) ?? readString(row.type) ?? "connection",
+    }));
+
     return { ok: true, credentials };
   } catch (err) {
-    return { ok: false, error: `Failed to list credentials: ${err}` };
+    return { ok: false, error: `Failed to list credentials: ${String(err)}` };
   }
 }
 
 /**
- * Create a credential in n8n
+ * Create/upsert a credential (app connection)
  */
 export async function createN8nCredential(
   workspaceId: string,
@@ -852,74 +967,69 @@ export async function createN8nCredential(
   type: string,
   data: Record<string, unknown>,
 ): Promise<{ ok: boolean; credentialId?: string; error?: string }> {
-  const { baseUrl, cookie, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
-
-  if (!hasWorkspaceCredentials) {
-    return { ok: false, error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." };
-  }
-
-  if (!cookie) {
-    return { ok: false, error: "n8n not reachable or not authenticated" };
-  }
-
   try {
-    const res = await fetch(`${baseUrl}/rest/credentials`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "accept": "application/json",
-        "Cookie": cookie,
-      },
-      body: JSON.stringify({ name, type, data }),
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      return { ok: false, error: `Failed to create credential: ${res.status} ${text.slice(0, 200)}` };
+    const ctx = await getContext(workspaceId);
+    if (!ctx.hasWorkspaceCredentials) {
+      return {
+        ok: false,
+        error:
+          "No workflow-engine credentials configured for your workspace. Configure Activepieces URL/key in Integrations first.",
+      };
     }
 
-    const respData = await res.json() as { id?: string; data?: { id: string } };
-    const credentialId = respData.id || respData.data?.id;
-    return { ok: true, credentialId };
+    const projectId = await resolveProjectId(workspaceId, ctx);
+    const connType = credentialTypeFromInput(type, data);
+    const externalId = `openclaw-${String(type || "connection").toLowerCase().replace(/[^a-z0-9_-]+/g, "-")}-${String(name || "conn").toLowerCase().replace(/[^a-z0-9_-]+/g, "-")}`;
+
+    const payload = await requestJson({
+      workspaceId,
+      ctx,
+      endpoint: "app-connections",
+      method: "POST",
+      body: {
+        projectId,
+        externalId,
+        displayName: name,
+        pieceName: type,
+        type: connType,
+        value: buildCredentialValue(connType, data),
+      },
+    });
+
+    const credentialId = readId(toObject(payload)?.id);
+    return { ok: true, credentialId: credentialId ?? undefined };
   } catch (err) {
-    return { ok: false, error: `Failed to create credential: ${err}` };
+    return { ok: false, error: `Failed to create credential: ${String(err)}` };
   }
 }
 
 /**
- * Delete a credential in n8n
+ * Delete a credential
  */
 export async function deleteN8nCredential(
   workspaceId: string,
   credentialId: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const { baseUrl, cookie, hasWorkspaceCredentials } = await getN8nContext(workspaceId);
-
-  if (!hasWorkspaceCredentials) {
-    return { ok: false, error: "No n8n credentials configured for your workspace. Please go to Integrations and configure your n8n connection first." };
-  }
-
-  if (!cookie) {
-    return { ok: false, error: "n8n not reachable or not authenticated" };
-  }
-
   try {
-    const res = await fetch(`${baseUrl}/rest/credentials/${credentialId}`, {
-      method: "DELETE",
-      headers: {
-        "accept": "application/json",
-        "Cookie": cookie,
-      },
-    });
-
-    if (!res.ok && res.status !== 204) {
-      const text = await res.text().catch(() => "");
-      return { ok: false, error: `Failed to delete credential: ${res.status} ${text.slice(0, 200)}` };
+    const ctx = await getContext(workspaceId);
+    if (!ctx.hasWorkspaceCredentials) {
+      return {
+        ok: false,
+        error:
+          "No workflow-engine credentials configured for your workspace. Configure Activepieces URL/key in Integrations first.",
+      };
     }
+
+    await requestJson({
+      workspaceId,
+      ctx,
+      endpoint: `app-connections/${encodeURIComponent(credentialId)}`,
+      method: "DELETE",
+    });
 
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: `Failed to delete credential: ${err}` };
+    return { ok: false, error: `Failed to delete credential: ${String(err)}` };
   }
 }
 
@@ -935,4 +1045,7 @@ export default {
   listN8nNodeTypes,
   cancelN8nExecution,
   upsertBasecampCredential,
+  listN8nCredentials,
+  createN8nCredential,
+  deleteN8nCredential,
 };

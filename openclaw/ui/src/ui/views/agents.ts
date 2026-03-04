@@ -110,7 +110,7 @@ export const DEFAULT_CREATE_AGENT_FORM: CreateAgentFormData = {
   workspace: DEFAULT_AGENT_WORKSPACE_PATH,
   emoji: "🤖",
   theme: "",
-  mode: "hybrid",
+  mode: "autonomous",
   model: "",
   skills: [],
   personality: "professional",

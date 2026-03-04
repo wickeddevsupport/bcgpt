@@ -243,8 +243,8 @@ export function renderAutomations(props: AutomationsProps) {
                   ▶ Test Trigger
                 </button>
                 <button class="btn btn--sm" @click=${() => props.onTriggerWebhook({ sync: true })} ?disabled=${props.mutating}
-                  title="Sync the latest workflow definition from n8n (use if you edited it directly in n8n).">
-                  ↻ Sync from n8n
+                  title="Sync the latest workflow definition from the workflow engine (use if you edited it directly there).">
+                  ↻ Sync from workflow engine
                 </button>
               </div>
             </div>
@@ -475,7 +475,7 @@ export function renderAutomations(props: AutomationsProps) {
                 <div class="automations-canvas">
                   <iframe
                     src=${props.embedUrl}
-                    title="n8n Workflow Canvas"
+                    title="Workflow Canvas"
                     style="flex:1 1 auto;width:100%;height:100%;min-height:80vh;border:0;display:block;background:#1a1a1a;"
                     allow="clipboard-read; clipboard-write"
                   ></iframe>
@@ -490,7 +490,7 @@ export function renderAutomations(props: AutomationsProps) {
                   >
                     <iframe
                       src=${props.embedUrl}
-                      title="n8n Workflow Canvas"
+                      title="Workflow Canvas"
                       style="flex:1 1 auto;width:100%;height:100%;min-height:80vh;border:0;display:block;background:#1a1a1a;"
                       allow="clipboard-read; clipboard-write"
                     ></iframe>
@@ -521,3 +521,4 @@ export function renderAutomations(props: AutomationsProps) {
     </div>
   `;
 }
+

@@ -1,186 +1,53 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
-import { createHash } from "node:crypto";
 import fs from "node:fs";
-import net from "node:net";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
+import { fileURLToPath } from "node:url";
 import { loadConfig } from "../config/config.js";
 import { resolvePmosSessionFromRequest } from "./pmos-auth.js";
 import { readWorkspaceConnectors } from "./workspace-connectors.js";
-import { buildN8nAuthHeaders, getOwnerCookie } from "./n8n-auth-bridge.js";
 
-// ── OpenClaw n8n theme injection ──────────────────────────────────────────────
-// Injected into every HTML response from n8n to match OpenClaw's dark theme
-// and remove n8n-specific branding/upgrade prompts.
-const N8N_THEME_CSS = `
-<style id="openclaw-theme">
-/* === OpenClaw n8n Theme Override === */
+type OpsSession = {
+  ok: boolean;
+  user?: {
+    workspaceId: string;
+    role: string;
+    email?: string;
+    id?: string;
+  };
+};
 
-/* Font */
-:root {
-  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-}
+type OpsContext = {
+  workspaceId: string | null;
+  role: string | null;
+  baseUrl: string;
+  apiKey: string | null;
+  apiKeyScope: "workspace" | "global" | "none";
+  projectId: string | null;
+  user: { email: string; password: string } | null;
+};
 
-/* Dark background tokens to match OpenClaw */
-:root .dark-theme,
-:root {
-  --color-background-base: #0d0d14 !important;
-  --color-background-xlight: #13131d !important;
-  --color-background-light: #1a1a27 !important;
-  --color-background-medium: #111119 !important;
-  --color-background-dark: #080810 !important;
-  --color-foreground-dark: #e8e8f0 !important;
-  --color-foreground-base: #c8c8d8 !important;
-  --color-foreground-light: #9898b0 !important;
-  --color-foreground-xlight: #6a6a80 !important;
-  --color-primary: #6366f1 !important;
-  --color-primary-tint-1: rgba(99,102,241,0.12) !important;
-  --color-primary-tint-2: rgba(99,102,241,0.06) !important;
-  --color-border: rgba(255,255,255,0.08) !important;
-  --color-border-light: rgba(255,255,255,0.05) !important;
-}
+const STRIP_REQUEST_HEADERS = new Set([
+  "host",
+  "connection",
+  "transfer-encoding",
+  "keep-alive",
+  "upgrade",
+  "proxy-authorization",
+  "te",
+  "trailers",
+  "expect",
+  "content-length",
+]);
 
-/* Hide n8n top-bar branding / logo wordmark */
-#n8n-logo .logo-text,
-.n8n-logo .logo-text,
-[class*="logo-text"],
-.n8n-logo svg text {
-  display: none !important;
-}
-
-/* Hide hiring banner */
-[data-test-id="banners-stack"],
-.hiring-banner,
-[class*="hiring"],
-.banners-stack {
-  display: none !important;
-}
-
-/* Hide "upgrade" / "enterprise" upsell elements */
-[data-test-id="main-sidebar-upgrade-link"],
-[href*="/settings/usage-and-plan"],
-.upgrade-button,
-.trial-banner,
-[class*="UpgradeBanner"],
-[class*="upgrade-banner"],
-.plan-name-wrapper {
-  display: none !important;
-}
-
-/* Hide "Feature" / "Upgrade to unlock" items in sidebar */
-[class*="enterprise-feature-text"],
-[class*="feature-not-available"] {
-  display: none !important;
-}
-
-/* Slim down the workflow canvas background */
-.workflow-canvas {
-  background: #0d0d14 !important;
-}
-
-/* Tighten node editor panel */
-.node-creator .panel-container {
-  background: #13131d !important;
-}
-
-/* OpenClaw accent on selected/active elements */
-.clickable:hover {
-  color: #6366f1 !important;
-}
-
-.n8n-button--primary,
-[class*="button--primary"] {
-  background: #6366f1 !important;
-  border-color: #6366f1 !important;
-}
-.n8n-button--primary:hover {
-  background: #5254cc !important;
-  border-color: #5254cc !important;
-}
-
-/* Make the header bar slightly more compact */
-.main-header .header-tabs {
-  gap: 4px;
-}
-
-/* Hide n8n community nodes installation prompts in canvas */
-[data-test-id="node-community-notice"] {
-  display: none !important;
-}
-</style>`;
-
-/**
- * Inject the OpenClaw theme into an n8n HTML response.
- * Returns modified HTML string with theme CSS inserted before </head>.
- */
-function injectN8nTheme(html: string): string {
-  const headCloseIdx = html.lastIndexOf("</head>");
-  if (headCloseIdx === -1) return html + N8N_THEME_CSS;
-  return html.slice(0, headCloseIdx) + N8N_THEME_CSS + html.slice(headCloseIdx);
-}
-
-function uniqResolved(items: string[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const item of items) {
-    const resolved = path.resolve(item);
-    if (seen.has(resolved)) continue;
-    seen.add(resolved);
-    out.push(resolved);
-  }
-  return out;
-}
-
-function findOpenclawRoot(startDir: string): string | null {
-  let dir = path.resolve(startDir);
-  for (let i = 0; i < 10; i++) {
-    try {
-      if (fs.existsSync(path.join(dir, "openclaw.mjs"))) {
-        return dir;
-      }
-    } catch {
-      // ignore
-    }
-    const next = path.dirname(dir);
-    if (next === dir) break;
-    dir = next;
-  }
-  return null;
-}
-
-// Path to the pre-built ops-ui bundle (openclaw/ops-ui/dist/)
-// Prefer resolving from the OpenClaw root (works with flattened build outputs where
-// import.meta.url lives directly under dist/).
-function resolveOpsUiDistDir(): string {
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const root = findOpenclawRoot(here) ?? findOpenclawRoot(process.cwd());
-  const candidates = uniqResolved([
-    // Typical package layout
-    root ? path.join(root, "ops-ui", "dist") : "",
-    // Monorepo layout (repo-root/openclaw/ops-ui/dist)
-    root ? path.join(root, "openclaw", "ops-ui", "dist") : "",
-    // Legacy relative path (when gateway output lived under dist/gateway)
-    path.resolve(here, "..", "..", "ops-ui", "dist"),
-    // CWD fallbacks (local dev)
-    path.resolve(process.cwd(), "ops-ui", "dist"),
-    path.resolve(process.cwd(), "openclaw", "ops-ui", "dist"),
-  ].filter(Boolean));
-
-  for (const candidate of candidates) {
-    try {
-      if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) return candidate;
-    } catch {
-      // ignore
-    }
-  }
-
-  // If nothing exists, return the best guess for better error messaging.
-  return candidates[0] ?? path.resolve(process.cwd(), "ops-ui", "dist");
-}
-
-const OPS_UI_DIST = resolveOpsUiDistDir();
+const STRIP_RESPONSE_HEADERS = new Set([
+  "connection",
+  "transfer-encoding",
+  "keep-alive",
+  // Node fetch auto-decompresses; do not forward stale encoding header.
+  "content-encoding",
+]);
 
 const OPS_UI_CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -201,454 +68,239 @@ const OPS_UI_CONTENT_TYPES: Record<string, string> = {
   ".txt": "text/plain; charset=utf-8",
 };
 
-// Hop-by-hop headers that must not be forwarded
-const STRIP_REQUEST_HEADERS = new Set([
-  "host",
-  // Never forward OpenClaw's gateway bearer token to n8n (it can override cookie/api-key auth).
-  "authorization",
-  // Never forward browser cookies (pmos_session, stale n8n-auth, etc.). The auth bridge injects
-  // the correct n8n cookie per request.
-  "cookie",
-  // undici (Node fetch) does not support `Expect: 100-continue` and will throw
-  // `TypeError: fetch failed` with cause `UND_ERR_NOT_SUPPORTED`.
-  // Some clients (notably PowerShell Invoke-WebRequest) send it by default on POST.
-  "expect",
-  // undici throws on the `Keep-Alive` header (UND_ERR_INVALID_ARG). It's also unnecessary
-  // for upstream fetch requests (connection persistence is handled by the client).
-  "keep-alive",
-  "connection",
-  "transfer-encoding",
-  "upgrade",
-  "proxy-authorization",
-  "te",
-  "trailers",
-]);
-const STRIP_RESPONSE_HEADERS = new Set([
-  "connection",
-  "transfer-encoding",
-  "keep-alive",
-  // Web Fetch API auto-decompresses; strip so downstream doesn't try to decompress again
-  "content-encoding",
-  // Allow the n8n editor to load inside an iframe within the same OpenClaw origin.
-  // n8n sets overly restrictive CSP/XFO that would blank the editor when embedded.
-  "content-security-policy",
-  "content-security-policy-report-only",
-  "x-frame-options",
-]);
-
-// ---------------------------------------------------------------------------
-// Workspace isolation: tag-based workflow filtering
-// ---------------------------------------------------------------------------
-
-// Cache: workspaceId → n8n tag ID
-const workspaceTagCache = new Map<string, string>();
-
-function workspaceTagName(workspaceId: string): string {
-  // n8n enforces a short tag name limit (currently 24 chars). Workspace IDs are often UUID-like,
-  // so derive a stable short tag name from a hash to guarantee it fits.
-  const hash = createHash("sha256").update(workspaceId).digest("hex").slice(0, 18);
-  return `pmos-${hash}`; // 23 chars
-}
-
-async function ensureWorkspaceN8nTagWithHeaders(params: {
-  workspaceId: string;
-  n8nBaseUrl: string;
-  authHeaders: Record<string, string>;
-}): Promise<string | null> {
-  const { workspaceId, n8nBaseUrl, authHeaders } = params;
-  const tagName = workspaceTagName(workspaceId);
-  const base = n8nBaseUrl.replace(/\/+$/, "");
-  const headersBase = { ...authHeaders, accept: "application/json" };
-
-  try {
-    // Find existing tag
-    const listRes = await fetch(`${base}/rest/tags`, {
-      headers: headersBase,
-    });
-    if (listRes.ok) {
-      const data = (await listRes.json()) as { data?: Array<{ id: string; name: string }> };
-      const match = (data.data ?? []).find((t) => t.name === tagName);
-      if (match?.id) {
-        return match.id;
-      }
+function readConfigString(cfg: unknown, pathParts: string[]): string | null {
+  let current: unknown = cfg;
+  for (const part of pathParts) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) {
+      return null;
     }
-
-    // Create tag
-    const createRes = await fetch(`${base}/rest/tags`, {
-      method: "POST",
-      headers: { ...headersBase, "content-type": "application/json" },
-      body: JSON.stringify({ name: tagName }),
-    });
-    if (createRes.ok) {
-      const data = (await createRes.json()) as { id?: string; data?: { id: string } };
-      return data.id ?? data.data?.id ?? null;
-    }
-  } catch {
-    // best-effort; caller may try another auth strategy
+    current = (current as Record<string, unknown>)[part];
   }
-  return null;
-}
-
-export async function ensureWorkspaceN8nTag(
-  workspaceId: string,
-  n8nBaseUrl: string,
-  preferredAuthHeaders?: Record<string, string> | null,
-): Promise<string | null> {
-  const cached = workspaceTagCache.get(workspaceId);
-  if (cached) return cached;
-
-  const authCandidates: Array<Record<string, string>> = [];
-  if (preferredAuthHeaders && typeof preferredAuthHeaders === "object") {
-    const filtered: Record<string, string> = {};
-    for (const [k, v] of Object.entries(preferredAuthHeaders)) {
-      if (typeof v !== "string" || !v.trim()) continue;
-      const lower = k.toLowerCase();
-      if (lower === "cookie" || lower === "x-n8n-api-key" || lower === "authorization") {
-        filtered[k] = v;
-      }
-    }
-    if (Object.keys(filtered).length > 0) {
-      authCandidates.push(filtered);
-    }
-  }
-
-  const ownerCookie = await getOwnerCookie(n8nBaseUrl);
-  if (ownerCookie) {
-    authCandidates.push({ Cookie: ownerCookie });
-  }
-
-  for (const authHeaders of authCandidates) {
-    const id = await ensureWorkspaceN8nTagWithHeaders({
-      workspaceId,
-      n8nBaseUrl,
-      authHeaders,
-    });
-    if (id) {
-      workspaceTagCache.set(workspaceId, id);
-      return id;
-    }
-  }
-
-  return null;
-}
-
-export function workflowBelongsToWorkspace(workflow: unknown, workspaceId: string): boolean {
-  const wf = workflow as Record<string, unknown> | null;
-  if (!wf) return false;
-  const tagName = workspaceTagName(workspaceId);
-  const tags = Array.isArray(wf.tags) ? wf.tags : [];
-  return tags.some((t: unknown) => {
-    if (!t || typeof t !== "object") return false;
-    return (t as Record<string, unknown>).name === tagName;
-  });
-}
-
-function parseJsonBuffer(buffer: Buffer): unknown | null {
-  try {
-    return JSON.parse(buffer.toString("utf-8")) as unknown;
-  } catch {
+  if (typeof current !== "string") {
     return null;
   }
+  const trimmed = current.trim();
+  return trimmed ? trimmed : null;
 }
 
-function dataArrayFromPayload(payload: unknown): unknown[] {
-  if (Array.isArray(payload)) return payload;
-  if (payload && typeof payload === "object") {
-    const data = (payload as Record<string, unknown>).data;
-    if (Array.isArray(data)) return data;
-  }
-  return [];
+function normalizeBaseUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/\/+$/, "");
 }
 
-function projectIdsFromPayload(payload: unknown): string[] {
-  const ids = new Set<string>();
-  for (const item of dataArrayFromPayload(payload)) {
-    if (!item || typeof item !== "object") continue;
-    const id = (item as Record<string, unknown>).id;
-    if (typeof id === "string" && id.trim()) ids.add(id);
-  }
-  return Array.from(ids);
+function boolEnv(name: string, fallback: boolean): boolean {
+  const value = (process.env[name] ?? "").trim().toLowerCase();
+  if (!value) return fallback;
+  if (["1", "true", "yes", "on"].includes(value)) return true;
+  if (["0", "false", "no", "off"].includes(value)) return false;
+  return fallback;
 }
 
-function workflowId(workflow: unknown): string | null {
-  if (!workflow || typeof workflow !== "object") return null;
-  const id = (workflow as Record<string, unknown>).id;
-  if (typeof id === "string" && id.trim()) return id;
-  if (typeof id === "number" && Number.isFinite(id)) return String(id);
-  return null;
-}
-
-function applyWorkflowWorkspaceFilter(payload: unknown, workspaceId: string): unknown {
-  if (payload && typeof payload === "object" && Array.isArray((payload as Record<string, unknown>).data)) {
-    const p = payload as Record<string, unknown>;
-    const filteredData = (p.data as unknown[]).filter((wf) => workflowBelongsToWorkspace(wf, workspaceId));
-    return { ...p, data: filteredData, count: filteredData.length };
-  }
-  if (Array.isArray(payload)) {
-    return payload.filter((wf) => workflowBelongsToWorkspace(wf, workspaceId));
-  }
-  return payload;
-}
-
-async function fetchSuperAdminWorkflowsAcrossProjects(params: {
-  targetUrl: string;
-  headers: Record<string, string>;
-  method?: string;
-}): Promise<unknown | null> {
-  const { targetUrl, headers, method } = params;
-  let parsedTarget: URL;
-  try {
-    parsedTarget = new URL(targetUrl);
-  } catch {
-    return null;
-  }
-
-  // If caller already requested a specific project, do not aggregate.
-  if (parsedTarget.searchParams.has("projectId")) return null;
-
-  const projectsUrl = new URL("/rest/projects", parsedTarget.origin).toString();
-  let projectsRes: Response;
-  try {
-    projectsRes = await fetch(projectsUrl, { method: "GET", headers });
-  } catch {
-    return null;
-  }
-  if (!projectsRes.ok) return null;
-
-  let projectsPayload: unknown;
-  try {
-    projectsPayload = await projectsRes.json() as unknown;
-  } catch {
-    return null;
-  }
-
-  const projectIds = projectIdsFromPayload(projectsPayload);
-  if (projectIds.length === 0) {
-    return { data: [], count: 0 };
-  }
-
-  const merged: unknown[] = [];
-  const seenWorkflowIds = new Set<string>();
-  for (const projectId of projectIds) {
-    const query = new URLSearchParams(parsedTarget.search);
-    query.set("projectId", projectId);
-    const projectWorkflowUrl = `${parsedTarget.origin}${parsedTarget.pathname}?${query.toString()}`;
-
-    let workflowsRes: Response;
-    try {
-      workflowsRes = await fetch(projectWorkflowUrl, {
-        method: method ?? "GET",
-        headers,
-      });
-    } catch {
-      continue;
-    }
-    if (!workflowsRes.ok) continue;
-
-    let workflowsPayload: unknown;
-    try {
-      workflowsPayload = await workflowsRes.json() as unknown;
-    } catch {
-      continue;
-    }
-
-    for (const workflow of dataArrayFromPayload(workflowsPayload)) {
-      const id = workflowId(workflow);
-      if (id && seenWorkflowIds.has(id)) continue;
-      if (id) seenWorkflowIds.add(id);
-      merged.push(workflow);
-    }
-  }
-
-  const limitRaw = parsedTarget.searchParams.get("limit");
-  const limit = limitRaw ? Number.parseInt(limitRaw, 10) : Number.NaN;
-  const data = Number.isFinite(limit) && limit > 0 ? merged.slice(0, limit) : merged;
-  return { data, count: data.length };
-}
-
-async function proxyWorkflowList(params: {
-  req: IncomingMessage;
-  res: ServerResponse;
-  targetUrl: string;
-  extraHeaders?: Record<string, string>;
-  workspaceId: string;
-  filterByWorkspace?: boolean;
-}): Promise<void> {
-  const { req, res, targetUrl, extraHeaders, workspaceId, filterByWorkspace = true } = params;
-  const headers = buildForwardHeaders(req, extraHeaders);
-  const body = await readBody(req);
-
-  // n8n workflow visibility can be project-scoped even for elevated users.
-  // For super-admin reads without an explicit projectId, aggregate all project lists.
-  if (!filterByWorkspace) {
-    const aggregate = await fetchSuperAdminWorkflowsAcrossProjects({
-      targetUrl,
-      headers,
-      method: req.method,
-    });
-    if (aggregate !== null) {
-      const json = JSON.stringify(aggregate);
-      res.statusCode = 200;
-      res.setHeader("Content-Type", "application/json; charset=utf-8");
-      res.setHeader("Content-Length", Buffer.byteLength(json));
-      res.end(json);
-      return;
-    }
-  }
-
-  let upstream: Response;
-  try {
-    upstream = await fetch(targetUrl, {
-      method: req.method,
-      headers,
-      body: body.length > 0 ? (body as unknown as BodyInit) : undefined,
-    });
-  } catch (err) {
-    res.statusCode = 502;
-    res.setHeader("Content-Type", "application/json; charset=utf-8");
-    res.end(JSON.stringify({ ok: false, error: `Upstream unreachable: ${String(err)}` }));
-    return;
-  }
-
-  if (upstream.ok) {
-    const rawBuf = Buffer.from(await upstream.arrayBuffer());
-    const parsed = parseJsonBuffer(rawBuf);
-    if (parsed !== null) {
-      const filtered = filterByWorkspace ? applyWorkflowWorkspaceFilter(parsed, workspaceId) : parsed;
-      const filteredStr = JSON.stringify(filtered);
-      res.statusCode = upstream.status;
-      for (const [k, v] of upstream.headers.entries()) {
-        if (STRIP_RESPONSE_HEADERS.has(k.toLowerCase()) || k.toLowerCase() === "content-length") continue;
-        res.setHeader(k, v);
-      }
-      res.setHeader("Content-Length", Buffer.byteLength(filteredStr));
-      res.end(filteredStr);
-      return;
-    }
-    // parse failed - return original buffered response
-    res.statusCode = upstream.status;
-    for (const [k, v] of upstream.headers.entries()) {
-      if (STRIP_RESPONSE_HEADERS.has(k.toLowerCase())) continue;
-      res.setHeader(k, v);
-    }
-    res.end(rawBuf);
-    return;
-  }
-
-  // Non-OK: stream through
-  res.statusCode = upstream.status;
-  for (const [k, v] of upstream.headers.entries()) {
-    if (STRIP_RESPONSE_HEADERS.has(k.toLowerCase())) continue;
-    res.setHeader(k, v);
-  }
-  if (upstream.body) {
-    Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0]).pipe(res);
-  } else {
-    res.end();
-  }
-}
-
-async function proxyWorkflowCreate(params: {
-  req: IncomingMessage;
-  res: ServerResponse;
-  targetUrl: string;
-  extraHeaders?: Record<string, string>;
-  workspaceId: string;
-  n8nBaseUrl: string;
-}): Promise<void> {
-  const { req, res, targetUrl, extraHeaders, workspaceId, n8nBaseUrl } = params;
-  let body = await readBody(req);
-
-  // Workspace isolation: inject workspace tag ID into the workflow body.
-  // Also ensure `active` is a boolean. If it's missing/invalid, n8n may insert NULL and
-  // fail with SQLITE_CONSTRAINT (workflow_entity.active) on some setups.
-  const tagId = await ensureWorkspaceN8nTag(workspaceId, n8nBaseUrl, extraHeaders ?? null);
-  if (body.length > 0) {
-    try {
-      const parsed = JSON.parse(body.toString("utf-8")) as Record<string, unknown>;
-
-      if (typeof parsed.active !== "boolean") {
-        parsed.active = false;
-      }
-
-      if (tagId) {
-        const existingTags = Array.isArray(parsed.tags) ? (parsed.tags as unknown[]) : [];
-        if (!existingTags.includes(tagId)) {
-          parsed.tags = [...existingTags, tagId];
-        }
-      }
-
-      body = Buffer.from(JSON.stringify(parsed));
-    } catch {
-      // keep original body
-    }
-  }
-
-  const headers = buildForwardHeaders(req, {
-    ...extraHeaders,
-    "content-length": String(body.length),
-  });
-
-  let upstream: Response;
-  try {
-    upstream = await fetch(targetUrl, {
-      method: req.method,
-      headers,
-      body: body.length > 0 ? (body as unknown as BodyInit) : undefined,
-    });
-  } catch (err) {
-    res.statusCode = 502;
-    res.setHeader("Content-Type", "application/json; charset=utf-8");
-    res.end(JSON.stringify({ ok: false, error: `Upstream unreachable: ${String(err)}` }));
-    return;
-  }
-
-  res.statusCode = upstream.status;
-  for (const [k, v] of upstream.headers.entries()) {
-    if (STRIP_RESPONSE_HEADERS.has(k.toLowerCase())) continue;
-    res.setHeader(k, v);
-  }
-  if (upstream.body) {
-    Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0]).pipe(res);
-  } else {
-    res.end();
-  }
-}
-
-function readGlobalOpsConfig(): { url: string; apiKey: string | null } {
+function readGlobalOpsConfig(): { url: string; apiKey: string | null; projectId: string | null } {
   const cfg = loadConfig() as unknown;
-  const pmos = (cfg as Record<string, unknown>)?.pmos as Record<string, unknown> | undefined;
-  const connectors = pmos?.connectors as Record<string, unknown> | undefined;
-  const ops = connectors?.ops as Record<string, unknown> | undefined;
   const url =
-    (typeof ops?.url === "string" && ops.url.trim()) ||
-    process.env.OPS_URL?.trim() ||
-    "https://ops.wickedlab.io";
-  const apiKey =
-    (typeof ops?.apiKey === "string" && ops.apiKey.trim()) ||
-    process.env.OPS_API_KEY?.trim() ||
-    null;
-  return { url: url.replace(/\/+$/, ""), apiKey };
+    normalizeBaseUrl(
+      readConfigString(cfg, ["pmos", "connectors", "ops", "url"]) ??
+        readConfigString(cfg, ["pmos", "connectors", "activepieces", "url"]) ??
+        process.env.ACTIVEPIECES_URL ??
+        process.env.FLOW_URL ??
+        process.env.OPS_URL ??
+        null,
+    ) ?? "https://flow.wickedlab.io";
+
+  const apiKey = (
+    readConfigString(cfg, ["pmos", "connectors", "ops", "apiKey"]) ??
+    readConfigString(cfg, ["pmos", "connectors", "activepieces", "apiKey"]) ??
+    process.env.ACTIVEPIECES_API_KEY ??
+    process.env.OPS_API_KEY ??
+    ""
+  ).trim();
+
+  const projectId = (
+    readConfigString(cfg, ["pmos", "connectors", "ops", "projectId"]) ??
+    readConfigString(cfg, ["pmos", "connectors", "activepieces", "projectId"]) ??
+    process.env.ACTIVEPIECES_PROJECT_ID ??
+    process.env.OPS_PROJECT_ID ??
+    ""
+  ).trim();
+
+  return {
+    url,
+    apiKey: apiKey || null,
+    projectId: projectId || null,
+  };
 }
 
-function allowRemoteOpsFallback(): boolean {
-  const raw = (process.env.PMOS_ALLOW_REMOTE_OPS_FALLBACK ?? "").trim().toLowerCase();
-  return raw === "1" || raw === "true" || raw === "yes";
+function workspaceUserFromConnectors(value: unknown): { email: string; password: string } | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  const rawEmail = candidate.email;
+  const rawPassword = candidate.password;
+  const email = typeof rawEmail === "string" ? rawEmail.trim() : "";
+  const password = typeof rawPassword === "string" ? rawPassword : "";
+  if (!email || !password) {
+    return null;
+  }
+  return { email, password };
 }
 
-async function resolveOpsBaseUrlForRequest(req: IncomingMessage): Promise<string | null> {
+function sanitizeEnvKeySuffix(raw: string): string {
+  return raw
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function workspaceUserFromSessionEnv(sessionUser: OpsSession["user"] | undefined): { email: string; password: string } | null {
+  const email = typeof sessionUser?.email === "string" ? sessionUser.email.trim() : "";
+  if (!email) {
+    return null;
+  }
+  const emailPrefix = email.includes("@") ? email.slice(0, email.indexOf("@")) : email;
+  const keyVariants = [
+    sanitizeEnvKeySuffix(email),
+    sanitizeEnvKeySuffix(emailPrefix),
+    sanitizeEnvKeySuffix(String(sessionUser?.id ?? "")),
+  ].filter(Boolean);
+
+  const candidateEnvKeys = [
+    ...keyVariants.map((suffix) => `ACTIVEPIECES_USER_PASSWORD_${suffix}`),
+    ...keyVariants.map((suffix) => `OPS_USER_PASSWORD_${suffix}`),
+    "ACTIVEPIECES_USER_PASSWORD",
+    "OPS_USER_PASSWORD",
+  ];
+
+  for (const key of candidateEnvKeys) {
+    const value = process.env[key];
+    if (typeof value === "string" && value) {
+      return { email, password: value };
+    }
+  }
+  return null;
+}
+
+async function resolveOpsContext(
+  req: IncomingMessage,
+  options?: { requireSession?: boolean },
+): Promise<OpsContext | null> {
+  const requireSession = Boolean(options?.requireSession);
+  const session = (await resolvePmosSessionFromRequest(req)) as OpsSession;
   const global = readGlobalOpsConfig();
-  const session = await resolvePmosSessionFromRequest(req);
-  if (!session.ok) {
-    return global.url || null;
+
+  if (!session.ok || !session.user) {
+    if (requireSession) {
+      return null;
+    }
+    return {
+      workspaceId: null,
+      role: null,
+      baseUrl: global.url,
+      apiKey: global.apiKey,
+      apiKeyScope: global.apiKey ? "global" : "none",
+      projectId: global.projectId,
+      user: null,
+    };
   }
 
-  const wc = await readWorkspaceConnectors(session.user.workspaceId);
+  const workspaceId = String(session.user.workspaceId ?? "").trim();
+  const role = String(session.user.role ?? "").trim() || null;
+  const connectors = (await readWorkspaceConnectors(workspaceId)) ?? {};
+  const ops =
+    connectors && typeof connectors === "object" && !Array.isArray(connectors)
+      ? ((connectors as Record<string, unknown>).ops as Record<string, unknown> | undefined) ??
+        ((connectors as Record<string, unknown>).activepieces as Record<string, unknown> | undefined)
+      : undefined;
+
   const workspaceUrl =
-    typeof wc?.ops?.url === "string" ? wc.ops.url.trim() : "";
-  const resolved = (workspaceUrl || global.url || "").trim();
-  return resolved ? resolved.replace(/\/+$/, "") : null;
+    typeof ops?.url === "string" && ops.url.trim()
+      ? normalizeBaseUrl(ops.url)
+      : null;
+  const workspaceApiKey =
+    typeof ops?.apiKey === "string" && ops.apiKey.trim() ? ops.apiKey.trim() : null;
+  const workspaceProjectId =
+    typeof ops?.projectId === "string" && ops.projectId.trim() ? ops.projectId.trim() : null;
+
+  const allowGlobalKeyFallback = boolEnv("PMOS_ALLOW_GLOBAL_OPS_KEY_FALLBACK", true);
+  const apiKey = workspaceApiKey ?? (allowGlobalKeyFallback ? global.apiKey : null);
+  const apiKeyScope: OpsContext["apiKeyScope"] = workspaceApiKey
+    ? "workspace"
+    : apiKey
+      ? "global"
+      : "none";
+  const projectId = workspaceProjectId ?? global.projectId;
+  const user = workspaceUserFromConnectors(ops?.user) ?? workspaceUserFromSessionEnv(session.user);
+
+  return {
+    workspaceId,
+    role,
+    baseUrl: workspaceUrl ?? global.url,
+    apiKey,
+    apiKeyScope,
+    projectId,
+    user,
+  };
 }
+
+function uniqResolved(items: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of items) {
+    const resolved = path.resolve(item);
+    if (seen.has(resolved)) continue;
+    seen.add(resolved);
+    out.push(resolved);
+  }
+  return out;
+}
+
+function findOpenclawRoot(startDir: string): string | null {
+  let dir = path.resolve(startDir);
+  for (let i = 0; i < 10; i += 1) {
+    try {
+      if (fs.existsSync(path.join(dir, "openclaw.mjs"))) {
+        return dir;
+      }
+    } catch {
+      // ignore
+    }
+    const next = path.dirname(dir);
+    if (next === dir) break;
+    dir = next;
+  }
+  return null;
+}
+
+function resolveOpsUiDistDir(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const root = findOpenclawRoot(here) ?? findOpenclawRoot(process.cwd());
+  const candidates = uniqResolved(
+    [
+      root ? path.join(root, "ops-ui", "dist") : "",
+      root ? path.join(root, "openclaw", "ops-ui", "dist") : "",
+      path.resolve(here, "..", "..", "ops-ui", "dist"),
+      path.resolve(process.cwd(), "ops-ui", "dist"),
+      path.resolve(process.cwd(), "openclaw", "ops-ui", "dist"),
+    ].filter(Boolean),
+  );
+
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+        return candidate;
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return candidates[0] ?? path.resolve(process.cwd(), "ops-ui", "dist");
+}
+
+const OPS_UI_DIST = resolveOpsUiDistDir();
 
 async function readBody(req: IncomingMessage): Promise<Buffer> {
   return new Promise<Buffer>((resolve, reject) => {
@@ -661,18 +313,136 @@ async function readBody(req: IncomingMessage): Promise<Buffer> {
 
 function buildForwardHeaders(
   req: IncomingMessage,
-  extra: Record<string, string> = {},
+  options?: {
+    extra?: Record<string, string>;
+    allowCookies?: boolean;
+  },
 ): Record<string, string> {
   const out: Record<string, string> = {};
+  const allowCookies = Boolean(options?.allowCookies);
   for (const [key, value] of Object.entries(req.headers)) {
-    if (STRIP_REQUEST_HEADERS.has(key.toLowerCase())) continue;
+    const lower = key.toLowerCase();
+    if (STRIP_REQUEST_HEADERS.has(lower)) continue;
+    if (!allowCookies && lower === "cookie") continue;
     if (Array.isArray(value)) {
       out[key] = value.join(", ");
     } else if (value !== undefined) {
       out[key] = value;
     }
   }
-  return { ...out, ...extra };
+  return { ...out, ...(options?.extra ?? {}) };
+}
+
+function extractSetCookies(headers: Headers): string[] {
+  const withGetSetCookie = headers as Headers & { getSetCookie?: () => string[] };
+  if (typeof withGetSetCookie.getSetCookie === "function") {
+    const values = withGetSetCookie.getSetCookie();
+    if (Array.isArray(values) && values.length > 0) {
+      return values;
+    }
+  }
+  const single = headers.get("set-cookie");
+  return single ? [single] : [];
+}
+
+function copyUpstreamHeaders(upstream: Response, res: ServerResponse): void {
+  for (const [key, value] of upstream.headers.entries()) {
+    const lower = key.toLowerCase();
+    if (STRIP_RESPONSE_HEADERS.has(lower) || lower === "content-length" || lower === "set-cookie") {
+      continue;
+    }
+    res.setHeader(key, value);
+  }
+
+  const upstreamCookies = extractSetCookies(upstream.headers);
+  if (upstreamCookies.length > 0) {
+    const existing = res.getHeader("set-cookie");
+    const merged = [
+      ...(Array.isArray(existing)
+        ? existing.map((value) => String(value))
+        : existing
+          ? [String(existing)]
+          : []),
+      ...upstreamCookies,
+    ];
+    if (merged.length > 0) {
+      res.setHeader("set-cookie", merged);
+    }
+  }
+}
+
+function isWriteMethod(method: string | undefined): boolean {
+  const upper = (method ?? "GET").toUpperCase();
+  return upper === "POST" || upper === "PUT" || upper === "PATCH";
+}
+
+function isAuthApiPath(pathname: string): boolean {
+  return (
+    pathname === "/api/v1/authentication/sign-in" ||
+    pathname === "/api/v1/authentication/sign-up" ||
+    pathname.startsWith("/api/v1/authentication/") ||
+    pathname === "/api/v1/users/sign-in" ||
+    pathname === "/api/v1/users/login"
+  );
+}
+
+function isProjectScopedListPath(pathname: string): boolean {
+  return (
+    pathname === "/api/v1/flows" ||
+    pathname === "/api/v1/flows/count" ||
+    pathname === "/api/v1/flow-runs" ||
+    pathname === "/api/v1/app-connections" ||
+    pathname === "/api/v1/pieces"
+  );
+}
+
+function addProjectIdToTargetUrl(targetUrl: string, projectId: string | null): string {
+  if (!projectId) {
+    return targetUrl;
+  }
+  try {
+    const parsed = new URL(targetUrl);
+    if (isProjectScopedListPath(parsed.pathname) && !parsed.searchParams.get("projectId")) {
+      parsed.searchParams.set("projectId", projectId);
+    }
+    return parsed.toString();
+  } catch {
+    return targetUrl;
+  }
+}
+
+function rewriteBodyWithProjectId(
+  targetPathname: string,
+  method: string | undefined,
+  rawBody: Buffer,
+  projectId: string | null,
+): Buffer {
+  if (!projectId || !isWriteMethod(method) || rawBody.length === 0) {
+    return rawBody;
+  }
+
+  const pathsNeedingProjectId = new Set([
+    "/api/v1/flows",
+    "/api/v1/app-connections",
+    "/api/v1/flow-runs/cancel",
+  ]);
+  if (!pathsNeedingProjectId.has(targetPathname)) {
+    return rawBody;
+  }
+
+  try {
+    const parsed = JSON.parse(rawBody.toString("utf-8")) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return rawBody;
+    }
+    if (!("projectId" in parsed) || typeof parsed.projectId !== "string" || !parsed.projectId.trim()) {
+      parsed.projectId = projectId;
+      return Buffer.from(JSON.stringify(parsed));
+    }
+  } catch {
+    // Keep original body for non-JSON requests.
+  }
+  return rawBody;
 }
 
 async function proxyUpstream(params: {
@@ -680,156 +450,488 @@ async function proxyUpstream(params: {
   res: ServerResponse;
   targetUrl: string;
   extraHeaders?: Record<string, string>;
+  allowCookies?: boolean;
+  projectId?: string | null;
+  htmlInjection?: string;
 }): Promise<void> {
-  const { req, res, targetUrl, extraHeaders } = params;
-  const headers = buildForwardHeaders(req, extraHeaders);
+  const { req, res, extraHeaders, allowCookies = false, htmlInjection } = params;
+  let targetUrl = params.targetUrl;
   const body = await readBody(req);
+
+  targetUrl = addProjectIdToTargetUrl(targetUrl, params.projectId ?? null);
+
+  let finalBody = body;
+  try {
+    const pathname = new URL(targetUrl).pathname;
+    finalBody = rewriteBodyWithProjectId(pathname, req.method, body, params.projectId ?? null);
+  } catch {
+    // ignore
+  }
+
+  const headers = buildForwardHeaders(req, {
+    allowCookies,
+    extra: {
+      ...(extraHeaders ?? {}),
+      ...(finalBody.length > 0 ? { "content-length": String(finalBody.length) } : {}),
+    },
+  });
 
   let upstream: Response;
   try {
     upstream = await fetch(targetUrl, {
       method: req.method,
       headers,
-      body: body.length > 0 ? (body as unknown as BodyInit) : undefined,
+      body: finalBody.length > 0 ? (finalBody as unknown as BodyInit) : undefined,
+      redirect: "manual",
     });
   } catch (err) {
     res.statusCode = 502;
     res.setHeader("Content-Type", "application/json; charset=utf-8");
-    res.end(JSON.stringify({ ok: false, error: `Upstream unreachable: ${String(err)}` }));
+    res.end(JSON.stringify({ ok: false, error: `Workflow engine unreachable: ${String(err)}` }));
     return;
   }
 
   res.statusCode = upstream.status;
-  for (const [key, value] of upstream.headers.entries()) {
-    if (STRIP_RESPONSE_HEADERS.has(key.toLowerCase())) continue;
-    res.setHeader(key, value);
-  }
-
-  // For HTML responses from n8n, buffer and inject our theme CSS
+  copyUpstreamHeaders(upstream, res);
   const upstreamContentType = upstream.headers.get("content-type") ?? "";
   if (upstream.body && upstreamContentType.includes("text/html")) {
-    try {
-      const raw = await upstream.text();
-      const themed = injectN8nTheme(raw);
-      const buf = Buffer.from(themed, "utf-8");
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.setHeader("Content-Length", buf.length);
-      res.removeHeader("transfer-encoding");
-      res.end(buf);
-    } catch {
-      // If buffering fails, fall through to streaming (no theme)
-      if (upstream.body) {
-        Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0]).pipe(res);
-      } else {
-        res.end();
-      }
-    }
+    const rawHtml = await upstream.text();
+    const finalHtml = htmlInjection ? injectHtmlBeforeHead(rawHtml, htmlInjection) : rawHtml;
+    const buf = Buffer.from(finalHtml, "utf-8");
+    res.setHeader("content-length", String(buf.length));
+    res.end(buf);
     return;
   }
 
   if (upstream.body) {
-    // Convert Web ReadableStream → Node Readable and pipe to response
-    Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0]).pipe(res);
+    const supportsPipe =
+      typeof (res as unknown as { write?: unknown }).write === "function" &&
+      typeof (res as unknown as { on?: unknown }).on === "function";
+    if (supportsPipe) {
+      Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0]).pipe(res);
+    } else {
+      const raw = Buffer.from(await upstream.arrayBuffer());
+      res.end(raw);
+    }
   } else {
     res.end();
   }
 }
 
+function injectHtmlBeforeHead(html: string, snippet: string): string {
+  const marker = "</head>";
+  const idx = html.lastIndexOf(marker);
+  if (idx < 0) {
+    return `${snippet}${html}`;
+  }
+  return `${html.slice(0, idx)}${snippet}${html.slice(idx)}`;
+}
+
+type ActivepiecesLoginResult = {
+  cookies: string[];
+  token: string | null;
+  projectId: string | null;
+};
+
+async function attemptActivepiecesLogin(
+  baseUrl: string,
+  credentials: { email: string; password: string },
+): Promise<ActivepiecesLoginResult | null> {
+  const endpoints = [
+    "/api/v1/authentication/sign-in",
+    "/api/v1/users/sign-in",
+    "/api/v1/users/login",
+  ];
+
+  const payloads = [
+    { email: credentials.email, password: credentials.password },
+    { emailOrLdapLoginId: credentials.email, password: credentials.password },
+  ];
+
+  for (const endpoint of endpoints) {
+    for (const payload of payloads) {
+      try {
+        const response = await fetch(`${baseUrl}${endpoint}`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify(payload),
+          redirect: "manual",
+        });
+        const cookies = extractSetCookies(response.headers);
+        if (cookies.length > 0) {
+          return { cookies, token: null, projectId: null };
+        }
+        if (response.ok) {
+          const payload = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+          const token =
+            payload && typeof payload.token === "string" && payload.token.trim()
+              ? payload.token
+              : null;
+          const projectId =
+            payload && (typeof payload.projectId === "string" || typeof payload.projectId === "number")
+              ? String(payload.projectId)
+              : null;
+          return { cookies: [], token, projectId };
+        }
+      } catch {
+        // best effort
+      }
+    }
+  }
+
+  return null;
+}
+
+function appendSetCookies(res: ServerResponse, cookies: string[]): void {
+  if (cookies.length === 0) {
+    return;
+  }
+  const existing = res.getHeader("set-cookie");
+  const merged = [
+    ...(Array.isArray(existing)
+      ? existing.map((value) => String(value))
+      : existing
+        ? [String(existing)]
+        : []),
+    ...cookies,
+  ];
+  res.setHeader("set-cookie", merged);
+}
+
+async function attemptAutoLoginForOpsUi(
+  req: IncomingMessage,
+  res: ServerResponse,
+  context: OpsContext,
+): Promise<string | null> {
+  const url = new URL(req.url ?? "/", "http://localhost");
+  if (!(url.pathname === "/ops-ui" || url.pathname.startsWith("/ops-ui/"))) {
+    return null;
+  }
+  if ((req.method ?? "GET").toUpperCase() !== "GET") {
+    return null;
+  }
+
+  let token: string | null = null;
+  let projectId = context.projectId ?? "";
+
+  if (context.user) {
+    const login = await attemptActivepiecesLogin(context.baseUrl, context.user);
+    if (login) {
+      if (login.cookies.length > 0) {
+        appendSetCookies(res, login.cookies);
+      }
+      token = login.token;
+      projectId = login.projectId ?? projectId;
+    }
+  }
+
+  // Fallback: if we have a workspace-scoped API key, bootstrap it directly.
+  // Never expose global fallback keys to the browser.
+  if (!token && context.apiKey && context.apiKeyScope === "workspace") {
+    token = context.apiKey;
+  }
+  if (!token) {
+    return null;
+  }
+
+  const tokenLiteral = JSON.stringify(token);
+  const projectLiteral = JSON.stringify(projectId);
+  return `<script id=\"openclaw-ap-bootstrap\">(function(){try{var t=${tokenLiteral};var p=${projectLiteral};if(t){localStorage.setItem('token',t);sessionStorage.setItem('token',t);}if(p){localStorage.setItem('projectId',p);sessionStorage.setItem('projectId',p);}}catch(_e){}})();</script>`;
+}
+
+function mapLegacyOpsUiPath(pathname: string): string {
+  const subPath = pathname.slice("/ops-ui".length) || "/";
+  if (subPath === "/workflow" || subPath.startsWith("/workflow/")) {
+    return `/flows${subPath.slice("/workflow".length)}`;
+  }
+  if (subPath === "/workflows" || subPath.startsWith("/workflows/")) {
+    return `/flows${subPath.slice("/workflows".length)}`;
+  }
+  if (subPath === "/credentials" || subPath.startsWith("/credentials/")) {
+    return `/connections${subPath.slice("/credentials".length)}`;
+  }
+  return subPath;
+}
+
+function mapLegacyOpsApiPath(apiPath: string): string {
+  if (!apiPath || apiPath === "/") {
+    return "/flows";
+  }
+  if (apiPath === "/workflows" || apiPath.startsWith("/workflows/")) {
+    return `/flows${apiPath.slice("/workflows".length)}`;
+  }
+  if (apiPath === "/executions" || apiPath.startsWith("/executions/")) {
+    return `/flow-runs${apiPath.slice("/executions".length)}`;
+  }
+  if (apiPath === "/credentials" || apiPath.startsWith("/credentials/")) {
+    return `/app-connections${apiPath.slice("/credentials".length)}`;
+  }
+  if (apiPath === "/node-types" || apiPath.startsWith("/node-types/")) {
+    return `/pieces${apiPath.slice("/node-types".length)}`;
+  }
+  return apiPath;
+}
+
+function sendJson(res: ServerResponse, status: number, payload: unknown): void {
+  res.statusCode = status;
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.end(JSON.stringify(payload));
+}
+
+function parseFlowIdFromCompatPath(apiPath: string): { flowId: string; action: "activate" | "deactivate" } | null {
+  const match = apiPath.match(/^\/workflows\/([^/]+)\/(activate|deactivate)$/i);
+  if (!match) {
+    return null;
+  }
+  return {
+    flowId: decodeURIComponent(match[1]),
+    action: match[2].toLowerCase() === "activate" ? "activate" : "deactivate",
+  };
+}
+
+function parseFlowExecuteFromCompatPath(apiPath: string): string | null {
+  const match = apiPath.match(/^\/workflows\/([^/]+)\/execute\/?$/i);
+  if (!match) {
+    return null;
+  }
+  return decodeURIComponent(match[1]);
+}
+
+async function handleCompatFlowStatusChange(params: {
+  req: IncomingMessage;
+  res: ServerResponse;
+  context: OpsContext;
+  flowId: string;
+  action: "activate" | "deactivate";
+}): Promise<void> {
+  const { req, res, context, flowId, action } = params;
+  if (!context.apiKey) {
+    sendJson(res, 503, {
+      ok: false,
+      error: "Workflow engine API key is not configured for this workspace.",
+    });
+    return;
+  }
+
+  const targetUrl = `${context.baseUrl}/api/v1/flows/${encodeURIComponent(flowId)}`;
+  const status = action === "activate" ? "ENABLED" : "DISABLED";
+  const headers = buildForwardHeaders(req, {
+    allowCookies: true,
+    extra: {
+      authorization: `Bearer ${context.apiKey}`,
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+  });
+
+  let upstream: Response;
+  try {
+    upstream = await fetch(targetUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        type: "CHANGE_STATUS",
+        request: { status },
+      }),
+    });
+  } catch (err) {
+    sendJson(res, 502, {
+      ok: false,
+      error: `Workflow engine unreachable: ${String(err)}`,
+    });
+    return;
+  }
+
+  res.statusCode = upstream.status;
+  copyUpstreamHeaders(upstream, res);
+  if (upstream.body) {
+    const supportsPipe =
+      typeof (res as unknown as { write?: unknown }).write === "function" &&
+      typeof (res as unknown as { on?: unknown }).on === "function";
+    if (supportsPipe) {
+      Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0]).pipe(res);
+    } else {
+      const raw = Buffer.from(await upstream.arrayBuffer());
+      res.end(raw);
+    }
+  } else {
+    res.end();
+  }
+}
+
+async function handleCompatFlowExecute(params: {
+  req: IncomingMessage;
+  res: ServerResponse;
+  context: OpsContext;
+  flowId: string;
+  search: string;
+}): Promise<void> {
+  const { req, res, context, flowId, search } = params;
+  const body = await readBody(req);
+  const headers = buildForwardHeaders(req, {
+    allowCookies: true,
+    extra: {
+      ...(context.apiKey ? { authorization: `Bearer ${context.apiKey}` } : {}),
+      accept: "application/json",
+      ...(body.length > 0 ? { "content-length": String(body.length) } : {}),
+    },
+  });
+
+  const encodedFlowId = encodeURIComponent(flowId);
+  const targetCandidates = [
+    `${context.baseUrl}/api/v1/webhooks/${encodedFlowId}/sync${search}`,
+    `${context.baseUrl}/api/v1/webhooks/${encodedFlowId}${search}`,
+  ];
+
+  let upstream: Response | null = null;
+  let lastError: unknown = null;
+  for (let index = 0; index < targetCandidates.length; index += 1) {
+    const targetUrl = targetCandidates[index];
+    try {
+      upstream = await fetch(targetUrl, {
+        method: req.method,
+        headers,
+        body: body.length > 0 ? (body as unknown as BodyInit) : undefined,
+        redirect: "manual",
+      });
+      // Older Activepieces builds may not support /sync, so fall back once.
+      if (index === 0 && [404, 405, 501].includes(upstream.status)) {
+        upstream = null;
+        continue;
+      }
+      break;
+    } catch (err) {
+      lastError = err;
+      upstream = null;
+    }
+  }
+
+  if (!upstream) {
+    sendJson(res, 502, {
+      ok: false,
+      error: `Workflow engine unreachable: ${String(lastError ?? "execute endpoint unavailable")}`,
+    });
+    return;
+  }
+
+  res.statusCode = upstream.status;
+  copyUpstreamHeaders(upstream, res);
+  if (upstream.body) {
+    const supportsPipe =
+      typeof (res as unknown as { write?: unknown }).write === "function" &&
+      typeof (res as unknown as { on?: unknown }).on === "function";
+    if (supportsPipe) {
+      Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0]).pipe(res);
+    } else {
+      const raw = Buffer.from(await upstream.arrayBuffer());
+      res.end(raw);
+    }
+  } else {
+    res.end();
+  }
+}
+
+function serveLocalOpsUiFallback(req: IncomingMessage, res: ServerResponse, pathname: string): boolean {
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    res.statusCode = 405;
+    res.end("Method Not Allowed");
+    return true;
+  }
+
+  const subPath = pathname.slice("/ops-ui".length) || "/";
+  const normalized = path.posix.normalize(subPath);
+  if (normalized.includes("..") || normalized.includes("\0")) {
+    res.statusCode = 400;
+    res.end("Bad Request");
+    return true;
+  }
+
+  const candidates = [
+    path.join(OPS_UI_DIST, normalized),
+    path.join(OPS_UI_DIST, normalized, "index.html"),
+    path.join(OPS_UI_DIST, "index.html"),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      if (!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) {
+        continue;
+      }
+      const ext = path.extname(candidate).toLowerCase();
+      const contentType = OPS_UI_CONTENT_TYPES[ext] ?? "application/octet-stream";
+      res.setHeader("Content-Type", contentType);
+      res.setHeader(
+        "Cache-Control",
+        ext === ".html" ? "no-cache" : "public, max-age=31536000, immutable",
+      );
+      if (req.method === "HEAD") {
+        res.statusCode = 200;
+        res.end();
+      } else {
+        res.statusCode = 200;
+        res.end(fs.readFileSync(candidate));
+      }
+      return true;
+    } catch {
+      // try next candidate
+    }
+  }
+
+  res.statusCode = 503;
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.end(
+    "<!DOCTYPE html><html><body style=\"font-family:sans-serif;padding:2rem\">" +
+      "<h2>Workflow editor unavailable</h2>" +
+      "<p>Configure <code>pmos.connectors.ops.url</code> and workspace API keys for Activepieces.</p>" +
+      "</body></html>",
+  );
+  return true;
+}
+
 /**
- * Reads the locally-running n8n config from openclaw config / env vars.
- * Returns null when no local n8n is configured.
- *
- * Config (openclaw.json):
- *   pmos.n8n.localUrl = "http://localhost:5678"
- *
- * Env vars:
- *   N8N_LOCAL_URL=http://localhost:5678
+ * Legacy compatibility helper retained for callers importing this symbol.
+ * Now resolves a local Activepieces (or legacy n8n) URL when explicitly configured.
  */
 export function readLocalN8nConfig(): { url: string; host: string; port: number } | null {
   const cfg = loadConfig() as unknown;
   const pmos = (cfg as Record<string, unknown>)?.pmos as Record<string, unknown> | undefined;
   const n8n = pmos?.n8n as Record<string, unknown> | undefined;
   const rawUrl =
-    (typeof n8n?.localUrl === "string" && n8n.localUrl.trim()) ||
-    process.env.N8N_LOCAL_URL?.trim() ||
-    null;
-  if (!rawUrl) return null;
+    normalizeBaseUrl(
+      (typeof n8n?.localUrl === "string" ? n8n.localUrl : null) ??
+        process.env.ACTIVEPIECES_LOCAL_URL ??
+        process.env.N8N_LOCAL_URL ??
+        null,
+    ) ?? null;
+  if (!rawUrl) {
+    return null;
+  }
   try {
-    const parsed = new URL(rawUrl.endsWith("/") ? rawUrl.slice(0, -1) : rawUrl);
-    const port = parsed.port ? parseInt(parsed.port, 10) : parsed.protocol === "https:" ? 443 : 80;
-    return { url: parsed.origin, host: parsed.hostname, port };
+    const parsed = new URL(rawUrl);
+    const port = parsed.port
+      ? Number.parseInt(parsed.port, 10)
+      : parsed.protocol === "https:"
+        ? 443
+        : 80;
+    return {
+      url: parsed.origin,
+      host: parsed.hostname,
+      port,
+    };
   } catch {
     return null;
   }
 }
 
-// Best-effort server-side login helper: POSTs credentials to n8n and returns Set-Cookie when available.
-async function attemptN8nLogin(targetBase: string, email: string, password: string) {
-  const loginId = email.trim();
-  const loginPassword = password;
-  if (!loginId || !loginPassword) {
-    return null;
-  }
-
-  const endpoints = [
-    `${targetBase.replace(/\/+$/, "")}/rest/login`,
-    `${targetBase.replace(/\/+$/, "")}/rest/users/login`,
-    `${targetBase.replace(/\/+$/, "")}/api/v1/users/login`,
-    `${targetBase.replace(/\/+$/, "")}/users/login`,
-  ];
-  const payloads: Array<Record<string, unknown>> = [
-    { emailOrLdapLoginId: loginId, password: loginPassword },
-    { email: loginId, password: loginPassword },
-    { username: loginId, password: loginPassword },
-  ];
-  for (const ep of endpoints) {
-    for (const body of payloads) {
-      try {
-        const res = await fetch(ep, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
-          redirect: "manual",
-        });
-        const sc = res.headers.get("set-cookie");
-        if (sc) return sc;
-        if (res.ok) return null;
-      } catch (err) {
-        // ignore and try next
-      }
-    }
-  }
-  return null;
-}
-
-// If workspace has ops.user creds, attempt server-side login and forward Set-Cookie to client (best-effort).
-async function attemptAutoLoginForRequest(req: IncomingMessage, res: ServerResponse, targetN8nBase: string) {
-  try {
-    const session = await resolvePmosSessionFromRequest(req);
-    if (!session.ok) return;
-    const wc = await readWorkspaceConnectors(session.user.workspaceId);
-    const u = wc?.ops?.user as { email?: string; password?: string } | undefined;
-    if (!u?.email || !u?.password) return;
-    const cookie = await attemptN8nLogin(targetN8nBase, u.email, u.password);
-    if (cookie) {
-      res.setHeader("Set-Cookie", cookie);
-    }
-  } catch (err) {
-    // best-effort only
-    console.warn("[pmos] auto-login attempt failed:", String(err));
-  }
-}
-
 /**
- * Transparent HTTP proxy for local n8n.
+ * Handles local PMOS editor routes.
  *
- * Routes handled:
- *   /ops-ui/*   → local n8n frontend (requires N8N_PATH=ops-ui on the n8n side)
- *               fallback: serve pre-built static files from openclaw/ops-ui/dist/
- *   /rest/*     → local n8n REST API (editor's internal API)
- *   /form/*     → local n8n form submissions
- *
- * Returns true if handled.
+ * Activepieces mode:
+ * - /ops-ui/* is proxied to flow.wickedlab.io (or configured ops.url)
+ * - legacy /rest/login returns PMOS auth identity for compatibility checks
  */
 export async function handleLocalN8nRequest(
   req: IncomingMessage,
@@ -839,217 +941,79 @@ export async function handleLocalN8nRequest(
   const pathname = url.pathname;
 
   const isOpsUi = pathname === "/ops-ui" || pathname.startsWith("/ops-ui/");
-  const isRestApi = pathname === "/rest" || pathname.startsWith("/rest/");
-  const isFormPath = pathname === "/form" || pathname.startsWith("/form/");
-  if (!isOpsUi && !isRestApi && !isFormPath) {
+  const isLegacyRestLogin = pathname === "/rest/login";
+
+  if (!isOpsUi && !isLegacyRestLogin) {
     return false;
   }
 
-  const n8n = readLocalN8nConfig();
-  if (n8n) {
-    let authHeaders = await buildN8nAuthHeaders(req, n8n.url);
-    const session = await resolvePmosSessionFromRequest(req);
-    const isSuperAdmin = session.ok && session.user.role === "super_admin";
-
-    // Super admins can read/manage all workflows using owner auth context.
-    // Keep workflow CREATE/PATCH scoped to workspace identity to avoid
-    // creating resources under shared owner identity.
-    if (isSuperAdmin && req.method && !["POST", "PUT", "PATCH"].includes(req.method.toUpperCase())) {
-      const ownerCookie = await getOwnerCookie(n8n.url);
-      if (ownerCookie) {
-        authHeaders = { ...authHeaders, Cookie: ownerCookie };
-      }
-    }
-
-    // Workspace-aware workflow endpoints (editor iframe calls /rest/workflows)
-    if (isRestApi && (pathname === "/rest/workflows" || pathname.startsWith("/rest/workflows/"))) {
-      if (session.ok) {
-        const { workspaceId } = session.user;
-        const filterByWorkspace = session.user.role !== "super_admin";
-        if (req.method === "GET" && pathname === "/rest/workflows") {
-          await proxyWorkflowList({
-            req,
-            res,
-            targetUrl: `${n8n.url}/rest/workflows${url.search}`,
-            extraHeaders: authHeaders,
-            workspaceId,
-            filterByWorkspace,
-          });
-          return true;
-        }
-        if ((req.method === "POST" || req.method === "PUT" || req.method === "PATCH") && pathname === "/rest/workflows") {
-          await proxyWorkflowCreate({ req, res, targetUrl: `${n8n.url}/rest/workflows${url.search}`, extraHeaders: authHeaders, workspaceId, n8nBaseUrl: n8n.url });
-          return true;
-        }
-      }
-    }
-
-    // Fall back to legacy auto-login if bridge returns no headers
-    if (!authHeaders.Cookie && !authHeaders["X-N8N-API-KEY"]) {
-      await attemptAutoLoginForRequest(req, res, n8n.url);
-    }
-
-    // Proxy everything transparently to local n8n.
-    //
-    // Important: When n8n is served behind a subpath (N8N_PATH=/ops-ui/), it still expects incoming
-    // requests *without* the prefix. The reverse proxy is responsible for stripping it.
-    // If we forward /ops-ui/assets/* as-is, n8n's history-api fallback returns index.html for JS/CSS,
-    // which makes the iframe look "blank" because the editor never loads.
-    const targetPath = isOpsUi ? (pathname.slice("/ops-ui".length) || "/") : pathname;
-    const targetUrl = `${n8n.url}${targetPath}${url.search}`;
-    await proxyUpstream({ req, res, targetUrl, extraHeaders: authHeaders });
-    return true;
-  }
-
-  // No local n8n running — for /rest/* and /form/*, don't intercept
-  if (isRestApi || isFormPath) return false;
-
-  const remoteOpsUrl = await resolveOpsBaseUrlForRequest(req);
-  if (remoteOpsUrl) {
-    const authHeaders = await buildN8nAuthHeaders(req, remoteOpsUrl);
-    if (!authHeaders.Cookie && !authHeaders["X-N8N-API-KEY"]) {
-      await attemptAutoLoginForRequest(req, res, remoteOpsUrl);
-    }
-    const targetPath = pathname.slice("/ops-ui".length) || "/";
-    const targetUrl = `${remoteOpsUrl}${targetPath}${url.search}`;
-    await proxyUpstream({ req, res, targetUrl, extraHeaders: authHeaders });
-    return true;
-  }
-
-  // For /ops-ui/*, try serving pre-built static bundle
-  if (req.method !== "GET" && req.method !== "HEAD") {
-    res.statusCode = 405;
-    res.end("Method Not Allowed");
-    return true;
-  }
-
-  const subPath = pathname.slice("/ops-ui".length) || "/";
-  // Prevent directory traversal
-  const normalized = path.posix.normalize(subPath);
-  if (normalized.includes("..") || normalized.includes("\0")) {
-    res.statusCode = 400;
-    res.end("Bad Request");
-    return true;
-  }
-
-  // Try exact path, then index.html fallback for SPA routing
-  const candidates = [
-    path.join(OPS_UI_DIST, normalized),
-    path.join(OPS_UI_DIST, normalized, "index.html"),
-    path.join(OPS_UI_DIST, "index.html"),
-  ];
-
-  // If the workspace has ops.user credentials stored, attempt a server-side login so the
-  // editor opens without showing n8n's login/setup screen (best-effort).
-  await attemptAutoLoginForRequest(req, res, "http://127.0.0.1:5678");
-
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-      const ext = path.extname(candidate).toLowerCase();
-      const contentType = OPS_UI_CONTENT_TYPES[ext] ?? "application/octet-stream";
-      res.setHeader("Content-Type", contentType);
-      res.setHeader("Cache-Control", ext === ".html" ? "no-cache" : "public, max-age=31536000, immutable");
-      if (req.method === "HEAD") {
-        res.statusCode = 200;
-        res.end();
-      } else {
-        res.statusCode = 200;
-        res.end(fs.readFileSync(candidate));
-      }
+  if (isLegacyRestLogin) {
+    const session = (await resolvePmosSessionFromRequest(req)) as OpsSession;
+    if (!session.ok || !session.user) {
+      sendJson(res, 401, { ok: false, error: "Authentication required." });
       return true;
     }
+    sendJson(res, 200, {
+      ok: true,
+      data: {
+        email: session.user.email ?? null,
+        id: session.user.id ?? null,
+        role: session.user.role ?? null,
+      },
+    });
+    return true;
   }
 
-  // Neither local n8n nor pre-built bundle found
-  res.statusCode = 503;
-  res.setHeader("Content-Type", "text/html; charset=utf-8");
-  res.end(
-    `<!DOCTYPE html><html><body style="font-family:sans-serif;padding:2rem">` +
-      `<h2>Embedded n8n unavailable</h2>` +
-      `<p>To enable the workflow editor:</p>` +
-      `<ul>` +
-      `<li>Ensure vendored n8n starts with OpenClaw gateway.</li>` +
-      `<li>Or set <code>N8N_LOCAL_URL=http://localhost:5678</code> for a local n8n process.</li>` +
-      `</ul>` +
-      `</body></html>`,
-  );
-  return true;
+  const context = await resolveOpsContext(req, { requireSession: true });
+  if (!context) {
+    sendJson(res, 401, { ok: false, error: "Authentication required." });
+    return true;
+  }
+
+  const htmlInjection = await attemptAutoLoginForOpsUi(req, res, context);
+
+  const targetPath = mapLegacyOpsUiPath(pathname);
+  const targetUrl = `${context.baseUrl}${targetPath}${url.search}`;
+  const authHeaders: Record<string, string> = {};
+  if (context.apiKey) {
+    authHeaders.authorization = `Bearer ${context.apiKey}`;
+  }
+
+  await proxyUpstream({
+    req,
+    res,
+    targetUrl,
+    allowCookies: true,
+    extraHeaders: authHeaders,
+    projectId: context.projectId,
+    htmlInjection: htmlInjection ?? undefined,
+  });
+
+  if (res.writableEnded) {
+    return true;
+  }
+
+  // Emergency fallback when upstream is down and a local bundle exists.
+  return serveLocalOpsUiFallback(req, res, pathname);
 }
 
 /**
- * Tunnels a WebSocket upgrade to the local n8n instance.
- * Used for n8n's push connection (/push) and any other WS endpoints.
- *
- * Returns true if the upgrade was handled.
+ * Activepieces currently does not require a dedicated gateway websocket bridge.
+ * Keep this exported symbol for compatibility with server-http.ts.
  */
 export async function tunnelN8nWebSocket(
-  req: IncomingMessage,
-  socket: Duplex,
-  head: Buffer,
+  _req: IncomingMessage,
+  _socket: Duplex,
+  _head: Buffer,
 ): Promise<boolean> {
-  const url = new URL(req.url ?? "/", "http://localhost");
-  const pathname = url.pathname;
-
-  const isN8nWs =
-    pathname === "/push" ||
-    pathname.startsWith("/push/") ||
-    pathname === "/rest/push" ||
-    pathname.startsWith("/rest/push/");
-
-  if (!isN8nWs) return false;
-
-  const n8n = readLocalN8nConfig();
-  if (!n8n) return false;
-
-  // Inject n8n auth cookie so n8n accepts the WebSocket upgrade.
-  // Strip the client's cookies (pmos_session, etc.) and replace with a workspace-scoped
-  // n8n cookie derived from the PMOS session.
-  const authHeaders = await buildN8nAuthHeaders(req, n8n.url);
-  const cookie = typeof authHeaders.Cookie === "string" ? authHeaders.Cookie : "";
-
-  const upstream = net.connect(n8n.port, n8n.host, () => {
-    // Reconstruct the HTTP upgrade request, stripping client cookies and injecting n8n auth
-    const forwardedHeaders = Object.entries(req.headers)
-      .filter(([k]) => !["connection", "upgrade", "cookie"].includes(k.toLowerCase()))
-      .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : (v ?? "")}`)
-      .join("\r\n");
-    const cookieLine = cookie ? `Cookie: ${cookie}\r\n` : "";
-    upstream.write(
-      `GET ${pathname}${url.search} HTTP/1.1\r\n` +
-        `Host: ${n8n.host}:${n8n.port}\r\n` +
-        `Upgrade: websocket\r\n` +
-        `Connection: Upgrade\r\n` +
-        cookieLine +
-        `${forwardedHeaders}\r\n\r\n`,
-    );
-    if (head.length > 0) {
-      upstream.write(head);
-    }
-    upstream.pipe(socket);
-    socket.pipe(upstream);
-  });
-
-  upstream.on("error", () => {
-    socket.destroy();
-  });
-  socket.on("error", () => {
-    upstream.destroy();
-  });
-
-  return true;
+  return false;
 }
 
 /**
  * Handles:
- *   /api/ops/*          -> embedded n8n /rest/* API
- *   /webhook/*          -> embedded n8n webhook passthrough
- *   /webhook-test/*     -> embedded n8n webhook-test passthrough
- *   /webhook-waiting/*  -> embedded n8n webhook-waiting passthrough
- *
- * Remote fallback is disabled by default and can be explicitly enabled with
- * PMOS_ALLOW_REMOTE_OPS_FALLBACK=1.
- *
- * Returns true if the request was handled.
+ * - /api/ops/*   (legacy PMOS compatibility API -> Activepieces API)
+ * - /api/v1/*    (Activepieces UI/API passthrough for embedded /ops-ui iframe)
+ * - /webhook/*   (compat webhook passthrough)
  */
 export async function handleOpsProxyRequest(
   req: IncomingMessage,
@@ -1058,119 +1022,107 @@ export async function handleOpsProxyRequest(
   const url = new URL(req.url ?? "/", "http://localhost");
   const pathname = url.pathname;
 
-  // Transparent webhook passthrough - embedded n8n by default.
-  const webhookPrefixes = ["/webhook-waiting/", "/webhook-test/", "/webhook/"];
-  for (const prefix of webhookPrefixes) {
-    const bare = prefix.slice(0, -1); // without trailing slash
-    if (pathname === bare || pathname.startsWith(prefix)) {
-      const localN8n = readLocalN8nConfig();
-      if (!localN8n && !allowRemoteOpsFallback()) {
-        res.statusCode = 503;
-        res.setHeader("Content-Type", "application/json; charset=utf-8");
-        res.end(
-          JSON.stringify({
-            ok: false,
-            error: "Embedded n8n is unavailable for webhook handling.",
-          }),
-        );
-        return true;
-      }
-      const baseUrl = localN8n ? localN8n.url : readGlobalOpsConfig().url;
-      const subPath = pathname.slice(bare.length);
-      const targetUrl = `${baseUrl}${bare}${subPath}${url.search}`;
-      await proxyUpstream({ req, res, targetUrl });
+  // Activepieces API passthrough for embedded UI traffic.
+  if (pathname === "/api/v1" || pathname.startsWith("/api/v1/")) {
+    const context = await resolveOpsContext(req, { requireSession: true });
+    if (!context) {
+      sendJson(res, 401, { ok: false, error: "Authentication required." });
       return true;
     }
+
+    const needsAuthHeader = !isAuthApiPath(pathname);
+    const extraHeaders: Record<string, string> = {};
+    if (needsAuthHeader && context.apiKey) {
+      extraHeaders.authorization = `Bearer ${context.apiKey}`;
+    }
+
+    await proxyUpstream({
+      req,
+      res,
+      targetUrl: `${context.baseUrl}${pathname}${url.search}`,
+      allowCookies: true,
+      extraHeaders,
+      projectId: context.projectId,
+    });
+    return true;
   }
 
-  // API proxy - requires PMOS session.
-  if (pathname === "/api/ops" || pathname.startsWith("/api/ops/")) {
-    const session = await resolvePmosSessionFromRequest(req);
-    if (!session.ok) {
-      res.statusCode = 401;
-      res.setHeader("Content-Type", "application/json; charset=utf-8");
-      res.end(JSON.stringify({ ok: false, error: "Authentication required." }));
+  // Legacy webhook compatibility: /webhook/:flowId -> /api/v1/webhooks/:flowId
+  const webhookMatch = pathname.match(/^\/(webhook|webhook-test|webhook-waiting)\/(.+)$/);
+  if (webhookMatch) {
+    const context = await resolveOpsContext(req, { requireSession: false });
+    if (!context) {
+      sendJson(res, 503, {
+        ok: false,
+        error: "Workflow engine URL is not configured.",
+      });
       return true;
     }
 
-    const localN8n = readLocalN8nConfig();
-    const { workspaceId } = session.user;
-    const filterByWorkspace = session.user.role !== "super_admin";
-    const apiPath = pathname.slice("/api/ops".length) || "/";
-
-    if (localN8n) {
-      let authHeaders = await buildN8nAuthHeaders(req, localN8n.url);
-      if (session.user.role === "super_admin" && req.method && !["POST", "PUT", "PATCH"].includes(req.method.toUpperCase())) {
-        const ownerCookie = await getOwnerCookie(localN8n.url);
-        if (ownerCookie) {
-          authHeaders = { ...authHeaders, Cookie: ownerCookie };
-        }
-      }
-
-      // Workspace-aware workflow endpoints
-      if (apiPath === "/workflows" || apiPath.startsWith("/workflows/")) {
-        if (req.method === "GET" && apiPath === "/workflows") {
-          await proxyWorkflowList({
-            req,
-            res,
-            targetUrl: `${localN8n.url}/rest/workflows${url.search}`,
-            extraHeaders: authHeaders,
-            workspaceId,
-            filterByWorkspace,
-          });
-          return true;
-        }
-        if ((req.method === "POST" || req.method === "PUT" || req.method === "PATCH") && apiPath === "/workflows") {
-          await proxyWorkflowCreate({ req, res, targetUrl: `${localN8n.url}/rest/workflows${url.search}`, extraHeaders: authHeaders, workspaceId, n8nBaseUrl: localN8n.url });
-          return true;
-        }
-      }
-
-      if (!authHeaders.Cookie && !authHeaders["X-N8N-API-KEY"]) {
-        await attemptAutoLoginForRequest(req, res, localN8n.url);
-      }
-      const targetUrl = `${localN8n.url}/rest${apiPath}${url.search}`;
-      await proxyUpstream({ req, res, targetUrl, extraHeaders: authHeaders });
-      return true;
-    }
-
-    if (!allowRemoteOpsFallback()) {
-      res.statusCode = 503;
-      res.setHeader("Content-Type", "application/json; charset=utf-8");
-      res.end(
-        JSON.stringify({
-          ok: false,
-          error: "Embedded n8n is unavailable. Start gateway with vendored n8n enabled.",
-        }),
-      );
-      return true;
-    }
-
-    // Legacy remote fallback (explicit opt-in)
-    const global = readGlobalOpsConfig();
-    const wc = await readWorkspaceConnectors(workspaceId);
-    const opsUrl = ((wc?.ops?.url?.trim() ?? "") || global.url).replace(/\/+$/, "");
-    const allowGlobalKeyFallback = session.user.role === "super_admin";
-    const opsKey = wc?.ops?.apiKey?.trim() || (allowGlobalKeyFallback ? global.apiKey : null);
-
-    if (!opsKey) {
-      res.statusCode = 503;
-      res.setHeader("Content-Type", "application/json; charset=utf-8");
-      res.end(
-        JSON.stringify({
-          ok: false,
-          error: "Remote ops fallback enabled, but no workspace API key is configured.",
-        }),
-      );
-      return true;
-    }
-
-    const targetUrl = `${opsUrl}/api/v1${apiPath}${url.search}`;
+    const flowSegment = webhookMatch[2];
+    const targetUrl = `${context.baseUrl}/api/v1/webhooks/${flowSegment}${url.search}`;
     await proxyUpstream({
       req,
       res,
       targetUrl,
-      extraHeaders: { "X-N8N-API-KEY": opsKey },
+      allowCookies: true,
+    });
+    return true;
+  }
+
+  // PMOS legacy compatibility API surface.
+  if (pathname === "/api/ops" || pathname.startsWith("/api/ops/")) {
+    const context = await resolveOpsContext(req, { requireSession: true });
+    if (!context) {
+      sendJson(res, 401, { ok: false, error: "Authentication required." });
+      return true;
+    }
+
+    const apiPath = pathname.slice("/api/ops".length) || "/";
+
+    const statusChange = parseFlowIdFromCompatPath(apiPath);
+    if (statusChange && (req.method ?? "GET").toUpperCase() === "POST") {
+      await handleCompatFlowStatusChange({
+        req,
+        res,
+        context,
+        flowId: statusChange.flowId,
+        action: statusChange.action,
+      });
+      return true;
+    }
+
+    const executeFlowId = parseFlowExecuteFromCompatPath(apiPath);
+    if (executeFlowId) {
+      if ((req.method ?? "GET").toUpperCase() !== "POST") {
+        sendJson(res, 405, { ok: false, error: "Method Not Allowed" });
+      } else {
+        await handleCompatFlowExecute({
+          req,
+          res,
+          context,
+          flowId: executeFlowId,
+          search: url.search,
+        });
+      }
+      return true;
+    }
+
+    const mapped = mapLegacyOpsApiPath(apiPath);
+    const targetPath = `/api/v1${mapped}`;
+
+    const extraHeaders: Record<string, string> = {};
+    if (context.apiKey) {
+      extraHeaders.authorization = `Bearer ${context.apiKey}`;
+    }
+
+    await proxyUpstream({
+      req,
+      res,
+      targetUrl: `${context.baseUrl}${targetPath}${url.search}`,
+      allowCookies: true,
+      extraHeaders,
+      projectId: context.projectId,
     });
     return true;
   }

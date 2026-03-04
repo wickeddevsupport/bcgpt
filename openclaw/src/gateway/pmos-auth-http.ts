@@ -450,7 +450,7 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
               emoji: "🤖",
               theme: "Workspace Assistant",
             },
-            tools: { profile: "messaging" },
+            tools: { profile: "full" },
             ...(sharedModelRef ? { model: sharedModelRef } : {}),
           },
         ],

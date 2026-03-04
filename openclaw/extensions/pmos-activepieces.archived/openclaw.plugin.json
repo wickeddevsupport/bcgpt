@@ -1,5 +1,5 @@
 {
-  "id": "pmos-activepieces",
+  "id": "pmos-activepieces.archived",
   "name": "PMOS Activepieces",
   "description": "Activepieces automation tools for PMOS (flows, runs, connections, pieces).",
   "version": "0.0.1",
@@ -27,4 +27,3 @@
     }
   }
 }
-

@@ -261,11 +261,11 @@ export function subtitleForTab(tab: Tab) {
     case "dashboard":
       return "Your automation OS at a glance: health, integrations, and what is running now.";
     case "automations":
-      return "Build and run workflows with your personal n8n automation workspace.";
+      return "Build and run workflows with your personal workflow engine workspace.";
     case "runs":
       return "Live and historical executions across agents and automations.";
     case "integrations":
-      return "Connect workflow engines and apps (embedded n8n, BCGPT/Basecamp, and more).";
+      return "Connect workflow engines and apps (embedded workflow engine, BCGPT/Basecamp, and more).";
     case "models":
       return "Create and manage workspace models, keys, and agent assignments.";
     case "connections":
@@ -304,3 +304,4 @@ export function subtitleForTab(tab: Tab) {
       return "";
   }
 }
+

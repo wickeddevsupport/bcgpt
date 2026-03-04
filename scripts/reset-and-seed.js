@@ -83,7 +83,7 @@ function wsConfigFor(wsId) {
             emoji: '🤖',
             theme: 'Workspace Assistant',
           },
-          tools: { profile: 'messaging' },
+          tools: { profile: 'full' },
           model: 'kilo/auto-free',
         },
       ],

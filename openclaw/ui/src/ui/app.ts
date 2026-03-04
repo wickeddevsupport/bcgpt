@@ -509,7 +509,7 @@ export class OpenClawApp extends LitElement {
     workspace: DEFAULT_AGENT_WORKSPACE_PATH,
     emoji: "🤖",
     theme: "",
-    mode: "hybrid",
+    mode: "autonomous",
     model: "",
     skills: [],
     personality: "professional",

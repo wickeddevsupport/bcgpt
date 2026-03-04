@@ -193,7 +193,7 @@ export function renderDashboard(props: DashboardProps) {
     {
       id: "ops-runtime",
       title: "Workflows editor live",
-      detail: "The n8n editor is embedded and accessible in the Workflows tab.",
+      detail: "The workflow editor is embedded and accessible in the Workflows tab.",
       done: opsRuntimeStatus.tone === "ok",
       actionKind: "refresh",
       actionLabel: "Check runtime",
@@ -395,7 +395,7 @@ export function renderDashboard(props: DashboardProps) {
           ? html`<div class="callout warn" style="margin-top:12px;">
               <div><strong>Automated provisioning failed</strong></div>
               <div style="margin-top:6px;">${props.opsProvisioningError}</div>
-              <div style="margin-top:8px;">You can create an n8n Project manually and paste its API key below to scope workflows to this workspace.</div>
+              <div style="margin-top:8px;">You can set an Activepieces Project ID and API key below to scope workflows to this workspace.</div>
             </div>
             <div class="form-grid" style="margin-top:8px;">
               <label class="field">
@@ -710,3 +710,4 @@ export function renderDashboard(props: DashboardProps) {
     </section>
   `;
 }
+

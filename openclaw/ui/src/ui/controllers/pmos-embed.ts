@@ -4,7 +4,7 @@ export function buildOpsUiEmbedUrl(basePath: string, flowId?: string | null): st
   const base = normalizeBasePath(basePath ?? "");
   const trimmedFlowId = typeof flowId === "string" ? flowId.trim() : "";
   if (trimmedFlowId) {
-    return `${base}/ops-ui/workflow/${encodeURIComponent(trimmedFlowId)}`;
+    return `${base}/ops-ui/flows/${encodeURIComponent(trimmedFlowId)}`;
   }
-  return `${base}/ops-ui/`;
+  return `${base}/ops-ui/flows`;
 }

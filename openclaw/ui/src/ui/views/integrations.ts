@@ -132,7 +132,7 @@ export function renderIntegrations(props: IntegrationsProps) {
   const bcgptConnectHref = `${(props.bcgptUrl || "https://bcgpt.wickedlab.io").replace(/\/+$/, "")}/connect`;
 
   const projectIdShort = props.opsProjectId ? String(props.opsProjectId).slice(0, 8) : null;
-  const opsUiHref = props.opsUiHref ?? "/ops-ui/credentials";
+  const opsUiHref = props.opsUiHref ?? "/ops-ui/connections";
 
   return html`
     <section class="grid grid-cols-2" style="margin-bottom: 18px;">
@@ -163,7 +163,7 @@ export function renderIntegrations(props: IntegrationsProps) {
       <div class="card">
         <div class="card-title">Workflow Engine</div>
         <div class="card-sub">
-          Your private n8n runtime for automations in your workspace.
+          Your private workflow engine runtime for automations in your workspace.
         </div>
 
         <div class="stat-grid" style="margin-top: 16px;">
@@ -298,7 +298,7 @@ export function renderIntegrations(props: IntegrationsProps) {
 
       <div class="card">
         <div class="card-title">Workflow Credentials</div>
-        <div class="card-sub">Credentials currently available inside your n8n workspace.</div>
+        <div class="card-sub">Credentials currently available inside your workflow engine workspace.</div>
 
         <div class="row" style="margin-top: 16px; align-items: center; gap: 10px;">
           <button
@@ -309,7 +309,7 @@ export function renderIntegrations(props: IntegrationsProps) {
             ${props.n8nCredentialsLoading ? "Loading..." : "Refresh Credentials"}
           </button>
           <a href=${opsUiHref} target="_blank" rel="noreferrer" class="btn btn--secondary">
-            Manage in n8n
+            Manage in workflow engine
           </a>
         </div>
 
@@ -317,7 +317,7 @@ export function renderIntegrations(props: IntegrationsProps) {
           ? html`<div class="callout danger" style="margin-top: 12px; font-size: 12px;">${props.n8nCredentialsError}</div>`
           : nothing}
         ${!props.n8nCredentialsLoading && (props.n8nCredentials?.length ?? 0) === 0
-          ? html`<div class="muted" style="margin-top: 12px;">No credentials found in your n8n workspace.</div>`
+          ? html`<div class="muted" style="margin-top: 12px;">No credentials found in your workflow engine workspace.</div>`
           : nothing}
         ${props.n8nCredentials && props.n8nCredentials.length > 0
           ? html`
@@ -365,3 +365,4 @@ export function renderIntegrations(props: IntegrationsProps) {
     </section>
   `;
 }
+

@@ -1,355 +1,51 @@
 import type { OpenClawPluginApi } from "../../src/plugins/types.js";
-import { getOrCreateWorkspaceN8nCookie, getOwnerCookie } from "../../src/gateway/n8n-auth-bridge.js";
-import { resolvePmosUserByWorkspaceId } from "../../src/gateway/pmos-auth.js";
-import { readLocalN8nConfig, ensureWorkspaceN8nTag, workflowBelongsToWorkspace } from "../../src/gateway/pmos-ops-proxy.js";
+import { readWorkspaceConnectors } from "../../src/gateway/workspace-connectors.js";
+
+const DEFAULT_BASE_URL = "https://flow.wickedlab.io";
 
 type OpsConfig = {
   baseUrl?: string;
   apiKey?: string;
+  projectId?: string;
 };
 
-type PmosOpsConnectorConfig = {
-  url?: string;
-  apiKey?: string;
+type ResolvedOpsConfig = {
+  baseUrl: string;
+  apiKey: string;
+  projectId?: string;
 };
 
-function normalizeUrl(raw: string): string {
-  const trimmed = raw.trim();
+type MaybeObject = Record<string, unknown> | null;
+
+type OpsRequestParams = {
+  api: OpenClawPluginApi;
+  endpoint: string;
+  workspaceId?: string | null;
+  method?: string;
+  body?: unknown;
+};
+
+function normalizeUrl(raw: string | null | undefined): string {
+  const trimmed = String(raw ?? "").trim();
   if (!trimmed) {
-    return trimmed;
+    return DEFAULT_BASE_URL;
   }
   return trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
 }
 
-function readPmosOpsConnector(api: OpenClawPluginApi): PmosOpsConnectorConfig | null {
-  const cfg = api.config as unknown;
-  if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) {
-    return null;
+function readString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const pmos = (cfg as any).pmos;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const ops = pmos && typeof pmos === "object" ? (pmos as any).connectors?.ops : null;
-  if (!ops || typeof ops !== "object" || Array.isArray(ops)) {
-    return null;
-  }
-  return ops as PmosOpsConnectorConfig;
-}
-
-function resolveOpsConfig(api: OpenClawPluginApi): Required<OpsConfig> {
-  const pmos = readPmosOpsConnector(api);
-  const cfg = (api.pluginConfig ?? {}) as OpsConfig;
-  const baseUrl = normalizeUrl(
-    pmos?.url ??
-      cfg.baseUrl ??
-      process.env.OPS_URL ??
-      "https://ops.wickedlab.io",
-  );
-  const apiKey = (pmos?.apiKey ?? cfg.apiKey ?? process.env.OPS_API_KEY ?? "").trim();
-  return { baseUrl, apiKey };
-}
-
-type EmbeddedOpsContext = {
-  baseUrl: string;
-  headers: Record<string, string>;
-  workspaceId?: string | null;
-};
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function resolveEmbeddedOpsContext(workspaceId?: string | null): Promise<EmbeddedOpsContext | null> {
-  const local = readLocalN8nConfig();
-  if (!local) {
-    return null;
-  }
-
-  // Workspace-scoped n8n cookie when available: this keeps "one login" and ensures
-  // workflows are created/owned by the workspace user (not the global n8n owner).
-  if (workspaceId) {
-    const wsId = String(workspaceId).trim();
-    const pmosUser = await resolvePmosUserByWorkspaceId(wsId).catch(() => null);
-    let cookie: string | null = null;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      cookie = await getOrCreateWorkspaceN8nCookie({
-        workspaceId: wsId,
-        n8nBaseUrl: local.url,
-        pmosUser,
-      }).catch(() => null);
-      if (cookie) {
-        break;
-      }
-      if (attempt < 2) {
-        await delay(500 * (attempt + 1));
-      }
-    }
-    if (!cookie) {
-      throw new Error("Unable to authenticate embedded n8n for this workspace.");
-    }
-    return {
-      baseUrl: local.url.replace(/\/+$/, ""),
-      headers: { Cookie: cookie },
-      workspaceId: wsId,
-    };
-  }
-
-  const ownerCookie = await getOwnerCookie(local.url);
-  if (!ownerCookie) {
-    throw new Error(
-      "Embedded n8n is running but owner credentials are missing. Set N8N_OWNER_EMAIL and N8N_OWNER_PASSWORD.",
-    );
-  }
-  return {
-    baseUrl: local.url.replace(/\/+$/, ""),
-    headers: { Cookie: ownerCookie },
-    workspaceId,
-  };
-}
-
-function normalizeTagFilter(raw?: string | null): string[] {
-  if (!raw) return [];
-  return raw
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean);
-}
-
-function filterWorkflowListByWorkspace(
-  payload: unknown,
-  workspaceId: string | null | undefined,
-  tagFilter: string[] = [],
-): unknown {
-  if (!workspaceId) {
-    return payload;
-  }
-  const passTagFilter = (workflow: unknown): boolean => {
-    if (tagFilter.length === 0) return true;
-    const wf = workflow as Record<string, unknown> | null;
-    if (!wf) return false;
-    const tags = Array.isArray(wf.tags) ? wf.tags : [];
-    const names = tags
-      .map((t) => (t && typeof t === "object" ? String((t as Record<string, unknown>).name ?? "") : ""))
-      .filter(Boolean);
-    return tagFilter.some((t) => names.includes(t));
-  };
-
-  if (Array.isArray(payload)) {
-    return payload.filter((wf) => workflowBelongsToWorkspace(wf, workspaceId) && passTagFilter(wf));
-  }
-  if (payload && typeof payload === "object" && Array.isArray((payload as any).data)) {
-    const p = payload as Record<string, unknown>;
-    const data = (p.data as unknown[]).filter(
-      (wf) => workflowBelongsToWorkspace(wf, workspaceId) && passTagFilter(wf),
-    );
-    return { ...p, data };
-  }
-  return payload;
-}
-
-async function assertWorkspaceWorkflowAccess(params: {
-  baseUrl: string;
-  headers: Record<string, string>;
-  workspaceId?: string | null;
-  workflowId?: string | null;
-}) {
-  const { baseUrl, headers, workspaceId, workflowId } = params;
-  if (!workspaceId || !workflowId) return;
-  const res = await fetch(`${baseUrl}/rest/workflows/${workflowId}`, { headers });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Embedded n8n request failed (${res.status}): ${text}`.trim());
-  }
-  const data = await res.json().catch(() => null);
-  const wf = (data && typeof data === "object" && "data" in data ? (data as any).data : data) as unknown;
-  if (!workflowBelongsToWorkspace(wf, workspaceId)) {
-    throw new Error("Unauthorized: workflow does not belong to this workspace.");
-  }
-}
-
-async function opsRequestEmbedded(params: {
-  endpoint: string;
-  method?: string;
-  body?: unknown;
-  workspaceId?: string | null;
-  tagsFilter?: string | null;
-}) {
-  const ctx = await resolveEmbeddedOpsContext(params.workspaceId);
-  if (!ctx) {
-    return null;
-  }
-  const method = (params.method ?? "GET").toUpperCase();
-  const endpoint = params.endpoint.replace(/^\/+/, "");
-  const url = `${ctx.baseUrl}/rest/${endpoint}`;
-  const hasBody = params.body !== undefined;
-  const headers: Record<string, string> = { ...ctx.headers };
-  if (hasBody) {
-    headers["content-type"] = "application/json";
-  }
-
-  // Workspace isolation: enforce tag on create and verify tag on mutations.
-  if (endpoint === "workflows" && method === "POST") {
-    const body =
-      params.body && typeof params.body === "object" && !Array.isArray(params.body)
-        ? { ...(params.body as Record<string, unknown>) }
-        : {};
-
-    // n8n's internal `/rest/workflows` endpoint will insert `active` as provided. If it's
-    // missing/invalid it can become NULL and fail with SQLITE_CONSTRAINT on some setups.
-    if (typeof (body as any).active !== "boolean") {
-      (body as any).active = false;
-    }
-
-    if (params.workspaceId) {
-      const tagId = await ensureWorkspaceN8nTag(params.workspaceId, ctx.baseUrl, ctx.headers);
-      if (!tagId) {
-        throw new Error("Unable to ensure workspace tag for embedded n8n.");
-      }
-      const existingTags = Array.isArray((body as any).tags) ? (body as any).tags : [];
-      if (!existingTags.includes(tagId)) {
-        (body as any).tags = [...existingTags, tagId];
-      }
-    }
-
-    params.body = body;
-  }
-
-  if (params.workspaceId && endpoint.startsWith("workflows/") && method !== "GET") {
-    const workflowId = endpoint.split("/")[1];
-    await assertWorkspaceWorkflowAccess({
-      baseUrl: ctx.baseUrl,
-      headers: ctx.headers,
-      workspaceId: params.workspaceId,
-      workflowId,
-    });
-  }
-
-  const res = await fetch(url, {
-    method,
-    headers,
-    body: hasBody ? JSON.stringify(params.body) : undefined,
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Embedded n8n ${res.status} ${res.statusText}: ${text}`.trim());
-  }
-
-  const text = await res.text().catch(() => "");
-  const parsed = text ? (() => { try { return JSON.parse(text); } catch { return { raw: text }; } })() : { ok: true };
-
-  if (endpoint.startsWith("workflows") && method === "GET") {
-    const tagFilter = normalizeTagFilter(params.tagsFilter ?? null);
-    return filterWorkflowListByWorkspace(parsed, params.workspaceId, tagFilter);
-  }
-  return parsed;
-}
-
-async function opsRequest(params: {
-  api: OpenClawPluginApi;
-  endpoint: string;
-  method?: string;
-  body?: unknown;
-  // optional: prefer workspace-scoped connectors when provided
-  workspaceId?: string | null;
-  tagsFilter?: string | null;
-}) {
-  const embedded = await opsRequestEmbedded({
-    endpoint: params.endpoint,
-    method: params.method,
-    body: params.body,
-    workspaceId: params.workspaceId,
-    tagsFilter: params.tagsFilter ?? null,
-  });
-  if (embedded) {
-    return embedded;
-  }
-
-  // Workspace override (if provided) takes precedence.
-  let baseUrl: string;
-  let apiKey: string;
-
-  if (params.workspaceId) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { readWorkspaceConnectors } = await import("../../src/gateway/workspace-connectors.js");
-      const wc = await readWorkspaceConnectors(String(params.workspaceId));
-      if (wc?.ops?.apiKey) {
-        baseUrl = (wc.ops.url ?? "").trim();
-        apiKey = (wc.ops.apiKey ?? "").trim();
-      }
-    } catch {
-      // Fall through to global resolution if workspace read fails
-    }
-  }
-
-  if (!apiKey || !baseUrl) {
-    const resolved = resolveOpsConfig(params.api);
-    baseUrl = baseUrl || resolved.baseUrl;
-    apiKey = apiKey || resolved.apiKey;
-  }
-
-  if (!apiKey) {
-    throw new Error(
-      "Wicked Ops API key is not configured. Set it in PMOS -> Integrations, or set env OPS_API_KEY.",
-    );
-  }
-  if (!baseUrl) {
-    throw new Error(
-      "Wicked Ops URL is not configured. Set it in PMOS -> Integrations, or set env OPS_URL.",
-    );
-  }
-
-  const endpoint = params.endpoint.replace(/^\/+/, "");
-  const url = `${baseUrl}/api/v1/${endpoint}`;
-  const method = (params.method ?? "GET").toUpperCase();
-  const hasBody = params.body !== undefined;
-  const headers: Record<string, string> = {
-    "X-N8N-API-KEY": apiKey,
-  };
-  if (hasBody) {
-    headers["content-type"] = "application/json";
-  }
-
-  const res = await fetch(url, {
-    method,
-    headers,
-    body: hasBody ? JSON.stringify(params.body) : undefined,
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Wicked Ops API ${res.status} ${res.statusText}: ${text}`.trim());
-  }
-
-  const text = await res.text().catch(() => "");
-  if (!text) {
-    return { ok: true };
-  }
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { raw: text };
-  }
-}
-
-function jsonToolResult(payload: unknown) {
-  return {
-    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
-    details: payload,
-  };
+  const trimmed = value.trim();
+  return trimmed || undefined;
 }
 
 function readOptionalString(params: unknown, key: string): string | undefined {
   if (!params || typeof params !== "object" || Array.isArray(params)) {
     return undefined;
   }
-  const value = (params as Record<string, unknown>)[key];
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
+  return readString((params as Record<string, unknown>)[key]);
 }
 
 function readOptionalNumber(params: unknown, key: string): number | undefined {
@@ -361,11 +57,7 @@ function readOptionalNumber(params: unknown, key: string): number | undefined {
     return value;
   }
   if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      return undefined;
-    }
-    const parsed = Number.parseFloat(trimmed);
+    const parsed = Number.parseFloat(value.trim());
     return Number.isFinite(parsed) ? parsed : undefined;
   }
   return undefined;
@@ -375,139 +67,427 @@ function resolveToolParams(toolCallIdOrParams: unknown, maybeParams?: unknown): 
   return maybeParams === undefined ? toolCallIdOrParams : maybeParams;
 }
 
+function toObject(value: unknown): MaybeObject {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function jsonToolResult(payload: unknown) {
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
+    details: payload,
+  };
+}
+
+async function resolveOpsConfig(
+  api: OpenClawPluginApi,
+  workspaceId?: string | null,
+): Promise<ResolvedOpsConfig> {
+  const pluginCfg = (api.pluginConfig ?? {}) as OpsConfig;
+  const rootCfg = api.config as unknown;
+
+  let workspaceOps: Record<string, unknown> | null = null;
+  if (workspaceId) {
+    const wc = await readWorkspaceConnectors(String(workspaceId)).catch(() => null);
+    const ops = wc?.ops;
+    if (ops && typeof ops === "object" && !Array.isArray(ops)) {
+      workspaceOps = ops as Record<string, unknown>;
+    }
+  }
+
+  const pmosOps = (() => {
+    if (!rootCfg || typeof rootCfg !== "object" || Array.isArray(rootCfg)) {
+      return null;
+    }
+    const pmos = (rootCfg as Record<string, unknown>).pmos;
+    if (!pmos || typeof pmos !== "object" || Array.isArray(pmos)) {
+      return null;
+    }
+    const connectors = (pmos as Record<string, unknown>).connectors;
+    if (!connectors || typeof connectors !== "object" || Array.isArray(connectors)) {
+      return null;
+    }
+    const ops = (connectors as Record<string, unknown>).ops;
+    return toObject(ops);
+  })();
+
+  const baseUrl = normalizeUrl(
+    readString(workspaceOps?.url) ??
+      readString(pmosOps?.url) ??
+      readString(pluginCfg.baseUrl) ??
+      process.env.ACTIVEPIECES_URL ??
+      process.env.FLOW_URL ??
+      process.env.OPS_URL ??
+      DEFAULT_BASE_URL,
+  );
+
+  const apiKey = (
+    readString(workspaceOps?.apiKey) ??
+    readString(pmosOps?.apiKey) ??
+    readString(pluginCfg.apiKey) ??
+    process.env.ACTIVEPIECES_API_KEY ??
+    process.env.OPS_API_KEY ??
+    ""
+  ).trim();
+
+  const projectId =
+    readString(workspaceOps?.projectId) ??
+    readString(pmosOps?.projectId) ??
+    readString(pluginCfg.projectId) ??
+    readString(process.env.ACTIVEPIECES_PROJECT_ID);
+
+  if (!apiKey) {
+    throw new Error(
+      "Workflow engine API key is not configured. Set PMOS ops.apiKey or ACTIVEPIECES_API_KEY.",
+    );
+  }
+
+  return {
+    baseUrl,
+    apiKey,
+    projectId: projectId || undefined,
+  };
+}
+
+async function opsRequest(params: OpsRequestParams): Promise<unknown> {
+  const { baseUrl, apiKey } = await resolveOpsConfig(params.api, params.workspaceId ?? null);
+  const endpoint = params.endpoint.replace(/^\/+/, "");
+  const url = `${baseUrl}/api/v1/${endpoint}`;
+  const method = (params.method ?? "GET").toUpperCase();
+  const hasBody = params.body !== undefined;
+
+  const headers: Record<string, string> = {
+    authorization: `Bearer ${apiKey}`,
+    accept: "application/json",
+  };
+  if (hasBody) {
+    headers["content-type"] = "application/json";
+  }
+
+  const res = await fetch(url, {
+    method,
+    headers,
+    body: hasBody ? JSON.stringify(params.body) : undefined,
+  });
+
+  const text = await res.text().catch(() => "");
+  const parsed = (() => {
+    if (!text) return null;
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      return text;
+    }
+  })();
+
+  if (!res.ok) {
+    const detail = typeof parsed === "string" ? parsed : text;
+    throw new Error(`Workflow engine API ${res.status} ${res.statusText}: ${detail}`.trim());
+  }
+
+  return parsed ?? { ok: true };
+}
+
+async function resolveProjectIdOrThrow(api: OpenClawPluginApi, workspaceId?: string | null): Promise<string> {
+  const cfg = await resolveOpsConfig(api, workspaceId ?? null);
+  if (cfg.projectId) {
+    return cfg.projectId;
+  }
+
+  const projectsPayload = await opsRequest({ api, workspaceId, endpoint: "projects" });
+  const projectsObj = toObject(projectsPayload);
+  const projectsData = Array.isArray(projectsObj?.data)
+    ? projectsObj?.data
+    : Array.isArray(projectsPayload)
+      ? projectsPayload
+      : [];
+
+  const firstProject = projectsData.find(
+    (entry) => entry && typeof entry === "object" && !Array.isArray(entry),
+  ) as Record<string, unknown> | undefined;
+  const projectId = readString(firstProject?.id);
+  if (!projectId) {
+    throw new Error(
+      "No projectId configured for workflow engine. Set PMOS ops.projectId in Integrations.",
+    );
+  }
+  return projectId;
+}
+
+function toWorkflowSummary(entry: Record<string, unknown>): Record<string, unknown> {
+  const id = readString(entry.id) ?? "";
+  const displayName = readString(entry.displayName) ?? readString(entry.name) ?? id;
+  const status = readString(entry.status) ?? "DISABLED";
+  return {
+    id,
+    name: displayName,
+    displayName,
+    active: status.toUpperCase() === "ENABLED",
+    status,
+    createdAt: readString(entry.created) ?? readString(entry.createdAt),
+    updatedAt: readString(entry.updated) ?? readString(entry.updatedAt),
+    projectId: readString(entry.projectId),
+  };
+}
+
+function getCompatNodes(flow: Record<string, unknown>): unknown[] {
+  const metadata = toObject(flow.metadata);
+  const compat = toObject(metadata?.n8nCompat);
+  return Array.isArray(compat?.nodes) ? compat.nodes : [];
+}
+
+function getCompatConnections(flow: Record<string, unknown>): Record<string, unknown> {
+  const metadata = toObject(flow.metadata);
+  const compat = toObject(metadata?.n8nCompat);
+  const value = toObject(compat?.connections);
+  return value ?? {};
+}
+
+function toWorkflowDetails(entry: Record<string, unknown>): Record<string, unknown> {
+  const base = toWorkflowSummary(entry);
+  return {
+    ...base,
+    nodes: getCompatNodes(entry),
+    connections: getCompatConnections(entry),
+    settings: toObject(toObject(toObject(entry.metadata)?.n8nCompat)?.settings) ?? {},
+    raw: entry,
+  };
+}
+
+function toExecutionSummary(entry: Record<string, unknown>): Record<string, unknown> {
+  const id = readString(entry.id) ?? "";
+  const statusRaw = readString(entry.status) ?? "RUNNING";
+  const lowered = statusRaw.toLowerCase();
+  const status = lowered.includes("success")
+    ? "success"
+    : lowered.includes("fail") || lowered.includes("error")
+      ? "failed"
+      : lowered.includes("cancel")
+        ? "canceled"
+        : lowered.includes("wait")
+          ? "waiting"
+          : "running";
+  const workflowId = readString(entry.flowId) ?? readString(toObject(entry.flowVersion)?.flowId);
+  return {
+    id,
+    workflowId,
+    flowId: workflowId,
+    status,
+    mode: readString(entry.environment) ?? "manual",
+    finished: status !== "running" && status !== "waiting",
+    startedAt: readString(entry.created) ?? readString(entry.createdAt),
+    stoppedAt: readString(entry.finishTime) ?? readString(entry.updatedAt),
+    raw: entry,
+  };
+}
+
+async function setWorkflowStatus(params: {
+  api: OpenClawPluginApi;
+  workspaceId?: string | null;
+  workflowId: string;
+  enabled: boolean;
+}): Promise<unknown> {
+  return opsRequest({
+    api: params.api,
+    workspaceId: params.workspaceId,
+    endpoint: `flows/${encodeURIComponent(params.workflowId)}`,
+    method: "POST",
+    body: {
+      type: "CHANGE_STATUS",
+      request: { status: params.enabled ? "ENABLED" : "DISABLED" },
+    },
+  });
+}
+
+async function updateCompatMetadata(params: {
+  api: OpenClawPluginApi;
+  workspaceId?: string | null;
+  workflowId: string;
+  metadataPatch: Record<string, unknown>;
+}): Promise<unknown> {
+  const current = await opsRequest({
+    api: params.api,
+    workspaceId: params.workspaceId,
+    endpoint: `flows/${encodeURIComponent(params.workflowId)}`,
+    method: "GET",
+  });
+  const currentObj = toObject(current) ?? {};
+  const currentMetadata = toObject(currentObj.metadata) ?? {};
+  const merged = {
+    ...currentMetadata,
+    ...params.metadataPatch,
+  };
+
+  return opsRequest({
+    api: params.api,
+    workspaceId: params.workspaceId,
+    endpoint: `flows/${encodeURIComponent(params.workflowId)}`,
+    method: "POST",
+    body: {
+      type: "UPDATE_METADATA",
+      request: { metadata: merged },
+    },
+  });
+}
+
 export default {
   id: "wicked-ops",
-  name: "Wicked Ops (n8n)",
+  name: "Wicked Ops (Activepieces)",
   register(api: OpenClawPluginApi) {
-    api.logger.info("[wicked-ops] registering tools");
+    api.logger.info("[wicked-ops] registering Activepieces-backed tools");
 
-    // ========================================
-    //         WORKFLOW MANAGEMENT
-    // ========================================
+    const registerTool = (tool: unknown, opts?: Parameters<OpenClawPluginApi['registerTool']>[1]) => {
+      api.registerTool(tool as Parameters<OpenClawPluginApi["registerTool"]>[0], opts);
+    };
 
-    api.registerTool({
+    registerTool({
       name: "ops_workflows_list",
-      description: "List all n8n workflows in Wicked Ops.",
+      description: "List workflows in the workspace workflow engine.",
       parameters: {
         type: "object",
         additionalProperties: false,
         properties: {
-          active: { type: "boolean", description: "Filter by active status" },
-          tags: { type: "string", description: "Comma-separated tag names to filter by" },
-          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
+          active: { type: "boolean" },
+          tags: { type: "string" },
+          limit: { type: "number" },
+          cursor: { type: "string" },
+          name: { type: "string" },
+          projectId: { type: "string" },
+          workspaceId: { type: "string" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
         const params = resolveToolParams(toolCallIdOrParams, maybeParams);
-        const active = params && typeof params === "object" && !Array.isArray(params)
-          ? ((params as Record<string, unknown>).active as boolean | undefined)
-          : undefined;
-        const tags = readOptionalString(params, "tags");
         const workspaceId = readOptionalString(params, "workspaceId");
+        const projectId = readOptionalString(params, "projectId") ?? (await resolveProjectIdOrThrow(api, workspaceId));
+        const limit = readOptionalNumber(params, "limit");
+        const cursor = readOptionalString(params, "cursor");
+        const name = readOptionalString(params, "name");
+        const active =
+          params && typeof params === "object" && !Array.isArray(params)
+            ? ((params as Record<string, unknown>).active as boolean | undefined)
+            : undefined;
 
         const query = new URLSearchParams();
-        if (typeof active === "boolean") query.set("active", active ? "true" : "false");
-        if (tags) query.set("tags", tags);
+        query.set("projectId", projectId);
+        if (cursor) query.set("cursor", cursor);
+        if (name) query.set("name", name);
+        if (limit && limit > 0) query.set("limit", String(Math.trunc(limit)));
 
-        const endpoint = query.toString() ? `workflows?${query.toString()}` : "workflows";
-        const data = await opsRequest({ api, endpoint, workspaceId, tagsFilter: tags });
-        return jsonToolResult(data);
+        const payload = await opsRequest({
+          api,
+          workspaceId,
+          endpoint: `flows?${query.toString()}`,
+        });
+
+        const obj = toObject(payload);
+        const rows = Array.isArray(obj?.data) ? obj.data : [];
+        const mapped = rows
+          .filter((row) => row && typeof row === "object" && !Array.isArray(row))
+          .map((row) => toWorkflowSummary(row as Record<string, unknown>))
+          .filter((row) => (typeof active === "boolean" ? Boolean(row.active) === active : true));
+
+        return jsonToolResult({
+          data: mapped,
+          next: readString(obj?.next),
+          previous: readString(obj?.previous),
+        });
       },
     });
 
-    api.registerTool({
+    registerTool({
       name: "ops_workflow_get",
-      description: "Get details of a specific n8n workflow by ID.",
+      description: "Get details of a workflow by ID.",
       parameters: {
         type: "object",
         additionalProperties: false,
         required: ["workflowId"],
         properties: {
-          workflowId: { type: "string", description: "The workflow ID" },
-          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
+          workflowId: { type: "string" },
+          workspaceId: { type: "string" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
         const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const workflowId = readOptionalString(params, "workflowId");
         const workspaceId = readOptionalString(params, "workspaceId");
-        if (!workflowId) {
-          throw new Error("workflowId is required");
-        }
-        const data = await opsRequest({ api, endpoint: `workflows/${workflowId}`, workspaceId });
-        return jsonToolResult(data);
+        if (!workflowId) throw new Error("workflowId is required");
+
+        const payload = await opsRequest({
+          api,
+          workspaceId,
+          endpoint: `flows/${encodeURIComponent(workflowId)}`,
+        });
+
+        return jsonToolResult(toWorkflowDetails(toObject(payload) ?? {}));
       },
     });
 
-    api.registerTool({
+    registerTool({
       name: "ops_workflow_create",
-      description: "Create a new n8n workflow.",
+      description: "Create a new workflow.",
       parameters: {
         type: "object",
         additionalProperties: false,
         required: ["name"],
         properties: {
-          name: { type: "string", description: "Workflow name" },
-          nodes: { type: "array", description: "Array of workflow nodes (JSON)" },
-          connections: { type: "object", description: "Workflow connections object (JSON)" },
-          settings: { type: "object", description: "Workflow settings (JSON)" },
-          tags: { type: "array", description: "Array of tag names" },
-          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
+          name: { type: "string" },
+          nodes: { type: "array" },
+          connections: { type: "object" },
+          settings: { type: "object" },
+          tags: { type: "array" },
+          projectId: { type: "string" },
+          workspaceId: { type: "string" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
         const params = resolveToolParams(toolCallIdOrParams, maybeParams);
-        if (!params || typeof params !== "object" || Array.isArray(params)) {
-          throw new Error("name is required");
-        }
         const name = readOptionalString(params, "name");
         const workspaceId = readOptionalString(params, "workspaceId");
-        if (!name) {
-          throw new Error("name is required");
-        }
+        const projectId = readOptionalString(params, "projectId") ?? (await resolveProjectIdOrThrow(api, workspaceId));
+        if (!name) throw new Error("name is required");
 
-        // n8n's API validates request bodies strictly. Ensure required fields exist and
-        // never forward tool-only fields (workspaceId) to n8n.
-        const body: Record<string, unknown> = { ...(params as Record<string, unknown>), name };
-        delete body.workspaceId;
-
-        if (!Array.isArray(body.nodes)) {
-          body.nodes = [
-            {
-              name: "Start",
-              type: "n8n-nodes-base.start",
-              typeVersion: 1,
-              position: [250, 300],
-              parameters: {},
-            },
-          ];
-        }
-        if (!body.connections || typeof body.connections !== "object" || Array.isArray(body.connections)) {
-          body.connections = {};
-        }
-        if (!body.settings || typeof body.settings !== "object" || Array.isArray(body.settings)) {
-          body.settings = {};
-        }
-        // n8n marks `active` as read-only on workflow creation; activation happens via a separate endpoint.
-        delete body.active;
-
-        const data = await opsRequest({
+        const created = await opsRequest({
           api,
-          endpoint: "workflows",
-          method: "POST",
-          body,
           workspaceId,
+          endpoint: "flows",
+          method: "POST",
+          body: {
+            displayName: name,
+            projectId,
+          },
         });
-        return jsonToolResult(data);
+        const flow = toObject(created);
+        const flowId = readString(flow?.id);
+
+        if (flowId && params && typeof params === "object" && !Array.isArray(params)) {
+          const rawParams = params as Record<string, unknown>;
+          if (Array.isArray(rawParams.nodes) || toObject(rawParams.connections) || toObject(rawParams.settings)) {
+            await updateCompatMetadata({
+              api,
+              workspaceId,
+              workflowId: flowId,
+              metadataPatch: {
+                n8nCompat: {
+                  nodes: Array.isArray(rawParams.nodes) ? rawParams.nodes : [],
+                  connections: toObject(rawParams.connections) ?? {},
+                  settings: toObject(rawParams.settings) ?? {},
+                  tags: Array.isArray(rawParams.tags) ? rawParams.tags : [],
+                },
+              },
+            });
+          }
+        }
+
+        return jsonToolResult(toWorkflowDetails(flow ?? {}));
       },
     });
 
-    // Simple natural-language → workflow helper (pragmatic starter):
-    // creates a minimal workflow skeleton from a short description so chat can
-    // quickly create a workflow and the user can open it in the editor.
-    api.registerTool({
+    registerTool({
       name: "ops_workflow_generate",
-      description: "Generate a simple n8n workflow from a short natural-language description.",
+      description: "Create a starter workflow from a short description.",
       parameters: {
         type: "object",
         additionalProperties: false,
@@ -515,308 +495,406 @@ export default {
         properties: {
           name: { type: "string" },
           description: { type: "string" },
-          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
+          projectId: { type: "string" },
+          workspaceId: { type: "string" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
-        const params = resolveToolParams(toolCallIdOrParams, maybeParams) as Record<string, any>;
+        const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const name = readOptionalString(params, "name");
-        const desc = readOptionalString(params, "description");
+        const description = readOptionalString(params, "description");
         const workspaceId = readOptionalString(params, "workspaceId");
-        if (!name || !desc) throw new Error("name and description are required");
+        const projectId = readOptionalString(params, "projectId") ?? (await resolveProjectIdOrThrow(api, workspaceId));
+        if (!name || !description) throw new Error("name and description are required");
 
-        // Minimal n8n workflow skeleton: Start node -> Function node that contains the description
-        const workflowBody = {
-          name,
-          nodes: [
-            {
-              name: "Start",
-              type: "n8n-nodes-base.start",
-              typeVersion: 1,
-              position: [250, 300],
-              parameters: {},
-            },
-            {
-              name: "Describe",
-              type: "n8n-nodes-base.function",
-              typeVersion: 1,
-              position: [450, 300],
-              parameters: {
-                functionCode: `// Natural language description:\n// ${desc.replace(/`/g, "\\`")}\nreturn [{ json: { description: ${JSON.stringify(
-                desc,
-              )} } }];`,
-              },
-            },
-          ],
-          connections: {},
-        } as unknown as Record<string, unknown>;
-
-        const data = await opsRequest({ api, endpoint: "workflows", method: "POST", body: workflowBody, workspaceId });
-        return jsonToolResult(data);
+        const created = await opsRequest({
+          api,
+          workspaceId,
+          endpoint: "flows",
+          method: "POST",
+          body: { displayName: name, projectId },
+        });
+        const flow = toObject(created);
+        const flowId = readString(flow?.id);
+        if (flowId) {
+          await updateCompatMetadata({
+            api,
+            workspaceId,
+            workflowId: flowId,
+            metadataPatch: { description },
+          });
+        }
+        return jsonToolResult(toWorkflowDetails(flow ?? {}));
       },
     });
 
-    api.registerTool({
+    registerTool({
       name: "ops_workflow_update",
-      description: "Update an existing n8n workflow.",
+      description: "Update workflow properties.",
       parameters: {
         type: "object",
         additionalProperties: false,
         required: ["workflowId"],
         properties: {
-          workflowId: { type: "string", description: "The workflow ID" },
-          name: { type: "string", description: "Workflow name" },
-          nodes: { type: "array", description: "Array of workflow nodes (JSON)" },
-          connections: { type: "object", description: "Workflow connections object (JSON)" },
-          settings: { type: "object", description: "Workflow settings (JSON)" },
-          tags: { type: "array", description: "Array of tag names" },
-          active: { type: "boolean", description: "Whether workflow is active" },
-          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
+          workflowId: { type: "string" },
+          name: { type: "string" },
+          nodes: { type: "array" },
+          connections: { type: "object" },
+          settings: { type: "object" },
+          tags: { type: "array" },
+          active: { type: "boolean" },
+          workspaceId: { type: "string" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
-        const params = resolveToolParams(toolCallIdOrParams, maybeParams) as Record<string, any>;
+        const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const workflowId = readOptionalString(params, "workflowId");
         const workspaceId = readOptionalString(params, "workspaceId");
-        if (!workflowId) {
-          throw new Error("workflowId is required");
+        if (!workflowId) throw new Error("workflowId is required");
+
+        if (params && typeof params === "object" && !Array.isArray(params)) {
+          const obj = params as Record<string, unknown>;
+          const name = readString(obj.name);
+          if (name) {
+            await opsRequest({
+              api,
+              workspaceId,
+              endpoint: `flows/${encodeURIComponent(workflowId)}`,
+              method: "POST",
+              body: { type: "CHANGE_NAME", request: { displayName: name } },
+            });
+          }
+          if (typeof obj.active === "boolean") {
+            await setWorkflowStatus({
+              api,
+              workspaceId,
+              workflowId,
+              enabled: obj.active,
+            });
+          }
+          if (Array.isArray(obj.nodes) || toObject(obj.connections) || toObject(obj.settings) || Array.isArray(obj.tags)) {
+            await updateCompatMetadata({
+              api,
+              workspaceId,
+              workflowId,
+              metadataPatch: {
+                n8nCompat: {
+                  nodes: Array.isArray(obj.nodes) ? obj.nodes : [],
+                  connections: toObject(obj.connections) ?? {},
+                  settings: toObject(obj.settings) ?? {},
+                  tags: Array.isArray(obj.tags) ? obj.tags : [],
+                },
+              },
+            });
+          }
         }
-        const { workflowId: _, ...updateBody } = params;
-        const data = await opsRequest({
+
+        const payload = await opsRequest({
           api,
-          endpoint: `workflows/${workflowId}`,
-          method: "PATCH",
-          body: updateBody,
           workspaceId,
+          endpoint: `flows/${encodeURIComponent(workflowId)}`,
         });
-        return jsonToolResult(data);
+        return jsonToolResult(toWorkflowDetails(toObject(payload) ?? {}));
       },
     });
 
-    api.registerTool({
+    registerTool({
       name: "ops_workflow_delete",
-      description: "Delete an n8n workflow by ID.",
+      description: "Delete a workflow.",
       parameters: {
         type: "object",
         additionalProperties: false,
         required: ["workflowId"],
         properties: {
-          workflowId: { type: "string", description: "The workflow ID to delete" },
-          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
+          workflowId: { type: "string" },
+          workspaceId: { type: "string" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
         const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const workflowId = readOptionalString(params, "workflowId");
         const workspaceId = readOptionalString(params, "workspaceId");
-        if (!workflowId) {
-          throw new Error("workflowId is required");
-        }
-        const data = await opsRequest({
+        if (!workflowId) throw new Error("workflowId is required");
+
+        const payload = await opsRequest({
           api,
-          endpoint: `workflows/${workflowId}`,
+          workspaceId,
+          endpoint: `flows/${encodeURIComponent(workflowId)}`,
           method: "DELETE",
-          workspaceId,
         });
-        return jsonToolResult(data);
+        return jsonToolResult(payload);
       },
     });
 
-    api.registerTool({
+    registerTool({
       name: "ops_workflow_activate",
-      description: "Activate an n8n workflow to start running.",
+      description: "Activate a workflow.",
       parameters: {
         type: "object",
         additionalProperties: false,
         required: ["workflowId"],
         properties: {
-          workflowId: { type: "string", description: "The workflow ID to activate" },
-          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
+          workflowId: { type: "string" },
+          workspaceId: { type: "string" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
         const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const workflowId = readOptionalString(params, "workflowId");
         const workspaceId = readOptionalString(params, "workspaceId");
-        if (!workflowId) {
-          throw new Error("workflowId is required");
-        }
-        const data = await opsRequest({
-          api,
-          endpoint: `workflows/${workflowId}`,
-          method: "PATCH",
-          body: { active: true },
-          workspaceId,
-        });
-        return jsonToolResult(data);
+        if (!workflowId) throw new Error("workflowId is required");
+        const payload = await setWorkflowStatus({ api, workspaceId, workflowId, enabled: true });
+        return jsonToolResult(payload);
       },
     });
 
-    api.registerTool({
+    registerTool({
       name: "ops_workflow_deactivate",
-      description: "Deactivate an n8n workflow to stop it from running.",
+      description: "Deactivate a workflow.",
       parameters: {
         type: "object",
         additionalProperties: false,
         required: ["workflowId"],
         properties: {
-          workflowId: { type: "string", description: "The workflow ID to deactivate" },
-          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
+          workflowId: { type: "string" },
+          workspaceId: { type: "string" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
         const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const workflowId = readOptionalString(params, "workflowId");
         const workspaceId = readOptionalString(params, "workspaceId");
-        if (!workflowId) {
-          throw new Error("workflowId is required");
-        }
-        const data = await opsRequest({
-          api,
-          endpoint: `workflows/${workflowId}`,
-          method: "PATCH",
-          body: { active: false },
-          workspaceId,
-        });
-        return jsonToolResult(data);
+        if (!workflowId) throw new Error("workflowId is required");
+        const payload = await setWorkflowStatus({ api, workspaceId, workflowId, enabled: false });
+        return jsonToolResult(payload);
       },
     });
 
-    // ========================================
-    //         WORKFLOW EXECUTIONS
-    // ========================================
-
-    api.registerTool({
+    registerTool({
       name: "ops_executions_list",
-      description: "List workflow executions (runs). Optional: filter by workflow ID.",
+      description: "List workflow runs.",
       parameters: {
         type: "object",
         additionalProperties: false,
         properties: {
-          workflowId: { type: "string", description: "Filter by workflow ID" },
-          status: { type: "string", description: "Filter by status: success, error, waiting" },
-          limit: { type: "number", description: "Maximum number of results" },
-          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
+          workflowId: { type: "string" },
+          status: { type: "string" },
+          limit: { type: "number" },
+          cursor: { type: "string" },
+          projectId: { type: "string" },
+          workspaceId: { type: "string" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
         const params = resolveToolParams(toolCallIdOrParams, maybeParams);
+        const workspaceId = readOptionalString(params, "workspaceId");
+        const projectId = readOptionalString(params, "projectId") ?? (await resolveProjectIdOrThrow(api, workspaceId));
         const workflowId = readOptionalString(params, "workflowId");
         const status = readOptionalString(params, "status");
         const limit = readOptionalNumber(params, "limit");
-        const workspaceId = readOptionalString(params, "workspaceId");
+        const cursor = readOptionalString(params, "cursor");
 
         const query = new URLSearchParams();
-        if (workflowId) query.set("workflowId", workflowId);
+        query.set("projectId", projectId);
+        if (workflowId) query.set("flowId", workflowId);
         if (status) query.set("status", status);
+        if (cursor) query.set("cursor", cursor);
         if (limit && limit > 0) query.set("limit", String(Math.trunc(limit)));
 
-        const endpoint = query.toString() ? `executions?${query.toString()}` : "executions";
-        const data = await opsRequest({ api, endpoint, workspaceId });
-        return jsonToolResult(data);
+        const payload = await opsRequest({
+          api,
+          workspaceId,
+          endpoint: `flow-runs?${query.toString()}`,
+        });
+        const obj = toObject(payload);
+        const rows = Array.isArray(obj?.data) ? obj.data : [];
+        const mapped = rows
+          .filter((row) => row && typeof row === "object" && !Array.isArray(row))
+          .map((row) => toExecutionSummary(row as Record<string, unknown>));
+
+        return jsonToolResult({
+          data: mapped,
+          next: readString(obj?.next),
+          previous: readString(obj?.previous),
+        });
       },
     });
 
-    api.registerTool({
+    registerTool({
       name: "ops_execution_get",
-      description: "Get details of a specific workflow execution by ID.",
+      description: "Get details of a workflow run.",
       parameters: {
         type: "object",
         additionalProperties: false,
         required: ["executionId"],
         properties: {
-          executionId: { type: "string", description: "The execution ID" },
-          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
+          executionId: { type: "string" },
+          workspaceId: { type: "string" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
         const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const executionId = readOptionalString(params, "executionId");
         const workspaceId = readOptionalString(params, "workspaceId");
-        if (!executionId) {
-          throw new Error("executionId is required");
-        }
-        const data = await opsRequest({ api, endpoint: `executions/${executionId}`, workspaceId });
-        return jsonToolResult(data);
+        if (!executionId) throw new Error("executionId is required");
+
+        const payload = await opsRequest({
+          api,
+          workspaceId,
+          endpoint: `flow-runs/${encodeURIComponent(executionId)}`,
+        });
+        return jsonToolResult(toExecutionSummary(toObject(payload) ?? {}));
       },
     });
 
-    api.registerTool({
+    registerTool({
       name: "ops_workflow_execute",
-      description: "Manually trigger execution of an n8n workflow.",
+      description: "Trigger a webhook workflow.",
       parameters: {
         type: "object",
         additionalProperties: false,
         required: ["workflowId"],
         properties: {
-          workflowId: { type: "string", description: "The workflow ID to execute" },
-          data: { type: "object", description: "Input data to pass to the workflow (JSON)" },
-          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
+          workflowId: { type: "string" },
+          data: { type: "object" },
+          workspaceId: { type: "string" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
-        const params = resolveToolParams(toolCallIdOrParams, maybeParams) as Record<string, any>;
+        const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const workflowId = readOptionalString(params, "workflowId");
         const workspaceId = readOptionalString(params, "workspaceId");
-        if (!workflowId) {
-          throw new Error("workflowId is required");
-        }
-        const data = await opsRequest({
+        if (!workflowId) throw new Error("workflowId is required");
+
+        const input =
+          params && typeof params === "object" && !Array.isArray(params)
+            ? (toObject((params as Record<string, unknown>).data) ?? {})
+            : {};
+
+        const draft = Boolean(input.__draft);
+        const sync = Boolean(input.__sync);
+        delete input.__draft;
+        delete input.__sync;
+
+        const suffix = draft && sync ? "draft/sync" : draft ? "draft" : sync ? "sync" : "";
+        const endpoint = suffix
+          ? `webhooks/${encodeURIComponent(workflowId)}/${suffix}`
+          : `webhooks/${encodeURIComponent(workflowId)}`;
+
+        const payload = await opsRequest({
           api,
-          endpoint: `workflows/${workflowId}/execute`,
-          method: "POST",
-          body: params.data || {},
           workspaceId,
+          endpoint,
+          method: "POST",
+          body: input,
         });
-        return jsonToolResult(data);
+
+        return jsonToolResult(payload);
       },
     });
 
-    // ========================================
-    //         CREDENTIALS
-    // ========================================
-
-    api.registerTool({
+    registerTool({
       name: "ops_credentials_list",
-      description: "List stored credentials in n8n.",
+      description: "List workflow-engine credentials (app connections).",
       parameters: {
         type: "object",
         additionalProperties: false,
         properties: {
-          type: { type: "string", description: "Filter by credential type" },
-          workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" },
+          type: { type: "string" },
+          pieceName: { type: "string" },
+          limit: { type: "number" },
+          cursor: { type: "string" },
+          projectId: { type: "string" },
+          workspaceId: { type: "string" },
         },
       },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
         const params = resolveToolParams(toolCallIdOrParams, maybeParams);
-        const type = readOptionalString(params, "type");
         const workspaceId = readOptionalString(params, "workspaceId");
+        const projectId = readOptionalString(params, "projectId") ?? (await resolveProjectIdOrThrow(api, workspaceId));
+        const typeFilter = readOptionalString(params, "type");
+        const pieceName = readOptionalString(params, "pieceName");
+        const limit = readOptionalNumber(params, "limit");
+        const cursor = readOptionalString(params, "cursor");
 
         const query = new URLSearchParams();
-        if (type) query.set("type", type);
+        query.set("projectId", projectId);
+        if (pieceName) query.set("pieceName", pieceName);
+        if (cursor) query.set("cursor", cursor);
+        if (limit && limit > 0) query.set("limit", String(Math.trunc(limit)));
 
-        const endpoint = query.toString() ? `credentials?${query.toString()}` : "credentials";
-        const data = await opsRequest({ api, endpoint, workspaceId });
-        return jsonToolResult(data);
+        const payload = await opsRequest({
+          api,
+          workspaceId,
+          endpoint: `app-connections?${query.toString()}`,
+        });
+
+        const obj = toObject(payload);
+        const rows = Array.isArray(obj?.data) ? obj.data : [];
+        const mapped = rows
+          .filter((row) => row && typeof row === "object" && !Array.isArray(row))
+          .map((row) => {
+            const entry = row as Record<string, unknown>;
+            return {
+              id: readString(entry.id) ?? "",
+              name: readString(entry.displayName) ?? readString(entry.externalId) ?? "",
+              displayName: readString(entry.displayName),
+              type: readString(entry.pieceName) ?? readString(entry.type) ?? "",
+              pieceName: readString(entry.pieceName),
+              status: readString(entry.status),
+              createdAt: readString(entry.created),
+            };
+          })
+          .filter((entry) => {
+            if (!typeFilter) return true;
+            const check = typeFilter.toLowerCase();
+            return (
+              entry.type.toLowerCase().includes(check) ||
+              String(entry.pieceName ?? "").toLowerCase().includes(check)
+            );
+          });
+
+        return jsonToolResult({
+          data: mapped,
+          next: readString(obj?.next),
+          previous: readString(obj?.previous),
+        });
       },
     });
 
-    // ========================================
-    //         CONNECTION TEST
-    // ========================================
-
-    api.registerTool({
+    registerTool({
       name: "ops_test_connection",
-      description: "Test connection to Wicked Ops (n8n). Returns success if API key is valid.",
-      parameters: { type: "object", additionalProperties: false, properties: { workspaceId: { type: "string", description: "(optional) PMOS workspace id to use workspace-scoped API key" } } },
+      description: "Test workflow engine API connectivity.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          workspaceId: { type: "string" },
+          projectId: { type: "string" },
+        },
+      },
       async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
         const params = resolveToolParams(toolCallIdOrParams, maybeParams);
         const workspaceId = readOptionalString(params, "workspaceId");
-        const data = await opsRequest({ api, endpoint: "workflows?limit=1", workspaceId });
-        return jsonToolResult({ success: true, message: "Connected to Wicked Ops", data });
+        const projectId = readOptionalString(params, "projectId") ?? (await resolveProjectIdOrThrow(api, workspaceId));
+        const query = new URLSearchParams();
+        query.set("projectId", projectId);
+        query.set("limit", "1");
+
+        const data = await opsRequest({
+          api,
+          workspaceId,
+          endpoint: `flows?${query.toString()}`,
+        });
+
+        return jsonToolResult({
+          success: true,
+          message: "Connected to workflow engine",
+          data,
+        });
       },
     });
 
-    api.logger.info("[wicked-ops] registered 16 tools");
+    api.logger.info("[wicked-ops] Activepieces compatibility tools registered");
   },
 };

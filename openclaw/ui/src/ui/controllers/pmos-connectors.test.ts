@@ -43,7 +43,7 @@ describe("pmos-connectors", () => {
 
     hydratePmosConnectorDraftsFromConfig(state);
 
-    expect(state.pmosOpsUrl).toBe("https://ops.wickedlab.io");
+    expect(state.pmosOpsUrl).toBe("https://flow.wickedlab.io");
   });
 
   it("saves ops + bcgpt config into workspace connectors", async () => {

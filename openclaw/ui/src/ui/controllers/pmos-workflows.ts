@@ -347,7 +347,7 @@ export async function createWorkflowConnection(state: PmosWorkflowsState) {
   state.apConnectionCreateSaving = true;
   state.apConnectionCreateError = null;
   try {
-    throw new Error("Create credential is managed inside the embedded n8n editor.");
+    throw new Error("Create credential is managed inside the embedded workflow editor.");
   } catch (err) {
     state.apConnectionCreateError = String(err);
   } finally {
@@ -359,7 +359,7 @@ export async function deleteWorkflowConnection(
   state: PmosWorkflowsState,
   _connectionId: string,
 ) {
-  state.apConnectionsError = "Delete credential is managed inside the embedded n8n editor.";
+  state.apConnectionsError = "Delete credential is managed inside the embedded workflow editor.";
 }
 
 export async function loadWorkflows(state: PmosWorkflowsState) {
@@ -503,7 +503,7 @@ export async function publishWorkflow(state: PmosWorkflowsState) {
   state.apFlowMutating = true;
   state.apFlowMutateError = null;
   try {
-    // n8n applies updates directly; no publish/lock step is required.
+    // Updates apply directly in the workflow engine; no publish/lock step is required.
     await loadWorkflowDetails(state, state.apFlowSelectedId);
     await loadWorkflows(state);
   } catch (err) {
@@ -666,3 +666,4 @@ export async function retryWorkflowRun(
     state.apRunRetrying = false;
   }
 }
+
