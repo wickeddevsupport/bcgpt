@@ -399,13 +399,20 @@ export async function handleToolsInvokeHttpRequest(
       action,
       args,
     });
-    if (usePmosAuth && pmosSession.ok && pmosSession.user.role !== "super_admin") {
-      // Enforce workspaceId server-side; never trust the browser-provided workspaceId.
+    if (usePmosAuth && pmosSession.ok) {
       const wsId = pmosSession.user.workspaceId?.trim() ?? "";
       // oxlint-disable-next-line typescript/no-explicit-any
       const toolSchema = (tool as any).parameters;
       if (wsId && toolSchemaHasKey(toolSchema, "workspaceId")) {
-        toolArgs = { ...toolArgs, workspaceId: wsId };
+        const existingWorkspaceId =
+          typeof toolArgs.workspaceId === "string" ? toolArgs.workspaceId.trim() : "";
+        // Non-super-admin users are always pinned to their own workspace.
+        // Super-admin users default to their own workspace unless they explicitly target another one.
+        const shouldInjectWorkspace =
+          pmosSession.user.role !== "super_admin" || !existingWorkspaceId;
+        if (shouldInjectWorkspace) {
+          toolArgs = { ...toolArgs, workspaceId: wsId };
+        }
       }
     }
     // oxlint-disable-next-line typescript/no-explicit-any
