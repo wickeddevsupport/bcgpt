@@ -627,7 +627,7 @@ export default {
 
     registerTool({
       name: "ops_workflow_update",
-      description: "Update workflow properties.",
+      description: "Update workflow properties or apply workflow-engine operations.",
       parameters: {
         type: "object",
         additionalProperties: false,
@@ -640,6 +640,9 @@ export default {
           settings: { type: "object" },
           tags: { type: "array" },
           active: { type: "boolean" },
+          type: { type: "string" },
+          request: { type: "object" },
+          operations: { type: "array" },
           workspaceId: { type: "string" },
         },
       },
@@ -669,6 +672,41 @@ export default {
               enabled: obj.active,
             });
           }
+
+          const operations: Array<{ type: string; request: Record<string, unknown> }> = [];
+          const directType = readString(obj.type);
+          if (directType) {
+            operations.push({
+              type: directType,
+              request: toObject(obj.request) ?? {},
+            });
+          }
+          if (Array.isArray(obj.operations)) {
+            for (const rawOp of obj.operations) {
+              const opObj = toObject(rawOp);
+              const opType = readString(opObj?.type);
+              if (!opType) {
+                continue;
+              }
+              operations.push({
+                type: opType,
+                request: toObject(opObj?.request) ?? {},
+              });
+            }
+          }
+          for (const operation of operations) {
+            await opsRequest({
+              api,
+              workspaceId,
+              endpoint: `flows/${encodeURIComponent(workflowId)}`,
+              method: "POST",
+              body: {
+                type: operation.type,
+                request: operation.request,
+              },
+            });
+          }
+
           if (Array.isArray(obj.nodes) || toObject(obj.connections) || toObject(obj.settings) || Array.isArray(obj.tags)) {
             await updateCompatMetadata({
               api,
