@@ -157,6 +157,9 @@ export type AppViewState = {
   // PMOS connector onboarding (Phase 1)
   pmosConnectorDraftsInitialized: boolean;
   pmosOpsUrl: string;
+  pmosOpsUserEmailDraft: string;
+  pmosOpsUserPasswordDraft: string;
+  pmosOpsUserHasSavedPassword: boolean;
   pmosBcgptUrl: string;
   pmosBcgptApiKeyDraft: string;
   pmosIntegrationsSaving: boolean;

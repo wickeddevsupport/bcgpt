@@ -41,6 +41,9 @@ export type PmosConnectorsState = {
 
   // Draft fields (UI inputs)
   pmosOpsUrl: string;
+  pmosOpsUserEmailDraft: string;
+  pmosOpsUserPasswordDraft: string;
+  pmosOpsUserHasSavedPassword: boolean;
   pmosBcgptUrl: string;
   pmosBcgptApiKeyDraft: string;
   pmosConnectorDraftsInitialized: boolean;
@@ -134,9 +137,25 @@ export async function savePmosConnectorsConfig(
     const opsUrl = normalizeUrl(state.pmosOpsUrl, "https://flow.wickedlab.io");
     const bcgptUrl = normalizeUrl(state.pmosBcgptUrl, "https://bcgpt.wickedlab.io");
     const bcgptKey = state.pmosBcgptApiKeyDraft.trim();
+    const opsUserEmail = state.pmosOpsUserEmailDraft.trim();
+    const opsUserPassword = state.pmosOpsUserPasswordDraft.trim();
+
+    const opsPatch: Record<string, unknown> = { url: opsUrl };
+    if (opsUserEmail || opsUserPassword) {
+      const userPatch: Record<string, unknown> = {};
+      if (opsUserEmail) {
+        userPatch.email = opsUserEmail;
+      }
+      if (opsUserPassword) {
+        userPatch.password = opsUserPassword;
+      }
+      if (Object.keys(userPatch).length > 0) {
+        opsPatch.user = userPatch;
+      }
+    }
 
     const connectorsPatch: Record<string, unknown> = {
-      ops: { url: opsUrl },
+      ops: opsPatch,
       bcgpt:
         opts?.clearBcgptKey
           ? { url: bcgptUrl, apiKey: null }
@@ -153,11 +172,19 @@ export async function savePmosConnectorsConfig(
       connectors: Record<string, unknown>;
     }>("pmos.connectors.workspace.get", {});
     const opsSaved = getPath(workspaceConnectors.connectors, ["ops", "url"]);
+    const opsUserEmailSaved = getPath(workspaceConnectors.connectors, ["ops", "user", "email"]);
+    const opsUserHasPasswordSaved = getPath(
+      workspaceConnectors.connectors,
+      ["ops", "user", "hasPassword"],
+    );
     const bcgptSaved = getPath(workspaceConnectors.connectors, ["bcgpt", "url"]);
     state.pmosOpsUrl = normalizeUrl(
       typeof opsSaved === "string" ? opsSaved : "https://flow.wickedlab.io",
       "https://flow.wickedlab.io",
     );
+    state.pmosOpsUserEmailDraft = typeof opsUserEmailSaved === "string" ? opsUserEmailSaved : "";
+    state.pmosOpsUserHasSavedPassword = Boolean(opsUserHasPasswordSaved);
+    state.pmosOpsUserPasswordDraft = "";
     state.pmosBcgptUrl = normalizeUrl(
       typeof bcgptSaved === "string" ? bcgptSaved : "https://bcgpt.wickedlab.io",
       "https://bcgpt.wickedlab.io",

@@ -11,6 +11,9 @@ function createBaseState(): PmosConnectorsState {
     connected: true,
     configSnapshot: null,
     pmosOpsUrl: "https://ops.wickedlab.io",
+    pmosOpsUserEmailDraft: "",
+    pmosOpsUserPasswordDraft: "",
+    pmosOpsUserHasSavedPassword: false,
     pmosBcgptUrl: "https://bcgpt.wickedlab.io",
     pmosBcgptApiKeyDraft: "",
     pmosConnectorDraftsInitialized: false,
@@ -49,12 +52,16 @@ describe("pmos-connectors", () => {
   it("saves ops + bcgpt config into workspace connectors", async () => {
     const state = createBaseState();
     state.pmosOpsUrl = "https://ops.example.test/";
+    state.pmosOpsUserEmailDraft = "ops@example.test";
+    state.pmosOpsUserPasswordDraft = "secret-pass";
     state.pmosBcgptUrl = "https://bcgpt.example.test/";
     state.pmosBcgptApiKeyDraft = "bcgpt-key";
 
     const request = vi.fn(async (method: string, params: any) => {
       if (method === "pmos.connectors.workspace.set") {
         expect(params.connectors.ops.url).toBe("https://ops.example.test");
+        expect(params.connectors.ops.user.email).toBe("ops@example.test");
+        expect(params.connectors.ops.user.password).toBe("secret-pass");
         expect(params.connectors.bcgpt.url).toBe("https://bcgpt.example.test");
         expect(params.connectors.bcgpt.apiKey).toBe("bcgpt-key");
         return { ok: true };
@@ -63,7 +70,10 @@ describe("pmos-connectors", () => {
         return {
           workspaceId: "ws-test",
           connectors: {
-            ops: { url: "https://ops.example.test" },
+            ops: {
+              url: "https://ops.example.test",
+              user: { email: "ops@example.test", hasPassword: true },
+            },
             bcgpt: { url: "https://bcgpt.example.test" },
           },
         };
@@ -76,6 +86,9 @@ describe("pmos-connectors", () => {
     await savePmosConnectorsConfig(state);
 
     expect(state.pmosOpsUrl).toBe("https://ops.example.test");
+    expect(state.pmosOpsUserEmailDraft).toBe("ops@example.test");
+    expect(state.pmosOpsUserHasSavedPassword).toBe(true);
+    expect(state.pmosOpsUserPasswordDraft).toBe("");
     expect(state.pmosBcgptUrl).toBe("https://bcgpt.example.test");
     expect(state.pmosBcgptApiKeyDraft).toBe("");
     expect(request).toHaveBeenCalledWith("pmos.connectors.workspace.set", expect.any(Object));

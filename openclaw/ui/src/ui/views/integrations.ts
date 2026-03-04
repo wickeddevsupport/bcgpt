@@ -8,6 +8,9 @@ export type IntegrationsProps = {
   error: string | null;
   bcgptUrl: string;
   bcgptApiKeyDraft: string;
+  opsUserEmailDraft: string;
+  opsUserPasswordDraft: string;
+  opsUserHasSavedPassword: boolean;
   connectorsLoading: boolean;
   connectorsStatus: PmosConnectorsStatus | null;
   connectorsError: string | null;
@@ -16,6 +19,8 @@ export type IntegrationsProps = {
   bcgptSavedOk?: boolean;
   onBcgptUrlChange: (next: string) => void;
   onBcgptApiKeyDraftChange: (next: string) => void;
+  onOpsUserEmailDraftChange: (next: string) => void;
+  onOpsUserPasswordDraftChange: (next: string) => void;
   onSave: () => void;
   onClearBcgptKey: () => void;
   onRefreshConnectors: () => void;
@@ -133,6 +138,9 @@ export function renderIntegrations(props: IntegrationsProps) {
 
   const projectIdShort = props.opsProjectId ? String(props.opsProjectId).slice(0, 8) : null;
   const opsUiHref = props.opsUiHref ?? "/ops-ui/connections";
+  const opsPasswordPlaceholder = props.opsUserHasSavedPassword
+    ? "Stored (leave blank to keep)"
+    : "Enter workflow password";
 
   return html`
     <section class="grid grid-cols-2" style="margin-bottom: 18px;">
@@ -181,6 +189,34 @@ export function renderIntegrations(props: IntegrationsProps) {
               ? html`<div class="muted" style="font-size:11px; font-family: monospace;">${projectIdShort}...</div>`
               : nothing}
           </div>
+        </div>
+
+        <div class="form-grid" style="margin-top: 14px;">
+          <label class="field">
+            <span>Workflow User Email</span>
+            <input
+              .value=${props.opsUserEmailDraft}
+              @input=${(e: Event) => props.onOpsUserEmailDraftChange((e.target as HTMLInputElement).value)}
+              placeholder="rajan@wickedwebsites.us"
+              autocomplete="off"
+              ?disabled=${!props.connected}
+            />
+          </label>
+          <label class="field">
+            <span>Workflow User Password</span>
+            <input
+              type="password"
+              .value=${props.opsUserPasswordDraft}
+              @input=${(e: Event) =>
+                props.onOpsUserPasswordDraftChange((e.target as HTMLInputElement).value)}
+              placeholder=${opsPasswordPlaceholder}
+              autocomplete="off"
+              ?disabled=${!props.connected}
+            />
+          </label>
+        </div>
+        <div class="muted" style="font-size:12px; margin-top:8px;">
+          Saved per workspace. Leave password blank while saving to keep the existing stored password.
         </div>
 
         <div class="row" style="margin-top: 12px; gap:8px;">

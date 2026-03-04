@@ -288,17 +288,37 @@ function filterEffectiveConfigForWorkspaceUi(
 }
 
 /**
- * Remove ops.user sub-object from connectors before returning to client.
- * The ops.user object contains the n8n provisioned password and email which
- * the client UI doesn't need and should not be exposed to the browser.
+ * Redact sensitive ops.user credentials before returning connectors to the UI.
+ * Keep lightweight metadata (email + hasPassword) so users can manage
+ * workflow-engine login wiring without exposing stored secrets.
  */
 function stripOpsUserFromConnectors(connectors: Record<string, unknown>): Record<string, unknown> {
   const ops = connectors.ops;
   if (!isJsonObject(ops) || !("user" in ops)) {
     return connectors;
   }
+  const rawUser = (ops as Record<string, unknown>).user;
+  const user = isJsonObject(rawUser) ? (rawUser as Record<string, unknown>) : null;
+  const email =
+    user && typeof user.email === "string" && user.email.trim() ? user.email.trim() : null;
+  const hasPassword = Boolean(
+    user && typeof user.password === "string" && (user.password as string).length > 0,
+  );
   const { user: _user, ...opsWithoutUser } = ops as Record<string, unknown>;
-  return { ...connectors, ops: opsWithoutUser };
+  const safeUser: Record<string, unknown> = {};
+  if (email) {
+    safeUser.email = email;
+  }
+  if (email || hasPassword) {
+    safeUser.hasPassword = hasPassword;
+  }
+  return {
+    ...connectors,
+    ops: {
+      ...opsWithoutUser,
+      ...(Object.keys(safeUser).length > 0 ? { user: safeUser } : {}),
+    },
+  };
 }
 
 function deepJsonEqual(a: unknown, b: unknown): boolean {

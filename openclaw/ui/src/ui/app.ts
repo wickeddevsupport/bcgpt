@@ -286,7 +286,10 @@ export class OpenClawApp extends LitElement {
 
   // PMOS connector onboarding (Phase 1)
   @state() pmosConnectorDraftsInitialized = false;
-  @state() pmosOpsUrl = "https://ops.wickedlab.io";
+  @state() pmosOpsUrl = "https://flow.wickedlab.io";
+  @state() pmosOpsUserEmailDraft = "";
+  @state() pmosOpsUserPasswordDraft = "";
+  @state() pmosOpsUserHasSavedPassword = false;
   @state() pmosBcgptUrl = "https://bcgpt.wickedlab.io";
   @state() pmosBcgptApiKeyDraft = "";
   @state() pmosIntegrationsSaving = false;
@@ -802,6 +805,18 @@ export class OpenClawApp extends LitElement {
           {},
         );
         const ops = ws?.connectors?.ops ?? null;
+        const opsUser = ops && typeof ops === "object" ? (ops as Record<string, unknown>).user : null;
+        const opsUserObj =
+          opsUser && typeof opsUser === "object" && !Array.isArray(opsUser)
+            ? (opsUser as Record<string, unknown>)
+            : null;
+        this.pmosOpsUserEmailDraft =
+          opsUserObj && typeof opsUserObj.email === "string" ? opsUserObj.email : "";
+        this.pmosOpsUserHasSavedPassword = Boolean(
+          opsUserObj?.hasPassword ||
+            (typeof opsUserObj?.password === "string" && opsUserObj.password.length > 0),
+        );
+        this.pmosOpsUserPasswordDraft = "";
         if (ops && typeof ops === "object" && ops.apiKey) {
           const key = String(ops.apiKey);
           this.pmosOpsProvisioningResult = { projectId: ops.projectId ?? undefined, apiKey: key };
@@ -888,6 +903,18 @@ export class OpenClawApp extends LitElement {
           {},
         );
         const ops = ws?.connectors?.ops ?? null;
+        const opsUser = ops && typeof ops === "object" ? (ops as Record<string, unknown>).user : null;
+        const opsUserObj =
+          opsUser && typeof opsUser === "object" && !Array.isArray(opsUser)
+            ? (opsUser as Record<string, unknown>)
+            : null;
+        this.pmosOpsUserEmailDraft =
+          opsUserObj && typeof opsUserObj.email === "string" ? opsUserObj.email : "";
+        this.pmosOpsUserHasSavedPassword = Boolean(
+          opsUserObj?.hasPassword ||
+            (typeof opsUserObj?.password === "string" && opsUserObj.password.length > 0),
+        );
+        this.pmosOpsUserPasswordDraft = "";
         if (ops && typeof ops === "object" && ops.apiKey) {
           const key = String(ops.apiKey);
           this.pmosOpsProvisioningResult = { projectId: ops.projectId ?? undefined, apiKey: key };
