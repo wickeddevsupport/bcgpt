@@ -158,4 +158,50 @@ describe("pmos ops proxy workflow list behavior", () => {
     expect(html).toContain("workspace-token-123");
     expect(html).toContain("proj_abc123");
   });
+
+  it("rewrites ops-ui html asset and route paths to stay under /ops-ui", async () => {
+    readWorkspaceConnectorsMock.mockResolvedValue({
+      ops: {
+        url: "https://flow.example.test",
+        apiKey: "workspace-token-123",
+        projectId: "proj_abc123",
+      },
+    });
+
+    const upstreamHtml = [
+      "<html><head>",
+      '<base href="/" />',
+      '<script type="module" src="/assets/index.js"></script>',
+      '<link rel="stylesheet" href="/assets/index.css">',
+      "</head><body>",
+      '<a href="/flows">Flows</a>',
+      '<a href="/api/v1/flows">API</a>',
+      "</body></html>",
+    ].join("");
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(upstreamHtml, {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { handleLocalN8nRequest } = await import("./pmos-ops-proxy.js");
+    const req = makeReq("/ops-ui/flows");
+    const { res, getBody } = makeRes();
+
+    const handled = await handleLocalN8nRequest(req, res);
+    expect(handled).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://flow.example.test/flows");
+
+    const html = getBody();
+    expect(html).toContain('<base href="/ops-ui/" />');
+    expect(html).toContain('src="/ops-ui/assets/index.js"');
+    expect(html).toContain('href="/ops-ui/assets/index.css"');
+    expect(html).toContain('href="/ops-ui/flows"');
+    // API endpoints should remain untouched.
+    expect(html).toContain('href="/api/v1/flows"');
+  });
 });

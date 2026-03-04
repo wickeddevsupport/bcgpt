@@ -453,8 +453,9 @@ async function proxyUpstream(params: {
   allowCookies?: boolean;
   projectId?: string | null;
   htmlInjection?: string;
+  htmlTransform?: (html: string) => string;
 }): Promise<void> {
-  const { req, res, extraHeaders, allowCookies = false, htmlInjection } = params;
+  const { req, res, extraHeaders, allowCookies = false, htmlInjection, htmlTransform } = params;
   let targetUrl = params.targetUrl;
   const body = await readBody(req);
 
@@ -496,7 +497,10 @@ async function proxyUpstream(params: {
   const upstreamContentType = upstream.headers.get("content-type") ?? "";
   if (upstream.body && upstreamContentType.includes("text/html")) {
     const rawHtml = await upstream.text();
-    const finalHtml = htmlInjection ? injectHtmlBeforeHead(rawHtml, htmlInjection) : rawHtml;
+    let finalHtml = htmlTransform ? htmlTransform(rawHtml) : rawHtml;
+    if (htmlInjection) {
+      finalHtml = injectHtmlBeforeHead(finalHtml, htmlInjection);
+    }
     const buf = Buffer.from(finalHtml, "utf-8");
     res.setHeader("content-length", String(buf.length));
     res.end(buf);
@@ -525,6 +529,24 @@ function injectHtmlBeforeHead(html: string, snippet: string): string {
     return `${snippet}${html}`;
   }
   return `${html.slice(0, idx)}${snippet}${html.slice(idx)}`;
+}
+
+function rewriteOpsUiHtmlForProxy(html: string): string {
+  let rewritten = html;
+  const baseTagRegex = /<base\s+href=(["'])\/\1\s*\/?>/i;
+  if (baseTagRegex.test(rewritten)) {
+    rewritten = rewritten.replace(baseTagRegex, '<base href="/ops-ui/" />');
+  } else {
+    rewritten = injectHtmlBeforeHead(rewritten, '<base href="/ops-ui/" />');
+  }
+
+  // Rewrite root-relative UI assets/routes to stay under /ops-ui while leaving API/webhook paths untouched.
+  rewritten = rewritten.replace(
+    /(src|href)=("|')\/(?!\/|api\/v1|api\/ops|ops-ui\/|webhook(?:-test|-waiting)?\/)([^"']+)/gi,
+    (_match, attr: string, quote: string, value: string) => `${attr}=${quote}/ops-ui/${value}`,
+  );
+
+  return rewritten;
 }
 
 type ActivepiecesLoginResult = {
@@ -986,6 +1008,7 @@ export async function handleLocalN8nRequest(
     allowCookies: true,
     extraHeaders: authHeaders,
     projectId: context.projectId,
+    htmlTransform: rewriteOpsUiHtmlForProxy,
     htmlInjection: htmlInjection ?? undefined,
   });
 
