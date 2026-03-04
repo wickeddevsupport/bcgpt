@@ -1011,13 +1011,7 @@ export async function handleLocalN8nRequest(
     htmlTransform: rewriteOpsUiHtmlForProxy,
     htmlInjection: htmlInjection ?? undefined,
   });
-
-  if (res.writableEnded) {
-    return true;
-  }
-
-  // Emergency fallback when upstream is down and a local bundle exists.
-  return serveLocalOpsUiFallback(req, res, pathname);
+  return true;
 }
 
 /**

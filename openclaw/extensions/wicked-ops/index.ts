@@ -429,6 +429,429 @@ async function updateCompatMetadata(params: {
   });
 }
 
+type CompatGraphNode = {
+  id: string;
+  stepName: string;
+  displayName: string;
+  role: "trigger" | "action";
+  rawType: string;
+  pieceHint?: string;
+};
+
+type PieceDescriptor = {
+  name: string;
+  version: string;
+  triggerNames: string[];
+  actionNames: string[];
+};
+
+const FLOW_TRIGGER_NAME = "trigger";
+const FLOW_TRIGGER_DISPLAY_NAME = "Webhook Trigger";
+const TRIGGER_PREFERENCE_BY_PIECE: Record<string, string[]> = {
+  "@activepieces/piece-webhook": ["catch_webhook", "catch_raw_webhook", "catch_request"],
+  "@activepieces/piece-schedule": ["cron_expression", "every_day", "every_hour"],
+  "@activepieces/piece-manual-trigger": ["manual_trigger"],
+};
+const ACTION_PREFERENCE_BY_PIECE: Record<string, string[]> = {
+  "@activepieces/piece-basecamp": ["create_todo", "create_message", "create_comment", "get_projects"],
+  "@activepieces/piece-slack": ["send_message_to_a_channel", "send_message", "send-message-to-channel"],
+  "@activepieces/piece-gmail": ["send_email", "send_email_action", "send-email"],
+  "@activepieces/piece-notion": ["create_page", "update_page"],
+  "@activepieces/piece-airtable": ["create_record", "update_record"],
+  "@activepieces/piece-discord": ["send_message", "send_message_to_channel"],
+  "@activepieces/piece-telegram": ["send_message"],
+  "@activepieces/piece-google-sheets": ["append_values", "update_values", "create_spreadsheet"],
+  "@activepieces/piece-http": ["send_request", "http_request", "call_api"],
+};
+const PIECE_VERSION_FALLBACK: Record<string, string> = {
+  "@activepieces/piece-webhook": "0.1.0",
+  "@activepieces/piece-schedule": "0.0.2",
+  "@activepieces/piece-http": "0.1.0",
+  "@activepieces/piece-basecamp": "0.0.1",
+};
+
+function sanitizeStepName(raw: string, fallbackPrefix: string, index: number): string {
+  const cleaned = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  if (cleaned) {
+    return cleaned;
+  }
+  return `${fallbackPrefix}_${index + 1}`;
+}
+
+function isNonEmptyObject(value: unknown): value is Record<string, unknown> {
+  const obj = toObject(value);
+  return Boolean(obj) && Object.keys(obj).length > 0;
+}
+
+function hasCompatGraph(params: Record<string, unknown>): boolean {
+  return Array.isArray(params.nodes) || isNonEmptyObject(params.connections);
+}
+
+function parseCompatGraphNodes(rawNodes: unknown): CompatGraphNode[] {
+  const rows = Array.isArray(rawNodes) ? rawNodes : [];
+  const parsed = rows
+    .map((row, index) => {
+      const obj = toObject(row);
+      if (!obj) {
+        return null;
+      }
+      const id = readString(obj.id) ?? `node_${index + 1}`;
+      const displayName = readString(obj.name) ?? readString(obj.label) ?? id;
+      const rawType = readString(obj.type) ?? "";
+      const explicitRole = readString(obj.role) ?? readString(obj.kind) ?? readString(obj.nodeType);
+      const pieceHint = readString(obj.piece) ?? (rawType || undefined);
+      const lowered = `${explicitRole ?? ""} ${rawType} ${pieceHint ?? ""}`.toLowerCase();
+      const role: "trigger" | "action" =
+        lowered.includes("trigger") || lowered.includes("webhook") || lowered.includes("schedule")
+          ? "trigger"
+          : "action";
+      return {
+        id,
+        stepName: sanitizeStepName(id || displayName, role === "trigger" ? "trigger" : "action", index),
+        displayName,
+        role,
+        rawType,
+        pieceHint,
+      } satisfies CompatGraphNode;
+    })
+    .filter((row): row is CompatGraphNode => Boolean(row));
+
+  if (parsed.length === 0) {
+    return [];
+  }
+  if (parsed.some((row) => row.role === "trigger")) {
+    return parsed;
+  }
+
+  const first = parsed[0];
+  parsed[0] = {
+    ...first,
+    role: "trigger",
+    stepName: sanitizeStepName(first.stepName || first.id, "trigger", 0),
+  };
+  return parsed;
+}
+
+function parseCompatConnections(rawConnections: unknown): Map<string, string> {
+  const edges = new Map<string, string>();
+  const connections = toObject(rawConnections);
+  if (!connections) {
+    return edges;
+  }
+  for (const [from, value] of Object.entries(connections)) {
+    const obj = toObject(value);
+    const main = Array.isArray(obj?.main) ? obj.main : [];
+    const firstLane = Array.isArray(main[0]) ? main[0] : [];
+    const firstTarget = firstLane.find(
+      (entry) => entry && typeof entry === "object" && !Array.isArray(entry),
+    ) as Record<string, unknown> | undefined;
+    const target = readString(firstTarget?.node);
+    if (target) {
+      edges.set(from, target);
+    }
+  }
+  return edges;
+}
+
+function orderCompatActionNodes(
+  nodes: CompatGraphNode[],
+  rawConnections: unknown,
+): { trigger: CompatGraphNode; actions: CompatGraphNode[] } {
+  const trigger = nodes.find((node) => node.role === "trigger") ?? nodes[0];
+  const byKey = new Map<string, CompatGraphNode>();
+  for (const node of nodes) {
+    byKey.set(node.id, node);
+    byKey.set(node.displayName, node);
+    byKey.set(node.stepName, node);
+  }
+
+  const connectionMap = parseCompatConnections(rawConnections);
+  const ordered: CompatGraphNode[] = [];
+  const visited = new Set<string>();
+  let current: CompatGraphNode | undefined = trigger;
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    if (current.role === "action") {
+      ordered.push(current);
+    }
+    const nextKey = connectionMap.get(current.displayName) ?? connectionMap.get(current.id) ?? connectionMap.get(current.stepName);
+    if (!nextKey) {
+      break;
+    }
+    const next = byKey.get(nextKey);
+    if (!next || next.role !== "action") {
+      break;
+    }
+    current = next;
+  }
+
+  for (const node of nodes) {
+    if (node.role === "action" && !visited.has(node.id)) {
+      ordered.push(node);
+      visited.add(node.id);
+    }
+  }
+
+  return { trigger, actions: ordered };
+}
+
+function inferPieceName(raw: string | undefined, role: "trigger" | "action"): string | null {
+  const value = (raw ?? "").trim();
+  if (!value) {
+    return role === "trigger" ? "@activepieces/piece-webhook" : null;
+  }
+  if (value.startsWith("@activepieces/piece-")) {
+    return value;
+  }
+
+  const lowered = value.toLowerCase();
+  if (role === "trigger") {
+    if (lowered.includes("schedule") || lowered.includes("cron")) {
+      return "@activepieces/piece-schedule";
+    }
+    if (lowered.includes("manual")) {
+      return "@activepieces/piece-manual-trigger";
+    }
+    return "@activepieces/piece-webhook";
+  }
+
+  if (lowered.includes("basecamp")) return "@activepieces/piece-basecamp";
+  if (lowered.includes("slack")) return "@activepieces/piece-slack";
+  if (lowered.includes("gmail") || lowered.includes("email")) return "@activepieces/piece-gmail";
+  if (lowered.includes("google") && lowered.includes("sheet")) return "@activepieces/piece-google-sheets";
+  if (lowered.includes("notion")) return "@activepieces/piece-notion";
+  if (lowered.includes("discord")) return "@activepieces/piece-discord";
+  if (lowered.includes("telegram")) return "@activepieces/piece-telegram";
+  if (lowered.includes("airtable")) return "@activepieces/piece-airtable";
+  if (lowered.includes("http")) return "@activepieces/piece-http";
+  if (lowered.includes("code")) return null;
+  if (lowered.includes("activepieces.action.code")) return null;
+  return null;
+}
+
+function pickPreferredName(candidates: string[], preferred: string[]): string | null {
+  if (candidates.length === 0) {
+    return null;
+  }
+  for (const pref of preferred) {
+    const hit = candidates.find((candidate) => candidate === pref);
+    if (hit) {
+      return hit;
+    }
+  }
+  return candidates[0] ?? null;
+}
+
+async function loadPieceDescriptor(params: {
+  api: OpenClawPluginApi;
+  workspaceId?: string | null;
+  projectId: string;
+  pieceName: string;
+  cache: Map<string, PieceDescriptor | null>;
+}): Promise<PieceDescriptor | null> {
+  const cached = params.cache.get(params.pieceName);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const query = new URLSearchParams();
+  query.set("projectId", params.projectId);
+  const payload = await opsRequest({
+    api: params.api,
+    workspaceId: params.workspaceId,
+    endpoint: `pieces/${encodeURIComponent(params.pieceName)}?${query.toString()}`,
+  }).catch(() => null);
+
+  const obj = toObject(payload) ?? {};
+  const piece = toObject(obj.piece) ?? obj;
+  const triggersObj = toObject(piece.triggers) ?? {};
+  const actionsObj = toObject(piece.actions) ?? {};
+  const descriptor: PieceDescriptor = {
+    name: readString(piece.name) ?? params.pieceName,
+    version:
+      readString(piece.version) ??
+      PIECE_VERSION_FALLBACK[params.pieceName] ??
+      "0.1.0",
+    triggerNames: Object.keys(triggersObj),
+    actionNames: Object.keys(actionsObj),
+  };
+  params.cache.set(params.pieceName, descriptor);
+  return descriptor;
+}
+
+async function buildTriggerStep(params: {
+  api: OpenClawPluginApi;
+  workspaceId?: string | null;
+  projectId: string;
+  triggerNode: CompatGraphNode;
+  nextAction?: Record<string, unknown>;
+  cache: Map<string, PieceDescriptor | null>;
+}): Promise<Record<string, unknown>> {
+  const pieceName = inferPieceName(params.triggerNode.pieceHint ?? params.triggerNode.rawType, "trigger")
+    ?? "@activepieces/piece-webhook";
+  const descriptor = await loadPieceDescriptor({
+    api: params.api,
+    workspaceId: params.workspaceId,
+    projectId: params.projectId,
+    pieceName,
+    cache: params.cache,
+  });
+
+  const triggerName = pickPreferredName(
+    descriptor?.triggerNames ?? [],
+    TRIGGER_PREFERENCE_BY_PIECE[pieceName] ?? [],
+  ) ?? "catch_webhook";
+  const triggerInput =
+    pieceName === "@activepieces/piece-schedule"
+      ? { cronExpression: "0 * * * *" }
+      : {};
+
+  const trigger: Record<string, unknown> = {
+    name: FLOW_TRIGGER_NAME,
+    valid: true,
+    displayName: params.triggerNode.displayName || FLOW_TRIGGER_DISPLAY_NAME,
+    type: "PIECE_TRIGGER",
+    settings: {
+      propertySettings: {},
+      pieceName,
+      pieceVersion: descriptor?.version ?? PIECE_VERSION_FALLBACK[pieceName] ?? "0.1.0",
+      triggerName,
+      input: triggerInput,
+    },
+  };
+  if (params.nextAction) {
+    trigger.nextAction = params.nextAction;
+  }
+  return trigger;
+}
+
+function buildCodeActionStep(node: CompatGraphNode, nextAction?: Record<string, unknown>): Record<string, unknown> {
+  const action: Record<string, unknown> = {
+    name: node.stepName,
+    valid: true,
+    displayName: node.displayName,
+    type: "CODE",
+    settings: {
+      input: {},
+      sourceCode: {
+        packageJson: "{}",
+        code: "export const code = async (inputs) => inputs;",
+      },
+    },
+  };
+  if (nextAction) {
+    action.nextAction = nextAction;
+  }
+  return action;
+}
+
+async function buildActionStep(params: {
+  api: OpenClawPluginApi;
+  workspaceId?: string | null;
+  projectId: string;
+  node: CompatGraphNode;
+  nextAction?: Record<string, unknown>;
+  cache: Map<string, PieceDescriptor | null>;
+}): Promise<Record<string, unknown>> {
+  const pieceName = inferPieceName(params.node.pieceHint ?? params.node.rawType, "action");
+  if (!pieceName) {
+    return buildCodeActionStep(params.node, params.nextAction);
+  }
+
+  const descriptor = await loadPieceDescriptor({
+    api: params.api,
+    workspaceId: params.workspaceId,
+    projectId: params.projectId,
+    pieceName,
+    cache: params.cache,
+  });
+
+  const actionName = pickPreferredName(
+    descriptor?.actionNames ?? [],
+    ACTION_PREFERENCE_BY_PIECE[pieceName] ?? [],
+  );
+  if (!actionName) {
+    return buildCodeActionStep(params.node, params.nextAction);
+  }
+
+  const action: Record<string, unknown> = {
+    name: params.node.stepName,
+    valid: true,
+    displayName: params.node.displayName,
+    type: "PIECE",
+    settings: {
+      propertySettings: {},
+      pieceName,
+      pieceVersion: descriptor?.version ?? PIECE_VERSION_FALLBACK[pieceName] ?? "0.1.0",
+      actionName,
+      input: {},
+    },
+  };
+  if (params.nextAction) {
+    action.nextAction = params.nextAction;
+  }
+  return action;
+}
+
+async function applyCompatGraphToWorkflow(params: {
+  api: OpenClawPluginApi;
+  workspaceId?: string | null;
+  projectId: string;
+  workflowId: string;
+  displayName: string;
+  rawNodes: unknown;
+  rawConnections: unknown;
+}): Promise<void> {
+  const nodes = parseCompatGraphNodes(params.rawNodes);
+  if (nodes.length === 0) {
+    return;
+  }
+
+  const { trigger, actions } = orderCompatActionNodes(nodes, params.rawConnections);
+  const cache = new Map<string, PieceDescriptor | null>();
+  let nextAction: Record<string, unknown> | undefined = undefined;
+  for (let index = actions.length - 1; index >= 0; index -= 1) {
+    const actionNode = actions[index];
+    nextAction = await buildActionStep({
+      api: params.api,
+      workspaceId: params.workspaceId,
+      projectId: params.projectId,
+      node: actionNode,
+      nextAction,
+      cache,
+    });
+  }
+
+  const triggerStep = await buildTriggerStep({
+    api: params.api,
+    workspaceId: params.workspaceId,
+    projectId: params.projectId,
+    triggerNode: trigger,
+    nextAction,
+    cache,
+  });
+
+  await opsRequest({
+    api: params.api,
+    workspaceId: params.workspaceId,
+    endpoint: `flows/${encodeURIComponent(params.workflowId)}`,
+    method: "POST",
+    body: {
+      type: "IMPORT_FLOW",
+      request: {
+        displayName: params.displayName,
+        trigger: triggerStep,
+        schemaVersion: null,
+        notes: [],
+      },
+    },
+  });
+}
+
 export default {
   id: "wicked-ops",
   name: "Wicked Ops (Activepieces)",
@@ -576,9 +999,27 @@ export default {
               },
             });
           }
+          if (hasCompatGraph(rawParams)) {
+            await applyCompatGraphToWorkflow({
+              api,
+              workspaceId,
+              projectId,
+              workflowId: flowId,
+              displayName: name,
+              rawNodes: rawParams.nodes,
+              rawConnections: rawParams.connections,
+            });
+          }
         }
 
-        return jsonToolResult(toWorkflowDetails(flow ?? {}));
+        const refreshed = flowId
+          ? await opsRequest({
+              api,
+              workspaceId,
+              endpoint: `flows/${encodeURIComponent(flowId)}`,
+            })
+          : flow;
+        return jsonToolResult(toWorkflowDetails(toObject(refreshed) ?? flow ?? {}));
       },
     });
 
@@ -651,6 +1092,14 @@ export default {
         const workflowId = readOptionalString(params, "workflowId");
         const workspaceId = readOptionalString(params, "workspaceId");
         if (!workflowId) throw new Error("workflowId is required");
+        const currentFlowPayload = await opsRequest({
+          api,
+          workspaceId,
+          endpoint: `flows/${encodeURIComponent(workflowId)}`,
+        });
+        const currentFlow = toObject(currentFlowPayload) ?? {};
+        const currentDisplayName = readString(currentFlow.displayName) ?? readString(currentFlow.name) ?? "Workflow";
+        const projectId = readOptionalString(params, "projectId") ?? readString(currentFlow.projectId) ?? (await resolveProjectIdOrThrow(api, workspaceId));
 
         if (params && typeof params === "object" && !Array.isArray(params)) {
           const obj = params as Record<string, unknown>;
@@ -720,6 +1169,18 @@ export default {
                   tags: Array.isArray(obj.tags) ? obj.tags : [],
                 },
               },
+            });
+          }
+
+          if (hasCompatGraph(obj)) {
+            await applyCompatGraphToWorkflow({
+              api,
+              workspaceId,
+              projectId,
+              workflowId,
+              displayName: name ?? currentDisplayName,
+              rawNodes: obj.nodes,
+              rawConnections: obj.connections,
             });
           }
         }
