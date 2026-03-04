@@ -3975,16 +3975,72 @@ async function getUpload(ctx, projectId, uploadId) {
 
 async function createUpload(ctx, projectId, vaultId, body) {
   if (!vaultId) throw new Error("vault_id is required to create an upload.");
+  const payload = (body && typeof body === "object" && !Array.isArray(body)) ? { ...body } : {};
+
+  // Convenience path: allow text/base64 content in body and create attachment automatically.
+  // Basecamp upload creation requires attachable_sgid.
+  if (!payload.attachable_sgid) {
+    const contentBase64 = payload.content_base64 || payload.file_base64 || payload.base64;
+    const contentText = payload.content || payload.text;
+    if (contentBase64 || contentText != null) {
+      const attachmentName = String(
+        payload.name ||
+        payload.filename ||
+        payload.title ||
+        `upload-${Date.now()}.txt`
+      );
+      const attachmentContentType = String(
+        payload.content_type ||
+        payload.mime_type ||
+        "text/plain; charset=utf-8"
+      );
+      const rawBase64 = contentBase64
+        ? String(contentBase64)
+        : Buffer.from(String(contentText), "utf8").toString("base64");
+
+      const attachment = await createAttachment(
+        ctx,
+        attachmentName,
+        attachmentContentType,
+        rawBase64
+      );
+      const attachableSgid = attachment?.attachment?.attachable_sgid || attachment?.attachable_sgid;
+      if (!attachableSgid) {
+        throw new Error("Attachment upload failed: attachable_sgid missing.");
+      }
+      payload.attachable_sgid = attachableSgid;
+      if (!payload.title && attachmentName) payload.title = attachmentName;
+      if (!payload.content_type && attachmentContentType) payload.content_type = attachmentContentType;
+    }
+  }
+
+  if (!payload.attachable_sgid) {
+    throw new Error(
+      "create_upload requires body.attachable_sgid, or body.content/content_base64 with name/content_type."
+    );
+  }
+
+  // These are convenience inputs, not upload API fields.
+  delete payload.content;
+  delete payload.text;
+  delete payload.content_base64;
+  delete payload.file_base64;
+  delete payload.base64;
+
+  if (!payload.title && payload.name) payload.title = payload.name;
+
   return api(ctx, `/buckets/${projectId}/vaults/${vaultId}/uploads.json`, {
     method: "POST",
-    body: withIdempotency(body, body)
+    body: withIdempotency(payload, body)
   });
 }
 
 async function updateUpload(ctx, projectId, uploadId, body) {
+  const payload = (body && typeof body === "object" && !Array.isArray(body)) ? { ...body } : {};
+  if (!payload.title && payload.name) payload.title = payload.name;
   return api(ctx, `/buckets/${projectId}/uploads/${uploadId}.json`, {
     method: "PUT",
-    body: withIdempotency(body, body)
+    body: withIdempotency(payload, body)
   });
 }
 

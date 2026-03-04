@@ -34,6 +34,7 @@ export class BasecampApi implements ICredentialType {
 		properties: {
 			headers: {
 				'x-bcgpt-api-key': '={{$credentials.apiKey}}',
+				'x-api-key': '={{$credentials.apiKey}}',
 			},
 		},
 	};
@@ -41,12 +42,9 @@ export class BasecampApi implements ICredentialType {
 	test: ICredentialTestRequest = {
 		request: {
 			baseURL: '={{$credentials.baseUrl}}',
-			url: '/api/basecamp/tool',
+			url: '/action/list_projects',
 			method: 'POST',
-			body: {
-				tool: 'list_projects',
-				params: { archived: false },
-			},
+			body: { archived: false },
 		},
 	};
 }
