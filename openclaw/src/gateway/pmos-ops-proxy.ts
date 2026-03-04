@@ -623,6 +623,16 @@ function appendSetCookies(res: ServerResponse, cookies: string[]): void {
   res.setHeader("set-cookie", merged);
 }
 
+function toCookieHeader(cookies: string[]): string | null {
+  const pairs = cookies
+    .map((cookie) => cookie.split(";")[0]?.trim() ?? "")
+    .filter((value) => Boolean(value));
+  if (pairs.length === 0) {
+    return null;
+  }
+  return pairs.join("; ");
+}
+
 async function attemptAutoLoginForOpsUi(
   req: IncomingMessage,
   res: ServerResponse,
@@ -1049,17 +1059,38 @@ export async function handleOpsProxyRequest(
 
     const needsAuthHeader = !isAuthApiPath(pathname);
     const extraHeaders: Record<string, string> = {};
+    const requestAuthorization = Array.isArray(req.headers.authorization)
+      ? req.headers.authorization.find((value) => typeof value === "string" && value.trim())
+      : typeof req.headers.authorization === "string"
+        ? req.headers.authorization
+        : "";
+    const hasRequestAuthorization = Boolean(requestAuthorization && requestAuthorization.trim());
+    const requestCookie = Array.isArray(req.headers.cookie)
+      ? req.headers.cookie.join("; ")
+      : typeof req.headers.cookie === "string"
+        ? req.headers.cookie
+        : "";
+    const hasRequestCookie = Boolean(requestCookie.trim());
+
     if (needsAuthHeader) {
-      if (context.apiKey) {
-        extraHeaders.authorization = `Bearer ${context.apiKey}`;
-      } else if (context.user) {
+      // Keep browser-provided Authorization intact (token bootstrap / prior login).
+      if (!hasRequestAuthorization && context.user && !hasRequestCookie) {
         const login = await attemptActivepiecesLogin(context.baseUrl, context.user);
         if (login?.cookies?.length) {
           appendSetCookies(res, login.cookies);
+          const loginCookie = toCookieHeader(login.cookies);
+          if (loginCookie) {
+            extraHeaders.cookie = requestCookie ? `${requestCookie}; ${loginCookie}` : loginCookie;
+          }
         }
         if (login?.token) {
           extraHeaders.authorization = `Bearer ${login.token}`;
         }
+      }
+      const hasForwardCookie = hasRequestCookie || Boolean(extraHeaders.cookie);
+      // Fall back to configured API key only when no browser auth/cookie is available.
+      if (!hasRequestAuthorization && !extraHeaders.authorization && !hasForwardCookie && context.apiKey) {
+        extraHeaders.authorization = `Bearer ${context.apiKey}`;
       }
     }
 

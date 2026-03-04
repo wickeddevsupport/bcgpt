@@ -34,7 +34,7 @@ function makeReq(url: string, method = "GET"): IncomingMessage {
 }
 
 function makeRes() {
-  const headers = new Map<string, string>();
+  const headers = new Map<string, unknown>();
   let body = "";
   let ended = false;
   const res = {
@@ -43,8 +43,14 @@ function makeRes() {
       return ended;
     },
     setHeader(key: string, value: unknown) {
-      headers.set(key.toLowerCase(), String(value));
+      headers.set(key.toLowerCase(), value);
       return this;
+    },
+    getHeader(key: string) {
+      return headers.get(key.toLowerCase());
+    },
+    getHeaders() {
+      return Object.fromEntries(headers.entries());
     },
     end(chunk?: unknown) {
       body = typeof chunk === "string" ? chunk : Buffer.isBuffer(chunk) ? chunk.toString("utf-8") : "";
@@ -196,6 +202,112 @@ describe("pmos ops proxy workflow list behavior", () => {
 
     const body = JSON.parse(getBody()) as { id?: string };
     expect(body.id).toBe("user-1");
+  });
+
+  it("preserves browser authorization header for /api/v1 proxy", async () => {
+    readWorkspaceConnectorsMock.mockResolvedValue({
+      ops: {
+        url: "https://flow.example.test",
+        apiKey: "workspace-token-should-not-override",
+      },
+    });
+
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ id: "user-1" }, 200));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { handleOpsProxyRequest } = await import("./pmos-ops-proxy.js");
+    const req = makeReq("/api/v1/users/me");
+    (req as unknown as { headers: Record<string, string> }).headers.authorization = "Bearer browser-token";
+    const { res, getBody } = makeRes();
+
+    const handled = await handleOpsProxyRequest(req, res);
+    expect(handled).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const headers = fetchMock.mock.calls[0]?.[1] as { headers?: Record<string, string> } | undefined;
+    expect(headers?.headers?.authorization).toBe("Bearer browser-token");
+
+    const body = JSON.parse(getBody()) as { id?: string };
+    expect(body.id).toBe("user-1");
+  });
+
+  it("prefers workspace user login token over configured API key for /api/v1 proxy", async () => {
+    readWorkspaceConnectorsMock.mockResolvedValue({
+      ops: {
+        url: "https://flow.example.test",
+        apiKey: "stale-configured-key",
+        user: {
+          email: "rajan@example.com",
+          password: "secret-pass",
+        },
+      },
+    });
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ token: "fresh-user-token" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ id: "user-1" }, 200));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { handleOpsProxyRequest } = await import("./pmos-ops-proxy.js");
+    const req = makeReq("/api/v1/users/me");
+    const { res, getBody } = makeRes();
+
+    const handled = await handleOpsProxyRequest(req, res);
+    expect(handled).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://flow.example.test/api/v1/authentication/sign-in");
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe("https://flow.example.test/api/v1/users/me");
+
+    const headers = fetchMock.mock.calls[1]?.[1] as { headers?: Record<string, string> } | undefined;
+    expect(headers?.headers?.authorization).toBe("Bearer fresh-user-token");
+
+    const body = JSON.parse(getBody()) as { id?: string };
+    expect(body.id).toBe("user-1");
+  });
+
+  it("forwards workspace user login cookies to upstream /api/v1 calls when token is absent", async () => {
+    readWorkspaceConnectorsMock.mockResolvedValue({
+      ops: {
+        url: "https://flow.example.test",
+        user: {
+          email: "rohit@example.com",
+          password: "secret-pass",
+        },
+      },
+    });
+
+    const loginResponse = new Response("{}", {
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+        "set-cookie": "ap-session=abc123; Path=/; HttpOnly",
+      },
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(loginResponse)
+      .mockResolvedValueOnce(jsonResponse({ ok: true }, 200));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { handleOpsProxyRequest } = await import("./pmos-ops-proxy.js");
+    const req = makeReq("/api/v1/users/me");
+    const { res, getBody } = makeRes();
+
+    const handled = await handleOpsProxyRequest(req, res);
+    expect(handled).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const headers = fetchMock.mock.calls[1]?.[1] as { headers?: Record<string, string> } | undefined;
+    expect(headers?.headers?.cookie).toContain("ap-session=abc123");
+
+    const body = JSON.parse(getBody()) as { ok?: boolean };
+    expect(body.ok).toBe(true);
   });
 
   it("rewrites ops-ui html asset and route paths to stay under /ops-ui", async () => {
