@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { readWorkspaceConnectors } from "./workspace-connectors.js";
+import { readWorkspaceConnectors, writeWorkspaceConnectors } from "./workspace-connectors.js";
 import { pmosHandlers } from "./server-methods/pmos.js";
 
 describe("pmos.connectors.workspace.provision_ops", () => {
@@ -47,9 +47,18 @@ describe("pmos.connectors.workspace.provision_ops", () => {
     expect(saved?.ops?.projectId).toBe("proj-123");
   });
 
-  it("creates an n8n user (best-effort) and persists credentials when available", async () => {
+  it("removes legacy synthetic workspace user while preserving project and key", async () => {
     vi.stubEnv("OPS_URL", opsUrl);
     vi.stubEnv("OPS_API_KEY", "global-key");
+
+    await writeWorkspaceConnectors(workspaceId, {
+      ops: {
+        user: {
+          email: `pmos-${workspaceId}@wicked.local`,
+          password: "legacy-pass",
+        },
+      },
+    } as any);
 
     const fetchMock = vi.fn(async (url: string) => {
       if (url.endsWith("/api/v1/projects")) {
@@ -57,9 +66,6 @@ describe("pmos.connectors.workspace.provision_ops", () => {
       }
       if (url.endsWith("/api/v1/api-keys")) {
         return { ok: true, status: 201, text: async () => JSON.stringify({ key: "workspace-key-3" }) } as any;
-      }
-      if (url.endsWith("/api/v1/users")) {
-        return { ok: true, status: 201, text: async () => JSON.stringify({ id: "user-1", email: `pmos-${workspaceId}@wicked.local` }) } as any;
       }
       return { ok: false, status: 404, text: async () => "" } as any;
     });
@@ -75,9 +81,7 @@ describe("pmos.connectors.workspace.provision_ops", () => {
     const saved = await readWorkspaceConnectors(workspaceId);
     expect(saved?.ops?.apiKey).toBe("workspace-key-3");
     expect(saved?.ops?.projectId).toBe("proj-456");
-    expect(saved?.ops?.user?.email).toBe(`pmos-${workspaceId}@wicked.local`);
-    expect(typeof saved?.ops?.user?.password).toBe("string");
-    expect((saved?.ops?.user?.password ?? "").length).toBeGreaterThan(0);
+    expect(saved?.ops?.user).toBeUndefined();
   });
 
   it("when Projects API is license-gated, persists API key only", async () => {

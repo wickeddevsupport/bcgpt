@@ -149,13 +149,14 @@ function inferFlowName(prompt: string): string {
 }
 
 const ACTION_KEYWORDS: Array<{ re: RegExp; label: string; piece: string }> = [
-  { re: /\bslack\b/i, label: "Post to Slack", piece: "n8n-nodes-base.slack" },
-  { re: /\bgmail|email\b/i, label: "Send Email", piece: "n8n-nodes-base.gmail" },
-  { re: /\bgoogle\s*sheets|sheets\b/i, label: "Write to Google Sheets", piece: "n8n-nodes-base.googleSheets" },
-  { re: /\bnotion\b/i, label: "Update Notion", piece: "n8n-nodes-base.notion" },
-  { re: /\bdiscord\b/i, label: "Send Discord message", piece: "n8n-nodes-base.discord" },
-  { re: /\btelegram\b/i, label: "Send Telegram message", piece: "n8n-nodes-base.telegram" },
-  { re: /\bairtable\b/i, label: "Update Airtable", piece: "n8n-nodes-base.airtable" },
+  { re: /\bbasecamp\b/i, label: "Update Basecamp", piece: "@activepieces/piece-basecamp" },
+  { re: /\bslack\b/i, label: "Post to Slack", piece: "@activepieces/piece-slack" },
+  { re: /\bgmail|email\b/i, label: "Send Email", piece: "@activepieces/piece-gmail" },
+  { re: /\bgoogle\s*sheets|sheets\b/i, label: "Write to Google Sheets", piece: "@activepieces/piece-google-sheets" },
+  { re: /\bnotion\b/i, label: "Update Notion", piece: "@activepieces/piece-notion" },
+  { re: /\bdiscord\b/i, label: "Send Discord message", piece: "@activepieces/piece-discord" },
+  { re: /\btelegram\b/i, label: "Send Telegram message", piece: "@activepieces/piece-telegram" },
+  { re: /\bairtable\b/i, label: "Update Airtable", piece: "@activepieces/piece-airtable" },
 ];
 
 function detectActions(prompt: string): Array<{ label: string; piece: string }> {
@@ -166,7 +167,7 @@ function detectActions(prompt: string): Array<{ label: string; piece: string }> 
   if (found.length > 0) {
     return found.slice(0, 5);
   }
-  return [{ label: "Send HTTP request", piece: "n8n-nodes-base.httpRequest" }];
+  return [{ label: "Send HTTP request", piece: "@activepieces/piece-http" }];
 }
 
 function buildGraphOps(promptRaw: string): {
@@ -184,7 +185,10 @@ function buildGraphOps(promptRaw: string): {
     id: "node-trigger",
     type: "trigger",
     label: triggerLabel,
-    piece: triggerLabel === "Schedule Trigger" ? "n8n-nodes-base.scheduleTrigger" : "n8n-nodes-base.webhook",
+    piece:
+      triggerLabel === "Schedule Trigger"
+        ? "activepieces.trigger.schedule"
+        : "activepieces.trigger.webhook",
   };
 
   const actionDefs = detectActions(prompt);
@@ -291,13 +295,13 @@ export async function commitPmosFlowBuilderPlan(state: PmosFlowBuilderState) {
   state.pmosFlowBuilderCommitting = true;
   state.pmosFlowBuilderError = null;
   try {
-    const n8nNodes = state.pmosFlowBuilderNodes.map((node, index) => ({
+    const compatNodes = state.pmosFlowBuilderNodes.map((node, index) => ({
       id: node.id,
       name: node.label,
       type:
         node.type === "trigger"
-          ? node.piece ?? "n8n-nodes-base.webhook"
-          : "n8n-nodes-base.set",
+          ? node.piece ?? "activepieces.trigger.webhook"
+          : node.piece ?? "activepieces.action.code",
       typeVersion: 1,
       position: [280 + index * 260, 320],
       parameters:
@@ -316,14 +320,14 @@ export async function commitPmosFlowBuilderPlan(state: PmosFlowBuilderState) {
             },
     }));
 
-    const n8nConnections: Record<string, unknown> = {};
+    const compatConnections: Record<string, unknown> = {};
     for (const edge of state.pmosFlowBuilderEdges) {
-      const fromNode = n8nNodes.find((node) => node.id === edge.from);
-      const toNode = n8nNodes.find((node) => node.id === edge.to);
+      const fromNode = compatNodes.find((node) => node.id === edge.from);
+      const toNode = compatNodes.find((node) => node.id === edge.to);
       if (!fromNode || !toNode) {
         continue;
       }
-      n8nConnections[fromNode.name] = {
+      compatConnections[fromNode.name] = {
         main: [
           [
             {
@@ -338,8 +342,8 @@ export async function commitPmosFlowBuilderPlan(state: PmosFlowBuilderState) {
 
     const created = await invokeTool<Record<string, unknown>>(state, "ops_workflow_create", {
       name: flowName,
-      nodes: n8nNodes,
-      connections: n8nConnections,
+      nodes: compatNodes,
+      connections: compatConnections,
       settings: {},
     });
     const payload =

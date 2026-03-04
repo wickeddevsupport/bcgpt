@@ -891,6 +891,110 @@ export default {
     });
 
     registerTool({
+      name: "ops_pieces_list",
+      description: "List workflow-engine pieces (integrations).",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          limit: { type: "number" },
+          cursor: { type: "string" },
+          search: { type: "string" },
+          projectId: { type: "string" },
+          workspaceId: { type: "string" },
+        },
+      },
+      async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
+        const params = resolveToolParams(toolCallIdOrParams, maybeParams);
+        const workspaceId = readOptionalString(params, "workspaceId");
+        const projectId =
+          readOptionalString(params, "projectId") ?? (await resolveProjectIdOrThrow(api, workspaceId));
+        const limit = readOptionalNumber(params, "limit");
+        const cursor = readOptionalString(params, "cursor");
+        const search = readOptionalString(params, "search")?.toLowerCase();
+
+        const query = new URLSearchParams();
+        query.set("projectId", projectId);
+        if (cursor) query.set("cursor", cursor);
+        if (limit && limit > 0) query.set("limit", String(Math.trunc(limit)));
+
+        const payload = await opsRequest({
+          api,
+          workspaceId,
+          endpoint: `pieces?${query.toString()}`,
+        });
+
+        const obj = toObject(payload);
+        const rows = Array.isArray(obj?.data)
+          ? obj.data
+          : Array.isArray(payload)
+            ? payload
+            : [];
+        const mapped = rows
+          .filter((row) => row && typeof row === "object" && !Array.isArray(row))
+          .map((row) => {
+            const entry = row as Record<string, unknown>;
+            const name = readString(entry.name) ?? "";
+            const displayName = readString(entry.displayName) ?? name;
+            const description = readString(entry.description) ?? readString(entry.summary);
+            return {
+              name,
+              displayName,
+              description,
+              version: readString(entry.version),
+              logoUrl: readString(entry.logoUrl),
+              releaseStage: readString(entry.releaseStage),
+              minimumSupportedRelease: readString(entry.minimumSupportedRelease),
+              raw: entry,
+            };
+          })
+          .filter((entry) => {
+            if (!search) return true;
+            const haystack = `${entry.name} ${entry.displayName ?? ""} ${entry.description ?? ""}`.toLowerCase();
+            return haystack.includes(search);
+          });
+
+        return jsonToolResult({
+          data: mapped,
+          next: readString(obj?.next),
+          previous: readString(obj?.previous),
+        });
+      },
+    });
+
+    registerTool({
+      name: "ops_piece_get",
+      description: "Get workflow-engine piece details by piece name.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["pieceName"],
+        properties: {
+          pieceName: { type: "string" },
+          projectId: { type: "string" },
+          workspaceId: { type: "string" },
+        },
+      },
+      async execute(toolCallIdOrParams: unknown, maybeParams?: unknown) {
+        const params = resolveToolParams(toolCallIdOrParams, maybeParams);
+        const pieceName = readOptionalString(params, "pieceName");
+        const workspaceId = readOptionalString(params, "workspaceId");
+        const projectId =
+          readOptionalString(params, "projectId") ?? (await resolveProjectIdOrThrow(api, workspaceId));
+        if (!pieceName) throw new Error("pieceName is required");
+
+        const query = new URLSearchParams();
+        query.set("projectId", projectId);
+        const payload = await opsRequest({
+          api,
+          workspaceId,
+          endpoint: `pieces/${encodeURIComponent(pieceName)}?${query.toString()}`,
+        });
+        return jsonToolResult(payload);
+      },
+    });
+
+    registerTool({
       name: "ops_credentials_list",
       description: "List workflow-engine credentials (app connections).",
       parameters: {

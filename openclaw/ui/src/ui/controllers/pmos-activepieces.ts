@@ -274,6 +274,20 @@ function normalizeCredentialSummary(entry: Record<string, unknown>): Activepiece
   };
 }
 
+function normalizePieceSummary(entry: Record<string, unknown>): ActivepiecesPieceSummary | null {
+  const name = readString(entry.name);
+  if (!name) {
+    return null;
+  }
+  return {
+    name,
+    displayName: readString(entry.displayName) ?? name,
+    description: readString(entry.description),
+    logoUrl: readString(entry.logoUrl),
+    version: readString(entry.version),
+  };
+}
+
 function normalizeFlowDetails(value: unknown): unknown {
   const obj = toObject(unwrapData(value));
   if (!obj) {
@@ -293,8 +307,14 @@ export async function loadActivepiecesPieces(state: PmosActivepiecesState) {
   state.apPiecesLoading = true;
   state.apPiecesError = null;
   try {
-    // n8n does not expose a "pieces" catalog endpoint in the same shape.
-    state.apPieces = [];
+    const details = await invokeTool<unknown>(state, "ops_pieces_list", {
+      search: state.apPiecesQuery.trim() || undefined,
+      limit: 200,
+    });
+    const items = toItems(details, ["data", "pieces"]);
+    state.apPieces = items
+      .map((entry) => normalizePieceSummary(entry))
+      .filter((entry): entry is ActivepiecesPieceSummary => Boolean(entry));
   } catch (err) {
     state.apPiecesError = String(err);
     state.apPieces = [];
@@ -312,7 +332,15 @@ export async function loadActivepiecesPieceDetails(state: PmosActivepiecesState,
   state.apPieceDetailsLoading = true;
   state.apPieceDetailsError = null;
   state.apPieceDetails = null;
-  state.apPieceDetailsLoading = false;
+  try {
+    const details = await invokeTool<unknown>(state, "ops_piece_get", { pieceName: name });
+    state.apPieceDetails = unwrapData(details);
+  } catch (err) {
+    state.apPieceDetailsError = String(err);
+    state.apPieceDetails = null;
+  } finally {
+    state.apPieceDetailsLoading = false;
+  }
 }
 
 export async function loadActivepiecesConnections(state: PmosActivepiecesState) {

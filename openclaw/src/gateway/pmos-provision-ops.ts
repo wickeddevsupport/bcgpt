@@ -1,10 +1,9 @@
 /**
- * Utility to provision legacy remote n8n connectors for a workspace.
- * Embedded n8n is the default runtime; this is for explicit remote fallback scenarios.
- * Called fire-and-forget on signup, and also used by the manual provision_ops WS handler.
+ * Utility to provision workflow-engine connector defaults for a workspace.
+ * This is Activepieces-first and intentionally does not create synthetic
+ * per-workspace users.
  */
 import { loadConfig } from "../config/config.js";
-import crypto from "node:crypto";
 import { readWorkspaceConnectors, writeWorkspaceConnectors } from "./workspace-connectors.js";
 
 export type ProvisionOpsResult = {
@@ -71,19 +70,39 @@ function extractApiKey(json: unknown): string | null {
 function resolveOpsGlobals(): { url: string; apiKey: string | null } {
   const cfg = loadConfig() as unknown;
   const urlRaw =
+    readConfigValue(cfg, ["pmos", "connectors", "activepieces", "url"]) ??
+    process.env.ACTIVEPIECES_URL?.trim() ??
+    process.env.FLOW_URL?.trim() ??
     readConfigValue(cfg, ["pmos", "connectors", "ops", "url"]) ??
     process.env.OPS_URL?.trim() ??
-    "https://ops.wickedlab.io";
+    "https://flow.wickedlab.io";
   const url = urlRaw.replace(/\/+$/, "");
   const apiKey =
+    readConfigValue(cfg, ["pmos", "connectors", "activepieces", "apiKey"]) ??
+    process.env.ACTIVEPIECES_API_KEY?.trim() ??
     readConfigValue(cfg, ["pmos", "connectors", "ops", "apiKey"]) ??
     process.env.OPS_API_KEY?.trim() ??
     null;
   return { url, apiKey };
 }
 
+function readUserEmail(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = (value as Record<string, unknown>).email;
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim().toLowerCase();
+  return trimmed || null;
+}
+
+function isLegacySyntheticWorkspaceUser(value: unknown): boolean {
+  const email = readUserEmail(value);
+  if (!email) return false;
+  if (!email.startsWith("pmos-")) return false;
+  return email.endsWith("@openclaw.local") || email.endsWith("@wicked.local");
+}
+
 /**
- * Creates an n8n Project + workspace-scoped API key for the given workspace.
+ * Creates a workflow-engine project + workspace-scoped API key for the given workspace.
  * Persists results to `~/.openclaw/workspaces/{workspaceId}/connectors.json`.
  * Throws on unrecoverable failure.
  */
@@ -94,17 +113,16 @@ export async function provisionWorkspaceOps(
   const { url: opsUrl, apiKey: opsKey } = resolveOpsGlobals();
   if (!opsKey) {
     throw new Error(
-      "Remote n8n API key not configured (set OPS_API_KEY env var or PMOS integrations).",
+      "Workflow engine API key not configured (set ACTIVEPIECES_API_KEY/OPS_API_KEY or PMOS integrations).",
     );
   }
 
-  const name =
-    projectName?.trim() || `PMOS workspace ${workspaceId}`;
+  const name = projectName?.trim() || `PMOS workspace ${workspaceId}`;
 
-  // 1. Create n8n project
+  // 1. Create workflow project
   const projectRes = await doFetch(`${opsUrl}/api/v1/projects`, {
     method: "POST",
-    headers: { "content-type": "application/json", "X-N8N-API-KEY": opsKey },
+    headers: { "content-type": "application/json", authorization: `Bearer ${opsKey}` },
     body: JSON.stringify({ name }),
     timeoutMs: 12000,
   });
@@ -129,7 +147,7 @@ export async function provisionWorkspaceOps(
   for (const ep of keyEndpoints) {
     const kRes = await doFetch(ep, {
       method: "POST",
-      headers: { "content-type": "application/json", "X-N8N-API-KEY": opsKey },
+      headers: { "content-type": "application/json", authorization: `Bearer ${opsKey}` },
       body: JSON.stringify({ name: `pmos:${workspaceId}` }),
       timeoutMs: 12000,
     });
@@ -139,7 +157,6 @@ export async function provisionWorkspaceOps(
         createdApiKey = key;
         break;
       }
-      // Some endpoints return the record id as a fallback token
       const j = kRes.json as Record<string, unknown>;
       if (typeof j.id === "string" && j.id) {
         createdApiKey = j.id;
@@ -150,48 +167,26 @@ export async function provisionWorkspaceOps(
 
   if (!projectId && !createdApiKey) {
     const msg = projectRes.error ?? `status=${projectRes.status}`;
-    throw new Error(`Failed to provision remote n8n fallback for workspace ${workspaceId}: ${msg}`);
+    throw new Error(`Failed to provision workflow engine for workspace ${workspaceId}: ${msg}`);
   }
 
-  // 3. Best-effort: create a workspace-scoped n8n user so the editor can auto-login.
-  //    This is optional and non-fatal — API key + project are the core requirement.
-  let createdUser: { email: string; password: string } | undefined;
-  try {
-    const userEmail = `pmos-${workspaceId}@wicked.local`;
-    const password = crypto.randomBytes(12).toString("base64url");
-    const userEndpoints = [`${opsUrl}/api/v1/users`, `${opsUrl}/rest/users`, `${opsUrl}/users`];
-    for (const ep of userEndpoints) {
-      const uRes = await doFetch(ep, {
-        method: "POST",
-        headers: { "content-type": "application/json", "X-N8N-API-KEY": opsKey },
-        body: JSON.stringify({ email: userEmail, password, firstName: "PMOS", lastName: `ws-${workspaceId}` }),
-        timeoutMs: 12000,
-      });
-      if (uRes.ok && uRes.json) {
-        createdUser = { email: userEmail, password };
-        break;
-      }
-      // if user already exists (409), still persist synthetic creds so gateway can attempt login
-      if (uRes.status === 409) {
-        createdUser = { email: userEmail, password };
-        break;
-      }
-    }
-  } catch (err) {
-    // best-effort: swallow errors and continue
-    console.warn("[pmos] create n8n user (best-effort) failed:", String(err));
-  }
-
-  // 4. Persist to connectors file (include user creds if available)
+  // 3. Persist to connectors.
+  // If legacy synthetic ops.user is present, drop it to avoid stale auth loops.
   const existing = (await readWorkspaceConnectors(workspaceId)) ?? {};
+  const existingOps =
+    existing.ops && typeof existing.ops === "object" && !Array.isArray(existing.ops)
+      ? ({ ...(existing.ops as Record<string, unknown>) } as Record<string, unknown>)
+      : {};
+  if (isLegacySyntheticWorkspaceUser(existingOps.user)) {
+    delete existingOps.user;
+  }
   const next = {
     ...existing,
     ops: {
-      ...(existing.ops ?? {}),
+      ...existingOps,
       url: opsUrl,
       ...(createdApiKey ? { apiKey: createdApiKey } : {}),
       ...(projectId ? { projectId } : {}),
-      ...(createdUser ? { user: createdUser } : {}),
     },
   };
   await writeWorkspaceConnectors(workspaceId, next);

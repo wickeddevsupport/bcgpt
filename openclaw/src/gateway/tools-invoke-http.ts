@@ -40,6 +40,8 @@ const PMOS_VIEWER_ALLOWED_TOOLS = new Set([
   "ops_workflow_get",
   "ops_executions_list",
   "ops_execution_get",
+  "ops_pieces_list",
+  "ops_piece_get",
   "ops_credentials_list",
   "ops_test_connection",
 ]);
