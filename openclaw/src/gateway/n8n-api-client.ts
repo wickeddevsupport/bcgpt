@@ -105,6 +105,37 @@ function normalizeBaseUrl(raw: string | null | undefined): string {
   return value.endsWith("/") ? value.slice(0, -1) : value;
 }
 
+function isLikelyLegacyN8nUrl(raw: string | null | undefined): boolean {
+  const normalized = String(raw ?? "").trim().replace(/\/+$/, "");
+  if (!normalized) {
+    return false;
+  }
+  const lower = normalized.toLowerCase();
+  if (lower.includes("://ops.wickedlab.io")) {
+    return true;
+  }
+  if (lower.includes("n8n")) {
+    return true;
+  }
+  try {
+    const parsed = new URL(normalized);
+    const host = parsed.hostname.toLowerCase();
+    if (host === "ops.wickedlab.io") {
+      return true;
+    }
+    if ((host === "127.0.0.1" || host === "localhost") && parsed.port === "5678") {
+      return true;
+    }
+    const pathLower = parsed.pathname.toLowerCase();
+    if (pathLower.includes("/rest") || pathLower.includes("/webhook")) {
+      return true;
+    }
+  } catch {
+    // best effort
+  }
+  return false;
+}
+
 function readString(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
@@ -361,10 +392,12 @@ async function getContext(workspaceId: string): Promise<ActivepiecesContext> {
   const cfg = loadConfig() as unknown;
   const workspaceOps = toObject(wc?.ops);
   const workspaceActivepieces = toObject(wc?.activepieces);
+  const workspaceOpsUrlRaw = readString(workspaceOps?.url) ?? null;
+  const workspaceOpsLooksLegacy = isLikelyLegacyN8nUrl(workspaceOpsUrlRaw);
 
   const baseUrl = normalizeBaseUrl(
     readString(workspaceActivepieces?.url) ??
-      readString(workspaceOps?.url) ??
+      (workspaceOpsLooksLegacy ? null : workspaceOpsUrlRaw) ??
       readConfigString(cfg, ["pmos", "connectors", "activepieces", "url"]) ??
       process.env.ACTIVEPIECES_URL ??
       process.env.FLOW_URL ??
@@ -375,7 +408,7 @@ async function getContext(workspaceId: string): Promise<ActivepiecesContext> {
 
   const apiKey =
     readString(workspaceActivepieces?.apiKey) ??
-    readString(workspaceOps?.apiKey) ??
+    (workspaceOpsLooksLegacy ? null : readString(workspaceOps?.apiKey)) ??
     readConfigString(cfg, ["pmos", "connectors", "activepieces", "apiKey"]) ??
     readString(process.env.ACTIVEPIECES_API_KEY) ??
     readConfigString(cfg, ["pmos", "connectors", "ops", "apiKey"]) ??
@@ -383,7 +416,7 @@ async function getContext(workspaceId: string): Promise<ActivepiecesContext> {
 
   const projectId =
     readString(workspaceActivepieces?.projectId) ??
-    readString(workspaceOps?.projectId) ??
+    (workspaceOpsLooksLegacy ? null : readString(workspaceOps?.projectId)) ??
     readConfigString(cfg, ["pmos", "connectors", "activepieces", "projectId"]) ??
     readString(process.env.ACTIVEPIECES_PROJECT_ID) ??
     readConfigString(cfg, ["pmos", "connectors", "ops", "projectId"]) ??

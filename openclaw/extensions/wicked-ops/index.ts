@@ -43,6 +43,37 @@ function normalizeUrl(raw: string | null | undefined): string {
   return trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
 }
 
+function isLikelyLegacyN8nUrl(raw: string | null | undefined): boolean {
+  const normalized = String(raw ?? "").trim().replace(/\/+$/, "");
+  if (!normalized) {
+    return false;
+  }
+  const lower = normalized.toLowerCase();
+  if (lower.includes("://ops.wickedlab.io")) {
+    return true;
+  }
+  if (lower.includes("n8n")) {
+    return true;
+  }
+  try {
+    const parsed = new URL(normalized);
+    const host = parsed.hostname.toLowerCase();
+    if (host === "ops.wickedlab.io") {
+      return true;
+    }
+    if ((host === "127.0.0.1" || host === "localhost") && parsed.port === "5678") {
+      return true;
+    }
+    const pathLower = parsed.pathname.toLowerCase();
+    if (pathLower.includes("/rest") || pathLower.includes("/webhook")) {
+      return true;
+    }
+  } catch {
+    // best effort
+  }
+  return false;
+}
+
 function readString(value: unknown): string | undefined {
   if (typeof value !== "string") {
     return undefined;
@@ -128,10 +159,12 @@ async function resolveOpsConfig(
   })();
   const pmosOps = toObject(pmosConnectors?.ops);
   const pmosActivepieces = toObject(pmosConnectors?.activepieces);
+  const workspaceOpsUrlRaw = readString(workspaceOps?.url) ?? undefined;
+  const workspaceOpsLooksLegacy = isLikelyLegacyN8nUrl(workspaceOpsUrlRaw);
 
   const baseUrl = normalizeUrl(
     readString(workspaceActivepieces?.url) ??
-      readString(workspaceOps?.url) ??
+      (workspaceOpsLooksLegacy ? undefined : workspaceOpsUrlRaw) ??
       readString(pmosActivepieces?.url) ??
       process.env.ACTIVEPIECES_URL ??
       process.env.FLOW_URL ??
@@ -143,7 +176,7 @@ async function resolveOpsConfig(
 
   const apiKey =
     readString(workspaceActivepieces?.apiKey) ??
-    readString(workspaceOps?.apiKey) ??
+    (workspaceOpsLooksLegacy ? undefined : readString(workspaceOps?.apiKey)) ??
     readString(pmosActivepieces?.apiKey) ??
     readString(process.env.ACTIVEPIECES_API_KEY) ??
     readString(pmosOps?.apiKey) ??
@@ -153,7 +186,7 @@ async function resolveOpsConfig(
 
   const projectId =
     readString(workspaceActivepieces?.projectId) ??
-    readString(workspaceOps?.projectId) ??
+    (workspaceOpsLooksLegacy ? undefined : readString(workspaceOps?.projectId)) ??
     readString(pmosActivepieces?.projectId) ??
     readString(process.env.ACTIVEPIECES_PROJECT_ID) ??
     readString(pmosOps?.projectId) ??

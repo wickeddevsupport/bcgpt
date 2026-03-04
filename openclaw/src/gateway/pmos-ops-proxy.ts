@@ -90,6 +90,44 @@ function normalizeBaseUrl(raw: string | null | undefined): string | null {
   return trimmed.replace(/\/+$/, "");
 }
 
+function toRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function isLikelyLegacyN8nUrl(raw: string | null | undefined): boolean {
+  const normalized = normalizeBaseUrl(raw);
+  if (!normalized) {
+    return false;
+  }
+  const lower = normalized.toLowerCase();
+  if (lower.includes("://ops.wickedlab.io")) {
+    return true;
+  }
+  if (lower.includes("n8n")) {
+    return true;
+  }
+  try {
+    const parsed = new URL(normalized);
+    const host = parsed.hostname.toLowerCase();
+    if (host === "ops.wickedlab.io") {
+      return true;
+    }
+    if ((host === "127.0.0.1" || host === "localhost") && parsed.port === "5678") {
+      return true;
+    }
+    const pathLower = parsed.pathname.toLowerCase();
+    if (pathLower.includes("/rest") || pathLower.includes("/webhook")) {
+      return true;
+    }
+  } catch {
+    // best effort
+  }
+  return false;
+}
+
 function boolEnv(name: string, fallback: boolean): boolean {
   const value = (process.env[name] ?? "").trim().toLowerCase();
   if (!value) return fallback;
@@ -102,8 +140,8 @@ function readGlobalOpsConfig(): { url: string; apiKey: string | null; projectId:
   const cfg = loadConfig() as unknown;
   const url =
     normalizeBaseUrl(
-      readConfigString(cfg, ["pmos", "connectors", "ops", "url"]) ??
-        readConfigString(cfg, ["pmos", "connectors", "activepieces", "url"]) ??
+      readConfigString(cfg, ["pmos", "connectors", "activepieces", "url"]) ??
+        readConfigString(cfg, ["pmos", "connectors", "ops", "url"]) ??
         process.env.ACTIVEPIECES_URL ??
         process.env.FLOW_URL ??
         process.env.OPS_URL ??
@@ -111,16 +149,16 @@ function readGlobalOpsConfig(): { url: string; apiKey: string | null; projectId:
     ) ?? "https://flow.wickedlab.io";
 
   const apiKey = (
-    readConfigString(cfg, ["pmos", "connectors", "ops", "apiKey"]) ??
     readConfigString(cfg, ["pmos", "connectors", "activepieces", "apiKey"]) ??
+    readConfigString(cfg, ["pmos", "connectors", "ops", "apiKey"]) ??
     process.env.ACTIVEPIECES_API_KEY ??
     process.env.OPS_API_KEY ??
     ""
   ).trim();
 
   const projectId = (
-    readConfigString(cfg, ["pmos", "connectors", "ops", "projectId"]) ??
     readConfigString(cfg, ["pmos", "connectors", "activepieces", "projectId"]) ??
+    readConfigString(cfg, ["pmos", "connectors", "ops", "projectId"]) ??
     process.env.ACTIVEPIECES_PROJECT_ID ??
     process.env.OPS_PROJECT_ID ??
     ""
@@ -209,21 +247,31 @@ async function resolveOpsContext(
 
   const workspaceId = String(session.user.workspaceId ?? "").trim();
   const role = String(session.user.role ?? "").trim() || null;
-  const connectors = (await readWorkspaceConnectors(workspaceId)) ?? {};
-  const ops =
-    connectors && typeof connectors === "object" && !Array.isArray(connectors)
-      ? ((connectors as Record<string, unknown>).ops as Record<string, unknown> | undefined) ??
-        ((connectors as Record<string, unknown>).activepieces as Record<string, unknown> | undefined)
-      : undefined;
+  const connectors = toRecord((await readWorkspaceConnectors(workspaceId)) ?? {});
+  const workspaceOps = toRecord(connectors?.ops);
+  const workspaceActivepieces = toRecord(connectors?.activepieces);
 
-  const workspaceUrl =
-    typeof ops?.url === "string" && ops.url.trim()
-      ? normalizeBaseUrl(ops.url)
-      : null;
+  const workspaceActivepiecesUrl =
+    typeof workspaceActivepieces?.url === "string" ? normalizeBaseUrl(workspaceActivepieces.url) : null;
+  const workspaceOpsUrl =
+    typeof workspaceOps?.url === "string" ? normalizeBaseUrl(workspaceOps.url) : null;
+  const workspaceOpsLooksLegacy = isLikelyLegacyN8nUrl(workspaceOpsUrl);
+
+  const workspaceUrl = workspaceActivepiecesUrl ?? (workspaceOpsLooksLegacy ? null : workspaceOpsUrl);
   const workspaceApiKey =
-    typeof ops?.apiKey === "string" && ops.apiKey.trim() ? ops.apiKey.trim() : null;
+    (typeof workspaceActivepieces?.apiKey === "string" && workspaceActivepieces.apiKey.trim()
+      ? workspaceActivepieces.apiKey.trim()
+      : null) ??
+    (!workspaceOpsLooksLegacy && typeof workspaceOps?.apiKey === "string" && workspaceOps.apiKey.trim()
+      ? workspaceOps.apiKey.trim()
+      : null);
   const workspaceProjectId =
-    typeof ops?.projectId === "string" && ops.projectId.trim() ? ops.projectId.trim() : null;
+    (typeof workspaceActivepieces?.projectId === "string" && workspaceActivepieces.projectId.trim()
+      ? workspaceActivepieces.projectId.trim()
+      : null) ??
+    (!workspaceOpsLooksLegacy && typeof workspaceOps?.projectId === "string" && workspaceOps.projectId.trim()
+      ? workspaceOps.projectId.trim()
+      : null);
 
   const allowGlobalKeyFallback = boolEnv("PMOS_ALLOW_GLOBAL_OPS_KEY_FALLBACK", true);
   const apiKey = workspaceApiKey ?? (allowGlobalKeyFallback ? global.apiKey : null);
@@ -233,7 +281,10 @@ async function resolveOpsContext(
       ? "global"
       : "none";
   const projectId = workspaceProjectId ?? global.projectId;
-  const user = workspaceUserFromConnectors(ops?.user) ?? workspaceUserFromSessionEnv(session.user);
+  const user =
+    workspaceUserFromConnectors(workspaceActivepieces?.user) ??
+    workspaceUserFromConnectors(workspaceOps?.user) ??
+    workspaceUserFromSessionEnv(session.user);
 
   return {
     workspaceId,

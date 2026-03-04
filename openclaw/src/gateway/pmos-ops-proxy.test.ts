@@ -165,6 +165,35 @@ describe("pmos ops proxy workflow list behavior", () => {
     expect(html).toContain("proj_abc123");
   });
 
+  it("ignores legacy workspace n8n url and routes /ops-ui to activepieces", async () => {
+    readWorkspaceConnectorsMock.mockResolvedValue({
+      ops: {
+        url: "http://127.0.0.1:5678",
+        apiKey: "legacy-n8n-api-key",
+      },
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("<html><head></head><body>ok</body></html>", {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { handleLocalN8nRequest } = await import("./pmos-ops-proxy.js");
+    const req = makeReq("/ops-ui/flows");
+    const { res } = makeRes();
+
+    const handled = await handleLocalN8nRequest(req, res);
+    expect(handled).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://flow.wickedlab.io/flows");
+
+    const upstreamOptions = fetchMock.mock.calls[0]?.[1] as { headers?: Record<string, string> } | undefined;
+    expect(upstreamOptions?.headers?.authorization).toBeUndefined();
+  });
+
   it("uses workspace user login token for /api/v1 proxy when API key is absent", async () => {
     readWorkspaceConnectorsMock.mockResolvedValue({
       ops: {
