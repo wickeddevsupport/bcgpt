@@ -1,5 +1,12 @@
 # Deployment Auto-Update
 
+## Source of Truth Policy
+
+- Coolify is the only deployment control plane for production services.
+- Do not run manual long-lived `docker run` / `docker compose up` deployments on the host.
+- If emergency debugging requires manual commands, revert to Coolify-managed state immediately after.
+- Enforce single host ownership to avoid routing collisions (`COOLIFY_HOST_OWNERSHIP_GUARDRAILS.md`).
+
 This repo uses a safe auto-update flow for PMOS + OPS:
 
 1. `PMOS Safe Auto Update` (`.github/workflows/pmos-safe-auto-update.yml`)

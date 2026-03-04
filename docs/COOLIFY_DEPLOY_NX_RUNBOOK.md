@@ -1,7 +1,7 @@
 # Coolify Deploy + Nx Runbook
 
-**Last Updated:** 2026-02-27  
-**Related:** [`NEXT_STEPS.md`](NEXT_STEPS.md), [`N8N_INTEGRATION_GUIDE.md`](N8N_INTEGRATION_GUIDE.md)
+**Last Updated:** 2026-03-04  
+**Related:** [`NEXT_STEPS.md`](NEXT_STEPS.md), [`N8N_INTEGRATION_GUIDE.md`](N8N_INTEGRATION_GUIDE.md), [`COOLIFY_HOST_OWNERSHIP_GUARDRAILS.md`](COOLIFY_HOST_OWNERSHIP_GUARDRAILS.md)
 
 ---
 
@@ -43,6 +43,9 @@ These are the issues we hit during the initial Coolify+Nx rollout. If you see th
 - Users see shared owner workflows instead of workspace-isolated workflows
   - Root cause: owner-cookie fallback is enabled and workspace-scoped n8n identity is bypassed.
   - Fix: set `N8N_ALLOW_OWNER_FALLBACK=0`; keep `N8N_OWNER_EMAIL` + `N8N_OWNER_PASSWORD` configured so workspace users can be auto-provisioned via invitation flow.
+- BCGPT auth appears random (`connected` flips between true/false for same API key)
+  - Root cause: multiple Coolify apps/services published the same `Host(...)` rule, so traffic hits different containers with different auth data.
+  - Fix: enforce single-host ownership and internal-only sidecars (see `COOLIFY_HOST_OWNERSHIP_GUARDRAILS.md`), then redeploy through Coolify.
 
 ---
 
@@ -106,6 +109,12 @@ Notes:
 3. Confirm build logs show successful app build and container restart.
 
 If you are using the **Docker Compose** build pack (recommended), you should not set a custom build command in Coolify.
+
+Before deploy, verify hostname ownership policy:
+
+- One host must be routed by one Coolify app only.
+- Internal helper services must not publish Traefik `Host(...)` labels.
+- No manual container deployments outside Coolify.
 
 ### Optional: Trigger Deploy via Coolify API (SSH)
 
