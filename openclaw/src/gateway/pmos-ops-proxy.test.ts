@@ -159,6 +159,45 @@ describe("pmos ops proxy workflow list behavior", () => {
     expect(html).toContain("proj_abc123");
   });
 
+  it("uses workspace user login token for /api/v1 proxy when API key is absent", async () => {
+    readWorkspaceConnectorsMock.mockResolvedValue({
+      ops: {
+        url: "https://flow.example.test",
+        user: {
+          email: "rajan@example.com",
+          password: "secret-pass",
+        },
+      },
+    });
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ token: "workspace-user-token" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ id: "user-1" }, 200));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { handleOpsProxyRequest } = await import("./pmos-ops-proxy.js");
+    const req = makeReq("/api/v1/users/me");
+    const { res, getBody } = makeRes();
+
+    const handled = await handleOpsProxyRequest(req, res);
+    expect(handled).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://flow.example.test/api/v1/authentication/sign-in");
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe("https://flow.example.test/api/v1/users/me");
+
+    const headers = fetchMock.mock.calls[1]?.[1] as { headers?: Record<string, string> } | undefined;
+    expect(headers?.headers?.authorization).toBe("Bearer workspace-user-token");
+
+    const body = JSON.parse(getBody()) as { id?: string };
+    expect(body.id).toBe("user-1");
+  });
+
   it("rewrites ops-ui html asset and route paths to stay under /ops-ui", async () => {
     readWorkspaceConnectorsMock.mockResolvedValue({
       ops: {

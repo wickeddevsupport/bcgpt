@@ -1049,8 +1049,18 @@ export async function handleOpsProxyRequest(
 
     const needsAuthHeader = !isAuthApiPath(pathname);
     const extraHeaders: Record<string, string> = {};
-    if (needsAuthHeader && context.apiKey) {
-      extraHeaders.authorization = `Bearer ${context.apiKey}`;
+    if (needsAuthHeader) {
+      if (context.apiKey) {
+        extraHeaders.authorization = `Bearer ${context.apiKey}`;
+      } else if (context.user) {
+        const login = await attemptActivepiecesLogin(context.baseUrl, context.user);
+        if (login?.cookies?.length) {
+          appendSetCookies(res, login.cookies);
+        }
+        if (login?.token) {
+          extraHeaders.authorization = `Bearer ${login.token}`;
+        }
+      }
     }
 
     await proxyUpstream({
