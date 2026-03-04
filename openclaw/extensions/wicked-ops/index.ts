@@ -11,9 +11,19 @@ type OpsConfig = {
 
 type ResolvedOpsConfig = {
   baseUrl: string;
-  apiKey: string;
+  apiKey: string | null;
   projectId?: string;
+  userEmail?: string;
+  userPassword?: string;
+  workspaceKey: string;
 };
+
+type CachedUserToken = {
+  token: string;
+  expiresAt: number;
+};
+
+const userTokenCache = new Map<string, CachedUserToken>();
 
 type MaybeObject = Record<string, unknown> | null;
 
@@ -89,15 +99,20 @@ async function resolveOpsConfig(
   const rootCfg = api.config as unknown;
 
   let workspaceOps: Record<string, unknown> | null = null;
+  let workspaceActivepieces: Record<string, unknown> | null = null;
   if (workspaceId) {
     const wc = await readWorkspaceConnectors(String(workspaceId)).catch(() => null);
     const ops = wc?.ops;
+    const activepieces = wc?.activepieces;
     if (ops && typeof ops === "object" && !Array.isArray(ops)) {
       workspaceOps = ops as Record<string, unknown>;
     }
+    if (activepieces && typeof activepieces === "object" && !Array.isArray(activepieces)) {
+      workspaceActivepieces = activepieces as Record<string, unknown>;
+    }
   }
 
-  const pmosOps = (() => {
+  const pmosConnectors = (() => {
     if (!rootCfg || typeof rootCfg !== "object" || Array.isArray(rootCfg)) {
       return null;
     }
@@ -109,38 +124,56 @@ async function resolveOpsConfig(
     if (!connectors || typeof connectors !== "object" || Array.isArray(connectors)) {
       return null;
     }
-    const ops = (connectors as Record<string, unknown>).ops;
-    return toObject(ops);
+    return connectors as Record<string, unknown>;
   })();
+  const pmosOps = toObject(pmosConnectors?.ops);
+  const pmosActivepieces = toObject(pmosConnectors?.activepieces);
 
   const baseUrl = normalizeUrl(
-    readString(workspaceOps?.url) ??
-      readString(pmosOps?.url) ??
-      readString(pluginCfg.baseUrl) ??
+    readString(workspaceActivepieces?.url) ??
+      readString(workspaceOps?.url) ??
+      readString(pmosActivepieces?.url) ??
       process.env.ACTIVEPIECES_URL ??
       process.env.FLOW_URL ??
+      readString(pmosOps?.url) ??
+      readString(pluginCfg.baseUrl) ??
       process.env.OPS_URL ??
       DEFAULT_BASE_URL,
   );
 
-  const apiKey = (
+  const apiKey =
+    readString(workspaceActivepieces?.apiKey) ??
     readString(workspaceOps?.apiKey) ??
+    readString(pmosActivepieces?.apiKey) ??
+    readString(process.env.ACTIVEPIECES_API_KEY) ??
     readString(pmosOps?.apiKey) ??
     readString(pluginCfg.apiKey) ??
-    process.env.ACTIVEPIECES_API_KEY ??
-    process.env.OPS_API_KEY ??
-    ""
-  ).trim();
+    readString(process.env.OPS_API_KEY) ??
+    null;
 
   const projectId =
+    readString(workspaceActivepieces?.projectId) ??
     readString(workspaceOps?.projectId) ??
+    readString(pmosActivepieces?.projectId) ??
+    readString(process.env.ACTIVEPIECES_PROJECT_ID) ??
     readString(pmosOps?.projectId) ??
     readString(pluginCfg.projectId) ??
-    readString(process.env.ACTIVEPIECES_PROJECT_ID);
+    readString(process.env.OPS_PROJECT_ID);
 
-  if (!apiKey) {
+  const workspaceUser = toObject(workspaceOps?.user);
+  const workspaceActivepiecesUser = toObject(workspaceActivepieces?.user);
+  const userEmail =
+    readString(workspaceActivepiecesUser?.email) ??
+    readString(workspaceUser?.email) ??
+    undefined;
+  const userPassword =
+    readString(workspaceActivepiecesUser?.password) ??
+    readString(workspaceUser?.password) ??
+    undefined;
+
+  if (!apiKey && !(userEmail && userPassword)) {
     throw new Error(
-      "Workflow engine API key is not configured. Set PMOS ops.apiKey or ACTIVEPIECES_API_KEY.",
+      "Workflow engine authentication is not configured. Set workspace user credentials or an Activepieces API key.",
     );
   }
 
@@ -148,18 +181,82 @@ async function resolveOpsConfig(
     baseUrl,
     apiKey,
     projectId: projectId || undefined,
+    userEmail,
+    userPassword,
+    workspaceKey: workspaceId ? String(workspaceId) : "global",
   };
 }
 
+async function signInWithWorkspaceUser(cfg: ResolvedOpsConfig): Promise<string | null> {
+  if (!cfg.userEmail || !cfg.userPassword) {
+    return null;
+  }
+
+  const cacheKey = `${cfg.workspaceKey}:${cfg.baseUrl}:${cfg.userEmail}`;
+  const cached = userTokenCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now() + 30_000) {
+    return cached.token;
+  }
+
+  const endpoints = [
+    "/api/v1/authentication/sign-in",
+    "/api/v1/users/sign-in",
+    "/api/v1/users/login",
+  ];
+  const payloads = [
+    { email: cfg.userEmail, password: cfg.userPassword },
+    { emailOrLdapLoginId: cfg.userEmail, password: cfg.userPassword },
+  ];
+
+  for (const endpoint of endpoints) {
+    for (const payload of payloads) {
+      const res = await fetch(`${cfg.baseUrl}${endpoint}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json",
+        },
+        body: JSON.stringify(payload),
+      }).catch(() => null);
+      if (!res || !res.ok) {
+        continue;
+      }
+      const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+      const token = readString(body?.token);
+      if (!token) {
+        continue;
+      }
+      userTokenCache.set(cacheKey, {
+        token,
+        expiresAt: Date.now() + 10 * 60 * 1000,
+      });
+      return token;
+    }
+  }
+  return null;
+}
+
+async function resolveAuthHeader(cfg: ResolvedOpsConfig): Promise<string> {
+  const userToken = await signInWithWorkspaceUser(cfg);
+  if (userToken) {
+    return `Bearer ${userToken}`;
+  }
+  if (cfg.apiKey) {
+    return `Bearer ${cfg.apiKey}`;
+  }
+  throw new Error("Workflow engine authentication failed: no usable user token or API key.");
+}
+
 async function opsRequest(params: OpsRequestParams): Promise<unknown> {
-  const { baseUrl, apiKey } = await resolveOpsConfig(params.api, params.workspaceId ?? null);
+  const cfg = await resolveOpsConfig(params.api, params.workspaceId ?? null);
   const endpoint = params.endpoint.replace(/^\/+/, "");
-  const url = `${baseUrl}/api/v1/${endpoint}`;
+  const url = `${cfg.baseUrl}/api/v1/${endpoint}`;
   const method = (params.method ?? "GET").toUpperCase();
   const hasBody = params.body !== undefined;
+  const authHeader = await resolveAuthHeader(cfg);
 
   const headers: Record<string, string> = {
-    authorization: `Bearer ${apiKey}`,
+    authorization: authHeader,
     accept: "application/json",
   };
   if (hasBody) {
