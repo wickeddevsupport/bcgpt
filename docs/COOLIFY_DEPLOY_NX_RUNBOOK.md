@@ -46,6 +46,12 @@ These are the issues we hit during the initial Coolify+Nx rollout. If you see th
 - BCGPT auth appears random (`connected` flips between true/false for same API key)
   - Root cause: multiple Coolify apps/services published the same `Host(...)` rule, so traffic hits different containers with different auth data.
   - Fix: enforce single-host ownership and internal-only sidecars (see `COOLIFY_HOST_OWNERSHIP_GUARDRAILS.md`), then redeploy through Coolify.
+- `flow.wickedlab.io` returns `502` (Activepieces) with logs like `NOAUTH Authentication required` or `password authentication failed for user ap_user`
+  - Root cause: Docker hostname collision on the shared `coolify` network; `redis` / `postgres` can resolve to Coolify system services instead of the app stack services.
+  - Fix: in `docker-compose.yaml` for Activepieces, scope hosts to the app network aliases:
+    - `AP_REDIS_HOST: "redis.<ACTIVEPIECES_RESOURCE_UUID>"`
+    - `AP_POSTGRES_HOST: "postgres.<ACTIVEPIECES_RESOURCE_UUID>"`
+    Then redeploy.
 
 ---
 
