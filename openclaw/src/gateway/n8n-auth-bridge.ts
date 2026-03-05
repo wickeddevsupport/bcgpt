@@ -301,23 +301,31 @@ async function ensureWorkspaceUserViaInvitation(params: {
   email: string;
   name?: string | null;
   role?: PmosAuthUser["role"] | null;
+  preferredPassword?: string | null;
 }): Promise<{ email: string; password: string; cookie: string } | null> {
   const { workspaceId, n8nBaseUrl } = params;
 
   const wc = await readWorkspaceConnectors(workspaceId);
   const existing = wc?.ops?.user as { email?: string; password?: string } | undefined;
   const requestedEmail = String(params.email ?? "").trim().toLowerCase();
+  const preferredPassword = String(params.preferredPassword ?? "");
   const existingEmail = String(existing?.email ?? "").trim().toLowerCase();
+  const existingPassword = typeof existing?.password === "string" ? existing.password : "";
   const existingIsSynthetic =
     existingEmail.endsWith("@openclaw.local") || existingEmail.startsWith("pmos-");
   const requestedLooksReal = Boolean(requestedEmail && !requestedEmail.endsWith("@openclaw.local"));
+  const requestedPasswordDiffers =
+    Boolean(preferredPassword) &&
+    existingEmail === requestedEmail &&
+    Boolean(existingPassword) &&
+    existingPassword !== preferredPassword;
   const shouldPreferRequestedIdentity = Boolean(
     existing?.email &&
       existing?.password &&
       requestedLooksReal &&
       existingIsSynthetic &&
       existingEmail !== requestedEmail,
-  );
+  ) || requestedPasswordDiffers;
 
   if (existing?.email && existing?.password && !shouldPreferRequestedIdentity) {
     const existingCookie = await loginToN8n(n8nBaseUrl, existing.email, existing.password);
@@ -355,7 +363,7 @@ async function ensureWorkspaceUserViaInvitation(params: {
   if (!inviterId) return null;
 
   const { randomBytes } = await import("node:crypto");
-  const password = randomBytes(24).toString("base64url");
+  const password = preferredPassword || randomBytes(24).toString("base64url");
   const emailCandidates = Array.from(
     new Set(
       [
@@ -496,6 +504,7 @@ export async function getOrCreateWorkspaceN8nCookie(params: {
   workspaceId: string;
   n8nBaseUrl: string;
   pmosUser?: Pick<PmosAuthUser, "email" | "name" | "role"> | null;
+  preferredPassword?: string | null;
 }): Promise<string | null> {
   const { workspaceId, n8nBaseUrl } = params;
 
@@ -514,6 +523,7 @@ export async function getOrCreateWorkspaceN8nCookie(params: {
       email: emailHint,
       name: nameHint,
       role: params.pmosUser?.role ?? null,
+      preferredPassword: params.preferredPassword ?? null,
     });
   };
 

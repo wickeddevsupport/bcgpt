@@ -62,7 +62,7 @@ describe("pmos-connectors", () => {
         expect(params.connectors.ops.url).toBe("https://ops.example.test");
         expect(params.connectors.ops.user.email).toBe("ops@example.test");
         expect(params.connectors.ops.user.password).toBe("secret-pass");
-        expect(params.connectors.bcgpt.url).toBe("https://bcgpt.example.test");
+        expect(params.connectors.bcgpt.url).toBe("https://bcgpt.wickedlab.io");
         expect(params.connectors.bcgpt.apiKey).toBe("bcgpt-key");
         return { ok: true };
       }
@@ -74,7 +74,7 @@ describe("pmos-connectors", () => {
               url: "https://ops.example.test",
               user: { email: "ops@example.test", hasPassword: true },
             },
-            bcgpt: { url: "https://bcgpt.example.test" },
+            bcgpt: { url: "https://bcgpt.wickedlab.io" },
           },
         };
       }
@@ -89,7 +89,7 @@ describe("pmos-connectors", () => {
     expect(state.pmosOpsUserEmailDraft).toBe("ops@example.test");
     expect(state.pmosOpsUserHasSavedPassword).toBe(true);
     expect(state.pmosOpsUserPasswordDraft).toBe("");
-    expect(state.pmosBcgptUrl).toBe("https://bcgpt.example.test");
+    expect(state.pmosBcgptUrl).toBe("https://bcgpt.wickedlab.io");
     expect(state.pmosBcgptApiKeyDraft).toBe("");
     expect(request).toHaveBeenCalledWith("pmos.connectors.workspace.set", expect.any(Object));
     expect(request).toHaveBeenCalledWith("pmos.connectors.workspace.get", {});
@@ -104,7 +104,7 @@ describe("pmos-connectors", () => {
     const request = vi.fn(async (method: string, params: any) => {
       if (method === "pmos.connectors.workspace.set") {
         expect(params.connectors.ops.url).toBe("https://ops.example.test");
-        expect(params.connectors.bcgpt.url).toBe("https://bcgpt.example.test");
+        expect(params.connectors.bcgpt.url).toBe("https://bcgpt.wickedlab.io");
         expect(params.connectors.bcgpt.apiKey).toBeNull();
         return { ok: true };
       }
@@ -113,7 +113,7 @@ describe("pmos-connectors", () => {
           workspaceId: "ws-test",
           connectors: {
             ops: { url: "https://ops.example.test" },
-            bcgpt: { url: "https://bcgpt.example.test", apiKey: null },
+            bcgpt: { url: "https://bcgpt.wickedlab.io", apiKey: null },
           },
         };
       }

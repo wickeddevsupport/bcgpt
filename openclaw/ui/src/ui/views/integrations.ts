@@ -252,17 +252,11 @@ export function renderIntegrations(props: IntegrationsProps) {
           </a>
           <span class="muted mono" style="font-size: 12px;">${bcgptConnectHref}</span>
         </div>
+        <div class="muted mono" style="font-size: 12px; margin-top: 8px;">
+          Endpoint: https://bcgpt.wickedlab.io
+        </div>
 
         <div class="form-grid" style="margin-top: 16px;">
-          <label class="field">
-            <span>Connector URL</span>
-            <input
-              .value=${props.bcgptUrl}
-              @input=${(e: Event) => props.onBcgptUrlChange((e.target as HTMLInputElement).value)}
-              placeholder="https://bcgpt.wickedlab.io"
-              ?disabled=${!props.connected}
-            />
-          </label>
           <label class="field">
             <span>Connection Key</span>
             <input
@@ -320,9 +314,9 @@ export function renderIntegrations(props: IntegrationsProps) {
                   class="btn btn--secondary"
                   ?disabled=${!props.connected || props.basecampSetupPending}
                   @click=${() => props.onSetupBasecamp?.()}
-                  title="Auto-configure Basecamp credentials in workflow engine"
+                  title="Re-sync Basecamp connection in workflow engine"
                 >
-                  ${props.basecampSetupPending ? "Configuring..." : "Sync to Workflow Engine"}
+                  ${props.basecampSetupPending ? "Syncing..." : "Re-sync in Workflow Engine"}
                 </button>
               </div>
               ${props.basecampSetupError

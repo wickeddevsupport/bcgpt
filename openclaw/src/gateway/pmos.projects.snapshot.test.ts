@@ -25,12 +25,15 @@ function jsonResponse(payload: unknown, status = 200): Response {
 
 describe("pmos.projects.snapshot", () => {
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-02-23T12:00:00Z"));
     vi.clearAllMocks();
     loadConfigMock.mockReturnValue({});
     readWorkspaceConnectorsMock.mockResolvedValue(null);
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 

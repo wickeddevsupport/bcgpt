@@ -10,6 +10,9 @@ import { loadConfig } from "../config/config.js";
 import { readWorkspaceConnectors } from "./workspace-connectors.js";
 
 const DEFAULT_BASE_URL = "https://flow.wickedlab.io";
+const ACTIVEPIECES_BASECAMP_PIECE_NAME = "@activepieces/piece-basecamp";
+const ACTIVEPIECES_BASECAMP_EXTERNAL_ID = "openclaw-basecamp";
+const ACTIVEPIECES_BASECAMP_DEFAULT_URL = "https://bcgpt.wickedlab.io";
 
 type JsonObject = Record<string, unknown>;
 
@@ -167,6 +170,27 @@ function toArrayObjects(value: unknown): JsonObject[] {
     return [];
   }
   return value.filter((entry): entry is JsonObject => Boolean(toObject(entry)));
+}
+
+function isBasecampPieceName(pieceName: string | null | undefined): boolean {
+  const lowered = String(pieceName ?? "").trim().toLowerCase();
+  if (!lowered) {
+    return false;
+  }
+  return (
+    lowered === "basecamp" ||
+    lowered === "basecampapi" ||
+    lowered === ACTIVEPIECES_BASECAMP_PIECE_NAME.toLowerCase() ||
+    lowered.endsWith("/piece-basecamp") ||
+    lowered.includes("piece-basecamp")
+  );
+}
+
+function normalizeConnectionTypeForCompat(pieceName: string | null | undefined): string {
+  if (isBasecampPieceName(pieceName)) {
+    return "basecampApi";
+  }
+  return String(pieceName ?? "").trim() || "connection";
 }
 
 function mapRunStatus(statusRaw: string | null): N8nExecution["status"] {
@@ -932,6 +956,9 @@ export async function cancelN8nExecution(
 
 function credentialTypeFromInput(type: string, data: Record<string, unknown>) {
   const lowered = type.trim().toLowerCase();
+  if (isBasecampPieceName(type)) {
+    return "CUSTOM_AUTH" as const;
+  }
   if (lowered.includes("basic") || (readString(data.username) && readString(data.password))) {
     return "BASIC_AUTH" as const;
   }
@@ -942,9 +969,36 @@ function credentialTypeFromInput(type: string, data: Record<string, unknown>) {
 }
 
 function buildCredentialValue(
-  connType: "SECRET_TEXT" | "BASIC_AUTH" | "NO_AUTH",
+  connType: "SECRET_TEXT" | "BASIC_AUTH" | "NO_AUTH" | "CUSTOM_AUTH",
+  pieceName: string,
   data: Record<string, unknown>,
 ) {
+  if (connType === "CUSTOM_AUTH") {
+    const apiKey =
+      readString(data.api_key) ??
+      readString(data.apiKey) ??
+      readString(data.token) ??
+      readString(data.secret_text) ??
+      "";
+    const rawBaseUrl = readString(data.base_url) ?? readString(data.bcgptUrl);
+    const baseUrl =
+      rawBaseUrl && rawBaseUrl.trim()
+        ? rawBaseUrl.trim().replace(/\/+$/, "")
+        : ACTIVEPIECES_BASECAMP_DEFAULT_URL;
+    if (isBasecampPieceName(pieceName)) {
+      return {
+        type: "CUSTOM_AUTH",
+        props: {
+          api_key: apiKey,
+          base_url: baseUrl,
+        },
+      };
+    }
+    return {
+      type: "CUSTOM_AUTH",
+      props: { ...data },
+    };
+  }
   if (connType === "BASIC_AUTH") {
     return {
       type: "BASIC_AUTH",
@@ -976,9 +1030,9 @@ export async function upsertBasecampCredential(
   bcgptUrl: string,
   bcgptApiKey: string,
 ): Promise<{ ok: boolean; credentialId?: string; error?: string }> {
-  return createN8nCredential(workspaceId, "Basecamp (OpenClaw)", "basecamp", {
-    bcgptUrl,
-    apiKey: bcgptApiKey,
+  return createN8nCredential(workspaceId, "Basecamp", ACTIVEPIECES_BASECAMP_PIECE_NAME, {
+    base_url: bcgptUrl || ACTIVEPIECES_BASECAMP_DEFAULT_URL,
+    api_key: bcgptApiKey,
   });
 }
 
@@ -1009,7 +1063,9 @@ export async function listN8nCredentials(
     const credentials = rows.map((row) => ({
       id: readId(row.id) ?? "",
       name: readString(row.displayName) ?? readString(row.externalId) ?? "Unnamed Connection",
-      type: readString(row.pieceName) ?? readString(row.type) ?? "connection",
+      type: normalizeConnectionTypeForCompat(
+        readString(row.pieceName) ?? readString(row.type) ?? "connection",
+      ),
     }));
 
     return { ok: true, credentials };
@@ -1038,8 +1094,11 @@ export async function createN8nCredential(
     }
 
     const projectId = await resolveProjectId(workspaceId, ctx);
-    const connType = credentialTypeFromInput(type, data);
-    const externalId = `openclaw-${String(type || "connection").toLowerCase().replace(/[^a-z0-9_-]+/g, "-")}-${String(name || "conn").toLowerCase().replace(/[^a-z0-9_-]+/g, "-")}`;
+    const pieceName = isBasecampPieceName(type) ? ACTIVEPIECES_BASECAMP_PIECE_NAME : type;
+    const connType = credentialTypeFromInput(pieceName, data);
+    const externalId = isBasecampPieceName(pieceName)
+      ? ACTIVEPIECES_BASECAMP_EXTERNAL_ID
+      : `openclaw-${String(pieceName || "connection").toLowerCase().replace(/[^a-z0-9_-]+/g, "-")}-${String(name || "conn").toLowerCase().replace(/[^a-z0-9_-]+/g, "-")}`;
 
     const payload = await requestJson({
       workspaceId,
@@ -1050,9 +1109,9 @@ export async function createN8nCredential(
         projectId,
         externalId,
         displayName: name,
-        pieceName: type,
+        pieceName,
         type: connType,
-        value: buildCredentialValue(connType, data),
+        value: buildCredentialValue(connType, pieceName, data),
       },
     });
 

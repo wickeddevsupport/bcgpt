@@ -58,7 +58,7 @@ export type PmosConnectorsState = {
   pmosIntegrationsSaving: boolean;
   pmosIntegrationsError: string | null;
 
-  // n8n Credentials
+  // Workflow engine credentials
   pmosN8nCredentials: Array<{ id: string; name: string; type: string }> | null;
   pmosN8nCredentialsLoading: boolean;
   pmosN8nCredentialsError: string | null;
@@ -95,12 +95,7 @@ export function hydratePmosConnectorDraftsFromConfig(state: PmosConnectorsState)
       : typeof getPath(cfg, ["pmos", "connectors", "ops", "url"]) === "string"
         ? (getPath(cfg, ["pmos", "connectors", "ops", "url"]) as string)
         : "") || "https://flow.wickedlab.io";
-  const bcgptUrl =
-    (typeof status?.bcgpt?.url === "string" && status.bcgpt.url.trim()
-      ? status.bcgpt.url
-      : typeof getPath(cfg, ["pmos", "connectors", "bcgpt", "url"]) === "string"
-        ? (getPath(cfg, ["pmos", "connectors", "bcgpt", "url"]) as string)
-        : "") || "https://bcgpt.wickedlab.io";
+  const bcgptUrl = "https://bcgpt.wickedlab.io";
 
   state.pmosOpsUrl = normalizeUrl(opsUrl, "https://flow.wickedlab.io");
   state.pmosBcgptUrl = normalizeUrl(bcgptUrl, "https://bcgpt.wickedlab.io");
@@ -135,7 +130,7 @@ export async function savePmosConnectorsConfig(
   state.pmosIntegrationsError = null;
   try {
     const opsUrl = normalizeUrl(state.pmosOpsUrl, "https://flow.wickedlab.io");
-    const bcgptUrl = normalizeUrl(state.pmosBcgptUrl, "https://bcgpt.wickedlab.io");
+    const bcgptUrl = "https://bcgpt.wickedlab.io";
     const bcgptKey = state.pmosBcgptApiKeyDraft.trim();
     const opsUserEmail = state.pmosOpsUserEmailDraft.trim();
     const opsUserPassword = state.pmosOpsUserPasswordDraft.trim();
@@ -186,7 +181,9 @@ export async function savePmosConnectorsConfig(
     state.pmosOpsUserHasSavedPassword = Boolean(opsUserHasPasswordSaved);
     state.pmosOpsUserPasswordDraft = "";
     state.pmosBcgptUrl = normalizeUrl(
-      typeof bcgptSaved === "string" ? bcgptSaved : "https://bcgpt.wickedlab.io",
+      typeof bcgptSaved === "string" && bcgptSaved.trim()
+        ? bcgptSaved
+        : "https://bcgpt.wickedlab.io",
       "https://bcgpt.wickedlab.io",
     );
     state.pmosConnectorDraftsInitialized = true;
@@ -197,14 +194,26 @@ export async function savePmosConnectorsConfig(
   }
 }
 
-export async function loadPmosN8nCredentials(state: PmosConnectorsState) {
+export async function loadPmosWorkflowCredentials(state: PmosConnectorsState) {
   if (!state.client || !state.connected) {
     return;
   }
   state.pmosN8nCredentialsLoading = true;
   state.pmosN8nCredentialsError = null;
   try {
-    const result = await state.client.request<{ credentials?: Array<{ id: string; name: string; type: string }> }>("pmos.ops.credentials.list", {});
+    let result: { credentials?: Array<{ id: string; name: string; type: string }> };
+    try {
+      result = await state.client.request<{ credentials?: Array<{ id: string; name: string; type: string }> }>(
+        "pmos.workflow.credentials.list",
+        {},
+      );
+    } catch {
+      // Backward-compatibility path while older gateways still expose the legacy route.
+      result = await state.client.request<{ credentials?: Array<{ id: string; name: string; type: string }> }>(
+        "pmos.ops.credentials.list",
+        {},
+      );
+    }
     state.pmosN8nCredentials = result.credentials ?? [];
   } catch (err) {
     state.pmosN8nCredentialsError = String(err);
@@ -213,3 +222,6 @@ export async function loadPmosN8nCredentials(state: PmosConnectorsState) {
     state.pmosN8nCredentialsLoading = false;
   }
 }
+
+// Backward-compatible export name kept for existing callers.
+export const loadPmosN8nCredentials = loadPmosWorkflowCredentials;

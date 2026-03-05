@@ -10,7 +10,11 @@ import {
   Polling,
   pollingHelper,
 } from '@activepieces/pieces-common';
-import { gatewayPost, type BasecampGatewayAuthConnection } from '../common/client';
+import {
+  gatewayPost,
+  resolveGatewayBaseUrl,
+  type BasecampGatewayAuthConnection,
+} from '../common/client';
 import { projectDropdown } from '../common/dropdowns';
 import { basecampAuth } from '../../index';
 
@@ -41,15 +45,12 @@ const polling = {
     files?: FilesService;
     lastItemId: unknown;
   }) => {
-    if (!auth?.props?.base_url) {
-      throw new Error('Missing BCGPT base URL in connection.');
-    }
     if (!auth?.props?.api_key) {
       throw new Error('Missing API key in the connection.');
     }
 
     const data = await gatewayPost({
-      baseUrl: auth.props.base_url,
+      baseUrl: resolveGatewayBaseUrl(auth),
       path: '/action/list_todos_for_project',
       body: {
         project: propsValue.project,

@@ -1,11 +1,12 @@
-import { gatewayPost, type BasecampGatewayAuthConnection } from './client';
+import {
+  gatewayPost,
+  resolveGatewayBaseUrl,
+  type BasecampGatewayAuthConnection,
+} from './client';
 
 export const requireGatewayAuth = (
   auth: BasecampGatewayAuthConnection | undefined,
 ): BasecampGatewayAuthConnection => {
-  if (!auth?.props?.base_url) {
-    throw new Error('Missing BCGPT base URL in connection.');
-  }
   if (!auth?.props?.api_key) {
     throw new Error('Missing API key in the connection.');
   }
@@ -18,7 +19,7 @@ export const callGatewayTool = async (params: {
   args?: unknown;
 }) => {
   const body = await gatewayPost({
-    baseUrl: params.auth.props.base_url,
+    baseUrl: resolveGatewayBaseUrl(params.auth),
     path: `/action/${params.toolName}`,
     body: params.args ?? {},
     auth: params.auth,

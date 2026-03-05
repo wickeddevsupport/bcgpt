@@ -15,9 +15,11 @@
  */
 
 import { getKey } from "./byok-store.js";
-import { getOrCreateWorkspaceN8nCookie } from "./n8n-auth-bridge.js";
+import {
+  createN8nCredential as upsertWorkflowCredential,
+  listN8nCredentials as listWorkflowCredentials,
+} from "./n8n-api-client.js";
 import { readWorkspaceConnectors } from "./workspace-connectors.js";
-import { readLocalN8nConfig } from "./pmos-ops-proxy.js";
 import { loadConfig } from "../config/config.js";
 
 const BASECAMP_ENSURE_SUCCESS_TTL_MS = 60_000;
@@ -43,32 +45,6 @@ function normalizeBaseUrl(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const trimmed = raw.trim();
   return trimmed ? trimmed.replace(/\/+$/, "") : null;
-}
-
-async function resolveWorkspaceN8nBaseUrl(workspaceId: string): Promise<string> {
-  const wc = await readWorkspaceConnectors(workspaceId);
-  const workspaceUrl = normalizeBaseUrl(
-    typeof wc?.ops?.url === "string" ? wc.ops.url : null,
-  );
-  if (workspaceUrl) {
-    return workspaceUrl;
-  }
-
-  const localN8n = readLocalN8nConfig();
-  const localUrl = normalizeBaseUrl(localN8n?.url ?? null);
-  if (localUrl) {
-    return localUrl;
-  }
-
-  const cfg = loadConfig() as unknown;
-  const globalOpsUrl = normalizeBaseUrl(
-    readConfigString(cfg, ["pmos", "connectors", "ops", "url"]),
-  );
-  if (globalOpsUrl) {
-    return globalOpsUrl;
-  }
-
-  return "https://ops.wickedlab.io";
 }
 
 type N8nCredentialType = "openAiApi" | "anthropicApi" | "googlePalmApi";
@@ -305,38 +281,21 @@ function credentialName(provider: string): string {
 }
 
 /**
- * Get all credentials from n8n for a workspace, filtered to OpenClaw-managed ones.
+ * Get all credentials from workflow engine for a workspace.
  */
 async function listN8nCredentials(
   workspaceId: string,
 ): Promise<Array<{ id: string; name: string; type: string }>> {
-  const n8nBaseUrl = await resolveWorkspaceN8nBaseUrl(workspaceId);
-  const cookie = await getOrCreateWorkspaceN8nCookie({
-    workspaceId,
-    n8nBaseUrl,
-  });
-
-  if (!cookie) return [];
-
   try {
-    const res = await fetch(`${n8nBaseUrl}/rest/credentials`, {
-      headers: {
-        Cookie: cookie,
-        Accept: "application/json",
-      },
-    });
-
-    if (!res.ok) return [];
-
-    const data = await res.json() as { data?: Array<{ id: string; name: string; type: string }> };
-    return data.data ?? [];
+    const result = await listWorkflowCredentials(workspaceId);
+    return result.ok ? (result.credentials ?? []) : [];
   } catch {
     return [];
   }
 }
 
 /**
- * Create a new managed credential in n8n.
+ * Upsert a managed credential in workflow engine.
  */
 async function createN8nCredential(params: {
   workspaceId: string;
@@ -344,66 +303,19 @@ async function createN8nCredential(params: {
   type: string;
   data: Record<string, unknown>;
 }): Promise<{ id: string } | null> {
-  const n8nBaseUrl = await resolveWorkspaceN8nBaseUrl(params.workspaceId);
-  const cookie = await getOrCreateWorkspaceN8nCookie({
-    workspaceId: params.workspaceId,
-    n8nBaseUrl,
-  });
-  if (!cookie) return null;
-
   try {
-    const res = await fetch(`${n8nBaseUrl}/rest/credentials`, {
-      method: "POST",
-      headers: {
-        Cookie: cookie,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({
-        name: params.name,
-        type: params.type,
-        data: params.data,
-      }),
-    });
-
-    if (!res.ok) return null;
-    const result = await res.json() as { data?: { id: string }; id?: string };
-    const id = result.data?.id ?? result.id;
-    return id ? { id: String(id) } : null;
+    const result = await upsertWorkflowCredential(
+      params.workspaceId,
+      params.name,
+      params.type,
+      params.data,
+    );
+    if (!result.ok) {
+      return null;
+    }
+    return result.credentialId ? { id: result.credentialId } : { id: "" };
   } catch {
     return null;
-  }
-}
-
-/**
- * Update an existing credential in n8n.
- */
-async function updateN8nCredential(params: {
-  workspaceId: string;
-  credentialId: string;
-  data: Record<string, unknown>;
-}): Promise<boolean> {
-  const n8nBaseUrl = await resolveWorkspaceN8nBaseUrl(params.workspaceId);
-  const cookie = await getOrCreateWorkspaceN8nCookie({
-    workspaceId: params.workspaceId,
-    n8nBaseUrl,
-  });
-  if (!cookie) return false;
-
-  try {
-    const res = await fetch(`${n8nBaseUrl}/rest/credentials/${params.credentialId}`, {
-      method: "PATCH",
-      headers: {
-        Cookie: cookie,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({ data: params.data }),
-    });
-
-    return res.ok;
-  } catch {
-    return false;
   }
 }
 
@@ -435,30 +347,17 @@ export async function syncByokToN8n(
   try {
     // Find existing credential by name
     const existing = await listN8nCredentials(workspaceId);
-    const found = existing.find(c => c.name === name);
+    const found = existing.find((c) => c.name === name);
 
-    if (found) {
-      // Update existing credential
-      const updated = await updateN8nCredential({
-        workspaceId,
-        credentialId: found.id,
-        data: credData,
-      });
-      return updated
-        ? { ok: true, action: "updated" }
-        : { ok: false, error: "Failed to update n8n credential" };
-    } else {
-      // Create new credential
-      const created = await createN8nCredential({
-        workspaceId,
-        name,
-        type: mapping.credentialType,
-        data: credData,
-      });
-      return created
-        ? { ok: true, action: "created" }
-        : { ok: false, error: "Failed to create n8n credential" };
-    }
+    const created = await createN8nCredential({
+      workspaceId,
+      name,
+      type: mapping.credentialType,
+      data: credData,
+    });
+    return created
+      ? { ok: true, action: found ? "updated" : "created" }
+      : { ok: false, error: "Failed to upsert workflow-engine credential" };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(`[credential-sync] Failed to sync ${provider} for workspace ${workspaceId}: ${msg}`);

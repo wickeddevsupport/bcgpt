@@ -10,7 +10,6 @@ import { loadAgentSkills } from "./controllers/agent-skills.ts";
 import { loadAgents } from "./controllers/agents.ts";
 import { loadChannels } from "./controllers/channels.ts";
 import { loadChatHistory } from "./controllers/chat.ts";
-import { loadPmosN8nCredentials } from "./controllers/pmos-connectors.ts";
 import {
   applyConfig,
   loadConfig,
@@ -905,14 +904,7 @@ export function renderApp(state: AppViewState) {
                         state.apFlowTemplateDeployedOk = true;
                         setTimeout(() => { state.apFlowTemplateDeployedOk = false; }, 3000);
                       },
-                      panelOpen: state.automationsPanelOpen,
-                      panelTab: (state.automationsPanelTab === "settings" ? "workflows" : state.automationsPanelTab) as "workflows" | "templates" | "runs",
-                      onPanelToggle: () => { state.automationsPanelOpen = !state.automationsPanelOpen; },
-                      onPanelTabChange: (tab) => { state.automationsPanelTab = tab; },
-                      leftPanelRatio: state.automationsLeftPanelRatio,
                       centerSplitRatio: state.automationsCenterSplitRatio,
-                      onLeftPanelResize: (ratio) =>
-                        state.handleAutomationsLeftPanelRatioChange(ratio),
                       onCenterSplitResize: (ratio) =>
                         state.handleAutomationsCenterSplitRatioChange(ratio),
                       chatOpen: state.automationsChatOpen,
@@ -966,7 +958,7 @@ export function renderApp(state: AppViewState) {
                 basecampSetupPending: state.pmosBasecampSetupPending,
                 basecampSetupOk: state.pmosBasecampSetupOk,
                 basecampSetupError: state.pmosBasecampSetupError,
-                onSetupBasecamp: () => void state.handlePmosSetupBasecampInN8n(),
+                onSetupBasecamp: () => void state.handlePmosSetupBasecampInWorkflowEngine(),
                 // n8n Credentials
                 n8nCredentials: state.pmosRealCredentials ?? undefined,
                 n8nCredentialsLoading: state.pmosRealCredentialsLoading,

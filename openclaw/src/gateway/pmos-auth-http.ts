@@ -91,7 +91,182 @@ type WarmIdentityUser = {
   role?: import("./pmos-auth.js").PmosRole | null;
 };
 
-async function warmEmbeddedN8nIdentity(user: WarmIdentityUser): Promise<void> {
+function readConfigStringPath(cfg: unknown, path: string[]): string | null {
+  let current: unknown = cfg;
+  for (const key of path) {
+    if (!isRecord(current)) {
+      return null;
+    }
+    current = current[key];
+  }
+  if (typeof current !== "string") {
+    return null;
+  }
+  const trimmed = current.trim();
+  return trimmed || null;
+}
+
+function normalizeExternalOpsUrl(raw: string | null | undefined): string {
+  const trimmed = String(raw ?? "").trim();
+  if (!trimmed) {
+    return "https://flow.wickedlab.io";
+  }
+  const normalized = trimmed.replace(/\/+$/, "");
+  if (
+    /^https?:\/\/localhost(?::\d+)?$/i.test(normalized) ||
+    /^https?:\/\/127\.0\.0\.1(?::\d+)?$/i.test(normalized) ||
+    /:5678$/i.test(normalized)
+  ) {
+    return "https://flow.wickedlab.io";
+  }
+  return normalized;
+}
+
+async function postJsonWithTimeout(
+  url: string,
+  payload: unknown,
+  timeoutMs = 6000,
+): Promise<Response | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function splitHumanName(raw: string | null | undefined): { firstName: string; lastName: string } {
+  const text = String(raw ?? "").trim();
+  if (!text) {
+    return { firstName: "PMOS", lastName: "User" };
+  }
+  const parts = text.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) {
+    return { firstName: parts[0], lastName: "User" };
+  }
+  return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
+}
+
+async function ensureActivepiecesCredentialParity(params: {
+  baseUrl: string;
+  email: string;
+  password: string;
+  name?: string | null;
+}): Promise<void> {
+  const baseUrl = normalizeExternalOpsUrl(params.baseUrl);
+  const email = params.email.trim().toLowerCase();
+  const password = params.password;
+  if (!email || !password) {
+    return;
+  }
+
+  const loginEndpoints = [
+    "/api/v1/authentication/sign-in",
+    "/api/v1/users/sign-in",
+    "/api/v1/users/login",
+  ];
+  const loginPayloads = [
+    { emailOrLdapLoginId: email, password },
+    { email, password },
+    { username: email, password },
+  ];
+  for (const endpoint of loginEndpoints) {
+    for (const payload of loginPayloads) {
+      const res = await postJsonWithTimeout(`${baseUrl}${endpoint}`, payload);
+      if (res && res.ok) {
+        return;
+      }
+      if (res && res.status === 401) {
+        continue;
+      }
+    }
+  }
+
+  const { firstName, lastName } = splitHumanName(params.name);
+  const signupEndpoints = [
+    "/api/v1/authentication/sign-up",
+    "/api/v1/users/sign-up",
+    "/api/v1/users/register",
+  ];
+  const signupPayloads = [
+    { email, password, firstName, lastName },
+    { email, password, name: `${firstName} ${lastName}`.trim() },
+    { emailOrLdapLoginId: email, password, firstName, lastName },
+  ];
+  for (const endpoint of signupEndpoints) {
+    for (const payload of signupPayloads) {
+      const res = await postJsonWithTimeout(`${baseUrl}${endpoint}`, payload);
+      if (!res) {
+        continue;
+      }
+      if (res.ok || res.status === 409) {
+        return;
+      }
+    }
+  }
+}
+
+async function syncWorkflowIdentityForWorkspace(user: WarmIdentityUser, password: string): Promise<void> {
+  const workspaceId = String(user.workspaceId ?? "").trim();
+  const email = typeof user.email === "string" ? user.email.trim().toLowerCase() : "";
+  if (!workspaceId || !email || !password) {
+    return;
+  }
+  try {
+    const [{ readWorkspaceConnectors, writeWorkspaceConnectors }, { loadConfig }] = await Promise.all([
+      import("./workspace-connectors.js"),
+      import("../config/config.js"),
+    ]);
+    const cfg = loadConfig() as unknown;
+    const existing = (await readWorkspaceConnectors(workspaceId)) ?? {};
+    const existingOps =
+      existing.ops && isRecord(existing.ops)
+        ? ({ ...(existing.ops as Record<string, unknown>) } as Record<string, unknown>)
+        : {};
+
+    const opsUrl = normalizeExternalOpsUrl(
+      (typeof existingOps.url === "string" ? existingOps.url : null) ??
+        readConfigStringPath(cfg, ["pmos", "connectors", "ops", "url"]) ??
+        readConfigStringPath(cfg, ["pmos", "connectors", "activepieces", "url"]) ??
+        process.env.ACTIVEPIECES_URL ??
+        process.env.FLOW_URL ??
+        process.env.OPS_URL ??
+        null,
+    );
+
+    const next = {
+      ...existing,
+      ops: {
+        ...existingOps,
+        url: opsUrl,
+        user: { email, password },
+      },
+    };
+    await writeWorkspaceConnectors(workspaceId, next);
+
+    void ensureActivepiecesCredentialParity({
+      baseUrl: opsUrl,
+      email,
+      password,
+      name: typeof user.name === "string" ? user.name : null,
+    });
+  } catch (err) {
+    console.warn("[pmos] workflow identity sync failed:", String(err));
+  }
+}
+
+async function warmEmbeddedN8nIdentity(user: WarmIdentityUser, preferredPassword?: string): Promise<void> {
   try {
     const [{ readLocalN8nConfig }, { getOrCreateWorkspaceN8nCookie }] = await Promise.all([
       import("./pmos-ops-proxy.js"),
@@ -108,6 +283,7 @@ async function warmEmbeddedN8nIdentity(user: WarmIdentityUser): Promise<void> {
         name: typeof user.name === "string" ? user.name : "",
         role: user.role ?? "member",
       },
+      preferredPassword: typeof preferredPassword === "string" && preferredPassword ? preferredPassword : null,
     });
   } catch (err) {
     console.warn("[pmos] embedded n8n identity warm-up failed:", String(err));
@@ -710,7 +886,8 @@ export async function handlePmosAuthHttpRequest(params: {
     // Warm workspace-scoped embedded n8n auth so the automations iframe opens
     // with the same PMOS user context on first load.
     await ensureWorkspaceStarterExperience(result.user);
-    void warmEmbeddedN8nIdentity(result.user);
+    await syncWorkflowIdentityForWorkspace(result.user, password);
+    void warmEmbeddedN8nIdentity(result.user, password);
     res.setHeader("Set-Cookie", buildPmosSessionCookieValue(result.sessionToken, req));
     sendJson(res, 200, { ok: true, user: result.user });
     return true;
@@ -726,7 +903,8 @@ export async function handlePmosAuthHttpRequest(params: {
     }
     // Same warm-up on login to avoid first-request races in embedded n8n auth.
     await ensureWorkspaceStarterExperience(result.user);
-    void warmEmbeddedN8nIdentity(result.user);
+    await syncWorkflowIdentityForWorkspace(result.user, password);
+    void warmEmbeddedN8nIdentity(result.user, password);
     res.setHeader("Set-Cookie", buildPmosSessionCookieValue(result.sessionToken, req));
     sendJson(res, 200, { ok: true, user: result.user });
     return true;

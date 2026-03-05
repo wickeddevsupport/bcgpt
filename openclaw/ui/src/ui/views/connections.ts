@@ -11,7 +11,7 @@ export type ConnectionsProps = {
   opsUiHref?: string;
 };
 
-// Human-readable labels + icons for common n8n credential types
+// Human-readable labels + icons for common workflow-engine credential types
 const CRED_TYPE_META: Record<string, { label: string; icon: string; category: string }> = {
   openAiApi:                { label: "OpenAI",           icon: "⬡", category: "AI" },
   anthropicApi:             { label: "Anthropic",        icon: "◆", category: "AI" },
@@ -80,7 +80,7 @@ export function renderConnections(props: ConnectionsProps) {
       <div style="display: flex; align-items: center; gap: 16px;">
         <div>
           <div style="font-size: 13px; font-weight: 600;">Workflow Engine</div>
-          <div class="muted" style="font-size: 12px;">${opsProvisioned ? "Ready — n8n running" : "Not yet provisioned"}</div>
+          <div class="muted" style="font-size: 12px;">${opsProvisioned ? "Ready — Activepieces running" : "Not yet provisioned"}</div>
         </div>
         <span class="chip ${opsProvisioned ? "chip-ok" : "chip-warn"}">
           ${opsProvisioned ? "Online" : "Offline"}

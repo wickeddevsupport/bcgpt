@@ -675,6 +675,13 @@ export const pmosHandlers: GatewayRequestHandlers = {
       const bcgptKey = workspaceBcgptKey ?? globalBcgptKey;
       const bcgptKeyIsShared = !workspaceBcgptKey && Boolean(globalBcgptKey);
 
+      // Keep Basecamp app-connection provisioned automatically for workspace keys.
+      // This is best-effort and should never fail connector status.
+      if (workspaceId && workspaceBcgptKey) {
+        const { ensureWorkspaceBasecampCredential } = await import("../credential-sync.js");
+        await ensureWorkspaceBasecampCredential(workspaceId).catch(() => undefined);
+      }
+
       const ops: ConnectorResult = {
         url: opsUrl,
         projectId: opsProjectId,
@@ -1116,6 +1123,14 @@ export const pmosHandlers: GatewayRequestHandlers = {
       const merged = deepMergeJson(existing, connectors as Record<string, unknown>);
       const next = isJsonObject(merged) ? merged : existing;
       await writeWorkspaceConnectors(workspaceId, next);
+      const workspaceBcgptApiKey =
+        typeof (next as { bcgpt?: { apiKey?: unknown } } | null)?.bcgpt?.apiKey === "string"
+          ? (next as { bcgpt?: { apiKey?: string } }).bcgpt?.apiKey?.trim() ?? ""
+          : "";
+      if (workspaceBcgptApiKey) {
+        const { ensureWorkspaceBasecampCredential } = await import("../credential-sync.js");
+        void ensureWorkspaceBasecampCredential(workspaceId).catch(() => undefined);
+      }
       respond(true, { ok: true, workspaceId, connectors: next }, undefined);
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
@@ -1135,7 +1150,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
       const connectors = (await readWorkspaceConnectors(workspaceId)) ?? {};
-      // Strip ops.user sub-object (contains n8n provisioned password) â€” not needed by the client UI.
+      // Strip ops.user sub-object (contains workflow-engine login password) - not needed by the client UI.
       // api keys (ops.apiKey, bcgpt.apiKey) are kept as-is so the UI can display configured status.
       const safeConnectors = isSuperAdmin(client) ? connectors : stripOpsUserFromConnectors(connectors);
       respond(true, { workspaceId, connectors: safeConnectors }, undefined);
@@ -2970,6 +2985,30 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
 
   // â”€â”€ Basecamp credential setup in workflow engine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+  "pmos.workflow.setup.basecamp": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
+      const wc = await readWorkspaceConnectors(workspaceId);
+      const bcgptUrl = (wc?.bcgpt?.url as string | undefined)?.trim() || "https://bcgpt.wickedlab.io";
+      const bcgptApiKey = (wc?.bcgpt?.apiKey as string | undefined)?.trim();
+      if (!bcgptApiKey) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "No BCGPT API key stored. Save your Basecamp connection key in Integrations first."));
+        return;
+      }
+      const { upsertBasecampCredential } = await import("../n8n-api-client.js");
+      const result = await upsertBasecampCredential(workspaceId, bcgptUrl, bcgptApiKey);
+      if (!result.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to configure Basecamp credential in workflow engine"));
+        return;
+      }
+      respond(true, { ok: true, credentialId: result.credentialId, message: "Basecamp credential configured in your workflow engine." }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
   "pmos.ops.setup.basecamp": async ({ params, respond, client }) => {
     try {
       if (!client) throw new Error("client context required");
@@ -2997,6 +3036,22 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
   // â”€â”€ Workflow Engine Credentials Management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   "pmos.n8n.credentials.list": async ({ respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const { listN8nCredentials } = await import("../n8n-api-client.js");
+      const result = await listN8nCredentials(workspaceId);
+      if (!result.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to list workflow-engine credentials"));
+        return;
+      }
+      respond(true, { credentials: result.credentials }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.workflow.credentials.list": async ({ respond, client }) => {
     try {
       if (!client) throw new Error("client context required");
       const workspaceId = requireWorkspaceId(client);
@@ -3049,6 +3104,27 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     }
   },
 
+  "pmos.workflow.credentials.create": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const p = params as { name?: string; type?: string; data?: Record<string, unknown> } | null;
+      if (!p?.name || !p?.type) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "name and type required"));
+        return;
+      }
+      const { createN8nCredential } = await import("../n8n-api-client.js");
+      const result = await createN8nCredential(workspaceId, p.name, p.type, p.data || {});
+      if (!result.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to create workflow-engine credential"));
+        return;
+      }
+      respond(true, { ok: true, credentialId: result.credentialId }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
   "pmos.ops.credentials.create": async ({ params, respond, client }) => {
     try {
       if (!client) throw new Error("client context required");
@@ -3071,6 +3147,27 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
   },
 
   "pmos.n8n.credentials.delete": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const p = params as { credentialId?: string } | null;
+      if (!p?.credentialId) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "credentialId required"));
+        return;
+      }
+      const { deleteN8nCredential } = await import("../n8n-api-client.js");
+      const result = await deleteN8nCredential(workspaceId, p.credentialId);
+      if (!result.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to delete workflow-engine credential"));
+        return;
+      }
+      respond(true, { ok: true }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.workflow.credentials.delete": async ({ params, respond, client }) => {
     try {
       if (!client) throw new Error("client context required");
       const workspaceId = requireWorkspaceId(client);

@@ -87,7 +87,7 @@ import { type ChatAttachment, type ChatQueueItem, type CronFormState } from "./u
 import {
   hydratePmosConnectorDraftsFromConfig,
   loadPmosConnectorsStatus,
-  loadPmosN8nCredentials,
+  loadPmosWorkflowCredentials,
   savePmosConnectorsConfig,
   type PmosConnectorsStatus,
 } from "./controllers/pmos-connectors.ts";
@@ -426,7 +426,7 @@ export class OpenClawApp extends LitElement {
   @state() apFlowMutateError: string | null = null;
   @state() apFlowTemplateDeployedOk = false;
   @state() automationsPanelOpen = true;
-  @state() automationsPanelTab: "workflows" | "templates" | "settings" | "runs" = "workflows";
+  @state() automationsPanelTab: "workflows" | "templates" | "settings" | "runs" = "templates";
   @state() automationsChatOpen = false;
   @state() automationsLeftPanelRatio = 0.28;
   @state() automationsCenterSplitRatio = 0.72;
@@ -795,7 +795,7 @@ export class OpenClawApp extends LitElement {
     if (!this.pmosConnectorDraftsInitialized) {
       hydratePmosConnectorDraftsFromConfig(this);
     }
-    await loadPmosN8nCredentials(this);
+    await loadPmosWorkflowCredentials(this);
 
     // Refresh workspace-scoped Wicked Ops connectors (if any)
     try {
@@ -893,7 +893,7 @@ export class OpenClawApp extends LitElement {
     hydratePmosConnectorDraftsFromConfig(this);
     await loadPmosModelWorkspaceState(this);
     this.syncPmosModelDraftRef();
-    await loadPmosN8nCredentials(this);
+    await loadPmosWorkflowCredentials(this);
 
     // Load any existing workspace-scoped Wicked Ops connectors so the UI can reflect provisioning state
     try {
@@ -938,18 +938,18 @@ export class OpenClawApp extends LitElement {
     hydratePmosConnectorDraftsFromConfig(this);
     await loadPmosModelWorkspaceState(this);
     this.syncPmosModelDraftRef();
-    await loadPmosN8nCredentials(this);
+    await loadPmosWorkflowCredentials(this);
     this.pmosBcgptSavedOk = true;
     setTimeout(() => { this.pmosBcgptSavedOk = false; }, 2500);
   }
 
-  async handlePmosSetupBasecampInN8n() {
+  async handlePmosSetupBasecampInWorkflowEngine() {
     if (!this.client || this.pmosBasecampSetupPending) return;
     this.pmosBasecampSetupPending = true;
     this.pmosBasecampSetupError = null;
     this.pmosBasecampSetupOk = false;
     try {
-      await this.client.request("pmos.ops.setup.basecamp", {});
+      await this.client.request("pmos.workflow.setup.basecamp", {});
       this.pmosBasecampSetupOk = true;
       setTimeout(() => { this.pmosBasecampSetupOk = false; }, 3000);
     } catch (err) {
@@ -985,7 +985,7 @@ export class OpenClawApp extends LitElement {
     hydratePmosConnectorDraftsFromConfig(this);
     await loadPmosModelWorkspaceState(this);
     this.syncPmosModelDraftRef();
-    await loadPmosN8nCredentials(this);
+    await loadPmosWorkflowCredentials(this);
   }
 
   async handlePmosProvisionOps(opts?: { projectName?: string }) {
