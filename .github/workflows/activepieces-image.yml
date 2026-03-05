@@ -9,7 +9,7 @@ on:
       - 'release-*'
       - 'v*'
     paths:
-      - 'activepieces/**'
+      - '_archived/activepieces-20260218/**'
       - '.github/workflows/activepieces-image.yml'
 
 permissions:
@@ -45,8 +45,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: ./activepieces
-          file: ./activepieces/Dockerfile
+          context: ./_archived/activepieces-20260218
+          file: ./_archived/activepieces-20260218/Dockerfile
           push: true
           build-args: |
             NX_CLOUD_ACCESS_TOKEN=${{ secrets.NX_CLOUD_ACCESS_TOKEN }}

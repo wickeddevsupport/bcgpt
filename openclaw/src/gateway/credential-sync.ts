@@ -172,7 +172,7 @@ export async function ensureWorkspaceBasecampCredential(workspaceId: string): Pr
 
   try {
     const { upsertBasecampCredential } = await import("./n8n-api-client.js");
-    const result = await upsertBasecampCredential(workspaceId, cfg.baseUrl, cfg.apiKey);
+    const result = await upsertBasecampCredential(workspaceId, cfg.apiKey);
     basecampEnsureCache.set(workspaceId, { fingerprint, at: now, ok: Boolean(result.ok) });
   } catch {
     basecampEnsureCache.set(workspaceId, { fingerprint, at: now, ok: false });

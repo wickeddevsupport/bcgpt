@@ -224,9 +224,10 @@ async function syncWorkflowIdentityForWorkspace(user: WarmIdentityUser, password
     return;
   }
   try {
-    const [{ readWorkspaceConnectors, writeWorkspaceConnectors }, { loadConfig }] = await Promise.all([
+    const [{ readWorkspaceConnectors, writeWorkspaceConnectors }, { loadConfig }, { ensureWorkspaceBasecampCredential }] = await Promise.all([
       import("./workspace-connectors.js"),
       import("../config/config.js"),
+      import("./credential-sync.js"),
     ]);
     const cfg = loadConfig() as unknown;
     const existing = (await readWorkspaceConnectors(workspaceId)) ?? {};
@@ -261,6 +262,7 @@ async function syncWorkflowIdentityForWorkspace(user: WarmIdentityUser, password
       password,
       name: typeof user.name === "string" ? user.name : null,
     });
+    void ensureWorkspaceBasecampCredential(workspaceId).catch(() => undefined);
   } catch (err) {
     console.warn("[pmos] workflow identity sync failed:", String(err));
   }

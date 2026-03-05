@@ -12,7 +12,6 @@ import { readWorkspaceConnectors } from "./workspace-connectors.js";
 const DEFAULT_BASE_URL = "https://flow.wickedlab.io";
 const ACTIVEPIECES_BASECAMP_PIECE_NAME = "@activepieces/piece-basecamp";
 const ACTIVEPIECES_BASECAMP_EXTERNAL_ID = "openclaw-basecamp";
-const ACTIVEPIECES_BASECAMP_DEFAULT_URL = "https://bcgpt.wickedlab.io";
 
 type JsonObject = Record<string, unknown>;
 
@@ -980,17 +979,11 @@ function buildCredentialValue(
       readString(data.token) ??
       readString(data.secret_text) ??
       "";
-    const rawBaseUrl = readString(data.base_url) ?? readString(data.bcgptUrl);
-    const baseUrl =
-      rawBaseUrl && rawBaseUrl.trim()
-        ? rawBaseUrl.trim().replace(/\/+$/, "")
-        : ACTIVEPIECES_BASECAMP_DEFAULT_URL;
     if (isBasecampPieceName(pieceName)) {
       return {
         type: "CUSTOM_AUTH",
         props: {
           api_key: apiKey,
-          base_url: baseUrl,
         },
       };
     }
@@ -1027,11 +1020,9 @@ function buildCredentialValue(
  */
 export async function upsertBasecampCredential(
   workspaceId: string,
-  bcgptUrl: string,
   bcgptApiKey: string,
 ): Promise<{ ok: boolean; credentialId?: string; error?: string }> {
   return createN8nCredential(workspaceId, "Basecamp", ACTIVEPIECES_BASECAMP_PIECE_NAME, {
-    base_url: bcgptUrl || ACTIVEPIECES_BASECAMP_DEFAULT_URL,
     api_key: bcgptApiKey,
   });
 }

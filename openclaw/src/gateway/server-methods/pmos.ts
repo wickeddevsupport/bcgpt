@@ -2998,7 +2998,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         return;
       }
       const { upsertBasecampCredential } = await import("../n8n-api-client.js");
-      const result = await upsertBasecampCredential(workspaceId, bcgptUrl, bcgptApiKey);
+      const result = await upsertBasecampCredential(workspaceId, bcgptApiKey);
       if (!result.ok) {
         respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to configure Basecamp credential in workflow engine"));
         return;
@@ -3022,7 +3022,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         return;
       }
       const { upsertBasecampCredential } = await import("../n8n-api-client.js");
-      const result = await upsertBasecampCredential(workspaceId, bcgptUrl, bcgptApiKey);
+      const result = await upsertBasecampCredential(workspaceId, bcgptApiKey);
       if (!result.ok) {
         respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to configure Basecamp credential in workflow engine"));
         return;
