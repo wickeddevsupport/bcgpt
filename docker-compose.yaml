@@ -1,35 +1,6 @@
 ﻿version: "3.9"
 
 services:
-  bcgpt:
-    build:
-      context: .
-      dockerfile: Dockerfile.bcgpt
-    environment:
-      PORT: "10000"
-      APP_BASE_URL: "${APP_BASE_URL}"
-      BASECAMP_CLIENT_ID: "${BASECAMP_CLIENT_ID}"
-      BASECAMP_CLIENT_SECRET: "${BASECAMP_CLIENT_SECRET}"
-      BASECAMP_DEFAULT_ACCOUNT_ID: "${BASECAMP_DEFAULT_ACCOUNT_ID}"
-      CHATGPT_API_KEY: "${CHATGPT_API_KEY}"
-      OTP_SECRET: "${OTP_SECRET}"
-      PAYLOAD_CACHE_TTL_SEC: "${PAYLOAD_CACHE_TTL_SEC}"
-      SQLITE_PATH: "/data/bcgpt.sqlite"
-      ACTIVEPIECES_PROXY_ENABLED: "${ACTIVEPIECES_PROXY_ENABLED:-false}"
-      PMOS_URL: "${PMOS_URL:-https://os.wickedlab.io}"
-      # Optional: proxy another hostname through this container (off by default).
-      # When enabled, set ACTIVEPIECES_PROXY_HOST explicitly.
-      ACTIVEPIECES_PROXY_HOST: "${ACTIVEPIECES_PROXY_HOST:-}"
-      ACTIVEPIECES_PROXY_TARGET: "${ACTIVEPIECES_PROXY_TARGET:-http://activepieces:80}"
-    volumes:
-      - bcgpt-data:/data
-    expose:
-      - "10000"
-    networks:
-      - app
-    depends_on:
-      - activepieces
-
   activepieces:
     image: ghcr.io/wickeddevsupport/activepieces-bcgpt:latest
     labels:
@@ -56,7 +27,7 @@ services:
       AP_POSTGRES_USERNAME: "${AP_POSTGRES_USERNAME}"
       AP_POSTGRES_PASSWORD: "${AP_POSTGRES_PASSWORD}"
       AP_POSTGRES_DATABASE: "${AP_POSTGRES_DATABASE}"
-      AP_REDIS_HOST: "redis"
+      AP_REDIS_HOST: "redis.ogk8ko8swg4g0g80o0w84go8"
       AP_REDIS_PORT: "6379"
       AP_JWT_SECRET: "${AP_JWT_SECRET}"
       AP_ENCRYPTION_KEY: "${AP_ENCRYPTION_KEY}"
@@ -96,9 +67,6 @@ services:
       - app
 
 volumes:
-  bcgpt-data:
-    external: true
-    name: bcgpt-data
   activepieces-data:
     external: true
     name: activepieces-data
