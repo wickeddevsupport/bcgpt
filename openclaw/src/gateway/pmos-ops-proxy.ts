@@ -722,7 +722,110 @@ async function attemptAutoLoginForOpsUi(
 
   const tokenLiteral = JSON.stringify(token);
   const projectLiteral = JSON.stringify(projectId);
-  return `<script id=\"openclaw-ap-bootstrap\">(function(){try{var t=${tokenLiteral};var p=${projectLiteral};if(t){localStorage.setItem('token',t);sessionStorage.setItem('token',t);}if(p){localStorage.setItem('projectId',p);sessionStorage.setItem('projectId',p);}}catch(_e){}try{var styleId='openclaw-embed-minimal-style';var selectors=['[data-sidebar=\"sidebar\"]','[data-testid=\"flows-left-panel\"]','[data-testid=\"flows-list-panel\"]','[data-testid=\"folder-filter\"]','button[title=\"Hide Panel\"]','[aria-label=\"Hide Panel\"]'];var textHints=['workflows','templates','runs','hide panel','create workflow','search flows'];var isLeft=function(el){try{var r=el.getBoundingClientRect();return Number.isFinite(r.left)&&r.left<(window.innerWidth*0.45);}catch(_){return false;}};var hideEl=function(el){if(!el)return;try{if(!isLeft(el))return;el.style.setProperty('display','none','important');el.setAttribute('data-openclaw-hidden','1');}catch(_){}};var ensureStyle=function(){if(document.getElementById(styleId))return;var st=document.createElement('style');st.id=styleId;st.textContent='[data-openclaw-hidden=\"1\"]{display:none!important;}';document.head.appendChild(st);};var hideBySelectors=function(){for(var i=0;i<selectors.length;i+=1){var nodeList=document.querySelectorAll(selectors[i]);for(var j=0;j<nodeList.length;j+=1){hideEl(nodeList[j]);}}};var hideByText=function(){var nodes=document.querySelectorAll('button,a,div,span,label,input');for(var i=0;i<nodes.length;i+=1){var el=nodes[i];if(el.getAttribute('data-openclaw-hidden')==='1')continue;var text='';if(el instanceof HTMLInputElement){text=((el.placeholder||'')+' '+(el.value||'')).trim().toLowerCase();}else{text=(el.textContent||'').trim().toLowerCase();}if(!text||text.length>60)continue;for(var h=0;h<textHints.length;h+=1){if(text===textHints[h]||text.startsWith(textHints[h])){var target=el.closest('button,a,[role=\"button\"],li,section,article,aside,div')||el;hideEl(target);break;}}}};var run=function(){ensureStyle();hideBySelectors();hideByText();try{document.documentElement.style.setProperty('--sidebar-width','0px');document.documentElement.style.setProperty('--sidebar-width-icon','0px');}catch(_){}};run();var obs=new MutationObserver(function(){run();});obs.observe(document.documentElement,{subtree:true,childList:true});}catch(_e){}})();</script>`;
+  return `<script id="openclaw-ap-bootstrap">
+(() => {
+  try {
+    const token = ${tokenLiteral};
+    const projectId = ${projectLiteral};
+    if (token) {
+      localStorage.setItem("token", token);
+      sessionStorage.setItem("token", token);
+    }
+    if (projectId) {
+      localStorage.setItem("projectId", projectId);
+      sessionStorage.setItem("projectId", projectId);
+    }
+  } catch {}
+
+  try {
+    const styleId = "openclaw-embed-minimal-style";
+    const selectors = [
+      "[data-sidebar='sidebar']",
+      "[data-testid='flows-left-panel']",
+      "[data-testid='flows-list-panel']",
+      "[data-testid='folder-filter']",
+      "button[title='Hide Panel']",
+      "[aria-label='Hide Panel']",
+      "[data-testid='flows-tab-templates']",
+      "[data-testid='flows-tab-runs']",
+    ];
+    const textHints = ["workflows", "templates", "runs", "hide panel", "create workflow", "search flows"];
+    const forceHideHints = new Set(["templates", "runs", "hide panel", "create workflow", "search flows"]);
+
+    const isLeft = (el) => {
+      try {
+        const rect = el.getBoundingClientRect();
+        return Number.isFinite(rect.left) && rect.left < window.innerWidth * 0.48;
+      } catch {
+        return false;
+      }
+    };
+
+    const isLikelyNav = (el) => {
+      if (!el) return false;
+      if (el.closest("nav,aside,header,[role='tablist'],[data-sidebar],section")) return true;
+      const klass = String(el.className || "").toLowerCase();
+      return klass.includes("sidebar") || klass.includes("panel") || klass.includes("nav");
+    };
+
+    const hideEl = (el, force = false) => {
+      if (!el) return;
+      try {
+        if (!force && !isLeft(el) && !isLikelyNav(el)) return;
+        el.style.setProperty("display", "none", "important");
+        el.setAttribute("data-openclaw-hidden", "1");
+      } catch {}
+    };
+
+    const ensureStyle = () => {
+      if (document.getElementById(styleId)) return;
+      const style = document.createElement("style");
+      style.id = styleId;
+      style.textContent = "[data-openclaw-hidden='1']{display:none!important;}";
+      document.head.appendChild(style);
+    };
+
+    const hideBySelectors = () => {
+      for (const selector of selectors) {
+        for (const node of document.querySelectorAll(selector)) {
+          hideEl(node, true);
+        }
+      }
+    };
+
+    const hideByText = () => {
+      for (const node of document.querySelectorAll("button,a,div,span,label,input,[role='tab']")) {
+        if (node.getAttribute("data-openclaw-hidden") === "1") continue;
+        const text =
+          node instanceof HTMLInputElement
+            ? ((node.placeholder || "") + " " + (node.value || "")).trim().toLowerCase()
+            : (node.textContent || "").trim().toLowerCase();
+        if (!text || text.length > 64) continue;
+        for (const hint of textHints) {
+          if (text === hint || text.startsWith(hint)) {
+            const target = node.closest("button,a,[role='button'],[role='tab'],li,section,article,aside,div") || node;
+            hideEl(target, forceHideHints.has(hint));
+            break;
+          }
+        }
+      }
+    };
+
+    const run = () => {
+      ensureStyle();
+      hideBySelectors();
+      hideByText();
+      try {
+        document.documentElement.style.setProperty("--sidebar-width", "0px");
+        document.documentElement.style.setProperty("--sidebar-width-icon", "0px");
+      } catch {}
+    };
+
+    run();
+    new MutationObserver(run).observe(document.documentElement, { subtree: true, childList: true });
+  } catch {}
+})();
+</script>`;
 }
 
 function mapLegacyOpsUiPath(pathname: string): string {
