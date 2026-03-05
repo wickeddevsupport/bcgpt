@@ -146,6 +146,30 @@ async function postJsonWithTimeout(
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
 function splitHumanName(raw: string | null | undefined): { firstName: string; lastName: string } {
   const text = String(raw ?? "").trim();
   if (!text) {
@@ -171,26 +195,36 @@ async function ensureActivepiecesCredentialParity(params: {
     return;
   }
 
-  const loginEndpoints = [
-    "/api/v1/authentication/sign-in",
-    "/api/v1/users/sign-in",
-    "/api/v1/users/login",
-  ];
-  const loginPayloads = [
-    { emailOrLdapLoginId: email, password },
-    { email, password },
-    { username: email, password },
-  ];
-  for (const endpoint of loginEndpoints) {
-    for (const payload of loginPayloads) {
-      const res = await postJsonWithTimeout(`${baseUrl}${endpoint}`, payload);
-      if (res && res.ok) {
-        return;
+  const trySignIn = async (attempts: number): Promise<boolean> => {
+    const loginEndpoints = [
+      "/api/v1/authentication/sign-in",
+      "/api/v1/users/sign-in",
+      "/api/v1/users/login",
+    ];
+    const loginPayloads = [
+      { email, password },
+      { emailOrLdapLoginId: email, password },
+      { username: email, password },
+    ];
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      for (const endpoint of loginEndpoints) {
+        for (const payload of loginPayloads) {
+          const res = await postJsonWithTimeout(`${baseUrl}${endpoint}`, payload);
+          if (res && res.ok) {
+            return true;
+          }
+        }
       }
-      if (res && res.status === 401) {
-        continue;
+      if (attempt < attempts - 1) {
+        await sleep(350);
       }
     }
+    return false;
+  };
+
+  if (await trySignIn(1)) {
+    return;
   }
 
   const { firstName, lastName } = splitHumanName(params.name);
@@ -200,21 +234,41 @@ async function ensureActivepiecesCredentialParity(params: {
     "/api/v1/users/register",
   ];
   const signupPayloads = [
+    { email, password, firstName, lastName, trackEvents: false, newsLetter: false },
     { email, password, firstName, lastName },
     { email, password, name: `${firstName} ${lastName}`.trim() },
     { emailOrLdapLoginId: email, password, firstName, lastName },
   ];
+  let attemptedSignUp = false;
+  let sawConflict = false;
   for (const endpoint of signupEndpoints) {
     for (const payload of signupPayloads) {
       const res = await postJsonWithTimeout(`${baseUrl}${endpoint}`, payload);
       if (!res) {
         continue;
       }
-      if (res.ok || res.status === 409) {
-        return;
+      attemptedSignUp = true;
+      if (res.ok) {
+        if (await trySignIn(6)) {
+          return;
+        }
+        throw new Error("Activepieces sign-up succeeded but sign-in verification failed.");
+      }
+      if (res.status === 409) {
+        sawConflict = true;
       }
     }
   }
+
+  if ((attemptedSignUp || sawConflict) && (await trySignIn(6))) {
+    return;
+  }
+
+  throw new Error(
+    attemptedSignUp || sawConflict
+      ? "Unable to establish Activepieces account/session for workspace user."
+      : "Activepieces sign-in and sign-up attempts failed.",
+  );
 }
 
 async function syncWorkflowIdentityForWorkspace(user: WarmIdentityUser, password: string): Promise<void> {
@@ -235,6 +289,10 @@ async function syncWorkflowIdentityForWorkspace(user: WarmIdentityUser, password
       existing.ops && isRecord(existing.ops)
         ? ({ ...(existing.ops as Record<string, unknown>) } as Record<string, unknown>)
         : {};
+    const existingActivepieces =
+      existing.activepieces && isRecord(existing.activepieces)
+        ? ({ ...(existing.activepieces as Record<string, unknown>) } as Record<string, unknown>)
+        : {};
 
     const opsUrl = normalizeExternalOpsUrl(
       (typeof existingOps.url === "string" ? existingOps.url : null) ??
@@ -253,16 +311,32 @@ async function syncWorkflowIdentityForWorkspace(user: WarmIdentityUser, password
         url: opsUrl,
         user: { email, password },
       },
+      activepieces: {
+        ...existingActivepieces,
+        url:
+          typeof existingActivepieces.url === "string" && existingActivepieces.url.trim()
+            ? existingActivepieces.url
+            : opsUrl,
+        user: { email, password },
+      },
     };
     await writeWorkspaceConnectors(workspaceId, next);
 
-    void ensureActivepiecesCredentialParity({
-      baseUrl: opsUrl,
-      email,
-      password,
-      name: typeof user.name === "string" ? user.name : null,
-    });
-    void ensureWorkspaceBasecampCredential(workspaceId).catch(() => undefined);
+    await withTimeout(
+      ensureActivepiecesCredentialParity({
+        baseUrl: opsUrl,
+        email,
+        password,
+        name: typeof user.name === "string" ? user.name : null,
+      }),
+      12_000,
+      "Activepieces parity timed out.",
+    );
+    await withTimeout(
+      ensureWorkspaceBasecampCredential(workspaceId).catch(() => undefined),
+      8_000,
+      "Basecamp credential ensure timed out.",
+    );
   } catch (err) {
     console.warn("[pmos] workflow identity sync failed:", String(err));
   }

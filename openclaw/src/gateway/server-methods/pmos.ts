@@ -1129,7 +1129,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
           : "";
       if (workspaceBcgptApiKey) {
         const { ensureWorkspaceBasecampCredential } = await import("../credential-sync.js");
-        void ensureWorkspaceBasecampCredential(workspaceId).catch(() => undefined);
+        await ensureWorkspaceBasecampCredential(workspaceId).catch(() => undefined);
       }
       respond(true, { ok: true, workspaceId, connectors: next }, undefined);
     } catch (err) {

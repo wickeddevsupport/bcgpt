@@ -1,4 +1,4 @@
-import { createPiece, PieceAuth, Property } from '@activepieces/pieces-framework';
+import { createPiece, PieceAuth } from '@activepieces/pieces-framework';
 import { PieceCategory } from '@activepieces/shared';
 import { adminAction } from './lib/actions/admin';
 import { cardsAction } from './lib/actions/cards';
@@ -13,27 +13,14 @@ import { scheduleAction } from './lib/actions/schedule';
 import { todosAction } from './lib/actions/todos';
 import { newTodoTrigger } from './lib/triggers/new-todo';
 
-const markdown = `
-Connect through your BCGPT gateway.
-
-**To get your API key:**
-1. Go to [bcgpt.wickedlab.io/connect](https://bcgpt.wickedlab.io/connect)
-2. Sign in with your Basecamp account
-3. Copy the API key provided
-4. Paste it in the API key field above
-`;
-
 export const basecampAuth = PieceAuth.CustomAuth({
   required: true,
   props: {
     api_key: PieceAuth.SecretText({
       displayName: 'API Key',
+      description:
+        'Get this key from https://bcgpt.wickedlab.io/connect (gateway URL is fixed to bcgpt.wickedlab.io).',
       required: true,
-    }),
-    instructions: Property.MarkDown({
-      displayName: 'Instructions',
-      required: false,
-      defaultValue: markdown,
     }),
   },
 });
