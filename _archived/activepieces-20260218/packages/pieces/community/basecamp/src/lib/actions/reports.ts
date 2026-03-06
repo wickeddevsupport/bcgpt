@@ -262,10 +262,24 @@ export const reportsAction = createAction({
         });
       }
       case 'report_todos_assigned':
+        try {
+          return await callGatewayTool({
+            auth,
+            toolName: 'report_todos_assigned',
+            args: { project: project || undefined },
+          });
+        } catch (err) {
+          if ((err as any).code === 'CHUNK_REQUIRED' || String((err as any).message).includes('CHUNK_REQUIRED')) {
+            throw new Error(
+              'This report covers all people across the account and is too large to return at once. Use "Report: to-dos assigned to person" with a specific person name/ID to get targeted results instead.',
+            );
+          }
+          throw err;
+        }
       case 'report_todos_overdue':
         return await callGatewayTool({
           auth,
-          toolName: op,
+          toolName: 'report_todos_overdue',
           args: {},
         });
       case 'report_todos_assigned_person':
