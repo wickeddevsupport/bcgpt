@@ -47,6 +47,13 @@ const STRIP_RESPONSE_HEADERS = new Set([
   "keep-alive",
   // Node fetch auto-decompresses; do not forward stale encoding header.
   "content-encoding",
+  // Strip upstream security headers that would restrict the embedded iframe.
+  // The gateway is the trust boundary; these headers from flow.wickedlab.io
+  // would block icon/asset loading and iframe embedding on os.wickedlab.io.
+  "content-security-policy",
+  "content-security-policy-report-only",
+  "x-frame-options",
+  "x-content-type-options",
 ]);
 
 const OPS_UI_CONTENT_TYPES: Record<string, string> = {
@@ -272,6 +279,20 @@ async function resolveOpsContext(
     (!workspaceOpsLooksLegacy && typeof workspaceOps?.projectId === "string" && workspaceOps.projectId.trim()
       ? workspaceOps.projectId.trim()
       : null);
+  let resolvedWorkspaceProjectId = workspaceProjectId;
+  if (!resolvedWorkspaceProjectId && workspaceId) {
+    try {
+      const { provisionWorkspaceOps } = await import("./pmos-provision-ops.js");
+      const provisioned = await provisionWorkspaceOps(workspaceId);
+      const nextProjectId =
+        typeof provisioned.projectId === "string" ? provisioned.projectId.trim() : "";
+      if (nextProjectId) {
+        resolvedWorkspaceProjectId = nextProjectId;
+      }
+    } catch {
+      // best effort; keep the request moving even if project auto-provision is unavailable
+    }
+  }
 
   const allowGlobalKeyFallback = boolEnv("PMOS_ALLOW_GLOBAL_OPS_KEY_FALLBACK", true);
   const apiKey = workspaceApiKey ?? (allowGlobalKeyFallback ? global.apiKey : null);
@@ -280,7 +301,7 @@ async function resolveOpsContext(
     : apiKey
       ? "global"
       : "none";
-  const projectId = workspaceProjectId ?? global.projectId;
+  const projectId = resolvedWorkspaceProjectId || null;
   const user =
     workspaceUserFromConnectors(workspaceActivepieces?.user) ??
     workspaceUserFromConnectors(workspaceOps?.user) ??
@@ -434,6 +455,15 @@ function isAuthApiPath(pathname: string): boolean {
     pathname.startsWith("/api/v1/authentication/") ||
     pathname === "/api/v1/users/sign-in" ||
     pathname === "/api/v1/users/login"
+  );
+}
+
+function isEmbeddedSignOutPath(pathname: string): boolean {
+  return (
+    pathname === "/api/v1/authentication/sign-out" ||
+    pathname === "/api/v1/authentication/logout" ||
+    pathname === "/api/v1/users/sign-out" ||
+    pathname === "/api/v1/users/logout"
   );
 }
 
@@ -600,11 +630,124 @@ function rewriteOpsUiHtmlForProxy(html: string): string {
   return rewritten;
 }
 
+function isOpsBrandingAssetPath(pathname: string): boolean {
+  return pathname === "/branding" || pathname.startsWith("/branding/");
+}
+
+function buildEmbeddedOpsUiGuardScript(): string {
+  return `<script id="openclaw-ap-embed-guard">(function(){try{
+var blocked=/\\/(sign-out|logout)\\/?$/i;
+var controlSelector='button,a,[role="button"]';
+var logoutPattern=/sign\\s*out|log\\s*out|logout/i;
+var resolveControl=function(target){
+  try{
+    if(!target||typeof target.closest!=='function'){
+      return null;
+    }
+    return target.closest(controlSelector);
+  }catch(_e){
+    return null;
+  }
+};
+var hide=function(root){
+  try{
+    var nodes=(root||document).querySelectorAll(controlSelector);
+    for(var i=0;i<nodes.length;i+=1){
+      var el=nodes[i];
+      var text=((el.textContent||'')+' '+(el.getAttribute('aria-label')||'')).trim();
+      var href=(el.getAttribute('href')||'').trim();
+      if(logoutPattern.test(text)||blocked.test(href)){
+        el.style.display='none';
+        el.setAttribute('data-openclaw-guarded','1');
+      }
+    }
+  }catch(_e){}
+};
+if(typeof window.fetch==='function'){
+  var original=window.fetch.bind(window);
+  window.fetch=function(input, init){
+    try{
+      var url=typeof input==='string'?input:(input&&input.url)||'';
+      if(blocked.test(url)){
+        return Promise.resolve(new Response(JSON.stringify({ok:true,embedded:true,ignored:true}),{status:200,headers:{'content-type':'application/json'}}));
+      }
+    }catch(_e){}
+    return original(input, init);
+  };
+}
+hide(document);
+setInterval(function(){hide(document);},1000);
+document.addEventListener('click',function(event){
+  var control=resolveControl(event.target);
+  if(!control){
+    return;
+  }
+  try{
+    var text=((control.textContent||'')+' '+(control.getAttribute('aria-label')||'')).trim();
+    var href=(control.getAttribute('href')||'').trim();
+    if(logoutPattern.test(text)||blocked.test(href)){
+      event.preventDefault();
+      event.stopPropagation();
+      return false;
+    }
+  }catch(_e){}
+},true);
+}catch(_e){}})();</script>`;
+}
+
 type ActivepiecesLoginResult = {
   cookies: string[];
   token: string | null;
   projectId: string | null;
 };
+
+async function resolveProjectIdFromActivepiecesSession(params: {
+  baseUrl: string;
+  token: string | null;
+  cookies: string[];
+}): Promise<string | null> {
+  const headers: Record<string, string> = {
+    accept: "application/json",
+  };
+  if (params.token) {
+    headers.authorization = `Bearer ${params.token}`;
+  } else {
+    const cookieHeader = toCookieHeader(params.cookies);
+    if (!cookieHeader) {
+      return null;
+    }
+    headers.cookie = cookieHeader;
+  }
+  try {
+    const response = await fetch(`${params.baseUrl}/api/v1/projects`, {
+      method: "GET",
+      headers,
+      redirect: "manual",
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const payload = (await response.json().catch(() => null)) as unknown;
+    const rows = Array.isArray(payload)
+      ? payload
+      : payload && typeof payload === "object" && Array.isArray((payload as { data?: unknown[] }).data)
+        ? (payload as { data: unknown[] }).data
+        : [];
+    const first = rows.find((row) => row && typeof row === "object" && !Array.isArray(row)) as
+      | Record<string, unknown>
+      | undefined;
+    const id = first?.id;
+    if (typeof id === "string" && id.trim()) {
+      return id.trim();
+    }
+    if (typeof id === "number" && Number.isFinite(id)) {
+      return String(id);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 async function attemptActivepiecesLogin(
   baseUrl: string,
@@ -635,7 +778,12 @@ async function attemptActivepiecesLogin(
         });
         const cookies = extractSetCookies(response.headers);
         if (cookies.length > 0) {
-          return { cookies, token: null, projectId: null };
+          const projectId = await resolveProjectIdFromActivepiecesSession({
+            baseUrl,
+            token: null,
+            cookies,
+          });
+          return { cookies, token: null, projectId };
         }
         if (response.ok) {
           const payload = (await response.json().catch(() => null)) as Record<string, unknown> | null;
@@ -643,10 +791,17 @@ async function attemptActivepiecesLogin(
             payload && typeof payload.token === "string" && payload.token.trim()
               ? payload.token
               : null;
-          const projectId =
+          const responseProjectId =
             payload && (typeof payload.projectId === "string" || typeof payload.projectId === "number")
               ? String(payload.projectId)
               : null;
+          const projectId =
+            responseProjectId ??
+            (await resolveProjectIdFromActivepiecesSession({
+              baseUrl,
+              token,
+              cookies: [],
+            }));
           return { cookies: [], token, projectId };
         }
       } catch {
@@ -716,13 +871,10 @@ async function attemptAutoLoginForOpsUi(
   if (!token && context.apiKey && context.apiKeyScope === "workspace") {
     token = context.apiKey;
   }
-  if (!token) {
-    return null;
-  }
 
   const tokenLiteral = JSON.stringify(token);
   const projectLiteral = JSON.stringify(projectId);
-  return `<script id="openclaw-ap-bootstrap">(function(){try{var token=${tokenLiteral};var projectId=${projectLiteral};if(token){localStorage.setItem("token",token);sessionStorage.setItem("token",token);}if(projectId){localStorage.setItem("projectId",projectId);sessionStorage.setItem("projectId",projectId);}}catch(_e){}})();</script>`;
+  return `<script id="openclaw-ap-bootstrap">(function(){try{var token=${tokenLiteral};var projectId=${projectLiteral};if(token){localStorage.setItem("token",token);sessionStorage.setItem("token",token);}else{localStorage.removeItem("token");sessionStorage.removeItem("token");}if(projectId){localStorage.setItem("projectId",projectId);sessionStorage.setItem("projectId",projectId);}else{localStorage.removeItem("projectId");sessionStorage.removeItem("projectId");}}catch(_e){}})();</script>${buildEmbeddedOpsUiGuardScript()}`;
 }
 
 function mapLegacyOpsUiPath(pathname: string): string {
@@ -1024,9 +1176,10 @@ export async function handleLocalN8nRequest(
   const pathname = url.pathname;
 
   const isOpsUi = pathname === "/ops-ui" || pathname.startsWith("/ops-ui/");
+  const isOpsBranding = isOpsBrandingAssetPath(pathname);
   const isLegacyRestLogin = pathname === "/rest/login";
 
-  if (!isOpsUi && !isLegacyRestLogin) {
+  if (!isOpsUi && !isOpsBranding && !isLegacyRestLogin) {
     return false;
   }
 
@@ -1053,12 +1206,11 @@ export async function handleLocalN8nRequest(
     return true;
   }
 
-  const htmlInjection = await attemptAutoLoginForOpsUi(req, res, context);
-
-  const targetPath = mapLegacyOpsUiPath(pathname);
+  const htmlInjection = isOpsUi ? await attemptAutoLoginForOpsUi(req, res, context) : null;
+  const targetPath = isOpsBranding ? pathname : mapLegacyOpsUiPath(pathname);
   const targetUrl = `${context.baseUrl}${targetPath}${url.search}`;
   const authHeaders: Record<string, string> = {};
-  if (context.apiKey) {
+  if (context.apiKey && context.apiKeyScope === "workspace") {
     authHeaders.authorization = `Bearer ${context.apiKey}`;
   }
 
@@ -1069,7 +1221,7 @@ export async function handleLocalN8nRequest(
     allowCookies: true,
     extraHeaders: authHeaders,
     projectId: context.projectId,
-    htmlTransform: rewriteOpsUiHtmlForProxy,
+    htmlTransform: isOpsUi ? rewriteOpsUiHtmlForProxy : undefined,
     htmlInjection: htmlInjection ?? undefined,
   });
   return true;
@@ -1108,6 +1260,11 @@ export async function handleOpsProxyRequest(
       return true;
     }
 
+    if (isEmbeddedSignOutPath(pathname)) {
+      sendJson(res, 200, { ok: true, embedded: true, ignored: true });
+      return true;
+    }
+
     const needsAuthHeader = !isAuthApiPath(pathname);
     const extraHeaders: Record<string, string> = {};
     const requestAuthorization = Array.isArray(req.headers.authorization)
@@ -1140,7 +1297,13 @@ export async function handleOpsProxyRequest(
       }
       const hasForwardCookie = hasRequestCookie || Boolean(extraHeaders.cookie);
       // Fall back to configured API key only when no browser auth/cookie is available.
-      if (!hasRequestAuthorization && !extraHeaders.authorization && !hasForwardCookie && context.apiKey) {
+      if (
+        !hasRequestAuthorization &&
+        !extraHeaders.authorization &&
+        !hasForwardCookie &&
+        context.apiKey &&
+        context.apiKeyScope === "workspace"
+      ) {
         extraHeaders.authorization = `Bearer ${context.apiKey}`;
       }
     }

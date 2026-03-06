@@ -1,4 +1,4 @@
-import { html, nothing } from "lit";
+﻿import { html, nothing } from "lit";
 import type { UiSettings } from "../storage.ts";
 import type { PmosConnectorsStatus } from "../controllers/pmos-connectors.ts";
 import type { PmosExecutionTraceEvent } from "../controllers/pmos-trace.ts";
@@ -38,7 +38,7 @@ export type DashboardProps = {
   currentModel?: string;  // Current model being used (e.g., "google/gemini-3-flash-preview")
   currentModelProvider?: string;  // Provider of current model
 
-  // ops provisioning UI state (workspace-scoped n8n project + API key)
+  // workflow provisioning UI state (workspace-scoped Flow project + credentials)
   opsProvisioning?: boolean;
   opsProvisioned?: boolean;
   opsProvisioningResult?: { projectId?: string; apiKey?: string } | null;
@@ -54,12 +54,6 @@ export type DashboardProps = {
   onRefreshDashboard: () => void;
   onClearTrace: () => void;
   onProvisionOps?: () => Promise<void>;
-  // Inline NL chat
-  nlDraft: string;
-  nlBusy: boolean;
-  nlResponse: string | null;
-  onNlDraftChange: (v: string) => void;
-  onAsk: () => void;
   // Quick actions
   onQuickAction: (action: "check-leads" | "daily-report" | "create-workflow" | "settings") => void;
 
@@ -172,7 +166,7 @@ export function renderDashboard(props: DashboardProps) {
 
   const refreshBusy = props.connectorsLoading ?? false;
   // Core setup: only the 3 steps needed to start using the app.
-  // BCGPT / AI model / first workflow are optional config — shown in Integrations tab.
+  // BCGPT / AI model / first workflow are optional config â€” shown in Integrations tab.
   const setupSteps: SetupStep[] = [
     {
       id: "gateway",
@@ -219,67 +213,21 @@ export function renderDashboard(props: DashboardProps) {
   ].filter((item): item is { title: string; detail: string; href: string } => Boolean(item));
 
   return html`
-    <!-- Greeting header -->
-    <section class="card" style="margin-bottom: 18px;">
-      <div style="display: flex; justify-content: space-between; align-items: center;">
-        <div>
-          <h1 style="font-size: 24px; font-weight: 600; margin: 0;">
-            ${getTimeGreeting()}! 👋
-          </h1>
-          <p class="muted" style="margin: 4px 0 0 0;">What would you like to do today?</p>
-        </div>
+    <section class="dashboard-shell">
+      <div class="dashboard-main">
+    <!-- Greeting strip — slim, no card, no chat input -->
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px;flex-wrap:wrap;">
+      <div>
+        <span style="font-size:20px;font-weight:600;">${getTimeGreeting()}</span>
+        <span class="muted" style="font-size:13px;margin-left:10px;">Chat is live on the right →</span>
       </div>
-      
-      <!-- Natural language input bar -->
-      <div style="margin-top: 16px;">
-        <div style="display: flex; gap: 8px;">
-          <input
-            type="text"
-            .value=${props.nlDraft}
-            @input=${(e: Event) => props.onNlDraftChange((e.target as HTMLInputElement).value)}
-            @keydown=${(e: KeyboardEvent) => { if (e.key === "Enter" && !e.shiftKey && props.nlDraft.trim() && !props.nlBusy) { e.preventDefault(); props.onAsk(); } }}
-            placeholder="Ask your AI team to do something..."
-            ?disabled=${!props.connected || props.nlBusy}
-            style="flex: 1; padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border);"
-          />
-          <button class="btn primary" ?disabled=${!props.connected || props.nlBusy || !props.nlDraft.trim()} @click=${props.onAsk}>
-            ${props.nlBusy ? "Sending..." : "Ask"}
-          </button>
-        </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         ${props.currentModel
-          ? html`
-            <div style="margin-top: 6px; display: flex; align-items: center; gap: 8px; font-size: 11px;">
-              <span class="muted">Using:</span>
-              <span class="chip" style="font-size: 10px; padding: 2px 8px;">
-                ${props.currentModelProvider ?? 'AI'} / ${props.currentModel?.includes('/') ? props.currentModel.split('/').pop() : props.currentModel}
-              </span>
-              <a href=${props.integrationsHref} style="opacity: 0.7;">Change</a>
-            </div>
-          `
-          : html`
-            <div style="margin-top: 6px; font-size: 11px;">
-              <span class="chip chip-warn" style="font-size: 10px; padding: 2px 8px;">⚠ No model configured</span>
-              <a href=${props.integrationsHref} style="margin-left: 6px; opacity: 0.7;">Configure in Integrations</a>
-            </div>
-          `
-        }
+          ? html`<span class="chip" style="font-size:11px;padding:4px 10px;">${props.currentModelProvider ?? "AI"} / ${props.currentModel?.includes("/") ? props.currentModel.split("/").pop() : props.currentModel}</span>`
+          : html`<span class="chip chip-warn" style="font-size:11px;padding:4px 10px;">No model</span>`}
+        <a href=${props.integrationsHref} class="btn btn--sm btn--secondary">Integrations</a>
       </div>
-
-      ${props.nlResponse ? html`
-        <div style="margin-top: 10px; padding: 12px 14px; background: var(--surface2, var(--surface)); border-radius: 8px; border: 1px solid var(--border); white-space: pre-wrap; font-size: 13px; line-height: 1.6;">
-          ${props.nlResponse}
-        </div>
-        <a href=${props.chatHref} style="display: inline-block; margin-top: 6px; font-size: 12px; opacity: 0.7;">View full conversation in Chat →</a>
-      ` : nothing}
-
-      <!-- Quick action buttons -->
-      <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
-        <button class="btn btn--secondary" ?disabled=${!props.connected} @click=${() => props.onQuickAction("check-leads")}>Check leads</button>
-        <button class="btn btn--secondary" ?disabled=${!props.connected} @click=${() => props.onQuickAction("daily-report")}>Daily report</button>
-        <button class="btn btn--secondary" @click=${() => props.onQuickAction("create-workflow")}>Create workflow</button>
-        <button class="btn btn--secondary" @click=${() => props.onQuickAction("settings")}>Settings</button>
-      </div>
-    </section>
+    </div>
 
     <!-- Your AI Team section -->
     <section class="card" style="margin-bottom: 18px;">
@@ -313,7 +261,7 @@ export function renderDashboard(props: DashboardProps) {
               };
               const identity = props.agentIdentityById[agent.id];
               const displayName = agent.name?.trim() || agent.identity?.name?.trim() || identity?.name?.trim() || agent.id;
-              const emoji = identity?.emoji?.trim() || agent.identity?.emoji?.trim() || '🤖';
+              const emoji = identity?.emoji?.trim() || agent.identity?.emoji?.trim() || 'ðŸ¤–';
               const theme = agent.identity?.theme?.trim() || identity?.theme?.trim() || 'AI Agent';
               
               const statusLabel =
@@ -576,7 +524,7 @@ export function renderDashboard(props: DashboardProps) {
       <div class="card">
         <div class="card-title">Focus Today</div>
         <div class="card-sub">Prioritized actions to keep operations healthy.</div>
-        ${focusItems.length === 0 ? html`<div class="muted" style="margin-top: 12px;">All good — no issues to address.</div>` : nothing}
+        ${focusItems.length === 0 ? html`<div class="muted" style="margin-top: 12px;">All good â€” no issues to address.</div>` : nothing}
         <div class="list" style="margin-top: 12px;">
           ${focusItems.slice(0, 5).map(
             (item) => html`
@@ -695,19 +643,35 @@ export function renderDashboard(props: DashboardProps) {
       </div>
     </section>
 
-    <!-- Chat Panel -->
-    <section class="card" style="margin-top: 18px;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-        <div>
-          <div class="card-title">Chat with AI</div>
-          <div class="card-sub">Ask questions, get help, or run tasks</div>
+      </div>
+
+      <aside class="dashboard-side">
+        <div class="card projects-chat-card dashboard-chat-card">
+          <div class="dashboard-chat-card__head">
+            <div>
+              <div class="card-title">Workspace Chat</div>
+              <div class="card-sub">Keep chat visible while you review health, runs, and connectors.</div>
+            </div>
+            <a href=${props.chatHref} style="font-size: 12px; opacity: 0.7;">Open full Chat</a>
+          </div>
+          <div class="row dashboard-chat-shortcuts" style="margin-top: 10px;">
+            <button class="btn btn--sm" ?disabled=${!props.connected} @click=${() => props.onQuickAction("daily-report")}>
+              Daily report
+            </button>
+            <button class="btn btn--sm" ?disabled=${!props.connected} @click=${() => props.onQuickAction("check-leads")}>
+              Check leads
+            </button>
+            <button class="btn btn--sm" @click=${() => props.onQuickAction("create-workflow")}>
+              Create workflow
+            </button>
+          </div>
+          <div class="projects-chat-host dashboard-chat-host" style="${isMobile ? "height: 60vh;" : ""}">
+            ${renderChat(props.chatProps)}
+          </div>
         </div>
-        <a href=${props.chatHref} style="font-size: 12px; opacity: 0.7;">Open full Chat →</a>
-      </div>
-      <div style="${isMobile ? "height: 60vh;" : "height: 400px;"} min-height: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 8px;">
-        ${renderChat(props.chatProps)}
-      </div>
+      </aside>
     </section>
   `;
 }
+
 

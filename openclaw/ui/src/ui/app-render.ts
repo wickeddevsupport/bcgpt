@@ -7,7 +7,7 @@ import { renderChatControls, renderTab, renderThemeToggle } from "./app-render.h
 import { loadAgentFileContent, loadAgentFiles, saveAgentFile } from "./controllers/agent-files.ts";
 import { loadAgentIdentities, loadAgentIdentity } from "./controllers/agent-identity.ts";
 import { loadAgentSkills } from "./controllers/agent-skills.ts";
-import { loadAgents } from "./controllers/agents.ts";
+import { createAgentListRow, loadAgents, upsertAgentsListResult } from "./controllers/agents.ts";
 import { loadChannels } from "./controllers/channels.ts";
 import { loadChatHistory } from "./controllers/chat.ts";
 import {
@@ -64,7 +64,7 @@ import {
   titleForTab,
   type Tab,
 } from "./navigation.ts";
-import { buildOpsUiEmbedUrl } from "./controllers/pmos-embed.ts";
+import { buildOpsUiConnectionsUrl, buildOpsUiEmbedUrl } from "./controllers/pmos-embed.ts";
 
 // Module-scope debounce for usage date changes (avoids type-unsafe hacks on state object)
 let usageDateDebounceTimeout: number | null = null;
@@ -212,11 +212,47 @@ function toWorkspaceScopedAgentWorkspacePath(workspaceId: string, agentId: strin
   return `~/.openclaw/workspaces/${ws}/${id}`;
 }
 
+function extractAvailableSkillNames(
+  report: { skills?: Array<{ name?: string | null } | null> } | null | undefined,
+): string[] {
+  const entries = Array.isArray(report?.skills) ? report.skills : [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const entry of entries) {
+    const name = typeof entry?.name === "string" ? entry.name.trim() : "";
+    if (!name || seen.has(name)) {
+      continue;
+    }
+    seen.add(name);
+    result.push(name);
+  }
+  return result;
+}
+
+function resolveAvailableSkillNames(state: AppViewState): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const name of [
+    ...state.availableSkills,
+    ...extractAvailableSkillNames(state.skillsReport),
+    ...extractAvailableSkillNames(state.agentSkillsReport),
+  ]) {
+    const normalized = name.trim();
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    result.push(normalized);
+  }
+  return result;
+}
+
 function buildDefaultCreateAgentForm(state: AppViewState, agentId = "assistant"): CreateAgentFormData {
   const wsId = state.pmosAuthUser?.workspaceId?.trim() ?? "";
   const isWorkspaceScopedUser = Boolean(wsId);
   return {
     ...DEFAULT_CREATE_AGENT_FORM,
+    skills: resolveAvailableSkillNames(state),
     workspace: isWorkspaceScopedUser
       ? toWorkspaceScopedAgentWorkspacePath(wsId, agentId)
       : DEFAULT_AGENT_WORKSPACE_PATH,
@@ -793,28 +829,6 @@ export function renderApp(state: AppViewState) {
                 },
                 // Inline chat panel
                 chatProps,
-                // Inline NL chat
-                nlDraft: state.dashboardNlDraft,
-                nlBusy: state.chatSending,
-                nlResponse: state.chatStream ?? (() => {
-                  const msgs = state.chatMessages as Array<{ role?: string; content?: unknown }>;
-                  const last = msgs?.findLast?.((m) => m.role === "assistant");
-                  const content = last?.content;
-                  if (typeof content === "string") return content;
-                  if (Array.isArray(content)) {
-                    const text = content.find((c: unknown) => (c as { type?: string })?.type === "text");
-                    return (text as { text?: string })?.text ?? null;
-                  }
-                  return null;
-                })(),
-                onNlDraftChange: (v) => (state.dashboardNlDraft = v),
-                onAsk: () => {
-                  const msg = state.dashboardNlDraft.trim();
-                  if (!msg) return;
-                  state.dashboardNlDraft = "";
-                  state.chatMessage = msg;
-                  void state.handleSendChat();
-                },
                 // Quick actions
                 onQuickAction: (action) => {
                   if (action === "check-leads") {
@@ -852,8 +866,7 @@ export function renderApp(state: AppViewState) {
                         buildOpsUiEmbedUrl(
                           basePath,
                           state.apFlowSelectedId,
-                          state.pmosOpsProvisioningResult?.projectId ?? null,
-                        ) + (state.n8nEmbedVersion ? `?v=${state.n8nEmbedVersion}` : ""),
+                        ) + (state.workflowEmbedVersion ? `?v=${state.workflowEmbedVersion}` : ""),
                       selectedFlowLabel: selectedWorkflow
                         ? selectedWorkflow.displayName ?? selectedWorkflow.id
                         : null,
@@ -935,17 +948,12 @@ export function renderApp(state: AppViewState) {
                 error: state.pmosIntegrationsError,
                 bcgptUrl: state.pmosBcgptUrl,
                 bcgptApiKeyDraft: state.pmosBcgptApiKeyDraft,
-                opsUserEmailDraft: state.pmosOpsUserEmailDraft,
-                opsUserPasswordDraft: state.pmosOpsUserPasswordDraft,
-                opsUserHasSavedPassword: state.pmosOpsUserHasSavedPassword,
                 connectorsLoading: state.pmosConnectorsLoading,
                 connectorsStatus: state.pmosConnectorsStatus,
                 connectorsError: state.pmosConnectorsError,
                 modelRows: state.pmosModelRows,
                 onBcgptUrlChange: (next) => (state.pmosBcgptUrl = next),
                 onBcgptApiKeyDraftChange: (next) => (state.pmosBcgptApiKeyDraft = next),
-                onOpsUserEmailDraftChange: (next) => (state.pmosOpsUserEmailDraft = next),
-                onOpsUserPasswordDraftChange: (next) => (state.pmosOpsUserPasswordDraft = next),
                 onSave: () => state.handlePmosIntegrationsSave(),
                 onClearBcgptKey: () => state.handlePmosIntegrationsClearBcgptKey(),
                 onRefreshConnectors: () => state.handlePmosRefreshConnectors(),
@@ -959,11 +967,10 @@ export function renderApp(state: AppViewState) {
                 basecampSetupOk: state.pmosBasecampSetupOk,
                 basecampSetupError: state.pmosBasecampSetupError,
                 onSetupBasecamp: () => void state.handlePmosSetupBasecampInWorkflowEngine(),
-                // n8n Credentials
-                n8nCredentials: state.pmosRealCredentials ?? undefined,
-                n8nCredentialsLoading: state.pmosRealCredentialsLoading,
-                n8nCredentialsError: state.pmosRealCredentialsError,
-                onRefreshN8nCredentials: () => void state.handleLoadRealCredentials(),
+                workflowCredentials: state.pmosRealCredentials ?? undefined,
+                workflowCredentialsLoading: state.pmosRealCredentialsLoading,
+                workflowCredentialsError: state.pmosRealCredentialsError,
+                onRefreshWorkflowCredentials: () => void state.handleLoadRealCredentials(),
               })
             : nothing
         }
@@ -974,6 +981,8 @@ export function renderApp(state: AppViewState) {
                 connected: state.connected,
                 modelAlias: state.pmosModelAlias,
                 modelApiKeyDraft: state.pmosModelApiKeyDraft,
+                modelApiKeyEditable: state.pmosModelApiKeyEditable,
+                modelApiKeyStored: state.pmosModelApiKeyStored,
                 modelBaseUrl: state.pmosModelBaseUrl,
                 modelApiType: state.pmosModelApiType,
                 modelSaving: state.pmosModelSaving,
@@ -993,8 +1002,11 @@ export function renderApp(state: AppViewState) {
                 },
                 onModelApiKeyDraftChange: (next) => {
                   state.pmosModelApiKeyDraft = next;
+                  state.pmosModelApiKeyEditable = true;
                   state.pmosModelError = null;
                 },
+                onModelApiKeyEditToggle: (editable) =>
+                  state.handlePmosModelApiKeyEditToggle(editable),
                 onModelBaseUrlChange: (next) => {
                   state.pmosModelBaseUrl = next;
                   state.pmosModelError = null;
@@ -1007,6 +1019,7 @@ export function renderApp(state: AppViewState) {
                 onModelSaveWithoutActivate: () => state.handlePmosModelSaveWithoutActivate(),
                 onModelClearKey: () => state.handlePmosModelClearKey(),
                 onModelClearKeyForRef: (ref) => state.handlePmosModelClearKeyForRef(ref),
+                onModelEdit: (ref) => state.handlePmosModelEdit(ref),
                 onModelActivate: (ref) => state.handlePmosModelActivate(ref),
                 onModelDeactivate: (ref) => state.handlePmosModelDeactivate(ref),
                 onModelDelete: (ref) => state.handlePmosModelDelete(ref),
@@ -1019,19 +1032,20 @@ export function renderApp(state: AppViewState) {
         ${
           state.tab === "connections"
             ? (() => {
-                // Lazy-load real credentials when the tab is first opened
-                if (state.pmosRealCredentials === null && !state.pmosRealCredentialsLoading) {
-                  void state.handleLoadRealCredentials();
-                }
                 return renderConnections({
-                  credentials: state.pmosRealCredentials ?? [],
-                  credentialsLoading: state.pmosRealCredentialsLoading,
-                  credentialsError: state.pmosRealCredentialsError,
                   opsProvisioned: Boolean(state.pmosOpsProvisioningResult?.apiKey) || state.pmosConnectorsStatus?.ops?.reachable === true,
-                  onRefresh: () => void state.handleLoadRealCredentials(),
-                  onAddCredential: () => state.setTab("automations"),
+                  connectorsLoading: state.pmosConnectorsLoading,
+                  connectorsError: state.pmosConnectorsError,
+                  embedUrl:
+                    buildOpsUiConnectionsUrl(basePath) +
+                    (state.flowConnectionsEmbedVersion
+                      ? `?v=${state.flowConnectionsEmbedVersion}`
+                      : ""),
+                  onRefresh: () => {
+                    state.flowConnectionsEmbedVersion = (state.flowConnectionsEmbedVersion ?? 0) + 1;
+                    void state.handlePmosRefreshConnectors();
+                  },
                   onOpenIntegrations: () => state.setTab("integrations"),
-                  opsUiHref: `${state.basePath ?? ""}/ops-ui/connections`,
                 });
               })()
             : nothing
@@ -1105,6 +1119,24 @@ export function renderApp(state: AppViewState) {
                 workspaceResetError: state.pmosWorkspaceResetError,
                 workspaceResetResults: state.pmosWorkspaceResetResults,
                 onResetAllWorkspaces: () => void state.handleResetAllWorkspaces(),
+                passwordCurrentDraft: state.pmosPasswordCurrentDraft,
+                passwordNewDraft: state.pmosPasswordNewDraft,
+                passwordConfirmDraft: state.pmosPasswordConfirmDraft,
+                passwordSaving: state.pmosPasswordSaving,
+                passwordError: state.pmosPasswordError,
+                passwordSavedOk: state.pmosPasswordSavedOk,
+                onPasswordCurrentDraftChange: (next) => (state.pmosPasswordCurrentDraft = next),
+                onPasswordNewDraftChange: (next) => (state.pmosPasswordNewDraft = next),
+                onPasswordConfirmDraftChange: (next) => (state.pmosPasswordConfirmDraft = next),
+                onPasswordChange: () => void state.handlePmosPasswordChange(),
+                adminResetTargetEmail: state.pmosAdminResetTargetEmail,
+                adminResetPasswordDraft: state.pmosAdminResetPasswordDraft,
+                adminResetSaving: state.pmosAdminResetSaving,
+                adminResetError: state.pmosAdminResetError,
+                adminResetSavedOk: state.pmosAdminResetSavedOk,
+                onAdminResetTargetEmailChange: (next) => (state.pmosAdminResetTargetEmail = next),
+                onAdminResetPasswordDraftChange: (next) => (state.pmosAdminResetPasswordDraft = next),
+                onAdminResetPassword: () => void state.handlePmosAdminResetUserPassword(),
               })
             : nothing
         }
@@ -1860,7 +1892,13 @@ export function renderApp(state: AppViewState) {
                 availableModels: state.availableModels,
                 configuredProviders: state.pmosByokProviders,
                 availableSkills: state.availableSkills,
-                onCreateModalOpen: () => {
+                workspaceLocked: Boolean(
+                  state.pmosAuthUser?.workspaceId?.trim() &&
+                    state.pmosAuthUser?.role !== "super_admin",
+                ),
+                onCreateModalOpen: async () => {
+                  await loadSkills(state);
+                  state.availableSkills = resolveAvailableSkillNames(state);
                   state.createModalOpen = true;
                   state.createModalMode = "create";
                   state.createModalEditAgentId = null;
@@ -2072,11 +2110,37 @@ export function renderApp(state: AppViewState) {
                     await saveConfig(state);
                     await applyConfig(state);
                     await loadAgents(state);
+                    const agentExists = state.agentsList?.agents?.some((entry) => entry.id === candidateId) ?? false;
+                    if (!agentExists) {
+                      state.agentsList = upsertAgentsListResult(
+                        state.agentsList,
+                        createAgentListRow({
+                          id: candidateId,
+                          name,
+                          identity: {
+                            name,
+                            ...(emoji ? { emoji } : {}),
+                            ...(theme ? { theme } : {}),
+                          },
+                        }),
+                      );
+                    }
                     const agentIds = state.agentsList?.agents?.map((entry) => entry.id) ?? [];
                     if (agentIds.length > 0) {
                       void loadAgentIdentities(state, agentIds);
                     }
+                    const existingIdentity = state.agentIdentityById[candidateId];
+                    state.agentIdentityById = {
+                      ...state.agentIdentityById,
+                      [candidateId]: {
+                        agentId: candidateId,
+                        name,
+                        avatar: existingIdentity?.avatar ?? "",
+                        ...(emoji ? { emoji } : existingIdentity?.emoji ? { emoji: existingIdentity.emoji } : {}),
+                      },
+                    };
                     state.agentsSelectedId = candidateId;
+                    void loadAgentIdentity(state, candidateId);
                     state.createModalFormData = buildDefaultCreateAgentForm(state, "assistant");
                     state.createModalOpen = false;
                     state.createModalMode = "create";
@@ -2113,6 +2177,8 @@ export function renderApp(state: AppViewState) {
                   }
                   try {
                     state.agentsError = null;
+                    await loadSkills(state);
+                    state.availableSkills = resolveAvailableSkillNames(state);
                     if (!state.configForm) {
                       await loadConfig(state);
                     }
@@ -2156,7 +2222,7 @@ export function renderApp(state: AppViewState) {
                               .filter(Boolean),
                           ),
                         )
-                      : [];
+                      : resolveAvailableSkillNames(state);
 
                     state.createModalFormData = {
                       ...buildDefaultCreateAgentForm(state, agentId),
@@ -2323,6 +2389,7 @@ export function renderApp(state: AppViewState) {
                   state.pmosAuthUser && state.pmosAuthUser.role !== "super_admin"
                     ? state.pmosAuthUser.workspaceId
                     : null,
+                allowRawMode: state.pmosAuthUser?.role === "super_admin",
                 raw: state.configRaw,
                 originalRaw: state.configRawOriginal,
                 valid: state.configValid,
@@ -2335,7 +2402,7 @@ export function renderApp(state: AppViewState) {
                 schema: state.configSchema,
                 schemaLoading: state.configSchemaLoading,
                 uiHints: state.configUiHints,
-                formMode: state.configFormMode,
+                formMode: state.pmosAuthUser?.role === "super_admin" ? state.configFormMode : "form",
                 formValue: state.configForm,
                 originalValue: state.configFormOriginal,
                 searchQuery: state.configSearchQuery,
@@ -2344,7 +2411,12 @@ export function renderApp(state: AppViewState) {
                 onRawChange: (next) => {
                   state.configRaw = next;
                 },
-                onFormModeChange: (mode) => (state.configFormMode = mode),
+                onFormModeChange: (mode) => {
+                  if (state.pmosAuthUser?.role !== "super_admin" && mode === "raw") {
+                    return;
+                  }
+                  state.configFormMode = mode;
+                },
                 onFormPatch: (path, value) => updateConfigFormValue(state, path, value),
                 onSearchChange: (query) => (state.configSearchQuery = query),
                 onSectionChange: (section) => {
