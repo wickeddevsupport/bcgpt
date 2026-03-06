@@ -199,11 +199,20 @@ export const reportsAction = createAction({
           },
         });
       case 'search_todos':
-        return await callGatewayTool({
-          auth,
-          toolName: 'search_todos',
-          args: { query: inputs['query'] },
-        });
+        try {
+          return await callGatewayTool({
+            auth,
+            toolName: 'search_todos',
+            args: { query: inputs['query'], project: project || undefined },
+          });
+        } catch (err) {
+          if ((err as any).code === 'CHUNK_REQUIRED' || String((err as any).message).includes('CHUNK_REQUIRED')) {
+            throw new Error(
+              'Too many matching to-dos. Use a more specific search query, or select a Project to narrow the search to that project.',
+            );
+          }
+          throw err;
+        }
       case 'assignment_report': {
         if (!project) {
           throw new Error('Project is required');
