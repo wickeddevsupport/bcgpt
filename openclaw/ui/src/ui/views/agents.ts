@@ -138,6 +138,7 @@ export type AgentsProps = {
   availableModels: string[];
   configuredProviders: string[];  // Providers with API keys in BYOK store
   availableSkills: string[];
+  workspaceLocked?: boolean;
   onCreateModalOpen: () => void;
   onCreateModalCancel: () => void;
   onCreateModalStepChange: (step: 1 | 2 | 3) => void;
@@ -668,10 +669,13 @@ function matchesList(name: string, list?: string[]) {
 export function renderAgents(props: AgentsProps) {
   const agents = props.agentsList?.agents ?? [];
   const defaultId = props.agentsList?.defaultId ?? null;
-  const selectedId = props.selectedAgentId ?? defaultId ?? agents[0]?.id ?? null;
-  const selectedAgent = selectedId
-    ? (agents.find((agent) => agent.id === selectedId) ?? null)
-    : null;
+  const preferredSelectedId = props.selectedAgentId ?? defaultId ?? agents[0]?.id ?? null;
+  const selectedAgent =
+    (preferredSelectedId ? agents.find((agent) => agent.id === preferredSelectedId) : null) ??
+    (defaultId ? agents.find((agent) => agent.id === defaultId) : null) ??
+    agents[0] ??
+    null;
+  const selectedId = selectedAgent?.id ?? null;
 
   return html`
     ${props.createModalOpen ? renderCreateAgentModal(props) : nothing}
@@ -2166,6 +2170,7 @@ function renderCreateAgentModal(props: AgentsProps) {
     ? configuredModels.some((option) => option.value === form.model)
     : true;
   const hasConfiguredModels = configuredModels.length > 0;
+  const workspaceLocked = Boolean(props.workspaceLocked);
   const canAdvanceStep1 = Boolean(form.name.trim());
   const canSubmit = Boolean(form.name.trim()) && (hasConfiguredModels || !form.model.trim());
 
@@ -2219,7 +2224,7 @@ function renderCreateAgentModal(props: AgentsProps) {
 
   return html`
     <div class="exec-approval-overlay" role="dialog" aria-modal="true" aria-labelledby="create-agent-title">
-      <div class="exec-approval-card" style="max-width: 920px; width: min(96vw, 920px);">
+      <div class="exec-approval-card exec-approval-card--wizard" style="max-width: 920px; width: min(96vw, 920px);">
         <div class="exec-approval-header">
           <div>
             <div class="exec-approval-title" id="create-agent-title">${modalTitle}</div>
@@ -2236,6 +2241,7 @@ function renderCreateAgentModal(props: AgentsProps) {
           </button>
         </div>
 
+        <div class="exec-approval-body exec-approval-body--wizard">
         <section class="card" style="margin-top: 14px;">
           <div class="row" style="justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
             <div>
@@ -2306,8 +2312,17 @@ function renderCreateAgentModal(props: AgentsProps) {
                       @input=${(e: Event) =>
                         props.onCreateModalFieldChange("workspace", (e.target as HTMLInputElement).value)}
                       placeholder=${DEFAULT_AGENT_WORKSPACE_PATH}
-                      ?disabled=${createModalLoading}
+                      ?disabled=${createModalLoading || workspaceLocked}
                     />
+                    ${
+                      workspaceLocked
+                        ? html`
+                            <div class="muted" style="font-size: 11px; margin-top: 4px;">
+                              Managed by the current workspace. Agent files and memory stay isolated here.
+                            </div>
+                          `
+                        : nothing
+                    }
                   </label>
                   <label class="field">
                     <span>Emoji</span>
@@ -2554,7 +2569,9 @@ function renderCreateAgentModal(props: AgentsProps) {
             `
           : nothing}
 
-        <div class="exec-approval-actions" style="margin-top: 18px; justify-content: flex-end;">
+        </div>
+
+        <div class="exec-approval-actions exec-approval-actions--wizard" style="justify-content: flex-end;">
           <button class="btn" @click=${props.onCreateModalCancel} ?disabled=${createModalLoading}>
             Cancel
           </button>

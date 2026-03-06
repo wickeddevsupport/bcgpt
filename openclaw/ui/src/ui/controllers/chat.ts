@@ -17,7 +17,7 @@ export type ChatState = {
   chatStream: string | null;
   chatStreamStartedAt: number | null;
   lastError: string | null;
-  /** Set for PMOS workspace users (real UUID, not "default"). Enables direct AI chat via pmos.chat.send. */
+  /** Set for PMOS workspace users (real UUID, not "default"). Used for workspace-aware validation paths. */
   pmosWorkspaceId?: string;
 };
 
@@ -245,61 +245,8 @@ export async function sendChatMessage(
     },
   ];
 
-  // Workspace mode: use pmos.chat.send (direct model call, no agent session)
-  // Same approach as n8n's AI Agent node — fast, reliable, understands context.
-  if (state.pmosWorkspaceId && state.pmosWorkspaceId !== "default" && state.client) {
-    state.chatSending = true;
-    state.lastError = null;
-    try {
-      // Build conversation history from current chatMessages (includes the pending user message)
-      const history: Array<{ role: "user" | "assistant"; content: string }> = [];
-      for (const message of state.chatMessages) {
-        const raw = message as Record<string, unknown>;
-        const role =
-          raw.role === "user" || raw.role === "assistant"
-            ? (raw.role as "user" | "assistant")
-            : null;
-        if (!role) continue;
-        const text = extractText(message)?.trim();
-        if (!text) continue;
-        history.push({ role, content: text });
-      }
-      const result = await state.client.request<{ ok: boolean; message: string }>(
-        "pmos.chat.send",
-        { messages: history },
-      );
-      const replyText = result.message || "I couldn't process that. Please try again.";
-      // Clear the pending-user marker so the user message renders as delivered
-      const withoutPending = clearPendingMarkersForRun(state.chatMessages, runId);
-      state.chatMessages = [
-        ...withoutPending,
-        {
-          role: "assistant",
-          content: [{ type: "text", text: replyText }],
-          timestamp: Date.now(),
-          stopReason: "stop",
-          usage: { input: 0, output: 0, totalTokens: 0 },
-        },
-      ];
-      return null;
-    } catch (err) {
-      const error = String(err);
-      state.lastError = error;
-      state.chatMessages = [
-        ...state.chatMessages,
-        {
-          role: "assistant",
-          content: [{ type: "text", text: "Error: " + error }],
-          timestamp: Date.now(),
-        },
-      ];
-      return null;
-    } finally {
-      state.chatSending = false;
-    }
-  }
-
-  // Standard mode: use agent-based chat.send with WebSocket streaming
+  // Use agent-based chat.send with WebSocket streaming for both PMOS workspace chat
+  // and regular agent chat so live thoughts/tools/subagents stay visible in the UI.
   state.chatSending = true;
   state.lastError = null;
   state.chatRunId = runId;

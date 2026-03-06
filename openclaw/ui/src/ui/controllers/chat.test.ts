@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   handleChatEvent,
   loadChatHistory,
+  sendChatMessage,
   type ChatEventPayload,
   type ChatState,
 } from "./chat.ts";
@@ -143,5 +144,31 @@ describe("handleChatEvent", () => {
     };
     expect(handleChatEvent(state, payload)).toBe("final");
     expect((state.chatMessages[0] as { __openclaw?: unknown }).__openclaw).toBeUndefined();
+  });
+
+  it("uses streamed chat.send for PMOS workspace chat", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === "models.list") {
+        return {
+          models: [{ id: "gpt-5", available: true }],
+        };
+      }
+      if (method === "chat.send") {
+        return { ok: true };
+      }
+      throw new Error(`unexpected method: ${method}`);
+    });
+    const state = createState({
+      sessionKey: "agent:main:main",
+      pmosWorkspaceId: "workspace-123",
+      client: { request } as unknown as ChatState["client"],
+    });
+
+    const runId = await sendChatMessage(state, "hello workspace");
+
+    expect(typeof runId).toBe("string");
+    expect(state.chatRunId).toBe(runId);
+    expect(request.mock.calls.some(([method]) => method === "chat.send")).toBe(true);
+    expect(request.mock.calls.some(([method]) => method === "pmos.chat.send")).toBe(false);
   });
 });

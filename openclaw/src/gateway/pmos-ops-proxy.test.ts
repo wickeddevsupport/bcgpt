@@ -75,6 +75,8 @@ describe("pmos ops proxy workflow list behavior", () => {
     delete process.env.N8N_LOCAL_URL;
     delete process.env.ACTIVEPIECES_USER_PASSWORD;
     delete process.env.OPS_USER_PASSWORD;
+    delete process.env.ACTIVEPIECES_PROJECT_ID;
+    delete process.env.OPS_PROJECT_ID;
     resolvePmosSessionFromRequestMock.mockResolvedValue({
       ok: true,
       user: {
@@ -163,6 +165,39 @@ describe("pmos ops proxy workflow list behavior", () => {
     expect(html).toContain("openclaw-ap-bootstrap");
     expect(html).toContain("workspace-token-123");
     expect(html).toContain("proj_abc123");
+    expect(html).toContain("openclaw-ap-embed-guard");
+    expect(html).toContain("closest(controlSelector)");
+    expect(html).toContain("logoutPattern=");
+    expect(html).not.toContain("while(target&&target!==document)");
+  });
+
+  it("does not inject a global project id into workspace-scoped /ops-ui bootstrap", async () => {
+    process.env.ACTIVEPIECES_PROJECT_ID = "global-proj-999";
+    readWorkspaceConnectorsMock.mockResolvedValue({
+      ops: {
+        url: "https://flow.example.test",
+        apiKey: "workspace-token-123",
+      },
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("<html><head></head><body>ok</body></html>", {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { handleLocalN8nRequest } = await import("./pmos-ops-proxy.js");
+    const req = makeReq("/ops-ui");
+    const { res, getBody } = makeRes();
+
+    const handled = await handleLocalN8nRequest(req, res);
+    expect(handled).toBe(true);
+    const html = getBody();
+    expect(html).toContain("workspace-token-123");
+    expect(html).not.toContain("global-proj-999");
+    expect(html).toContain('localStorage.removeItem("projectId")');
   });
 
   it("ignores legacy workspace n8n url and routes /ops-ui to activepieces", async () => {
@@ -205,15 +240,21 @@ describe("pmos ops proxy workflow list behavior", () => {
       },
     });
 
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ token: "workspace-user-token" }), {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/api/v1/authentication/sign-in")) {
+        return new Response(JSON.stringify({ token: "workspace-user-token" }), {
           status: 200,
           headers: { "content-type": "application/json" },
-        }),
-      )
-      .mockResolvedValueOnce(jsonResponse({ id: "user-1" }, 200));
+        });
+      }
+      if (url.endsWith("/api/v1/projects")) {
+        return jsonResponse({ data: [{ id: "proj-user-1" }] }, 200);
+      }
+      if (url.endsWith("/api/v1/users/me")) {
+        return jsonResponse({ id: "user-1" }, 200);
+      }
+      return jsonResponse({ error: "unexpected url" }, 404);
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const { handleOpsProxyRequest } = await import("./pmos-ops-proxy.js");
@@ -222,11 +263,12 @@ describe("pmos ops proxy workflow list behavior", () => {
 
     const handled = await handleOpsProxyRequest(req, res);
     expect(handled).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://flow.example.test/api/v1/authentication/sign-in");
-    expect(String(fetchMock.mock.calls[1]?.[0])).toBe("https://flow.example.test/api/v1/users/me");
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe("https://flow.example.test/api/v1/projects");
+    expect(String(fetchMock.mock.calls[2]?.[0])).toBe("https://flow.example.test/api/v1/users/me");
 
-    const headers = fetchMock.mock.calls[1]?.[1] as { headers?: Record<string, string> } | undefined;
+    const headers = fetchMock.mock.calls[2]?.[1] as { headers?: Record<string, string> } | undefined;
     expect(headers?.headers?.authorization).toBe("Bearer workspace-user-token");
 
     const body = JSON.parse(getBody()) as { id?: string };
@@ -260,6 +302,24 @@ describe("pmos ops proxy workflow list behavior", () => {
     expect(body.id).toBe("user-1");
   });
 
+  it("blocks embedded Flow sign-out requests at the proxy layer", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { handleOpsProxyRequest } = await import("./pmos-ops-proxy.js");
+    const req = makeReq("/api/v1/authentication/sign-out", "POST");
+    const { res, getBody } = makeRes();
+
+    const handled = await handleOpsProxyRequest(req, res);
+    expect(handled).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const body = JSON.parse(getBody()) as { ok?: boolean; ignored?: boolean; embedded?: boolean };
+    expect(body.ok).toBe(true);
+    expect(body.ignored).toBe(true);
+    expect(body.embedded).toBe(true);
+  });
+
   it("prefers workspace user login token over configured API key for /api/v1 proxy", async () => {
     readWorkspaceConnectorsMock.mockResolvedValue({
       ops: {
@@ -272,15 +332,21 @@ describe("pmos ops proxy workflow list behavior", () => {
       },
     });
 
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ token: "fresh-user-token" }), {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/api/v1/authentication/sign-in")) {
+        return new Response(JSON.stringify({ token: "fresh-user-token" }), {
           status: 200,
           headers: { "content-type": "application/json" },
-        }),
-      )
-      .mockResolvedValueOnce(jsonResponse({ id: "user-1" }, 200));
+        });
+      }
+      if (url.endsWith("/api/v1/projects")) {
+        return jsonResponse({ data: [{ id: "proj-user-2" }] }, 200);
+      }
+      if (url.endsWith("/api/v1/users/me")) {
+        return jsonResponse({ id: "user-1" }, 200);
+      }
+      return jsonResponse({ error: "unexpected url" }, 404);
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const { handleOpsProxyRequest } = await import("./pmos-ops-proxy.js");
@@ -289,11 +355,12 @@ describe("pmos ops proxy workflow list behavior", () => {
 
     const handled = await handleOpsProxyRequest(req, res);
     expect(handled).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://flow.example.test/api/v1/authentication/sign-in");
-    expect(String(fetchMock.mock.calls[1]?.[0])).toBe("https://flow.example.test/api/v1/users/me");
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe("https://flow.example.test/api/v1/projects");
+    expect(String(fetchMock.mock.calls[2]?.[0])).toBe("https://flow.example.test/api/v1/users/me");
 
-    const headers = fetchMock.mock.calls[1]?.[1] as { headers?: Record<string, string> } | undefined;
+    const headers = fetchMock.mock.calls[2]?.[1] as { headers?: Record<string, string> } | undefined;
     expect(headers?.headers?.authorization).toBe("Bearer fresh-user-token");
 
     const body = JSON.parse(getBody()) as { id?: string };
@@ -318,10 +385,18 @@ describe("pmos ops proxy workflow list behavior", () => {
         "set-cookie": "ap-session=abc123; Path=/; HttpOnly",
       },
     });
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(loginResponse)
-      .mockResolvedValueOnce(jsonResponse({ ok: true }, 200));
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/api/v1/authentication/sign-in")) {
+        return loginResponse;
+      }
+      if (url.endsWith("/api/v1/projects")) {
+        return jsonResponse({ data: [{ id: "proj-cookie-1" }] }, 200);
+      }
+      if (url.endsWith("/api/v1/users/me")) {
+        return jsonResponse({ ok: true }, 200);
+      }
+      return jsonResponse({ error: "unexpected url" }, 404);
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const { handleOpsProxyRequest } = await import("./pmos-ops-proxy.js");
@@ -330,9 +405,9 @@ describe("pmos ops proxy workflow list behavior", () => {
 
     const handled = await handleOpsProxyRequest(req, res);
     expect(handled).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
 
-    const headers = fetchMock.mock.calls[1]?.[1] as { headers?: Record<string, string> } | undefined;
+    const headers = fetchMock.mock.calls[2]?.[1] as { headers?: Record<string, string> } | undefined;
     expect(headers?.headers?.cookie).toContain("ap-session=abc123");
 
     const body = JSON.parse(getBody()) as { ok?: boolean };
@@ -383,5 +458,35 @@ describe("pmos ops proxy workflow list behavior", () => {
     expect(html).toContain('href="/ops-ui/flows"');
     // API endpoints should remain untouched.
     expect(html).toContain('href="/api/v1/flows"');
+  });
+
+  it("proxies Flow branding assets through PMOS without HTML rewriting", async () => {
+    readWorkspaceConnectorsMock.mockResolvedValue({
+      ops: {
+        url: "https://flow.example.test",
+        apiKey: "workspace-token-123",
+        projectId: "proj_abc123",
+      },
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("<svg>brand</svg>", {
+        status: 200,
+        headers: { "content-type": "image/svg+xml" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { handleLocalN8nRequest } = await import("./pmos-ops-proxy.js");
+    const req = makeReq("/branding/wicked-flow-logo.svg?v=20260208");
+    const { res, getBody } = makeRes();
+
+    const handled = await handleLocalN8nRequest(req, res);
+    expect(handled).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "https://flow.example.test/branding/wicked-flow-logo.svg?v=20260208",
+    );
+    expect(getBody()).toContain("<svg>brand</svg>");
   });
 });

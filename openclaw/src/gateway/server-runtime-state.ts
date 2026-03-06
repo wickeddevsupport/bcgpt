@@ -108,8 +108,9 @@ export async function createGatewayRuntimeState(params: {
     }
   }
 
-  // If a vendored n8n exists in the workspace, attempt to spawn it as an embedded child
-  // process so OpenClaw can integrate with n8n locally (no external proxy required).
+  // Legacy embedded n8n support is opt-in only. Activepieces is the primary
+  // workflow engine, but a vendored n8n can still be started explicitly for
+  // compatibility testing.
   try {
     const spawned = await spawnEmbeddedN8nIfVendored();
     if (spawned) {

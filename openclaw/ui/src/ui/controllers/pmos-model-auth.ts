@@ -23,7 +23,9 @@ export type PmosModelRow = {
   modelId: string;
   alias: string;
   active: boolean;
-  configured: boolean;
+  keyConfigured: boolean;
+  providerReady: boolean;
+  sharedProvider: boolean;
   inCatalog: boolean;
   usedBy: string[];
   workspaceOverride: boolean;
@@ -77,6 +79,7 @@ export type PmosModelAuthState = {
   pmosModelSaving: boolean;
   pmosModelError: string | null;
   pmosModelConfigured: boolean;
+  pmosModelApiKeyStored?: boolean;
   // Cached providers that currently have keys in config.models.providers.*.apiKey.
   pmosByokProviders?: PmosModelProvider[];
   // Cached config snapshots for the model manager UX.
@@ -87,9 +90,10 @@ export type PmosModelAuthState = {
   pmosModelCatalogLoading?: boolean;
   pmosModelCatalogError?: string | null;
   availableModels?: string[];
+  pmosModelRefDraft?: string;
 };
 
-const PMOS_SHARED_PROVIDER_ALLOWLIST = new Set(["local-ollama", "ollama"]);
+const PMOS_SHARED_PROVIDER_ALLOWLIST = new Set(["local-ollama", "ollama", "kilo"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -355,6 +359,25 @@ function resolveProviderConfigKey(cfg: Record<string, unknown>, provider: string
   return null;
 }
 
+function resolveProviderStatus(
+  state: Pick<PmosModelAuthState, "pmosByokProviders" | "pmosEffectiveConfig">,
+  providerRaw: string,
+): { keyStored: boolean; sharedProvider: boolean; providerReady: boolean } {
+  const provider = normalizePmosProvider(providerRaw);
+  if (!provider) {
+    return { keyStored: false, sharedProvider: false, providerReady: false };
+  }
+  const keyStored = (state.pmosByokProviders ?? []).includes(provider);
+  const sharedProvider = listSharedProvidersFromEffectiveConfig(state.pmosEffectiveConfig).includes(
+    provider,
+  );
+  return {
+    keyStored,
+    sharedProvider,
+    providerReady: keyStored || sharedProvider,
+  };
+}
+
 type WorkspaceConfigSnapshot = {
   workspaceConfig: Record<string, unknown>;
   effectiveConfig: Record<string, unknown>;
@@ -592,8 +615,9 @@ export function hydratePmosModelDraftFromConfig(state: PmosModelAuthState) {
   state.pmosModelAlias = state.pmosModelAlias ?? "";
   state.pmosModelBaseUrl = state.pmosModelBaseUrl ?? "";
   state.pmosModelApiType = state.pmosModelApiType ?? "";
-  const configuredProviders = state.pmosByokProviders ?? [];
-  state.pmosModelConfigured = configuredProviders.includes(state.pmosModelProvider);
+  const providerStatus = resolveProviderStatus(state, state.pmosModelProvider);
+  state.pmosModelConfigured = providerStatus.providerReady;
+  state.pmosModelApiKeyStored = providerStatus.keyStored;
 }
 
 export function setPmosModelProvider(state: PmosModelAuthState, provider: PmosModelProvider) {
@@ -621,8 +645,9 @@ export function setPmosModelProvider(state: PmosModelAuthState, provider: PmosMo
     state.pmosModelApiType = PROVIDER_DEFAULT_API_TYPES[normalized] ?? "";
   }
   state.pmosModelError = null;
-  const configuredProviders = state.pmosByokProviders ?? [];
-  state.pmosModelConfigured = configuredProviders.includes(normalized);
+  const providerStatus = resolveProviderStatus(state, normalized);
+  state.pmosModelConfigured = providerStatus.providerReady;
+  state.pmosModelApiKeyStored = providerStatus.keyStored;
 }
 
 function hydrateFromEffectiveConfig(state: PmosModelAuthState, cfg: unknown) {
@@ -677,8 +702,15 @@ export async function loadPmosModelWorkspaceState(state: PmosModelAuthState) {
     const availableProviders = Array.from(
       new Set([...workspaceProviders, ...effectiveConfiguredProviders, ...sharedProviders]),
     );
-    state.pmosByokProviders = Array.from(new Set([...workspaceProviders, ...effectiveConfiguredProviders]));
-    state.pmosModelConfigured = availableProviders.includes(state.pmosModelProvider);
+    const keyConfiguredProviders = Array.from(
+      new Set([...workspaceProviders, ...effectiveConfiguredProviders]),
+    );
+    const availableProviderSet = new Set(availableProviders);
+    const keyConfiguredProviderSet = new Set(keyConfiguredProviders);
+    const sharedProviderSet = new Set(sharedProviders);
+    state.pmosByokProviders = keyConfiguredProviders;
+    state.pmosModelConfigured = availableProviderSet.has(state.pmosModelProvider);
+    state.pmosModelApiKeyStored = keyConfiguredProviderSet.has(state.pmosModelProvider);
 
     const visibleProviders = new Set(availableProviders);
     const catalogRefs = new Set<string>();
@@ -750,7 +782,9 @@ export async function loadPmosModelWorkspaceState(state: PmosModelAuthState) {
             effectiveConfiguredModels[ref]?.alias ??
             "",
           active: defaultsPrimary === ref,
-          configured: availableProviders.includes(provider),
+          keyConfigured: keyConfiguredProviderSet.has(provider),
+          providerReady: availableProviderSet.has(provider),
+          sharedProvider: sharedProviderSet.has(provider),
           inCatalog: catalogRefs.has(ref),
           usedBy: usageByRef.get(ref) ?? [],
           workspaceOverride: Object.prototype.hasOwnProperty.call(
@@ -837,6 +871,38 @@ export async function savePmosModelConfig(state: PmosModelAuthState) {
   } finally {
     state.pmosModelSaving = false;
   }
+}
+
+export function selectPmosModelEditor(state: PmosModelAuthState, modelRef: string): boolean {
+  const normalized = normalizeModelRef(modelRef);
+  const parsed = parsePrimaryModelRef(normalized);
+  if (!normalized || !parsed) {
+    return false;
+  }
+  const row = (state.pmosModelRows ?? []).find((entry) => normalizeModelRef(entry.ref) === normalized);
+  const alias =
+    row?.alias ??
+    asNonEmptyString(getPath(state.pmosWorkspaceConfig, ["agents", "defaults", "models", normalized, "alias"])) ??
+    asNonEmptyString(getPath(state.pmosEffectiveConfig, ["agents", "defaults", "models", normalized, "alias"])) ??
+    "";
+  const providerCfg = getPath(state.pmosEffectiveConfig, ["models", "providers", parsed.provider]);
+  const providerStatus = resolveProviderStatus(state, parsed.provider);
+
+  state.pmosModelProvider = parsed.provider;
+  state.pmosModelId = parsed.modelId;
+  state.pmosModelRefDraft = normalized;
+  state.pmosModelAlias = alias;
+  state.pmosModelApiKeyDraft = "";
+  state.pmosModelBaseUrl = isRecord(providerCfg)
+    ? asNonEmptyString(providerCfg.baseUrl) ?? PROVIDER_DEFAULT_BASE_URLS[parsed.provider] ?? ""
+    : PROVIDER_DEFAULT_BASE_URLS[parsed.provider] ?? "";
+  state.pmosModelApiType = isRecord(providerCfg)
+    ? asNonEmptyString(providerCfg.api) ?? PROVIDER_DEFAULT_API_TYPES[parsed.provider] ?? ""
+    : PROVIDER_DEFAULT_API_TYPES[parsed.provider] ?? "";
+  state.pmosModelConfigured = providerStatus.providerReady;
+  state.pmosModelApiKeyStored = providerStatus.keyStored;
+  state.pmosModelError = null;
+  return true;
 }
 
 export async function activatePmosModel(state: PmosModelAuthState, modelRef: string) {

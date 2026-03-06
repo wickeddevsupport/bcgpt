@@ -1,4 +1,5 @@
 import { truncateText } from "./format.ts";
+import { parseAgentSessionKey } from "../../../src/sessions/session-key-utils.js";
 
 const TOOL_STREAM_LIMIT = 50;
 const TOOL_STREAM_THROTTLE_MS = 80;
@@ -33,6 +34,32 @@ type ToolStreamHost = {
   chatToolMessages: Record<string, unknown>[];
   toolStreamSyncTimer: number | null;
 };
+
+function isRelatedAgentSessionKey(activeSessionKey: string, candidateSessionKey: string): boolean {
+  if (candidateSessionKey === activeSessionKey) {
+    return true;
+  }
+  const active = parseAgentSessionKey(activeSessionKey);
+  const candidate = parseAgentSessionKey(candidateSessionKey);
+  if (!active || !candidate || active.agentId !== candidate.agentId) {
+    return false;
+  }
+  const activeRest = active.rest.trim().toLowerCase();
+  const candidateRest = candidate.rest.trim().toLowerCase();
+  if (!activeRest || !candidateRest) {
+    return false;
+  }
+  if (activeRest === candidateRest) {
+    return true;
+  }
+  if (activeRest === "main" && candidateRest.startsWith("subagent:")) {
+    return true;
+  }
+  if (candidateRest === "main" && activeRest.startsWith("subagent:")) {
+    return true;
+  }
+  return false;
+}
 
 function extractToolOutputText(value: unknown): string | null {
   if (!value || typeof value !== "object") {
@@ -219,7 +246,7 @@ export function handleAgentEvent(host: ToolStreamHost, payload?: AgentEventPaylo
     return;
   }
   const sessionKey = typeof payload.sessionKey === "string" ? payload.sessionKey : undefined;
-  if (sessionKey && sessionKey !== host.sessionKey) {
+  if (sessionKey && !isRelatedAgentSessionKey(host.sessionKey, sessionKey)) {
     return;
   }
   // Fallback: only accept session-less events for the active run.

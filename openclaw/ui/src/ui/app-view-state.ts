@@ -180,12 +180,14 @@ export type AppViewState = {
   pmosModelId: string;
   pmosModelAlias: string;
   pmosModelApiKeyDraft: string;
+  pmosModelApiKeyEditable: boolean;
   pmosModelBaseUrl: string;
   pmosModelApiType: string;
   pmosModelSaving: boolean;
   pmosModelSavedOk: boolean;
   pmosModelError: string | null;
   pmosModelConfigured: boolean;
+  pmosModelApiKeyStored: boolean;
   pmosBcgptSavedOk: boolean;
   pmosBasecampSetupPending: boolean;
   pmosBasecampSetupOk: boolean;
@@ -199,7 +201,7 @@ export type AppViewState = {
   pmosEffectiveConfig: Record<string, unknown> | null;
   pmosModelRefDraft: string;
 
-  // Real n8n credentials for the Connections page
+  // Live workflow-engine connections for the workspace
   pmosRealCredentials: Array<{ id: string; name: string; type: string }> | null;
   pmosRealCredentialsLoading: boolean;
   pmosRealCredentialsError: string | null;
@@ -221,6 +223,17 @@ export type AppViewState = {
   pmosMemberDraftStatus: PmosMemberStatus;
   pmosMemberRemoveConfirm: string | null;
   pmosAuditEvents: PmosAuditEvent[];
+  pmosPasswordCurrentDraft: string;
+  pmosPasswordNewDraft: string;
+  pmosPasswordConfirmDraft: string;
+  pmosPasswordSaving: boolean;
+  pmosPasswordError: string | null;
+  pmosPasswordSavedOk: boolean;
+  pmosAdminResetTargetEmail: string;
+  pmosAdminResetPasswordDraft: string;
+  pmosAdminResetSaving: boolean;
+  pmosAdminResetError: string | null;
+  pmosAdminResetSavedOk: boolean;
   // Super-admin: workspace list
   pmosWorkspacesList: Array<{ workspaceId: string; ownerEmail: string; ownerName: string; ownerRole: string; createdAtMs: number }>;
   pmosWorkspacesLoading: boolean;
@@ -279,7 +292,8 @@ export type AppViewState = {
   apFlowCreateSaving: boolean;
   apFlowCreateError: string | null;
   apFlowSelectedId: string | null;
-  n8nEmbedVersion: number;
+  workflowEmbedVersion: number;
+  flowConnectionsEmbedVersion: number;
   apFlowDetailsLoading: boolean;
   apFlowDetailsError: string | null;
   apFlowDetails: unknown | null;
@@ -290,7 +304,7 @@ export type AppViewState = {
   apFlowMutateError: string | null;
   apFlowTemplateDeployedOk: boolean;
   automationsPanelOpen: boolean;
-  automationsPanelTab: "workflows" | "templates" | "settings" | "runs";
+  automationsPanelTab: "workflows" | "runs";
   automationsChatOpen: boolean;
   automationsLeftPanelRatio: number;
   automationsCenterSplitRatio: number;
@@ -523,6 +537,7 @@ export type AppViewState = {
   handlePmosIntegrationsClearBcgptKey: () => Promise<void>;
   handlePmosModelProviderChange: (next: PmosModelProvider) => void;
   handlePmosModelRefDraftChange: (next: string) => void;
+  handlePmosModelApiKeyEditToggle: (enabled: boolean) => void;
   handleLoadRealCredentials: () => Promise<void>;
   handlePmosModelSave: () => Promise<void>;
   handlePmosModelSaveWithoutActivate: () => Promise<void>;
@@ -532,6 +547,8 @@ export type AppViewState = {
   handlePmosModelDeactivate: (modelRef: string) => Promise<void>;
   handlePmosModelDelete: (modelRef: string) => Promise<void>;
   handlePmosAssignAgentModel: (agentId: string, modelRef: string | null) => Promise<void>;
+  handlePmosPasswordChange: () => Promise<void>;
+  handlePmosAdminResetUserPassword: () => Promise<void>;
   handlePmosApPiecesLoad: () => Promise<void>;
   handlePmosApConnectionsLoad: () => Promise<void>;
   handlePmosApConnectionCreate: () => Promise<void>;

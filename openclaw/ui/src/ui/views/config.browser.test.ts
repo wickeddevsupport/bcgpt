@@ -152,6 +152,25 @@ describe("config view", () => {
     expect(onFormModeChange).toHaveBeenCalledWith("raw");
   });
 
+  it("hides raw mode when raw editing is disabled", () => {
+    const container = document.createElement("div");
+    render(
+      renderConfig({
+        ...baseProps(),
+        allowRawMode: false,
+        formMode: "raw",
+      }),
+      container,
+    );
+
+    const rawButton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Raw",
+    );
+    const rawTextarea = container.querySelector(".config-raw-field textarea");
+    expect(rawButton).toBeUndefined();
+    expect(rawTextarea).toBeNull();
+  });
+
   it("switches sections from the sidebar", () => {
     const container = document.createElement("div");
     const onSectionChange = vi.fn();

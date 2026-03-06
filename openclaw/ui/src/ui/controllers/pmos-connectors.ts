@@ -25,6 +25,7 @@ export type PmosConnectorsStatus = {
     error: string | null;
     identity?: {
       connected: boolean;
+      basecampConnected?: boolean;
       name?: string | null;
       email?: string | null;
       selectedAccountId?: string | null;
@@ -57,11 +58,13 @@ export type PmosConnectorsState = {
   // Save fields
   pmosIntegrationsSaving: boolean;
   pmosIntegrationsError: string | null;
+  pmosBasecampSetupOk?: boolean;
+  pmosBasecampSetupError?: string | null;
 
-  // Workflow engine credentials
-  pmosN8nCredentials: Array<{ id: string; name: string; type: string }> | null;
-  pmosN8nCredentialsLoading: boolean;
-  pmosN8nCredentialsError: string | null;
+  // Workflow-engine connections
+  pmosWorkflowCredentials: Array<{ id: string; name: string; type: string }> | null;
+  pmosWorkflowCredentialsLoading: boolean;
+  pmosWorkflowCredentialsError: string | null;
 };
 
 function getPath(obj: unknown, path: string[]): unknown {
@@ -132,25 +135,23 @@ export async function savePmosConnectorsConfig(
     const opsUrl = normalizeUrl(state.pmosOpsUrl, "https://flow.wickedlab.io");
     const bcgptUrl = "https://bcgpt.wickedlab.io";
     const bcgptKey = state.pmosBcgptApiKeyDraft.trim();
-    const opsUserEmail = state.pmosOpsUserEmailDraft.trim();
-    const opsUserPassword = state.pmosOpsUserPasswordDraft.trim();
-
-    const opsPatch: Record<string, unknown> = { url: opsUrl };
-    if (opsUserEmail || opsUserPassword) {
-      const userPatch: Record<string, unknown> = {};
-      if (opsUserEmail) {
-        userPatch.email = opsUserEmail;
-      }
-      if (opsUserPassword) {
-        userPatch.password = opsUserPassword;
-      }
-      if (Object.keys(userPatch).length > 0) {
-        opsPatch.user = userPatch;
-      }
-    }
+    const opsUserEmail = state.pmosOpsUserEmailDraft.trim().toLowerCase();
+    const opsUserPassword = state.pmosOpsUserPasswordDraft;
+    const opsUserPatch =
+      opsUserEmail || opsUserPassword
+        ? {
+            user: {
+              ...(opsUserEmail ? { email: opsUserEmail } : {}),
+              ...(opsUserPassword ? { password: opsUserPassword } : {}),
+            },
+          }
+        : {};
 
     const connectorsPatch: Record<string, unknown> = {
-      ops: opsPatch,
+      ops: {
+        url: opsUrl,
+        ...opsUserPatch,
+      },
       bcgpt:
         opts?.clearBcgptKey
           ? { url: bcgptUrl, apiKey: null }
@@ -158,8 +159,25 @@ export async function savePmosConnectorsConfig(
             ? { url: bcgptUrl }
           : { url: bcgptUrl, apiKey: bcgptKey },
     };
-    await state.client.request("pmos.connectors.workspace.set", { connectors: connectorsPatch });
+    const saveResult = await state.client.request<{
+      workflowConnection?: {
+        configured?: boolean;
+        ok?: boolean;
+        credentialId?: string;
+        error?: string;
+        skippedReason?: "missing_api_key";
+      };
+    }>("pmos.connectors.workspace.set", { connectors: connectorsPatch });
     state.pmosBcgptApiKeyDraft = "";
+    if ("pmosBasecampSetupOk" in state) {
+      state.pmosBasecampSetupOk = Boolean(saveResult.workflowConnection?.ok);
+    }
+    if ("pmosBasecampSetupError" in state) {
+      state.pmosBasecampSetupError =
+        saveResult.workflowConnection?.configured && saveResult.workflowConnection?.ok === false
+          ? saveResult.workflowConnection.error ?? "Flow connection sync failed."
+          : null;
+    }
 
     // Keep UI state in sync with persisted workspace connector data.
     const workspaceConnectors = await state.client.request<{
@@ -198,28 +216,35 @@ export async function loadPmosWorkflowCredentials(state: PmosConnectorsState) {
   if (!state.client || !state.connected) {
     return;
   }
-  state.pmosN8nCredentialsLoading = true;
-  state.pmosN8nCredentialsError = null;
+  state.pmosWorkflowCredentialsLoading = true;
+  state.pmosWorkflowCredentialsError = null;
   try {
     let result: { credentials?: Array<{ id: string; name: string; type: string }> };
     try {
       result = await state.client.request<{ credentials?: Array<{ id: string; name: string; type: string }> }>(
-        "pmos.workflow.credentials.list",
+        "pmos.flow.credentials.list",
         {},
       );
     } catch {
-      // Backward-compatibility path while older gateways still expose the legacy route.
-      result = await state.client.request<{ credentials?: Array<{ id: string; name: string; type: string }> }>(
-        "pmos.ops.credentials.list",
-        {},
-      );
+      try {
+        result = await state.client.request<{ credentials?: Array<{ id: string; name: string; type: string }> }>(
+          "pmos.workflow.credentials.list",
+          {},
+        );
+      } catch {
+        // Backward-compatibility path while older gateways still expose the legacy route.
+        result = await state.client.request<{ credentials?: Array<{ id: string; name: string; type: string }> }>(
+          "pmos.ops.credentials.list",
+          {},
+        );
+      }
     }
-    state.pmosN8nCredentials = result.credentials ?? [];
+    state.pmosWorkflowCredentials = result.credentials ?? [];
   } catch (err) {
-    state.pmosN8nCredentialsError = String(err);
-    state.pmosN8nCredentials = null;
+    state.pmosWorkflowCredentialsError = String(err);
+    state.pmosWorkflowCredentials = null;
   } finally {
-    state.pmosN8nCredentialsLoading = false;
+    state.pmosWorkflowCredentialsLoading = false;
   }
 }
 

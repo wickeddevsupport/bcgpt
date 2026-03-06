@@ -10,6 +10,32 @@ export type EmbeddedN8nHandle = {
   url: string;
 };
 
+function parseBooleanEnvFlag(raw: string | undefined): boolean | null {
+  const normalized = (raw ?? "").trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  return null;
+}
+
+export function isLegacyEmbeddedN8nEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const explicitPmosFlag = parseBooleanEnvFlag(env.PMOS_ENABLE_LEGACY_EMBEDDED_N8N);
+  if (explicitPmosFlag !== null) {
+    return explicitPmosFlag;
+  }
+  const explicitLegacyFlag = parseBooleanEnvFlag(env.N8N_EMBED_ENABLED);
+  if (explicitLegacyFlag !== null) {
+    return explicitLegacyFlag;
+  }
+  return false;
+}
+
 function uniqResolved(items: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -159,10 +185,16 @@ function parseN8nCustomExtensions(raw: string | undefined): string[] {
 
 /**
  * Spawn a vendored n8n as a child process (best-effort).
+ * Legacy mode is opt-in and disabled by default because Activepieces is the
+ * primary workflow engine.
  * - Sets process.env.N8N_LOCAL_URL when successful.
  * - Returns the spawned child process handle or null if not started.
  */
 export async function spawnEmbeddedN8nIfVendored(opts?: { port?: number; host?: string }) {
+  if (!isLegacyEmbeddedN8nEnabled()) {
+    return null;
+  }
+
   const repo = findVendoredN8nRepo();
   if (!repo) return null;
 

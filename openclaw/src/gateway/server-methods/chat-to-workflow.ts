@@ -36,8 +36,8 @@ const ChatWorkflowConfirmSchema = z.object({
 });
 
 type WorkflowNodeRecord = Record<string, unknown>;
-type N8nConnectionRef = { node: string; type: "main"; index: number };
-type N8nConnectionMap = Record<string, { main: N8nConnectionRef[][] }>;
+type WorkflowConnectionRef = { node: string; type: "main"; index: number };
+type WorkflowConnectionMap = Record<string, { main: WorkflowConnectionRef[][] }>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -51,8 +51,8 @@ function ensureNodeNames(nodes: WorkflowNodeRecord[]): WorkflowNodeRecord[] {
   });
 }
 
-function buildLinearConnections(nodes: WorkflowNodeRecord[]): N8nConnectionMap {
-  const connections: N8nConnectionMap = {};
+function buildLinearConnections(nodes: WorkflowNodeRecord[]): WorkflowConnectionMap {
+  const connections: WorkflowConnectionMap = {};
   for (let i = 0; i < nodes.length - 1; i += 1) {
     const from = nodes[i];
     const to = nodes[i + 1];
@@ -69,7 +69,7 @@ function buildLinearConnections(nodes: WorkflowNodeRecord[]): N8nConnectionMap {
 function normalizeConnectionRef(
   value: unknown,
   validNames: Set<string>,
-): N8nConnectionRef | null {
+): WorkflowConnectionRef | null {
   if (!isRecord(value)) return null;
   const nodeName = typeof value.node === "string" ? value.node.trim() : "";
   if (!nodeName || !validNames.has(nodeName)) return null;
@@ -88,8 +88,8 @@ function normalizeConnectionRef(
 function normalizeWorkflowConnections(
   raw: Record<string, unknown>,
   nodes: WorkflowNodeRecord[],
-): N8nConnectionMap {
-  const normalized: N8nConnectionMap = {};
+): WorkflowConnectionMap {
+  const normalized: WorkflowConnectionMap = {};
   const validNames = new Set(
     nodes
       .map((node) => (typeof node.name === "string" ? node.name.trim() : ""))
@@ -102,10 +102,10 @@ function normalizeWorkflowConnections(
     const mainRaw = target.main;
     if (!Array.isArray(mainRaw)) continue;
 
-    const normalizedBranches: N8nConnectionRef[][] = [];
+    const normalizedBranches: WorkflowConnectionRef[][] = [];
     for (const branch of mainRaw) {
       if (!Array.isArray(branch)) continue;
-      const refs: N8nConnectionRef[] = [];
+      const refs: WorkflowConnectionRef[] = [];
       for (const candidate of branch) {
         const ref = normalizeConnectionRef(candidate, validNames);
         if (ref) refs.push(ref);
@@ -234,8 +234,8 @@ export async function handleTemplateDeploy(
     workspaceId
   );
   
-  // Persist workflow to n8n via API
-  const { createN8nWorkflow } = await import('../n8n-api-client.js');
+  // Persist workflow to the Activepieces runtime.
+  const { createWorkflowEngineWorkflow } = await import("../workflow-api-client.js");
 
   // Auto-link credentials to workflow nodes
   const { fetchWorkspaceCredentials, autoLinkNodeCredentials } = await import('../credential-sync.js');
@@ -245,7 +245,7 @@ export async function handleTemplateDeploy(
     templateCredentials,
   );
 
-  const result = await createN8nWorkflow(workspaceId, {
+  const result = await createWorkflowEngineWorkflow(workspaceId, {
     name: workflow.name,
     active: false,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -331,8 +331,8 @@ export async function handleWorkflowConfirm(
     workflowNodes,
   );
   
-  // Persist workflow to n8n via API
-  const { createN8nWorkflow } = await import('../n8n-api-client.js');
+  // Persist workflow to the Activepieces runtime.
+  const { createWorkflowEngineWorkflow } = await import("../workflow-api-client.js");
 
   // Auto-link credentials to workflow nodes based on node types
   const { fetchWorkspaceCredentials, autoLinkNodeCredentials } = await import('../credential-sync.js');
@@ -342,7 +342,7 @@ export async function handleWorkflowConfirm(
     credentials,
   );
 
-  const result = await createN8nWorkflow(workspaceId, {
+  const result = await createWorkflowEngineWorkflow(workspaceId, {
     name: parsed.data.workflow.name,
     active: false,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

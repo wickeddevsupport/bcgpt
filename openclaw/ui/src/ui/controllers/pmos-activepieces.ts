@@ -368,7 +368,7 @@ export async function createActivepiecesConnection(state: PmosActivepiecesState)
   state.apConnectionCreateSaving = true;
   state.apConnectionCreateError = null;
   try {
-    throw new Error("Create credential is managed inside the embedded workflow editor.");
+    throw new Error("Create connections in the Connections tab using the native Flow UI.");
   } catch (err) {
     state.apConnectionCreateError = String(err);
   } finally {
@@ -380,7 +380,7 @@ export async function deleteActivepiecesConnection(
   state: PmosActivepiecesState,
   _connectionId: string,
 ) {
-  state.apConnectionsError = "Delete credential is managed inside the embedded workflow editor.";
+  state.apConnectionsError = "Delete connections in the Connections tab using the native Flow UI.";
 }
 
 export async function loadActivepiecesFlows(state: PmosActivepiecesState) {

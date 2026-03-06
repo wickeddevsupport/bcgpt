@@ -100,6 +100,7 @@ import {
   clearPmosModelApiKey,
   loadPmosModelWorkspaceState,
   savePmosModelConfig,
+  selectPmosModelEditor,
   setPmosModelProvider,
   upsertPmosModelFromRef,
   type PmosAgentModelAssignment,
@@ -107,6 +108,8 @@ import {
   type PmosModelProvider,
 } from "./controllers/pmos-model-auth.ts";
 import {
+  adminResetPmosAuthPassword,
+  changePmosAuthPassword,
   loadPmosAuthSession,
   loginPmosAuth,
   logoutPmosAuth,
@@ -298,12 +301,12 @@ export class OpenClawApp extends LitElement {
   @state() pmosConnectorsStatus: PmosConnectorsStatus | null = null;
   @state() pmosConnectorsError: string | null = null;
   @state() pmosConnectorsLastChecked: number | null = null;
-  @state() pmosN8nCredentials: Array<{ id: string; name: string; type: string }> | null = null;
-  @state() pmosN8nCredentialsLoading = false;
-  @state() pmosN8nCredentialsError: string | null = null;
+  @state() pmosWorkflowCredentials: Array<{ id: string; name: string; type: string }> | null = null;
+  @state() pmosWorkflowCredentialsLoading = false;
+  @state() pmosWorkflowCredentialsError: string | null = null;
   @state() pmosTraceEvents: PmosExecutionTraceEvent[] = [];
 
-  // Wicked Ops (n8n) provisioning per-workspace
+  // Flow provisioning per workspace
   @state() pmosOpsProvisioning = false;
   @state() pmosOpsProvisioningError: string | null = null;
   @state() pmosOpsProvisioningResult: { projectId?: string; apiKey?: string } | null = null;
@@ -317,12 +320,14 @@ export class OpenClawApp extends LitElement {
   @state() pmosModelId = "minimax/minimax-m2.5:free";
   @state() pmosModelAlias = "";
   @state() pmosModelApiKeyDraft = "";
+  @state() pmosModelApiKeyEditable = false;
   @state() pmosModelBaseUrl = "";
   @state() pmosModelApiType = "";
   @state() pmosModelSaving = false;
   @state() pmosModelSavedOk = false;
   @state() pmosModelError: string | null = null;
   @state() pmosModelConfigured = false;
+  @state() pmosModelApiKeyStored = false;
   @state() pmosBcgptSavedOk = false;
   @state() pmosBasecampSetupPending = false;
   @state() pmosBasecampSetupOk = false;
@@ -336,7 +341,7 @@ export class OpenClawApp extends LitElement {
   @state() pmosEffectiveConfig: Record<string, unknown> | null = null;
   @state() pmosModelRefDraft = "";
 
-  // Real n8n credentials for the Connections page
+  // Live workflow-engine connections for the workspace
   @state() pmosRealCredentials: Array<{ id: string; name: string; type: string }> | null = null;
   @state() pmosRealCredentialsLoading = false;
   @state() pmosRealCredentialsError: string | null = null;
@@ -363,6 +368,17 @@ export class OpenClawApp extends LitElement {
   @state() pmosWorkspacesError: string | null = null;
   @state() pmosGatewayRestarting = false;
   @state() pmosGatewayRestartError: string | null = null;
+  @state() pmosPasswordCurrentDraft = "";
+  @state() pmosPasswordNewDraft = "";
+  @state() pmosPasswordConfirmDraft = "";
+  @state() pmosPasswordSaving = false;
+  @state() pmosPasswordError: string | null = null;
+  @state() pmosPasswordSavedOk = false;
+  @state() pmosAdminResetTargetEmail = "";
+  @state() pmosAdminResetPasswordDraft = "";
+  @state() pmosAdminResetSaving = false;
+  @state() pmosAdminResetError: string | null = null;
+  @state() pmosAdminResetSavedOk = false;
 
   @state() pmosWorkspaceResetting = false;
   @state() pmosWorkspaceResetError: string | null = null;
@@ -415,7 +431,8 @@ export class OpenClawApp extends LitElement {
   @state() apFlowCreateSaving = false;
   @state() apFlowCreateError: string | null = null;
   @state() apFlowSelectedId: string | null = null;
-  @state() n8nEmbedVersion = 0;
+  @state() workflowEmbedVersion = 0;
+  @state() flowConnectionsEmbedVersion = 0;
   @state() apFlowDetailsLoading = false;
   @state() apFlowDetailsError: string | null = null;
   @state() apFlowDetails: unknown | null = null;
@@ -426,7 +443,7 @@ export class OpenClawApp extends LitElement {
   @state() apFlowMutateError: string | null = null;
   @state() apFlowTemplateDeployedOk = false;
   @state() automationsPanelOpen = true;
-  @state() automationsPanelTab: "workflows" | "templates" | "settings" | "runs" = "templates";
+  @state() automationsPanelTab: "workflows" | "runs" = "workflows";
   @state() automationsChatOpen = false;
   @state() automationsLeftPanelRatio = 0.28;
   @state() automationsCenterSplitRatio = 0.72;
@@ -677,10 +694,7 @@ export class OpenClawApp extends LitElement {
   async handlePmosAuthBootstrap() {
     await loadPmosAuthSession(this);
     if (this.pmosAuthAuthenticated) {
-      if (this.pmosAuthUser?.role && this.pmosAuthUser.role !== "super_admin") {
-        this.onboarding = false;
-        this.setTab("chat");
-      }
+      this.onboarding = false;
       this.connect();
     }
   }
@@ -693,9 +707,9 @@ export class OpenClawApp extends LitElement {
     }
     this.lastError = null;
     // Starter experience is now auto-provisioned server-side (shared Ollama + starter agent),
-    // so skip onboarding and drop users straight into chat.
+    // so skip onboarding and drop users straight into dashboard.
     this.onboarding = false;
-    this.setTab("chat");
+    this.setTab("dashboard");
     this.connect();
   }
 
@@ -795,6 +809,9 @@ export class OpenClawApp extends LitElement {
     if (!this.pmosConnectorDraftsInitialized) {
       hydratePmosConnectorDraftsFromConfig(this);
     }
+    await loadPmosModelWorkspaceState(this);
+    this.syncPmosModelDraftRef();
+    this.syncPmosModelApiKeyEditability();
     await loadPmosWorkflowCredentials(this);
 
     // Refresh workspace-scoped Wicked Ops connectors (if any)
@@ -859,6 +876,80 @@ export class OpenClawApp extends LitElement {
     await loadPmosAdminState(this);
   }
 
+  async handlePmosPasswordChange() {
+    this.pmosPasswordError = null;
+    this.pmosPasswordSavedOk = false;
+    const currentPassword = this.pmosPasswordCurrentDraft;
+    const newPassword = this.pmosPasswordNewDraft;
+    const confirmPassword = this.pmosPasswordConfirmDraft;
+    if (!currentPassword.trim()) {
+      this.pmosPasswordError = "Current password is required.";
+      return;
+    }
+    if (newPassword.length < 8) {
+      this.pmosPasswordError = "New password must be at least 8 characters.";
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      this.pmosPasswordError = "New password and confirmation must match.";
+      return;
+    }
+    this.pmosPasswordSaving = true;
+    try {
+      const result = await changePmosAuthPassword(this, {
+        currentPassword,
+        newPassword,
+      });
+      if (!result.ok) {
+        this.pmosPasswordError = result.error || "Failed to change password.";
+        return;
+      }
+      this.pmosPasswordCurrentDraft = "";
+      this.pmosPasswordNewDraft = "";
+      this.pmosPasswordConfirmDraft = "";
+      this.pmosPasswordSavedOk = true;
+      setTimeout(() => {
+        this.pmosPasswordSavedOk = false;
+      }, 3000);
+    } finally {
+      this.pmosPasswordSaving = false;
+    }
+  }
+
+  async handlePmosAdminResetUserPassword() {
+    this.pmosAdminResetError = null;
+    this.pmosAdminResetSavedOk = false;
+    if (this.pmosAuthUser?.role !== "super_admin") {
+      this.pmosAdminResetError = "super_admin role required.";
+      return;
+    }
+    const email = this.pmosAdminResetTargetEmail.trim().toLowerCase();
+    const newPassword = this.pmosAdminResetPasswordDraft;
+    if (!email) {
+      this.pmosAdminResetError = "Target user email is required.";
+      return;
+    }
+    if (newPassword.length < 8) {
+      this.pmosAdminResetError = "New password must be at least 8 characters.";
+      return;
+    }
+    this.pmosAdminResetSaving = true;
+    try {
+      const result = await adminResetPmosAuthPassword(this, { email, newPassword });
+      if (!result.ok) {
+        this.pmosAdminResetError = result.error || "Failed to reset user password.";
+        return;
+      }
+      this.pmosAdminResetPasswordDraft = "";
+      this.pmosAdminResetSavedOk = true;
+      setTimeout(() => {
+        this.pmosAdminResetSavedOk = false;
+      }, 3000);
+    } finally {
+      this.pmosAdminResetSaving = false;
+    }
+  }
+
   async handlePmosMemberUpsert() {
     this.pmosAdminError = null;
     upsertPmosMember(this);
@@ -893,6 +984,7 @@ export class OpenClawApp extends LitElement {
     hydratePmosConnectorDraftsFromConfig(this);
     await loadPmosModelWorkspaceState(this);
     this.syncPmosModelDraftRef();
+    this.syncPmosModelApiKeyEditability();
     await loadPmosWorkflowCredentials(this);
 
     // Load any existing workspace-scoped Wicked Ops connectors so the UI can reflect provisioning state
@@ -931,16 +1023,23 @@ export class OpenClawApp extends LitElement {
   }
 
   async handlePmosIntegrationsSave() {
+    this.pmosBasecampSetupError = null;
+    this.pmosBasecampSetupOk = false;
     await savePmosConnectorsConfig(this);
+    this.flowConnectionsEmbedVersion = (this.flowConnectionsEmbedVersion ?? 0) + 1;
     await loadConfig(this);
     await loadPmosConnectorsStatus(this);
     this.pmosConnectorDraftsInitialized = false;
     hydratePmosConnectorDraftsFromConfig(this);
     await loadPmosModelWorkspaceState(this);
     this.syncPmosModelDraftRef();
+    this.syncPmosModelApiKeyEditability();
     await loadPmosWorkflowCredentials(this);
     this.pmosBcgptSavedOk = true;
     setTimeout(() => { this.pmosBcgptSavedOk = false; }, 2500);
+    if (this.pmosBasecampSetupOk) {
+      setTimeout(() => { this.pmosBasecampSetupOk = false; }, 3000);
+    }
   }
 
   async handlePmosSetupBasecampInWorkflowEngine() {
@@ -949,8 +1048,13 @@ export class OpenClawApp extends LitElement {
     this.pmosBasecampSetupError = null;
     this.pmosBasecampSetupOk = false;
     try {
-      await this.client.request("pmos.workflow.setup.basecamp", {});
+      try {
+        await this.client.request("pmos.flow.setup.basecamp", {});
+      } catch {
+        await this.client.request("pmos.workflow.setup.basecamp", {});
+      }
       this.pmosBasecampSetupOk = true;
+      this.flowConnectionsEmbedVersion = (this.flowConnectionsEmbedVersion ?? 0) + 1;
       setTimeout(() => { this.pmosBasecampSetupOk = false; }, 3000);
     } catch (err) {
       this.pmosBasecampSetupError = err instanceof Error ? err.message : String(err);
@@ -978,13 +1082,17 @@ export class OpenClawApp extends LitElement {
   }
 
   async handlePmosIntegrationsClearBcgptKey() {
+    this.pmosBasecampSetupError = null;
+    this.pmosBasecampSetupOk = false;
     await savePmosConnectorsConfig(this, { clearBcgptKey: true });
+    this.flowConnectionsEmbedVersion = (this.flowConnectionsEmbedVersion ?? 0) + 1;
     await loadConfig(this);
     await loadPmosConnectorsStatus(this);
     this.pmosConnectorDraftsInitialized = false;
     hydratePmosConnectorDraftsFromConfig(this);
     await loadPmosModelWorkspaceState(this);
     this.syncPmosModelDraftRef();
+    this.syncPmosModelApiKeyEditability();
     await loadPmosWorkflowCredentials(this);
   }
 
@@ -1004,6 +1112,7 @@ export class OpenClawApp extends LitElement {
       // persist result in UI state and refresh connectors
       this.pmosOpsProvisioningResult = { projectId: res.projectId, apiKey: res.apiKey };
       this.pmosOpsProvisioningError = null;
+      this.flowConnectionsEmbedVersion = (this.flowConnectionsEmbedVersion ?? 0) + 1;
       await this.handlePmosRefreshConnectors();
     } catch (err) {
       // keep original error message for display and allow manual-key fallback UI to show
@@ -1048,9 +1157,25 @@ export class OpenClawApp extends LitElement {
     this.pmosModelRefDraft = `${this.pmosModelProvider}/${modelId}`;
   }
 
+  private syncPmosModelApiKeyEditability() {
+    this.pmosModelApiKeyEditable =
+      !this.pmosModelApiKeyStored || Boolean(this.pmosModelApiKeyDraft.trim());
+  }
+
+  private restorePmosModelEditor(modelRef?: string | null) {
+    const target = modelRef?.trim() || this.pmosModelRefDraft.trim();
+    if (target && selectPmosModelEditor(this, target)) {
+      this.syncPmosModelApiKeyEditability();
+      return;
+    }
+    this.syncPmosModelDraftRef();
+    this.syncPmosModelApiKeyEditability();
+  }
+
   handlePmosModelProviderChange(next: PmosModelProvider) {
     setPmosModelProvider(this, next);
     this.syncPmosModelDraftRef();
+    this.syncPmosModelApiKeyEditability();
   }
 
   handlePmosModelRefDraftChange(next: string) {
@@ -1070,9 +1195,26 @@ export class OpenClawApp extends LitElement {
     // if the current value matches the previous provider's default.
     if (this.pmosModelProvider !== provider) {
       setPmosModelProvider(this, provider as PmosModelProvider);
+      this.syncPmosModelApiKeyEditability();
     }
     this.pmosModelProvider = provider as PmosModelProvider;
     this.pmosModelId = modelId;
+    this.syncPmosModelApiKeyEditability();
+  }
+
+  handlePmosModelEdit(modelRef: string) {
+    if (!selectPmosModelEditor(this, modelRef)) {
+      this.pmosModelError = "Unable to load that model into the editor.";
+      return;
+    }
+    this.syncPmosModelApiKeyEditability();
+  }
+
+  handlePmosModelApiKeyEditToggle(enabled: boolean) {
+    this.pmosModelApiKeyEditable = enabled;
+    if (!enabled) {
+      this.pmosModelApiKeyDraft = "";
+    }
   }
 
   async handlePmosModelSave() {
@@ -1089,11 +1231,14 @@ export class OpenClawApp extends LitElement {
     } else {
       await savePmosModelConfig(this);
     }
-    this.syncPmosModelDraftRef();
     if (!this.pmosModelError) {
+      this.restorePmosModelEditor(ref || null);
       this.pmosModelSavedOk = true;
       setTimeout(() => { this.pmosModelSavedOk = false; }, 2500);
+      return;
     }
+    this.syncPmosModelDraftRef();
+    this.syncPmosModelApiKeyEditability();
   }
 
   async handlePmosModelSaveWithoutActivate() {
@@ -1110,43 +1255,51 @@ export class OpenClawApp extends LitElement {
       apiType: this.pmosModelApiType,
       activate: false,
     });
-    this.syncPmosModelDraftRef();
     if (!this.pmosModelError) {
+      this.restorePmosModelEditor(ref);
       this.pmosModelSavedOk = true;
       setTimeout(() => { this.pmosModelSavedOk = false; }, 2500);
+      return;
     }
+    this.syncPmosModelDraftRef();
+    this.syncPmosModelApiKeyEditability();
   }
 
   async handlePmosModelActivate(modelRef: string) {
     await activatePmosModel(this, modelRef);
-    this.syncPmosModelDraftRef();
+    this.restorePmosModelEditor(modelRef);
   }
 
   async handlePmosModelDeactivate(modelRef: string) {
     await deactivatePmosModel(this, modelRef);
-    this.syncPmosModelDraftRef();
+    this.restorePmosModelEditor(modelRef);
   }
 
   async handlePmosModelDelete(modelRef: string) {
     await deletePmosModel(this, modelRef);
     this.syncPmosModelDraftRef();
+    this.syncPmosModelApiKeyEditability();
   }
 
   async handlePmosModelClearKey() {
+    const currentRef = this.pmosModelRefDraft.trim();
     await clearPmosModelApiKey(this);
     await loadPmosModelWorkspaceState(this);
-    this.syncPmosModelDraftRef();
+    this.restorePmosModelEditor(currentRef || null);
+    this.pmosModelApiKeyEditable = true;
   }
 
   async handlePmosModelClearKeyForRef(modelRef: string) {
     await clearPmosModelApiKeyForRef(this, modelRef);
     await loadPmosModelWorkspaceState(this);
-    this.syncPmosModelDraftRef();
+    this.restorePmosModelEditor(modelRef);
+    this.pmosModelApiKeyEditable = true;
   }
 
   async handlePmosAssignAgentModel(agentId: string, modelRef: string | null) {
     await assignPmosAgentModel(this, { agentId, modelRef });
     this.syncPmosModelDraftRef();
+    this.syncPmosModelApiKeyEditability();
   }
 
   async handlePmosApPiecesLoad() {
@@ -1270,7 +1423,7 @@ export class OpenClawApp extends LitElement {
       // fallback: if server returned workflowId but event wasn't received, navigate now
       if (result.workflowCreated && result.workflowId && this.apFlowSelectedId !== result.workflowId) {
         this.apFlowSelectedId = result.workflowId;
-        this.n8nEmbedVersion = (this.n8nEmbedVersion ?? 0) + 1;
+        this.workflowEmbedVersion = (this.workflowEmbedVersion ?? 0) + 1;
       }
       if (result.workflowCreated) {
         void this.handlePmosApFlowsLoad();

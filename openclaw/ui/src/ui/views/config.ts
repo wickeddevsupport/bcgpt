@@ -6,6 +6,7 @@ import { analyzeConfigSchema, renderConfigForm, SECTION_META } from "./config-fo
 export type ConfigProps = {
   scope?: "global" | "workspace";
   scopeLabel?: string | null;
+  allowRawMode?: boolean;
   raw: string;
   originalRaw: string;
   valid: boolean | null;
@@ -388,6 +389,8 @@ function truncateValue(value: unknown, maxLen = 40): string {
 export function renderConfig(props: ConfigProps) {
   const configScope = props.scope ?? "global";
   const workspaceScoped = configScope === "workspace";
+  const rawModeEnabled = props.allowRawMode !== false;
+  const effectiveFormMode = rawModeEnabled ? props.formMode : "form";
   const validity = props.valid == null ? "unknown" : props.valid ? "valid" : "invalid";
   const analysis = analyzeConfigSchema(props.schema);
   const formUnsafe = analysis.schema ? analysis.unsupportedPaths.length > 0 : false;
@@ -419,7 +422,7 @@ export function renderConfig(props: ConfigProps) {
       })
     : [];
   const allowSubnav =
-    props.formMode === "form" && Boolean(props.activeSection) && subsections.length > 0;
+    effectiveFormMode === "form" && Boolean(props.activeSection) && subsections.length > 0;
   const isAllSubsection = props.activeSubsection === ALL_SUBSECTION;
   const effectiveSubsection = props.searchQuery
     ? null
@@ -428,9 +431,9 @@ export function renderConfig(props: ConfigProps) {
       : (props.activeSubsection ?? subsections[0]?.key ?? null);
 
   // Compute diff for showing changes (works for both form and raw modes)
-  const diff = props.formMode === "form" ? computeDiff(props.originalValue, props.formValue) : [];
-  const hasRawChanges = props.formMode === "raw" && props.raw !== props.originalRaw;
-  const hasChanges = props.formMode === "form" ? diff.length > 0 : hasRawChanges;
+  const diff = effectiveFormMode === "form" ? computeDiff(props.originalValue, props.formValue) : [];
+  const hasRawChanges = effectiveFormMode === "raw" && props.raw !== props.originalRaw;
+  const hasChanges = effectiveFormMode === "form" ? diff.length > 0 : hasRawChanges;
 
   // Save/apply buttons require actual changes to be enabled.
   // Note: formUnsafe warns about unsupported schema paths but shouldn't block saving.
@@ -439,13 +442,13 @@ export function renderConfig(props: ConfigProps) {
     props.connected &&
     !props.saving &&
     hasChanges &&
-    (props.formMode === "raw" ? true : canSaveForm);
+    (effectiveFormMode === "raw" ? true : canSaveForm);
   const canApply =
     props.connected &&
     !props.applying &&
     !props.updating &&
     hasChanges &&
-    (props.formMode === "raw" ? true : canSaveForm);
+    (effectiveFormMode === "raw" ? true : canSaveForm);
   const canUpdate = !workspaceScoped && props.connected && !props.applying && !props.updating;
 
   return html`
@@ -535,18 +538,24 @@ export function renderConfig(props: ConfigProps) {
         <div class="config-sidebar__footer">
           <div class="config-mode-toggle">
             <button
-              class="config-mode-toggle__btn ${props.formMode === "form" ? "active" : ""}"
+              class="config-mode-toggle__btn ${effectiveFormMode === "form" ? "active" : ""}"
               ?disabled=${props.schemaLoading || !props.schema}
               @click=${() => props.onFormModeChange("form")}
             >
               Form
             </button>
-            <button
-              class="config-mode-toggle__btn ${props.formMode === "raw" ? "active" : ""}"
-              @click=${() => props.onFormModeChange("raw")}
-            >
-              Raw
-            </button>
+            ${
+              rawModeEnabled
+                ? html`
+                    <button
+                      class="config-mode-toggle__btn ${effectiveFormMode === "raw" ? "active" : ""}"
+                      @click=${() => props.onFormModeChange("raw")}
+                    >
+                      Raw
+                    </button>
+                  `
+                : nothing
+            }
           </div>
         </div>
       </aside>
@@ -561,7 +570,7 @@ export function renderConfig(props: ConfigProps) {
                 ? html`
                   <span class="config-changes-badge"
                     >${
-                      props.formMode === "raw"
+                      effectiveFormMode === "raw"
                         ? "Unsaved changes"
                         : `${diff.length} unsaved change${diff.length !== 1 ? "s" : ""}`
                     }</span
@@ -607,7 +616,7 @@ export function renderConfig(props: ConfigProps) {
 
         <!-- Diff panel (form mode only - raw mode doesn't have granular diff) -->
         ${
-          hasChanges && props.formMode === "form"
+          hasChanges && effectiveFormMode === "form"
             ? html`
               <details class="config-diff">
                 <summary class="config-diff__summary">
@@ -648,7 +657,7 @@ export function renderConfig(props: ConfigProps) {
             : nothing
         }
         ${
-          activeSectionMeta && props.formMode === "form"
+          activeSectionMeta && effectiveFormMode === "form"
             ? html`
               <div class="config-section-hero">
                 <div class="config-section-hero__icon">
@@ -701,7 +710,7 @@ export function renderConfig(props: ConfigProps) {
         <!-- Form content -->
         <div class="config-content">
           ${
-            props.formMode === "form"
+            effectiveFormMode === "form"
               ? html`
                 ${
                   props.schemaLoading
@@ -727,7 +736,11 @@ export function renderConfig(props: ConfigProps) {
                   formUnsafe
                     ? html`
                         <div class="callout danger" style="margin-top: 12px">
-                          Form view can't safely edit some fields. Use Raw to avoid losing config entries.
+                          ${
+                            rawModeEnabled
+                              ? "Form view can't safely edit some fields. Use Raw to avoid losing config entries."
+                              : "Form view can't safely edit some fields. Raw editing is restricted for workspace users."
+                          }
                         </div>
                       `
                     : nothing

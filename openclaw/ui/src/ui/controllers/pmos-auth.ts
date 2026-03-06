@@ -268,3 +268,63 @@ export async function logoutPmosAuth(state: PmosAuthState): Promise<void> {
     state.pmosAuthLoading = false;
   }
 }
+
+export async function changePmosAuthPassword(
+  state: PmosAuthState,
+  params: { currentPassword: string; newPassword: string },
+): Promise<{ ok: boolean; error?: string }> {
+  state.pmosAuthLoading = true;
+  state.pmosAuthError = null;
+  try {
+    const result = await requestAuth(state, "change-password", {
+      method: "POST",
+      body: JSON.stringify({
+        currentPassword: params.currentPassword,
+        newPassword: params.newPassword,
+      }),
+    });
+    if (!result.ok || !result.user) {
+      const error = result.error || "Failed to change password.";
+      state.pmosAuthError = error;
+      return { ok: false, error };
+    }
+    applyAuthenticatedUser(state, result.user);
+    saveCachedUser(result.user);
+    return { ok: true };
+  } catch (err) {
+    const error = String(err);
+    state.pmosAuthError = error;
+    return { ok: false, error };
+  } finally {
+    state.pmosAuthLoading = false;
+  }
+}
+
+export async function adminResetPmosAuthPassword(
+  state: PmosAuthState,
+  params: { email: string; newPassword: string },
+): Promise<{ ok: boolean; error?: string }> {
+  state.pmosAuthLoading = true;
+  state.pmosAuthError = null;
+  try {
+    const result = await requestAuth(state, "admin/reset-password", {
+      method: "POST",
+      body: JSON.stringify({
+        email: params.email,
+        newPassword: params.newPassword,
+      }),
+    });
+    if (!result.ok) {
+      const error = result.error || "Failed to reset user password.";
+      state.pmosAuthError = error;
+      return { ok: false, error };
+    }
+    return { ok: true };
+  } catch (err) {
+    const error = String(err);
+    state.pmosAuthError = error;
+    return { ok: false, error };
+  } finally {
+    state.pmosAuthLoading = false;
+  }
+}

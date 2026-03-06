@@ -16,9 +16,9 @@
 
 import { getKey } from "./byok-store.js";
 import {
-  createN8nCredential as upsertWorkflowCredential,
-  listN8nCredentials as listWorkflowCredentials,
-} from "./n8n-api-client.js";
+  createWorkflowEngineConnection as upsertWorkflowConnection,
+  listWorkflowEngineConnections as listWorkflowEngineConnectionsViaApi,
+} from "./workflow-api-client.js";
 import { readWorkspaceConnectors } from "./workspace-connectors.js";
 import { loadConfig } from "../config/config.js";
 
@@ -47,10 +47,10 @@ function normalizeBaseUrl(raw: string | null | undefined): string | null {
   return trimmed ? trimmed.replace(/\/+$/, "") : null;
 }
 
-type N8nCredentialType = "openAiApi" | "anthropicApi" | "googlePalmApi";
+type WorkflowConnectionType = "openAiApi" | "anthropicApi" | "googlePalmApi";
 
 type ProviderMapping = {
-  credentialType: N8nCredentialType;
+  credentialType: WorkflowConnectionType;
   buildData: (apiKey: string, customUrl?: string) => Record<string, unknown>;
 };
 
@@ -124,6 +124,13 @@ const NODE_CREDENTIAL_MAP: Record<string, string> = {
 // ── Public credential info type ────────────────────────────────────────────────
 
 export type CredentialInfo = { id: string; name: string; type: string };
+export type BasecampCredentialEnsureResult = {
+  configured: boolean;
+  ok: boolean;
+  credentialId?: string;
+  error?: string;
+  skippedReason?: "missing_api_key";
+};
 
 async function resolveBasecampConnectorConfig(
   workspaceId: string,
@@ -154,10 +161,16 @@ async function resolveBasecampConnectorConfig(
  * Ensure Basecamp credential (basecampApi) exists in workspace n8n using configured connector key.
  * Best-effort and cached to avoid repeated upserts on every request.
  */
-export async function ensureWorkspaceBasecampCredential(workspaceId: string): Promise<void> {
+export async function ensureWorkspaceBasecampCredential(
+  workspaceId: string,
+): Promise<BasecampCredentialEnsureResult> {
   const cfg = await resolveBasecampConnectorConfig(workspaceId);
   if (!cfg) {
-    return;
+    return {
+      configured: false,
+      ok: false,
+      skippedReason: "missing_api_key",
+    };
   }
 
   const fingerprint = `${cfg.baseUrl}|${cfg.apiKey.length}|${cfg.apiKey.slice(-6)}`;
@@ -166,16 +179,32 @@ export async function ensureWorkspaceBasecampCredential(workspaceId: string): Pr
   if (cached && cached.fingerprint === fingerprint) {
     const ttl = cached.ok ? BASECAMP_ENSURE_SUCCESS_TTL_MS : BASECAMP_ENSURE_FAILURE_TTL_MS;
     if (now - cached.at < ttl) {
-      return;
+      return {
+        configured: true,
+        ok: cached.ok,
+        ...(cached.ok ? {} : { error: "Basecamp connection sync is still retrying." }),
+      };
     }
   }
 
   try {
-    const { upsertBasecampCredential } = await import("./n8n-api-client.js");
-    const result = await upsertBasecampCredential(workspaceId, cfg.apiKey);
-    basecampEnsureCache.set(workspaceId, { fingerprint, at: now, ok: Boolean(result.ok) });
+    const { upsertBasecampWorkflowConnection } = await import("./workflow-api-client.js");
+    const result = await upsertBasecampWorkflowConnection(workspaceId, cfg.apiKey);
+    const ok = Boolean(result.ok);
+    basecampEnsureCache.set(workspaceId, { fingerprint, at: now, ok });
+    return {
+      configured: true,
+      ok,
+      ...(result.credentialId ? { credentialId: result.credentialId } : {}),
+      ...(result.error ? { error: result.error } : {}),
+    };
   } catch {
     basecampEnsureCache.set(workspaceId, { fingerprint, at: now, ok: false });
+    return {
+      configured: true,
+      ok: false,
+      error: "Failed to sync Basecamp connection into the workflow engine.",
+    };
   }
 }
 
@@ -186,7 +215,7 @@ export async function ensureWorkspaceBasecampCredential(workspaceId: string): Pr
 export async function fetchWorkspaceCredentials(workspaceId: string): Promise<CredentialInfo[]> {
   try {
     await ensureWorkspaceBasecampCredential(workspaceId);
-    return await listN8nCredentials(workspaceId);
+    return await listWorkflowConnections(workspaceId);
   } catch {
     return [];
   }
@@ -283,11 +312,11 @@ function credentialName(provider: string): string {
 /**
  * Get all credentials from workflow engine for a workspace.
  */
-async function listN8nCredentials(
+async function listWorkflowConnections(
   workspaceId: string,
 ): Promise<Array<{ id: string; name: string; type: string }>> {
   try {
-    const result = await listWorkflowCredentials(workspaceId);
+    const result = await listWorkflowEngineConnectionsViaApi(workspaceId);
     return result.ok ? (result.credentials ?? []) : [];
   } catch {
     return [];
@@ -297,14 +326,14 @@ async function listN8nCredentials(
 /**
  * Upsert a managed credential in workflow engine.
  */
-async function createN8nCredential(params: {
+async function createWorkflowConnection(params: {
   workspaceId: string;
   name: string;
   type: string;
   data: Record<string, unknown>;
 }): Promise<{ id: string } | null> {
   try {
-    const result = await upsertWorkflowCredential(
+    const result = await upsertWorkflowConnection(
       params.workspaceId,
       params.name,
       params.type,
@@ -346,10 +375,10 @@ export async function syncByokToN8n(
 
   try {
     // Find existing credential by name
-    const existing = await listN8nCredentials(workspaceId);
+    const existing = await listWorkflowConnections(workspaceId);
     const found = existing.find((c) => c.name === name);
 
-    const created = await createN8nCredential({
+    const created = await createWorkflowConnection({
       workspaceId,
       name,
       type: mapping.credentialType,

@@ -11,6 +11,7 @@ import {
   handleN8nAiApplySuggestion,
   STREAM_SEPARATOR,
 } from "./n8n-ai-proxy.js";
+import { isLegacyEmbeddedN8nEnabled } from "./n8n-embed.js";
 
 function getInternalToken(): string {
   return process.env.OPENCLAW_INTERNAL_TOKEN ?? "openclaw-internal-dev-token";
@@ -50,6 +51,9 @@ export async function handleN8nAiHttpRequest(
 ): Promise<boolean> {
   const url = new URL(req.url ?? "/", "http://localhost");
   if (!url.pathname.startsWith("/api/internal/n8n-ai/")) {
+    return false;
+  }
+  if (!isLegacyEmbeddedN8nEnabled()) {
     return false;
   }
 

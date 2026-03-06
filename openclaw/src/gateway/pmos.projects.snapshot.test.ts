@@ -220,4 +220,96 @@ describe("pmos.projects.snapshot", () => {
     expect(payload.dueTodayTodos[0]?.title).toBe("Same-day deliverable");
     expect(payload.errors).toEqual([]);
   });
+
+  it("marks the workspace connected when Basecamp tools work even if startbcgpt is degraded", async () => {
+    readWorkspaceConnectorsMock.mockResolvedValue({
+      bcgpt: {
+        url: "https://bcgpt.example.test",
+        apiKey: "workspace-key",
+      },
+    });
+
+    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/action/startbcgpt")) {
+        return jsonResponse(
+          {
+            connected: false,
+            message: "warmup pending",
+          },
+          503,
+        );
+      }
+
+      if (url.endsWith("/mcp")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          params?: { name?: string; arguments?: Record<string, unknown> };
+        };
+        const tool = body.params?.name;
+        if (tool === "list_projects") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "1",
+            result: {
+              projects: [
+                {
+                  id: 1001,
+                  name: "BCGPT Test Project",
+                  status: "active",
+                  app_url: "https://3.basecamp.com/9999999/buckets/1001/projects/1001",
+                },
+              ],
+            },
+          });
+        }
+        if (tool === "list_todos_for_project") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "2",
+            result: {
+              groups: [],
+            },
+          });
+        }
+        if (tool === "report_todos_overdue") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "3",
+            result: {
+              overdue: [],
+            },
+          });
+        }
+        if (tool === "list_todos_due") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "4",
+            result: {
+              todos: [],
+            },
+          });
+        }
+      }
+
+      return jsonResponse({ error: "not found" }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const respond = vi.fn();
+    await pmosHandlers["pmos.projects.snapshot"]({
+      params: {},
+      respond,
+      client: {
+        pmosWorkspaceId: "ws-projects",
+        pmosRole: "workspace_admin",
+      } as any,
+    } as any);
+
+    const payload = respond.mock.calls[0]?.[1] as {
+      connected: boolean;
+      errors: string[];
+    };
+    expect(payload.connected).toBe(true);
+    expect(payload.errors[0]).toContain("identity check failed");
+  });
 });

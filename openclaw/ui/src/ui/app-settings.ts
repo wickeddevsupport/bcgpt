@@ -371,7 +371,7 @@ export function syncTabWithLocation(host: SettingsHost, replace: boolean) {
   if (typeof window === "undefined") {
     return;
   }
-  const resolved = tabFromPath(window.location.pathname, host.basePath) ?? "chat";
+  const resolved = tabFromPath(window.location.pathname, host.basePath) ?? "dashboard";
   setTabFromRoute(host, resolved);
   // Sync URL with the actual tab (which may have been redirected for non-superadmin)
   syncUrlWithTab(host, host.tab, replace);

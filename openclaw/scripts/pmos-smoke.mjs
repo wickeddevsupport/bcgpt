@@ -281,11 +281,12 @@ async function main() {
   const bundle = await assertGetOk(assetPath);
   assertContains(bundle, "Command Center", "ui-command-center");
   assertContains(bundle, "Workspace Identity", "ui-workspace-identity");
-  // Phase 3 UX: "native" workflows means n8n is embedded in-dashboard, not opened in a new tab.
-  assertContains(bundle, "n8n workflow canvas", "ui-ops-embed");
+  // Phase 3 UX: the native Flow editor is embedded in-dashboard, not opened in a new tab.
+  assertContains(bundle, "Workflow Canvas", "ui-ops-embed");
+  assertContains(bundle, "AI Workflow Assistant", "ui-workflow-assistant");
   assertContains(bundle, "Execution Trace", "ui-execution-trace");
 
-  // n8n ops tools + mutation smoke
+  // Workflow-engine tools + mutation smoke
   await assertTool("ops_workflows_list", {});
   await assertTool("ops_executions_list", { limit: 5 });
 

@@ -1,5 +1,5 @@
 import type { GatewayBrowserClient } from "../gateway.ts";
-import type { AgentsListResult } from "../types.ts";
+import type { AgentsListResult, GatewayAgentRow } from "../types.ts";
 
 export type AgentsState = {
   client: GatewayBrowserClient | null;
@@ -9,6 +9,79 @@ export type AgentsState = {
   agentsList: AgentsListResult | null;
   agentsSelectedId: string | null;
 };
+
+type AgentRowDraft = {
+  id: string;
+  name?: string;
+  identity?: GatewayAgentRow["identity"];
+};
+
+function mergeAgentRow(existing: GatewayAgentRow | undefined, next: GatewayAgentRow): GatewayAgentRow {
+  return {
+    ...(existing ?? {}),
+    ...next,
+    identity:
+      existing?.identity || next.identity
+        ? {
+            ...(existing?.identity ?? {}),
+            ...(next.identity ?? {}),
+          }
+        : undefined,
+  };
+}
+
+export function createAgentListRow(agent: AgentRowDraft): GatewayAgentRow {
+  const next: GatewayAgentRow = {
+    id: agent.id,
+  };
+  const trimmedName = agent.name?.trim();
+  if (trimmedName) {
+    next.name = trimmedName;
+  }
+  const identity = agent.identity;
+  if (identity) {
+    const nextIdentity: NonNullable<GatewayAgentRow["identity"]> = {};
+    const identityName = identity.name?.trim();
+    const identityTheme = identity.theme?.trim();
+    const identityEmoji = identity.emoji?.trim();
+    const identityAvatar = identity.avatar?.trim();
+    const identityAvatarUrl = identity.avatarUrl?.trim();
+    if (identityName) {
+      nextIdentity.name = identityName;
+    }
+    if (identityTheme) {
+      nextIdentity.theme = identityTheme;
+    }
+    if (identityEmoji) {
+      nextIdentity.emoji = identityEmoji;
+    }
+    if (identityAvatar) {
+      nextIdentity.avatar = identityAvatar;
+    }
+    if (identityAvatarUrl) {
+      nextIdentity.avatarUrl = identityAvatarUrl;
+    }
+    if (Object.keys(nextIdentity).length > 0) {
+      next.identity = nextIdentity;
+    }
+  }
+  return next;
+}
+
+export function upsertAgentsListResult(
+  snapshot: AgentsListResult | null,
+  row: GatewayAgentRow,
+): AgentsListResult {
+  const existingAgents = snapshot?.agents ?? [];
+  const previous = existingAgents.find((entry) => entry.id === row.id);
+  const merged = mergeAgentRow(previous, row);
+  return {
+    defaultId: snapshot?.defaultId || merged.id,
+    mainKey: snapshot?.mainKey || "main",
+    scope: snapshot?.scope || "",
+    agents: [merged, ...existingAgents.filter((entry) => entry.id !== merged.id)],
+  };
+}
 
 export async function loadAgents(state: AgentsState) {
   if (!state.client || !state.connected) {

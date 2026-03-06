@@ -300,7 +300,7 @@ export async function loadWorkflowPieces(state: PmosWorkflowsState) {
   state.apPiecesLoading = true;
   state.apPiecesError = null;
   try {
-    // n8n does not expose a "pieces" catalog endpoint in the same shape.
+    // The embedded workflow engine does not expose a "pieces" catalog endpoint in this shape.
     state.apPieces = [];
   } catch (err) {
     state.apPiecesError = String(err);
@@ -347,7 +347,7 @@ export async function createWorkflowConnection(state: PmosWorkflowsState) {
   state.apConnectionCreateSaving = true;
   state.apConnectionCreateError = null;
   try {
-    throw new Error("Create credential is managed inside the embedded workflow editor.");
+    throw new Error("Create connections in the Connections tab using the native Flow UI.");
   } catch (err) {
     state.apConnectionCreateError = String(err);
   } finally {
@@ -359,7 +359,7 @@ export async function deleteWorkflowConnection(
   state: PmosWorkflowsState,
   _connectionId: string,
 ) {
-  state.apConnectionsError = "Delete credential is managed inside the embedded workflow editor.";
+  state.apConnectionsError = "Delete connections in the Connections tab using the native Flow UI.";
 }
 
 export async function loadWorkflows(state: PmosWorkflowsState) {

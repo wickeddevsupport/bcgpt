@@ -59,6 +59,28 @@ export type AdminProps = {
   workspaceResetError?: string | null;
   workspaceResetResults?: Array<{ workspaceId: string; ok: boolean; error?: string }> | null;
   onResetAllWorkspaces?: () => void;
+
+  // Password management
+  passwordCurrentDraft: string;
+  passwordNewDraft: string;
+  passwordConfirmDraft: string;
+  passwordSaving: boolean;
+  passwordError: string | null;
+  passwordSavedOk: boolean;
+  onPasswordCurrentDraftChange: (next: string) => void;
+  onPasswordNewDraftChange: (next: string) => void;
+  onPasswordConfirmDraftChange: (next: string) => void;
+  onPasswordChange: () => void;
+
+  // Super-admin password reset
+  adminResetTargetEmail: string;
+  adminResetPasswordDraft: string;
+  adminResetSaving: boolean;
+  adminResetError: string | null;
+  adminResetSavedOk: boolean;
+  onAdminResetTargetEmailChange: (next: string) => void;
+  onAdminResetPasswordDraftChange: (next: string) => void;
+  onAdminResetPassword: () => void;
 };
 
 const ROLE_DESCRIPTIONS: Record<PmosRole, string> = {
@@ -271,6 +293,97 @@ export function renderAdmin(props: AdminProps) {
           )}
           ${props.members.length === 0 ? html`<div class="muted">No workspace members configured.</div>` : nothing}
         </div>
+      </div>
+    </section>
+
+    <section class="grid grid-cols-2" style="margin-top: 18px;">
+      <div class="card">
+        <div class="card-title">Change Password</div>
+        <div class="card-sub">Update your PMOS password. This will also sync your workflow account credentials.</div>
+        <div class="form-grid" style="margin-top: 14px;">
+          <label class="field">
+            <span>Current Password</span>
+            <input
+              type="password"
+              .value=${props.passwordCurrentDraft}
+              @input=${(e: Event) => props.onPasswordCurrentDraftChange((e.target as HTMLInputElement).value)}
+              ?disabled=${props.passwordSaving}
+              autocomplete="current-password"
+            />
+          </label>
+          <label class="field">
+            <span>New Password</span>
+            <input
+              type="password"
+              .value=${props.passwordNewDraft}
+              @input=${(e: Event) => props.onPasswordNewDraftChange((e.target as HTMLInputElement).value)}
+              ?disabled=${props.passwordSaving}
+              autocomplete="new-password"
+            />
+          </label>
+          <label class="field">
+            <span>Confirm New Password</span>
+            <input
+              type="password"
+              .value=${props.passwordConfirmDraft}
+              @input=${(e: Event) => props.onPasswordConfirmDraftChange((e.target as HTMLInputElement).value)}
+              ?disabled=${props.passwordSaving}
+              autocomplete="new-password"
+            />
+          </label>
+        </div>
+        <div class="row" style="margin-top: 12px;">
+          <button class="btn btn--primary" ?disabled=${props.passwordSaving} @click=${() => props.onPasswordChange()}>
+            ${props.passwordSaving ? "Updating..." : "Update Password"}
+          </button>
+          ${props.passwordSavedOk ? html`<span class="chip chip-ok">Saved</span>` : nothing}
+        </div>
+        ${props.passwordError ? html`<div class="callout danger" style="margin-top: 10px;">${props.passwordError}</div>` : nothing}
+      </div>
+
+      <div class="card">
+        <div class="card-title">Admin Reset Password</div>
+        <div class="card-sub">Super admins can reset another user's password and re-sync workflow login credentials.</div>
+        ${props.isSuperAdmin
+          ? html`
+              <div class="form-grid" style="margin-top: 14px;">
+                <label class="field">
+                  <span>User Email</span>
+                  <input
+                    .value=${props.adminResetTargetEmail}
+                    @input=${(e: Event) =>
+                      props.onAdminResetTargetEmailChange((e.target as HTMLInputElement).value)}
+                    ?disabled=${props.adminResetSaving}
+                    placeholder="user@domain.com"
+                  />
+                </label>
+                <label class="field">
+                  <span>New Password</span>
+                  <input
+                    type="password"
+                    .value=${props.adminResetPasswordDraft}
+                    @input=${(e: Event) =>
+                      props.onAdminResetPasswordDraftChange((e.target as HTMLInputElement).value)}
+                    ?disabled=${props.adminResetSaving}
+                    autocomplete="new-password"
+                  />
+                </label>
+              </div>
+              <div class="row" style="margin-top: 12px;">
+                <button
+                  class="btn btn--danger"
+                  ?disabled=${props.adminResetSaving}
+                  @click=${() => props.onAdminResetPassword()}
+                >
+                  ${props.adminResetSaving ? "Resetting..." : "Reset User Password"}
+                </button>
+                ${props.adminResetSavedOk ? html`<span class="chip chip-ok">Reset</span>` : nothing}
+              </div>
+              ${props.adminResetError
+                ? html`<div class="callout danger" style="margin-top: 10px;">${props.adminResetError}</div>`
+                : nothing}
+            `
+          : html`<div class="muted" style="margin-top: 12px;">Only super admins can reset another user's password.</div>`}
       </div>
     </section>
 

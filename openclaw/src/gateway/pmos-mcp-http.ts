@@ -1,8 +1,8 @@
 /**
  * PMOS MCP HTTP handler
  *
- * Exposes pmos_n8n_* tools as MCP-compatible endpoint for the bcgpt gateway router.
- * Called by bcgpt MCP server when AI uses pmos_n8n_* tools.
+ * Exposes workflow tools (pmos_ops_*) as MCP-compatible endpoints for the
+ * bcgpt gateway router. Legacy `pmos_n8n_*` aliases are still accepted.
  *
  * Auth: x-session-key header (PMOS session token set by gateway-router.js)
  * Protocol: JSON-RPC 2.0 MCP tools/call
@@ -11,13 +11,13 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolvePmosSessionFromToken } from "./pmos-auth.js";
 import {
-  listN8nWorkflows,
-  createN8nWorkflow,
-  executeN8nWorkflow,
-  getN8nWorkflow,
-  listN8nCredentials,
-  listN8nNodeTypes,
-} from "./n8n-api-client.js";
+  createWorkflowEngineWorkflow,
+  executeWorkflowEngineWorkflow,
+  getWorkflowEngineWorkflow,
+  listWorkflowEngineConnections,
+  listWorkflowEngineNodeTypes,
+  listWorkflowEngineWorkflows,
+} from "./workflow-api-client.js";
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;
@@ -60,7 +60,7 @@ function errorResult(text: string) {
 
 /**
  * Handle POST /mcp requests from bcgpt gateway router.
- * Authenticates via x-session-key header, resolves workspaceId, dispatches pmos_n8n_* tools.
+ * Authenticates via x-session-key header, resolves workspaceId, dispatches workflow tools.
  */
 export async function handlePmosMcpHttpRequest(
   req: IncomingMessage,
@@ -135,9 +135,13 @@ async function dispatchTool(
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  switch (toolName) {
-    case "pmos_n8n_list_workflows": {
-      const r = await listN8nWorkflows(workspaceId);
+  const normalizedToolName = toolName.startsWith("pmos_n8n_")
+    ? `pmos_ops_${toolName.slice("pmos_n8n_".length)}`
+    : toolName;
+
+  switch (normalizedToolName) {
+    case "pmos_ops_list_workflows": {
+      const r = await listWorkflowEngineWorkflows(workspaceId);
       if (!r.ok) return errorResult(r.error ?? "Failed to list workflows");
       const summary = (r.workflows ?? []).map((w) => ({
         id: w.id,
@@ -148,15 +152,15 @@ async function dispatchTool(
       return contentResult(JSON.stringify({ workflows: summary, count: summary.length }, null, 2));
     }
 
-    case "pmos_n8n_get_workflow": {
+    case "pmos_ops_get_workflow": {
       const wfId = String(args.workflow_id ?? "").trim();
       if (!wfId) return errorResult("workflow_id is required");
-      const r = await getN8nWorkflow(workspaceId, wfId);
+      const r = await getWorkflowEngineWorkflow(workspaceId, wfId);
       if (!r.ok) return errorResult(r.error ?? "Failed to get workflow");
       return contentResult(JSON.stringify(r.workflow, null, 2));
     }
 
-    case "pmos_n8n_create_workflow": {
+    case "pmos_ops_create_workflow": {
       const name = String(args.name ?? "").trim();
       const nodes = Array.isArray(args.nodes) ? args.nodes : [];
       const connections =
@@ -165,37 +169,37 @@ async function dispatchTool(
           : {};
       if (!name) return errorResult("name is required");
       if (!nodes.length) return errorResult("nodes array is required and must not be empty");
-      const r = await createN8nWorkflow(workspaceId, {
+      const r = await createWorkflowEngineWorkflow(workspaceId, {
         name,
         active: false,
-        nodes: nodes as Parameters<typeof createN8nWorkflow>[1]["nodes"],
+        nodes: nodes as Parameters<typeof createWorkflowEngineWorkflow>[1]["nodes"],
         connections,
       });
       if (!r.ok) return errorResult(r.error ?? "Failed to create workflow");
       return contentResult(
-        `Workflow created successfully!\nID: ${r.workflow?.id}\nName: ${name}\n\nView and edit it in the Workflows tab.`,
+        `Workflow created successfully!\nID: ${r.workflow?.id}\nName: ${name}\n\nView and edit it in the Automations tab.`,
       );
     }
 
-    case "pmos_n8n_execute_workflow": {
+    case "pmos_ops_execute_workflow": {
       const wfId = String(args.workflow_id ?? "").trim();
       if (!wfId) return errorResult("workflow_id is required");
-      const r = await executeN8nWorkflow(workspaceId, wfId);
+      const r = await executeWorkflowEngineWorkflow(workspaceId, wfId);
       if (!r.ok) return errorResult(r.error ?? "Failed to execute workflow");
       return contentResult(
-        `Workflow executed! Execution ID: ${r.executionId ?? "unknown"}. Check the Workflows panel for execution results.`,
+        `Workflow executed! Execution ID: ${r.executionId ?? "unknown"}. Check the Automations panel for execution results.`,
       );
     }
 
-    case "pmos_n8n_list_credentials": {
-      const r = await listN8nCredentials(workspaceId);
+    case "pmos_ops_list_credentials": {
+      const r = await listWorkflowEngineConnections(workspaceId);
       if (!r.ok) return errorResult(r.error ?? "Failed to list credentials");
       const creds = (r.credentials ?? []).map((c) => ({ id: c.id, name: c.name, type: c.type }));
       return contentResult(JSON.stringify({ credentials: creds, count: creds.length }, null, 2));
     }
 
-    case "pmos_n8n_list_node_types": {
-      const r = await listN8nNodeTypes(workspaceId);
+    case "pmos_ops_list_node_types": {
+      const r = await listWorkflowEngineNodeTypes(workspaceId);
       if (!r.ok) return errorResult(r.error ?? "Failed to list node types");
       // Return condensed list — skip internal/meta nodes
       const allTypes = r.nodeTypes ?? [];
@@ -230,9 +234,9 @@ async function dispatchTool(
     default:
       return errorResult(
         `Unknown tool: ${toolName}. Supported tools: ` +
-          `pmos_n8n_list_workflows, pmos_n8n_create_workflow, pmos_n8n_execute_workflow, ` +
-          `pmos_n8n_get_workflow, pmos_n8n_list_credentials, pmos_n8n_list_node_types, ` +
-          `pmos_web_search`,
+          `pmos_ops_list_workflows, pmos_ops_create_workflow, pmos_ops_execute_workflow, ` +
+          `pmos_ops_get_workflow, pmos_ops_list_credentials, pmos_ops_list_node_types, ` +
+          `pmos_web_search (legacy pmos_n8n_* aliases are also accepted)`,
       );
   }
 }

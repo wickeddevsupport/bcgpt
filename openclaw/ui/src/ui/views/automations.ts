@@ -99,17 +99,17 @@ export function renderAutomations(props: AutomationsProps) {
           style="${isMobile ? "font-size:16px;padding:8px 12px;" : ""}"
           @click=${() => props.onChatToggle()}
           title="Close chat"
-        >✕</button>
+        >X</button>
       </div>
       <!-- AI thoughts / step progress (shown while AI is working) -->
       ${props.chatSteps.length > 0 && props.chatProps.sending ? html`
         <details class="ai-thoughts" open>
           <summary style="cursor:pointer;padding:6px 12px;font-size:12px;color:var(--muted,#888);user-select:none;display:flex;align-items:center;gap:6px;">
-            <span style="animation:spin 1s linear infinite;display:inline-block;">⟳</span>
+            <span style="animation:spin 1s linear infinite;display:inline-block;">o</span>
             Thinking... (${props.chatSteps.length} step${props.chatSteps.length === 1 ? "" : "s"})
           </summary>
           <div style="padding:6px 12px 8px;font-size:11px;color:var(--muted,#888);font-family:monospace;line-height:1.5;max-height:120px;overflow-y:auto;background:var(--bg-secondary,rgba(0,0,0,0.15));border-top:1px solid var(--border,rgba(255,255,255,0.08));">
-            ${props.chatSteps.map((step) => html`<div>• ${step}</div>`)}
+            ${props.chatSteps.map((step) => html`<div>- ${step}</div>`)}
           </div>
         </details>
       ` : nothing}
@@ -165,7 +165,7 @@ export function renderAutomations(props: AutomationsProps) {
           @click=${() => props.onChatToggle()}
           title="AI Workflow Assistant"
         >
-          AI Assistant ${props.chatOpen ? "▶" : "◀"}
+          AI Assistant ${props.chatOpen ? ">" : "<"}
         </button>
       </div>
 

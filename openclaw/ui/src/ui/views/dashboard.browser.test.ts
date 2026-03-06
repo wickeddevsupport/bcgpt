@@ -30,6 +30,44 @@ describe("dashboard provisioning UI", () => {
     onRefreshConnectors: vi.fn(),
     onRefreshDashboard: vi.fn(),
     onClearTrace: vi.fn(),
+    nlDraft: "",
+    nlBusy: false,
+    nlResponse: null,
+    onNlDraftChange: vi.fn(),
+    onAsk: vi.fn(),
+    onQuickAction: vi.fn(),
+    agentsList: null,
+    agentActivityById: {},
+    agentIdentityById: {},
+    onOpenAgentChat: vi.fn(),
+    chatProps: {
+      sessionKey: "main",
+      onSessionKeyChange: vi.fn(),
+      thinkingLevel: null,
+      showThinking: false,
+      loading: false,
+      sending: false,
+      messages: [],
+      toolMessages: [],
+      stream: null,
+      streamStartedAt: null,
+      draft: "",
+      queue: [],
+      connected: true,
+      canSend: true,
+      disabledReason: null,
+      error: null,
+      sessions: null,
+      focusMode: false,
+      assistantName: "Workspace Assistant",
+      assistantAvatar: null,
+      onRefresh: vi.fn(),
+      onToggleFocusMode: vi.fn(),
+      onDraftChange: vi.fn(),
+      onSend: vi.fn(),
+      onQueueRemove: vi.fn(),
+      onNewSession: vi.fn(),
+    },
   });
 
   it("shows provisioning success and copy button when apiKey present", () => {
@@ -57,11 +95,11 @@ describe("dashboard provisioning UI", () => {
     const onChange = vi.fn();
     const onSave = vi.fn();
 
-    render(
+      render(
       renderDashboard({
         ...baseProps(),
         opsProvisioningError: "Projects API is license-gated",
-        opsManualApiKeyDraft: "",
+        opsManualApiKeyDraft: "manual-key-xyz",
         onOpsManualApiKeyChange: onChange,
         onSaveOpsApiKey: async () => onSave(),
       } as any),
@@ -84,5 +122,13 @@ describe("dashboard provisioning UI", () => {
     expect(saveBtn).not.toBeUndefined();
     saveBtn?.click();
     expect(onSave).toHaveBeenCalled();
+  });
+
+  it("renders the workspace chat side rail", () => {
+    const container = document.createElement("div");
+    render(renderDashboard(baseProps() as any), container);
+
+    expect(container.querySelector(".dashboard-side .dashboard-chat-host")).not.toBeNull();
+    expect(container.textContent).toContain("Workspace Chat");
   });
 });

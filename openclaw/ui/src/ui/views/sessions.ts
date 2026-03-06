@@ -221,6 +221,7 @@ function renderRow(
   onDelete: SessionsProps["onDelete"],
   disabled: boolean,
 ) {
+  const isSubagent = row.key.toLowerCase().includes(":subagent:");
   const updated = row.updatedAt ? formatRelativeTimestamp(row.updatedAt) : "n/a";
   const rawThinking = row.thinkingLevel ?? "";
   const isBinaryThinking = isBinaryThinkingProvider(row.modelProvider);
@@ -258,7 +259,7 @@ function renderRow(
           }}
         />
       </div>
-      <div>${row.kind}</div>
+      <div>${isSubagent ? "subagent" : row.kind}</div>
       <div>${updated}</div>
       <div>${formatSessionTokens(row)}</div>
       <div>

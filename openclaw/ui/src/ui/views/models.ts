@@ -5,6 +5,8 @@ export type ModelsProps = {
   connected: boolean;
   modelAlias: string;
   modelApiKeyDraft: string;
+  modelApiKeyEditable: boolean;
+  modelApiKeyStored: boolean;
   /** API base URL for the selected provider (e.g. https://api.kilo.ai/v1) */
   modelBaseUrl: string;
   /** API type for the provider (e.g. openai-completions, anthropic-messages) */
@@ -22,12 +24,14 @@ export type ModelsProps = {
   onModelRefDraftChange: (next: string) => void;
   onModelAliasChange: (next: string) => void;
   onModelApiKeyDraftChange: (next: string) => void;
+  onModelApiKeyEditToggle: (editable: boolean) => void;
   onModelBaseUrlChange: (next: string) => void;
   onModelApiTypeChange: (next: string) => void;
   onModelSave: () => void;
   onModelSaveWithoutActivate: () => void;
   onModelClearKey: () => void;
   onModelClearKeyForRef: (ref: string) => void;
+  onModelEdit: (ref: string) => void;
   onModelActivate: (ref: string) => void;
   onModelDeactivate: (ref: string) => void;
   onModelDelete: (ref: string) => void;
@@ -170,33 +174,17 @@ function composeModelRef(provider: string, modelId: string): string {
   return `${normalizedProvider}/${normalizedModelId}`;
 }
 
-function readJsonEditor(trigger: Event): Record<string, unknown> | null {
-  const root = (trigger.currentTarget as HTMLElement | null)?.closest(".model-json-editor");
-  const editor = root?.querySelector("textarea[data-model-json]") as HTMLTextAreaElement | null;
-  if (!editor) {
-    window.alert("JSON editor not found.");
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(editor.value);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      window.alert("JSON must be an object.");
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch (err) {
-    window.alert(`Invalid JSON: ${String(err)}`);
-    return null;
-  }
-}
-
 export function renderModels(props: ModelsProps) {
   const disabledReason = !props.connected
     ? "Sign in to your workspace to configure models."
     : null;
-  const modelKeyPlaceholder = props.modelConfigured
-    ? "Stored (leave blank to keep current key)"
-    : "Paste provider API key";
+  const keyLocked =
+    props.modelApiKeyStored && !props.modelApiKeyEditable && !props.modelApiKeyDraft.trim();
+  const modelKeyPlaceholder = keyLocked
+    ? "Stored (click Edit key to replace)"
+    : props.modelApiKeyStored
+      ? "Stored (leave blank to keep current key)"
+      : "Paste provider API key";
 
   const modelRows = props.modelRows ?? [];
   const modelOptions = buildModelOptions(modelRows, props.modelOptions ?? []);
@@ -215,19 +203,17 @@ export function renderModels(props: ModelsProps) {
   const savedRows = modelRows.filter(
     (row) => row.workspaceOverride || row.active || assignedRefs.has(row.ref),
   );
-
-  const jsonTemplate = JSON.stringify(
-    {
-      ref: draftRef || "provider/model-id",
-      alias: props.modelAlias || "",
-      apiKey: props.modelApiKeyDraft || "",
-      baseUrl: props.modelBaseUrl || "",
-      apiType: props.modelApiType || "",
-      activate: true,
-    },
-    null,
-    2,
-  );
+  const selectedSavedRow = savedRows.find((row) => row.ref === draftRef) ?? null;
+  const editorStatusText = props.modelApiKeyStored
+    ? "A provider key is already stored for this provider. Use Edit Key only when you want to replace it."
+    : selectedSavedRow?.sharedProvider
+      ? "This provider is coming from shared workspace configuration. No workspace API key is stored here."
+      : "No provider key is stored for this provider yet.";
+  const editorStatusTone = props.modelApiKeyStored
+    ? "ok"
+    : selectedSavedRow?.sharedProvider
+      ? "muted"
+      : "warn";
 
   return html`
     <section class="card" style="margin-bottom:18px;">
@@ -245,10 +231,9 @@ export function renderModels(props: ModelsProps) {
       </div>
     </section>
 
-    <section class="grid grid-cols-2" style="margin-bottom:18px;">
-      <div class="card">
-        <div class="card-title">Add Or Update Model</div>
-        <div class="card-sub">Type-ahead form with provider/model suggestions. Save to config when ready.</div>
+    <section class="card" style="margin-bottom:18px;">
+        <div class="card-title">Model Editor</div>
+        <div class="card-sub">Edit a saved card or define a new provider/model pair, then save it into the workspace.</div>
 
         <div class="form-grid" style="margin-top:14px; grid-template-columns: 1fr 2fr;">
           <label class="field">
@@ -301,7 +286,7 @@ export function renderModels(props: ModelsProps) {
                 props.onModelApiKeyDraftChange((e.target as HTMLInputElement).value)}
               placeholder=${modelKeyPlaceholder}
               autocomplete="off"
-              ?disabled=${!props.connected || props.modelSaving}
+              ?disabled=${!props.connected || props.modelSaving || keyLocked}
             />
           </label>
           <label class="field">
@@ -339,6 +324,17 @@ export function renderModels(props: ModelsProps) {
         </div>
 
         <div class="row" style="margin-top:8px; gap:8px; flex-wrap:wrap; align-items:center;">
+          ${props.modelApiKeyStored
+            ? html`
+                <button
+                  class="btn btn--secondary"
+                  ?disabled=${!props.connected || props.modelSaving}
+                  @click=${() => props.onModelApiKeyEditToggle(keyLocked)}
+                >
+                  ${keyLocked ? "Edit Key" : "Lock Key"}
+                </button>
+              `
+            : nothing}
           <button
             class="btn btn--primary"
             ?disabled=${!props.connected || props.modelSaving || !modelRefReady}
@@ -355,13 +351,16 @@ export function renderModels(props: ModelsProps) {
           </button>
           <button
             class="btn btn--secondary"
-            ?disabled=${!props.connected || props.modelSaving || !props.modelConfigured}
+            ?disabled=${!props.connected || props.modelSaving || !props.modelApiKeyStored}
             @click=${() => props.onModelClearKey()}
             title="Remove key for selected provider"
           >
             Remove provider key
           </button>
           ${props.modelSavedOk ? html`<span class="chip chip-ok">Saved</span>` : nothing}
+        </div>
+        <div style="margin-top:10px;">
+          ${renderModelToneChip(editorStatusText, editorStatusTone)}
         </div>
 
         ${props.modelCatalogError
@@ -370,49 +369,6 @@ export function renderModels(props: ModelsProps) {
         ${props.modelError
           ? html`<div class="callout danger" style="margin-top:10px; font-size:12px;">${props.modelError}</div>`
           : nothing}
-      </div>
-
-      <div class="card model-json-editor">
-        <div class="card-title">JSON Editor</div>
-        <div class="card-sub">Configure model fields in JSON and apply directly to the form.</div>
-        <label class="field" style="margin-top:12px;">
-          <span>Model JSON</span>
-          <textarea
-            data-model-json
-            class="mono"
-            style="min-height:260px;"
-            .value=${jsonTemplate}
-            ?disabled=${!props.connected || props.modelSaving}
-          ></textarea>
-        </label>
-        <div class="row" style="margin-top:8px; gap:8px; flex-wrap:wrap;">
-          <button
-            class="btn btn--secondary"
-            ?disabled=${!props.connected || props.modelSaving}
-            @click=${(e: Event) => {
-              const parsed = readJsonEditor(e);
-              if (!parsed) {
-                return;
-              }
-              const refFromJson = typeof parsed.ref === "string" ? parsed.ref.trim() : "";
-              const provider = typeof parsed.provider === "string" ? parsed.provider.trim() : "";
-              const modelId = typeof parsed.modelId === "string" ? parsed.modelId.trim() : "";
-              const nextRef = refFromJson || composeModelRef(provider, modelId);
-              if (!parseModelRef(nextRef)) {
-                window.alert("JSON must include a valid `ref` (provider/model) or provider + modelId.");
-                return;
-              }
-              props.onModelRefDraftChange(nextRef);
-              props.onModelAliasChange(typeof parsed.alias === "string" ? parsed.alias : "");
-              props.onModelApiKeyDraftChange(typeof parsed.apiKey === "string" ? parsed.apiKey : "");
-              props.onModelBaseUrlChange(typeof parsed.baseUrl === "string" ? parsed.baseUrl : "");
-              props.onModelApiTypeChange(typeof parsed.apiType === "string" ? parsed.apiType : "");
-            }}
-          >
-            Apply JSON To Form
-          </button>
-        </div>
-      </div>
     </section>
 
     <section class="card">
@@ -436,20 +392,6 @@ export function renderModels(props: ModelsProps) {
                 const rowAssignments = assignments
                   .filter((assignment) => assignment.modelRef === row.ref)
                   .sort((a, b) => a.label.localeCompare(b.label));
-                const explicitAssignments = rowAssignments.filter((assignment) => !assignment.inherited);
-                const inheritedAssignments = rowAssignments.filter((assignment) => assignment.inherited);
-                const jsonSnapshot = JSON.stringify(
-                  {
-                    ref: row.ref,
-                    alias: row.alias || "",
-                    workspaceDefault: row.active,
-                    keyConfigured: row.configured,
-                    explicitAgents: explicitAssignments.map((a) => a.agentId),
-                    inheritedAgents: inheritedAssignments.map((a) => a.agentId),
-                  },
-                  null,
-                  2,
-                );
                 return html`
                   <div class="agent-card ${row.active ? "agent-card--selected" : ""}">
                     <div class="agent-card-header">
@@ -462,19 +404,32 @@ export function renderModels(props: ModelsProps) {
                     </div>
 
                     <div class="chip-row" style="margin-top:10px;">
+                      ${draftRef === row.ref ? renderModelToneChip("Editing", "ok") : nothing}
                       ${row.active ? renderModelToneChip("Workspace default", "ok") : nothing}
-                      ${row.configured
-                        ? renderModelToneChip("Key configured", "ok")
-                        : renderModelToneChip("No key", "warn")}
+                      ${row.keyConfigured
+                        ? renderModelToneChip("Key stored", "ok")
+                        : row.sharedProvider
+                          ? renderModelToneChip("Shared provider", "muted")
+                          : renderModelToneChip("No key", "warn")}
                       ${row.workspaceOverride
                         ? renderModelToneChip("Saved in config", "muted")
                         : renderModelToneChip("Referenced only", "muted")}
+                      ${!row.inCatalog
+                        ? renderModelToneChip("Manual model", "muted")
+                        : nothing}
                       ${rowAssignments.length > 0
                         ? renderModelToneChip(`Agents: ${rowAssignments.length}`, "muted")
                         : renderModelToneChip("Agents: 0", "muted")}
                     </div>
 
                     <div class="agent-card-actions">
+                      <button
+                        class="btn btn--sm"
+                        ?disabled=${!props.connected || props.modelSaving}
+                        @click=${() => props.onModelEdit(row.ref)}
+                      >
+                        Edit
+                      </button>
                       ${!row.active
                         ? html`
                             <button
@@ -511,7 +466,7 @@ export function renderModels(props: ModelsProps) {
                         : nothing}
                       <button
                         class="btn btn--sm"
-                        ?disabled=${!props.connected || props.modelSaving}
+                        ?disabled=${!props.connected || props.modelSaving || !row.keyConfigured}
                         @click=${() => props.onModelClearKeyForRef(row.ref)}
                       >
                         Remove Key
@@ -572,11 +527,6 @@ export function renderModels(props: ModelsProps) {
                             `;
                           })}
                       </div>
-                    </details>
-
-                    <details style="margin-top:8px;">
-                      <summary class="muted" style="cursor:pointer;">JSON snapshot</summary>
-                      <pre class="mono" style="margin-top:8px; white-space:pre-wrap; font-size:12px;">${jsonSnapshot}</pre>
                     </details>
                   </div>
                 `;

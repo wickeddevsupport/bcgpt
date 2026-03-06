@@ -72,7 +72,7 @@ try {
   const hasDeprecatedPlugin = logs.includes("[pmos-activepieces] registering tools");
   const hasConnectorStatus = logs.includes("pmos.connectors.status");
 
-  report(hasEmbeddedMarker ? "OK" : "WARN", "embedded-n8n-marker", hasEmbeddedMarker ? "present" : "missing");
+  report(hasEmbeddedMarker ? "FAIL" : "OK", "legacy-embedded-n8n", hasEmbeddedMarker ? "present" : "not detected");
   report(
     hasDeprecatedPlugin ? "WARN" : "OK",
     "deprecated-plugin-marker",
@@ -80,14 +80,14 @@ try {
   );
   report(hasConnectorStatus ? "OK" : "WARN", "connector-status-traffic", hasConnectorStatus ? "present" : "missing");
 
-  if (!hasEmbeddedMarker || hasDeprecatedPlugin) {
+  if (hasEmbeddedMarker || hasDeprecatedPlugin) {
     console.log(
       "RESULT: FAIL - runtime does not match target state. Redeploy latest main via Coolify and re-check.",
     );
     process.exit(3);
   }
 
-  console.log("RESULT: PASS - embedded n8n marker found and deprecated plugin marker absent.");
+  console.log("RESULT: PASS - legacy embedded n8n is disabled and deprecated plugin markers are absent.");
 } catch (err) {
   report("FAIL", "ssh-check", err instanceof Error ? err.message : String(err));
   process.exit(2);

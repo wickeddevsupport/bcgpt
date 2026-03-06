@@ -8,9 +8,6 @@ export type IntegrationsProps = {
   error: string | null;
   bcgptUrl: string;
   bcgptApiKeyDraft: string;
-  opsUserEmailDraft: string;
-  opsUserPasswordDraft: string;
-  opsUserHasSavedPassword: boolean;
   connectorsLoading: boolean;
   connectorsStatus: PmosConnectorsStatus | null;
   connectorsError: string | null;
@@ -19,30 +16,28 @@ export type IntegrationsProps = {
   bcgptSavedOk?: boolean;
   onBcgptUrlChange: (next: string) => void;
   onBcgptApiKeyDraftChange: (next: string) => void;
-  onOpsUserEmailDraftChange: (next: string) => void;
-  onOpsUserPasswordDraftChange: (next: string) => void;
   onSave: () => void;
   onClearBcgptKey: () => void;
   onRefreshConnectors: () => void;
   onOpenModels: () => void;
   onOpenAutomations: () => void;
 
-  // n8n / Wicked Ops provisioning status
+  // Workflow engine provisioning status
   opsProvisioned?: boolean;
   opsProjectId?: string | null;
   opsUiHref?: string;
 
-  // Basecamp credential setup in n8n
+  // Basecamp credential setup in workflow engine
   basecampSetupPending?: boolean;
   basecampSetupOk?: boolean;
   basecampSetupError?: string | null;
   onSetupBasecamp?: () => void;
 
-  // n8n Credentials
-  n8nCredentials?: Array<{ id: string; name: string; type: string }>;
-  n8nCredentialsLoading?: boolean;
-  n8nCredentialsError?: string | null;
-  onRefreshN8nCredentials?: () => void;
+  // Workflow credentials
+  workflowCredentials?: Array<{ id: string; name: string; type: string }>;
+  workflowCredentialsLoading?: boolean;
+  workflowCredentialsError?: string | null;
+  onRefreshWorkflowCredentials?: () => void;
 };
 
 function renderConnectorStatus(label: string, ok: boolean | null, detail?: string | null) {
@@ -137,11 +132,6 @@ export function renderIntegrations(props: IntegrationsProps) {
   const bcgptConnectHref = `${(props.bcgptUrl || "https://bcgpt.wickedlab.io").replace(/\/+$/, "")}/connect`;
 
   const projectIdShort = props.opsProjectId ? String(props.opsProjectId).slice(0, 8) : null;
-  const opsUiHref = props.opsUiHref ?? "/ops-ui/connections";
-  const opsPasswordPlaceholder = props.opsUserHasSavedPassword
-    ? "Stored (leave blank to keep)"
-    : "Enter workflow password";
-
   return html`
     <section class="grid grid-cols-2" style="margin-bottom: 18px;">
       <div class="card">
@@ -191,41 +181,14 @@ export function renderIntegrations(props: IntegrationsProps) {
           </div>
         </div>
 
-        <div class="form-grid" style="margin-top: 14px;">
-          <label class="field">
-            <span>Workflow User Email</span>
-            <input
-              .value=${props.opsUserEmailDraft}
-              @input=${(e: Event) => props.onOpsUserEmailDraftChange((e.target as HTMLInputElement).value)}
-              placeholder="rajan@wickedwebsites.us"
-              autocomplete="off"
-              ?disabled=${!props.connected}
-            />
-          </label>
-          <label class="field">
-            <span>Workflow User Password</span>
-            <input
-              type="password"
-              .value=${props.opsUserPasswordDraft}
-              @input=${(e: Event) =>
-                props.onOpsUserPasswordDraftChange((e.target as HTMLInputElement).value)}
-              placeholder=${opsPasswordPlaceholder}
-              autocomplete="off"
-              ?disabled=${!props.connected}
-            />
-          </label>
-        </div>
         <div class="muted" style="font-size:12px; margin-top:8px;">
-          Saved per workspace. Leave password blank while saving to keep the existing stored password.
+          Workflow users are auto-provisioned from PMOS logins. Password changes in PMOS are synced automatically.
         </div>
 
         <div class="row" style="margin-top: 12px; gap:8px;">
           <button class="btn btn--secondary" @click=${() => props.onOpenAutomations()}>
             Open Automations
           </button>
-          <a href=${opsUiHref} target="_blank" rel="noreferrer" class="btn btn--secondary">
-            Open Credentials
-          </a>
         </div>
 
         ${ops?.reachable === false
@@ -239,7 +202,9 @@ export function renderIntegrations(props: IntegrationsProps) {
     <section class="grid grid-cols-2" style="margin-bottom: 18px;">
       <div class="card">
         <div class="card-title">Basecamp</div>
-        <div class="card-sub">Connect your Basecamp account for workflow and chat tools.</div>
+        <div class="card-sub">
+          Save your BCGPT key once. PMOS uses it for chat and auto-syncs the same connection into Flow.
+        </div>
         <div class="row" style="margin-top: 10px; gap: 8px; flex-wrap: wrap; align-items: center;">
           <a
             href=${bcgptConnectHref}
@@ -254,6 +219,9 @@ export function renderIntegrations(props: IntegrationsProps) {
         </div>
         <div class="muted mono" style="font-size: 12px; margin-top: 8px;">
           Endpoint: https://bcgpt.wickedlab.io
+        </div>
+        <div class="muted" style="font-size: 12px; margin-top: 8px;">
+          Flow sync is automatic after save. If Basecamp OAuth is not linked yet, complete it in BCGPT first.
         </div>
 
         <div class="form-grid" style="margin-top: 16px;">
@@ -283,14 +251,14 @@ export function renderIntegrations(props: IntegrationsProps) {
             Remove key
           </button>
           ${props.bcgptSavedOk ? html`<span class="chip chip-ok">Saved</span>` : nothing}
-          ${props.basecampSetupOk ? html`<span class="chip chip-ok">Added to workflow engine</span>` : nothing}
+          ${props.basecampSetupOk ? html`<span class="chip chip-ok">Synced to Flow</span>` : nothing}
         </div>
 
         ${bcgptIdentity
           ? html`
               <div class="callout" style="margin-top: 10px; font-size: 12px;">
-                <div><strong>API Key:</strong> ${bcgptIdentity.connected ? html`<span style="color:#22c55e">✓ Valid</span>` : html`<span style="color:#f87171">✗ Not recognized</span>`}</div>
-                <div><strong>Basecamp OAuth:</strong> ${(bcgptIdentity as Record<string,unknown>).basecampConnected ? html`<span style="color:#22c55e">✓ Linked</span>` : html`<span style="color:#f59e0b">⚠ Not linked — <a href=${`${(props.bcgptUrl || "https://bcgpt.wickedlab.io").replace(/\/+$/, "")}/connect`} target="_blank" rel="noreferrer">Connect Basecamp</a></span>`}</div>
+                <div><strong>API Key:</strong> ${bcgptIdentity.connected ? html`<span style="color:#22c55e">[OK] Valid</span>` : html`<span style="color:#f87171">[X] Not recognized</span>`}</div>
+                <div><strong>Basecamp OAuth:</strong> ${bcgptIdentity.basecampConnected ? html`<span style="color:#22c55e">[OK] Linked</span>` : html`<span style="color:#f59e0b">[!] Not linked - <a href=${`${(props.bcgptUrl || "https://bcgpt.wickedlab.io").replace(/\/+$/, "")}/connect`} target="_blank" rel="noreferrer">Connect Basecamp</a></span>`}</div>
                 ${bcgptIdentity.name || bcgptIdentity.email
                   ? html`<div><strong>User:</strong> ${bcgptIdentity.name ?? "-"} ${bcgptIdentity.email ? html`<span class="mono">(${bcgptIdentity.email})</span>` : nothing}</div>`
                   : nothing}
@@ -314,45 +282,44 @@ export function renderIntegrations(props: IntegrationsProps) {
                   class="btn btn--secondary"
                   ?disabled=${!props.connected || props.basecampSetupPending}
                   @click=${() => props.onSetupBasecamp?.()}
-                  title="Re-sync Basecamp connection in workflow engine"
+                  title="Retry Basecamp sync into the workflow engine"
                 >
-                  ${props.basecampSetupPending ? "Syncing..." : "Re-sync in Workflow Engine"}
+                  ${props.basecampSetupPending ? "Syncing..." : "Retry Flow Sync"}
                 </button>
               </div>
               ${props.basecampSetupError
-                ? html`<div class="callout danger" style="margin-top: 8px; font-size: 12px;">${props.basecampSetupError}</div>`
+                ? html`<div class="callout danger" style="margin-top: 8px; font-size: 12px;">Saved in PMOS, but Flow sync failed: ${props.basecampSetupError}</div>`
                 : nothing}
             `
           : nothing}
       </div>
 
       <div class="card">
-        <div class="card-title">Workflow Credentials</div>
-        <div class="card-sub">Credentials currently available inside your workflow engine workspace.</div>
+        <div class="card-title">Flow Connections</div>
+        <div class="card-sub">
+          Connections currently available inside your Activepieces workspace.
+        </div>
 
         <div class="row" style="margin-top: 16px; align-items: center; gap: 10px;">
           <button
             class="btn btn--secondary"
-            ?disabled=${!props.connected || props.n8nCredentialsLoading}
-            @click=${() => props.onRefreshN8nCredentials?.()}
+            ?disabled=${!props.connected || props.workflowCredentialsLoading}
+            @click=${() => props.onRefreshWorkflowCredentials?.()}
           >
-            ${props.n8nCredentialsLoading ? "Loading..." : "Refresh Credentials"}
+            ${props.workflowCredentialsLoading ? "Loading..." : "Refresh Connections"}
           </button>
-          <a href=${opsUiHref} target="_blank" rel="noreferrer" class="btn btn--secondary">
-            Manage in workflow engine
-          </a>
         </div>
 
-        ${props.n8nCredentialsError
-          ? html`<div class="callout danger" style="margin-top: 12px; font-size: 12px;">${props.n8nCredentialsError}</div>`
+        ${props.workflowCredentialsError
+          ? html`<div class="callout danger" style="margin-top: 12px; font-size: 12px;">${props.workflowCredentialsError}</div>`
           : nothing}
-        ${!props.n8nCredentialsLoading && (props.n8nCredentials?.length ?? 0) === 0
-          ? html`<div class="muted" style="margin-top: 12px;">No credentials found in your workflow engine workspace.</div>`
+        ${!props.workflowCredentialsLoading && (props.workflowCredentials?.length ?? 0) === 0
+          ? html`<div class="muted" style="margin-top: 12px;">No connections found in your Activepieces workspace.</div>`
           : nothing}
-        ${props.n8nCredentials && props.n8nCredentials.length > 0
+        ${props.workflowCredentials && props.workflowCredentials.length > 0
           ? html`
               <div class="list" style="margin-top: 12px;">
-                ${props.n8nCredentials.slice(0, 8).map(
+                ${props.workflowCredentials.slice(0, 8).map(
                   (cred) => html`
                     <div class="list-item" style="display:flex;justify-content:space-between;gap:10px;">
                       <div class="mono">${cred.name}</div>

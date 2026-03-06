@@ -458,7 +458,7 @@ function describeAgentSection(input: {
 
 function describeCredentialSection(credentials: WorkspaceAiCredential[]): string {
   if (!credentials.length) {
-    return ["## n8n Credential Inventory", "- no credentials discovered"].join("\n");
+    return ["## Active Flow Connections", "- no active Flow connections discovered"].join("\n");
   }
 
   const sorted = credentials
@@ -469,7 +469,9 @@ function describeCredentialSection(credentials: WorkspaceAiCredential[]): string
   if (sorted.length > top.length) {
     lines.push(`- ... plus ${sorted.length - top.length} more`);
   }
-  return ["## n8n Credential Inventory", ...lines].join("\n");
+  lines.push("- Treat this list as the current connected apps inventory for workflow planning.");
+  lines.push("- Do not ask the user to reconnect an app already listed here unless an action explicitly fails.");
+  return ["## Active Flow Connections", ...lines].join("\n");
 }
 
 function describeWorkspaceConfigSection(input: {
@@ -487,50 +489,51 @@ function describeWorkspaceConfigSection(input: {
   ].join("\n");
 }
 
-function describeN8nSection(connectors: WorkspaceConnectors | null, credentials: WorkspaceAiCredential[]): string {
+function describeWorkflowEngineSection(connectors: WorkspaceConnectors | null, credentials: WorkspaceAiCredential[]): string {
   const raw = isRecord(connectors) ? connectors : {};
   const ops = isRecord(raw.ops) ? raw.ops : {};
   const opsUrl = asNonEmptyString(ops.url);
   const opsApiKeySet = Boolean(asNonEmptyString(ops.apiKey));
-  const n8nConnected = Boolean(opsUrl || opsApiKeySet);
+  const workflowConnected = Boolean(opsUrl || opsApiKeySet);
 
-  const lines: string[] = ["## n8n Automation Integration"];
+  const lines: string[] = ["## Workflow Engine Integration (Activepieces)"];
 
-  if (!n8nConnected) {
-    lines.push("- status: NOT CONFIGURED — no n8n/ops connection set for this workspace");
-    lines.push("- To connect: go to Integrations → Automation → configure n8n URL and credentials");
-    lines.push("- Once connected, use pmos_n8n_* tools to create and manage automation workflows");
+  if (!workflowConnected) {
+    lines.push("- status: NOT CONFIGURED — no workflow-engine connector set for this workspace");
+    lines.push("- To connect: go to Integrations and save your workflow engine settings.");
+    lines.push("- PMOS workspace users are auto-provisioned to Activepieces on login and password updates.");
+    lines.push("- Once connected, use pmos_ops_* tools to create and manage automation workflows");
     return lines.join("\n");
   }
 
-  lines.push("- status: CONNECTED — n8n is available");
+  lines.push("- status: CONNECTED — workflow engine is available");
   if (opsUrl) lines.push(`- url: ${opsUrl}`);
 
   const credCount = credentials.length;
   if (credCount > 0) {
     const credNames = credentials.slice(0, 12).map((c) => `${c.name} (${c.type})`);
     lines.push(
-      `- credentials configured: ${credCount} — ${credNames.join(", ")}${credCount > 12 ? ", ..." : ""}`,
+      `- active connections: ${credCount} — ${credNames.join(", ")}${credCount > 12 ? ", ..." : ""}`,
     );
   } else {
-    lines.push("- credentials: none yet — call pmos_n8n_list_credentials for live list");
+    lines.push("- active connections: none yet — call pmos_ops_list_credentials for live list");
   }
 
   lines.push("");
-  lines.push("### n8n Workflow Tools (pmos_n8n_*)");
-  lines.push("- **pmos_n8n_list_workflows** — list all workflows");
-  lines.push("- **pmos_n8n_get_workflow(workflow_id)** — get full workflow JSON");
-  lines.push("- **pmos_n8n_create_workflow(name, nodes, connections)** — create a new workflow");
-  lines.push("- **pmos_n8n_execute_workflow(workflow_id)** — test-run a workflow");
-  lines.push("- **pmos_n8n_list_credentials** — list configured services (Slack, GitHub, etc.)");
-  lines.push("- **pmos_n8n_list_node_types** — list available trigger/action node types");
+  lines.push("### Workflow Tools (pmos_ops_*)");
+  lines.push("- **pmos_ops_list_workflows** — list all workflows");
+  lines.push("- **pmos_ops_get_workflow(workflow_id)** — get full workflow JSON");
+  lines.push("- **pmos_ops_create_workflow(name, nodes, connections)** — create a new workflow");
+  lines.push("- **pmos_ops_execute_workflow(workflow_id)** — test-run a workflow");
+  lines.push("- **pmos_ops_list_credentials** — list configured services (Slack, GitHub, etc.)");
+  lines.push("- **pmos_ops_list_node_types** — list available trigger/action node types");
   lines.push("");
   lines.push("### Creating Workflows via Chat");
-  lines.push("1. Call pmos_n8n_list_credentials to see what services are connected");
+  lines.push("1. Call pmos_ops_list_credentials to see what services are connected");
   lines.push("2. Ask for any required info not already available");
-  lines.push("3. Generate valid n8n workflow JSON (use exact node type names)");
-  lines.push("4. Call pmos_n8n_create_workflow with name/nodes/connections");
-  lines.push("5. Call pmos_n8n_execute_workflow to test, then report the result");
+  lines.push("3. Generate valid workflow JSON (use exact node type names)");
+  lines.push("4. Call pmos_ops_create_workflow with name/nodes/connections");
+  lines.push("5. Call pmos_ops_execute_workflow to test, then report the result");
   lines.push("");
   lines.push("### Common Node Types");
   lines.push(
@@ -546,10 +549,10 @@ function describeN8nSection(connectors: WorkspaceConnectors | null, credentials:
 function describeProjectManagerSection(): string {
   return [
     "## AI Project Manager Role",
-    "Role: AI Project Manager — access to Basecamp and n8n automation for this workspace.",
+    "Role: AI Project Manager — access to Basecamp and workflow automation for this workspace.",
     "",
     "**Basecamp**: Use smart_action for queries, specific tools for creation. View projects/todos/schedules/people live.",
-    "**Automation**: Use pmos_n8n_* tools to list, create, and execute n8n workflows through conversation.",
+    "**Automation**: Use pmos_ops_* tools to list, create, and execute workflows through conversation.",
     "**Web Search**: Use pmos_web_search for documentation, current events, or external research.",
     "",
     "Operating principles:",
@@ -564,8 +567,8 @@ function describeCapabilitySection(): string {
   return [
     "## PMOS Surface and Capabilities",
     "- Chat panel: ask, run tasks, and automate actions with workspace-scoped agents.",
-    "- Workflows panel: create, update, activate, and execute n8n workflows.",
-    "- Connections panel: inspect and manage available n8n credentials.",
+    "- Workflows panel: create, update, activate, and execute Activepieces workflows.",
+    "- Connections panel: inspect and manage available workflow credentials.",
     "- Integrations panel: configure model providers, connector settings, and Basecamp/BCGPT access.",
     "- Projects panel: summarize Basecamp project state and urgent work via BCGPT tools.",
     "- Agents/Models/Skills/Nodes: manage automation agents, model assignment, and enabled tooling.",
@@ -583,7 +586,7 @@ function describeAssistantPolicySection(): string {
     "- Treat this snapshot and the live node catalog as authoritative.",
     "- Do not ask the user to paste keys that are already marked as present.",
     "- Treat Basecamp/BCGPT connector state here as the default workspace memory baseline.",
-    "- Prefer workspace-scoped n8n credentials and connector bindings over global assumptions.",
+    "- Prefer workspace-scoped workflow credentials and connector bindings over global assumptions.",
     "- If required connector or key is missing, report exactly what is missing and where to configure it.",
     "- When answering questions about Basecamp data, first verify connector+credential readiness from this snapshot.",
     "- Use credential presence metadata only (never reveal secret values).",
@@ -712,7 +715,7 @@ export function buildWorkspaceAiContextMarkdown(input: WorkspaceAiContextInput):
     "",
     describeCredentialSection(input.credentials),
     "",
-    describeN8nSection(input.connectors, input.credentials),
+    describeWorkflowEngineSection(input.connectors, input.credentials),
     "",
     describeProjectManagerSection(),
     "",

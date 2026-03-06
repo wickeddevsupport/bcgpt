@@ -67,6 +67,15 @@ type AuthSuccess = {
 
 type AuthResult = AuthSuccess | AuthFailure;
 
+type PasswordChangeResult = AuthResult;
+
+type AdminPasswordResetResult =
+  | {
+      ok: true;
+      user: PmosAuthUser;
+    }
+  | AuthFailure;
+
 type SessionLookupResult =
   | {
       ok: true;
@@ -301,6 +310,106 @@ export async function loginPmosUser(params: {
     store.sessions.push(record);
     await saveStoreUnlocked(store);
     return { ok: true, user: toPublicUser(user), sessionToken: token };
+  });
+}
+
+export async function changePmosUserPassword(params: {
+  userId: string;
+  currentPassword: string;
+  newPassword: string;
+}): Promise<PasswordChangeResult> {
+  return await runWithStoreMutex(async () => {
+    const userId = String(params.userId ?? "").trim();
+    const currentPassword = params.currentPassword;
+    const newPassword = params.newPassword;
+    if (!userId) {
+      return { ok: false, status: 400, error: "User id is required." };
+    }
+    if (!currentPassword) {
+      return { ok: false, status: 400, error: "Current password is required." };
+    }
+    const passwordError = ensureValidPassword(newPassword);
+    if (passwordError) {
+      return passwordError;
+    }
+
+    const store = await loadStoreUnlocked();
+    pruneExpiredSessions(store);
+    const user = store.users.find((entry) => entry.id === userId);
+    if (!user) {
+      return { ok: false, status: 404, error: "User not found." };
+    }
+
+    const expectedHash = hashPassword(currentPassword, user.passwordSalt);
+    if (!safeStringEqual(expectedHash, user.passwordHash)) {
+      return { ok: false, status: 401, error: "Current password is incorrect." };
+    }
+
+    const nextSalt = createPasswordSalt();
+    const nextHash = hashPassword(newPassword, nextSalt);
+    if (safeStringEqual(nextHash, user.passwordHash)) {
+      return { ok: false, status: 400, error: "New password must be different." };
+    }
+
+    const now = Date.now();
+    user.passwordSalt = nextSalt;
+    user.passwordHash = nextHash;
+    user.updatedAtMs = now;
+    user.lastLoginAtMs = now;
+
+    // Invalidate all existing sessions and issue a fresh session token.
+    store.sessions = store.sessions.filter((entry) => entry.userId !== user.id);
+    const { token, record } = createSessionRecord(user.id);
+    store.sessions.push(record);
+
+    await saveStoreUnlocked(store);
+    return { ok: true, user: toPublicUser(user), sessionToken: token };
+  });
+}
+
+export async function adminResetPmosUserPassword(params: {
+  actorUserId: string;
+  targetEmail: string;
+  newPassword: string;
+}): Promise<AdminPasswordResetResult> {
+  return await runWithStoreMutex(async () => {
+    const actorUserId = String(params.actorUserId ?? "").trim();
+    const targetEmail = normalizeEmail(params.targetEmail);
+    const newPassword = params.newPassword;
+    if (!actorUserId) {
+      return { ok: false, status: 401, error: "Authentication required." };
+    }
+    if (!targetEmail || !validateEmail(targetEmail)) {
+      return { ok: false, status: 400, error: "Valid target email is required." };
+    }
+    const passwordError = ensureValidPassword(newPassword);
+    if (passwordError) {
+      return passwordError;
+    }
+
+    const store = await loadStoreUnlocked();
+    pruneExpiredSessions(store);
+
+    const actor = store.users.find((entry) => entry.id === actorUserId);
+    if (!actor || actor.role !== "super_admin") {
+      return { ok: false, status: 403, error: "super_admin role required." };
+    }
+
+    const target = store.users.find((entry) => entry.email === targetEmail);
+    if (!target) {
+      return { ok: false, status: 404, error: "Target user not found." };
+    }
+
+    const nextSalt = createPasswordSalt();
+    target.passwordSalt = nextSalt;
+    target.passwordHash = hashPassword(newPassword, nextSalt);
+    target.updatedAtMs = Date.now();
+
+    // Invalidate target sessions so they must log in with the new password.
+    store.sessions = store.sessions.filter((entry) => entry.userId !== target.id);
+
+    await saveStoreUnlocked(store);
+    return { ok: true, user: toPublicUser(target) };
   });
 }
 

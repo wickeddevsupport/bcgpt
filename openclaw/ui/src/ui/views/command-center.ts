@@ -142,6 +142,10 @@ export function renderCommandCenter(props: CommandCenterProps) {
   const urgentTodos = snapshot?.urgentTodos ?? [];
   const dueTodayTodos = snapshot?.dueTodayTodos ?? [];
   const cards = snapshot?.projects ?? [];
+  const staleLabel =
+    snapshot?.cacheAgeMs && snapshot.cacheAgeMs > 0
+      ? formatRelativeTimestamp(Date.now() - snapshot.cacheAgeMs)
+      : refreshedLabel;
 
   return html`
     <section class="projects-layout">
@@ -175,7 +179,29 @@ export function renderCommandCenter(props: CommandCenterProps) {
               : nothing}
           </div>
 
-          ${props.error ? html`<div class="callout danger" style="margin-top: 12px;">${props.error}</div>` : nothing}
+          ${snapshot?.refreshing && snapshot?.projects?.length
+            ? html`
+                <div class="callout info" style="margin-top: 12px;">
+                  Refreshing Basecamp data. Showing the last successful snapshot from ${refreshedLabel}.
+                </div>
+              `
+            : nothing}
+          ${props.loading && !snapshot
+            ? html`
+                <div class="callout info" style="margin-top: 12px;">
+                  Refreshing Basecamp data. This can take a few seconds on larger workspaces.
+                </div>
+              `
+            : nothing}
+          ${snapshot?.stale && snapshot?.staleReason
+            ? html`
+                <div class="callout warn" style="margin-top: 12px;">
+                  Latest refresh failed. Showing the last successful snapshot from ${staleLabel}. ${snapshot.staleReason}
+                </div>
+              `
+            : props.error
+              ? html`<div class="callout danger" style="margin-top: 12px;">${props.error}</div>`
+              : nothing}
           ${errors.length > 0
             ? html`<div class="callout info" style="margin-top: 12px;">${errors[0]}</div>`
             : nothing}

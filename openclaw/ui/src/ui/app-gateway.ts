@@ -1,6 +1,7 @@
 import type { EventLogEntry } from "./app-events.ts";
 import type { OpenClawApp } from "./app.ts";
 import type { ExecApprovalRequest } from "./controllers/exec-approval.ts";
+import { parseAgentSessionKey } from "../../../src/sessions/session-key-utils.js";
 import type { GatewayEventFrame, GatewayHelloOk } from "./gateway.ts";
 import type { Tab } from "./navigation.ts";
 import type { UiSettings } from "./storage.ts";
@@ -37,6 +38,7 @@ import { GatewayBrowserClient } from "./gateway.ts";
 // Batches rapid-fire deltas so at most one Lit re-render fires per animation frame.
 const pendingChatDelta = new WeakMap<object, ChatEventPayload>();
 const chatDeltaRafId = new WeakMap<object, number>();
+const relatedSessionRefreshSeen = new WeakMap<object, Set<string>>();
 
 type GatewayHost = {
   settings: UiSettings;
@@ -126,11 +128,64 @@ function applySessionDefaults(host: GatewayHost, defaults?: SessionDefaultsSnaps
   }
 }
 
+function isRelatedAgentSessionKey(activeSessionKey: string, candidateSessionKey: string): boolean {
+  if (candidateSessionKey === activeSessionKey) {
+    return true;
+  }
+  const active = parseAgentSessionKey(activeSessionKey);
+  const candidate = parseAgentSessionKey(candidateSessionKey);
+  if (!active || !candidate || active.agentId !== candidate.agentId) {
+    return false;
+  }
+  const activeRest = active.rest.trim().toLowerCase();
+  const candidateRest = candidate.rest.trim().toLowerCase();
+  if (!activeRest || !candidateRest) {
+    return false;
+  }
+  if (activeRest === candidateRest) {
+    return true;
+  }
+  if (activeRest === "main" && candidateRest.startsWith("subagent:")) {
+    return true;
+  }
+  if (candidateRest === "main" && activeRest.startsWith("subagent:")) {
+    return true;
+  }
+  return false;
+}
+
+function refreshSessionsForRelatedAgentSession(host: GatewayHost, payload?: AgentEventPayload) {
+  const relatedSessionKey =
+    typeof payload?.sessionKey === "string" ? payload.sessionKey.trim() : "";
+  if (!relatedSessionKey || !host.chatRunId || payload?.runId !== host.chatRunId) {
+    return;
+  }
+  if (
+    relatedSessionKey === host.sessionKey ||
+    !isRelatedAgentSessionKey(host.sessionKey, relatedSessionKey)
+  ) {
+    return;
+  }
+  const cacheKey = `${payload.runId}:${relatedSessionKey}`;
+  const seen = relatedSessionRefreshSeen.get(host) ?? new Set<string>();
+  if (seen.has(cacheKey)) {
+    return;
+  }
+  seen.add(cacheKey);
+  relatedSessionRefreshSeen.set(host, seen);
+  void loadSessions(host as unknown as OpenClawApp, {
+    activeMinutes: CHAT_SESSIONS_ACTIVE_MINUTES,
+  });
+}
+
 function recordAgentTraceEvent(host: GatewayHost, payload?: AgentEventPayload) {
   if (!payload) {
     return;
   }
-  if (payload.sessionKey && payload.sessionKey !== host.sessionKey) {
+  if (
+    payload.sessionKey &&
+    !isRelatedAgentSessionKey(host.sessionKey, payload.sessionKey)
+  ) {
     return;
   }
   if (payload.stream === "compaction") {
@@ -224,13 +279,16 @@ export function connectGateway(host: GatewayHost) {
   host.execApprovalError = null;
 
   host.client?.stop();
-  host.client = new GatewayBrowserClient({
+  const client = new GatewayBrowserClient({
     url: host.settings.gatewayUrl,
     token: host.settings.token.trim() ? host.settings.token : undefined,
     password: host.password.trim() ? host.password : undefined,
     clientName: "openclaw-control-ui",
     mode: "webchat",
     onHello: async (hello) => {
+      if (host.client !== client) {
+        return;
+      }
       host.connected = true;
       host.lastError = null;
       host.hello = hello;
@@ -285,17 +343,29 @@ export function connectGateway(host: GatewayHost) {
       })();
     },
     onClose: ({ code, reason }) => {
+      if (host.client !== client) {
+        return;
+      }
       host.connected = false;
       // Code 1012 = Service Restart (expected during config saves, don't show as error)
       if (code !== 1012) {
         host.lastError = `disconnected (${code}): ${reason || "no reason"}`;
       }
     },
-    onEvent: (evt) => handleGatewayEvent(host, evt),
+    onEvent: (evt) => {
+      if (host.client !== client) {
+        return;
+      }
+      handleGatewayEvent(host, evt);
+    },
     onGap: ({ expected, received }) => {
+      if (host.client !== client) {
+        return;
+      }
       host.lastError = `event gap detected (expected seq ${expected}, got ${received}); refresh recommended`;
     },
   });
+  host.client = client;
   host.client.start();
 }
 
@@ -323,6 +393,7 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
     }
     recordAgentTraceEvent(host, payload);
     handleAgentEvent(host as unknown as Parameters<typeof handleAgentEvent>[0], payload);
+    refreshSessionsForRelatedAgentSession(host, payload);
     return;
   }
 
@@ -373,8 +444,9 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
       typeof payload?.runId === "string" &&
       Boolean(host.chatRunId) &&
       payload.runId !== host.chatRunId;
-    if (state === "final" || state === "error" || state === "aborted") {
+    if ((state === "final" || state === "error" || state === "aborted") && !foreignFinalWhileBusy) {
       resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
+      relatedSessionRefreshSeen.delete(host);
       void flushChatQueueForEvent(host as unknown as Parameters<typeof flushChatQueueForEvent>[0]);
       const runId = payload?.runId;
       if (runId && host.refreshSessionsAfterChat.has(runId)) {
@@ -386,7 +458,7 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
         }
       }
     }
-    if (state === "final" && !foreignFinalWhileBusy) {
+    if (state === "final") {
       void loadChatHistory(host as unknown as OpenClawApp);
     }
     return;
@@ -455,9 +527,9 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
 
     // Typed payload: workflow created/updated — navigate iframe immediately
     if (payload.type === "workflow_ready" && typeof payload.workflowId === "string") {
-      const app = host as unknown as { apFlowSelectedId: string | null; n8nEmbedVersion: number };
+      const app = host as unknown as { apFlowSelectedId: string | null; workflowEmbedVersion: number };
       app.apFlowSelectedId = payload.workflowId;
-      app.n8nEmbedVersion = (app.n8nEmbedVersion ?? 0) + 1;
+      app.workflowEmbedVersion = (app.workflowEmbedVersion ?? 0) + 1;
       return;
     }
 

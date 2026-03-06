@@ -23,9 +23,11 @@ function createBaseState(): PmosConnectorsState {
     pmosConnectorsLastChecked: null,
     pmosIntegrationsSaving: false,
     pmosIntegrationsError: null,
-    pmosN8nCredentials: null,
-    pmosN8nCredentialsLoading: false,
-    pmosN8nCredentialsError: null,
+    pmosBasecampSetupOk: false,
+    pmosBasecampSetupError: null,
+    pmosWorkflowCredentials: null,
+    pmosWorkflowCredentialsLoading: false,
+    pmosWorkflowCredentialsError: null,
   };
 }
 
@@ -64,7 +66,14 @@ describe("pmos-connectors", () => {
         expect(params.connectors.ops.user.password).toBe("secret-pass");
         expect(params.connectors.bcgpt.url).toBe("https://bcgpt.wickedlab.io");
         expect(params.connectors.bcgpt.apiKey).toBe("bcgpt-key");
-        return { ok: true };
+        return {
+          ok: true,
+          workflowConnection: {
+            configured: true,
+            ok: true,
+            credentialId: "conn-basecamp",
+          },
+        };
       }
       if (method === "pmos.connectors.workspace.get") {
         return {
@@ -91,6 +100,8 @@ describe("pmos-connectors", () => {
     expect(state.pmosOpsUserPasswordDraft).toBe("");
     expect(state.pmosBcgptUrl).toBe("https://bcgpt.wickedlab.io");
     expect(state.pmosBcgptApiKeyDraft).toBe("");
+    expect(state.pmosBasecampSetupOk).toBe(true);
+    expect(state.pmosBasecampSetupError).toBeNull();
     expect(request).toHaveBeenCalledWith("pmos.connectors.workspace.set", expect.any(Object));
     expect(request).toHaveBeenCalledWith("pmos.connectors.workspace.get", {});
   });
@@ -106,7 +117,14 @@ describe("pmos-connectors", () => {
         expect(params.connectors.ops.url).toBe("https://ops.example.test");
         expect(params.connectors.bcgpt.url).toBe("https://bcgpt.wickedlab.io");
         expect(params.connectors.bcgpt.apiKey).toBeNull();
-        return { ok: true };
+        return {
+          ok: true,
+          workflowConnection: {
+            configured: false,
+            ok: false,
+            skippedReason: "missing_api_key",
+          },
+        };
       }
       if (method === "pmos.connectors.workspace.get") {
         return {
@@ -132,5 +150,7 @@ describe("pmos-connectors", () => {
         }),
       }),
     );
+    expect(state.pmosBasecampSetupOk).toBe(false);
+    expect(state.pmosBasecampSetupError).toBeNull();
   });
 });

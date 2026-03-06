@@ -21,6 +21,7 @@ type ConnectorResult = {
   vendoredRepo?: string | null;
   identity?: {
     connected: boolean;
+    basecampConnected?: boolean;
     name?: string | null;
     email?: string | null;
     selectedAccountId?: string | null;
@@ -153,7 +154,7 @@ function sanitizeWorkspaceConfigResponse(
   };
 }
 
-const PMOS_SHARED_PROVIDER_ALLOWLIST = new Set(["local-ollama", "ollama"]);
+const PMOS_SHARED_PROVIDER_ALLOWLIST = new Set(["local-ollama", "ollama", "kilo"]);
 
 function deepCloneJson<T>(value: T): T {
   return value && typeof value === "object" ? (JSON.parse(JSON.stringify(value)) as T) : value;
@@ -287,38 +288,46 @@ function filterEffectiveConfigForWorkspaceUi(
   return next;
 }
 
+export const __test = {
+  filterEffectiveConfigForWorkspaceUi,
+  stripSensitiveUserCredentialsFromConnectors,
+};
+
 /**
- * Redact sensitive ops.user credentials before returning connectors to the UI.
+ * Redact workflow-engine user passwords before returning connectors to the UI.
  * Keep lightweight metadata (email + hasPassword) so users can manage
- * workflow-engine login wiring without exposing stored secrets.
+ * provisioning without exposing stored secrets.
  */
-function stripOpsUserFromConnectors(connectors: Record<string, unknown>): Record<string, unknown> {
-  const ops = connectors.ops;
-  if (!isJsonObject(ops) || !("user" in ops)) {
-    return connectors;
-  }
-  const rawUser = (ops as Record<string, unknown>).user;
-  const user = isJsonObject(rawUser) ? (rawUser as Record<string, unknown>) : null;
-  const email =
-    user && typeof user.email === "string" && user.email.trim() ? user.email.trim() : null;
-  const hasPassword = Boolean(
-    user && typeof user.password === "string" && (user.password as string).length > 0,
-  );
-  const { user: _user, ...opsWithoutUser } = ops as Record<string, unknown>;
-  const safeUser: Record<string, unknown> = {};
-  if (email) {
-    safeUser.email = email;
-  }
-  if (email || hasPassword) {
-    safeUser.hasPassword = hasPassword;
-  }
-  return {
-    ...connectors,
-    ops: {
-      ...opsWithoutUser,
+function stripSensitiveUserCredentialsFromConnectors(
+  connectors: Record<string, unknown>,
+): Record<string, unknown> {
+  const next = { ...connectors };
+  for (const connectorKey of ["ops", "activepieces"]) {
+    const connector = next[connectorKey];
+    if (!isJsonObject(connector) || !("user" in connector)) {
+      continue;
+    }
+    const rawUser = (connector as Record<string, unknown>).user;
+    const user = isJsonObject(rawUser) ? (rawUser as Record<string, unknown>) : null;
+    const email =
+      user && typeof user.email === "string" && user.email.trim() ? user.email.trim() : null;
+    const hasPassword = Boolean(
+      user && typeof user.password === "string" && (user.password as string).length > 0,
+    );
+    const { user: _user, ...connectorWithoutUser } = connector as Record<string, unknown>;
+    const safeUser: Record<string, unknown> = {};
+    if (email) {
+      safeUser.email = email;
+    }
+    if (email || hasPassword) {
+      safeUser.hasPassword = hasPassword;
+    }
+    next[connectorKey] = {
+      ...connectorWithoutUser,
       ...(Object.keys(safeUser).length > 0 ? { user: safeUser } : {}),
-    },
-  };
+    };
+  }
+  return next;
 }
 
 function deepJsonEqual(a: unknown, b: unknown): boolean {
@@ -649,7 +658,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
       const opsUrl = normalizeBaseUrl(opsUrlRaw, "https://flow.wickedlab.io");
       const opsProjectId =
         (workspaceConnectors?.ops?.projectId as string | undefined) ??
-        readConfigString(cfg, ["pmos", "connectors", "ops", "projectId"]) ??
+        (allowGlobalSecrets ? readConfigString(cfg, ["pmos", "connectors", "ops", "projectId"]) : null) ??
         process.env.ACTIVEPIECES_PROJECT_ID ??
         null;
       const workspaceOpsApiKey = (workspaceConnectors?.ops?.apiKey as string | undefined)?.trim() || null;
@@ -1121,17 +1130,115 @@ export const pmosHandlers: GatewayRequestHandlers = {
       const { readWorkspaceConnectors, writeWorkspaceConnectors } = await import("../workspace-connectors.js");
       const existing = (await readWorkspaceConnectors(workspaceId)) ?? {};
       const merged = deepMergeJson(existing, connectors as Record<string, unknown>);
-      const next = isJsonObject(merged) ? merged : existing;
+      let next = isJsonObject(merged) ? merged : existing;
+
+      const readTrimmed = (value: unknown): string | null => {
+        if (typeof value !== "string") return null;
+        const trimmed = value.trim();
+        return trimmed || null;
+      };
+
+      const existingObj = isJsonObject(existing) ? existing : {};
+      const existingOpsConnector = isJsonObject(existingObj.ops)
+        ? (existingObj.ops as Record<string, unknown>)
+        : {};
+      const existingActivepiecesConnector = isJsonObject(existingObj.activepieces)
+        ? (existingObj.activepieces as Record<string, unknown>)
+        : {};
+      const existingOpsUser = isJsonObject(existingOpsConnector.user)
+        ? (existingOpsConnector.user as Record<string, unknown>)
+        : {};
+      const existingActivepiecesUser = isJsonObject(existingActivepiecesConnector.user)
+        ? (existingActivepiecesConnector.user as Record<string, unknown>)
+        : {};
+      const previousIdentityPassword =
+        readTrimmed(existingActivepiecesUser.password) ?? readTrimmed(existingOpsUser.password) ?? "";
+
+      const nextObj = isJsonObject(next) ? next : {};
+      const opsConnector = isJsonObject(nextObj.ops) ? (nextObj.ops as Record<string, unknown>) : {};
+      const activepiecesConnector = isJsonObject(nextObj.activepieces)
+        ? (nextObj.activepieces as Record<string, unknown>)
+        : {};
+      const opsUser = isJsonObject(opsConnector.user) ? (opsConnector.user as Record<string, unknown>) : {};
+      const activepiecesUser = isJsonObject(activepiecesConnector.user)
+        ? (activepiecesConnector.user as Record<string, unknown>)
+        : {};
+
+      const identityEmail =
+        (readTrimmed(activepiecesUser.email) ?? readTrimmed(opsUser.email) ?? "").toLowerCase();
+      const identityPassword = readTrimmed(activepiecesUser.password) ?? readTrimmed(opsUser.password) ?? "";
+      const activepiecesUrl =
+        readTrimmed(activepiecesConnector.url) ??
+        readTrimmed(opsConnector.url) ??
+        "https://flow.wickedlab.io";
+
+      if (identityEmail && identityPassword) {
+        const mirrored = deepMergeJson(next, {
+          ops: {
+            url: activepiecesUrl,
+            user: {
+              email: identityEmail,
+              password: identityPassword,
+            },
+          },
+          activepieces: {
+            url: activepiecesUrl,
+            user: {
+              email: identityEmail,
+              password: identityPassword,
+            },
+          },
+        });
+        if (isJsonObject(mirrored)) {
+          next = mirrored;
+        }
+      }
+
       await writeWorkspaceConnectors(workspaceId, next);
+      if (identityEmail && identityPassword) {
+        const { ensureActivepiecesCredentialParity } = await import("../pmos-auth-http.js");
+        await ensureActivepiecesCredentialParity({
+          baseUrl: activepiecesUrl,
+          email: identityEmail,
+          password: identityPassword,
+          previousPassword: previousIdentityPassword || null,
+        }).catch(() => undefined);
+      }
+      let workflowConnection:
+        | {
+            configured: boolean;
+            ok: boolean;
+            credentialId?: string;
+            error?: string;
+            skippedReason?: "missing_api_key";
+          }
+        | undefined;
       const workspaceBcgptApiKey =
         typeof (next as { bcgpt?: { apiKey?: unknown } } | null)?.bcgpt?.apiKey === "string"
           ? (next as { bcgpt?: { apiKey?: string } }).bcgpt?.apiKey?.trim() ?? ""
           : "";
       if (workspaceBcgptApiKey) {
         const { ensureWorkspaceBasecampCredential } = await import("../credential-sync.js");
-        await ensureWorkspaceBasecampCredential(workspaceId).catch(() => undefined);
+        workflowConnection = await ensureWorkspaceBasecampCredential(workspaceId).catch((err) => ({
+          configured: true,
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        }));
+      } else {
+        workflowConnection = {
+          configured: false,
+          ok: false,
+          skippedReason: "missing_api_key",
+        };
       }
-      respond(true, { ok: true, workspaceId, connectors: next }, undefined);
+      const safeConnectors = isSuperAdmin(client)
+        ? next
+        : stripSensitiveUserCredentialsFromConnectors(next);
+      respond(
+        true,
+        { ok: true, workspaceId, connectors: safeConnectors, workflowConnection },
+        undefined,
+      );
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }
@@ -1150,9 +1257,11 @@ export const pmosHandlers: GatewayRequestHandlers = {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
       const connectors = (await readWorkspaceConnectors(workspaceId)) ?? {};
-      // Strip ops.user sub-object (contains workflow-engine login password) - not needed by the client UI.
+      // Strip workflow-engine login passwords before returning connectors to non-super-admin clients.
       // api keys (ops.apiKey, bcgpt.apiKey) are kept as-is so the UI can display configured status.
-      const safeConnectors = isSuperAdmin(client) ? connectors : stripOpsUserFromConnectors(connectors);
+      const safeConnectors = isSuperAdmin(client)
+        ? connectors
+        : stripSensitiveUserCredentialsFromConnectors(connectors);
       respond(true, { workspaceId, connectors: safeConnectors }, undefined);
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
@@ -1743,9 +1852,9 @@ export const pmosHandlers: GatewayRequestHandlers = {
       const currentWorkflowId = typeof p?.currentWorkflowId === "string" ? p.currentWorkflowId.trim() : null;
       let currentWorkflowContext = "";
       if (currentWorkflowId) {
-        const { getN8nWorkflow } = await import("../n8n-api-client.js");
+        const { getWorkflowEngineWorkflow } = await import("../workflow-api-client.js");
         const wfResult = await withTimeout(
-          getN8nWorkflow(workspaceId, currentWorkflowId).catch(() => ({ ok: false as const })),
+          getWorkflowEngineWorkflow(workspaceId, currentWorkflowId).catch(() => ({ ok: false as const })),
           4000,
           { ok: false as const },
         );
@@ -1804,7 +1913,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           type: "function" as const,
           function: {
             name: "pmos_ops_list_node_types",
-            description: "List available workflow node types (triggers and actions). Node types are exposed in n8n-compatible names.",
+            description: "List available workflow node types (triggers and actions). Legacy-compatible aliases remain accepted where needed.",
             parameters: { type: "object", properties: {}, additionalProperties: false },
           },
         },
@@ -1908,13 +2017,13 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       // â”€â”€ Tool executor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const executeTool = async (toolName: string, args: Record<string, unknown>): Promise<string> => {
         const {
-          listN8nCredentials,
-          listN8nWorkflows,
-          createN8nWorkflow,
-          getN8nWorkflow,
-          executeN8nWorkflow,
-          listN8nNodeTypes,
-        } = await import("../n8n-api-client.js");
+          createWorkflowEngineWorkflow,
+          executeWorkflowEngineWorkflow,
+          getWorkflowEngineWorkflow,
+          listWorkflowEngineConnections,
+          listWorkflowEngineNodeTypes,
+          listWorkflowEngineWorkflows,
+        } = await import("../workflow-api-client.js");
 
         const normalizedToolName = toolName.startsWith("pmos_n8n_")
           ? `pmos_ops_${toolName.slice("pmos_n8n_".length)}`
@@ -1923,7 +2032,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         switch (normalizedToolName) {
           case "pmos_ops_list_credentials": {
             pushProgress("Checking available integrations...");
-            const r = await listN8nCredentials(workspaceId);
+            const r = await listWorkflowEngineConnections(workspaceId);
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to list credentials" });
             return JSON.stringify({
               credentials: (r.credentials ?? []).map((c) => ({ id: c.id, name: c.name, type: c.type })),
@@ -1931,7 +2040,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           }
           case "pmos_ops_list_workflows": {
             pushProgress("Loading existing workflows...");
-            const r = await listN8nWorkflows(workspaceId);
+            const r = await listWorkflowEngineWorkflows(workspaceId);
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to list workflows" });
             return JSON.stringify({
               workflows: (r.workflows ?? []).map((w) => ({ id: w.id, name: w.name, active: w.active })),
@@ -1939,7 +2048,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           }
           case "pmos_ops_list_node_types": {
             pushProgress("Looking up available node types...");
-            const r = await listN8nNodeTypes(workspaceId);
+            const r = await listWorkflowEngineNodeTypes(workspaceId);
             // Always inject the custom Basecamp node + all essential core n8n nodes,
             // regardless of what the live n8n REST API returns (it often returns empty).
             const BASECAMP_CUSTOM_NODE = {
@@ -2011,7 +2120,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               return node;
             });
             if (correctedCount > 0) {
-              pushProgress(`âš™ï¸ Auto-corrected ${correctedCount} node type(s) to valid n8n names.`);
+              pushProgress(`âš™ï¸ Auto-corrected ${correctedCount} node type(s) to valid workflow aliases.`);
             }
 
             // â”€â”€ Credential check for Basecamp nodes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -2019,7 +2128,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               String(n.type ?? "") === "n8n-nodes-basecamp.basecamp"
             );
             if (hasBasecampNode) {
-              const credR = await listN8nCredentials(workspaceId);
+              const credR = await listWorkflowEngineConnections(workspaceId);
               const creds = credR.ok ? (credR.credentials ?? []) : [];
               const basecampCred = creds.find((c) => c.type === "basecampApi");
               if (!basecampCred) {
@@ -2060,10 +2169,10 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               await new Promise((res) => setTimeout(res, 30));
             }
 
-            const r = await createN8nWorkflow(workspaceId, {
+            const r = await createWorkflowEngineWorkflow(workspaceId, {
               name,
               active: false,
-              nodes: nodes as Parameters<typeof createN8nWorkflow>[1]["nodes"],
+              nodes: nodes as Parameters<typeof createWorkflowEngineWorkflow>[1]["nodes"],
               connections,
             });
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to create workflow" });
@@ -2085,11 +2194,11 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           case "pmos_ops_update_workflow": {
             const id = String(args.workflow_id ?? "").trim();
             if (!id) return JSON.stringify({ error: "workflow_id is required" });
-            const { updateN8nWorkflow } = await import("../n8n-api-client.js");
+            const { updateWorkflowEngineWorkflow } = await import("../workflow-api-client.js");
             pushProgress(`Updating workflow...`);
-            const r = await updateN8nWorkflow(workspaceId, id, {
+            const r = await updateWorkflowEngineWorkflow(workspaceId, id, {
               ...(typeof args.name === "string" ? { name: args.name } : {}),
-              ...(Array.isArray(args.nodes) ? { nodes: args.nodes as Parameters<typeof createN8nWorkflow>[1]["nodes"] } : {}),
+              ...(Array.isArray(args.nodes) ? { nodes: args.nodes as Parameters<typeof createWorkflowEngineWorkflow>[1]["nodes"] } : {}),
               ...(args.connections && typeof args.connections === "object" ? { connections: args.connections as Record<string, unknown> } : {}),
             });
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to update workflow" });
@@ -2105,7 +2214,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           case "pmos_ops_get_workflow": {
             const id = String(args.workflow_id ?? "").trim();
             if (!id) return JSON.stringify({ error: "workflow_id is required" });
-            const r = await getN8nWorkflow(workspaceId, id);
+            const r = await getWorkflowEngineWorkflow(workspaceId, id);
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to get workflow" });
             return JSON.stringify(r.workflow);
           }
@@ -2113,7 +2222,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             const id = String(args.workflow_id ?? "").trim();
             if (!id) return JSON.stringify({ error: "workflow_id is required" });
             pushProgress("Executing workflow...");
-            const r = await executeN8nWorkflow(workspaceId, id);
+            const r = await executeWorkflowEngineWorkflow(workspaceId, id);
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to execute workflow" });
             return JSON.stringify({ success: true, executionId: r.executionId ?? "unknown" });
           }
@@ -2238,7 +2347,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                 (n) => String(n.type ?? "") === "n8n-nodes-basecamp.basecamp",
               );
               if (hasBasecampNode) {
-                const { listN8nCredentials: listCreds } = await import("../n8n-api-client.js");
+                const { listWorkflowEngineConnections: listCreds } = await import("../workflow-api-client.js");
                 const credR2 = await listCreds(workspaceId);
                 const bcCred = (credR2.ok ? (credR2.credentials ?? []) : []).find(
                   (c) => c.type === "basecampApi",
@@ -2274,7 +2383,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                 });
                 await new Promise<void>((res) => setTimeout(res, 30));
               }
-              const { createN8nWorkflow: createWf } = await import("../n8n-api-client.js");
+              const { createWorkflowEngineWorkflow: createWf } = await import("../workflow-api-client.js");
               const createR = await createWf(workspaceId, {
                 name: wfName,
                 active: false,
@@ -2430,7 +2539,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- When asked to CREATE a workflow: call `pmos_ops_create_workflow` immediately â€” never output JSON for the user to import.",
         "- When asked to EDIT/UPDATE/FIX a workflow: call `pmos_ops_update_workflow` on the existing workflow ID.",
         "- Always call `pmos_ops_list_credentials` first so credential IDs are correct in node parameters.",
-        "- For Basecamp nodes: always use `n8n-nodes-basecamp.basecamp`, always include credentials, use `findByName` to resolve project names.",
+        "- For Basecamp steps: always use the compat Basecamp node type `n8n-nodes-basecamp.basecamp`, always include credentials, use `findByName` to resolve project names.",
         "- Position nodes left-to-right: trigger at [250, 300], each next node at x+250.",
         "- Build complete, runnable workflows â€” no manual rewiring needed.",
         "",
@@ -2475,7 +2584,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           type: "function" as const,
           function: {
             name: "pmos_ops_list_node_types",
-            description: "List available workflow node types (triggers and actions). Node types are exposed in n8n-compatible names.",
+            description: "List available workflow node types (triggers and actions). Legacy-compatible aliases remain accepted where needed.",
             parameters: { type: "object", properties: {}, additionalProperties: false },
           },
         },
@@ -2555,14 +2664,14 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       // â”€â”€ Tool executor â€” calls n8n-api-client directly â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const executeTool = async (toolName: string, args: Record<string, unknown>): Promise<string> => {
         const {
-          listN8nCredentials,
-          listN8nWorkflows,
-          createN8nWorkflow,
-          updateN8nWorkflow,
-          getN8nWorkflow,
-          executeN8nWorkflow,
-          listN8nNodeTypes,
-        } = await import("../n8n-api-client.js");
+          createWorkflowEngineWorkflow,
+          executeWorkflowEngineWorkflow,
+          getWorkflowEngineWorkflow,
+          listWorkflowEngineConnections,
+          listWorkflowEngineNodeTypes,
+          listWorkflowEngineWorkflows,
+          updateWorkflowEngineWorkflow,
+        } = await import("../workflow-api-client.js");
 
         const normalizedToolName = toolName.startsWith("pmos_n8n_")
           ? `pmos_ops_${toolName.slice("pmos_n8n_".length)}`
@@ -2570,21 +2679,21 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
 
         switch (normalizedToolName) {
           case "pmos_ops_list_credentials": {
-            const r = await listN8nCredentials(workspaceId);
+            const r = await listWorkflowEngineConnections(workspaceId);
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to list credentials" });
             return JSON.stringify({
               credentials: (r.credentials ?? []).map((c) => ({ id: c.id, name: c.name, type: c.type })),
             });
           }
           case "pmos_ops_list_workflows": {
-            const r = await listN8nWorkflows(workspaceId);
+            const r = await listWorkflowEngineWorkflows(workspaceId);
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to list workflows" });
             return JSON.stringify({
               workflows: (r.workflows ?? []).map((w) => ({ id: w.id, name: w.name, active: w.active })),
             });
           }
           case "pmos_ops_list_node_types": {
-            const r2 = await listN8nNodeTypes(workspaceId);
+            const r2 = await listWorkflowEngineNodeTypes(workspaceId);
             const BASECAMP_NODE2 = { name: "n8n-nodes-basecamp.basecamp", displayName: "Basecamp (BCgpt Custom Node)", description: "Full Basecamp integration. ALWAYS use this for Basecamp.", group: ["custom"], version: 1 };
             const CORE_NODES2 = [
               { name: "n8n-nodes-base.manualTrigger", displayName: "Manual Trigger", group: ["trigger"], version: 1 },
@@ -2627,10 +2736,10 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               if (TYPE_FIXES2[t]) return { ...node, type: TYPE_FIXES2[t] };
               return node;
             });
-            const r = await createN8nWorkflow(workspaceId, {
+            const r = await createWorkflowEngineWorkflow(workspaceId, {
               name,
               active: false,
-              nodes: nodes2 as Parameters<typeof createN8nWorkflow>[1]["nodes"],
+              nodes: nodes2 as Parameters<typeof createWorkflowEngineWorkflow>[1]["nodes"],
               connections,
             });
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to create workflow" });
@@ -2644,14 +2753,14 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           case "pmos_ops_get_workflow": {
             const id = String(args.workflow_id ?? "").trim();
             if (!id) return JSON.stringify({ error: "workflow_id is required" });
-            const r = await getN8nWorkflow(workspaceId, id);
+            const r = await getWorkflowEngineWorkflow(workspaceId, id);
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to get workflow" });
             return JSON.stringify(r.workflow);
           }
           case "pmos_ops_execute_workflow": {
             const id = String(args.workflow_id ?? "").trim();
             if (!id) return JSON.stringify({ error: "workflow_id is required" });
-            const r = await executeN8nWorkflow(workspaceId, id);
+            const r = await executeWorkflowEngineWorkflow(workspaceId, id);
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to execute workflow" });
             return JSON.stringify({ success: true, executionId: r.executionId ?? "unknown" });
           }
@@ -2665,9 +2774,9 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                 : {};
             if (!wfId) return JSON.stringify({ error: "workflow_id is required" });
             if (!wfName) return JSON.stringify({ error: "name is required" });
-            const ur = await updateN8nWorkflow(workspaceId, wfId, {
+            const ur = await updateWorkflowEngineWorkflow(workspaceId, wfId, {
               name: wfName,
-              nodes: wfNodes as Parameters<typeof updateN8nWorkflow>[2]["nodes"],
+              nodes: wfNodes as Parameters<typeof updateWorkflowEngineWorkflow>[2]["nodes"],
               connections: wfConnections,
             });
             if (!ur.ok) return JSON.stringify({ error: ur.error ?? "Failed to update workflow" });
@@ -2931,13 +3040,19 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         overdueTodos: overdueTodos.length,
         dueTodayTodos: dueTodayTodos.length,
       };
+      const connected =
+        identity.connected ||
+        listProjectsResult.ok ||
+        overdueRpc.ok ||
+        dueTodayRpc.ok ||
+        detailsByProjectId.size > 0;
 
       respond(
         true,
         {
           workspaceId,
           configured: true,
-          connected: identity.connected,
+          connected,
           connectorUrl: bcgptUrl,
           identity,
           totals,
@@ -2991,14 +3106,36 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const workspaceId = requireWorkspaceId(client);
       const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
       const wc = await readWorkspaceConnectors(workspaceId);
-      const bcgptUrl = (wc?.bcgpt?.url as string | undefined)?.trim() || "https://bcgpt.wickedlab.io";
       const bcgptApiKey = (wc?.bcgpt?.apiKey as string | undefined)?.trim();
       if (!bcgptApiKey) {
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "No BCGPT API key stored. Save your Basecamp connection key in Integrations first."));
         return;
       }
-      const { upsertBasecampCredential } = await import("../n8n-api-client.js");
-      const result = await upsertBasecampCredential(workspaceId, bcgptApiKey);
+      const { upsertBasecampWorkflowConnection } = await import("../workflow-api-client.js");
+      const result = await upsertBasecampWorkflowConnection(workspaceId, bcgptApiKey);
+      if (!result.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to configure Basecamp credential in workflow engine"));
+        return;
+      }
+      respond(true, { ok: true, credentialId: result.credentialId, message: "Basecamp credential configured in your workflow engine." }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.flow.setup.basecamp": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
+      const wc = await readWorkspaceConnectors(workspaceId);
+      const bcgptApiKey = (wc?.bcgpt?.apiKey as string | undefined)?.trim();
+      if (!bcgptApiKey) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "No BCGPT API key stored. Save your Basecamp connection key in Integrations first."));
+        return;
+      }
+      const { upsertBasecampWorkflowConnection } = await import("../workflow-api-client.js");
+      const result = await upsertBasecampWorkflowConnection(workspaceId, bcgptApiKey);
       if (!result.ok) {
         respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to configure Basecamp credential in workflow engine"));
         return;
@@ -3015,14 +3152,13 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const workspaceId = requireWorkspaceId(client);
       const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
       const wc = await readWorkspaceConnectors(workspaceId);
-      const bcgptUrl = (wc?.bcgpt?.url as string | undefined)?.trim() || "https://bcgpt.wickedlab.io";
       const bcgptApiKey = (wc?.bcgpt?.apiKey as string | undefined)?.trim();
       if (!bcgptApiKey) {
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "No BCGPT API key stored. Save your Basecamp connection key in Integrations first."));
         return;
       }
-      const { upsertBasecampCredential } = await import("../n8n-api-client.js");
-      const result = await upsertBasecampCredential(workspaceId, bcgptApiKey);
+      const { upsertBasecampWorkflowConnection } = await import("../workflow-api-client.js");
+      const result = await upsertBasecampWorkflowConnection(workspaceId, bcgptApiKey);
       if (!result.ok) {
         respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to configure Basecamp credential in workflow engine"));
         return;
@@ -3039,8 +3175,24 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     try {
       if (!client) throw new Error("client context required");
       const workspaceId = requireWorkspaceId(client);
-      const { listN8nCredentials } = await import("../n8n-api-client.js");
-      const result = await listN8nCredentials(workspaceId);
+      const { listWorkflowEngineConnections } = await import("../workflow-api-client.js");
+      const result = await listWorkflowEngineConnections(workspaceId);
+      if (!result.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to list workflow-engine credentials"));
+        return;
+      }
+      respond(true, { credentials: result.credentials }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.flow.credentials.list": async ({ respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const { listWorkflowEngineConnections } = await import("../workflow-api-client.js");
+      const result = await listWorkflowEngineConnections(workspaceId);
       if (!result.ok) {
         respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to list workflow-engine credentials"));
         return;
@@ -3055,8 +3207,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     try {
       if (!client) throw new Error("client context required");
       const workspaceId = requireWorkspaceId(client);
-      const { listN8nCredentials } = await import("../n8n-api-client.js");
-      const result = await listN8nCredentials(workspaceId);
+      const { listWorkflowEngineConnections } = await import("../workflow-api-client.js");
+      const result = await listWorkflowEngineConnections(workspaceId);
       if (!result.ok) {
         respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to list workflow-engine credentials"));
         return;
@@ -3071,8 +3223,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     try {
       if (!client) throw new Error("client context required");
       const workspaceId = requireWorkspaceId(client);
-      const { listN8nCredentials } = await import("../n8n-api-client.js");
-      const result = await listN8nCredentials(workspaceId);
+      const { listWorkflowEngineConnections } = await import("../workflow-api-client.js");
+      const result = await listWorkflowEngineConnections(workspaceId);
       if (!result.ok) {
         respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to list workflow-engine credentials"));
         return;
@@ -3092,8 +3244,29 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "name and type required"));
         return;
       }
-      const { createN8nCredential } = await import("../n8n-api-client.js");
-      const result = await createN8nCredential(workspaceId, p.name, p.type, p.data || {});
+      const { createWorkflowEngineConnection } = await import("../workflow-api-client.js");
+      const result = await createWorkflowEngineConnection(workspaceId, p.name, p.type, p.data || {});
+      if (!result.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to create workflow-engine credential"));
+        return;
+      }
+      respond(true, { ok: true, credentialId: result.credentialId }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.flow.credentials.create": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const p = params as { name?: string; type?: string; data?: Record<string, unknown> } | null;
+      if (!p?.name || !p?.type) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "name and type required"));
+        return;
+      }
+      const { createWorkflowEngineConnection } = await import("../workflow-api-client.js");
+      const result = await createWorkflowEngineConnection(workspaceId, p.name, p.type, p.data || {});
       if (!result.ok) {
         respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to create workflow-engine credential"));
         return;
@@ -3113,8 +3286,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "name and type required"));
         return;
       }
-      const { createN8nCredential } = await import("../n8n-api-client.js");
-      const result = await createN8nCredential(workspaceId, p.name, p.type, p.data || {});
+      const { createWorkflowEngineConnection } = await import("../workflow-api-client.js");
+      const result = await createWorkflowEngineConnection(workspaceId, p.name, p.type, p.data || {});
       if (!result.ok) {
         respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to create workflow-engine credential"));
         return;
@@ -3134,8 +3307,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "name and type required"));
         return;
       }
-      const { createN8nCredential } = await import("../n8n-api-client.js");
-      const result = await createN8nCredential(workspaceId, p.name, p.type, p.data || {});
+      const { createWorkflowEngineConnection } = await import("../workflow-api-client.js");
+      const result = await createWorkflowEngineConnection(workspaceId, p.name, p.type, p.data || {});
       if (!result.ok) {
         respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to create workflow-engine credential"));
         return;
@@ -3155,8 +3328,29 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "credentialId required"));
         return;
       }
-      const { deleteN8nCredential } = await import("../n8n-api-client.js");
-      const result = await deleteN8nCredential(workspaceId, p.credentialId);
+      const { deleteWorkflowEngineConnection } = await import("../workflow-api-client.js");
+      const result = await deleteWorkflowEngineConnection(workspaceId, p.credentialId);
+      if (!result.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to delete workflow-engine credential"));
+        return;
+      }
+      respond(true, { ok: true }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.flow.credentials.delete": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const p = params as { credentialId?: string } | null;
+      if (!p?.credentialId) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "credentialId required"));
+        return;
+      }
+      const { deleteWorkflowEngineConnection } = await import("../workflow-api-client.js");
+      const result = await deleteWorkflowEngineConnection(workspaceId, p.credentialId);
       if (!result.ok) {
         respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to delete workflow-engine credential"));
         return;
@@ -3176,8 +3370,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "credentialId required"));
         return;
       }
-      const { deleteN8nCredential } = await import("../n8n-api-client.js");
-      const result = await deleteN8nCredential(workspaceId, p.credentialId);
+      const { deleteWorkflowEngineConnection } = await import("../workflow-api-client.js");
+      const result = await deleteWorkflowEngineConnection(workspaceId, p.credentialId);
       if (!result.ok) {
         respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to delete workflow-engine credential"));
         return;
@@ -3197,8 +3391,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "credentialId required"));
         return;
       }
-      const { deleteN8nCredential } = await import("../n8n-api-client.js");
-      const result = await deleteN8nCredential(workspaceId, p.credentialId);
+      const { deleteWorkflowEngineConnection } = await import("../workflow-api-client.js");
+      const result = await deleteWorkflowEngineConnection(workspaceId, p.credentialId);
       if (!result.ok) {
         respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to delete workflow-engine credential"));
         return;

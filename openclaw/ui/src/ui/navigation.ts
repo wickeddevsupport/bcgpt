@@ -265,11 +265,11 @@ export function subtitleForTab(tab: Tab) {
     case "runs":
       return "Live and historical executions across agents and automations.";
     case "integrations":
-      return "Connect workflow engines and apps (embedded workflow engine, BCGPT/Basecamp, and more).";
+      return "Connect Flow, Basecamp, and provider keys for this workspace.";
     case "models":
       return "Create and manage workspace models, keys, and agent assignments.";
     case "connections":
-      return "Connect the services your AI agents will use: Slack, GitHub, Email, and more.";
+      return "Manage native Flow connections for this workspace.";
     case "command-center":
       return "Basecamp project management center with live summaries and AI operations.";
     case "admin":

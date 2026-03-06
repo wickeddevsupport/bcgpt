@@ -1,8 +1,14 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { randomUUID } from "node:crypto";
+import fs from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import {
+  adminResetPmosUserPassword,
   buildPmosClearSessionCookieValue,
   buildPmosSessionCookieValue,
+  changePmosUserPassword,
   extractPmosSessionTokenFromRequest,
   loginPmosUser,
   resolvePmosSessionFromRequest,
@@ -21,12 +27,411 @@ const SHARED_PROVIDER_PREFER = new Set(["local-ollama", "ollama", "kilo"]);
 const DEFAULT_KILO_FREE_MODEL_REF = "kilo/minimax/minimax-m2.5:free";
 const DEFAULT_SHARED_THINKING_LEVEL = "low";
 const DEFAULT_SHARED_REASONING_LEVEL = "stream";
+const UNSUPPORTED_STARTER_MODEL_REFS = new Set(["kilo/auto-free"]);
+const requireModule = createRequire(import.meta.url);
 const DEPRECATED_MODEL_REF_REPLACEMENTS: Record<string, string> = {
+  "kilo/auto-free": "kilo/minimax/minimax-m2.5:free",
   "kilo/z-ai/glm-5:free": "kilo/minimax/minimax-m2.5:free",
   "kilo/glm-5:free": "kilo/minimax/minimax-m2.5:free",
   "kilo/z-ai/glm-5": "kilo/minimax/minimax-m2.5:free",
   "kilo/glm-5": "kilo/minimax/minimax-m2.5:free",
 };
+
+function readEnvValue(names: string[]): string | null {
+  for (const name of names) {
+    const value = process.env[name];
+    if (typeof value !== "string") {
+      continue;
+    }
+    const trimmed = value.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return null;
+}
+
+function readTextFileIfExists(filePath: string): string | null {
+  try {
+    if (!existsSync(filePath)) {
+      return null;
+    }
+    const value = readFileSync(filePath, "utf-8").trim();
+    return value || null;
+  } catch {
+    return null;
+  }
+}
+
+function isTruthyText(value: string | null | undefined): boolean {
+  return /^(1|true|yes|on)$/i.test(String(value ?? "").trim());
+}
+
+function tryRequireModule(moduleId: string): unknown | null {
+  try {
+    return requireModule(moduleId) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+type ActivepiecesDatabaseConnectionConfig = {
+  connectionString: string;
+  connectionTimeoutMillis: number;
+  query_timeout: number;
+  statement_timeout: number;
+  ssl?: { rejectUnauthorized: boolean };
+};
+
+type ActivepiecesDatabaseHostConfig = {
+  host: string;
+  port: number;
+  user: string;
+  password?: string;
+  database: string;
+  connectionTimeoutMillis: number;
+  query_timeout: number;
+  statement_timeout: number;
+  ssl?: { rejectUnauthorized: boolean };
+};
+
+type ActivepiecesDatabaseConfig =
+  | ActivepiecesDatabaseConnectionConfig
+  | ActivepiecesDatabaseHostConfig;
+
+function createActivepiecesDbTimingConfig() {
+  return {
+    connectionTimeoutMillis: 4_000,
+    query_timeout: 5_000,
+    statement_timeout: 5_000,
+  } as const;
+}
+
+function readActivepiecesDbPort(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value.trim());
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return 5432;
+}
+
+function readActivepiecesDatabaseConfigFromFile(
+  sslConfig?: { rejectUnauthorized: boolean },
+): ActivepiecesDatabaseConfig | null {
+  const explicitPath = readEnvValue([
+    "ACTIVEPIECES_DB_CONFIG_FILE",
+    "PMOS_ACTIVEPIECES_DB_CONFIG_FILE",
+  ]);
+  const defaultPath = path.join(resolveStateDir(process.env), "activepieces-db.json");
+  const configPath = explicitPath ?? defaultPath;
+  if (!configPath || !existsSync(configPath)) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(configPath, "utf-8")) as Record<string, unknown>;
+    const connectionStringCandidate =
+      (typeof parsed.connectionString === "string" ? parsed.connectionString.trim() : "") ||
+      (typeof parsed.databaseUrl === "string" ? parsed.databaseUrl.trim() : "") ||
+      (typeof parsed.url === "string" ? parsed.url.trim() : "");
+    const timingConfig = createActivepiecesDbTimingConfig();
+    if (connectionStringCandidate) {
+      return {
+        connectionString: connectionStringCandidate,
+        ...timingConfig,
+        ...(sslConfig ? { ssl: sslConfig } : {}),
+      };
+    }
+
+    const host =
+      (typeof parsed.host === "string" ? parsed.host.trim() : "") ||
+      (typeof parsed.hostname === "string" ? parsed.hostname.trim() : "");
+    const user =
+      (typeof parsed.user === "string" ? parsed.user.trim() : "") ||
+      (typeof parsed.username === "string" ? parsed.username.trim() : "");
+    const database =
+      (typeof parsed.database === "string" ? parsed.database.trim() : "") ||
+      (typeof parsed.dbName === "string" ? parsed.dbName.trim() : "") ||
+      (typeof parsed.name === "string" ? parsed.name.trim() : "");
+    if (!host || !user || !database) {
+      return null;
+    }
+    const password = typeof parsed.password === "string" ? parsed.password : undefined;
+    return {
+      host,
+      port: readActivepiecesDbPort(parsed.port),
+      user,
+      password,
+      database,
+      ...timingConfig,
+      ...(sslConfig ? { ssl: sslConfig } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function resolveActivepiecesDatabaseConfig(): ActivepiecesDatabaseConfig | null {
+  const sslEnabled = isTruthyText(
+    readEnvValue([
+      "ACTIVEPIECES_POSTGRES_SSL",
+      "ACTIVEPIECES_DB_SSL",
+      "AP_POSTGRES_SSL",
+    ]),
+  );
+  const sslConfig = sslEnabled ? { rejectUnauthorized: false } : undefined;
+  const timingConfig = createActivepiecesDbTimingConfig();
+
+  const connectionString = readEnvValue([
+    "ACTIVEPIECES_DATABASE_URL",
+    "ACTIVEPIECES_DB_URL",
+    "FLOW_DATABASE_URL",
+    "AP_POSTGRES_URL",
+  ]);
+  if (connectionString) {
+    return {
+      connectionString,
+      ...timingConfig,
+      ...(sslConfig ? { ssl: sslConfig } : {}),
+    };
+  }
+
+  const host = readEnvValue([
+    "ACTIVEPIECES_POSTGRES_HOST",
+    "ACTIVEPIECES_DB_HOST",
+    "AP_POSTGRES_HOST",
+    "PGHOST",
+  ]);
+  const user = readEnvValue([
+    "ACTIVEPIECES_POSTGRES_USERNAME",
+    "ACTIVEPIECES_DB_USER",
+    "AP_POSTGRES_USERNAME",
+    "PGUSER",
+  ]);
+  const database = readEnvValue([
+    "ACTIVEPIECES_POSTGRES_DATABASE",
+    "ACTIVEPIECES_DB_NAME",
+    "AP_POSTGRES_DATABASE",
+    "PGDATABASE",
+  ]);
+  if (!host || !user || !database) {
+    return readActivepiecesDatabaseConfigFromFile(sslConfig);
+  }
+  const port = readActivepiecesDbPort(
+    readEnvValue([
+      "ACTIVEPIECES_POSTGRES_PORT",
+      "ACTIVEPIECES_DB_PORT",
+      "AP_POSTGRES_PORT",
+      "PGPORT",
+    ]),
+  );
+  const password =
+    readEnvValue([
+      "ACTIVEPIECES_POSTGRES_PASSWORD",
+      "ACTIVEPIECES_DB_PASSWORD",
+      "AP_POSTGRES_PASSWORD",
+      "PGPASSWORD",
+    ]) ?? undefined;
+  return {
+    host,
+    port,
+    user,
+    password,
+    database,
+    ...timingConfig,
+    ...(sslConfig ? { ssl: sslConfig } : {}),
+  };
+}
+
+function resolveActivepiecesSyncToken(): string | null {
+  const tokenFromEnv = readEnvValue([
+    "ACTIVEPIECES_SYNC_TOKEN",
+    "PMOS_ACTIVEPIECES_SYNC_TOKEN",
+    "PMOS_WORKFLOW_SYNC_TOKEN",
+  ]);
+  if (tokenFromEnv) {
+    return tokenFromEnv;
+  }
+  const explicitPath = readEnvValue([
+    "ACTIVEPIECES_SYNC_TOKEN_FILE",
+    "PMOS_ACTIVEPIECES_SYNC_TOKEN_FILE",
+  ]);
+  const candidatePaths = [
+    explicitPath,
+    path.join(resolveStateDir(process.env), "activepieces-sync-token"),
+    "/app/.openclaw/activepieces-sync-token",
+    "/app/openclaw/.openclaw/activepieces-sync-token",
+    "/root/.openclaw/activepieces-sync-token",
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  for (const tokenPath of candidatePaths) {
+    const token = readTextFileIfExists(tokenPath);
+    if (token) {
+      return token;
+    }
+  }
+  return null;
+}
+
+async function runPasswordUpdateQueriesWithHash(
+  client: { query: (sql: string, values: unknown[]) => Promise<{ rowCount?: number }> },
+  email: string,
+  hash: string,
+): Promise<number> {
+  const nextTokenVersion = randomUUID();
+  const queries = [
+    `UPDATE user_identity
+       SET password = $2,
+           lastpassword = $2,
+           "tokenVersion" = $3,
+           updated = NOW()
+     WHERE lower(trim(email)) = lower(trim($1))`,
+    `UPDATE user_identity
+       SET password = $2,
+           lastpassword = $2,
+           updated = NOW()
+     WHERE lower(trim(email)) = lower(trim($1))`,
+    `UPDATE user_identity
+       SET password = $2,
+           "tokenVersion" = $3,
+           updated = NOW()
+     WHERE lower(trim(email)) = lower(trim($1))`,
+    `UPDATE user_identity
+       SET password = $2,
+           updated = NOW()
+     WHERE lower(trim(email)) = lower(trim($1))`,
+  ];
+  for (const sql of queries) {
+    try {
+      const result = await client.query(sql, [email, hash, nextTokenVersion]);
+      const rowCount = typeof result.rowCount === "number" ? result.rowCount : 0;
+      if (rowCount > 0) {
+        return rowCount;
+      }
+    } catch {
+      // keep trying compatibility variants
+    }
+  }
+  return 0;
+}
+
+async function runPasswordUpdateQueriesWithDatabaseHash(
+  client: { query: (sql: string, values: unknown[]) => Promise<{ rowCount?: number }> },
+  email: string,
+  password: string,
+): Promise<number> {
+  const nextTokenVersion = randomUUID();
+  const queries = [
+    `WITH next_hash AS (
+       SELECT crypt($2, gen_salt('bf', 10)) AS value
+     )
+     UPDATE user_identity AS ui
+        SET password = next_hash.value,
+            lastpassword = next_hash.value,
+            "tokenVersion" = $3,
+            updated = NOW()
+       FROM next_hash
+      WHERE lower(trim(ui.email)) = lower(trim($1))`,
+    `WITH next_hash AS (
+       SELECT crypt($2, gen_salt('bf', 10)) AS value
+     )
+     UPDATE user_identity AS ui
+        SET password = next_hash.value,
+            lastpassword = next_hash.value,
+            updated = NOW()
+       FROM next_hash
+      WHERE lower(trim(ui.email)) = lower(trim($1))`,
+    `WITH next_hash AS (
+       SELECT crypt($2, gen_salt('bf', 10)) AS value
+     )
+     UPDATE user_identity AS ui
+        SET password = next_hash.value,
+            updated = NOW()
+       FROM next_hash
+      WHERE lower(trim(ui.email)) = lower(trim($1))`,
+  ];
+  for (const sql of queries) {
+    try {
+      const result = await client.query(sql, [email, password, nextTokenVersion]);
+      const rowCount = typeof result.rowCount === "number" ? result.rowCount : 0;
+      if (rowCount > 0) {
+        return rowCount;
+      }
+    } catch {
+      // keep trying compatibility variants
+    }
+  }
+  return 0;
+}
+
+async function trySyncActivepiecesPasswordViaDatabase(params: {
+  email: string;
+  password: string;
+}): Promise<boolean> {
+  const config = resolveActivepiecesDatabaseConfig();
+  if (!config) {
+    console.warn("[pmos] activepieces password sync: database config unavailable");
+    return false;
+  }
+  const pgModule = tryRequireModule("pg") as
+    | {
+        Client?: new (options: unknown) => {
+          connect: () => Promise<void>;
+          end: () => Promise<void>;
+          query: (sql: string, values: unknown[]) => Promise<{ rowCount?: number }>;
+        };
+      }
+    | null;
+  const PgClient = pgModule?.Client;
+  if (!PgClient) {
+    console.warn("[pmos] activepieces password sync: 'pg' module not available");
+    return false;
+  }
+  const client = new PgClient(config);
+  try {
+    await client.connect();
+  } catch (err) {
+    console.warn("[pmos] activepieces password sync: database connect failed:", String(err));
+    return false;
+  }
+  try {
+    const bcryptModule = tryRequireModule("bcryptjs") as
+      | {
+          hash?: (plain: string, rounds: number) => Promise<string>;
+        }
+      | null;
+    if (typeof bcryptModule?.hash === "function") {
+      const hashed = await bcryptModule.hash(params.password, 10);
+      const updated = await runPasswordUpdateQueriesWithHash(client, params.email, hashed);
+      if (updated > 0) {
+        console.info("[pmos] activepieces password sync: updated with bcrypt hash");
+        return true;
+      }
+    }
+    const updatedWithDbHash = await runPasswordUpdateQueriesWithDatabaseHash(
+      client,
+      params.email,
+      params.password,
+    );
+    if (updatedWithDbHash > 0) {
+      console.info("[pmos] activepieces password sync: updated with database hash");
+      return true;
+    }
+    console.warn(
+      "[pmos] activepieces password sync: database update ran but no user_identity row matched",
+      params.email,
+    );
+    return false;
+  } catch (err) {
+    console.warn("[pmos] activepieces password sync: database update failed:", String(err));
+    return false;
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+}
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;
@@ -58,6 +463,12 @@ function resolveAuthRoute(pathname: string, basePath: string): string | null {
   if (pathname === `${rootPrefix}/me`) {
     return "me";
   }
+  if (pathname === `${rootPrefix}/change-password`) {
+    return "change-password";
+  }
+  if (pathname === `${rootPrefix}/admin/reset-password`) {
+    return "admin-reset-password";
+  }
 
   if (normalizedBase) {
     const prefixed = `${normalizedBase}${rootPrefix}`;
@@ -72,6 +483,12 @@ function resolveAuthRoute(pathname: string, basePath: string): string | null {
     }
     if (pathname === `${prefixed}/me`) {
       return "me";
+    }
+    if (pathname === `${prefixed}/change-password`) {
+      return "change-password";
+    }
+    if (pathname === `${prefixed}/admin/reset-password`) {
+      return "admin-reset-password";
     }
   }
   return null;
@@ -126,16 +543,25 @@ async function postJsonWithTimeout(
   url: string,
   payload: unknown,
   timeoutMs = 6000,
+  options?: { headers?: Record<string, string> | null },
 ): Promise<Response | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      accept: "application/json",
+    };
+    if (options?.headers) {
+      for (const [name, value] of Object.entries(options.headers)) {
+        if (typeof value === "string" && value.trim()) {
+          headers[name] = value;
+        }
+      }
+    }
     return await fetch(url, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json",
-      },
+      headers,
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
@@ -144,6 +570,58 @@ async function postJsonWithTimeout(
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function trySyncActivepiecesPasswordViaHttp(params: {
+  baseUrl: string;
+  email: string;
+  password: string;
+}): Promise<boolean> {
+  const syncToken = resolveActivepiecesSyncToken();
+  if (!syncToken) {
+    return false;
+  }
+  const endpoints = ["/api/v1/authentication/sync-password", "/api/v1/authentication/password-sync"];
+  for (const endpoint of endpoints) {
+    const res = await postJsonWithTimeout(
+      `${params.baseUrl}${endpoint}`,
+      {
+        email: params.email,
+        password: params.password,
+      },
+      6_000,
+      {
+        headers: {
+          "x-pmos-sync-token": syncToken,
+        },
+      },
+    );
+    if (!res) {
+      continue;
+    }
+    if (res.ok) {
+      try {
+        const payload = (await res.json()) as unknown;
+        if (
+          payload &&
+          typeof payload === "object" &&
+          "updated" in payload &&
+          (payload as { updated?: unknown }).updated === false
+        ) {
+          continue;
+        }
+      } catch {
+        // best-effort response parsing
+      }
+      console.info("[pmos] activepieces password sync: updated via HTTP bridge");
+      return true;
+    }
+    if (res.status === 401 || res.status === 403) {
+      console.warn("[pmos] activepieces password sync: HTTP bridge token rejected");
+      return false;
+    }
+  }
+  return false;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -182,29 +660,34 @@ function splitHumanName(raw: string | null | undefined): { firstName: string; la
   return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
 }
 
-async function ensureActivepiecesCredentialParity(params: {
+export async function ensureActivepiecesCredentialParity(params: {
   baseUrl: string;
   email: string;
   password: string;
   name?: string | null;
+  previousPassword?: string | null;
 }): Promise<void> {
   const baseUrl = normalizeExternalOpsUrl(params.baseUrl);
   const email = params.email.trim().toLowerCase();
   const password = params.password;
+  const previousPassword = String(params.previousPassword ?? "").trim();
   if (!email || !password) {
     return;
   }
 
-  const trySignIn = async (attempts: number): Promise<boolean> => {
+  const trySignIn = async (passwordToUse: string, attempts: number): Promise<boolean> => {
+    if (!passwordToUse) {
+      return false;
+    }
     const loginEndpoints = [
       "/api/v1/authentication/sign-in",
       "/api/v1/users/sign-in",
       "/api/v1/users/login",
     ];
     const loginPayloads = [
-      { email, password },
-      { emailOrLdapLoginId: email, password },
-      { username: email, password },
+      { email, password: passwordToUse },
+      { emailOrLdapLoginId: email, password: passwordToUse },
+      { username: email, password: passwordToUse },
     ];
 
     for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -223,7 +706,29 @@ async function ensureActivepiecesCredentialParity(params: {
     return false;
   };
 
-  if (await trySignIn(1)) {
+  if (await trySignIn(password, 1)) {
+    return;
+  }
+
+  const syncedFromHttp = await trySyncActivepiecesPasswordViaHttp({
+    baseUrl,
+    email,
+    password,
+  });
+  if (syncedFromHttp && (await trySignIn(password, 6))) {
+    return;
+  }
+
+  const hadPreviousPassword = previousPassword && previousPassword !== password;
+  const previousPasswordStillValid = hadPreviousPassword
+    ? await trySignIn(previousPassword, 1)
+    : false;
+  if (
+    !syncedFromHttp &&
+    previousPasswordStillValid &&
+    (await trySyncActivepiecesPasswordViaDatabase({ email, password })) &&
+    (await trySignIn(password, 6))
+  ) {
     return;
   }
 
@@ -249,7 +754,7 @@ async function ensureActivepiecesCredentialParity(params: {
       }
       attemptedSignUp = true;
       if (res.ok) {
-        if (await trySignIn(6)) {
+        if (await trySignIn(password, 6)) {
           return;
         }
         throw new Error("Activepieces sign-up succeeded but sign-in verification failed.");
@@ -260,18 +765,33 @@ async function ensureActivepiecesCredentialParity(params: {
     }
   }
 
-  if ((attemptedSignUp || sawConflict) && (await trySignIn(6))) {
+  if ((attemptedSignUp || sawConflict) && (await trySignIn(password, 6))) {
+    return;
+  }
+
+  if (
+    !syncedFromHttp &&
+    (sawConflict || previousPasswordStillValid) &&
+    (await trySyncActivepiecesPasswordViaDatabase({ email, password })) &&
+    (await trySignIn(password, 6))
+  ) {
     return;
   }
 
   throw new Error(
-    attemptedSignUp || sawConflict
+    previousPasswordStillValid
+      ? "Activepieces account exists with a different password and no password-sync bridge is configured."
+      : attemptedSignUp || sawConflict
       ? "Unable to establish Activepieces account/session for workspace user."
       : "Activepieces sign-in and sign-up attempts failed.",
   );
 }
 
-async function syncWorkflowIdentityForWorkspace(user: WarmIdentityUser, password: string): Promise<void> {
+async function syncWorkflowIdentityForWorkspace(
+  user: WarmIdentityUser,
+  password: string,
+  options?: { previousPassword?: string | null },
+): Promise<void> {
   const workspaceId = String(user.workspaceId ?? "").trim();
   const email = typeof user.email === "string" ? user.email.trim().toLowerCase() : "";
   if (!workspaceId || !email || !password) {
@@ -328,6 +848,8 @@ async function syncWorkflowIdentityForWorkspace(user: WarmIdentityUser, password
         email,
         password,
         name: typeof user.name === "string" ? user.name : null,
+        previousPassword:
+          typeof options?.previousPassword === "string" ? options.previousPassword : null,
       }),
       12_000,
       "Activepieces parity timed out.",
@@ -342,12 +864,43 @@ async function syncWorkflowIdentityForWorkspace(user: WarmIdentityUser, password
   }
 }
 
+async function ensureWorkspaceOpsProjectProvisioned(user: WarmIdentityUser): Promise<void> {
+  const workspaceId = String(user.workspaceId ?? "").trim();
+  if (!workspaceId) {
+    return;
+  }
+  try {
+    const [{ readWorkspaceConnectors }, { provisionWorkspaceOps }] = await Promise.all([
+      import("./workspace-connectors.js"),
+      import("./pmos-provision-ops.js"),
+    ]);
+    const connectors = await readWorkspaceConnectors(workspaceId).catch(() => null);
+    const existingProjectId =
+      typeof connectors?.ops?.projectId === "string" ? connectors.ops.projectId.trim() : "";
+    if (existingProjectId) {
+      return;
+    }
+    await provisionWorkspaceOps(
+      workspaceId,
+      typeof user.name === "string" && user.name.trim()
+        ? `${user.name.trim()} Workspace`
+        : undefined,
+    );
+  } catch (err) {
+    console.warn("[pmos] workflow project auto-provision failed:", String(err));
+  }
+}
+
 async function warmEmbeddedN8nIdentity(user: WarmIdentityUser, preferredPassword?: string): Promise<void> {
   try {
-    const [{ readLocalN8nConfig }, { getOrCreateWorkspaceN8nCookie }] = await Promise.all([
+    const [{ isLegacyEmbeddedN8nEnabled }, { readLocalN8nConfig }, { getOrCreateWorkspaceN8nCookie }] =
+      await Promise.all([
+        import("./n8n-embed.js"),
       import("./pmos-ops-proxy.js"),
       import("./n8n-auth-bridge.js"),
-    ]);
+      ]);
+    if (!isLegacyEmbeddedN8nEnabled()) return;
+
     const localN8n = readLocalN8nConfig();
     if (!localN8n) return;
 
@@ -524,12 +1077,120 @@ function resolveWorkspaceAgentSessionStorePath(workspaceId: string, agentId: str
   );
 }
 
+function resolveWorkspaceAgentWorkspacePath(workspaceId: string, agentId: string): string {
+  return path.join(
+    resolveStateDir(process.env),
+    "workspaces",
+    workspaceId.trim(),
+    slugifyAgentId(agentId),
+  );
+}
+
+function resolveWorkspaceAgentStatePath(workspaceId: string, agentId: string): string {
+  return path.join(
+    resolveStateDir(process.env),
+    "workspaces",
+    workspaceId.trim(),
+    "agents",
+    slugifyAgentId(agentId),
+  );
+}
+
 function resolveWorkspaceSessionStoreTemplate(workspaceId: string): string {
   const trimmed = String(workspaceId || "").trim();
   if (!trimmed) {
     return "";
   }
   return `${DEFAULT_STARTER_AGENT_WORKSPACE_BASE}/${trimmed}/agents/{agentId}/sessions/sessions.json`;
+}
+
+function resolveWorkspaceMemoryStoreTemplate(workspaceId: string): string {
+  const trimmed = String(workspaceId || "").trim();
+  if (!trimmed) {
+    return "";
+  }
+  return `${DEFAULT_STARTER_AGENT_WORKSPACE_BASE}/${trimmed}/agents/{agentId}/memory/index.sqlite`;
+}
+
+function looksLikeLegacyStarterWorkspacePackage(raw: string): boolean {
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const name = typeof parsed.name === "string" ? parsed.name.trim() : "";
+    const main = typeof parsed.main === "string" ? parsed.main.trim() : "";
+    const testScript =
+      typeof parsed.scripts === "object" &&
+      parsed.scripts !== null &&
+      !Array.isArray(parsed.scripts) &&
+      typeof (parsed.scripts as Record<string, unknown>).test === "string"
+        ? String((parsed.scripts as Record<string, unknown>).test)
+        : "";
+    return (
+      name === DEFAULT_STARTER_AGENT_ID &&
+      main === "test_duckduckgo.js" &&
+      /no test specified/i.test(testScript)
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function sanitizeLegacyStarterWorkspaceScaffold(workspaceDir: string): Promise<boolean> {
+  const packagePath = path.join(workspaceDir, "package.json");
+  let packageRaw = "";
+  try {
+    packageRaw = await fs.readFile(packagePath, "utf-8");
+  } catch {
+    return false;
+  }
+  if (!looksLikeLegacyStarterWorkspacePackage(packageRaw)) {
+    return false;
+  }
+
+  const junkPaths = [
+    ".git",
+    "package.json",
+    "openclaw.json",
+    "simple_test.js",
+    "common_query_test.js",
+    "tasks.js",
+    "view_tasks.js",
+    "web_search.js",
+    "test_duckduckgo.js",
+    "test_wikipedia_fallback.js",
+    "test_skills.js",
+    "test_tasks_only.js",
+    "data",
+    path.join("skills", "README.md"),
+    path.join("skills", "_template.md"),
+    path.join("skills", "tasks.md"),
+    path.join("skills", "web_search.md"),
+  ];
+
+  await Promise.all(
+    junkPaths.map(async (entry) =>
+      fs.rm(path.join(workspaceDir, entry), { recursive: true, force: true }).catch(() => undefined),
+    ),
+  );
+
+  try {
+    const remainingSkills = await fs.readdir(path.join(workspaceDir, "skills"));
+    if (remainingSkills.length === 0) {
+      await fs.rm(path.join(workspaceDir, "skills"), { recursive: true, force: true });
+    }
+  } catch {
+    // ignore
+  }
+
+  return true;
+}
+
+async function resetStarterWorkspaceArtifacts(workspaceId: string, agentId: string): Promise<void> {
+  const workspacePath = resolveWorkspaceAgentWorkspacePath(workspaceId, agentId);
+  const statePath = resolveWorkspaceAgentStatePath(workspaceId, agentId);
+  await Promise.all([
+    fs.rm(workspacePath, { recursive: true, force: true }).catch(() => undefined),
+    fs.rm(statePath, { recursive: true, force: true }).catch(() => undefined),
+  ]);
 }
 
 function hasOllamaEnvConfigured(): boolean {
@@ -567,6 +1228,56 @@ function resolveModelAlias(modelRef: string): string {
   return "Workspace Default";
 }
 
+function normalizeModelRef(modelRef: string): string {
+  return modelRef.trim().toLowerCase();
+}
+
+function resolvePreferredSharedProviderModelRef(
+  providerName: string,
+  providerRaw: unknown,
+): string | null {
+  const provider = providerName.trim().toLowerCase();
+  if (!provider || !isRecord(providerRaw)) {
+    return null;
+  }
+  const rawModels = providerRaw.models;
+  if (!Array.isArray(rawModels) || rawModels.length === 0) {
+    return null;
+  }
+
+  const refs: string[] = [];
+  for (const modelRaw of rawModels) {
+    if (!isRecord(modelRaw)) {
+      continue;
+    }
+    const id = typeof modelRaw.id === "string" ? modelRaw.id.trim() : "";
+    if (!id) {
+      continue;
+    }
+    const ref = `${provider}/${id}`;
+    refs.push(resolveDeprecatedModelRefReplacement(ref) ?? ref);
+  }
+  if (refs.length === 0) {
+    return null;
+  }
+
+  const normalizedRefs = refs.map((ref) => normalizeModelRef(ref));
+  if (provider === "kilo") {
+    const explicitKiloStarterIndex = normalizedRefs.findIndex(
+      (ref) => ref === DEFAULT_KILO_FREE_MODEL_REF,
+    );
+    if (explicitKiloStarterIndex >= 0) {
+      return refs[explicitKiloStarterIndex] ?? DEFAULT_KILO_FREE_MODEL_REF;
+    }
+  }
+
+  const safeIndex = normalizedRefs.findIndex((ref) => !UNSUPPORTED_STARTER_MODEL_REFS.has(ref));
+  if (safeIndex >= 0) {
+    return refs[safeIndex] ?? null;
+  }
+  return refs[0] ?? null;
+}
+
 function findSharedWorkspaceModelRef(cfg: unknown): string | null {
   const providers = getPath(cfg, ["models", "providers"]);
   if (!isRecord(providers)) {
@@ -590,15 +1301,9 @@ function findSharedWorkspaceModelRef(cfg: unknown): string | null {
   }
 
   for (const [providerName, providerRaw] of ordered) {
-    const provider = providerName.trim().toLowerCase();
-    if (!provider || !isRecord(providerRaw)) continue;
-    const models = providerRaw.models;
-    if (!Array.isArray(models) || models.length === 0) continue;
-    for (const modelRaw of models) {
-      if (!isRecord(modelRaw)) continue;
-      const id = typeof modelRaw.id === "string" ? modelRaw.id.trim() : "";
-      if (!id) continue;
-      return `${provider}/${id}`;
+    const preferredRef = resolvePreferredSharedProviderModelRef(providerName, providerRaw);
+    if (preferredRef) {
+      return preferredRef;
     }
   }
   // When KILO_API_KEY env is set, use Kilo free model as the shared default.
@@ -612,6 +1317,13 @@ function findSharedWorkspaceModelRef(cfg: unknown): string | null {
   return null;
 }
 
+export const __test = {
+  findSharedWorkspaceModelRef,
+  resolveDeprecatedModelRefReplacement,
+  looksLikeLegacyStarterWorkspacePackage,
+  sanitizeLegacyStarterWorkspaceScaffold,
+};
+
 /**
  * Reset a single workspace: wipe all agents then re-provision the single starter agent.
  * Called by the super-admin reset-all-workspaces RPC.
@@ -620,6 +1332,7 @@ export async function resetWorkspaceToSingleStarter(workspaceId: string): Promis
   const [{ readWorkspaceConfig, writeWorkspaceConfig }] = await Promise.all([
     import("./workspace-config.js"),
   ]);
+  await resetStarterWorkspaceArtifacts(workspaceId, DEFAULT_STARTER_AGENT_ID);
   const existing = (await readWorkspaceConfig(workspaceId)) ?? {};
   // Wipe agents list and primary model so ensureWorkspaceStarterExperience rebuilds from scratch.
   const agents = isRecord(existing.agents) ? { ...existing.agents as Record<string, unknown> } : {};
@@ -649,6 +1362,7 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
       existing = scrubbedOverlay.cleaned;
       await writeWorkspaceConfig(workspaceId, existing);
     }
+    const sharedModelRef = findSharedWorkspaceModelRef(globalCfg);
     const existingAgentsList = getPath(existing, ["agents", "list"]);
     const hasAgents = Array.isArray(existingAgentsList) && existingAgentsList.length > 0;
     const repairedAgentsList = Array.isArray(existingAgentsList)
@@ -661,10 +1375,25 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
             // workspaces. Drop them when this workspace logs in.
             return [];
           }
-          if (currentWorkspaceId) {
-            return [entry];
+          let nextEntry: Record<string, unknown> = entry;
+          if (!currentWorkspaceId) {
+            nextEntry = { ...nextEntry, workspaceId };
           }
-          return [{ ...entry, workspaceId }];
+          const currentModelRef =
+            typeof nextEntry.model === "string" ? nextEntry.model.trim() : "";
+          const replacementModelRef = currentModelRef
+            ? resolveDeprecatedModelRefReplacement(currentModelRef)
+            : null;
+          if (replacementModelRef && replacementModelRef !== currentModelRef) {
+            nextEntry = { ...nextEntry, model: replacementModelRef };
+          } else if (
+            currentModelRef &&
+            sharedModelRef &&
+            UNSUPPORTED_STARTER_MODEL_REFS.has(normalizeModelRef(currentModelRef))
+          ) {
+            nextEntry = { ...nextEntry, model: sharedModelRef };
+          }
+          return [nextEntry];
         })
       : null;
     const repairedAgentsChanged =
@@ -672,17 +1401,18 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
       Array.isArray(repairedAgentsList) &&
       (repairedAgentsList.length !== existingAgentsList.length ||
         repairedAgentsList.some((entry, index) => entry !== existingAgentsList[index]));
-
-    const sharedModelRef = findSharedWorkspaceModelRef(globalCfg);
     const starterName =
       typeof user.name === "string" && user.name.trim()
         ? `${user.name.trim().split(/\s+/)[0]}'s Assistant`
         : DEFAULT_STARTER_AGENT_NAME;
     const starterAgentId = slugifyAgentId(DEFAULT_STARTER_AGENT_ID);
     const starterWorkspace = `${DEFAULT_STARTER_AGENT_WORKSPACE_BASE}/${workspaceId}/${starterAgentId}`;
+    const starterWorkspacePath = resolveWorkspaceAgentWorkspacePath(workspaceId, starterAgentId);
+    const scrubbedLegacyWorkspace = await sanitizeLegacyStarterWorkspaceScaffold(starterWorkspacePath);
 
     const patch: Record<string, unknown> = {};
     const workspaceSessionStore = resolveWorkspaceSessionStoreTemplate(workspaceId);
+    const workspaceMemoryStore = resolveWorkspaceMemoryStoreTemplate(workspaceId);
 
     if (!hasAgents) {
       patch.agents = {
@@ -775,8 +1505,86 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
       }
     }
 
+    const existingMemorySearch = getPath(existing, ["agents", "defaults", "memorySearch"]);
+    const currentMemorySearch = isRecord(existingMemorySearch)
+      ? (existingMemorySearch as Record<string, unknown>)
+      : null;
+    const currentMemoryStore =
+      typeof getPath(currentMemorySearch, ["store", "path"]) === "string"
+        ? String(getPath(currentMemorySearch, ["store", "path"])).trim()
+        : "";
+    const currentMemoryEnabled = getPath(currentMemorySearch, ["enabled"]);
+    const currentSessionMemory = getPath(currentMemorySearch, ["experimental", "sessionMemory"]);
+    const currentSources = Array.isArray(getPath(currentMemorySearch, ["sources"]))
+      ? (getPath(currentMemorySearch, ["sources"]) as unknown[])
+      : null;
+    const memorySearchPatch: Record<string, unknown> = {};
+
+    if (typeof currentMemoryEnabled !== "boolean") {
+      memorySearchPatch.enabled = true;
+    }
+    if (typeof currentSessionMemory !== "boolean") {
+      memorySearchPatch.experimental = {
+        sessionMemory: true,
+      };
+    }
+    if (!currentSources || currentSources.length === 0) {
+      memorySearchPatch.sources = ["memory", "sessions"];
+    }
+    if (
+      workspaceMemoryStore &&
+      (!currentMemoryStore ||
+        !currentMemoryStore.includes(`/workspaces/${workspaceId}/`) ||
+        !currentMemoryStore.includes("{agentId}"))
+    ) {
+      memorySearchPatch.store = {
+        path: workspaceMemoryStore,
+      };
+    }
+    const currentSync = isRecord(getPath(currentMemorySearch, ["sync"]))
+      ? (getPath(currentMemorySearch, ["sync"]) as Record<string, unknown>)
+      : null;
+    const syncPatch: Record<string, unknown> = {};
+    if (typeof currentSync?.onSessionStart !== "boolean") {
+      syncPatch.onSessionStart = true;
+    }
+    if (typeof currentSync?.onSearch !== "boolean") {
+      syncPatch.onSearch = true;
+    }
+    if (typeof currentSync?.watch !== "boolean") {
+      syncPatch.watch = true;
+    }
+    if (Object.keys(syncPatch).length > 0) {
+      memorySearchPatch.sync = syncPatch;
+    }
+    if (Object.keys(memorySearchPatch).length > 0) {
+      patch.agents = {
+        ...(isRecord(patch.agents) ? (patch.agents as Record<string, unknown>) : {}),
+        defaults: {
+          ...(isRecord(getPath(patch, ["agents", "defaults"]))
+            ? (getPath(patch, ["agents", "defaults"]) as Record<string, unknown>)
+            : {}),
+          memorySearch: memorySearchPatch,
+        },
+      };
+    }
+
     if (Object.keys(patch).length > 0) {
       await patchWorkspaceConfig(workspaceId, patch);
+    }
+
+    try {
+      const { ensureAgentWorkspace } = await import("../agents/workspace.js");
+      await ensureAgentWorkspace({
+        dir: starterWorkspace,
+        ensureBootstrapFiles: true,
+      });
+    } catch (err) {
+      console.warn("[pmos] workspace bootstrap files ensure failed:", String(err));
+    }
+
+    if (scrubbedLegacyWorkspace) {
+      console.info(`[pmos] scrubbed polluted starter workspace scaffold for workspace=${workspaceId}`);
     }
 
     try {
@@ -933,6 +1741,61 @@ export async function handlePmosAuthHttpRequest(params: {
     return true;
   }
 
+  if (route === "change-password") {
+    const session = await resolvePmosSessionFromRequest(req);
+    if (!session.ok) {
+      sendJson(res, 401, { ok: false, error: "Authentication required." });
+      return true;
+    }
+    const currentPassword =
+      typeof parsed.currentPassword === "string" ? parsed.currentPassword : "";
+    const newPassword = typeof parsed.newPassword === "string" ? parsed.newPassword : "";
+    const result = await changePmosUserPassword({
+      userId: session.user.id,
+      currentPassword,
+      newPassword,
+    });
+    if (!result.ok) {
+      sendJson(res, result.status, { ok: false, error: result.error });
+      return true;
+    }
+    await ensureWorkspaceStarterExperience(result.user);
+    await syncWorkflowIdentityForWorkspace(result.user, newPassword, {
+      previousPassword: currentPassword,
+    });
+    void warmEmbeddedN8nIdentity(result.user, newPassword);
+    res.setHeader("Set-Cookie", buildPmosSessionCookieValue(result.sessionToken, req));
+    sendJson(res, 200, { ok: true, user: result.user });
+    return true;
+  }
+
+  if (route === "admin-reset-password") {
+    const session = await resolvePmosSessionFromRequest(req);
+    if (!session.ok) {
+      sendJson(res, 401, { ok: false, error: "Authentication required." });
+      return true;
+    }
+    if (session.user.role !== "super_admin") {
+      sendJson(res, 403, { ok: false, error: "super_admin role required." });
+      return true;
+    }
+    const email = typeof parsed.email === "string" ? parsed.email : "";
+    const newPassword = typeof parsed.newPassword === "string" ? parsed.newPassword : "";
+    const result = await adminResetPmosUserPassword({
+      actorUserId: session.user.id,
+      targetEmail: email,
+      newPassword,
+    });
+    if (!result.ok) {
+      sendJson(res, result.status, { ok: false, error: result.error });
+      return true;
+    }
+    await syncWorkflowIdentityForWorkspace(result.user, newPassword);
+    void warmEmbeddedN8nIdentity(result.user, newPassword);
+    sendJson(res, 200, { ok: true, user: result.user });
+    return true;
+  }
+
   if (route === "signup") {
     const name = typeof parsed.name === "string" ? parsed.name : "";
     const email = typeof parsed.email === "string" ? parsed.email : "";
@@ -942,27 +1805,10 @@ export async function handlePmosAuthHttpRequest(params: {
       sendJson(res, result.status, { ok: false, error: result.error });
       return true;
     }
-    // Fire-and-forget: provision *remote* ops (legacy) only when explicitly enabled.
-    // Embedded n8n is the default runtime and does not require provisioning.
-    const allowRemoteOpsFallback = (() => {
-      const raw = (process.env.PMOS_ALLOW_REMOTE_OPS_FALLBACK ?? "").trim().toLowerCase();
-      return raw === "1" || raw === "true" || raw === "yes";
-    })();
-    if (allowRemoteOpsFallback) {
-      import("./pmos-provision-ops.js")
-        .then(({ provisionWorkspaceOps }) => provisionWorkspaceOps(result.user.workspaceId))
-        .catch((err: unknown) => {
-          console.warn(
-            "[pmos] auto-provision ops failed for workspace",
-            result.user.workspaceId,
-            String(err),
-          );
-        });
-    }
-    // Warm workspace-scoped embedded n8n auth so the automations iframe opens
-    // with the same PMOS user context on first load.
+    // Keep the workflow-engine account and connectors ready on first load.
     await ensureWorkspaceStarterExperience(result.user);
     await syncWorkflowIdentityForWorkspace(result.user, password);
+    await ensureWorkspaceOpsProjectProvisioned(result.user);
     void warmEmbeddedN8nIdentity(result.user, password);
     res.setHeader("Set-Cookie", buildPmosSessionCookieValue(result.sessionToken, req));
     sendJson(res, 200, { ok: true, user: result.user });
@@ -977,9 +1823,10 @@ export async function handlePmosAuthHttpRequest(params: {
       sendJson(res, result.status, { ok: false, error: result.error });
       return true;
     }
-    // Same warm-up on login to avoid first-request races in embedded n8n auth.
+    // Same parity warm-up on login to avoid first-request races in Flow provisioning.
     await ensureWorkspaceStarterExperience(result.user);
     await syncWorkflowIdentityForWorkspace(result.user, password);
+    await ensureWorkspaceOpsProjectProvisioned(result.user);
     void warmEmbeddedN8nIdentity(result.user, password);
     res.setHeader("Set-Cookie", buildPmosSessionCookieValue(result.sessionToken, req));
     sendJson(res, 200, { ok: true, user: result.user });

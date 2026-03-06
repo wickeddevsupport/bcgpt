@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Workflow AI calls the workspace-effective configured model.
  *
  * Source of truth:
@@ -35,7 +35,7 @@ function resJsonWithTimeout<T>(res: Response, timeoutMs: number): Promise<T> {
     res.json() as Promise<T>,
     new Promise<never>((_, reject) =>
       setTimeout(
-        () => reject(new Error(`json_body_timeout_${timeoutMs}ms — model may be streaming too slowly`)),
+        () => reject(new Error(`json_body_timeout_${timeoutMs}ms â€” model may be streaming too slowly`)),
         timeoutMs,
       )
     ),
@@ -550,7 +550,7 @@ export async function callWorkspaceModel(
   return { ok: false, error: compact || "Model call failed for configured workflow assistant models." };
 }
 
-// ─── Agentic tool-calling loop ────────────────────────────────────────────────
+// â”€â”€â”€ Agentic tool-calling loop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export type ChatToolDefinition = {
   type: "function";
@@ -610,7 +610,7 @@ export async function callWorkspaceModelAgentLoop(
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (apiKey.trim()) headers.Authorization = `Bearer ${apiKey}`;
 
-    // Build message array — tool messages interleaved after each tool call round
+    // Build message array â€” tool messages interleaved after each tool call round
     const agentMessages: Array<Record<string, unknown>> = [
       { role: "system", content: systemPrompt },
       ...userMessages.map((m) => ({ role: m.role, content: m.content })),
@@ -663,7 +663,7 @@ export async function callWorkspaceModelAgentLoop(
         const toolCalls = assistantMsg.tool_calls;
 
         if (!toolCalls?.length) {
-          // No tool calls — final text response
+          // No tool calls â€” final text response
           return {
             ok: true,
             text: assistantMsg.content ?? "",
@@ -698,7 +698,7 @@ export async function callWorkspaceModelAgentLoop(
         // Loop continues with tool results injected
       }
 
-      // Max iterations reached — return last assistant text if any
+      // Max iterations reached â€” return last assistant text if any
       const lastText = [...agentMessages]
         .reverse()
         .find((m) => m.role === "assistant" && m.content);
@@ -716,7 +716,7 @@ export async function callWorkspaceModelAgentLoop(
   return { ok: false, error: "Model call failed for all configured providers." };
 }
 
-// ─── n8n node catalog for the system prompt ──────────────────────────────────
+// â”€â”€â”€ n8n node catalog for the system prompt â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // Dynamic n8n node catalog - fetches from n8n API with caching
 const NODE_CATALOG_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
@@ -740,10 +740,10 @@ async function fetchN8nNodeTypes(n8nBaseUrl: string): Promise<string> {
 ## Available n8n Node Types (fetched from your n8n instance)
 
 ### Triggers
-${triggers.map((n) => `- ${n.name} — ${n.description ?? n.displayName}`).join("\n")}
+${triggers.map((n) => `- ${n.name} â€” ${n.description ?? n.displayName}`).join("\n")}
 
 ### Actions
-${actions.map((n) => `- ${n.name} — ${n.description ?? n.displayName}`).join("\n")}
+${actions.map((n) => `- ${n.name} â€” ${n.description ?? n.displayName}`).join("\n")}
 `;
   } catch {
     return N8N_NODE_CATALOG_FALLBACK;
@@ -777,14 +777,14 @@ function isWorkspaceTriggerNode(nodeName: string): boolean {
   return lower.includes("trigger") || lower.endsWith(".trigger");
 }
 
-// ─── Basecamp node cheatsheet (always injected — authoritative reference) ──────
+// â”€â”€â”€ Basecamp node cheatsheet (always injected â€” authoritative reference) â”€â”€â”€â”€â”€â”€
 
 const BASECAMP_NODE_CHEATSHEET = `
-## ⭐ Custom Basecamp Node — Complete Reference (n8n-nodes-basecamp.basecamp)
+## â­ Custom Basecamp Node â€” Complete Reference (n8n-nodes-basecamp.basecamp)
 
 This is YOUR custom Basecamp integration node. It is ALWAYS available when Basecamp is connected.
 Node type: \`n8n-nodes-basecamp.basecamp\`
-Credential type: \`basecampApi\` (auto-linked — include "credentials" key in every Basecamp node)
+Credential type: \`basecampApi\` (auto-linked â€” include "credentials" key in every Basecamp node)
 
 ### All Resources and Operations
 
@@ -932,31 +932,31 @@ Chain these two nodes: first find project by name, then get its todo lists.
 \`\`\`
 
 ### Expression Reference for Chaining Nodes
-- \`={{ $json.id.toString() }}\` — convert numeric Basecamp ID to string
-- \`={{ $json.projectId }}\` — pass projectId from previous node output
-- \`={{ $node["Get Projects"].json[0].id.toString() }}\` — access first item from a named node
-- \`={{ $json.name }}\` — use the name field from previous output
-- \`={{ $json.title }}\` — use the title field (for todos, cards)
+- \`={{ $json.id.toString() }}\` â€” convert numeric Basecamp ID to string
+- \`={{ $json.projectId }}\` â€” pass projectId from previous node output
+- \`={{ $node["Get Projects"].json[0].id.toString() }}\` â€” access first item from a named node
+- \`={{ $json.name }}\` â€” use the name field from previous output
+- \`={{ $json.title }}\` â€” use the title field (for todos, cards)
 
 ### Design Patterns for Basecamp Workflows
 
 **Pattern 1: Create todo from webhook data**
-Webhook Trigger → Set (format data) → Basecamp (todo: create) → Respond to Webhook
+Webhook Trigger â†’ Set (format data) â†’ Basecamp (todo: create) â†’ Respond to Webhook
 
 **Pattern 2: Auto-notify on new Basecamp data**
-Schedule Trigger → Basecamp (project: getAll) → Split In Batches → Basecamp (todo: getAll) → Filter (check due soon) → Slack (notify) / Gmail (send email)
+Schedule Trigger â†’ Basecamp (project: getAll) â†’ Split In Batches â†’ Basecamp (todo: getAll) â†’ Filter (check due soon) â†’ Slack (notify) / Gmail (send email)
 
 **Pattern 3: Sync between Basecamp and other tools**
-Webhook → Basecamp (findByName project) → Basecamp (todolist: getAll) → Code (pick first list) → Basecamp (todo: create) → GitHub (issue: create)
+Webhook â†’ Basecamp (findByName project) â†’ Basecamp (todolist: getAll) â†’ Code (pick first list) â†’ Basecamp (todo: create) â†’ GitHub (issue: create)
 
 **Pattern 4: Status board update**  
-Schedule Trigger → Basecamp (todo: getAll) → Filter (completed) → Google Sheets (append) → Slack (summary)
+Schedule Trigger â†’ Basecamp (todo: getAll) â†’ Filter (completed) â†’ Google Sheets (append) â†’ Slack (summary)
 
 ### CRITICAL: When User Mentions Basecamp
-- ALWAYS use \`n8n-nodes-basecamp.basecamp\` — never invent a different type name
-- ALWAYS include the \`credentials\` key — the credential name will be auto-linked
+- ALWAYS use \`n8n-nodes-basecamp.basecamp\` â€” never invent a different type name
+- ALWAYS include the \`credentials\` key â€” the credential name will be auto-linked
 - Use \`findByName\` operation when the user mentions a project by name (so runtime resolves the ID)
-- Chain nodes: get project → get todolists → create todo (3-node pattern for full context)
+- Chain nodes: get project â†’ get todolists â†’ create todo (3-node pattern for full context)
 - For numeric IDs from previous nodes always call \`.toString()\` in the expression
 `;
 function formatWorkspaceNodeRow(row: WorkspaceNodeCatalogRow): string {
@@ -1006,7 +1006,7 @@ function buildWorkspaceNodeCatalog(nodeTypes: WorkspaceNodeCatalogRow[]): string
   const triggerLines = trimWorkspaceNodeRows(triggers.map(formatWorkspaceNodeRow), triggerLimit);
   const actionLines = trimWorkspaceNodeRows(actions.map(formatWorkspaceNodeRow), actionLimit);
 
-  // Always inject the custom Basecamp node at the top — even if n8n's REST API doesn't surface it.
+  // Always inject the custom Basecamp node at the top â€” even if n8n's REST API doesn't surface it.
   const basecampCustomEntry = "- n8n-nodes-basecamp.basecamp | Basecamp (Custom BCgpt Node) | ALWAYS use this for ALL Basecamp operations";
   const customSection = customLines.length > 0
     ? [basecampCustomEntry, ...customLines.filter(l => !l.includes("n8n-nodes-basecamp"))].join("\n")
@@ -1015,7 +1015,7 @@ function buildWorkspaceNodeCatalog(nodeTypes: WorkspaceNodeCatalogRow[]): string
   return `
 ## Available n8n Node Types (live from this workspace)
 Use this live catalog as the source of truth for node type names.
-⚠️ IMPORTANT: ALWAYS use \`n8n-nodes-basecamp.basecamp\` for ANY Basecamp operation — this is the custom BCgpt node. NEVER use \`n8n-nodes-base.basecamp\` or any other basecamp variant.
+âš ï¸ IMPORTANT: ALWAYS use \`n8n-nodes-basecamp.basecamp\` for ANY Basecamp operation â€” this is the custom BCgpt node. NEVER use \`n8n-nodes-base.basecamp\` or any other basecamp variant.
 
 ### Custom/Community Nodes (ALWAYS AVAILABLE)
 ${customSection}
@@ -1055,104 +1055,104 @@ const N8N_NODE_CATALOG_FALLBACK = `
 ## Available n8n Node Types
 
 ### Triggers (workflow starts with one of these)
-- n8n-nodes-base.webhook — HTTP webhook (any inbound HTTP call triggers the workflow; NOT webhookTrigger)
-- n8n-nodes-base.scheduleTrigger — Cron schedule (e.g. every day at 9am)
-- n8n-nodes-base.manualTrigger — Manual execution only
-- n8n-nodes-base.emailReadImap — Trigger on new email via IMAP
-- n8n-nodes-base.rssFeedReadTrigger — Trigger on new RSS feed item
-- n8n-nodes-base.slackTrigger — Trigger on Slack events (messages, reactions, etc.)
-- n8n-nodes-base.githubTrigger — Trigger on GitHub events (push, PR, issue, etc.)
-- n8n-nodes-base.googleSheetsTrigger — Trigger on new row in Google Sheets
+- n8n-nodes-base.webhook â€” HTTP webhook (any inbound HTTP call triggers the workflow; NOT webhookTrigger)
+- n8n-nodes-base.scheduleTrigger â€” Cron schedule (e.g. every day at 9am)
+- n8n-nodes-base.manualTrigger â€” Manual execution only
+- n8n-nodes-base.emailReadImap â€” Trigger on new email via IMAP
+- n8n-nodes-base.rssFeedReadTrigger â€” Trigger on new RSS feed item
+- n8n-nodes-base.slackTrigger â€” Trigger on Slack events (messages, reactions, etc.)
+- n8n-nodes-base.githubTrigger â€” Trigger on GitHub events (push, PR, issue, etc.)
+- n8n-nodes-base.googleSheetsTrigger â€” Trigger on new row in Google Sheets
 
-### Custom Basecamp Node (YOUR custom integration — always use this for Basecamp)
-- n8n-nodes-basecamp.basecamp — Resources: project, todo, todolist, message, card, comment, person
-  — project ops: getAll, get, findByName, create, update, trash
-  — todo ops: create, get, update, complete, uncomplete, delete
-  — todolist ops: getAll, get, create, update, delete
-  — message ops: create, get, update, delete
-  — person ops: getAll
-  — credential: basecampApi (auto-linked from workspace)
+### Custom Basecamp Node (YOUR custom integration â€” always use this for Basecamp)
+- n8n-nodes-basecamp.basecamp â€” Resources: project, todo, todolist, message, card, comment, person
+  â€” project ops: getAll, get, findByName, create, update, trash
+  â€” todo ops: create, get, update, complete, uncomplete, delete
+  â€” todolist ops: getAll, get, create, update, delete
+  â€” message ops: create, get, update, delete
+  â€” person ops: getAll
+  â€” credential: basecampApi (auto-linked from workspace)
 
 ### Communication
-- n8n-nodes-base.slack — Send messages, create channels, update users (credentials: Slack OAuth)
-- n8n-nodes-base.gmail — Send/read emails via Gmail (credentials: Google OAuth)
-- n8n-nodes-base.emailSend — Send email via SMTP
-- n8n-nodes-base.telegramBot — Send Telegram messages
-- n8n-nodes-base.discord — Send Discord webhook messages
-- n8n-nodes-base.microsoftTeams — Send Teams messages
+- n8n-nodes-base.slack â€” Send messages, create channels, update users (credentials: Slack OAuth)
+- n8n-nodes-base.gmail â€” Send/read emails via Gmail (credentials: Google OAuth)
+- n8n-nodes-base.emailSend â€” Send email via SMTP
+- n8n-nodes-base.telegramBot â€” Send Telegram messages
+- n8n-nodes-base.discord â€” Send Discord webhook messages
+- n8n-nodes-base.microsoftTeams â€” Send Teams messages
 
 ### Data & Storage
-- n8n-nodes-base.googleSheets — Read/write Google Sheets (credentials: Google OAuth)
-- n8n-nodes-base.airtable — Read/write Airtable records
-- n8n-nodes-base.notion — Read/write Notion pages/databases
-- n8n-nodes-base.postgres — Query PostgreSQL databases
-- n8n-nodes-base.mysql — Query MySQL databases
-- n8n-nodes-base.redis — Get/set Redis values
-- n8n-nodes-base.ftp — Upload/download files via FTP
+- n8n-nodes-base.googleSheets â€” Read/write Google Sheets (credentials: Google OAuth)
+- n8n-nodes-base.airtable â€” Read/write Airtable records
+- n8n-nodes-base.notion â€” Read/write Notion pages/databases
+- n8n-nodes-base.postgres â€” Query PostgreSQL databases
+- n8n-nodes-base.mysql â€” Query MySQL databases
+- n8n-nodes-base.redis â€” Get/set Redis values
+- n8n-nodes-base.ftp â€” Upload/download files via FTP
 
 ### Project Management
-- n8n-nodes-base.github — Issues, PRs, files, releases (credentials: GitHub PAT)
-- n8n-nodes-base.jira — Create/update Jira issues
-- n8n-nodes-base.trello — Manage Trello cards and lists
-- n8n-nodes-base.asana — Create/update Asana tasks
-- n8n-nodes-base.linear — Create/update Linear issues
+- n8n-nodes-base.github â€” Issues, PRs, files, releases (credentials: GitHub PAT)
+- n8n-nodes-base.jira â€” Create/update Jira issues
+- n8n-nodes-base.trello â€” Manage Trello cards and lists
+- n8n-nodes-base.asana â€” Create/update Asana tasks
+- n8n-nodes-base.linear â€” Create/update Linear issues
 
 ### AI & Processing
-- n8n-nodes-base.openAi — Call OpenAI API (chat, images, embeddings)
-- n8n-nodes-base.httpRequest — Make any HTTP request (GET/POST/PUT/DELETE)
-- n8n-nodes-base.code — Run custom JavaScript/Python code
-- n8n-nodes-base.set — Set/transform field values
-- n8n-nodes-base.if — Branch workflow based on a condition
-- n8n-nodes-base.switch — Route to multiple branches
-- n8n-nodes-base.merge — Merge data from multiple branches
-- n8n-nodes-base.splitInBatches — Process items in batches
-- n8n-nodes-base.filter — Keep only items matching a condition
-- n8n-nodes-base.respondToWebhook — Send custom HTTP response from webhook workflow
+- n8n-nodes-base.openAi â€” Call OpenAI API (chat, images, embeddings)
+- n8n-nodes-base.httpRequest â€” Make any HTTP request (GET/POST/PUT/DELETE)
+- n8n-nodes-base.code â€” Run custom JavaScript/Python code
+- n8n-nodes-base.set â€” Set/transform field values
+- n8n-nodes-base.if â€” Branch workflow based on a condition
+- n8n-nodes-base.switch â€” Route to multiple branches
+- n8n-nodes-base.merge â€” Merge data from multiple branches
+- n8n-nodes-base.splitInBatches â€” Process items in batches
+- n8n-nodes-base.filter â€” Keep only items matching a condition
+- n8n-nodes-base.respondToWebhook â€” Send custom HTTP response from webhook workflow
 
 ### CRM & Sales
-- n8n-nodes-base.hubspot — Read/write HubSpot contacts, deals, companies
-- n8n-nodes-base.salesforce — Read/write Salesforce records
-- n8n-nodes-base.pipedrive — Read/write Pipedrive deals
+- n8n-nodes-base.hubspot â€” Read/write HubSpot contacts, deals, companies
+- n8n-nodes-base.salesforce â€” Read/write Salesforce records
+- n8n-nodes-base.pipedrive â€” Read/write Pipedrive deals
 `;
 
-// ─── System prompt ────────────────────────────────────────────────────────────
+// â”€â”€â”€ System prompt â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-export const WORKFLOW_ASSISTANT_SYSTEM_PROMPT = `You are an expert n8n workflow automation assistant integrated into OpenClaw — a next-generation project management and automation platform.
+export const WORKFLOW_ASSISTANT_SYSTEM_PROMPT = `You are an expert workflow automation assistant integrated into OpenClaw â€” a next-generation project management and automation platform.
 
 ## Platform Context: BCgpt + OpenClaw
 
 **OpenClaw** is a unified platform that combines:
 - **Project Management** (Basecamp workspaces, teams, todos, messages, schedules, card tables)
-- **Automation Intelligence** (n8n workflows embedded in-UI, AI-directed creation/editing)
-- **BCgpt** — the AI layer that connects to Basecamp via both MCP (Model Context Protocol) and a smart OpenAPI-compatible action layer
+- **Automation Intelligence** (Activepieces workflows embedded in-UI, AI-directed creation/editing)
+- **BCgpt** â€” the AI layer that connects to Basecamp via both MCP (Model Context Protocol) and a smart OpenAPI-compatible action layer
 
 **BCgpt API Endpoints** (base URL: configured per deployment, typically the workspace gateway):
-- \`POST /mcp\` — MCP JSON-RPC endpoint (authoritative). Accepts \`{jsonrpc:"2.0", method:"tools/call", params:{name, arguments}}\`. Auth via \`x-bcgpt-api-key\` header.
-- \`POST /action/:operation\` — OpenAPI compatibility wrapper for MCP tools. Easier for simple calls.
-- \`smart_action\` — A natural-language intent router (MCP tool). Accepts a plain English \`query\` and automatically calls the correct underlying Basecamp tools, handles pagination, enriches results, and returns structured summaries. Use this when you need Basecamp data and aren't sure of the exact tool.
-- \`GET /startbcgpt\` — OAuth session init
+- \`POST /mcp\` â€” MCP JSON-RPC endpoint (authoritative). Accepts \`{jsonrpc:"2.0", method:"tools/call", params:{name, arguments}}\`. Auth via \`x-bcgpt-api-key\` header.
+- \`POST /action/:operation\` â€” OpenAPI compatibility wrapper for MCP tools. Easier for simple calls.
+- \`smart_action\` â€” A natural-language intent router (MCP tool). Accepts a plain English \`query\` and automatically calls the correct underlying Basecamp tools, handles pagination, enriches results, and returns structured summaries. Use this when you need Basecamp data and aren't sure of the exact tool.
+- \`GET /startbcgpt\` â€” OAuth session init
 
 **Key MCP / BCgpt Tools for DATA RETRIEVAL:**
-- \`smart_action({query})\` — Best general-purpose tool. "List all todos in Project X", "Find messages mentioning deploy", "Who are the people in this account?" etc.
-- \`list_projects\` — All Basecamp projects
-- \`list_todos\`, \`list_todosets\` — Todo items and lists
-- \`list_people\`, \`search_people({query})\` — People/team members
-- \`search_entities({query, types})\` — Cross-resource search
-- \`list_recordings({type, status})\` — Recordings (messages, todos, etc.)
-- \`basecamp_raw({method, path, body})\` — Raw Basecamp API access for anything else
+- \`smart_action({query})\` â€” Best general-purpose tool. "List all todos in Project X", "Find messages mentioning deploy", "Who are the people in this account?" etc.
+- \`list_projects\` â€” All Basecamp projects
+- \`list_todos\`, \`list_todosets\` â€” Todo items and lists
+- \`list_people\`, \`search_people({query})\` â€” People/team members
+- \`search_entities({query, types})\` â€” Cross-resource search
+- \`list_recordings({type, status})\` â€” Recordings (messages, todos, etc.)
+- \`basecamp_raw({method, path, body})\` â€” Raw Basecamp API access for anything else
 
-**n8n Workflow Tools (available via the agent tools below):**
-- \`pmos_n8n_list_credentials\` — See which services are connected
-- \`pmos_n8n_list_workflows\` — List existing workflows
-- \`pmos_n8n_create_workflow({name, nodes, connections})\` — Create a new workflow in n8n NOW
-- \`pmos_n8n_update_workflow({workflow_id, name, nodes, connections})\` — Update the currently open workflow
-- \`pmos_n8n_get_workflow({workflow_id})\` — Get a workflow's full definition
-- \`pmos_n8n_execute_workflow({workflow_id})\` — Test-run a workflow
-- \`pmos_n8n_list_node_types\` — List all available n8n node types
+**Workflow Engine Tools (available via the agent tools below):**
+- \`pmos_ops_list_credentials\` â€” See which services are connected
+- \`pmos_ops_list_workflows\` â€” List existing workflows
+- \`pmos_ops_create_workflow({name, nodes, connections})\` â€” Create a new workflow in the workflow engine NOW
+- \`pmos_ops_update_workflow({workflow_id, name, nodes, connections})\` â€” Update the currently open workflow
+- \`pmos_ops_get_workflow({workflow_id})\` â€” Get a workflow's full definition
+- \`pmos_ops_execute_workflow({workflow_id})\` â€” Test-run a workflow
+- \`pmos_ops_list_node_types\` â€” List all available workflow node types
 
 ## Current Workflow Context
 
-If a section titled "Current Workflow (open in editor)" is present in the conversation, that is the workflow currently visible in the n8n canvas. When editing, always start from that definition — preserve existing nodes and connections unless specifically asked to change or remove them. Use \`pmos_n8n_update_workflow\` to push edits, not \`pmos_n8n_create_workflow\`.
+If a section titled "Current Workflow (open in editor)" is present in the conversation, that is the workflow currently visible in the workflow canvas. When editing, always start from that definition â€” preserve existing nodes and connections unless specifically asked to change or remove them. Use \`pmos_ops_update_workflow\` to push edits, not \`pmos_ops_create_workflow\`.
 
 ## Node Catalog
 
@@ -1168,7 +1168,7 @@ ${BASECAMP_NODE_CHEATSHEET}
 
 Always respond with a JSON object in this exact format:
 {
-  "message": "Your response here — always analyze and explain, never just dump raw data.",
+  "message": "Your response here â€” always analyze and explain, never just dump raw data.",
   "workflow": {              // Include ONLY if creating or modifying a workflow
     "name": "Workflow name",
     "nodes": [...],
@@ -1176,16 +1176,16 @@ Always respond with a JSON object in this exact format:
   }
 }
 
-## Behavioral Rules — How to Think and Respond
+## Behavioral Rules â€” How to Think and Respond
 
 ### 1. Always analyze, never just dump raw output
 - When you retrieve data (credentials, workflow lists, node types), INTERPRET it before responding.
-- Example: Instead of "Here are 23 node types: [huge list...]" say "You have Slack, GitHub, Basecamp, and HTTP nodes available — I'll use the Basecamp webhook trigger and Slack message node."
+- Example: Instead of "Here are 23 node types: [huge list...]" say "You have Slack, GitHub, Basecamp, and HTTP nodes available â€” I'll use the Basecamp webhook trigger and Slack message node."
 - Summarize what matters for the task and proceed.
 
 ### 2. Always explain what you're doing and why
 - Before creating a workflow, briefly describe the plan: triggers, steps, key decisions.
-- After creating, explain: "The workflow is now live in your n8n. To activate it, toggle the workflow switch. For Basecamp webhooks, you'll need to set up the webhook URL in your Basecamp project settings."
+- After creating, explain: "The workflow is now live in your workflow engine. To activate it, toggle the workflow switch. For Basecamp webhooks, you'll need to set up the webhook URL in your Basecamp project settings."
 
 ### 3. Always provide next steps
 - Every response should end with clear next steps for the user:
@@ -1195,13 +1195,13 @@ Always respond with a JSON object in this exact format:
   - "Check the executions tab to verify it ran correctly"
 
 ### 4. Be proactive with tool calls
-- Don't ask the user for info you can discover yourself. Call \`pmos_n8n_list_credentials\` first to know what's connected.
-- If editing an existing workflow, call \`pmos_n8n_get_workflow\` to see its current state before proposing changes.
-- Use \`pmos_n8n_list_node_types\` if you need to verify exact type names.
+- Don't ask the user for info you can discover yourself. Call \`pmos_ops_list_credentials\` first to know what's connected.
+- If editing an existing workflow, call \`pmos_ops_get_workflow\` to see its current state before proposing changes.
+- Use \`pmos_ops_list_node_types\` if you need to verify exact type names.
 
 ### 5. Workflow editing vs creation
-- If the user says "add", "modify", "update", "fix", "change" anything → use \`pmos_n8n_update_workflow\` on the existing workflow.
-- If the user says "create", "new", "build" → use \`pmos_n8n_create_workflow\`.
+- If the user says "add", "modify", "update", "fix", "change" anything â†’ use \`pmos_ops_update_workflow\` on the existing workflow.
+- If the user says "create", "new", "build" â†’ use \`pmos_ops_create_workflow\`.
 - Never create a new workflow when editing was requested.
 
 ### 6. Handle complexity gracefully
@@ -1210,15 +1210,15 @@ Always respond with a JSON object in this exact format:
 - Always make workflows that can run without manual rewiring.
 
 ## Node Construction Rules
-- Use REAL n8n node type names exactly as listed (e.g., "n8n-nodes-base.slack" not "slack")
-- If a live workspace node catalog is provided, use ONLY node names from that catalog — with ONE exception:
-- ALWAYS use "n8n-nodes-basecamp.basecamp" for ALL Basecamp operations — this overrides any live catalog. NEVER use any other Basecamp node type.
+- Use REAL workflow node type names exactly as listed (n8n-compatible aliases are supported where needed).
+- If a live workspace node catalog is provided, use ONLY node names from that catalog â€” with ONE exception:
+- ALWAYS use "n8n-nodes-basecamp.basecamp" for ALL Basecamp operations â€” this overrides any live catalog. NEVER use any other Basecamp node type.
 - Use the findByName operation when the user mentions a Basecamp project by name (avoids hardcoding IDs)
-- Chain nodes for full context: findByName → todolist:getAll → todo:create (3-node pattern)
+- Chain nodes for full context: findByName â†’ todolist:getAll â†’ todo:create (3-node pattern)
 - Always include the credentials key on every Basecamp node
 - Position nodes left-to-right: trigger at x=250, each subsequent node at x+250
 - If a webhook flow must return custom JSON/body/status, include n8n-nodes-base.respondToWebhook and set webhook trigger responseMode to responseNode
-- Respond ONLY with the JSON object — no markdown fences, no extra text before or after
+- Respond ONLY with the JSON object â€” no markdown fences, no extra text before or after
 
 ## Example: Creating a Basecamp Todo Sync Workflow
 
@@ -1226,7 +1226,7 @@ User: "Create a workflow that receives new Basecamp todos via webhook, notifies 
 
 Response:
 {
-  "message": "I'll build a 7-node workflow: (1) Webhook trigger listens for new Basecamp todos, (2) a Set node formats the data, (3) Slack notification goes out immediately, (4) an IF node checks priority — high-priority todos go to (5) GitHub issue creation while low-priority ones go to (6) a logging node. All connected via (7) the final merge. Next steps: activate the workflow, copy the webhook URL into your Basecamp project notification settings, and check that your Slack credential is pointing to #notifications.",
+  "message": "I'll build a 7-node workflow: (1) Webhook trigger listens for new Basecamp todos, (2) a Set node formats the data, (3) Slack notification goes out immediately, (4) an IF node checks priority â€” high-priority todos go to (5) GitHub issue creation while low-priority ones go to (6) a logging node. All connected via (7) the final merge. Next steps: activate the workflow, copy the webhook URL into your Basecamp project notification settings, and check that your Slack credential is pointing to #notifications.",
   "workflow": {
     "name": "Basecamp Todo to Slack and GitHub",
     "nodes": [

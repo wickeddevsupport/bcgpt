@@ -426,14 +426,12 @@ export async function executeFlowControl(
 ): Promise<FlowControlResult> {
   const workspaceId = client.pmosWorkspaceId;
   
-  // Import n8n API client for real operations
-  const { 
-    setWorkflowActive, 
-    executeN8nWorkflow, 
-    getN8nWorkflow,
-    getN8nExecution,
-    cancelN8nExecution,
-  } = await import('./n8n-api-client.js');
+  // Import workflow-engine API client for real operations.
+  const {
+    executeWorkflowEngineWorkflow,
+    getWorkflowEngineWorkflow,
+    setWorkflowEngineWorkflowActive,
+  } = await import("./workflow-api-client.js");
   
   switch (action) {
     case 'activate': {
@@ -446,7 +444,7 @@ export async function executeFlowControl(
         };
       }
       
-      const result = await setWorkflowActive(workspaceId, workflowId, true);
+      const result = await setWorkflowEngineWorkflowActive(workspaceId, workflowId, true);
       
       if (!result.ok) {
         return {
@@ -483,7 +481,7 @@ export async function executeFlowControl(
         };
       }
       
-      const result = await setWorkflowActive(workspaceId, workflowId, false);
+      const result = await setWorkflowEngineWorkflowActive(workspaceId, workflowId, false);
       
       if (!result.ok) {
         return {
@@ -520,7 +518,7 @@ export async function executeFlowControl(
         };
       }
       
-      const result = await executeN8nWorkflow(workspaceId, workflowId);
+      const result = await executeWorkflowEngineWorkflow(workspaceId, workflowId);
       
       if (!result.ok) {
         return {
@@ -579,7 +577,7 @@ export async function executeFlowControl(
       }
       
       // Get the current workflow state
-      const result = await getN8nWorkflow(workspaceId, workflowId);
+      const result = await getWorkflowEngineWorkflow(workspaceId, workflowId);
       
       if (!result.ok) {
         return {
@@ -593,7 +591,7 @@ export async function executeFlowControl(
       // For rollback, we deactivate and return the current state
       // A full implementation would track version history
       if (result.workflow?.active) {
-        const deactivateResult = await setWorkflowActive(workspaceId, workflowId, false);
+        const deactivateResult = await setWorkflowEngineWorkflowActive(workspaceId, workflowId, false);
         if (!deactivateResult.ok) {
           return {
             success: false,
@@ -768,10 +766,10 @@ export async function deployTemplate(
     workspaceId,
   };
   
-  // Persist workflow to n8n via API
-  const { createN8nWorkflow } = await import('./n8n-api-client.js');
+  // Persist workflow to the Activepieces runtime.
+  const { createWorkflowEngineWorkflow } = await import("./workflow-api-client.js");
   
-  const result = await createN8nWorkflow(workspaceId, {
+  const result = await createWorkflowEngineWorkflow(workspaceId, {
     name: workflow.name,
     active: false,
     nodes: workflow.nodes,

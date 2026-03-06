@@ -15,17 +15,33 @@ describe("n8n-embed spawn behavior", () => {
     fs.statSync = realStat;
     fs.readdirSync = realReadDir;
     delete process.env.N8N_LOCAL_URL;
+    delete process.env.PMOS_ENABLE_LEGACY_EMBEDDED_N8N;
+    delete process.env.N8N_EMBED_ENABLED;
     vi.restoreAllMocks();
   });
 
   it("returns null when no vendored repo is present", async () => {
+    process.env.PMOS_ENABLE_LEGACY_EMBEDDED_N8N = "1";
     fs.existsSync = () => false;
     const mod = await import("./n8n-embed.js");
     const res = await mod.spawnEmbeddedN8nIfVendored();
     expect(res).toBeNull();
   });
 
-  it("spawns embedded n8n when vendored repo exists and sets N8N_LOCAL_URL", async () => {
+  it("keeps embedded n8n disabled by default", async () => {
+    const spawnUtils = await import("../process/spawn-utils.js");
+    const spawnSpy = vi.spyOn(spawnUtils, "spawnWithFallback");
+
+    const mod = await import("./n8n-embed.js");
+    expect(mod.isLegacyEmbeddedN8nEnabled()).toBe(false);
+    const res = await mod.spawnEmbeddedN8nIfVendored({ port: 5680 });
+
+    expect(res).toBeNull();
+    expect(spawnSpy).not.toHaveBeenCalled();
+  });
+
+  it("spawns embedded n8n when legacy mode is enabled and vendored repo exists", async () => {
+    process.env.PMOS_ENABLE_LEGACY_EMBEDDED_N8N = "1";
     // Simulate repo present at candidate location
     const bcgptRoot = path.resolve(__dirname, "..", "..", "..");
     const fakeRepo = path.join(bcgptRoot, "openclaw", "vendor", "n8n");

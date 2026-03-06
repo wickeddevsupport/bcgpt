@@ -1753,11 +1753,25 @@
   animation: scale-in 0.2s var(--ease-out);
 }
 
+.exec-approval-card--wizard {
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .exec-approval-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+
+.exec-approval-body--wizard {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .exec-approval-title {
@@ -1822,6 +1836,14 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.exec-approval-actions--wizard {
+  flex: 0 0 auto;
+  margin-top: 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  background: var(--card);
 }
 
 /* ===========================================
@@ -2447,6 +2469,48 @@
 }
 
 /* ===========================================
+   Dashboard
+   =========================================== */
+
+.dashboard-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(340px, 420px);
+  gap: 18px;
+  align-items: start;
+}
+
+.dashboard-main {
+  min-width: 0;
+}
+
+.dashboard-side {
+  min-width: 0;
+  position: sticky;
+  top: 84px;
+  align-self: start;
+}
+
+.dashboard-chat-card {
+  min-width: 0;
+}
+
+.dashboard-chat-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.dashboard-chat-shortcuts {
+  flex-wrap: wrap;
+}
+
+.dashboard-chat-host {
+  height: clamp(520px, calc(100vh - 220px), 940px);
+  max-height: 940px;
+}
+
+/* ===========================================
    Projects (Command Center)
    =========================================== */
 
@@ -2777,6 +2841,19 @@
     min-width: 0;
   }
 
+  .dashboard-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-side {
+    position: static;
+  }
+
+  .dashboard-chat-host {
+    height: min(560px, calc(100vh - 240px));
+    max-height: min(720px, calc(100vh - 180px));
+  }
+
   .projects-layout {
     grid-template-columns: 1fr;
   }
@@ -2838,6 +2915,17 @@
 }
 
 @media (max-width: 640px) {
+  .dashboard-chat-card__head {
+    flex-direction: column;
+  }
+
+  .dashboard-chat-host {
+    width: 100%;
+    height: min(500px, calc(100vh - 200px));
+    min-height: 420px;
+    max-height: calc(100vh - 140px);
+  }
+
   .projects-header-row {
     flex-direction: column;
     align-items: stretch;
