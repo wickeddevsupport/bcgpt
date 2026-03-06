@@ -49,14 +49,16 @@ export const scheduleAction = createAction({
             break;
           case 'get_schedule':
             fields['schedule_id'] = Property.Number({
-              displayName: 'Schedule ID',
-              required: true,
+              displayName: 'Schedule ID (optional)',
+              description: 'Leave blank to auto-detect from the selected project.',
+              required: false,
             });
             break;
           case 'update_schedule':
             fields['schedule_id'] = Property.Number({
-              displayName: 'Schedule ID',
-              required: true,
+              displayName: 'Schedule ID (optional)',
+              description: 'Leave blank to auto-detect from the selected project.',
+              required: false,
             });
             fields['body'] = Property.Json({
               displayName: 'Body (JSON)',
@@ -83,8 +85,9 @@ export const scheduleAction = createAction({
             break;
           case 'create_schedule_entry':
             fields['schedule_id'] = Property.Number({
-              displayName: 'Schedule ID',
-              required: true,
+              displayName: 'Schedule ID (optional)',
+              description: 'Leave blank to auto-detect from the selected project.',
+              required: false,
             });
             fields['body'] = Property.Json({
               displayName: 'Body (JSON)',
@@ -109,6 +112,33 @@ export const scheduleAction = createAction({
     const project = String(context.propsValue.project ?? '');
     const inputs = (context.propsValue.inputs ?? {}) as Record<string, unknown>;
 
+    // Auto-detect schedule ID from project dock when not provided manually
+    const resolveScheduleId = async (): Promise<number> => {
+      if (inputs['schedule_id'] != null && inputs['schedule_id'] !== '') {
+        return Number(inputs['schedule_id']);
+      }
+      const structure = await callGatewayTool({
+        auth,
+        toolName: 'get_project_structure',
+        args: { project },
+      });
+      const dock = (structure as { dock?: unknown })?.dock;
+      if (Array.isArray(dock)) {
+        const match = dock.find(
+          (d: any) =>
+            d &&
+            d.enabled !== false &&
+            ['schedule'].includes(String(d.name ?? '')),
+        );
+        if (match?.id != null) {
+          return Number(match.id);
+        }
+      }
+      throw new Error(
+        'Could not resolve schedule for this project. Make sure the Schedule tool is enabled in Basecamp.',
+      );
+    };
+
     switch (op) {
       case 'list_schedule_entries':
         return await callGatewayTool({
@@ -124,7 +154,7 @@ export const scheduleAction = createAction({
         return await callGatewayTool({
           auth,
           toolName: 'get_schedule',
-          args: { project, schedule_id: inputs['schedule_id'] },
+          args: { project, schedule_id: await resolveScheduleId() },
         });
       case 'update_schedule':
         return await callGatewayTool({
@@ -132,7 +162,7 @@ export const scheduleAction = createAction({
           toolName: 'update_schedule',
           args: {
             project,
-            schedule_id: inputs['schedule_id'],
+            schedule_id: await resolveScheduleId(),
             body: inputs['body'] ?? {},
           },
         });
@@ -148,7 +178,7 @@ export const scheduleAction = createAction({
           toolName: 'create_schedule_entry',
           args: {
             project,
-            schedule_id: inputs['schedule_id'],
+            schedule_id: await resolveScheduleId(),
             body: inputs['body'] ?? {},
           },
         });

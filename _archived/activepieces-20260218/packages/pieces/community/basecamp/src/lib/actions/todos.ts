@@ -23,6 +23,7 @@ export const todosAction = createAction({
       required: true,
       options: {
         options: [
+          { label: 'List to-do lists', value: 'list_todolists' },
           { label: 'List to-dos for a project', value: 'list_todos_for_project' },
           { label: 'List to-dos for a list', value: 'list_todos_for_list' },
           { label: 'Get a to-do', value: 'get_todo' },
@@ -55,6 +56,8 @@ export const todosAction = createAction({
         const hasTodoList = Boolean(todolist);
         const fields: DynamicPropsValue = {};
         switch (op) {
+          case 'list_todolists':
+            break;
           case 'list_todos_for_project':
             fields['compact'] = Property.Checkbox({
               displayName: 'Compact',
@@ -352,6 +355,14 @@ export const todosAction = createAction({
         : undefined;
 
     switch (op) {
+      case 'list_todolists':
+        return await callGatewayTool({
+          auth,
+          toolName: 'list_todolists',
+          args: {
+            project,
+          },
+        });
       case 'list_todos_for_project':
         return await callGatewayTool({
           auth,

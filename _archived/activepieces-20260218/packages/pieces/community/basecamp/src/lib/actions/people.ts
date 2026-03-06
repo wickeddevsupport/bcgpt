@@ -43,7 +43,12 @@ export const peopleAction = createAction({
             fields['query'] = Property.ShortText({
               displayName: 'Query',
               description:
-                'Name or email to search for. Use empty string to list all.',
+                'Name or email to search for. For large accounts, provide a query to avoid timeouts.',
+              required: false,
+            });
+            fields['limit'] = Property.Number({
+              displayName: 'Limit (optional)',
+              description: 'Maximum number of people to return.',
               required: false,
             });
             fields['deep_scan'] = Property.Checkbox({
@@ -56,6 +61,13 @@ export const peopleAction = createAction({
               displayName: 'Include archived projects',
               required: false,
               defaultValue: false,
+            });
+            break;
+          case 'list_pingable_people':
+            fields['limit'] = Property.Number({
+              displayName: 'Limit (optional)',
+              description: 'Maximum number of people to return.',
+              required: false,
             });
             break;
           case 'search_people':
@@ -88,10 +100,15 @@ export const peopleAction = createAction({
             });
             break;
           case 'list_person_activity':
+            fields['person_id'] = Property.Number({
+              displayName: 'Person ID (preferred)',
+              description: 'Use a numeric person ID to avoid ambiguous name matches.',
+              required: false,
+            });
             fields['person'] = Property.ShortText({
-              displayName: 'Person',
-              description: 'Name, email, or person ID.',
-              required: true,
+              displayName: 'Person (name/email)',
+              description: 'Name or email — ignored when Person ID is set.',
+              required: false,
             });
             fields['query'] = Property.ShortText({
               displayName: 'Query (optional)',
@@ -190,15 +207,25 @@ export const peopleAction = createAction({
 
     switch (op) {
       case 'list_all_people':
-        return await callGatewayTool({
-          auth,
-          toolName: 'list_all_people',
-          args: {
-            query: inputs['query'] ?? '',
-            deep_scan: Boolean(inputs['deep_scan']),
-            include_archived_projects: Boolean(inputs['include_archived_projects']),
-          },
-        });
+        try {
+          return await callGatewayTool({
+            auth,
+            toolName: 'list_all_people',
+            args: {
+              query: inputs['query'] ?? '',
+              limit: inputs['limit'] || undefined,
+              deep_scan: Boolean(inputs['deep_scan']),
+              include_archived_projects: Boolean(inputs['include_archived_projects']),
+            },
+          });
+        } catch (err) {
+          if ((err as any).code === 'CHUNK_REQUIRED' || String((err as any).message).includes('CHUNK_REQUIRED')) {
+            throw new Error(
+              'The account has too many people to list all at once. Enter a name or email in the Query field to search for specific people, or use the "Search people" operation instead.',
+            );
+          }
+          throw err;
+        }
       case 'search_people':
         return await callGatewayTool({
           auth,
@@ -215,12 +242,26 @@ export const peopleAction = createAction({
           args: { person_id: inputs['person_id'] },
         });
       case 'get_my_profile':
-      case 'list_pingable_people':
         return await callGatewayTool({
           auth,
-          toolName: op,
+          toolName: 'get_my_profile',
           args: {},
         });
+      case 'list_pingable_people':
+        try {
+          return await callGatewayTool({
+            auth,
+            toolName: 'list_pingable_people',
+            args: { limit: inputs['limit'] || undefined },
+          });
+        } catch (err) {
+          if ((err as any).code === 'CHUNK_REQUIRED' || String((err as any).message).includes('CHUNK_REQUIRED')) {
+            throw new Error(
+              'The account has too many people to list all at once. Use "Search people" with a name or email to find specific people.',
+            );
+          }
+          throw err;
+        }
       case 'list_project_people': {
         if (!project) {
           throw new Error('Project is required');
@@ -245,7 +286,7 @@ export const peopleAction = createAction({
           auth,
           toolName: 'list_person_activity',
           args: {
-            person: inputs['person'],
+            person: inputs['person_id'] != null ? String(inputs['person_id']) : inputs['person'],
             project: project || undefined,
             query: inputs['query'] || undefined,
             include_archived_projects: Boolean(inputs['include_archived_projects']),
