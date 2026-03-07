@@ -466,6 +466,9 @@ export function renderApp(state: AppViewState) {
   const figmaEmbedBaseUrl = `${figmaBaseUrl}/?pmosEmbed=1&pmosParentOrigin=${encodeURIComponent(
     typeof window !== "undefined" ? window.location.origin : "",
   )}`;
+  const figmaAuthUrl = `${figmaBaseUrl}/auth/figma?pmosEmbed=1&pmosParentOrigin=${encodeURIComponent(
+    typeof window !== "undefined" ? window.location.origin : "",
+  )}`;
   const sessionDefaults =
     (state.hello?.snapshot as { sessionDefaults?: { mainKey?: string } } | undefined)
       ?.sessionDefaults ?? null;
@@ -1008,8 +1011,21 @@ export function renderApp(state: AppViewState) {
                 syncing: state.pmosFigmaContextSyncing,
                 syncError: state.pmosFigmaContextError,
                 syncedOk: state.pmosFigmaContextSyncedOk,
+                authUrl: figmaAuthUrl,
                 chatProps,
                 onSyncContext: () => void state.handlePmosFigmaSyncContext(),
+                onOpenAuth: () => {
+                  const popup = window.open(
+                    figmaAuthUrl,
+                    "pmos-figma-auth",
+                    "popup=yes,width=720,height=900,resizable=yes,scrollbars=yes",
+                  );
+                  if (popup) {
+                    popup.focus();
+                    return;
+                  }
+                  window.location.href = figmaAuthUrl;
+                },
                 onRefresh: () => {
                   state.pmosFigmaEmbedVersion = (state.pmosFigmaEmbedVersion ?? 0) + 1;
                   void state.handlePmosRefreshConnectors();

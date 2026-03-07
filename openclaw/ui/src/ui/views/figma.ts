@@ -7,6 +7,7 @@ export type FigmaProps = {
   connected: boolean;
   figmaUrl: string;
   embedUrl: string;
+  authUrl: string;
   connectorsLoading: boolean;
   connectorsError: string | null;
   connectorsStatus: PmosConnectorsStatus | null;
@@ -14,6 +15,7 @@ export type FigmaProps = {
   syncError: string | null;
   syncedOk: boolean;
   chatProps: ChatProps;
+  onOpenAuth: () => void;
   onSyncContext: () => void;
   onRefresh: () => void;
   onOpenIntegrations: () => void;
@@ -65,6 +67,9 @@ export function renderFigma(props: FigmaProps) {
               </div>
               <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                 ${props.syncedOk ? html`<span class="chip chip-ok">Context Synced</span>` : nothing}
+                <button class="btn btn--secondary" @click=${() => props.onOpenAuth()}>
+                  Sign In Outside Panel
+                </button>
                 <button class="btn btn--secondary" ?disabled=${props.connectorsLoading} @click=${() => props.onRefresh()}>
                   ${props.connectorsLoading ? "Refreshing..." : "Reload"}
                 </button>
@@ -76,6 +81,19 @@ export function renderFigma(props: FigmaProps) {
 
             ${props.syncError
               ? html`<div class="callout warn" style="font-size: 12px;">${props.syncError}</div>`
+              : nothing}
+
+            ${!identity?.connected
+              ? html`
+                  <div class="callout" style="font-size: 12px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+                    <span>
+                      If the embedded login flow is blocked by your browser, start Figma sign-in from the top-level PMOS page instead.
+                    </span>
+                    <a href=${props.authUrl} class="btn btn--secondary" target="pmos-figma-auth">
+                      Open Auth Window
+                    </a>
+                  </div>
+                `
               : nothing}
 
             <div style="display:grid; grid-template-columns:minmax(0, 1.7fr) minmax(340px, 0.9fr); gap:12px; min-height: calc(100vh - 220px);">
