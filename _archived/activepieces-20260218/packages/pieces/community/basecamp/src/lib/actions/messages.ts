@@ -31,21 +31,24 @@ const messageBoardDropdown = (required: boolean) =>
         };
       }
 
-      const result = await callGatewayTool({
-        auth: auth as unknown as BasecampGatewayAuthConnection,
-        toolName: 'list_message_boards',
-        args: { project: String(project) },
-      });
-      const boards = extractList<MessageBoard>(result, 'message_boards');
-
-      return {
-        disabled: false,
-        options: boards.map((b) => ({
-          label: b.title ?? b.name ?? String(b.id ?? 'Unknown board'),
-          value: String(b.id ?? ''),
-        })),
-        placeholder: boards.length ? 'Select a message board' : 'No boards found',
-      };
+      try {
+        const result = await callGatewayTool({
+          auth: auth as unknown as BasecampGatewayAuthConnection,
+          toolName: 'list_message_boards',
+          args: { project: String(project) },
+        });
+        const boards = extractList<MessageBoard>(result, 'message_boards');
+        return {
+          disabled: false,
+          options: boards.map((b) => ({
+            label: b.title ?? b.name ?? String(b.id ?? 'Unknown board'),
+            value: String(b.id ?? ''),
+          })),
+          placeholder: boards.length ? 'Select a message board' : 'No boards found',
+        };
+      } catch (err: unknown) {
+        return { disabled: true, options: [], placeholder: `Error: ${(err as Error)?.message ?? String(err)}` };
+      }
     },
   });
 
@@ -79,26 +82,29 @@ const messageDropdown = (required: boolean) =>
         };
       }
 
-      const result = await callGatewayTool({
-        auth: auth as unknown as BasecampGatewayAuthConnection,
-        toolName: 'list_messages',
-        args: {
-          project: String(project),
-          message_board_id: toInt(board, 'Message board'),
-        },
-      });
-      const messages = extractList<Message>(result, 'messages');
-
-      return {
-        disabled: false,
-        options: messages
-          .filter((m) => m?.id != null)
-          .map((m) => ({
-            label: m.subject ?? m.title ?? String(m.id ?? 'Unknown message'),
-            value: String(m.id ?? ''),
-          })),
-        placeholder: messages.length ? 'Select a message' : 'No messages found',
-      };
+      try {
+        const result = await callGatewayTool({
+          auth: auth as unknown as BasecampGatewayAuthConnection,
+          toolName: 'list_messages',
+          args: {
+            project: String(project),
+            message_board_id: toInt(board, 'Message board'),
+          },
+        });
+        const messages = extractList<Message>(result, 'messages');
+        return {
+          disabled: false,
+          options: messages
+            .filter((m) => m?.id != null)
+            .map((m) => ({
+              label: m.subject ?? m.title ?? String(m.id ?? 'Unknown message'),
+              value: String(m.id ?? ''),
+            })),
+          placeholder: messages.length ? 'Select a message' : 'No messages found',
+        };
+      } catch (err: unknown) {
+        return { disabled: true, options: [], placeholder: `Error: ${(err as Error)?.message ?? String(err)}` };
+      }
     },
   });
 

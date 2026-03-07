@@ -53,6 +53,7 @@ export const gatewayPost = async (params: {
     url,
     headers: buildGatewayHeaders(params.auth),
     body: params.body ?? {},
+    timeout: 30000,
   });
   return response.body;
 };

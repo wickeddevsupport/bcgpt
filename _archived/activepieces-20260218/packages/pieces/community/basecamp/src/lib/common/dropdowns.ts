@@ -33,20 +33,24 @@ export const projectDropdown = <R extends boolean>(required: R) =>
           placeholder: 'Connect Basecamp first',
         };
       }
-      const projectsResult = await callGatewayTool({
-        auth: auth as unknown as BasecampGatewayAuthConnection,
-        toolName: 'list_projects',
-        args: {},
-      });
-      const projects = extractList<Project>(projectsResult, 'projects');
-      return {
-        disabled: false,
-        options: projects.map((p) => ({
-          label: p.name ?? String(p.id ?? 'Unknown project'),
-          value: String(p.id ?? ''),
-        })),
-        placeholder: projects.length ? 'Select a project' : 'No projects found',
-      };
+      try {
+        const projectsResult = await callGatewayTool({
+          auth: auth as unknown as BasecampGatewayAuthConnection,
+          toolName: 'list_projects',
+          args: {},
+        });
+        const projects = extractList<Project>(projectsResult, 'projects');
+        return {
+          disabled: false,
+          options: projects.map((p) => ({
+            label: p.name ?? String(p.id ?? 'Unknown project'),
+            value: String(p.id ?? ''),
+          })),
+          placeholder: projects.length ? 'Select a project' : 'No projects found',
+        };
+      } catch (err: unknown) {
+        return { disabled: true, options: [], placeholder: `Error: ${(err as Error)?.message ?? String(err)}` };
+      }
     },
   });
 
@@ -73,23 +77,26 @@ export const todolistDropdown = <R extends boolean>(required: R) =>
         };
       }
 
-      const result = await callGatewayTool({
-        auth: auth as unknown as BasecampGatewayAuthConnection,
-        toolName: 'list_todolists',
-        args: { project: String(project), compact: true, preview_limit: 0, inlineLimit: 500 },
-      });
-      const lists = extractList<TodoList>(result, 'todolists');
-
-      return {
-        disabled: false,
-        options: lists
-          .filter((l) => l?.id != null)
-          .map((l) => ({
-            label: l.name ?? l.title ?? String(l.id ?? 'Unknown list'),
-            value: String(l.id ?? ''),
-          })),
-        placeholder: lists.length ? 'Select a to-do list' : 'No to-do lists found',
-      };
+      try {
+        const result = await callGatewayTool({
+          auth: auth as unknown as BasecampGatewayAuthConnection,
+          toolName: 'list_todolists',
+          args: { project: String(project), compact: true, preview_limit: 0, inlineLimit: 500 },
+        });
+        const lists = extractList<TodoList>(result, 'todolists');
+        return {
+          disabled: false,
+          options: lists
+            .filter((l) => l?.id != null)
+            .map((l) => ({
+              label: l.name ?? l.title ?? String(l.id ?? 'Unknown list'),
+              value: String(l.id ?? ''),
+            })),
+          placeholder: lists.length ? 'Select a to-do list' : 'No to-do lists found',
+        };
+      } catch (err: unknown) {
+        return { disabled: true, options: [], placeholder: `Error: ${(err as Error)?.message ?? String(err)}` };
+      }
     },
   });
 
@@ -123,29 +130,32 @@ export const todoDropdown = <R extends boolean>(required: R) =>
         };
       }
 
-      const result = await callGatewayTool({
-        auth: auth as unknown as BasecampGatewayAuthConnection,
-        toolName: 'list_todos_for_list',
-        args: {
-          project: String(project),
-          todolist_id: toInt(todolist, 'To-do list'),
-        },
-      });
-      const todos = extractList<Todo>(result, 'todos');
-
-      return {
-        disabled: false,
-        options: todos
-          .filter((t) => t?.id != null)
-          .map((t) => ({
-            label:
-              (t.content ?? t.title ?? String(t.id ?? 'Unknown to-do')) +
-              (t.due_on ? ` (due ${t.due_on})` : '') +
-              (t.completed || t.completed_at ? ' [completed]' : ''),
-            value: String(t.id ?? ''),
-          })),
-        placeholder: todos.length ? 'Select a to-do' : 'No to-dos found',
-      };
+      try {
+        const result = await callGatewayTool({
+          auth: auth as unknown as BasecampGatewayAuthConnection,
+          toolName: 'list_todos_for_list',
+          args: {
+            project: String(project),
+            todolist_id: toInt(todolist, 'To-do list'),
+          },
+        });
+        const todos = extractList<Todo>(result, 'todos');
+        return {
+          disabled: false,
+          options: todos
+            .filter((t) => t?.id != null)
+            .map((t) => ({
+              label:
+                (t.content ?? t.title ?? String(t.id ?? 'Unknown to-do')) +
+                (t.due_on ? ` (due ${t.due_on})` : '') +
+                (t.completed || t.completed_at ? ' [completed]' : ''),
+              value: String(t.id ?? ''),
+            })),
+          placeholder: todos.length ? 'Select a to-do' : 'No to-dos found',
+        };
+      } catch (err: unknown) {
+        return { disabled: true, options: [], placeholder: `Error: ${(err as Error)?.message ?? String(err)}` };
+      }
     },
   });
 
@@ -179,26 +189,29 @@ export const todolistGroupDropdown = <R extends boolean>(required: R) =>
         };
       }
 
-      const result = await callGatewayTool({
-        auth: auth as unknown as BasecampGatewayAuthConnection,
-        toolName: 'list_todolist_groups',
-        args: {
-          project: String(project),
-          todolist_id: toInt(todolist, 'To-do list'),
-        },
-      });
-      const groups = extractList<TodolistGroup>(result, 'groups');
-
-      return {
-        disabled: false,
-        options: groups
-          .filter((g) => g?.id != null)
-          .map((g) => ({
-            label: g.title ?? g.name ?? String(g.id ?? 'Unknown group'),
-            value: String(g.id ?? ''),
-          })),
-        placeholder: groups.length ? 'Select a group' : 'No groups found',
-      };
+      try {
+        const result = await callGatewayTool({
+          auth: auth as unknown as BasecampGatewayAuthConnection,
+          toolName: 'list_todolist_groups',
+          args: {
+            project: String(project),
+            todolist_id: toInt(todolist, 'To-do list'),
+          },
+        });
+        const groups = extractList<TodolistGroup>(result, 'groups');
+        return {
+          disabled: false,
+          options: groups
+            .filter((g) => g?.id != null)
+            .map((g) => ({
+              label: g.title ?? g.name ?? String(g.id ?? 'Unknown group'),
+              value: String(g.id ?? ''),
+            })),
+          placeholder: groups.length ? 'Select a group' : 'No groups found',
+        };
+      } catch (err: unknown) {
+        return { disabled: true, options: [], placeholder: `Error: ${(err as Error)?.message ?? String(err)}` };
+      }
     },
   });
 
@@ -225,23 +238,26 @@ export const messageTypeDropdown = <R extends boolean>(required: R) =>
         };
       }
 
-      const result = await callGatewayTool({
-        auth: auth as unknown as BasecampGatewayAuthConnection,
-        toolName: 'list_message_types',
-        args: { project: String(project) },
-      });
-      const types = extractList<MessageType>(result, 'types');
-
-      return {
-        disabled: false,
-        options: types
-          .filter((t) => t?.id != null)
-          .map((t) => ({
-            label: t.name ?? t.title ?? String(t.id ?? 'Unknown type'),
-            value: String(t.id ?? ''),
-          })),
-        placeholder: types.length ? 'Select a message type' : 'No message types found',
-      };
+      try {
+        const result = await callGatewayTool({
+          auth: auth as unknown as BasecampGatewayAuthConnection,
+          toolName: 'list_message_types',
+          args: { project: String(project) },
+        });
+        const types = extractList<MessageType>(result, 'types');
+        return {
+          disabled: false,
+          options: types
+            .filter((t) => t?.id != null)
+            .map((t) => ({
+              label: t.name ?? t.title ?? String(t.id ?? 'Unknown type'),
+              value: String(t.id ?? ''),
+            })),
+          placeholder: types.length ? 'Select a message type' : 'No message types found',
+        };
+      } catch (err: unknown) {
+        return { disabled: true, options: [], placeholder: `Error: ${(err as Error)?.message ?? String(err)}` };
+      }
     },
   });
 
@@ -272,25 +288,28 @@ export const projectPeopleMultiSelectDropdown = <R extends boolean>(params: {
         };
       }
 
-      const result = await callGatewayTool({
-        auth: auth as unknown as BasecampGatewayAuthConnection,
-        toolName: 'list_project_people',
-        args: { project: String(project) },
-      });
-      const people = extractList<Person>(result, 'people');
-
-      return {
-        disabled: false,
-        options: people
-          .filter((p) => p?.id != null)
-          .map((p) => {
-            const email = p.email_address ?? p.email;
-            return {
-              label: email ? `${p.name ?? p.id} <${email}>` : String(p.name ?? p.id),
-              value: Number(p.id),
-            };
-          }),
-        placeholder: people.length ? 'Select people' : 'No people found',
-      };
+      try {
+        const result = await callGatewayTool({
+          auth: auth as unknown as BasecampGatewayAuthConnection,
+          toolName: 'list_project_people',
+          args: { project: String(project) },
+        });
+        const people = extractList<Person>(result, 'people');
+        return {
+          disabled: false,
+          options: people
+            .filter((p) => p?.id != null)
+            .map((p) => {
+              const email = p.email_address ?? p.email;
+              return {
+                label: email ? `${p.name ?? p.id} <${email}>` : String(p.name ?? p.id),
+                value: Number(p.id),
+              };
+            }),
+          placeholder: people.length ? 'Select people' : 'No people found',
+        };
+      } catch (err: unknown) {
+        return { disabled: true, options: [], placeholder: `Error: ${(err as Error)?.message ?? String(err)}` };
+      }
     },
   });

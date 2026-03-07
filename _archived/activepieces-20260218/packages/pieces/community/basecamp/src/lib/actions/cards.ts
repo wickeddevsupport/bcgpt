@@ -33,20 +33,24 @@ const cardTableDropdown = (required: boolean) =>
         };
       }
 
-      const result = await callGatewayTool({
-        auth: auth as unknown as BasecampGatewayAuthConnection,
-        toolName: 'list_card_tables',
-        args: { project: String(project), include_archived: false },
-      });
-      const tables = extractList<CardTable>(result, 'card_tables');
-      return {
-        disabled: false,
-        options: tables.map((t) => ({
-          label: t.title ?? t.name ?? String(t.id ?? 'Unknown table'),
-          value: String(t.id ?? ''),
-        })),
-        placeholder: tables.length ? 'Select a card table' : 'No card tables found',
-      };
+      try {
+        const result = await callGatewayTool({
+          auth: auth as unknown as BasecampGatewayAuthConnection,
+          toolName: 'list_card_tables',
+          args: { project: String(project), include_archived: false },
+        });
+        const tables = extractList<CardTable>(result, 'card_tables');
+        return {
+          disabled: false,
+          options: tables.map((t) => ({
+            label: t.title ?? t.name ?? String(t.id ?? 'Unknown table'),
+            value: String(t.id ?? ''),
+          })),
+          placeholder: tables.length ? 'Select a card table' : 'No card tables found',
+        };
+      } catch (err: unknown) {
+        return { disabled: true, options: [], placeholder: `Error: ${(err as Error)?.message ?? String(err)}` };
+      }
     },
   });
 
@@ -80,25 +84,29 @@ const cardColumnDropdown = (required: boolean) =>
         };
       }
 
-      const result = await callGatewayTool({
-        auth: auth as unknown as BasecampGatewayAuthConnection,
-        toolName: 'list_card_table_columns',
-        args: {
-          project: String(project),
-          card_table_id: toInt(card_table, 'Card table'),
-        },
-      });
-      const columns = extractList<CardColumn>(result, 'columns');
-      return {
-        disabled: false,
-        options: columns
-          .filter((c) => c?.id != null)
-          .map((c) => ({
-            label: c.title ?? c.name ?? String(c.id ?? 'Unknown column'),
-            value: String(c.id ?? ''),
-          })),
-        placeholder: columns.length ? 'Select a column' : 'No columns found',
-      };
+      try {
+        const result = await callGatewayTool({
+          auth: auth as unknown as BasecampGatewayAuthConnection,
+          toolName: 'list_card_table_columns',
+          args: {
+            project: String(project),
+            card_table_id: toInt(card_table, 'Card table'),
+          },
+        });
+        const columns = extractList<CardColumn>(result, 'columns');
+        return {
+          disabled: false,
+          options: columns
+            .filter((c) => c?.id != null)
+            .map((c) => ({
+              label: c.title ?? c.name ?? String(c.id ?? 'Unknown column'),
+              value: String(c.id ?? ''),
+            })),
+          placeholder: columns.length ? 'Select a column' : 'No columns found',
+        };
+      } catch (err: unknown) {
+        return { disabled: true, options: [], placeholder: `Error: ${(err as Error)?.message ?? String(err)}` };
+      }
     },
   });
 
@@ -132,30 +140,33 @@ const cardDropdown = (required: boolean) =>
         };
       }
 
-      const result = await callGatewayTool({
-        auth: auth as unknown as BasecampGatewayAuthConnection,
-        toolName: 'list_card_table_cards',
-        args: {
-          project: String(project),
-          card_table_id: toInt(card_table, 'Card table'),
-          max_cards_per_column: 200,
-          include_details: false,
-        },
-      });
-      const cards = extractList<Card>(result, 'cards');
-
-      return {
-        disabled: false,
-        options: cards
-          .filter((c) => c?.id != null)
-          .map((c) => ({
-            label:
-              (c.title ?? String(c.id ?? 'Unknown card')) +
-              (c.due_on ? ` (due ${c.due_on})` : ''),
-            value: String(c.id ?? ''),
-          })),
-        placeholder: cards.length ? 'Select a card' : 'No cards found',
-      };
+      try {
+        const result = await callGatewayTool({
+          auth: auth as unknown as BasecampGatewayAuthConnection,
+          toolName: 'list_card_table_cards',
+          args: {
+            project: String(project),
+            card_table_id: toInt(card_table, 'Card table'),
+            max_cards_per_column: 200,
+            include_details: false,
+          },
+        });
+        const cards = extractList<Card>(result, 'cards');
+        return {
+          disabled: false,
+          options: cards
+            .filter((c) => c?.id != null)
+            .map((c) => ({
+              label:
+                (c.title ?? String(c.id ?? 'Unknown card')) +
+                (c.due_on ? ` (due ${c.due_on})` : ''),
+              value: String(c.id ?? ''),
+            })),
+          placeholder: cards.length ? 'Select a card' : 'No cards found',
+        };
+      } catch (err: unknown) {
+        return { disabled: true, options: [], placeholder: `Error: ${(err as Error)?.message ?? String(err)}` };
+      }
     },
   });
 
@@ -189,27 +200,30 @@ const cardStepDropdown = (required: boolean) =>
         };
       }
 
-      const result = await callGatewayTool({
-        auth: auth as unknown as BasecampGatewayAuthConnection,
-        toolName: 'list_card_steps',
-        args: {
-          project: String(project),
-          card_id: toInt(card, 'Card'),
-        },
-      });
-      const steps = extractList<CardStep>(result, 'steps');
-
-      return {
-        disabled: false,
-        options: steps
-          .filter((s) => s?.id != null)
-          .map((s) => ({
-            label:
-              s.title ?? s.name ?? s.content ?? String(s.id ?? 'Unknown step'),
-            value: String(s.id ?? ''),
-          })),
-        placeholder: steps.length ? 'Select a step' : 'No steps found',
-      };
+      try {
+        const result = await callGatewayTool({
+          auth: auth as unknown as BasecampGatewayAuthConnection,
+          toolName: 'list_card_steps',
+          args: {
+            project: String(project),
+            card_id: toInt(card, 'Card'),
+          },
+        });
+        const steps = extractList<CardStep>(result, 'steps');
+        return {
+          disabled: false,
+          options: steps
+            .filter((s) => s?.id != null)
+            .map((s) => ({
+              label:
+                s.title ?? s.name ?? s.content ?? String(s.id ?? 'Unknown step'),
+              value: String(s.id ?? ''),
+            })),
+          placeholder: steps.length ? 'Select a step' : 'No steps found',
+        };
+      } catch (err: unknown) {
+        return { disabled: true, options: [], placeholder: `Error: ${(err as Error)?.message ?? String(err)}` };
+      }
     },
   });
 

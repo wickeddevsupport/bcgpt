@@ -30,20 +30,24 @@ const vaultDropdown = (required: boolean) =>
         };
       }
 
-      const result = await callGatewayTool({
-        auth: auth as unknown as BasecampGatewayAuthConnection,
-        toolName: 'list_vaults',
-        args: { project: String(project) },
-      });
-      const vaults = extractList<Vault>(result, 'vaults');
-      return {
-        disabled: false,
-        options: vaults.map((v) => ({
-          label: v.title ?? v.name ?? String(v.id ?? 'Unknown vault'),
-          value: String(v.id ?? ''),
-        })),
-        placeholder: vaults.length ? 'Select a vault' : 'No vaults found',
-      };
+      try {
+        const result = await callGatewayTool({
+          auth: auth as unknown as BasecampGatewayAuthConnection,
+          toolName: 'list_vaults',
+          args: { project: String(project) },
+        });
+        const vaults = extractList<Vault>(result, 'vaults');
+        return {
+          disabled: false,
+          options: vaults.map((v) => ({
+            label: v.title ?? v.name ?? String(v.id ?? 'Unknown vault'),
+            value: String(v.id ?? ''),
+          })),
+          placeholder: vaults.length ? 'Select a vault' : 'No vaults found',
+        };
+      } catch (err: unknown) {
+        return { disabled: true, options: [], placeholder: `Error: ${(err as Error)?.message ?? String(err)}` };
+      }
     },
   });
 
