@@ -2,8 +2,10 @@ name: PMOS Safe Auto Update
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '15 3 * * 2'
+
+# Scheduled n8n auto-update is intentionally disabled.
+# n8n vendor is legacy/opt-in only. Builds run on Coolify server directly.
+# Re-enable the schedule block only if vendored n8n is actively used again.
 
 permissions:
   contents: write

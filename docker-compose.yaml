@@ -2,7 +2,9 @@
 
 services:
   activepieces:
-    image: ghcr.io/wickeddevsupport/activepieces-bcgpt:latest
+    build:
+      context: ./_archived/activepieces-20260218
+      dockerfile: Dockerfile
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=coolify"

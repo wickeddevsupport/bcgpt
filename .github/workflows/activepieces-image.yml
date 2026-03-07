@@ -2,15 +2,10 @@ name: Build Activepieces Image
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    tags:
-      - 'release-*'
-      - 'v*'
-    paths:
-      - '_archived/activepieces-20260218/**'
-      - '.github/workflows/activepieces-image.yml'
+
+# Auto-push trigger is intentionally removed.
+# Builds run on Coolify directly from git (local image, no GHCR push needed).
+# Trigger this workflow manually only when publishing a GHCR image is explicitly required.
 
 permissions:
   contents: read

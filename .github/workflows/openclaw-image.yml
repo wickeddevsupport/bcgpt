@@ -11,14 +11,10 @@ on:
         description: "Vendor image (e.g. ghcr.io/wickeddevsupport/openclaw-n8n-vendor:stable or n8n_vendor_build)"
         required: false
         default: "n8n_vendor_build"
-  push:
-    branches:
-      - main
-    paths:
-      - 'openclaw/**'
-      - 'Dockerfile.openclaw.nx'
-      - 'docker-compose.pmos.yml'
-      - '.github/workflows/openclaw-image.yml'
+
+# Auto-push trigger is intentionally removed.
+# Builds run on Coolify directly from git (local image, no GHCR push needed).
+# Trigger this workflow manually only when publishing a GHCR image is explicitly required.
 
 permissions:
   contents: read
