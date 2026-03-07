@@ -22,8 +22,8 @@ import {
 import { readWorkspaceConnectors } from "./workspace-connectors.js";
 import { loadConfig } from "../config/config.js";
 
-const BASECAMP_ENSURE_SUCCESS_TTL_MS = 60_000;
-const BASECAMP_ENSURE_FAILURE_TTL_MS = 10_000;
+const BASECAMP_ENSURE_SUCCESS_TTL_MS = 30_000;
+const BASECAMP_ENSURE_FAILURE_TTL_MS = 5_000;
 const basecampEnsureCache = new Map<string, { fingerprint: string; at: number; ok: boolean }>();
 
 function readConfigString(cfg: unknown, path: string[]): string | null {
@@ -188,9 +188,34 @@ export async function ensureWorkspaceBasecampCredential(
   }
 
   try {
+    // Ensure the workspace's AP user exists (self-healing: re-run parity if needed).
+    // This prevents sign-in failures inside upsertBasecampWorkflowConnection from falling
+    // back to the platform API key and creating the connection in the wrong project.
+    try {
+      const wc = await readWorkspaceConnectors(workspaceId).catch(() => null);
+      const userEmail = wc?.ops?.user?.email?.trim() || null;
+      const userPassword = wc?.ops?.user?.password || null;
+      const opsUrl = normalizeBaseUrl(wc?.ops?.url ?? null);
+      if (userEmail && userPassword && opsUrl) {
+        const { ensureActivepiecesCredentialParity } = await import("./pmos-auth-http.js");
+        await ensureActivepiecesCredentialParity({
+          baseUrl: opsUrl,
+          email: userEmail,
+          password: userPassword,
+        }).catch(() => undefined);
+      }
+    } catch {
+      // best-effort user parity — never block the main sync
+    }
+
     const { upsertBasecampWorkflowConnection } = await import("./workflow-api-client.js");
     const result = await upsertBasecampWorkflowConnection(workspaceId, cfg.apiKey);
     const ok = Boolean(result.ok);
+    if (!ok) {
+      console.warn(
+        `[credential-sync] Basecamp connection sync failed for workspace ${workspaceId}: ${result.error ?? "unknown error"}`,
+      );
+    }
     basecampEnsureCache.set(workspaceId, { fingerprint, at: now, ok });
     return {
       configured: true,
@@ -198,12 +223,16 @@ export async function ensureWorkspaceBasecampCredential(
       ...(result.credentialId ? { credentialId: result.credentialId } : {}),
       ...(result.error ? { error: result.error } : {}),
     };
-  } catch {
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `[credential-sync] Basecamp connection sync threw for workspace ${workspaceId}: ${errorMsg}`,
+    );
     basecampEnsureCache.set(workspaceId, { fingerprint, at: now, ok: false });
     return {
       configured: true,
       ok: false,
-      error: "Failed to sync Basecamp connection into the workflow engine.",
+      error: errorMsg,
     };
   }
 }

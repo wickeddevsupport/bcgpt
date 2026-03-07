@@ -684,9 +684,9 @@ export const pmosHandlers: GatewayRequestHandlers = {
       const bcgptKey = workspaceBcgptKey ?? globalBcgptKey;
       const bcgptKeyIsShared = !workspaceBcgptKey && Boolean(globalBcgptKey);
 
-      // Keep Basecamp app-connection provisioned automatically when any bcgpt key is available
-      // (workspace-specific OR the shared global key). Best-effort, never fails connector status.
-      if (workspaceId && bcgptKey) {
+      // Keep Basecamp app-connection provisioned automatically for workspace keys.
+      // This is best-effort and should never fail connector status.
+      if (workspaceId && workspaceBcgptKey) {
         const { ensureWorkspaceBasecampCredential } = await import("../credential-sync.js");
         await ensureWorkspaceBasecampCredential(workspaceId).catch(() => undefined);
       }
