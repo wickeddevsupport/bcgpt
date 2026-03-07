@@ -24,8 +24,18 @@ type ConnectorResult = {
     basecampConnected?: boolean;
     name?: string | null;
     email?: string | null;
+    handle?: string | null;
+    activeConnectionId?: string | null;
+    activeConnectionName?: string | null;
+    activeTeamId?: string | null;
+    lastSyncedAt?: string | null;
+    selectedFileUrl?: string | null;
+    selectedFileId?: string | null;
+    selectedFileName?: string | null;
+    updatedAt?: string | null;
     selectedAccountId?: string | null;
     accountsCount?: number;
+    totalConnections?: number;
     message?: string | null;
   };
 };
@@ -715,6 +725,69 @@ export const pmosHandlers: GatewayRequestHandlers = {
         // shared=true means connection is via server-wide key, not workspace-scoped
         ...(bcgptKeyIsShared ? { shared: true } : {}),
       };
+      const figmaConnector = isJsonObject(workspaceConnectors?.figma)
+        ? (workspaceConnectors?.figma as Record<string, unknown>)
+        : {};
+      const figmaIdentity = isJsonObject(figmaConnector.identity)
+        ? (figmaConnector.identity as Record<string, unknown>)
+        : {};
+      const figmaUrlRaw =
+        (typeof figmaConnector.url === "string" ? figmaConnector.url : null) ??
+        readConfigString(cfg, ["pmos", "connectors", "figma", "url"]);
+      const figmaUrl = normalizeBaseUrl(figmaUrlRaw, "https://fm.wickedwebsites.us");
+      const figma: ConnectorResult = {
+        url: figmaUrl,
+        configured: Boolean(figmaUrlRaw && figmaUrlRaw.trim()),
+        reachable: null,
+        authOk: typeof figmaIdentity.connected === "boolean" ? figmaIdentity.connected : null,
+        healthUrl: `${figmaUrl}/api/pmos/health`,
+        editorUrl: figmaUrl,
+        error: null,
+        identity:
+          Object.keys(figmaIdentity).length > 0
+            ? {
+                connected: figmaIdentity.connected === true,
+                handle: typeof figmaIdentity.handle === "string" ? figmaIdentity.handle : null,
+                email: typeof figmaIdentity.email === "string" ? figmaIdentity.email : null,
+                activeConnectionId:
+                  typeof figmaIdentity.activeConnectionId === "string"
+                    ? figmaIdentity.activeConnectionId
+                    : typeof figmaIdentity.activeConnectionId === "number"
+                      ? String(figmaIdentity.activeConnectionId)
+                      : null,
+                activeConnectionName:
+                  typeof figmaIdentity.activeConnectionName === "string"
+                    ? figmaIdentity.activeConnectionName
+                    : null,
+                activeTeamId:
+                  typeof figmaIdentity.activeTeamId === "string" ? figmaIdentity.activeTeamId : null,
+                totalConnections:
+                  typeof figmaIdentity.totalConnections === "number"
+                    ? figmaIdentity.totalConnections
+                    : undefined,
+                lastSyncedAt:
+                  typeof figmaIdentity.lastSyncedAt === "string" ? figmaIdentity.lastSyncedAt : null,
+                selectedFileUrl:
+                  typeof figmaIdentity.selectedFileUrl === "string"
+                    ? figmaIdentity.selectedFileUrl
+                    : null,
+                selectedFileId:
+                  typeof figmaIdentity.selectedFileId === "string" ? figmaIdentity.selectedFileId : null,
+                selectedFileName:
+                  typeof figmaIdentity.selectedFileName === "string"
+                    ? figmaIdentity.selectedFileName
+                    : null,
+                updatedAt:
+                  typeof figmaIdentity.updatedAt === "string" ? figmaIdentity.updatedAt : null,
+                message:
+                  typeof figmaIdentity.message === "string"
+                    ? figmaIdentity.message
+                    : figmaIdentity.connected === true
+                      ? "Synced from Figma File Manager."
+                      : null,
+              }
+            : undefined,
+      };
 
       if (opsUrlRaw && opsUrlRaw.trim()) {
         const remoteHealth = await fetchJson(`${opsUrl}/api/v1/flags`, { method: "GET", timeoutMs: 3500 });
@@ -810,12 +883,21 @@ export const pmosHandlers: GatewayRequestHandlers = {
         }
       }
 
+      if (figma.configured) {
+        const figmaHealth = await fetchJson(figma.healthUrl!, { method: "GET", timeoutMs: 3500 });
+        figma.reachable = figmaHealth.ok || isReachableStatus(figmaHealth.status);
+        if (!figma.reachable) {
+          figma.error = figmaHealth.error || "FIGMA_MANAGER_UNREACHABLE";
+        }
+      }
+
       respond(
         true,
         {
           checkedAtMs: Date.now(),
           ops,
           bcgpt,
+          figma,
         },
         undefined,
       );

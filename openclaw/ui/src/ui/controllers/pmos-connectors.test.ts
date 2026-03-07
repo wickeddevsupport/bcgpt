@@ -15,6 +15,7 @@ function createBaseState(): PmosConnectorsState {
     pmosOpsUserPasswordDraft: "",
     pmosOpsUserHasSavedPassword: false,
     pmosBcgptUrl: "https://bcgpt.wickedlab.io",
+    pmosFigmaUrl: "https://fm.wickedwebsites.us",
     pmosBcgptApiKeyDraft: "",
     pmosConnectorDraftsInitialized: false,
     pmosConnectorsLoading: false,
@@ -57,6 +58,7 @@ describe("pmos-connectors", () => {
     state.pmosOpsUserEmailDraft = "ops@example.test";
     state.pmosOpsUserPasswordDraft = "secret-pass";
     state.pmosBcgptUrl = "https://bcgpt.example.test/";
+    state.pmosFigmaUrl = "https://fm.example.test/";
     state.pmosBcgptApiKeyDraft = "bcgpt-key";
 
     const request = vi.fn(async (method: string, params: any) => {
@@ -66,6 +68,7 @@ describe("pmos-connectors", () => {
         expect(params.connectors.ops.user.password).toBe("secret-pass");
         expect(params.connectors.bcgpt.url).toBe("https://bcgpt.wickedlab.io");
         expect(params.connectors.bcgpt.apiKey).toBe("bcgpt-key");
+        expect(params.connectors.figma.url).toBe("https://fm.example.test");
         return {
           ok: true,
           workflowConnection: {
@@ -84,6 +87,7 @@ describe("pmos-connectors", () => {
               user: { email: "ops@example.test", hasPassword: true },
             },
             bcgpt: { url: "https://bcgpt.wickedlab.io" },
+            figma: { url: "https://fm.example.test" },
           },
         };
       }
@@ -99,6 +103,7 @@ describe("pmos-connectors", () => {
     expect(state.pmosOpsUserHasSavedPassword).toBe(true);
     expect(state.pmosOpsUserPasswordDraft).toBe("");
     expect(state.pmosBcgptUrl).toBe("https://bcgpt.wickedlab.io");
+    expect(state.pmosFigmaUrl).toBe("https://fm.example.test");
     expect(state.pmosBcgptApiKeyDraft).toBe("");
     expect(state.pmosBasecampSetupOk).toBe(true);
     expect(state.pmosBasecampSetupError).toBeNull();
@@ -110,6 +115,7 @@ describe("pmos-connectors", () => {
     const state = createBaseState();
     state.pmosOpsUrl = "https://ops.example.test/";
     state.pmosBcgptUrl = "https://bcgpt.example.test/";
+    state.pmosFigmaUrl = "https://fm.example.test/";
     state.pmosBcgptApiKeyDraft = "";
 
     const request = vi.fn(async (method: string, params: any) => {
@@ -117,6 +123,7 @@ describe("pmos-connectors", () => {
         expect(params.connectors.ops.url).toBe("https://ops.example.test");
         expect(params.connectors.bcgpt.url).toBe("https://bcgpt.wickedlab.io");
         expect(params.connectors.bcgpt.apiKey).toBeNull();
+        expect(params.connectors.figma.url).toBe("https://fm.example.test");
         return {
           ok: true,
           workflowConnection: {
@@ -132,6 +139,7 @@ describe("pmos-connectors", () => {
           connectors: {
             ops: { url: "https://ops.example.test" },
             bcgpt: { url: "https://bcgpt.wickedlab.io", apiKey: null },
+            figma: { url: "https://fm.example.test" },
           },
         };
       }

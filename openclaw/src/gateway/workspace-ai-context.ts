@@ -266,11 +266,21 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
   const bcgpt = isRecord(raw.bcgpt) ? raw.bcgpt : {};
   const bcgptUrl = asNonEmptyString(bcgpt.url);
   const bcgptApiKeySet = Boolean(asNonEmptyString(bcgpt.apiKey));
+  const figma = isRecord(raw.figma) ? raw.figma : {};
+  const figmaUrl = asNonEmptyString(figma.url);
+  const figmaIdentity = isRecord(figma.identity) ? figma.identity : {};
+  const figmaConnected = figmaIdentity.connected === true;
+  const figmaHandle = asNonEmptyString(figmaIdentity.handle);
+  const figmaEmail = asNonEmptyString(figmaIdentity.email);
+  const figmaActiveConnectionName = asNonEmptyString(figmaIdentity.activeConnectionName);
+  const figmaActiveTeamId = asNonEmptyString(figmaIdentity.activeTeamId);
+  const figmaSelectedFileUrl = asNonEmptyString(figmaIdentity.selectedFileUrl);
+  const figmaSelectedFileName = asNonEmptyString(figmaIdentity.selectedFileName);
   // Shared key: global BCGPT_API_KEY env var available (server-wide connection)
   const bcgptSharedKeyAvailable = !bcgptApiKeySet && Boolean(process.env.BCGPT_API_KEY?.trim());
 
   const extraConnectorKeys = Object.keys(raw)
-    .filter((key) => key !== "ops" && key !== "bcgpt")
+    .filter((key) => key !== "ops" && key !== "bcgpt" && key !== "figma")
     .sort((a, b) => a.localeCompare(b));
 
   const extraLines = extraConnectorKeys.map((key) => {
@@ -289,6 +299,12 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
     `- basecamp connector configured: ${yesNo(Boolean(bcgptUrl || bcgptApiKeySet || bcgptSharedKeyAvailable))}`,
     `- basecamp url: ${bcgptUrl ?? process.env.BCGPT_URL?.trim() ?? "https://bcgpt.wickedlab.io"}`,
     `- basecamp apiKey present: ${bcgptApiKeySet ? "yes" : bcgptSharedKeyAvailable ? "yes (shared server key)" : "no"}`,
+    `- figma connector configured: ${yesNo(Boolean(figmaUrl || figmaConnected || figmaHandle || figmaEmail))}`,
+    `- figma url: ${figmaUrl ?? "https://fm.wickedwebsites.us"}`,
+    `- figma connected user: ${figmaHandle ?? figmaEmail ?? "(not synced)"}`,
+    `- figma active connection: ${figmaActiveConnectionName ?? "(not synced)"}`,
+    `- figma active team id: ${figmaActiveTeamId ?? "(not synced)"}`,
+    `- figma selected file: ${figmaSelectedFileName ?? figmaSelectedFileUrl ?? "(not synced)"}`,
     extraLines.length > 0 ? "### Additional connectors" : "",
     ...extraLines,
   ]
@@ -570,6 +586,7 @@ function describeCapabilitySection(): string {
     "- Workflows panel: create, update, activate, and execute Activepieces workflows.",
     "- Connections panel: inspect and manage available workflow credentials.",
     "- Integrations panel: configure model providers, connector settings, and Basecamp/BCGPT access.",
+    "- Figma panel: open the embedded Figma File Manager, sync active design context, and run design-system audits.",
     "- Projects panel: summarize Basecamp project state and urgent work via BCGPT tools.",
     "- Agents/Models/Skills/Nodes: manage automation agents, model assignment, and enabled tooling.",
     "- Control pages: overview/channels/instances/sessions/usage/cron operations for the workspace.",

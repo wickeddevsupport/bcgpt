@@ -7,6 +7,7 @@ export type IntegrationsProps = {
   saving: boolean;
   error: string | null;
   bcgptUrl: string;
+  figmaUrl: string;
   bcgptApiKeyDraft: string;
   connectorsLoading: boolean;
   connectorsStatus: PmosConnectorsStatus | null;
@@ -15,12 +16,14 @@ export type IntegrationsProps = {
 
   bcgptSavedOk?: boolean;
   onBcgptUrlChange: (next: string) => void;
+  onFigmaUrlChange: (next: string) => void;
   onBcgptApiKeyDraftChange: (next: string) => void;
   onSave: () => void;
   onClearBcgptKey: () => void;
   onRefreshConnectors: () => void;
   onOpenModels: () => void;
   onOpenAutomations: () => void;
+  onOpenFigma: () => void;
 
   // Workflow engine provisioning status
   opsProvisioned?: boolean;
@@ -85,6 +88,8 @@ export function renderIntegrations(props: IntegrationsProps) {
   const bcgpt = props.connectorsStatus?.bcgpt ?? null;
   const bcgptIdentity = bcgpt?.identity ?? null;
   const ops = props.connectorsStatus?.ops ?? null;
+  const figma = props.connectorsStatus?.figma ?? null;
+  const figmaIdentity = figma?.identity ?? null;
   const modelRows = props.modelRows ?? [];
   const activeModel = modelRows.find((row) => row.active) ?? null;
   const configuredModelCount = modelRows.filter((row) => row.workspaceOverride).length;
@@ -200,6 +205,70 @@ export function renderIntegrations(props: IntegrationsProps) {
     </section>
 
     <section class="grid grid-cols-2" style="margin-bottom: 18px;">
+      <div class="card">
+        <div class="card-title">Figma File Manager</div>
+        <div class="card-sub">
+          Embed your Figma workspace, sync active team/file context into PMOS, and use design audit prompts.
+        </div>
+
+        <div class="form-grid" style="margin-top: 16px;">
+          <label class="field">
+            <span>Figma App URL</span>
+            <input
+              type="url"
+              .value=${props.figmaUrl}
+              @input=${(e: Event) => props.onFigmaUrlChange((e.target as HTMLInputElement).value)}
+              placeholder="https://fm.wickedwebsites.us"
+              ?disabled=${!props.connected}
+            />
+          </label>
+        </div>
+
+        <div class="stat-grid" style="margin-top: 16px;">
+          <div class="stat">
+            <div class="stat-label">Status</div>
+            <div class="stat-value ${figma?.reachable === true ? "ok" : figma?.reachable === false ? "warn" : ""}">
+              ${figma?.reachable === true ? "Online" : figma?.reachable === false ? "Offline" : "Unknown"}
+            </div>
+            <div class="muted" style="font-size:11px;">${figma?.url ?? props.figmaUrl}</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Context</div>
+            <div class="stat-value ${figmaIdentity?.connected ? "ok" : "warn"}">
+              ${figmaIdentity?.connected ? "Synced" : "Pending"}
+            </div>
+            <div class="muted" style="font-size:11px;">
+              ${figmaIdentity?.activeConnectionName ?? figmaIdentity?.handle ?? "No active connection synced yet."}
+            </div>
+          </div>
+        </div>
+
+        ${figmaIdentity
+          ? html`
+              <div class="callout" style="margin-top: 12px; font-size: 12px;">
+                <div><strong>User:</strong> ${figmaIdentity.handle ?? figmaIdentity.email ?? "Unknown"}</div>
+                <div><strong>Team:</strong> ${figmaIdentity.activeConnectionName ?? figmaIdentity.activeTeamId ?? "Not synced"}</div>
+                ${figmaIdentity.selectedFileUrl
+                  ? html`<div><strong>Selected file:</strong> <span class="mono">${figmaIdentity.selectedFileName ?? figmaIdentity.selectedFileUrl}</span></div>`
+                  : nothing}
+              </div>
+            `
+          : nothing}
+
+        <div class="row" style="margin-top: 14px; gap: 8px; flex-wrap: wrap;">
+          <button class="btn btn--primary" ?disabled=${props.saving || !props.connected} @click=${() => props.onSave()}>
+            ${props.saving ? "Saving..." : "Save"}
+          </button>
+          <button class="btn btn--secondary" ?disabled=${!props.connected} @click=${() => props.onOpenFigma()}>
+            Open Figma Panel
+          </button>
+        </div>
+
+        ${figma?.error
+          ? html`<div class="callout warn" style="margin-top: 12px; font-size: 12px;">${figma.error}</div>`
+          : nothing}
+      </div>
+
       <div class="card">
         <div class="card-title">Basecamp</div>
         <div class="card-sub">

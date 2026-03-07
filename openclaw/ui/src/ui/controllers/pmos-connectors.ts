@@ -33,6 +33,30 @@ export type PmosConnectorsStatus = {
       message?: string | null;
     };
   };
+  figma?: {
+    url: string | null;
+    configured: boolean;
+    reachable: boolean | null;
+    authOk: boolean | null;
+    healthUrl?: string | null;
+    editorUrl?: string | null;
+    error: string | null;
+    identity?: {
+      connected: boolean;
+      handle?: string | null;
+      email?: string | null;
+      activeConnectionId?: string | null;
+      activeConnectionName?: string | null;
+      activeTeamId?: string | null;
+      totalConnections?: number;
+      lastSyncedAt?: string | null;
+      selectedFileUrl?: string | null;
+      selectedFileId?: string | null;
+      selectedFileName?: string | null;
+      updatedAt?: string | null;
+      message?: string | null;
+    };
+  };
 };
 
 export type PmosConnectorsState = {
@@ -46,6 +70,7 @@ export type PmosConnectorsState = {
   pmosOpsUserPasswordDraft: string;
   pmosOpsUserHasSavedPassword: boolean;
   pmosBcgptUrl: string;
+  pmosFigmaUrl: string;
   pmosBcgptApiKeyDraft: string;
   pmosConnectorDraftsInitialized: boolean;
 
@@ -99,9 +124,16 @@ export function hydratePmosConnectorDraftsFromConfig(state: PmosConnectorsState)
         ? (getPath(cfg, ["pmos", "connectors", "ops", "url"]) as string)
         : "") || "https://flow.wickedlab.io";
   const bcgptUrl = "https://bcgpt.wickedlab.io";
+  const figmaUrl =
+    (typeof status?.figma?.url === "string" && status.figma.url.trim()
+      ? status.figma.url
+      : typeof getPath(cfg, ["pmos", "connectors", "figma", "url"]) === "string"
+        ? (getPath(cfg, ["pmos", "connectors", "figma", "url"]) as string)
+        : "") || "https://fm.wickedwebsites.us";
 
   state.pmosOpsUrl = normalizeUrl(opsUrl, "https://flow.wickedlab.io");
   state.pmosBcgptUrl = normalizeUrl(bcgptUrl, "https://bcgpt.wickedlab.io");
+  state.pmosFigmaUrl = normalizeUrl(figmaUrl, "https://fm.wickedwebsites.us");
   state.pmosConnectorDraftsInitialized = true;
 }
 
@@ -134,6 +166,7 @@ export async function savePmosConnectorsConfig(
   try {
     const opsUrl = normalizeUrl(state.pmosOpsUrl, "https://flow.wickedlab.io");
     const bcgptUrl = "https://bcgpt.wickedlab.io";
+    const figmaUrl = normalizeUrl(state.pmosFigmaUrl, "https://fm.wickedwebsites.us");
     const bcgptKey = state.pmosBcgptApiKeyDraft.trim();
     const opsUserEmail = state.pmosOpsUserEmailDraft.trim().toLowerCase();
     const opsUserPassword = state.pmosOpsUserPasswordDraft;
@@ -158,6 +191,9 @@ export async function savePmosConnectorsConfig(
           : !bcgptKey
             ? { url: bcgptUrl }
           : { url: bcgptUrl, apiKey: bcgptKey },
+      figma: {
+        url: figmaUrl,
+      },
     };
     const saveResult = await state.client.request<{
       workflowConnection?: {
@@ -191,6 +227,7 @@ export async function savePmosConnectorsConfig(
       ["ops", "user", "hasPassword"],
     );
     const bcgptSaved = getPath(workspaceConnectors.connectors, ["bcgpt", "url"]);
+    const figmaSaved = getPath(workspaceConnectors.connectors, ["figma", "url"]);
     state.pmosOpsUrl = normalizeUrl(
       typeof opsSaved === "string" ? opsSaved : "https://flow.wickedlab.io",
       "https://flow.wickedlab.io",
@@ -203,6 +240,12 @@ export async function savePmosConnectorsConfig(
         ? bcgptSaved
         : "https://bcgpt.wickedlab.io",
       "https://bcgpt.wickedlab.io",
+    );
+    state.pmosFigmaUrl = normalizeUrl(
+      typeof figmaSaved === "string" && figmaSaved.trim()
+        ? figmaSaved
+        : "https://fm.wickedwebsites.us",
+      "https://fm.wickedwebsites.us",
     );
     state.pmosConnectorDraftsInitialized = true;
   } catch (err) {

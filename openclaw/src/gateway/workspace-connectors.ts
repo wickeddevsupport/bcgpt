@@ -10,6 +10,23 @@ export type WorkspaceConnectors = {
     user?: { email?: string; password?: string };
   };
   bcgpt?: { url?: string; apiKey?: string };
+  figma?: {
+    url?: string;
+    identity?: {
+      connected?: boolean;
+      handle?: string;
+      email?: string;
+      activeConnectionId?: string;
+      activeConnectionName?: string;
+      activeTeamId?: string;
+      totalConnections?: number;
+      lastSyncedAt?: string;
+      selectedFileUrl?: string;
+      selectedFileId?: string;
+      selectedFileName?: string;
+      updatedAt?: string;
+    };
+  };
   [k: string]: unknown;
 };
 

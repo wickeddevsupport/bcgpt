@@ -161,6 +161,7 @@ export type AppViewState = {
   pmosOpsUserPasswordDraft: string;
   pmosOpsUserHasSavedPassword: boolean;
   pmosBcgptUrl: string;
+  pmosFigmaUrl: string;
   pmosBcgptApiKeyDraft: string;
   pmosIntegrationsSaving: boolean;
   pmosIntegrationsError: string | null;
@@ -168,6 +169,9 @@ export type AppViewState = {
   pmosConnectorsStatus: PmosConnectorsStatus | null;
   pmosConnectorsError: string | null;
   pmosConnectorsLastChecked: number | null;
+  pmosFigmaContextSyncing: boolean;
+  pmosFigmaContextError: string | null;
+  pmosFigmaContextSyncedOk: boolean;
   pmosTraceEvents: PmosExecutionTraceEvent[];
 
   // workspace-scoped Wicked Ops provisioning state
@@ -294,6 +298,7 @@ export type AppViewState = {
   apFlowSelectedId: string | null;
   workflowEmbedVersion: number;
   flowConnectionsEmbedVersion: number;
+  pmosFigmaEmbedVersion: number;
   apFlowDetailsLoading: boolean;
   apFlowDetailsError: string | null;
   apFlowDetails: unknown | null;
@@ -535,6 +540,7 @@ export type AppViewState = {
   handlePmosIntegrationsSave: () => Promise<void>;
   handlePmosSetupBasecampInWorkflowEngine: () => Promise<void>;
   handlePmosIntegrationsClearBcgptKey: () => Promise<void>;
+  handlePmosFigmaSyncContext: () => Promise<void>;
   handlePmosModelProviderChange: (next: PmosModelProvider) => void;
   handlePmosModelRefDraftChange: (next: string) => void;
   handlePmosModelApiKeyEditToggle: (enabled: boolean) => void;

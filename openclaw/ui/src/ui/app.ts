@@ -294,6 +294,7 @@ export class OpenClawApp extends LitElement {
   @state() pmosOpsUserPasswordDraft = "";
   @state() pmosOpsUserHasSavedPassword = false;
   @state() pmosBcgptUrl = "https://bcgpt.wickedlab.io";
+  @state() pmosFigmaUrl = "https://fm.wickedwebsites.us";
   @state() pmosBcgptApiKeyDraft = "";
   @state() pmosIntegrationsSaving = false;
   @state() pmosIntegrationsError: string | null = null;
@@ -301,6 +302,9 @@ export class OpenClawApp extends LitElement {
   @state() pmosConnectorsStatus: PmosConnectorsStatus | null = null;
   @state() pmosConnectorsError: string | null = null;
   @state() pmosConnectorsLastChecked: number | null = null;
+  @state() pmosFigmaContextSyncing = false;
+  @state() pmosFigmaContextError: string | null = null;
+  @state() pmosFigmaContextSyncedOk = false;
   @state() pmosWorkflowCredentials: Array<{ id: string; name: string; type: string }> | null = null;
   @state() pmosWorkflowCredentialsLoading = false;
   @state() pmosWorkflowCredentialsError: string | null = null;
@@ -433,6 +437,7 @@ export class OpenClawApp extends LitElement {
   @state() apFlowSelectedId: string | null = null;
   @state() workflowEmbedVersion = 0;
   @state() flowConnectionsEmbedVersion = 0;
+  @state() pmosFigmaEmbedVersion = 0;
   @state() apFlowDetailsLoading = false;
   @state() apFlowDetailsError: string | null = null;
   @state() apFlowDetails: unknown | null = null;
@@ -1094,6 +1099,92 @@ export class OpenClawApp extends LitElement {
     this.syncPmosModelDraftRef();
     this.syncPmosModelApiKeyEditability();
     await loadPmosWorkflowCredentials(this);
+  }
+
+  async handlePmosFigmaSyncContext() {
+    if (!this.client || !this.connected) {
+      this.pmosFigmaContextError = "Connect to the gateway first.";
+      return;
+    }
+
+    const figmaBaseUrl = String(this.pmosFigmaUrl ?? "").trim().replace(/\/+$/, "") || "https://fm.wickedwebsites.us";
+    this.pmosFigmaContextSyncing = true;
+    this.pmosFigmaContextError = null;
+    this.pmosFigmaContextSyncedOk = false;
+    try {
+      const response = await fetch(`${figmaBaseUrl}/api/pmos/context`, {
+        credentials: "include",
+        headers: {
+          accept: "application/json",
+        },
+      });
+      if (response.status === 401) {
+        throw new Error("Sign in to the Figma File Manager first, then retry sync.");
+      }
+      if (!response.ok) {
+        throw new Error(`Figma context request failed (${response.status}).`);
+      }
+
+      const payload = (await response.json()) as {
+        user?: { handle?: string | null; email?: string | null };
+        activeConnection?: {
+          id?: string | number | null;
+          connection_name?: string | null;
+          figma_team_id?: string | null;
+          last_synced_at?: string | null;
+        } | null;
+        selection?: {
+          selectedFileUrl?: string | null;
+          selectedFileId?: string | null;
+          selectedFileName?: string | null;
+          updatedAt?: string | null;
+        } | null;
+        connectionsCount?: number;
+      };
+
+      await this.client.request("pmos.connectors.workspace.set", {
+        connectors: {
+          figma: {
+            url: figmaBaseUrl,
+            identity: {
+              connected: Boolean(payload.user?.handle || payload.user?.email),
+              handle: payload.user?.handle ?? null,
+              email: payload.user?.email ?? null,
+              activeConnectionId:
+                payload.activeConnection?.id === null || payload.activeConnection?.id === undefined
+                  ? null
+                  : String(payload.activeConnection.id),
+              activeConnectionName: payload.activeConnection?.connection_name ?? null,
+              activeTeamId: payload.activeConnection?.figma_team_id ?? null,
+              totalConnections:
+                typeof payload.connectionsCount === "number" ? payload.connectionsCount : undefined,
+              lastSyncedAt: payload.activeConnection?.last_synced_at ?? null,
+              selectedFileUrl: payload.selection?.selectedFileUrl ?? null,
+              selectedFileId: payload.selection?.selectedFileId ?? null,
+              selectedFileName: payload.selection?.selectedFileName ?? null,
+              updatedAt: payload.selection?.updatedAt ?? new Date().toISOString(),
+            },
+          },
+        },
+      });
+
+      await loadPmosConnectorsStatus(this);
+      this.pmosConnectorDraftsInitialized = false;
+      hydratePmosConnectorDraftsFromConfig(this);
+      try {
+        await this.client.request("pmos.context.workspace.refresh", {});
+      } catch {
+        // Best-effort context refresh only.
+      }
+      this.pmosFigmaContextSyncedOk = true;
+      setTimeout(() => {
+        this.pmosFigmaContextSyncedOk = false;
+      }, 2500);
+    } catch (err) {
+      this.pmosFigmaContextError = err instanceof Error ? err.message : String(err);
+    } finally {
+      this.pmosFigmaContextSyncing = false;
+    }
   }
 
   async handlePmosProvisionOps(opts?: { projectName?: string }) {

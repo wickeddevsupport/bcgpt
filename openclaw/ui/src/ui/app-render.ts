@@ -91,6 +91,7 @@ import { renderCron } from "./views/cron.ts";
 import { renderOnboarding } from "./views/onboarding.ts";
 import { renderDebug } from "./views/debug.ts";
 import { renderExecApprovalPrompt } from "./views/exec-approval.ts";
+import { renderFigma } from "./views/figma.ts";
 import { renderGatewayUrlConfirmation } from "./views/gateway-url-confirmation.ts";
 import { renderIntegrations } from "./views/integrations.ts";
 import { renderInstances } from "./views/instances.ts";
@@ -452,6 +453,19 @@ export function renderApp(state: AppViewState) {
     state.apFlowSelectedId && state.apFlows
       ? state.apFlows.find((flow) => flow.id === state.apFlowSelectedId) ?? null
       : null;
+  const opsProjectId =
+    state.pmosOpsProvisioningResult?.projectId ?? state.pmosConnectorsStatus?.ops?.projectId ?? null;
+  const workflowEmbedBaseUrl = buildOpsUiEmbedUrl(
+    basePath,
+    state.apFlowSelectedId,
+    opsProjectId,
+  );
+  const flowConnectionsEmbedBaseUrl = buildOpsUiConnectionsUrl(basePath, opsProjectId);
+  const figmaBaseUrl = (state.pmosFigmaUrl || state.pmosConnectorsStatus?.figma?.url || "https://fm.wickedwebsites.us")
+    .replace(/\/+$/, "");
+  const figmaEmbedBaseUrl = `${figmaBaseUrl}/?pmosEmbed=1&pmosParentOrigin=${encodeURIComponent(
+    typeof window !== "undefined" ? window.location.origin : "",
+  )}`;
   const sessionDefaults =
     (state.hello?.snapshot as { sessionDefaults?: { mainKey?: string } } | undefined)
       ?.sessionDefaults ?? null;
@@ -863,10 +877,10 @@ export function renderApp(state: AppViewState) {
                       projectId: state.pmosOpsProvisioningResult?.projectId ?? "embedded",
                       onOpenIntegrations: () => state.setTab("integrations"),
                       embedUrl:
-                        buildOpsUiEmbedUrl(
-                          basePath,
-                          state.apFlowSelectedId,
-                        ) + (state.workflowEmbedVersion ? `?v=${state.workflowEmbedVersion}` : ""),
+                        workflowEmbedBaseUrl +
+                        (state.workflowEmbedVersion
+                          ? `${workflowEmbedBaseUrl.includes("?") ? "&" : "?"}v=${state.workflowEmbedVersion}`
+                          : ""),
                       selectedFlowLabel: selectedWorkflow
                         ? selectedWorkflow.displayName ?? selectedWorkflow.id
                         : null,
@@ -952,17 +966,20 @@ export function renderApp(state: AppViewState) {
                 connectorsStatus: state.pmosConnectorsStatus,
                 connectorsError: state.pmosConnectorsError,
                 modelRows: state.pmosModelRows,
+                figmaUrl: state.pmosFigmaUrl,
                 onBcgptUrlChange: (next) => (state.pmosBcgptUrl = next),
+                onFigmaUrlChange: (next) => (state.pmosFigmaUrl = next),
                 onBcgptApiKeyDraftChange: (next) => (state.pmosBcgptApiKeyDraft = next),
                 onSave: () => state.handlePmosIntegrationsSave(),
                 onClearBcgptKey: () => state.handlePmosIntegrationsClearBcgptKey(),
                 onRefreshConnectors: () => state.handlePmosRefreshConnectors(),
                 onOpenModels: () => state.setTab("models"),
                 onOpenAutomations: () => state.setTab("automations"),
+                onOpenFigma: () => state.setTab("figma"),
                 bcgptSavedOk: state.pmosBcgptSavedOk,
                 opsProvisioned: Boolean(state.pmosOpsProvisioningResult?.apiKey) || state.pmosConnectorsStatus?.ops?.reachable === true,
                 opsProjectId: state.pmosOpsProvisioningResult?.projectId ?? null,
-                opsUiHref: `${state.basePath ?? ""}/ops-ui/connections`,
+                opsUiHref: flowConnectionsEmbedBaseUrl,
                 basecampSetupPending: state.pmosBasecampSetupPending,
                 basecampSetupOk: state.pmosBasecampSetupOk,
                 basecampSetupError: state.pmosBasecampSetupError,
@@ -971,6 +988,36 @@ export function renderApp(state: AppViewState) {
                 workflowCredentialsLoading: state.pmosRealCredentialsLoading,
                 workflowCredentialsError: state.pmosRealCredentialsError,
                 onRefreshWorkflowCredentials: () => void state.handleLoadRealCredentials(),
+              })
+            : nothing
+        }
+
+        ${
+          state.tab === "figma"
+            ? renderFigma({
+                connected: state.connected,
+                figmaUrl: state.pmosFigmaUrl,
+                embedUrl:
+                  figmaEmbedBaseUrl +
+                  (state.pmosFigmaEmbedVersion
+                    ? `${figmaEmbedBaseUrl.includes("?") ? "&" : "?"}v=${state.pmosFigmaEmbedVersion}`
+                    : ""),
+                connectorsLoading: state.pmosConnectorsLoading,
+                connectorsError: state.pmosConnectorsError,
+                connectorsStatus: state.pmosConnectorsStatus,
+                syncing: state.pmosFigmaContextSyncing,
+                syncError: state.pmosFigmaContextError,
+                syncedOk: state.pmosFigmaContextSyncedOk,
+                chatProps,
+                onSyncContext: () => void state.handlePmosFigmaSyncContext(),
+                onRefresh: () => {
+                  state.pmosFigmaEmbedVersion = (state.pmosFigmaEmbedVersion ?? 0) + 1;
+                  void state.handlePmosRefreshConnectors();
+                },
+                onOpenIntegrations: () => state.setTab("integrations"),
+                onPrefillPrompt: (prompt) => {
+                  chatProps.onDraftChange(prompt);
+                },
               })
             : nothing
         }
@@ -1037,9 +1084,9 @@ export function renderApp(state: AppViewState) {
                   connectorsLoading: state.pmosConnectorsLoading,
                   connectorsError: state.pmosConnectorsError,
                   embedUrl:
-                    buildOpsUiConnectionsUrl(basePath) +
+                    flowConnectionsEmbedBaseUrl +
                     (state.flowConnectionsEmbedVersion
-                      ? `?v=${state.flowConnectionsEmbedVersion}`
+                      ? `${flowConnectionsEmbedBaseUrl.includes("?") ? "&" : "?"}v=${state.flowConnectionsEmbedVersion}`
                       : ""),
                   onRefresh: () => {
                     state.flowConnectionsEmbedVersion = (state.flowConnectionsEmbedVersion ?? 0) + 1;

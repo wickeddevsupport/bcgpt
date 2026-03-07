@@ -9,7 +9,7 @@ export const TAB_GROUPS = [
   // Core Wicked OS workspace surface.
   {
     label: "Wicked OS",
-    tabs: ["dashboard", "automations", "connections", "integrations", "command-center"],
+    tabs: ["dashboard", "automations", "connections", "integrations", "figma", "command-center"],
   },
   // Agent management.
   {
@@ -37,6 +37,7 @@ export type Tab =
   | "automations"
   | "runs"
   | "integrations"
+  | "figma"
   | "models"
   | "connections"
   | "command-center"
@@ -60,6 +61,7 @@ const TAB_PATHS: Record<Tab, string> = {
   automations: "/automations",
   runs: "/runs",
   integrations: "/integrations",
+  figma: "/figma",
   models: "/models",
   connections: "/connections",
   "command-center": "/command-center",
@@ -170,6 +172,8 @@ export function iconForTab(tab: Tab): IconName {
       return "scrollText";
     case "integrations":
       return "link";
+    case "figma":
+      return "folder";
     case "models":
       return "brain";
     case "command-center":
@@ -217,6 +221,8 @@ export function titleForTab(tab: Tab) {
       return "Runs";
     case "integrations":
       return "Integrations";
+    case "figma":
+      return "Figma";
     case "models":
       return "Models";
     case "connections":
@@ -266,6 +272,8 @@ export function subtitleForTab(tab: Tab) {
       return "Live and historical executions across agents and automations.";
     case "integrations":
       return "Connect Flow, Basecamp, and provider keys for this workspace.";
+    case "figma":
+      return "Embed the Figma File Manager, sync active design context, and run design audits.";
     case "models":
       return "Create and manage workspace models, keys, and agent assignments.";
     case "connections":
