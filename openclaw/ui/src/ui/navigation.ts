@@ -173,7 +173,7 @@ export function iconForTab(tab: Tab): IconName {
     case "integrations":
       return "link";
     case "figma":
-      return "folder";
+      return "figma";
     case "models":
       return "brain";
     case "command-center":

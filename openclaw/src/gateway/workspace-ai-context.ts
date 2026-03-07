@@ -300,7 +300,7 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
     `- basecamp url: ${bcgptUrl ?? process.env.BCGPT_URL?.trim() ?? "https://bcgpt.wickedlab.io"}`,
     `- basecamp apiKey present: ${bcgptApiKeySet ? "yes" : bcgptSharedKeyAvailable ? "yes (shared server key)" : "no"}`,
     `- figma connector configured: ${yesNo(Boolean(figmaUrl || figmaConnected || figmaHandle || figmaEmail))}`,
-    `- figma url: ${figmaUrl ?? "https://fm.wickedwebsites.us"}`,
+      `- figma url: ${figmaUrl ?? "https://fm.wickedlab.io"}`,
     `- figma connected user: ${figmaHandle ?? figmaEmail ?? "(not synced)"}`,
     `- figma active connection: ${figmaActiveConnectionName ?? "(not synced)"}`,
     `- figma active team id: ${figmaActiveTeamId ?? "(not synced)"}`,

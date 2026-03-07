@@ -15,7 +15,7 @@ function createBaseState(): PmosConnectorsState {
     pmosOpsUserPasswordDraft: "",
     pmosOpsUserHasSavedPassword: false,
     pmosBcgptUrl: "https://bcgpt.wickedlab.io",
-    pmosFigmaUrl: "https://fm.wickedwebsites.us",
+    pmosFigmaUrl: "https://fm.wickedlab.io",
     pmosBcgptApiKeyDraft: "",
     pmosConnectorDraftsInitialized: false,
     pmosConnectorsLoading: false,

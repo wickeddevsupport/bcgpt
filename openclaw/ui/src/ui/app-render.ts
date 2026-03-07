@@ -461,7 +461,7 @@ export function renderApp(state: AppViewState) {
     opsProjectId,
   );
   const flowConnectionsEmbedBaseUrl = buildOpsUiConnectionsUrl(basePath, opsProjectId);
-  const figmaBaseUrl = (state.pmosFigmaUrl || state.pmosConnectorsStatus?.figma?.url || "https://fm.wickedwebsites.us")
+    const figmaBaseUrl = (state.pmosFigmaUrl || state.pmosConnectorsStatus?.figma?.url || "https://fm.wickedlab.io")
     .replace(/\/+$/, "");
   const figmaEmbedBaseUrl = `${figmaBaseUrl}/?pmosEmbed=1&pmosParentOrigin=${encodeURIComponent(
     typeof window !== "undefined" ? window.location.origin : "",

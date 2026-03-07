@@ -734,7 +734,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
       const figmaUrlRaw =
         (typeof figmaConnector.url === "string" ? figmaConnector.url : null) ??
         readConfigString(cfg, ["pmos", "connectors", "figma", "url"]);
-      const figmaUrl = normalizeBaseUrl(figmaUrlRaw, "https://fm.wickedwebsites.us");
+        const figmaUrl = normalizeBaseUrl(figmaUrlRaw, "https://fm.wickedlab.io");
       const figma: ConnectorResult = {
         url: figmaUrl,
         configured: Boolean(figmaUrlRaw && figmaUrlRaw.trim()),

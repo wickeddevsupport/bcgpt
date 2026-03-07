@@ -129,11 +129,11 @@ export function hydratePmosConnectorDraftsFromConfig(state: PmosConnectorsState)
       ? status.figma.url
       : typeof getPath(cfg, ["pmos", "connectors", "figma", "url"]) === "string"
         ? (getPath(cfg, ["pmos", "connectors", "figma", "url"]) as string)
-        : "") || "https://fm.wickedwebsites.us";
+        : "") || "https://fm.wickedlab.io";
 
   state.pmosOpsUrl = normalizeUrl(opsUrl, "https://flow.wickedlab.io");
   state.pmosBcgptUrl = normalizeUrl(bcgptUrl, "https://bcgpt.wickedlab.io");
-  state.pmosFigmaUrl = normalizeUrl(figmaUrl, "https://fm.wickedwebsites.us");
+  state.pmosFigmaUrl = normalizeUrl(figmaUrl, "https://fm.wickedlab.io");
   state.pmosConnectorDraftsInitialized = true;
 }
 
@@ -166,7 +166,7 @@ export async function savePmosConnectorsConfig(
   try {
     const opsUrl = normalizeUrl(state.pmosOpsUrl, "https://flow.wickedlab.io");
     const bcgptUrl = "https://bcgpt.wickedlab.io";
-    const figmaUrl = normalizeUrl(state.pmosFigmaUrl, "https://fm.wickedwebsites.us");
+    const figmaUrl = normalizeUrl(state.pmosFigmaUrl, "https://fm.wickedlab.io");
     const bcgptKey = state.pmosBcgptApiKeyDraft.trim();
     const opsUserEmail = state.pmosOpsUserEmailDraft.trim().toLowerCase();
     const opsUserPassword = state.pmosOpsUserPasswordDraft;
@@ -244,8 +244,8 @@ export async function savePmosConnectorsConfig(
     state.pmosFigmaUrl = normalizeUrl(
       typeof figmaSaved === "string" && figmaSaved.trim()
         ? figmaSaved
-        : "https://fm.wickedwebsites.us",
-      "https://fm.wickedwebsites.us",
+        : "https://fm.wickedlab.io",
+      "https://fm.wickedlab.io",
     );
     state.pmosConnectorDraftsInitialized = true;
   } catch (err) {

@@ -88,6 +88,15 @@ export const icons = {
       />
     </svg>
   `,
+  figma: html`
+    <svg viewBox="0 0 24 24">
+      <path d="M9 3.5h3.5a3.5 3.5 0 0 1 0 7H9z" />
+      <path d="M9 10.5h3.5a3.5 3.5 0 0 1 0 7H9z" />
+      <path d="M9 17.5a3.5 3.5 0 1 0 0-7z" />
+      <path d="M12.5 3.5H16a3.5 3.5 0 1 1 0 7h-3.5z" />
+      <path d="M12.5 10.5H16a3.5 3.5 0 1 1-3.5 3.5z" />
+    </svg>
+  `,
 
   // UI icons
   menu: html`

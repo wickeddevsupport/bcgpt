@@ -294,7 +294,7 @@ export class OpenClawApp extends LitElement {
   @state() pmosOpsUserPasswordDraft = "";
   @state() pmosOpsUserHasSavedPassword = false;
   @state() pmosBcgptUrl = "https://bcgpt.wickedlab.io";
-  @state() pmosFigmaUrl = "https://fm.wickedwebsites.us";
+    @state() pmosFigmaUrl = "https://fm.wickedlab.io";
   @state() pmosBcgptApiKeyDraft = "";
   @state() pmosIntegrationsSaving = false;
   @state() pmosIntegrationsError: string | null = null;
@@ -1107,7 +1107,7 @@ export class OpenClawApp extends LitElement {
       return;
     }
 
-    const figmaBaseUrl = String(this.pmosFigmaUrl ?? "").trim().replace(/\/+$/, "") || "https://fm.wickedwebsites.us";
+    const figmaBaseUrl = String(this.pmosFigmaUrl ?? "").trim().replace(/\/+$/, "") || "https://fm.wickedlab.io";
     this.pmosFigmaContextSyncing = true;
     this.pmosFigmaContextError = null;
     this.pmosFigmaContextSyncedOk = false;

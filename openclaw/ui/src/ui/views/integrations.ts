@@ -218,7 +218,7 @@ export function renderIntegrations(props: IntegrationsProps) {
               type="url"
               .value=${props.figmaUrl}
               @input=${(e: Event) => props.onFigmaUrlChange((e.target as HTMLInputElement).value)}
-              placeholder="https://fm.wickedwebsites.us"
+              placeholder="https://fm.wickedlab.io"
               ?disabled=${!props.connected}
             />
           </label>
