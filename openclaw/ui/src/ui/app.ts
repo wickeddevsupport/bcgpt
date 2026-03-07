@@ -668,6 +668,33 @@ export class OpenClawApp extends LitElement {
   private themeMedia: MediaQueryList | null = null;
   private themeMediaHandler: ((event: MediaQueryListEvent) => void) | null = null;
   private topbarObserver: ResizeObserver | null = null;
+  private readonly pmosFigmaAuthMessageHandler = (event: MessageEvent) => {
+    const data = event.data;
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      return;
+    }
+    if ((data as { type?: unknown }).type !== "pmos:figma-auth-complete") {
+      return;
+    }
+    const figmaBaseUrl = String(
+      this.pmosFigmaUrl || this.pmosConnectorsStatus?.figma?.url || "https://fm.wickedlab.io",
+    )
+      .trim()
+      .replace(/\/+$/, "");
+    let expectedOrigin: string | null = null;
+    try {
+      expectedOrigin = new URL(figmaBaseUrl).origin;
+    } catch {
+      expectedOrigin = null;
+    }
+    if (!expectedOrigin || event.origin !== expectedOrigin) {
+      return;
+    }
+    this.pmosFigmaContextError = null;
+    this.pmosFigmaContextSyncedOk = false;
+    this.pmosFigmaEmbedVersion = (this.pmosFigmaEmbedVersion ?? 0) + 1;
+    void this.handlePmosRefreshConnectors();
+  };
 
   createRenderRoot() {
     return this;
@@ -675,6 +702,7 @@ export class OpenClawApp extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
+    window.addEventListener("message", this.pmosFigmaAuthMessageHandler);
     handleConnected(this as unknown as Parameters<typeof handleConnected>[0]);
     void this.handlePmosAuthBootstrap();
   }
@@ -684,6 +712,7 @@ export class OpenClawApp extends LitElement {
   }
 
   disconnectedCallback() {
+    window.removeEventListener("message", this.pmosFigmaAuthMessageHandler);
     handleDisconnected(this as unknown as Parameters<typeof handleDisconnected>[0]);
     super.disconnectedCallback();
   }
