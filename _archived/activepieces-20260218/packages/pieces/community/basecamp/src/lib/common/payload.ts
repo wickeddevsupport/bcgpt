@@ -53,8 +53,14 @@ export const toOptionalIntArray = (
   value: unknown,
   fieldName: string,
 ): number[] | undefined => {
-  if (value === undefined || value === null) {
+  if (value === undefined || value === null || value === '') {
     return undefined;
+  }
+  // Accept comma-separated string of IDs (e.g. "123,456")
+  if (typeof value === 'string') {
+    const parts = value.split(',').map((s) => s.trim()).filter(Boolean);
+    if (parts.length === 0) return undefined;
+    return parts.map((v, idx) => toInt(v, `${fieldName}[${idx}]`));
   }
   return toIntArray(value, fieldName);
 };

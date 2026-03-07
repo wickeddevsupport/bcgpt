@@ -5,8 +5,6 @@ import {
   projectDropdown,
   todolistDropdown,
   todoDropdown,
-  todolistGroupDropdown,
-  projectPeopleMultiSelectDropdown,
 } from '../common/dropdowns';
 import { callGatewayTool, requireGatewayAuth } from '../common/gateway';
 import { toInt, toOptionalIntArray } from '../common/payload';
@@ -46,14 +44,16 @@ export const todosAction = createAction({
     }),
     project: projectDropdown(true),
     todolist: todolistDropdown(false),
+    todo: todoDropdown(false),
     inputs: Property.DynamicProperties({
       displayName: 'Inputs',
       required: false,
       auth: basecampAuth,
-      refreshers: ['operation', 'todolist'],
-      props: async ({ operation, todolist }) => {
+      refreshers: ['operation', 'todolist', 'todo'],
+      props: async ({ operation, todolist, todo }) => {
         const op = String(operation ?? '');
         const hasTodoList = Boolean(todolist);
+        const hasTodo = Boolean(todo);
         const fields: DynamicPropsValue = {};
         switch (op) {
           case 'list_todolists':
@@ -90,21 +90,19 @@ export const todosAction = createAction({
           case 'get_todo':
           case 'complete_todo':
           case 'uncomplete_todo':
-            if (hasTodoList) {
-              fields['todo'] = todoDropdown(true);
-            } else {
+            if (!hasTodo) {
               fields['todo_id'] = Property.Number({
                 displayName: 'To-do ID',
+                description: 'Required if no To-do is selected above.',
                 required: true,
               });
             }
             break;
           case 'reposition_todo':
-            if (hasTodoList) {
-              fields['todo'] = todoDropdown(true);
-            } else {
+            if (!hasTodo) {
               fields['todo_id'] = Property.Number({
                 displayName: 'To-do ID',
+                description: 'Required if no To-do is selected above.',
                 required: true,
               });
             }
@@ -141,10 +139,10 @@ export const todosAction = createAction({
               description: 'Date string (YYYY-MM-DD).',
               required: false,
             });
-            fields['assignee_ids'] = projectPeopleMultiSelectDropdown({
-              required: false,
+            fields['assignee_ids'] = Property.ShortText({
               displayName: 'Assignees (optional)',
-              description: 'Assign this to-do to one or more people.',
+              description: 'Comma-separated person IDs to assign this to-do to.',
+              required: false,
             });
             fields['notify'] = Property.Checkbox({
               displayName: 'Notify',
@@ -153,11 +151,10 @@ export const todosAction = createAction({
             });
             break;
           case 'update_todo_details':
-            if (hasTodoList) {
-              fields['todo'] = todoDropdown(true);
-            } else {
+            if (!hasTodo) {
               fields['todo_id'] = Property.Number({
                 displayName: 'To-do ID',
+                description: 'Required if no To-do is selected above.',
                 required: true,
               });
             }
@@ -179,16 +176,15 @@ export const todosAction = createAction({
               description: 'Date string (YYYY-MM-DD).',
               required: false,
             });
-            fields['assignee_ids'] = projectPeopleMultiSelectDropdown({
-              required: false,
+            fields['assignee_ids'] = Property.ShortText({
               displayName: 'Assignees (optional)',
-              description: 'Replace assignees. Leave unset to keep current.',
-            });
-            fields['completion_subscriber_ids'] = projectPeopleMultiSelectDropdown({
+              description: 'Comma-separated person IDs. Replace assignees. Leave unset to keep current.',
               required: false,
+            });
+            fields['completion_subscriber_ids'] = Property.ShortText({
               displayName: 'Completion subscribers (optional)',
-              description:
-                'Replace completion subscribers. Leave unset to keep current.',
+              description: 'Comma-separated person IDs. Replace subscribers. Leave unset to keep current.',
+              required: false,
             });
             fields['notify'] = Property.Checkbox({
               displayName: 'Notify',
@@ -204,14 +200,10 @@ export const todosAction = createAction({
             }
             break;
           case 'get_todolist_group':
-            if (hasTodoList) {
-              fields['group'] = todolistGroupDropdown(true);
-            } else {
-              fields['group_id'] = Property.Number({
-                displayName: 'Group ID',
-                required: true,
-              });
-            }
+            fields['group_id'] = Property.Number({
+              displayName: 'Group ID',
+              required: true,
+            });
             break;
           case 'create_todolist_group':
             if (!hasTodoList) {
@@ -231,14 +223,10 @@ export const todosAction = createAction({
             });
             break;
           case 'reposition_todolist_group':
-            if (hasTodoList) {
-              fields['group'] = todolistGroupDropdown(true);
-            } else {
-              fields['group_id'] = Property.Number({
-                displayName: 'Group ID',
-                required: true,
-              });
-            }
+            fields['group_id'] = Property.Number({
+              displayName: 'Group ID',
+              required: true,
+            });
             fields['position'] = Property.Number({
               displayName: 'Position',
               required: true,
@@ -309,9 +297,9 @@ export const todosAction = createAction({
     };
 
     const resolveTodoId = (): number => {
-      const raw = inputs['todo'] ?? inputs['todo_id'];
+      const raw = context.propsValue.todo ?? inputs['todo_id'];
       if (raw === undefined || raw === null || raw === '') {
-        throw new Error('To-do is required');
+        throw new Error('To-do is required. Select a To-do above or provide a To-do ID.');
       }
       return toInt(raw, 'To-do ID');
     };
