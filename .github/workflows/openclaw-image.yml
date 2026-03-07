@@ -7,10 +7,6 @@ on:
         description: "Image tag (e.g. latest, sha, custom)"
         required: false
         default: "latest"
-      n8n_vendor_image:
-        description: "Vendor image (e.g. ghcr.io/wickeddevsupport/openclaw-n8n-vendor:stable or n8n_vendor_build)"
-        required: false
-        default: "n8n_vendor_build"
 
 # Auto-push trigger is intentionally removed.
 # Builds run on Coolify directly from git (local image, no GHCR push needed).
@@ -37,19 +33,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Resolve image settings
+      - name: Resolve image tag
         id: img
         run: |
           tag="${{ inputs.image_tag }}"
-          vendor="${{ inputs.n8n_vendor_image }}"
-          if [ -z "$tag" ]; then
-            tag="latest"
-          fi
-          if [ -z "$vendor" ]; then
-            vendor="n8n_vendor_build"
-          fi
+          if [ -z "$tag" ]; then tag="latest"; fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "vendor=$vendor" >> "$GITHUB_OUTPUT"
 
       - name: Docker metadata
         id: meta
@@ -66,9 +55,6 @@ jobs:
           context: .
           file: ./Dockerfile.openclaw.nx
           push: true
-          build-args: |
-            INCLUDE_VENDORED_N8N=true
-            N8N_VENDOR_IMAGE=${{ steps.img.outputs.vendor }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

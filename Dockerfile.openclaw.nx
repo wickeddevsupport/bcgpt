@@ -1,69 +1,3 @@
-# ---------- n8n vendor stage (optionally prebuilt) ----------
-# Use a prebuilt n8n vendor image when available (defaults to the local build stage).
-ARG N8N_VENDOR_IMAGE=n8n_vendor_build
-
-FROM node:22-bookworm AS n8n_vendor_build
-
-# Install Bun (required for build scripts)
-RUN curl -fsSL https://bun.sh/install | bash
-ENV PATH="/root/.bun/bin:${PATH}"
-
-RUN corepack enable
-
-WORKDIR /app
-
-ARG OPENCLAW_DOCKER_APT_PACKAGES=""
-RUN if [ -n "$OPENCLAW_DOCKER_APT_PACKAGES" ]; then \
-      apt-get update && \
-      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $OPENCLAW_DOCKER_APT_PACKAGES && \
-      apt-get clean && \
-      rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*; \
-    fi
-
-# Workspace metadata for Nx
-COPY package.json nx.json ./
-
-# Optional custom node (used only when vendoring n8n)
-COPY n8n-nodes-basecamp/ ./n8n-nodes-basecamp/
-
-# Optionally include vendored n8n (for embedded n8n) at build time.
-# Enable by passing build-arg: --build-arg INCLUDE_VENDORED_N8N=true
-# Pin version with: --build-arg N8N_VERSION=n8n@1.76.1
-# NOTE: This block intentionally runs *before* copying OpenClaw to maximize Docker caching.
-ARG INCLUDE_VENDORED_N8N=false
-ARG N8N_VERSION=n8n@1.76.1
-ARG N8N_BUILD_PACKAGES="git python3 make g++"
-RUN set -eux; \
-    if [ "$INCLUDE_VENDORED_N8N" = "true" ]; then \
-      apt-get update; \
-      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${N8N_BUILD_PACKAGES}; \
-      mkdir -p openclaw/vendor; \
-      git clone --depth 1 --branch "$N8N_VERSION" https://github.com/n8n-io/n8n.git openclaw/vendor/n8n; \
-      cd openclaw/vendor/n8n; \
-      corepack enable; \
-      pnpm install --frozen-lockfile; \
-      pnpm build; \
-      cd /app; \
-      if [ -d "n8n-nodes-basecamp" ]; then \
-        cd n8n-nodes-basecamp; \
-        npm ci --no-audit --no-fund; \
-        npm run build; \
-        if [ -d "dist" ]; then \
-          for target in \
-            /app/openclaw/vendor/n8n/packages/cli/node_modules/n8n-nodes-basecamp \
-            /app/openclaw/vendor/n8n/custom/nodes/n8n-nodes-basecamp \
-          ; do \
-            mkdir -p "$target"; \
-            cp -r dist package.json "$target"/; \
-          done; \
-        fi; \
-      fi; \
-    else \
-      mkdir -p /app/openclaw/vendor/n8n; \
-    fi
-
-FROM ${N8N_VENDOR_IMAGE} AS n8n_vendor
-
 # ---------- OpenClaw build stage ----------
 FROM node:22-bookworm
 
@@ -95,8 +29,9 @@ COPY openclaw/ ./openclaw/
 # Install OpenClaw workspace deps (includes ui)
 RUN corepack pnpm --dir openclaw install --frozen-lockfile
 
-# Bring in vendored n8n (prebuilt or built in the vendor stage)
-COPY --from=n8n_vendor /app/openclaw/vendor/n8n /app/openclaw/vendor/n8n
+# Vendored n8n is legacy/opt-in and not built by default.
+# Create the expected empty directory so the runtime path exists.
+RUN mkdir -p /app/openclaw/vendor/n8n
 
 # Build using Nx so both openclaw-app and openclaw-control-ui are compiled.
 # openclaw-control-ui is built last to ensure dist/control-ui is present at runtime.

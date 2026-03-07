@@ -6,11 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile.openclaw.nx
       args:
-        INCLUDE_VENDORED_N8N: "false"
         OPENCLAW_NX_PROJECTS: "openclaw-app,openclaw-control-ui"
-        # Optional: point to a prebuilt vendor image to skip n8n build.
-        # Example: ghcr.io/<org>/openclaw-n8n-vendor:n8n-1.76.1
-        N8N_VENDOR_IMAGE: "${N8N_VENDOR_IMAGE:-n8n_vendor_build}"
     environment:
       # Keep OpenClaw config/workspace in a named volume by pinning HOME into /app.
       HOME: /app
@@ -27,12 +23,6 @@ services:
 
       # Embedded-first behavior. Only allow remote ops provisioning if explicitly enabled.
       PMOS_ALLOW_REMOTE_OPS_FALLBACK: "${PMOS_ALLOW_REMOTE_OPS_FALLBACK:-0}"
-
-      # Persist embedded n8n state (SQLite DB, credentials, settings) inside the OpenClaw volume.
-      # Without this, n8n defaults to ~/.n8n which is not persisted in this compose.
-      N8N_USER_FOLDER: "${N8N_USER_FOLDER:-/app/.openclaw/n8n}"
-      # Keep permissions on n8n settings file tight (n8n will enforce/auto-fix on startup).
-      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "${N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS:-true}"
 
       # Shared Kilo API key — covers free-tier models for all workspaces (no per-user key needed).
       KILO_API_KEY: "${KILO_API_KEY:-}"
