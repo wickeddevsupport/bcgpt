@@ -248,14 +248,18 @@ export const cardsAction = createAction({
     }),
     project: projectDropdown(true),
     card_table: cardTableDropdown(false),
+    card: cardDropdown(false),
+    card_step: cardStepDropdown(false),
     inputs: Property.DynamicProperties({
       displayName: 'Inputs',
       required: false,
       auth: basecampAuth,
-      refreshers: ['operation', 'card_table'],
-      props: async ({ operation, card_table }) => {
+      refreshers: ['operation', 'card_table', 'card', 'card_step'],
+      props: async ({ operation, card_table, card, card_step }) => {
         const op = String(operation ?? '');
         const hasTable = Boolean(card_table);
+        const hasCard = Boolean(card);
+        const hasStep = Boolean(card_step);
         const fields: DynamicPropsValue = {};
 
         switch (op) {
@@ -330,14 +334,11 @@ export const cardsAction = createAction({
               displayName: 'Description (optional)',
               required: false,
             });
-            if (hasTable) {
-              fields['column'] = cardColumnDropdown(false);
-            } else {
-              fields['column_id'] = Property.Number({
-                displayName: 'Column ID (optional)',
-                required: false,
-              });
-            }
+            fields['column_id'] = Property.Number({
+              displayName: 'Column ID (optional)',
+              description: 'ID of the column to place this card in.',
+              required: false,
+            });
             fields['due_on'] = Property.ShortText({
               displayName: 'Due on (optional)',
               description: 'Date string (YYYY-MM-DD).',
@@ -349,19 +350,17 @@ export const cardsAction = createAction({
             });
             break;
           case 'move_card':
-            if (hasTable) {
-              fields['card'] = cardDropdown(true);
-              fields['column'] = cardColumnDropdown(false);
-            } else {
+            if (!hasCard) {
               fields['card_id'] = Property.Number({
                 displayName: 'Card ID',
+                description: 'Required if no Card is selected above.',
                 required: true,
               });
-              fields['column_id'] = Property.Number({
-                displayName: 'Column ID (optional)',
-                required: false,
-              });
             }
+            fields['column_id'] = Property.Number({
+              displayName: 'Column ID (optional)',
+              required: false,
+            });
             fields['position'] = Property.Number({
               displayName: 'Position (optional)',
               required: false,
@@ -371,21 +370,19 @@ export const cardsAction = createAction({
           case 'unarchive_card':
           case 'trash_card':
           case 'get_card':
-            if (hasTable) {
-              fields['card'] = cardDropdown(true);
-            } else {
+            if (!hasCard) {
               fields['card_id'] = Property.Number({
                 displayName: 'Card ID',
+                description: 'Required if no Card is selected above.',
                 required: true,
               });
             }
             break;
           case 'update_card':
-            if (hasTable) {
-              fields['card'] = cardDropdown(true);
-            } else {
+            if (!hasCard) {
               fields['card_id'] = Property.Number({
                 displayName: 'Card ID',
+                description: 'Required if no Card is selected above.',
                 required: true,
               });
             }
@@ -401,14 +398,10 @@ export const cardsAction = createAction({
               displayName: 'Description (optional)',
               required: false,
             });
-            if (hasTable) {
-              fields['column'] = cardColumnDropdown(false);
-            } else {
-              fields['column_id'] = Property.Number({
-                displayName: 'Column ID (optional)',
-                required: false,
-              });
-            }
+            fields['column_id'] = Property.Number({
+              displayName: 'Column ID (optional)',
+              required: false,
+            });
             fields['due_on'] = Property.ShortText({
               displayName: 'Due on (optional)',
               description: 'Date string (YYYY-MM-DD).',
@@ -427,11 +420,10 @@ export const cardsAction = createAction({
           case 'list_card_steps':
           case 'create_card_step':
           case 'reposition_card_step':
-            if (hasTable) {
-              fields['card'] = cardDropdown(true);
-            } else {
+            if (!hasCard) {
               fields['card_id'] = Property.Number({
                 displayName: 'Card ID',
+                description: 'Required if no Card is selected above.',
                 required: true,
               });
             }
@@ -447,11 +439,10 @@ export const cardsAction = createAction({
               });
             }
             if (op === 'reposition_card_step') {
-              if (hasTable) {
-                fields['step'] = cardStepDropdown(true);
-              } else {
+              if (!hasStep) {
                 fields['step_id'] = Property.Number({
                   displayName: 'Step ID',
+                  description: 'Required if no Card Step is selected above.',
                   required: true,
                 });
               }
@@ -462,12 +453,10 @@ export const cardsAction = createAction({
             }
             break;
           case 'update_card_step':
-            if (hasTable) {
-              fields['card'] = cardDropdown(true);
-              fields['step'] = cardStepDropdown(true);
-            } else {
+            if (!hasStep) {
               fields['step_id'] = Property.Number({
                 displayName: 'Step ID',
+                description: 'Required if no Card Step is selected above.',
                 required: true,
               });
             }
@@ -483,12 +472,10 @@ export const cardsAction = createAction({
             break;
           case 'complete_card_step':
           case 'uncomplete_card_step':
-            if (hasTable) {
-              fields['card'] = cardDropdown(true);
-              fields['step'] = cardStepDropdown(true);
-            } else {
+            if (!hasStep) {
               fields['step_id'] = Property.Number({
                 displayName: 'Step ID',
+                description: 'Required if no Card Step is selected above.',
                 required: true,
               });
             }
@@ -524,23 +511,23 @@ export const cardsAction = createAction({
     };
 
     const resolveCardId = (): number => {
-      const raw = inputs['card_id'] ?? inputs['card'];
+      const raw = context.propsValue.card ?? inputs['card_id'];
       if (raw == null || raw === '') {
-        throw new Error('Card is required');
+        throw new Error('Card is required. Select a Card above or provide a Card ID.');
       }
       return toInt(raw, 'Card ID');
     };
 
     const resolveStepId = (): number => {
-      const raw = inputs['step_id'] ?? inputs['step'];
+      const raw = context.propsValue.card_step ?? inputs['step_id'];
       if (raw == null || raw === '') {
-        throw new Error('Step is required');
+        throw new Error('Step is required. Select a Card Step above or provide a Step ID.');
       }
       return toInt(raw, 'Step ID');
     };
 
     const resolveColumnId = (): number | undefined => {
-      const raw = inputs['column_id'] ?? inputs['column'];
+      const raw = inputs['column_id'];
       return toOptionalInt(raw, 'Column ID');
     };
 
