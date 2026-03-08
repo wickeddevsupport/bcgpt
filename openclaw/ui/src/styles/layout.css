@@ -527,6 +527,23 @@
   margin-top: 0;
 }
 
+.content--dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  overflow: hidden;
+  padding-bottom: 16px;
+}
+
+.content--dashboard > * + * {
+  margin-top: 0;
+}
+
+.content--dashboard .dashboard-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 /* Content header */
 .content-header {
   display: flex;
@@ -678,6 +695,15 @@
   .grid-cols-2,
   .grid-cols-3 {
     grid-template-columns: 1fr;
+  }
+
+  .content--dashboard {
+    overflow-y: auto;
+  }
+
+  .content--dashboard .dashboard-shell {
+    flex: 0 0 auto;
+    min-height: auto;
   }
 
   .topbar {

@@ -40,6 +40,10 @@ export function renderFigma(props: FigmaProps) {
   const figma = props.connectorsStatus?.figma ?? null;
   const identity = figma?.identity ?? null;
   const canEmbed = Boolean(props.figmaUrl?.trim());
+  const hasSyncedIdentity = identity?.connected === true;
+  const hasLiveAuth = figma?.authOk === true;
+  const requiresSignIn = !hasSyncedIdentity || figma?.authOk === false;
+  const canRenderIframe = hasSyncedIdentity && hasLiveAuth;
 
   return html`
     ${props.connectorsError
@@ -68,6 +72,9 @@ export function renderFigma(props: FigmaProps) {
               <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                 <span class="chip">Auto Sync On</span>
                 ${props.syncedOk ? html`<span class="chip chip-ok">Context Synced</span>` : nothing}
+                <button class="btn btn--secondary" @click=${() => props.onOpenAuth()}>
+                  Open Sign-In Popup
+                </button>
                 <button class="btn btn--secondary" ?disabled=${props.connectorsLoading} @click=${() => props.onRefresh()}>
                   ${props.connectorsLoading ? "Refreshing..." : "Reload"}
                 </button>
@@ -91,13 +98,13 @@ export function renderFigma(props: FigmaProps) {
                     <div>
                       <div class="card-title">Figma AI Assistant</div>
                       <div class="card-sub">
-                        ${identity?.connected
-                          ? `${identity.handle ?? identity.email ?? "Connected"} · ${identity.activeConnectionName ?? identity.activeTeamId ?? "Team synced"}`
+                        ${hasSyncedIdentity
+                          ? `${identity?.handle ?? identity?.email ?? "Connected"} · ${identity?.activeConnectionName ?? identity?.activeTeamId ?? "Team synced"}`
                           : "Sign in below to connect your Figma workspace."}
                       </div>
                     </div>
                     <div class="chip-row">
-                      <span class="chip ${identity?.connected ? "chip-ok" : "chip-warn"}">${identity?.connected ? "Connected" : "Not connected"}</span>
+                      <span class="chip ${canRenderIframe ? "chip-ok" : "chip-warn"}">${canRenderIframe ? "Connected" : "Sign-in required"}</span>
                     </div>
                   </div>
 
@@ -118,16 +125,19 @@ export function renderFigma(props: FigmaProps) {
 
                 <!-- Iframe area — shows sign-in CTA when not connected -->
                 <div class="card" style="flex:1 1 auto; min-height:0; padding:0; overflow:hidden; position:relative; display:flex; flex-direction:column;">
-                  ${!identity?.connected
+                  ${requiresSignIn
                     ? html`
                         <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; gap:16px; padding:32px 24px; text-align:center;">
                           <div style="font-size:32px;">🎨</div>
                           <div style="font-weight:600;">Sign in to Figma</div>
                           <div class="muted" style="max-width:360px; font-size:13px;">
-                            Connect your Figma account to embed the file manager and enable AI design reviews.
+                            Open the auth popup, finish sign-in, then click Sync Now. The embedded panel unlocks only after live auth is confirmed.
                           </div>
-                          <a href=${props.authUrl} class="btn btn--primary" target="pmos-figma-auth" @click=${() => props.onOpenAuth()}>
-                            Sign In with Figma
+                          <button class="btn btn--primary" @click=${() => props.onOpenAuth()}>
+                            Sign In with Figma (Popup)
+                          </button>
+                          <a href=${props.authUrl} class="btn btn--secondary" target="pmos-figma-auth" rel="noreferrer">
+                            Open Sign-In in New Tab
                           </a>
                         </div>
                       `

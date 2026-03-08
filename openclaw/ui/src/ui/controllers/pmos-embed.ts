@@ -1,15 +1,28 @@
 import { normalizeBasePath } from "../navigation.ts";
 
-export function buildOpsUiEmbedUrl(basePath: string, flowId?: string | null): string {
+function appendProjectId(url: string, projectId?: string | null): string {
+  const trimmedProjectId = typeof projectId === "string" ? projectId.trim() : "";
+  if (!trimmedProjectId) {
+    return url;
+  }
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}projectId=${encodeURIComponent(trimmedProjectId)}`;
+}
+
+export function buildOpsUiEmbedUrl(
+  basePath: string,
+  flowId?: string | null,
+  projectId?: string | null,
+): string {
   const base = normalizeBasePath(basePath ?? "");
   const trimmedFlowId = typeof flowId === "string" ? flowId.trim() : "";
   if (trimmedFlowId) {
-    return `${base}/ops-ui/flows/${encodeURIComponent(trimmedFlowId)}`;
+    return appendProjectId(`${base}/ops-ui/flows/${encodeURIComponent(trimmedFlowId)}`, projectId);
   }
-  return `${base}/ops-ui`;
+  return appendProjectId(`${base}/ops-ui/flows`, projectId);
 }
 
-export function buildOpsUiConnectionsUrl(basePath: string): string {
+export function buildOpsUiConnectionsUrl(basePath: string, projectId?: string | null): string {
   const base = normalizeBasePath(basePath ?? "");
-  return `${base}/ops-ui/connections`;
+  return appendProjectId(`${base}/ops-ui/connections`, projectId);
 }

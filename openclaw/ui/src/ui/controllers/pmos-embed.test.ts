@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { buildOpsUiConnectionsUrl, buildOpsUiEmbedUrl } from "./pmos-embed.js";
 
 describe("buildOpsUiEmbedUrl", () => {
-  it("returns root ops-ui route when no flow id is provided", () => {
-    expect(buildOpsUiEmbedUrl("")).toBe("/ops-ui");
-    expect(buildOpsUiEmbedUrl("/control")).toBe("/control/ops-ui");
+  it("returns the default flows route when no flow id is provided", () => {
+    expect(buildOpsUiEmbedUrl("")).toBe("/ops-ui/flows");
+    expect(buildOpsUiEmbedUrl("/control")).toBe("/control/ops-ui/flows");
   });
 
   it("returns a flow-specific route when flow id exists", () => {
@@ -17,5 +17,12 @@ describe("buildOpsUiEmbedUrl", () => {
   it("returns the native connections route", () => {
     expect(buildOpsUiConnectionsUrl("")).toBe("/ops-ui/connections");
     expect(buildOpsUiConnectionsUrl("/control")).toBe("/control/ops-ui/connections");
+  });
+
+  it("preserves the workspace project id on embed urls", () => {
+    expect(buildOpsUiEmbedUrl("", null, "proj-123")).toBe("/ops-ui/flows?projectId=proj-123");
+    expect(buildOpsUiConnectionsUrl("/control", "proj-123")).toBe(
+      "/control/ops-ui/connections?projectId=proj-123",
+    );
   });
 });
