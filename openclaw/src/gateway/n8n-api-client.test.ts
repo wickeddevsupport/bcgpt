@@ -192,6 +192,22 @@ describe("n8n api client activepieces import path", () => {
     expect(settings.input?.project).toBe("123");
   });
 
+  it("rewrites n8n-style compat expressions to Activepieces step references", async () => {
+    const { __test } = await import("./n8n-api-client.js");
+    expect(
+      __test.normalizeCompatExpressionString("={{ $json.id.toString() }}", {
+        upstreamStepName: "bc_find_1",
+        stepNamesByRef: new Map<string, string>([["Find Project", "bc_find_1"]]),
+      }),
+    ).toBe("{{bc_find_1.id.toString()}}");
+    expect(
+      __test.normalizeCompatExpressionString('<p>={{ $node["Find Project"].json.name }}</p>', {
+        upstreamStepName: "trigger",
+        stepNamesByRef: new Map<string, string>([["Find Project", "bc_find_1"]]),
+      }),
+    ).toBe("<p>{{bc_find_1.name}}</p>");
+  });
+
   it("executes manual-trigger workflows through the Activepieces manual-run socket when workspace user auth is available", async () => {
     readWorkspaceConnectorsMock.mockResolvedValue({
       ops: {

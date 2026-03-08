@@ -112,6 +112,11 @@ type CompatGraphNode = {
   credentials: JsonObject | null;
 };
 
+type CompatExpressionContext = {
+  upstreamStepName: string;
+  stepNamesByRef: Map<string, string>;
+};
+
 type PieceDescriptor = {
   name: string;
   version: string;
@@ -510,6 +515,60 @@ function pickPreferredName(candidates: string[], preferred: string[]): string | 
 
 function buildConnectionExpression(externalId: string): string {
   return `{{connections['${externalId}']}}`;
+}
+
+function rewriteCompatExpressionBody(
+  expression: string,
+  context: CompatExpressionContext,
+): string {
+  return expression
+    .replace(/\$input\.item\.json\b/g, context.upstreamStepName)
+    .replace(/\$json\b/g, context.upstreamStepName)
+    .replace(/\$node\s*\[\s*["']([^"']+)["']\s*\]\.json\b/g, (_match, rawName: string) => {
+      const resolved = context.stepNamesByRef.get(String(rawName).trim());
+      return resolved ?? sanitizeStepName(String(rawName), "action", 0);
+    })
+    .replace(/\$node\s*\[\s*["']([^"']+)["']\s*\]\b/g, (_match, rawName: string) => {
+      const resolved = context.stepNamesByRef.get(String(rawName).trim());
+      return resolved ?? sanitizeStepName(String(rawName), "action", 0);
+    });
+}
+
+function normalizeCompatExpressionString(
+  value: string,
+  context: CompatExpressionContext,
+): string {
+  if (!value.includes("{{")) {
+    return value;
+  }
+
+  return value.replace(/=?\{\{\s*([\s\S]*?)\s*\}\}/g, (full, body: string) => {
+    const expression = String(body).trim();
+    if (!/\$json\b|\$node\b|\$input\.item\.json\b/.test(expression)) {
+      return full;
+    }
+    return `{{${rewriteCompatExpressionBody(expression, context)}}}`;
+  });
+}
+
+function normalizeCompatValue(
+  value: unknown,
+  context: CompatExpressionContext,
+): unknown {
+  if (typeof value === "string") {
+    return normalizeCompatExpressionString(value, context);
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeCompatValue(entry, context));
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    out[key] = normalizeCompatValue(entry, context);
+  }
+  return out;
 }
 
 function isBasecampPieceName(pieceName: string | null | undefined): boolean {
@@ -1489,6 +1548,7 @@ async function buildActionStep(params: {
   ctx: ActivepiecesContext;
   projectId: string;
   node: CompatGraphNode;
+  expressionContext: CompatExpressionContext;
   nextAction?: Record<string, unknown>;
   connections: ActivepiecesConnectionSummary[];
   cache: Map<string, PieceDescriptor | null>;
@@ -1499,10 +1559,18 @@ async function buildActionStep(params: {
     return createCodeActionStep(params.node, params.nextAction);
   }
 
+  const normalizedNode: CompatGraphNode = {
+    ...params.node,
+    parameters: (normalizeCompatValue(
+      params.node.parameters,
+      params.expressionContext,
+    ) as JsonObject | null) ?? {},
+  };
+
   if (pieceName === ACTIVEPIECES_BASECAMP_PIECE_NAME) {
     const step = createBasecampActionStep(
-      params.node,
-      resolveNodeConnectionExternalId(params.node, pieceName, params.connections),
+      normalizedNode,
+      resolveNodeConnectionExternalId(normalizedNode, pieceName, params.connections),
       params.nextAction,
     );
     if (step) {
@@ -1511,11 +1579,11 @@ async function buildActionStep(params: {
   }
 
   if (pieceName === ACTIVEPIECES_WEBHOOK_PIECE_NAME && rawTypeLower.includes("respond")) {
-    return createWebhookReturnResponseAction(params.node, params.nextAction);
+    return createWebhookReturnResponseAction(normalizedNode, params.nextAction);
   }
 
   if (pieceName === ACTIVEPIECES_HTTP_PIECE_NAME) {
-    return createHttpActionStep(params.node, params.nextAction);
+    return createHttpActionStep(normalizedNode, params.nextAction);
   }
 
   if (
@@ -1545,14 +1613,14 @@ async function buildActionStep(params: {
   }
 
   const input: JsonObject = {};
-  const connectionExternalId = resolveNodeConnectionExternalId(params.node, pieceName, params.connections);
+  const connectionExternalId = resolveNodeConnectionExternalId(normalizedNode, pieceName, params.connections);
   if (connectionExternalId) {
     input.auth = buildConnectionExpression(connectionExternalId);
   }
   const action: Record<string, unknown> = {
-    name: params.node.stepName,
+    name: normalizedNode.stepName,
     valid: true,
-    displayName: params.node.displayName,
+    displayName: normalizedNode.displayName,
     type: "PIECE",
     settings: {
       propertySettings: {},
@@ -1583,6 +1651,12 @@ async function applyCompatGraphToFlow(params: {
   }
 
   const { trigger, actions } = orderCompatActionNodes(nodes, params.rawConnections);
+  const stepNamesByRef = new Map<string, string>();
+  for (const node of nodes) {
+    stepNamesByRef.set(node.id, node.stepName);
+    stepNamesByRef.set(node.displayName, node.stepName);
+    stepNamesByRef.set(node.stepName, node.stepName);
+  }
   const connections = await listAppConnectionsRaw(params.workspaceId, params.ctx, params.projectId).catch(
     () => [],
   );
@@ -1594,6 +1668,10 @@ async function applyCompatGraphToFlow(params: {
       ctx: params.ctx,
       projectId: params.projectId,
       node: actions[index],
+      expressionContext: {
+        upstreamStepName: index === 0 ? FLOW_TRIGGER_NAME : actions[index - 1].stepName,
+        stepNamesByRef,
+      },
       nextAction,
       connections,
       cache,
@@ -2348,6 +2426,7 @@ export const __test = {
   inferPieceName,
   resolveScheduleCronExpression,
   createBasecampActionStep,
+  normalizeCompatExpressionString,
 };
 
 export default {

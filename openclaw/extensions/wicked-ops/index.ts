@@ -1,4 +1,5 @@
 import type { OpenClawPluginApi } from "../../src/plugins/types.js";
+import { executeWorkflowEngineWorkflow } from "../../src/gateway/workflow-api-client.js";
 import { readWorkspaceConnectors } from "../../src/gateway/workspace-connectors.js";
 
 const DEFAULT_BASE_URL = "https://flow.wickedlab.io";
@@ -1378,7 +1379,7 @@ export default {
 
     registerTool({
       name: "ops_workflow_execute",
-      description: "Trigger a webhook workflow.",
+      description: "Execute a workflow, retry a run, or trigger a webhook workflow.",
       parameters: {
         type: "object",
         additionalProperties: false,
@@ -1402,8 +1403,44 @@ export default {
 
         const draft = Boolean(input.__draft);
         const sync = Boolean(input.__sync);
+        const retryExecutionId = readString(input.__retryExecutionId);
+        const retryStrategy = readString(input.__retryStrategy) ?? "ON_LATEST_VERSION";
         delete input.__draft;
         delete input.__sync;
+        delete input.__retryExecutionId;
+        delete input.__retryStrategy;
+
+        if (retryExecutionId) {
+          const projectId = await resolveProjectIdOrThrow(api, workspaceId);
+          const payload = await opsRequest({
+            api,
+            workspaceId,
+            endpoint: `flow-runs/${encodeURIComponent(retryExecutionId)}/retry`,
+            method: "POST",
+            body: {
+              projectId,
+              strategy: retryStrategy,
+            },
+          });
+          return jsonToolResult(toExecutionSummary(toObject(payload) ?? {}));
+        }
+
+        const hasStructuredPayload = Object.keys(input).length > 0;
+        if (!draft && !sync && !hasStructuredPayload && workspaceId) {
+          const execution = await executeWorkflowEngineWorkflow(workspaceId, workflowId);
+          if (!execution.ok) {
+            throw new Error(execution.error ?? "Workflow execution failed.");
+          }
+          if (!execution.executionId) {
+            return jsonToolResult({ ok: true });
+          }
+          const payload = await opsRequest({
+            api,
+            workspaceId,
+            endpoint: `flow-runs/${encodeURIComponent(execution.executionId)}`,
+          });
+          return jsonToolResult(toExecutionSummary(toObject(payload) ?? {}));
+        }
 
         const suffix = draft && sync ? "draft/sync" : draft ? "draft" : sync ? "sync" : "";
         const endpoint = suffix
