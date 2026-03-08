@@ -216,21 +216,196 @@ export function renderModels(props: ModelsProps) {
       : "warn";
 
   return html`
-    <section class="card" style="margin-bottom:18px;">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-        <div>
-          <div class="card-title">Models</div>
-          <div class="card-sub">Card-based model management for workspace defaults, keys, and agent usage.</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          ${activeModel
-            ? renderModelToneChip(`Active: ${activeModel.ref}`, "ok")
-            : renderModelToneChip("No active default", "warn")}
-          ${props.modelCatalogLoading ? renderModelToneChip("Catalog loading", "muted") : nothing}
-        </div>
-      </div>
-    </section>
+    <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.2fr); gap:18px; align-items:start;">
 
+    <!-- Left column: configured model cards -->
+    <div>
+      <section class="card" style="margin-bottom:16px;">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+          <div>
+            <div class="card-title">Models</div>
+            <div class="card-sub">Workspace defaults, keys, and agent assignments.</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            ${activeModel
+              ? renderModelToneChip(`Active: ${activeModel.ref}`, "ok")
+              : renderModelToneChip("No active default", "warn")}
+            ${props.modelCatalogLoading ? renderModelToneChip("Catalog loading", "muted") : nothing}
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+          <div>
+            <div class="card-title">Configured Model Cards</div>
+            <div class="card-sub">Manage defaults, keys, and per-agent activation.</div>
+          </div>
+          <div class="muted">${savedRows.length} card${savedRows.length === 1 ? "" : "s"}</div>
+        </div>
+
+        ${savedRows.length === 0
+          ? html`
+              <div class="callout" style="margin-top:12px;">
+                No model cards yet. Add a model in the editor and click <span class="mono">Save Model</span>.
+              </div>
+            `
+          : html`
+              <div class="agent-cards-grid" style="margin-top:14px;">
+                ${savedRows.map((row) => {
+                  const rowAssignments = assignments
+                    .filter((assignment) => assignment.modelRef === row.ref)
+                    .sort((a, b) => a.label.localeCompare(b.label));
+                  return html`
+                    <div class="agent-card ${row.active ? "agent-card--selected" : ""}">
+                      <div class="agent-card-header">
+                        <div class="agent-card-info">
+                          <div class="agent-card-title mono">${row.ref}</div>
+                          <div class="muted" style="font-size:12px; margin-top:4px;">
+                            ${row.alias ? `Alias: ${row.alias}` : "No alias"}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="chip-row" style="margin-top:10px;">
+                        ${draftRef === row.ref ? renderModelToneChip("Editing", "ok") : nothing}
+                        ${row.active ? renderModelToneChip("Workspace default", "ok") : nothing}
+                        ${row.keyConfigured
+                          ? renderModelToneChip("Key stored", "ok")
+                          : row.sharedProvider
+                            ? renderModelToneChip("Shared provider", "muted")
+                            : renderModelToneChip("No key", "warn")}
+                        ${row.workspaceOverride
+                          ? renderModelToneChip("Saved in config", "muted")
+                          : renderModelToneChip("Referenced only", "muted")}
+                        ${!row.inCatalog
+                          ? renderModelToneChip("Manual model", "muted")
+                          : nothing}
+                        ${rowAssignments.length > 0
+                          ? renderModelToneChip(`Agents: ${rowAssignments.length}`, "muted")
+                          : renderModelToneChip("Agents: 0", "muted")}
+                      </div>
+
+                      <div class="agent-card-actions">
+                        <button
+                          class="btn btn--sm"
+                          ?disabled=${!props.connected || props.modelSaving}
+                          @click=${() => props.onModelEdit(row.ref)}
+                        >
+                          Edit
+                        </button>
+                        ${!row.active
+                          ? html`
+                              <button
+                                class="btn btn--sm"
+                                ?disabled=${!props.connected || props.modelSaving}
+                                @click=${() => props.onModelActivate(row.ref)}
+                              >
+                                Set Default
+                              </button>
+                            `
+                          : nothing}
+                        ${row.workspaceOverride
+                          ? html`
+                              <button
+                                class="btn btn--sm"
+                                ?disabled=${!props.connected || props.modelSaving}
+                                @click=${() => props.onModelDeactivate(row.ref)}
+                              >
+                                Remove Default
+                              </button>
+                              <button
+                                class="btn btn--sm"
+                                ?disabled=${!props.connected || props.modelSaving}
+                                @click=${() => {
+                                  if (!window.confirm(`Delete model ${row.ref} from config?`)) {
+                                    return;
+                                  }
+                                  props.onModelDelete(row.ref);
+                                }}
+                              >
+                                Delete
+                              </button>
+                            `
+                          : nothing}
+                        <button
+                          class="btn btn--sm"
+                          ?disabled=${!props.connected || props.modelSaving || !row.keyConfigured}
+                          @click=${() => props.onModelClearKeyForRef(row.ref)}
+                        >
+                          Remove Key
+                        </button>
+                      </div>
+
+                      <details style="margin-top:10px;">
+                        <summary class="muted" style="cursor:pointer;">
+                          Agent assignments (${rowAssignments.length})
+                        </summary>
+                        <div style="display:grid; gap:8px; margin-top:10px;">
+                          ${(props.agentModelAssignments ?? [])
+                            .sort((a, b) => a.label.localeCompare(b.label))
+                            .map((assignment) => {
+                              const isCurrent = assignment.modelRef === row.ref;
+                              const isExplicit = isCurrent && !assignment.inherited;
+                              const statusText = isCurrent
+                                ? (assignment.inherited ? "Using workspace default" : "Active in agent")
+                                : (assignment.modelRef ? `Using ${assignment.modelRef}` : "Inherit workspace default");
+                              return html`
+                                <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
+                                  <div style="min-width:0;">
+                                    <div style="font-size:12px; font-weight:600;">${assignment.label}</div>
+                                    <div class="muted mono" style="font-size:11px;">${statusText}</div>
+                                  </div>
+                                  <div class="row" style="gap:6px; flex-wrap:wrap;">
+                                    ${isCurrent
+                                      ? (isExplicit
+                                        ? html`
+                                            <button
+                                              class="btn btn--sm"
+                                              ?disabled=${!props.connected || props.modelSaving}
+                                              @click=${() => props.onAssignAgentModel(assignment.agentId, null)}
+                                            >
+                                              Deactivate
+                                            </button>
+                                          `
+                                        : html`
+                                            <button
+                                              class="btn btn--sm"
+                                              ?disabled=${!props.connected || props.modelSaving}
+                                              @click=${() => props.onAssignAgentModel(assignment.agentId, row.ref)}
+                                            >
+                                              Pin To Agent
+                                            </button>
+                                          `)
+                                      : html`
+                                          <button
+                                            class="btn btn--sm"
+                                            ?disabled=${!props.connected || props.modelSaving}
+                                            @click=${() => props.onAssignAgentModel(assignment.agentId, row.ref)}
+                                          >
+                                            Activate
+                                          </button>
+                                        `}
+                                  </div>
+                                </div>
+                              `;
+                            })}
+                        </div>
+                      </details>
+                    </div>
+                  `;
+                })}
+              </div>
+            `}
+
+        ${disabledReason
+          ? html`<div class="muted" style="margin-top:12px; font-size:13px;">${disabledReason}</div>`
+          : nothing}
+      </section>
+    </div>
+
+    <!-- Right column: model editor -->
+    <div>
     <section class="card" style="margin-bottom:18px;">
         <div class="card-title">Model Editor</div>
         <div class="card-sub">Edit a saved card or define a new provider/model pair, then save it into the workspace.</div>
@@ -370,173 +545,8 @@ export function renderModels(props: ModelsProps) {
           ? html`<div class="callout danger" style="margin-top:10px; font-size:12px;">${props.modelError}</div>`
           : nothing}
     </section>
+    </div><!-- end right column -->
 
-    <section class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-        <div>
-          <div class="card-title">Configured Model Cards</div>
-          <div class="card-sub">Manage defaults, keys, and per-agent activation from each card.</div>
-        </div>
-        <div class="muted">${savedRows.length} card${savedRows.length === 1 ? "" : "s"}</div>
-      </div>
-
-      ${savedRows.length === 0
-        ? html`
-            <div class="callout" style="margin-top:12px;">
-              No model cards configured yet. Add your first model above and click <span class="mono">Save Model</span>.
-            </div>
-          `
-        : html`
-            <div class="agent-cards-grid" style="margin-top:14px;">
-              ${savedRows.map((row) => {
-                const rowAssignments = assignments
-                  .filter((assignment) => assignment.modelRef === row.ref)
-                  .sort((a, b) => a.label.localeCompare(b.label));
-                return html`
-                  <div class="agent-card ${row.active ? "agent-card--selected" : ""}">
-                    <div class="agent-card-header">
-                      <div class="agent-card-info">
-                        <div class="agent-card-title mono">${row.ref}</div>
-                        <div class="muted" style="font-size:12px; margin-top:4px;">
-                          ${row.alias ? `Alias: ${row.alias}` : "No alias"}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div class="chip-row" style="margin-top:10px;">
-                      ${draftRef === row.ref ? renderModelToneChip("Editing", "ok") : nothing}
-                      ${row.active ? renderModelToneChip("Workspace default", "ok") : nothing}
-                      ${row.keyConfigured
-                        ? renderModelToneChip("Key stored", "ok")
-                        : row.sharedProvider
-                          ? renderModelToneChip("Shared provider", "muted")
-                          : renderModelToneChip("No key", "warn")}
-                      ${row.workspaceOverride
-                        ? renderModelToneChip("Saved in config", "muted")
-                        : renderModelToneChip("Referenced only", "muted")}
-                      ${!row.inCatalog
-                        ? renderModelToneChip("Manual model", "muted")
-                        : nothing}
-                      ${rowAssignments.length > 0
-                        ? renderModelToneChip(`Agents: ${rowAssignments.length}`, "muted")
-                        : renderModelToneChip("Agents: 0", "muted")}
-                    </div>
-
-                    <div class="agent-card-actions">
-                      <button
-                        class="btn btn--sm"
-                        ?disabled=${!props.connected || props.modelSaving}
-                        @click=${() => props.onModelEdit(row.ref)}
-                      >
-                        Edit
-                      </button>
-                      ${!row.active
-                        ? html`
-                            <button
-                              class="btn btn--sm"
-                              ?disabled=${!props.connected || props.modelSaving}
-                              @click=${() => props.onModelActivate(row.ref)}
-                            >
-                              Set Default
-                            </button>
-                          `
-                        : nothing}
-                      ${row.workspaceOverride
-                        ? html`
-                            <button
-                              class="btn btn--sm"
-                              ?disabled=${!props.connected || props.modelSaving}
-                              @click=${() => props.onModelDeactivate(row.ref)}
-                            >
-                              Remove Default
-                            </button>
-                            <button
-                              class="btn btn--sm"
-                              ?disabled=${!props.connected || props.modelSaving}
-                              @click=${() => {
-                                if (!window.confirm(`Delete model ${row.ref} from config?`)) {
-                                  return;
-                                }
-                                props.onModelDelete(row.ref);
-                              }}
-                            >
-                              Delete
-                            </button>
-                          `
-                        : nothing}
-                      <button
-                        class="btn btn--sm"
-                        ?disabled=${!props.connected || props.modelSaving || !row.keyConfigured}
-                        @click=${() => props.onModelClearKeyForRef(row.ref)}
-                      >
-                        Remove Key
-                      </button>
-                    </div>
-
-                    <details style="margin-top:10px;">
-                      <summary class="muted" style="cursor:pointer;">
-                        Agent assignments (${rowAssignments.length})
-                      </summary>
-                      <div style="display:grid; gap:8px; margin-top:10px;">
-                        ${(props.agentModelAssignments ?? [])
-                          .sort((a, b) => a.label.localeCompare(b.label))
-                          .map((assignment) => {
-                            const isCurrent = assignment.modelRef === row.ref;
-                            const isExplicit = isCurrent && !assignment.inherited;
-                            const statusText = isCurrent
-                              ? (assignment.inherited ? "Using workspace default" : "Active in agent")
-                              : (assignment.modelRef ? `Using ${assignment.modelRef}` : "Inherit workspace default");
-                            return html`
-                              <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
-                                <div style="min-width:0;">
-                                  <div style="font-size:12px; font-weight:600;">${assignment.label}</div>
-                                  <div class="muted mono" style="font-size:11px;">${statusText}</div>
-                                </div>
-                                <div class="row" style="gap:6px; flex-wrap:wrap;">
-                                  ${isCurrent
-                                    ? (isExplicit
-                                      ? html`
-                                          <button
-                                            class="btn btn--sm"
-                                            ?disabled=${!props.connected || props.modelSaving}
-                                            @click=${() => props.onAssignAgentModel(assignment.agentId, null)}
-                                          >
-                                            Deactivate
-                                          </button>
-                                        `
-                                      : html`
-                                          <button
-                                            class="btn btn--sm"
-                                            ?disabled=${!props.connected || props.modelSaving}
-                                            @click=${() => props.onAssignAgentModel(assignment.agentId, row.ref)}
-                                          >
-                                            Pin To Agent
-                                          </button>
-                                        `)
-                                    : html`
-                                        <button
-                                          class="btn btn--sm"
-                                          ?disabled=${!props.connected || props.modelSaving}
-                                          @click=${() => props.onAssignAgentModel(assignment.agentId, row.ref)}
-                                        >
-                                          Activate
-                                        </button>
-                                      `}
-                                </div>
-                              </div>
-                            `;
-                          })}
-                      </div>
-                    </details>
-                  </div>
-                `;
-              })}
-            </div>
-          `}
-
-      ${disabledReason
-        ? html`<div class="muted" style="margin-top:12px; font-size:13px;">${disabledReason}</div>`
-        : nothing}
-    </section>
+    </div><!-- end 2-column grid -->
   `;
 }

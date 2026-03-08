@@ -137,9 +137,8 @@ export function renderAutomations(props: AutomationsProps) {
     <div style="
       display: flex;
       flex-direction: column;
-      height: min(100%, 80vh);
-      max-height: 80vh;
-      min-height: 0;
+      height: calc(100dvh - 140px);
+      min-height: 400px;
       overflow: hidden;
     ">
       <!-- toolbar -->

@@ -261,6 +261,7 @@ export type AppViewState = {
   pmosProjectsLoading: boolean;
   pmosProjectsError: string | null;
   pmosProjectsSnapshot: PmosProjectsSnapshot | null;
+  pmosProjectSearch: string;
 
   // PMOS workflows native embed (Phase 2)
   apPiecesLoading: boolean;

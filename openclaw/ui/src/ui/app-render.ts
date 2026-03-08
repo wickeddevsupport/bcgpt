@@ -1121,12 +1121,16 @@ export function renderApp(state: AppViewState) {
                 loading: state.pmosProjectsLoading,
                 error: state.pmosProjectsError ?? state.pmosCommandError,
                 snapshot: state.pmosProjectsSnapshot,
+                projectSearch: state.pmosProjectSearch,
                 chatProps,
                 onRefresh: () => state.handlePmosProjectsLoad(),
                 onOpenIntegrations: () => state.setTab("integrations"),
                 onOpenWorkflows: () => state.setTab("automations"),
                 onPrefillChat: (next) => {
                   chatProps.onDraftChange(next);
+                },
+                onProjectSearchChange: (next) => {
+                  state.pmosProjectSearch = next;
                 },
               })
             : nothing

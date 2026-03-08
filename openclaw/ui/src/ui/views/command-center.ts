@@ -9,11 +9,13 @@ export type CommandCenterProps = {
   loading: boolean;
   error: string | null;
   snapshot: PmosProjectsSnapshot | null;
+  projectSearch: string;
   chatProps: ChatProps;
   onRefresh: () => void;
   onOpenIntegrations: () => void;
   onOpenWorkflows: () => void;
   onPrefillChat: (prompt: string) => void;
+  onProjectSearchChange: (next: string) => void;
 };
 
 function healthChipClass(health: PmosProjectCard["health"]) {
@@ -141,7 +143,11 @@ export function renderCommandCenter(props: CommandCenterProps) {
   const errors = snapshot?.errors ?? [];
   const urgentTodos = snapshot?.urgentTodos ?? [];
   const dueTodayTodos = snapshot?.dueTodayTodos ?? [];
-  const cards = snapshot?.projects ?? [];
+  const allCards = snapshot?.projects ?? [];
+  const projectSearch = (props.projectSearch ?? "").trim().toLowerCase();
+  const cards = projectSearch
+    ? allCards.filter((p) => p.name.toLowerCase().includes(projectSearch))
+    : allCards;
   const staleLabel =
     snapshot?.cacheAgeMs && snapshot.cacheAgeMs > 0
       ? formatRelativeTimestamp(Date.now() - snapshot.cacheAgeMs)
@@ -156,7 +162,14 @@ export function renderCommandCenter(props: CommandCenterProps) {
               <div class="card-title">Project Pulse</div>
               <div class="card-sub">Live Basecamp sync with project health, pending work, and urgency.</div>
             </div>
-            <div class="row">
+            <div class="row" style="gap:8px; flex-wrap:wrap; align-items:center;">
+              <input
+                type="search"
+                .value=${props.projectSearch ?? ""}
+                @input=${(e: Event) => props.onProjectSearchChange((e.target as HTMLInputElement).value)}
+                placeholder="Search projects..."
+                style="padding:4px 10px; font-size:13px; border:1px solid var(--border); border-radius:var(--radius-sm,6px); background:var(--input-bg,var(--surface)); color:inherit; outline:none; width:180px;"
+              />
               <button class="btn btn--sm" @click=${() => props.onOpenIntegrations()}>Integrations</button>
               <button class="btn btn--sm" @click=${() => props.onOpenWorkflows()}>Workflows</button>
               <button class="btn btn--sm" ?disabled=${props.loading} @click=${() => props.onRefresh()}>
@@ -258,7 +271,9 @@ export function renderCommandCenter(props: CommandCenterProps) {
           </div>
           ${cards.length > 0
             ? renderProjectCards(props, cards)
-            : html`<div class="muted" style="margin-top: 12px;">No project cards available yet.</div>`}
+            : allCards.length > 0
+              ? html`<div class="muted" style="margin-top: 12px;">No projects match "${props.projectSearch}".</div>`
+              : html`<div class="muted" style="margin-top: 12px;">No project cards available yet.</div>`}
         </div>
       </div>
 

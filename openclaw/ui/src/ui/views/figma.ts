@@ -59,8 +59,8 @@ export function renderFigma(props: FigmaProps) {
           </section>
         `
       : html`
-          <div style="display:flex; flex-direction:column; gap:12px; min-height: calc(100vh - 140px);">
-            <div class="page-header" style="margin-bottom: 0;">
+          <div style="display:flex; flex-direction:column; gap:12px; height: calc(100dvh - 140px); min-height: 400px;">
+            <div class="page-header" style="margin-bottom: 0; flex-shrink:0;">
               <div>
                 <div class="page-title">Figma</div>
                 <div class="page-subtitle">Embedded Figma File Manager with live workspace sync for AI design reviews.</div>
@@ -68,9 +68,6 @@ export function renderFigma(props: FigmaProps) {
               <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                 <span class="chip">Auto Sync On</span>
                 ${props.syncedOk ? html`<span class="chip chip-ok">Context Synced</span>` : nothing}
-                <button class="btn btn--secondary" @click=${() => props.onOpenAuth()}>
-                  Sign In Outside Panel
-                </button>
                 <button class="btn btn--secondary" ?disabled=${props.connectorsLoading} @click=${() => props.onRefresh()}>
                   ${props.connectorsLoading ? "Refreshing..." : "Reload"}
                 </button>
@@ -81,73 +78,75 @@ export function renderFigma(props: FigmaProps) {
             </div>
 
             ${props.syncError
-              ? html`<div class="callout warn" style="font-size: 12px;">${props.syncError}</div>`
+              ? html`<div class="callout warn" style="font-size: 12px; flex-shrink:0;">${props.syncError}</div>`
               : nothing}
 
-            ${!identity?.connected
-              ? html`
-                  <div class="callout" style="font-size: 12px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-                    <span>
-                      If the embedded login flow is blocked by your browser, start Figma sign-in from the top-level PMOS page instead.
-                    </span>
-                    <a href=${props.authUrl} class="btn btn--secondary" target="pmos-figma-auth">
-                      Open Auth Window
-                    </a>
-                  </div>
-                `
-              : nothing}
+            <!-- 2-column: left (assistant + iframe stacked), right (chat) -->
+            <div style="display:grid; grid-template-columns:minmax(0, 1.7fr) minmax(320px, 0.9fr); gap:12px; flex:1 1 auto; min-height:0; overflow:hidden;">
 
-            <div style="display:grid; grid-template-columns:minmax(0, 1.7fr) minmax(340px, 0.9fr); gap:12px; min-height: calc(100vh - 220px);">
-              <div class="card" style="padding:0; overflow:hidden; min-height: calc(100vh - 220px);">
-                <iframe
-                  src=${props.embedUrl}
-                  title="Figma File Manager"
-                  style="width:100%; min-height: calc(100vh - 220px); border:0; display:block; background:#101418;"
-                  allow="clipboard-read; clipboard-write"
-                ></iframe>
-              </div>
-
-              <div style="display:flex; flex-direction:column; gap:12px; min-height: 0;">
-                <section class="card">
-                  <div class="card-title">Figma AI Assistant</div>
-                  <div class="card-sub">
-                    Keep the file manager open on the left. Team and file changes sync into PMOS automatically, and the manual sync button is only a fallback.
-                  </div>
-
-                  <div class="stat-grid" style="margin-top: 16px;">
-                    <div class="stat">
-                      <div class="stat-label">User</div>
-                      <div class="stat-value ${identity?.connected ? "ok" : "warn"}">
-                        ${identity?.handle ?? identity?.email ?? "Not synced"}
+              <!-- Left column: AI assistant card on top, iframe below -->
+              <div style="display:flex; flex-direction:column; gap:12px; min-height:0; overflow:hidden;">
+                <section class="card" style="flex-shrink:0;">
+                  <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+                    <div>
+                      <div class="card-title">Figma AI Assistant</div>
+                      <div class="card-sub">
+                        ${identity?.connected
+                          ? `${identity.handle ?? identity.email ?? "Connected"} · ${identity.activeConnectionName ?? identity.activeTeamId ?? "Team synced"}`
+                          : "Sign in below to connect your Figma workspace."}
                       </div>
                     </div>
-                    <div class="stat">
-                      <div class="stat-label">Connection</div>
-                      <div class="stat-value ${identity?.activeConnectionName ? "ok" : "warn"}">
-                        ${identity?.activeConnectionName ?? identity?.activeTeamId ?? "Not synced"}
-                      </div>
+                    <div class="chip-row">
+                      <span class="chip ${identity?.connected ? "chip-ok" : "chip-warn"}">${identity?.connected ? "Connected" : "Not connected"}</span>
                     </div>
                   </div>
 
                   ${identity?.selectedFileUrl
                     ? html`
-                        <div class="callout" style="margin-top: 12px; font-size: 12px;">
-                          <div><strong>Selected file:</strong> ${identity.selectedFileName ?? identity.selectedFileUrl}</div>
-                          <div class="muted mono" style="margin-top: 4px;">${identity.selectedFileUrl}</div>
+                        <div class="callout" style="margin-top: 10px; font-size: 12px;">
+                          <strong>Selected file:</strong> ${identity.selectedFileName ?? identity.selectedFileUrl}
                         </div>
                       `
-                    : html`<div class="muted" style="margin-top: 12px; font-size: 12px;">Open a Figma file in the left panel and PMOS will capture it automatically for AI.</div>`}
+                    : html`<div class="muted" style="margin-top: 8px; font-size: 12px;">Open a Figma file in the panel below and PMOS will capture it for AI context.</div>`}
 
-                  <div class="row" style="margin-top: 14px; gap: 8px; flex-wrap: wrap;">
-                    <button class="btn btn--secondary" @click=${() => props.onPrefillPrompt(buildPrompt(figma, "audit"))}>Audit Current File</button>
+                  <div class="row" style="margin-top: 12px; gap: 8px; flex-wrap: wrap;">
+                    <button class="btn btn--secondary" @click=${() => props.onPrefillPrompt(buildPrompt(figma, "audit"))}>Audit File</button>
                     <button class="btn btn--secondary" @click=${() => props.onPrefillPrompt(buildPrompt(figma, "tokens"))}>Review Tokens</button>
-                    <button class="btn btn--secondary" @click=${() => props.onPrefillPrompt(buildPrompt(figma, "layout"))}>Review Auto-Layout</button>
+                    <button class="btn btn--secondary" @click=${() => props.onPrefillPrompt(buildPrompt(figma, "layout"))}>Review Layout</button>
                   </div>
                 </section>
 
-                <section class="card" style="display:flex; flex-direction:column; min-height: 0; flex:1 1 auto; overflow:hidden;">
+                <!-- Iframe area — shows sign-in CTA when not connected -->
+                <div class="card" style="flex:1 1 auto; min-height:0; padding:0; overflow:hidden; position:relative; display:flex; flex-direction:column;">
+                  ${!identity?.connected
+                    ? html`
+                        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; gap:16px; padding:32px 24px; text-align:center;">
+                          <div style="font-size:32px;">🎨</div>
+                          <div style="font-weight:600;">Sign in to Figma</div>
+                          <div class="muted" style="max-width:360px; font-size:13px;">
+                            Connect your Figma account to embed the file manager and enable AI design reviews.
+                          </div>
+                          <a href=${props.authUrl} class="btn btn--primary" target="pmos-figma-auth" @click=${() => props.onOpenAuth()}>
+                            Sign In with Figma
+                          </a>
+                        </div>
+                      `
+                    : html`
+                        <iframe
+                          src=${props.embedUrl}
+                          title="Figma File Manager"
+                          style="flex:1 1 auto; width:100%; height:100%; border:0; display:block; background:#101418;"
+                          allow="clipboard-read; clipboard-write"
+                        ></iframe>
+                      `}
+                </div>
+              </div>
+
+              <!-- Right column: full-height chat panel -->
+              <div style="display:flex; flex-direction:column; min-height:0; overflow:hidden;">
+                <section class="card" style="display:flex; flex-direction:column; flex:1 1 auto; min-height:0; overflow:hidden;">
                   <div class="card-title">Assistant Chat</div>
-                  <div class="card-sub">Use the synced Figma context plus the design audit skill prompts inside the normal PMOS chat runtime.</div>
+                  <div class="card-sub">Chat with PMOS using synced Figma context and design audit skills.</div>
                   <div style="margin-top: 12px; min-height: 0; flex:1 1 auto; overflow:hidden;">
                     ${renderChat(props.chatProps)}
                   </div>
