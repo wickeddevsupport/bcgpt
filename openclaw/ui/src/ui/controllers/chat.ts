@@ -56,7 +56,7 @@ function isPendingMessageForRun(message: unknown, runId: string | null): boolean
 function comparableMessageKey(message: unknown): string {
   const raw = message as Record<string, unknown>;
   const role = typeof raw.role === "string" ? raw.role : "unknown";
-  const text = extractText(message).trim();
+  const text = (extractText(message) ?? "").trim();
   if (text) {
     return `${role}:${text}`;
   }
@@ -344,10 +344,7 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
       // Encode live thinking as inline tags so renderStreamingGroup can display it.
       // extractThinkingCached and extractTextCached in grouped-render handle this format.
       const streamText = thinking ? `<thinking>${thinking}</thinking>\n${textPart}` : textPart;
-      const current = state.chatStream ?? "";
-      if (!current || streamText.length >= current.length) {
-        state.chatStream = streamText;
-      }
+      state.chatStream = streamText;
     }
   } else if (payload.state === "final") {
     state.chatMessages = clearPendingMarkersForRun(state.chatMessages, payload.runId);

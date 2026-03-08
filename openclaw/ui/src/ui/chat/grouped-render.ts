@@ -19,6 +19,7 @@ type ImageBlock = {
 };
 
 function extractImages(message: unknown): ImageBlock[] {
+  if (!message || typeof message !== "object") return [];
   const m = message as Record<string, unknown>;
   const content = m.content;
   const images: ImageBlock[] = [];
@@ -248,6 +249,7 @@ function renderGroupedMessage(
   opts: { isStreaming: boolean; showReasoning: boolean },
   onOpenSidebar?: (content: string) => void,
 ) {
+  if (!message || typeof message !== "object") return nothing;
   const m = message as Record<string, unknown>;
   const role = typeof m.role === "string" ? m.role : "unknown";
   const isToolResult =

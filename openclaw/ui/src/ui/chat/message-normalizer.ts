@@ -8,6 +8,9 @@ import type { NormalizedMessage, MessageContentItem } from "../types/chat-types.
  * Normalize a raw message object into a consistent structure.
  */
 export function normalizeMessage(message: unknown): NormalizedMessage {
+  if (!message || typeof message !== "object") {
+    return { role: "unknown", content: [], timestamp: Date.now(), id: undefined };
+  }
   const m = message as Record<string, unknown>;
   let role = typeof m.role === "string" ? m.role : "unknown";
 
@@ -84,6 +87,7 @@ export function normalizeRoleForGrouping(role: string): string {
  * Check if a message is a tool result message based on its role.
  */
 export function isToolResultMessage(message: unknown): boolean {
+  if (!message || typeof message !== "object") return false;
   const m = message as Record<string, unknown>;
   const role = typeof m.role === "string" ? m.role.toLowerCase() : "";
   return role === "toolresult" || role === "tool_result";

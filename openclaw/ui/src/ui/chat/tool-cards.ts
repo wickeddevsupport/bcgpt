@@ -8,6 +8,7 @@ import { isToolResultMessage } from "./message-normalizer.ts";
 import { formatToolOutputForSidebar, getTruncatedPreview } from "./tool-helpers.ts";
 
 export function extractToolCards(message: unknown): ToolCard[] {
+  if (!message || typeof message !== "object") return [];
   const m = message as Record<string, unknown>;
   const content = normalizeContent(m.content);
   const cards: ToolCard[] = [];

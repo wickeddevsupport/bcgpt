@@ -530,6 +530,7 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
   }
   for (let i = historyStart; i < history.length; i++) {
     const msg = history[i];
+    if (!msg) continue;
     const normalized = normalizeMessage(msg);
     const raw = msg as Record<string, unknown>;
     const marker = raw.__openclaw as Record<string, unknown> | undefined;
