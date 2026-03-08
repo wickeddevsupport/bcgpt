@@ -835,6 +835,37 @@ export class OpenClawApp extends LitElement {
     if (next === "admin" && this.pmosAuthUser?.role === "super_admin" && this.pmosWorkspacesList.length === 0 && !this.pmosWorkspacesLoading) {
       void this._loadWorkspacesList();
     }
+    // When switching to Figma tab, verify live auth before showing iframe
+    if (next === "figma") {
+      void this.verifyFigmaLiveAuth();
+    }
+  }
+
+  /** Quick auth check against FM API — clears stale connected state on 401. */
+  private async verifyFigmaLiveAuth() {
+    const figmaBaseUrl = String(this.pmosFigmaUrl ?? "").trim().replace(/\/+$/, "") || "https://fm.wickedlab.io";
+    try {
+      const res = await fetch(`${figmaBaseUrl}/api/pmos/context`, {
+        credentials: "include",
+        headers: { accept: "application/json" },
+      });
+      if (res.status === 401) {
+        // FM session expired — clear stale connected state
+        if (this.client) {
+          await this.client.request("pmos.connectors.workspace.set", {
+            connectors: {
+              figma: {
+                url: figmaBaseUrl,
+                identity: { connected: false },
+              },
+            },
+          }).catch(() => {});
+        }
+        await loadPmosConnectorsStatus(this);
+      }
+    } catch {
+      // Network error — silently ignore, keep existing state
+    }
   }
 
   async _loadWorkspacesList() {
@@ -1178,8 +1209,19 @@ export class OpenClawApp extends LitElement {
         },
       });
       if (response.status === 401) {
+        // Clear stale connected state so the iframe hides and sign-in CTA shows
+        if (this.client) {
+          await this.client.request("pmos.connectors.workspace.set", {
+            connectors: {
+              figma: {
+                url: figmaBaseUrl,
+                identity: { connected: false },
+              },
+            },
+          }).catch(() => {});
+        }
+        await loadPmosConnectorsStatus(this);
         if (opts?.auto) {
-          await loadPmosConnectorsStatus(this);
           return;
         }
         throw new Error("Sign in to the Figma File Manager first, then retry sync.");
