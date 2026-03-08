@@ -21,6 +21,7 @@ type ResolvedOpsConfig = {
 
 type CachedUserToken = {
   token: string;
+  projectId?: string;
   expiresAt: number;
 };
 
@@ -260,8 +261,10 @@ async function signInWithWorkspaceUser(cfg: ResolvedOpsConfig): Promise<string |
       if (!token) {
         continue;
       }
+      const projectId = readString(body?.projectId) ?? undefined;
       userTokenCache.set(cacheKey, {
         token,
+        projectId,
         expiresAt: Date.now() + 10 * 60 * 1000,
       });
       return token;
@@ -323,8 +326,18 @@ async function opsRequest(params: OpsRequestParams): Promise<unknown> {
 
 async function resolveProjectIdOrThrow(api: OpenClawPluginApi, workspaceId?: string | null): Promise<string> {
   const cfg = await resolveOpsConfig(api, workspaceId ?? null);
-  if (cfg.projectId) {
-    return cfg.projectId;
+  const cacheKey = `${cfg.workspaceKey}:${cfg.baseUrl}:${cfg.userEmail ?? ""}`;
+  const cached = userTokenCache.get(cacheKey);
+  if (cached?.projectId) {
+    return cached.projectId;
+  }
+
+  if (cfg.userEmail && cfg.userPassword) {
+    await signInWithWorkspaceUser(cfg).catch(() => null);
+    const refreshed = userTokenCache.get(cacheKey);
+    if (refreshed?.projectId) {
+      return refreshed.projectId;
+    }
   }
 
   const projectsPayload = await opsRequest({ api, workspaceId, endpoint: "projects" });
@@ -340,6 +353,9 @@ async function resolveProjectIdOrThrow(api: OpenClawPluginApi, workspaceId?: str
   ) as Record<string, unknown> | undefined;
   const projectId = readString(firstProject?.id);
   if (!projectId) {
+    if (cfg.projectId) {
+      return cfg.projectId;
+    }
     throw new Error(
       "No projectId configured for workflow engine. Set PMOS ops.projectId in Integrations.",
     );

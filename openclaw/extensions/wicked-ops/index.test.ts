@@ -143,6 +143,13 @@ describe("wicked-ops ops_workflow_execute", () => {
       ok: true,
       status: 200,
       statusText: "OK",
+      text: async () => JSON.stringify({ data: [{ id: "proj_1" }] }),
+    } as Response);
+
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: "OK",
       text: async () =>
         JSON.stringify({
           id: "run_retry",
@@ -177,5 +184,55 @@ describe("wicked-ops ops_workflow_execute", () => {
       workflowId: "flow_1",
       status: "running",
     });
+  });
+
+  it("prefers the live projects list over a stale saved project id", async () => {
+    const { api, tools } = createApi();
+    api.config = {
+      pmos: {
+        connectors: {
+          activepieces: {
+            url: "https://flow.example.test",
+            apiKey: "service-key",
+          },
+        },
+      },
+    };
+    api.pluginConfig = {
+      projectId: "stale_proj",
+    };
+    plugin.register(api as never);
+    const tool = tools.find((entry) => entry.name === "ops_executions_list");
+    expect(tool).toBeTruthy();
+
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: async () => JSON.stringify({ next: null, previous: null, data: [{ id: "proj_live" }] }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: async () => JSON.stringify({ data: [] }),
+      } as Response);
+
+    const result = await tool!.execute("call_4", {
+      workspaceId: "ws_1",
+      workflowId: "flow_1",
+    });
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "https://flow.example.test/api/v1/projects",
+      expect.objectContaining({
+        method: "GET",
+      }),
+    );
+    expect(String(vi.mocked(fetch).mock.calls[1]?.[0] ?? "")).toContain("projectId=proj_live");
+    expect(String(vi.mocked(fetch).mock.calls[1]?.[0] ?? "")).not.toContain("projectId=stale_proj");
+    expect(JSON.parse(getToolText(result))).toMatchObject({ data: [] });
   });
 });
