@@ -884,6 +884,26 @@ async function resolveProjectId(
     // Fall through to connector/global configuration fallback below.
   }
 
+  if (ctx.userEmail && ctx.userPassword) {
+    try {
+      const projects = await requestJson({
+        workspaceId,
+        ctx: { ...ctx, projectId: null },
+        endpoint: "projects",
+      });
+      const obj = toObject(projects);
+      const rows = toArrayObjects(obj?.data ?? projects);
+      const first = rows[0];
+      const projectId = readId(first?.id);
+      if (projectId) {
+        ctx.projectId = projectId;
+        return projectId;
+      }
+    } catch {
+      // Fall through to connector/global configuration fallback below.
+    }
+  }
+
   if (ctx.projectId) {
     return ctx.projectId;
   }

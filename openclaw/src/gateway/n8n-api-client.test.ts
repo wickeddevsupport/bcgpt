@@ -406,4 +406,32 @@ describe("n8n api client activepieces import path", () => {
     expect(String(fetchMock.mock.calls[1]?.[0] ?? "")).toContain("projectId=proj_live");
     expect(String(fetchMock.mock.calls[1]?.[0] ?? "")).not.toContain("projectId=stale_proj");
   });
+
+  it("falls back to the live projects list before a stale saved project id when sign-in omits projectId", async () => {
+    readWorkspaceConnectorsMock.mockResolvedValue({
+      ops: {
+        url: "https://flow.example.test",
+        projectId: "stale_proj",
+        user: {
+          email: "user@example.test",
+          password: "secret",
+        },
+      },
+    });
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ token: "user-token" }))
+      .mockResolvedValueOnce(jsonResponse([{ id: "proj_live" }]))
+      .mockResolvedValueOnce(jsonResponse({ data: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { listN8nWorkflows } = await import("./n8n-api-client.js");
+    const result = await listN8nWorkflows("ws_4");
+
+    expect(result).toEqual({ ok: true, workflows: [] });
+    expect(String(fetchMock.mock.calls[1]?.[0] ?? "")).toContain("/api/v1/projects");
+    expect(String(fetchMock.mock.calls[2]?.[0] ?? "")).toContain("projectId=proj_live");
+    expect(String(fetchMock.mock.calls[2]?.[0] ?? "")).not.toContain("projectId=stale_proj");
+  });
 });
