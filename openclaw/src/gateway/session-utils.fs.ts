@@ -1,11 +1,69 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DEFAULT_MEMORY_FLUSH_PROMPT } from "../auto-reply/reply/memory-flush.js";
+import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import type { SessionPreviewItem } from "./session-utils.types.js";
 import { resolveSessionTranscriptPath } from "../config/sessions.js";
 import { resolveRequiredHomeDir } from "../infra/home-dir.js";
 import { extractToolCallNames, hasToolCall } from "../utils/transcript-tools.js";
 import { stripEnvelope } from "./chat-sanitize.js";
+
+function extractMessageText(message: unknown): string | null {
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+
+  const content = (message as { content?: unknown }).content;
+  if (typeof content === "string") {
+    const trimmed = content.trim();
+    return trimmed || null;
+  }
+
+  if (!Array.isArray(content)) {
+    return null;
+  }
+
+  const parts: string[] = [];
+  for (const part of content) {
+    if (!part || typeof part !== "object") {
+      continue;
+    }
+    const text = (part as { text?: unknown }).text;
+    if (typeof text === "string" && text.trim()) {
+      parts.push(text.trim());
+    }
+  }
+
+  if (parts.length === 0) {
+    return null;
+  }
+  return parts.join("\n\n");
+}
+
+function isMemoryFlushPromptMessage(message: unknown): boolean {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  const role = (message as { role?: unknown }).role;
+  if (role !== "user") {
+    return false;
+  }
+  const text = extractMessageText(message);
+  return text === DEFAULT_MEMORY_FLUSH_PROMPT;
+}
+
+function isSilentAssistantReply(message: unknown): boolean {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  const role = (message as { role?: unknown }).role;
+  if (role !== "assistant") {
+    return false;
+  }
+  const text = extractMessageText(message);
+  return text === SILENT_REPLY_TOKEN;
+}
 
 export function readSessionMessages(
   sessionId: string,
@@ -21,6 +79,7 @@ export function readSessionMessages(
 
   const lines = fs.readFileSync(filePath, "utf-8").split(/\r?\n/);
   const messages: unknown[] = [];
+  let skipNextSilentAssistant = false;
   for (const line of lines) {
     if (!line.trim()) {
       continue;
@@ -28,6 +87,15 @@ export function readSessionMessages(
     try {
       const parsed = JSON.parse(line);
       if (parsed?.message) {
+        if (isMemoryFlushPromptMessage(parsed.message)) {
+          skipNextSilentAssistant = true;
+          continue;
+        }
+        if (skipNextSilentAssistant && isSilentAssistantReply(parsed.message)) {
+          skipNextSilentAssistant = false;
+          continue;
+        }
+        skipNextSilentAssistant = false;
         messages.push(parsed.message);
         continue;
       }

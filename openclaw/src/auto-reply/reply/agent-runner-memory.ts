@@ -1,4 +1,7 @@
 import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { TemplateContext } from "../templating.js";
 import type { VerboseLevel } from "../thinking.js";
@@ -15,7 +18,6 @@ import {
   updateSessionStoreEntry,
 } from "../../config/sessions.js";
 import { logVerbose } from "../../globals.js";
-import { registerAgentRunContext } from "../../infra/agent-events.js";
 import { buildThreadingToolContext, resolveEnforceFinalTag } from "./agent-runner-utils.js";
 import {
   resolveMemoryFlushContextWindowTokens,
@@ -23,6 +25,39 @@ import {
   shouldRunMemoryFlush,
 } from "./memory-flush.js";
 import { incrementCompactionCount } from "./session-updates.js";
+
+async function createScratchTranscriptFile(sourceFile?: string): Promise<{
+  scratchFile: string | undefined;
+  cleanup: () => Promise<void>;
+}> {
+  if (!sourceFile?.trim()) {
+    return {
+      scratchFile: undefined,
+      cleanup: async () => {},
+    };
+  }
+
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-flush-"));
+  const scratchFile = path.join(tempDir, path.basename(sourceFile));
+
+  try {
+    await fs.copyFile(sourceFile, scratchFile);
+  } catch (err) {
+    const error = err as NodeJS.ErrnoException;
+    if (error?.code !== "ENOENT") {
+      await fs.rm(tempDir, { recursive: true, force: true });
+      throw err;
+    }
+    await fs.writeFile(scratchFile, "", "utf-8");
+  }
+
+  return {
+    scratchFile,
+    cleanup: async () => {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    },
+  };
+}
 
 export async function runMemoryFlushIfNeeded(params: {
   cfg: OpenClawConfig;
@@ -82,12 +117,6 @@ export async function runMemoryFlushIfNeeded(params: {
   let activeSessionEntry = params.sessionEntry;
   const activeSessionStore = params.sessionStore;
   const flushRunId = crypto.randomUUID();
-  if (params.sessionKey) {
-    registerAgentRunContext(flushRunId, {
-      sessionKey: params.sessionKey,
-      verboseLevel: params.resolvedVerboseLevel,
-    });
-  }
   let memoryCompactionCompleted = false;
   const flushSystemPrompt = [
     params.followupRun.run.extraSystemPrompt,
@@ -95,6 +124,9 @@ export async function runMemoryFlushIfNeeded(params: {
   ]
     .filter(Boolean)
     .join("\n\n");
+  const { scratchFile, cleanup } = await createScratchTranscriptFile(
+    params.followupRun.run.sessionFile,
+  );
   try {
     await runWithModelFallback({
       cfg: params.followupRun.run.config,
@@ -128,7 +160,7 @@ export async function runMemoryFlushIfNeeded(params: {
           senderName: params.sessionCtx.SenderName?.trim() || undefined,
           senderUsername: params.sessionCtx.SenderUsername?.trim() || undefined,
           senderE164: params.sessionCtx.SenderE164?.trim() || undefined,
-          sessionFile: params.followupRun.run.sessionFile,
+          sessionFile: scratchFile ?? params.followupRun.run.sessionFile,
           workspaceDir: params.followupRun.run.workspaceDir,
           agentDir: params.followupRun.run.agentDir,
           config: params.followupRun.run.config,
@@ -196,6 +228,8 @@ export async function runMemoryFlushIfNeeded(params: {
     }
   } catch (err) {
     logVerbose(`memory flush run failed: ${String(err)}`);
+  } finally {
+    await cleanup();
   }
 
   return activeSessionEntry;

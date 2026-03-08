@@ -13,6 +13,7 @@ const runCliAgentMock = vi.fn();
 type EmbeddedRunParams = {
   prompt?: string;
   extraSystemPrompt?: string;
+  sessionFile?: string;
   onAgentEvent?: (evt: { stream?: string; data?: { phase?: string; willRetry?: boolean } }) => void;
 };
 
@@ -126,6 +127,7 @@ describe("runReplyAgent memory flush", () => {
     runEmbeddedPiAgentMock.mockReset();
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-flush-"));
     const storePath = path.join(tmp, "sessions.json");
+    const sessionFile = path.join(tmp, "session.jsonl");
     const sessionKey = "main";
     const sessionEntry = {
       sessionId: "session",
@@ -135,10 +137,11 @@ describe("runReplyAgent memory flush", () => {
     };
 
     await seedSessionStore({ storePath, sessionKey, entry: sessionEntry });
+    await fs.writeFile(sessionFile, '{"message":{"role":"user","content":"keep me"}}\n', "utf-8");
 
-    const calls: Array<{ prompt?: string }> = [];
+    const calls: Array<{ prompt?: string; sessionFile?: string }> = [];
     runEmbeddedPiAgentMock.mockImplementation(async (params: EmbeddedRunParams) => {
-      calls.push({ prompt: params.prompt });
+      calls.push({ prompt: params.prompt, sessionFile: params.sessionFile });
       if (params.prompt === DEFAULT_MEMORY_FLUSH_PROMPT) {
         return { payloads: [], meta: {} };
       }
@@ -151,6 +154,7 @@ describe("runReplyAgent memory flush", () => {
     const { typing, sessionCtx, resolvedQueue, followupRun } = createBaseRun({
       storePath,
       sessionEntry,
+      runOverrides: { sessionFile },
     });
 
     await runReplyAgent({
@@ -179,6 +183,9 @@ describe("runReplyAgent memory flush", () => {
     });
 
     expect(calls.map((call) => call.prompt)).toEqual([DEFAULT_MEMORY_FLUSH_PROMPT, "hello"]);
+  expect(calls[0]?.sessionFile).toBeTruthy();
+  expect(calls[0]?.sessionFile).not.toBe(sessionFile);
+  expect(calls[1]?.sessionFile).toBe(sessionFile);
 
     const stored = JSON.parse(await fs.readFile(storePath, "utf-8"));
     expect(stored[sessionKey].memoryFlushAt).toBeTypeOf("number");
