@@ -23,11 +23,19 @@ COPY package.json nx.json ./
 # Install root Nx deps (nx CLI only, no scripts)
 RUN npm install --ignore-scripts --no-audit --no-fund --no-package-lock
 
+# Shared PMOS bootstrap assets that must survive image rebuilds and sync into /app/.openclaw.
+COPY scripts/prime-openclaw-state.mjs ./scripts/prime-openclaw-state.mjs
+COPY scripts/docker/pmos-entrypoint.sh /usr/local/bin/pmos-entrypoint
+COPY skills/ ./bcgpt-skills/
+
 # Copy our custom OpenClaw fork (contains pmos UI patches, bcgpt integrations, etc.)
 COPY openclaw/ ./openclaw/
 
 # Install OpenClaw workspace deps (includes ui)
 RUN corepack pnpm --dir openclaw install --frozen-lockfile
+
+# Figma MCP support depends on mcporter being present in the runtime image.
+RUN npm install -g mcporter && chmod +x /usr/local/bin/pmos-entrypoint
 
 # Vendored n8n is legacy/opt-in and not built by default.
 # Create the expected empty directory so the runtime path exists.
@@ -46,13 +54,14 @@ ENV OPENCLAW_PREFER_PNPM=1
 ENV NODE_ENV=production
 
 # Only chown the writable runtime directory; avoid recursive chown on the full repo.
-RUN mkdir -p /app/.openclaw && chown -R node:node /app/.openclaw
+RUN mkdir -p /app/.openclaw /app/.mcporter && chown -R node:node /app/.openclaw /app/.mcporter
 
 # Security hardening: Run as non-root user
 # The node:22-bookworm image includes a 'node' user (uid 1000)
 # This reduces the attack surface by preventing container escape via root privileges
 USER node
 WORKDIR /app/openclaw
+ENTRYPOINT ["pmos-entrypoint"]
 
 # Start gateway server with default config.
 # Binds to loopback (127.0.0.1) by default for security.

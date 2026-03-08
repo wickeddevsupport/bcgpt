@@ -1,53 +1,55 @@
 #!/usr/bin/env node
 /**
- * PMOS Reset & Seed Script
- * Keeps only 3 accounts, gives each a clean isolated workspace config.
- * Run inside the pmos container: node /tmp/reset-and-seed.js
+ * PMOS reset and seed script.
+ * Keeps only the approved accounts and rebuilds their workspace configs.
+ * Run inside the PMOS container: node /tmp/reset-and-seed.js
  */
-const fs = require('fs');
-const path = require('path');
+const fs = require("fs");
+const path = require("path");
 
-const BASE = '/app/.openclaw';
+const BASE = "/app/.openclaw";
 const AUTH_FILE = `${BASE}/pmos-auth.json`;
 const GLOBAL_FILE = `${BASE}/openclaw.json`;
 const WS_BASE = `${BASE}/workspaces`;
 
-const KILO_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbnYiOiJwcm9kdWN0aW9uIiwia2lsb1VzZXJJZCI6IjdjOTY1OGI0LWJjYmQtNGNkMC05MjE4LTU1MzJjMzFiMTY0ZiIsImFwaVRva2VuUGVwcGVyIjpudWxsLCJ2ZXJzaW9uIjozLCJpYXQiOjE3NzEyMzIzMTIsImV4cCI6MTkyODkxMjMxMn0.SbCF4tLykUwOpChzl7KazebP8GZnahl_qaN2Vo5Inv4';
+const PRIMARY_MODEL = "kilo/minimax/minimax-m2.5:free";
+const KILO_API_KEY =
+  process.env.KILO_API_KEY ||
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbnYiOiJwcm9kdWN0aW9uIiwia2lsb1VzZXJJZCI6IjdjOTY1OGI0LWJjYmQtNGNkMC05MjE4LTU1MzJjMzFiMTY0ZiIsImFwaVRva2VuUGVwcGVyIjpudWxsLCJ2ZXJzaW9uIjozLCJpYXQiOjE3NzEyMzIzMTIsImV4cCI6MTkyODkxMjMxMn0.SbCF4tLykUwOpChzl7KazebP8GZnahl_qaN2Vo5Inv4";
 
-// The 3 accounts we keep (email → bcgpt API key)
 const KEEP_EMAILS = {
-  'rajan@wickedwebsites.us':  'acb7d6a65d6c3d12c383526040e060119fa6e7687c244268',
-  'eddie@wickedlab.io':        '7bd9f32092ff46af5b76f4308d6a1e56fca091df41d95587',
-  'testws@wickedlab.io':       'acb7d6a65d6c3d12c383526040e060119fa6e7687c244268',
+  "rajan@wickedwebsites.us": "acb7d6a65d6c3d12c383526040e060119fa6e7687c244268",
+  "eddie@wickedlab.io": "7bd9f32092ff46af5b76f4308d6a1e56fca091df41d95587",
+  "testws@wickedlab.io": "acb7d6a65d6c3d12c383526040e060119fa6e7687c244268",
 };
 
 function wsConfigFor(wsId) {
   return {
     meta: {
-      lastTouchedVersion: '2026.2.9',
+      lastTouchedVersion: "bcgpt-primer-2026-03-08",
       lastTouchedAt: new Date().toISOString(),
     },
     models: {
       providers: {
         kilo: {
-          baseUrl: 'https://api.kilo.ai/api/gateway',
+          baseUrl: "https://api.kilo.ai/api/gateway",
           apiKey: KILO_API_KEY,
-          api: 'openai-completions',
+          api: "openai-completions",
           models: [
             {
-              id: 'auto-free',
-              name: 'Kilo Auto (Free)',
+              id: "auto-free",
+              name: "Kilo Auto (Free)",
               reasoning: false,
-              input: ['text'],
+              input: ["text"],
               cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
               contextWindow: 200000,
               maxTokens: 64000,
             },
             {
-              id: 'minimax/minimax-m2.5:free',
-              name: 'MiniMax M2.5 (Free via Kilo)',
+              id: "minimax/minimax-m2.5:free",
+              name: "MiniMax M2.5 (Free via Kilo)",
               reasoning: false,
-              input: ['text'],
+              input: ["text"],
               cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
               contextWindow: 1000000,
               maxTokens: 64000,
@@ -62,29 +64,50 @@ function wsConfigFor(wsId) {
     agents: {
       defaults: {
         workspace: `~/.openclaw/workspaces/${wsId}/assistant`,
-        thinkingDefault: 'low',
+        thinkingDefault: "low",
         model: {
-          primary: 'kilo/auto-free',
+          primary: PRIMARY_MODEL,
+          fallbacks: [],
         },
         models: {
-          'kilo/auto-free': { alias: 'Kilo (Auto Free)' },
-          'kilo/minimax/minimax-m2.5:free': { alias: 'MiniMax M2.5 (Free)' },
+          [PRIMARY_MODEL]: { alias: "MiniMax M2.5 (Free)" },
+        },
+        subagents: {
+          model: PRIMARY_MODEL,
+          thinking: "low",
+          maxConcurrent: 4,
+          archiveAfterMinutes: 30,
+        },
+        memorySearch: {
+          enabled: true,
+          experimental: {
+            sessionMemory: true,
+          },
+          sources: ["memory", "sessions"],
+          sync: {
+            onSessionStart: true,
+            onSearch: true,
+            watch: true,
+          },
+          store: {
+            path: `~/.openclaw/workspaces/${wsId}/agents/{agentId}/memory/memory.db`,
+          },
         },
       },
       list: [
         {
-          id: 'assistant',
-          name: 'Workspace Assistant',
+          id: "assistant",
+          name: "Workspace Assistant",
           default: true,
           workspaceId: wsId,
           workspace: `~/.openclaw/workspaces/${wsId}/assistant`,
           identity: {
-            name: 'Workspace Assistant',
-            emoji: '🤖',
-            theme: 'Workspace Assistant',
+            name: "Workspace Assistant",
+            emoji: "🤖",
+            theme: "Workspace Assistant",
           },
-          tools: { profile: 'full' },
-          model: 'kilo/auto-free',
+          tools: { profile: "full" },
+          model: PRIMARY_MODEL,
         },
       ],
     },
@@ -94,7 +117,7 @@ function wsConfigFor(wsId) {
 function connectorsFor(bcgptApiKey) {
   return {
     bcgpt: {
-      url: 'https://bcgpt.wickedlab.io',
+      url: "https://bcgpt.wickedlab.io",
       apiKey: bcgptApiKey,
     },
   };
@@ -102,33 +125,36 @@ function connectorsFor(bcgptApiKey) {
 
 function writeJson(filePath, data) {
   const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n');
-  console.log(`  ✓ wrote ${filePath}`);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n");
+  console.log(`  wrote ${filePath}`);
 }
 
-function rmrf(dir) {
-  if (!fs.existsSync(dir)) return;
-  fs.rmSync(dir, { recursive: true, force: true });
-  console.log(`  🗑  deleted ${dir}`);
+function rmrf(dirPath) {
+  if (!fs.existsSync(dirPath)) {
+    return;
+  }
+  fs.rmSync(dirPath, { recursive: true, force: true });
+  console.log(`  deleted ${dirPath}`);
 }
 
-// ── 1. Update pmos-auth.json ──────────────────────────────────────────────
-console.log('\n=== Step 1: Cleaning user accounts ===');
-const auth = JSON.parse(fs.readFileSync(AUTH_FILE, 'utf8'));
+console.log("\n=== Step 1: Cleaning user accounts ===");
+const auth = JSON.parse(fs.readFileSync(AUTH_FILE, "utf8"));
 const before = auth.users.length;
-auth.users = auth.users.filter(u => KEEP_EMAILS[u.email]);
-auth.sessions = auth.sessions || [];
-// Prune sessions for removed users
-const keepIds = new Set(auth.users.map(u => u.id));
-auth.sessions = auth.sessions.filter(s => keepIds.has(s.userId));
+auth.users = auth.users.filter((user) => KEEP_EMAILS[user.email]);
+auth.sessions = Array.isArray(auth.sessions) ? auth.sessions : [];
+const keepIds = new Set(auth.users.map((user) => user.id));
+auth.sessions = auth.sessions.filter((session) => keepIds.has(session.userId));
 writeJson(AUTH_FILE, auth);
-console.log(`  Users: ${before} → ${auth.users.length} (kept: ${auth.users.map(u => u.email).join(', ')})`);
+console.log(
+  `  Users: ${before} -> ${auth.users.length} (kept: ${auth.users.map((user) => user.email).join(", ")})`,
+);
 
-// ── 2. Delete orphaned workspace dirs ────────────────────────────────────
-console.log('\n=== Step 2: Removing orphaned workspace directories ===');
-const keepWorkspaces = new Set(auth.users.map(u => u.workspaceId));
-console.log(`  Keeping workspaces: ${[...keepWorkspaces].join(', ')}`);
+console.log("\n=== Step 2: Removing orphaned workspace directories ===");
+const keepWorkspaces = new Set(auth.users.map((user) => user.workspaceId));
+console.log(`  Keeping workspaces: ${[...keepWorkspaces].join(", ")}`);
 const allWsDirs = fs.existsSync(WS_BASE) ? fs.readdirSync(WS_BASE) : [];
 for (const wsDir of allWsDirs) {
   if (!keepWorkspaces.has(wsDir)) {
@@ -136,77 +162,130 @@ for (const wsDir of allWsDirs) {
   }
 }
 
-// ── 3. Write clean workspace configs ─────────────────────────────────────
-console.log('\n=== Step 3: Seeding clean workspace configs ===');
+console.log("\n=== Step 3: Seeding clean workspace configs ===");
 for (const user of auth.users) {
   const wsId = user.workspaceId;
   const bcgptKey = KEEP_EMAILS[user.email];
-  console.log(`\n  ${user.email} → workspace ${wsId}`);
+  console.log(`\n  ${user.email} -> workspace ${wsId}`);
 
-  // Write config.json
-  writeJson(path.join(WS_BASE, wsId, 'config.json'), wsConfigFor(wsId));
+  writeJson(path.join(WS_BASE, wsId, "config.json"), wsConfigFor(wsId));
+  writeJson(path.join(WS_BASE, wsId, "connectors.json"), connectorsFor(bcgptKey));
 
-  // Write connectors.json
-  writeJson(path.join(WS_BASE, wsId, 'connectors.json'), connectorsFor(bcgptKey));
-
-  // Leave sessions dir intact (or recreate empty)
-  const sessionsDir = path.join(WS_BASE, wsId, 'agents', 'assistant', 'sessions');
-  if (!fs.existsSync(sessionsDir)) fs.mkdirSync(sessionsDir, { recursive: true });
+  const sessionsDir = path.join(WS_BASE, wsId, "agents", "assistant", "sessions");
+  if (!fs.existsSync(sessionsDir)) {
+    fs.mkdirSync(sessionsDir, { recursive: true });
+  }
 }
 
-// ── 4. Clean global openclaw.json ────────────────────────────────────────
-console.log('\n=== Step 4: Cleaning global openclaw.json ===');
-const global = JSON.parse(fs.readFileSync(GLOBAL_FILE, 'utf8'));
+console.log("\n=== Step 4: Cleaning global openclaw.json ===");
+const global = JSON.parse(fs.readFileSync(GLOBAL_FILE, "utf8"));
 
-// Remove PW_WS_DEBUG_ agents from global agents.list
-const agentsBefore = (global.agents?.list || []).length;
-if (global.agents?.list) {
-  global.agents.list = global.agents.list.filter(a =>
-    !String(a.id || '').startsWith('pw_ws_debug_')
+const agentsBefore = Array.isArray(global.agents?.list) ? global.agents.list.length : 0;
+if (Array.isArray(global.agents?.list)) {
+  global.agents.list = global.agents.list.filter(
+    (agent) => !String(agent?.id || "").startsWith("pw_ws_debug_"),
   );
 }
-const agentsAfter = (global.agents?.list || []).length;
-console.log(`  Global agents: ${agentsBefore} → ${agentsAfter}`);
+const agentsAfter = Array.isArray(global.agents?.list) ? global.agents.list.length : 0;
+console.log(`  Global agents: ${agentsBefore} -> ${agentsAfter}`);
 
-// Fix global default model to kilo/auto-free
-if (global.agents?.defaults?.model) {
-  global.agents.defaults.model.primary = 'kilo/auto-free';
-  global.agents.defaults.model.fallbacks = [];
+global.agents = global.agents || {};
+global.agents.defaults = global.agents.defaults || {};
+global.agents.defaults.model = global.agents.defaults.model || {};
+global.agents.defaults.model.primary = PRIMARY_MODEL;
+global.agents.defaults.model.fallbacks = [];
+global.agents.defaults.thinkingDefault = global.agents.defaults.thinkingDefault || "low";
+global.agents.defaults.compaction = global.agents.defaults.compaction || {};
+global.agents.defaults.compaction.mode = global.agents.defaults.compaction.mode || "safeguard";
+global.agents.defaults.subagents = global.agents.defaults.subagents || {};
+global.agents.defaults.subagents.model =
+  global.agents.defaults.subagents.model || PRIMARY_MODEL;
+global.agents.defaults.subagents.thinking =
+  global.agents.defaults.subagents.thinking || "low";
+if (typeof global.agents.defaults.subagents.maxConcurrent !== "number") {
+  global.agents.defaults.subagents.maxConcurrent = 4;
+}
+if (typeof global.agents.defaults.subagents.archiveAfterMinutes !== "number") {
+  global.agents.defaults.subagents.archiveAfterMinutes = 30;
+}
+global.agents.defaults.memorySearch = global.agents.defaults.memorySearch || {};
+if (typeof global.agents.defaults.memorySearch.enabled !== "boolean") {
+  global.agents.defaults.memorySearch.enabled = true;
+}
+global.agents.defaults.memorySearch.experimental =
+  global.agents.defaults.memorySearch.experimental || {};
+if (typeof global.agents.defaults.memorySearch.experimental.sessionMemory !== "boolean") {
+  global.agents.defaults.memorySearch.experimental.sessionMemory = true;
+}
+if (
+  !Array.isArray(global.agents.defaults.memorySearch.sources) ||
+  global.agents.defaults.memorySearch.sources.length === 0
+) {
+  global.agents.defaults.memorySearch.sources = ["memory", "sessions"];
+}
+global.agents.defaults.memorySearch.sync = global.agents.defaults.memorySearch.sync || {};
+if (typeof global.agents.defaults.memorySearch.sync.onSessionStart !== "boolean") {
+  global.agents.defaults.memorySearch.sync.onSessionStart = true;
+}
+if (typeof global.agents.defaults.memorySearch.sync.onSearch !== "boolean") {
+  global.agents.defaults.memorySearch.sync.onSearch = true;
+}
+if (typeof global.agents.defaults.memorySearch.sync.watch !== "boolean") {
+  global.agents.defaults.memorySearch.sync.watch = true;
 }
 
-// Set the gateway auth token. Both the local fork and upstream use gateway.auth.token.
-// (gateway.token is the old deprecated field that causes a config error on startup.)
-const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || '';
-if (GATEWAY_TOKEN) {
-  global.gateway = global.gateway || {};
+const gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN || "";
+global.gateway = global.gateway || {};
+if (gatewayToken) {
   global.gateway.auth = global.gateway.auth || {};
-  global.gateway.auth.token = GATEWAY_TOKEN;
-  delete global.gateway.token; // remove deprecated field
+  global.gateway.auth.token = gatewayToken;
 }
+delete global.gateway.token;
 
-// Remove custom keys that OpenClaw schema no longer accepts
 delete global.pmos;
-// Remove upstream-only gateway keys that local fork schema rejects
-if (global.gateway) {
-  if (global.gateway.controlUi) {
-    delete global.gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback;
-    if (Object.keys(global.gateway.controlUi).length === 0) delete global.gateway.controlUi;
-  }
-  delete global.gateway.trustedProxies;
+if (global.gateway.controlUi) {
+  delete global.gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback;
+}
+delete global.gateway.trustedProxies;
+
+global.browser = global.browser || {};
+if (typeof global.browser.enabled !== "boolean") {
+  global.browser.enabled = true;
+}
+if (typeof global.browser.headless !== "boolean") {
+  global.browser.headless = true;
+}
+if (typeof global.browser.noSandbox !== "boolean") {
+  global.browser.noSandbox = true;
 }
 
-// Update global meta
-global.meta = { ...global.meta, lastTouchedAt: new Date().toISOString() };
+global.skills = global.skills || {};
+global.skills.load = global.skills.load || {};
+if (typeof global.skills.load.watch !== "boolean") {
+  global.skills.load.watch = true;
+}
+if (typeof global.skills.load.watchDebounceMs !== "number") {
+  global.skills.load.watchDebounceMs = 250;
+}
+global.skills.install = global.skills.install || {};
+global.skills.install.nodeManager = global.skills.install.nodeManager || "npm";
+
+global.meta = {
+  ...global.meta,
+  lastTouchedVersion: "bcgpt-primer-2026-03-08",
+  lastTouchedAt: new Date().toISOString(),
+};
 
 writeJson(GLOBAL_FILE, global);
 
-// ── 5. Summary ────────────────────────────────────────────────────────────
-console.log('\n=== Done! Summary ===');
+console.log("\n=== Done! Summary ===");
 for (const user of auth.users) {
-  console.log(`  ✅ ${user.email} | ${user.role} | ws=${user.workspaceId}`);
+  console.log(`  OK ${user.email} | ${user.role} | ws=${user.workspaceId}`);
 }
-console.log('\nAll workspaces seeded with:');
-console.log('  - Model: kilo/auto-free (Kilo Auto Free tier)');
-console.log('  - Agent: assistant (Workspace Assistant)');
-console.log('  - bcgpt connector: configured per-workspace');
-console.log('\nRestart the pmos container to reload config.\n');
+console.log("\nAll workspaces seeded with:");
+console.log(`  - Model: ${PRIMARY_MODEL}`);
+console.log("  - Agent: assistant (Workspace Assistant)");
+console.log("  - Memory search: enabled with session indexing defaults");
+console.log("  - Subagents: enabled with shared defaults");
+console.log("  - bcgpt connector: configured per-workspace");
+console.log("\nRestart the pmos container to reload config.\n");
