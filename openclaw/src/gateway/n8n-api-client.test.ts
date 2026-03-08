@@ -192,7 +192,7 @@ describe("n8n api client activepieces import path", () => {
     expect(settings.input?.project).toBe("123");
   });
 
-  it("executes workflows through the Activepieces manual-run socket when workspace user auth is available", async () => {
+  it("executes manual-trigger workflows through the Activepieces manual-run socket when workspace user auth is available", async () => {
     readWorkspaceConnectorsMock.mockResolvedValue({
       ops: {
         url: "https://flow.example.test",
@@ -218,8 +218,8 @@ describe("n8n api client activepieces import path", () => {
               nodes: [
                 {
                   id: "trigger-1",
-                  name: "Webhook",
-                  type: "activepieces.trigger.webhook",
+                  name: "Manual Trigger",
+                  type: "activepieces.trigger.manual",
                 },
               ],
             },
@@ -266,7 +266,7 @@ describe("n8n api client activepieces import path", () => {
     socketIoMock.mockReturnValue(socket);
 
     const { executeN8nWorkflow } = await import("./n8n-api-client.js");
-    const result = await executeN8nWorkflow("ws_1", "flow_1");
+    const result = await executeN8nWorkflow("ws_2", "flow_1");
 
     expect(result).toEqual({ ok: true, executionId: "run_1" });
     expect(socketIoMock).toHaveBeenCalledWith(
@@ -277,6 +277,89 @@ describe("n8n api client activepieces import path", () => {
       }),
     );
     expect(socket.emit).toHaveBeenCalledWith("MANUAL_TRIGGER_RUN_STARTED", {
+      flowVersionId: "ver_1",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("executes non-manual workflows through the Activepieces test-run socket when workspace user auth is available", async () => {
+    readWorkspaceConnectorsMock.mockResolvedValue({
+      ops: {
+        url: "https://flow.example.test",
+        projectId: "proj_1",
+        user: {
+          email: "user@example.test",
+          password: "secret",
+        },
+      },
+    });
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ token: "user-token", projectId: "proj_1" }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: "flow_1",
+          displayName: "Scheduled Flow",
+          status: "DISABLED",
+          version: { id: "ver_1" },
+          metadata: {
+            n8nCompat: {
+              nodes: [
+                {
+                  id: "trigger-1",
+                  name: "Schedule",
+                  type: "activepieces.trigger.schedule",
+                },
+              ],
+            },
+          },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const socketHandlers = new Map<string, Array<(payload?: unknown) => void>>();
+    const socket = {
+      connect: vi.fn(() => {
+        for (const handler of socketHandlers.get("connect") ?? []) {
+          handler();
+        }
+      }),
+      disconnect: vi.fn(),
+      once: vi.fn((event: string, handler: (payload?: unknown) => void) => {
+        const list = socketHandlers.get(event) ?? [];
+        socketHandlers.set(event, [...list, handler]);
+        return socket;
+      }),
+      on: vi.fn((event: string, handler: (payload?: unknown) => void) => {
+        const list = socketHandlers.get(event) ?? [];
+        socketHandlers.set(event, [...list, handler]);
+        return socket;
+      }),
+      off: vi.fn((event: string, handler: (payload?: unknown) => void) => {
+        const list = socketHandlers.get(event) ?? [];
+        socketHandlers.set(
+          event,
+          list.filter((entry) => entry !== handler),
+        );
+        return socket;
+      }),
+      emit: vi.fn((event: string, payload: { flowVersionId?: string }) => {
+        if (event === "TEST_FLOW_RUN") {
+          for (const handler of socketHandlers.get("TEST_FLOW_RUN_STARTED") ?? []) {
+            handler({ id: "run_2", flowVersionId: payload.flowVersionId });
+          }
+        }
+        return socket;
+      }),
+    };
+    socketIoMock.mockReturnValue(socket);
+
+    const { executeN8nWorkflow } = await import("./n8n-api-client.js");
+    const result = await executeN8nWorkflow("ws_1", "flow_1");
+
+    expect(result).toEqual({ ok: true, executionId: "run_2" });
+    expect(socket.emit).toHaveBeenCalledWith("TEST_FLOW_RUN", {
       flowVersionId: "ver_1",
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
