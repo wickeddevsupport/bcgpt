@@ -273,8 +273,10 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
   const figmaHandle = asNonEmptyString(figmaIdentity.handle);
   const figmaEmail = asNonEmptyString(figmaIdentity.email);
   const figmaActiveConnectionName = asNonEmptyString(figmaIdentity.activeConnectionName);
+  const figmaActiveConnectionId = asNonEmptyString(figmaIdentity.activeConnectionId);
   const figmaActiveTeamId = asNonEmptyString(figmaIdentity.activeTeamId);
   const figmaSelectedFileUrl = asNonEmptyString(figmaIdentity.selectedFileUrl);
+  const figmaSelectedFileId = asNonEmptyString(figmaIdentity.selectedFileId);
   const figmaSelectedFileName = asNonEmptyString(figmaIdentity.selectedFileName);
   const figmaSelectedFileSummary =
     figmaSelectedFileName && figmaSelectedFileUrl
@@ -307,8 +309,10 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
     `- figma url: ${figmaUrl ?? "https://fm.wickedlab.io"}`,
     `- figma connected user: ${figmaHandle ?? figmaEmail ?? "(not synced)"}`,
     `- figma active connection: ${figmaActiveConnectionName ?? "(not synced)"}`,
+    `- figma active connection id: ${figmaActiveConnectionId ?? "(not synced)"}`,
     `- figma active team id: ${figmaActiveTeamId ?? "(not synced)"}`,
     `- figma selected file: ${figmaSelectedFileSummary ?? "(not synced)"}`,
+    `- figma selected file id: ${figmaSelectedFileId ?? "(not synced)"}`,
     `- figma selected file url: ${figmaSelectedFileUrl ?? "(not synced)"}`,
     ...(figmaConnected
       ? [

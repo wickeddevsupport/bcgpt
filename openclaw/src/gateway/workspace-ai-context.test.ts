@@ -90,4 +90,32 @@ describe("workspace-ai-context", () => {
     expect(context.length).toBeLessThanOrEqual(860);
     expect(context).toContain("[workspace ai context truncated]");
   });
+
+  it("includes synced Figma connection and selected file context", async () => {
+    await writeWorkspaceConnectors(workspaceId, {
+      figma: {
+        url: "https://fm.wickedlab.io",
+        identity: {
+          connected: true,
+          handle: "designer-1",
+          activeConnectionId: "conn-22",
+          activeConnectionName: "Product Design",
+          activeTeamId: "team-abc",
+          selectedFileName: "Landing Page Revamp",
+          selectedFileId: "FILE123",
+          selectedFileUrl: "https://www.figma.com/file/FILE123/Landing-Page-Revamp",
+        },
+      },
+    });
+
+    const refreshed = await refreshWorkspaceAiContext(workspaceId, {
+      credentials: [],
+    });
+
+    expect(refreshed.markdown).toContain("figma active connection: Product Design");
+    expect(refreshed.markdown).toContain("figma active connection id: conn-22");
+    expect(refreshed.markdown).toContain("figma active team id: team-abc");
+    expect(refreshed.markdown).toContain("figma selected file id: FILE123");
+    expect(refreshed.markdown).toContain("figma selected file url: https://www.figma.com/file/FILE123/Landing-Page-Revamp");
+  });
 });

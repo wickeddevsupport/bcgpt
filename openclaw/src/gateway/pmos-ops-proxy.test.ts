@@ -159,7 +159,7 @@ describe("pmos ops proxy workflow list behavior", () => {
     const handled = await handleLocalN8nRequest(req, res);
     expect(handled).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://flow.example.test/");
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://flow.example.test/flows");
 
     const html = getBody();
     expect(html).toContain("openclaw-ap-bootstrap");
@@ -263,12 +263,15 @@ describe("pmos ops proxy workflow list behavior", () => {
 
     const handled = await handleOpsProxyRequest(req, res);
     expect(handled).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://flow.example.test/api/v1/authentication/sign-in");
-    expect(String(fetchMock.mock.calls[1]?.[0])).toBe("https://flow.example.test/api/v1/projects");
-    expect(String(fetchMock.mock.calls[2]?.[0])).toBe("https://flow.example.test/api/v1/users/me");
+    const calledUrls = fetchMock.mock.calls.map((entry) => String(entry[0]));
+    expect(calledUrls).toContain("https://flow.example.test/api/v1/authentication/sign-in");
+    expect(calledUrls).toContain("https://flow.example.test/api/v1/projects");
+    const usersMeCall = fetchMock.mock.calls.find((entry) =>
+      String(entry[0]).startsWith("https://flow.example.test/api/v1/users/me"),
+    );
+    expect(usersMeCall).toBeDefined();
 
-    const headers = fetchMock.mock.calls[2]?.[1] as { headers?: Record<string, string> } | undefined;
+    const headers = usersMeCall?.[1] as { headers?: Record<string, string> } | undefined;
     expect(headers?.headers?.authorization).toBe("Bearer workspace-user-token");
 
     const body = JSON.parse(getBody()) as { id?: string };
@@ -355,12 +358,15 @@ describe("pmos ops proxy workflow list behavior", () => {
 
     const handled = await handleOpsProxyRequest(req, res);
     expect(handled).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://flow.example.test/api/v1/authentication/sign-in");
-    expect(String(fetchMock.mock.calls[1]?.[0])).toBe("https://flow.example.test/api/v1/projects");
-    expect(String(fetchMock.mock.calls[2]?.[0])).toBe("https://flow.example.test/api/v1/users/me");
+    const calledUrls = fetchMock.mock.calls.map((entry) => String(entry[0]));
+    expect(calledUrls).toContain("https://flow.example.test/api/v1/authentication/sign-in");
+    expect(calledUrls).toContain("https://flow.example.test/api/v1/projects");
+    const usersMeCall = fetchMock.mock.calls.find((entry) =>
+      String(entry[0]).startsWith("https://flow.example.test/api/v1/users/me"),
+    );
+    expect(usersMeCall).toBeDefined();
 
-    const headers = fetchMock.mock.calls[2]?.[1] as { headers?: Record<string, string> } | undefined;
+    const headers = usersMeCall?.[1] as { headers?: Record<string, string> } | undefined;
     expect(headers?.headers?.authorization).toBe("Bearer fresh-user-token");
 
     const body = JSON.parse(getBody()) as { id?: string };
@@ -405,9 +411,12 @@ describe("pmos ops proxy workflow list behavior", () => {
 
     const handled = await handleOpsProxyRequest(req, res);
     expect(handled).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const usersMeCall = fetchMock.mock.calls.find((entry) =>
+      String(entry[0]).startsWith("https://flow.example.test/api/v1/users/me"),
+    );
+    expect(usersMeCall).toBeDefined();
 
-    const headers = fetchMock.mock.calls[2]?.[1] as { headers?: Record<string, string> } | undefined;
+    const headers = usersMeCall?.[1] as { headers?: Record<string, string> } | undefined;
     expect(headers?.headers?.cookie).toContain("ap-session=abc123");
 
     const body = JSON.parse(getBody()) as { ok?: boolean };

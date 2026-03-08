@@ -618,6 +618,74 @@ async function runMcporterJson(args: string[]): Promise<unknown> {
   }
 }
 
+type WorkspaceFigmaContext = {
+  figmaUrl: string;
+  connected: boolean;
+  handle: string | null;
+  email: string | null;
+  activeConnectionId: string | null;
+  activeConnectionName: string | null;
+  activeTeamId: string | null;
+  selectedFileName: string | null;
+  selectedFileUrl: string | null;
+  selectedFileId: string | null;
+  totalConnections: number | null;
+  lastSyncedAt: string | null;
+  updatedAt: string | null;
+};
+
+async function readWorkspaceFigmaContext(workspaceId: string): Promise<WorkspaceFigmaContext> {
+  const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
+  const connectors = await readWorkspaceConnectors(workspaceId);
+  const figma = (connectors?.figma ?? {}) as Record<string, unknown>;
+  const identity = (figma.identity as Record<string, unknown> | undefined) ?? {};
+  const figmaUrl = String(figma.url ?? "https://fm.wickedlab.io");
+  return {
+    figmaUrl,
+    connected: identity.connected === true,
+    handle: typeof identity.handle === "string" ? identity.handle : null,
+    email: typeof identity.email === "string" ? identity.email : null,
+    activeConnectionId:
+      typeof identity.activeConnectionId === "string" || typeof identity.activeConnectionId === "number"
+        ? String(identity.activeConnectionId)
+        : null,
+    activeConnectionName: typeof identity.activeConnectionName === "string" ? identity.activeConnectionName : null,
+    activeTeamId: typeof identity.activeTeamId === "string" ? identity.activeTeamId : null,
+    selectedFileName: typeof identity.selectedFileName === "string" ? identity.selectedFileName : null,
+    selectedFileUrl: typeof identity.selectedFileUrl === "string" ? identity.selectedFileUrl : null,
+    selectedFileId: typeof identity.selectedFileId === "string" ? identity.selectedFileId : null,
+    totalConnections: typeof identity.totalConnections === "number" ? identity.totalConnections : null,
+    lastSyncedAt: typeof identity.lastSyncedAt === "string" ? identity.lastSyncedAt : null,
+    updatedAt: typeof identity.updatedAt === "string" ? identity.updatedAt : null,
+  };
+}
+
+function fillFigmaContextValue(
+  args: Record<string, unknown>,
+  keys: string[],
+  value: string | null,
+): void {
+  if (!value) return;
+  for (const key of keys) {
+    if (!(key in args)) continue;
+    const current = args[key];
+    if (current === null || current === undefined || (typeof current === "string" && current.trim() === "")) {
+      args[key] = value;
+    }
+  }
+}
+
+function hydrateKnownFigmaContextArguments(
+  rawArgs: Record<string, unknown>,
+  context: WorkspaceFigmaContext,
+): Record<string, unknown> {
+  const next = { ...rawArgs };
+  fillFigmaContextValue(next, ["fileId", "file_id", "selectedFileId", "selected_file_id"], context.selectedFileId);
+  fillFigmaContextValue(next, ["teamId", "team_id", "figmaTeamId", "figma_team_id"], context.activeTeamId);
+  fillFigmaContextValue(next, ["connectionId", "connection_id", "activeConnectionId", "active_connection_id"], context.activeConnectionId);
+  return next;
+}
+
 function parseProjectList(result: unknown): Array<{ id: string; name: string; status: string; appUrl: string | null }> {
   const listRaw = (() => {
     if (isJsonObject(result) && Array.isArray(result.projects)) return result.projects;
@@ -2411,22 +2479,9 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             return JSON.stringify({ url: fetchUrl, status: fetchResp.status, content: fetchText.slice(0, 15000) });
           }
           case "figma_get_context": {
-            const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
-            const connectors = await readWorkspaceConnectors(workspaceId);
-            const figma = (connectors?.figma ?? {}) as Record<string, unknown>;
-            const identity = (figma.identity as Record<string, unknown> | undefined) ?? {};
-            const figmaUrl = String(figma.url ?? "https://fm.wickedlab.io");
+            const figmaContext = await readWorkspaceFigmaContext(workspaceId);
             return JSON.stringify({
-              figmaUrl,
-              connected: identity.connected === true,
-              handle: identity.handle ?? null,
-              email: identity.email ?? null,
-              activeConnectionName: identity.activeConnectionName ?? null,
-              activeTeamId: identity.activeTeamId ?? null,
-              selectedFileName: identity.selectedFileName ?? null,
-              selectedFileUrl: identity.selectedFileUrl ?? null,
-              selectedFileId: identity.selectedFileId ?? null,
-              lastSyncedAt: identity.lastSyncedAt ?? null,
+              ...figmaContext,
               note: "Use selectedFileId with web_fetch to call Figma REST API.",
             });
           }
@@ -3163,22 +3218,9 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             return JSON.stringify({ url: fetchUrl, status: fetchResp.status, content: fetchText.slice(0, 15000) });
           }
           case "figma_get_context": {
-            const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
-            const connectors = await readWorkspaceConnectors(workspaceId);
-            const figma = (connectors?.figma ?? {}) as Record<string, unknown>;
-            const identity = (figma.identity as Record<string, unknown> | undefined) ?? {};
-            const figmaUrl = String(figma.url ?? "https://fm.wickedlab.io");
+            const figmaContext = await readWorkspaceFigmaContext(workspaceId);
             return JSON.stringify({
-              figmaUrl,
-              connected: identity.connected === true,
-              handle: identity.handle ?? null,
-              email: identity.email ?? null,
-              activeConnectionName: identity.activeConnectionName ?? null,
-              activeTeamId: identity.activeTeamId ?? null,
-              selectedFileName: identity.selectedFileName ?? null,
-              selectedFileUrl: identity.selectedFileUrl ?? null,
-              selectedFileId: identity.selectedFileId ?? null,
-              lastSyncedAt: identity.lastSyncedAt ?? null,
+              ...figmaContext,
               note: "Use selectedFileId with web_fetch to call Figma REST API.",
             });
           }
@@ -3204,6 +3246,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             if (!tool) {
               return JSON.stringify({ error: "tool is required" });
             }
+            const figmaContext = await readWorkspaceFigmaContext(workspaceId);
+            const effectiveToolArgs = hydrateKnownFigmaContextArguments(toolArgs, figmaContext);
             const mcporterConfigPath =
               process.env.MCPORTER_CONFIG_PATH ?? "/app/.mcporter/mcporter.json";
             const result = await runMcporterJson([
@@ -3212,7 +3256,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               "call",
               `figma.${tool}`,
               "--args",
-              JSON.stringify(toolArgs),
+              JSON.stringify(effectiveToolArgs),
               "--output",
               "json",
             ]);

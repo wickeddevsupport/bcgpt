@@ -879,6 +879,9 @@ async function attemptAutoLoginForOpsUi(
 
 function mapLegacyOpsUiPath(pathname: string): string {
   const subPath = pathname.slice("/ops-ui".length) || "/";
+  if (subPath === "/") {
+    return "/flows";
+  }
   if (subPath === "/workflow" || subPath.startsWith("/workflow/")) {
     return `/flows${subPath.slice("/workflow".length)}`;
   }
