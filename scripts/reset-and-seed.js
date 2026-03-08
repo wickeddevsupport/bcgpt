@@ -11,6 +11,8 @@ const BASE = "/app/.openclaw";
 const AUTH_FILE = `${BASE}/pmos-auth.json`;
 const GLOBAL_FILE = `${BASE}/openclaw.json`;
 const WS_BASE = `${BASE}/workspaces`;
+const MCPORTER_CONFIG_FILE =
+  process.env.MCPORTER_CONFIG_PATH || "/app/openclaw/config/mcporter.json";
 
 const PRIMARY_MODEL = "kilo/minimax/minimax-m2.5:free";
 const KILO_API_KEY =
@@ -277,6 +279,11 @@ global.meta = {
 };
 
 writeJson(GLOBAL_FILE, global);
+writeJson(MCPORTER_CONFIG_FILE, {
+  figma: {
+    baseUrl: "https://mcp.figma.com/mcp",
+  },
+});
 
 console.log("\n=== Done! Summary ===");
 for (const user of auth.users) {

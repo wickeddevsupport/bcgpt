@@ -6,10 +6,13 @@
  * underlying runtime is Activepieces.
  */
 
+import { io, type Socket } from "socket.io-client";
 import { loadConfig } from "../config/config.js";
 import { readWorkspaceConnectors } from "./workspace-connectors.js";
 
 const DEFAULT_BASE_URL = "https://flow.wickedlab.io";
+const ACTIVEPIECES_SOCKET_PATH = "/api/socket.io";
+const ACTIVEPIECES_SOCKET_TIMEOUT_MS = 15_000;
 const ACTIVEPIECES_BASECAMP_PIECE_NAME = "@activepieces/piece-basecamp";
 const ACTIVEPIECES_BASECAMP_EXTERNAL_ID = "openclaw-basecamp";
 
@@ -31,6 +34,9 @@ type CachedUserToken = {
 };
 
 const userTokenCache = new Map<string, CachedUserToken>();
+
+const ACTIVEPIECES_SOCKET_SERVER_EVENT_MANUAL_TRIGGER_RUN_STARTED = "MANUAL_TRIGGER_RUN_STARTED";
+const ACTIVEPIECES_SOCKET_CLIENT_EVENT_MANUAL_TRIGGER_RUN_STARTED = "MANUAL_TRIGGER_RUN_STARTED";
 
 export interface N8nWorkflow {
   id: string;
@@ -824,6 +830,165 @@ async function resolveProjectId(
   }
   ctx.projectId = projectId;
   return projectId;
+}
+
+function getWorkflowTriggerNode(
+  workflow: Pick<N8nWorkflow, "nodes"> | null | undefined,
+): N8nWorkflow["nodes"][number] | null {
+  const nodes = Array.isArray(workflow?.nodes) ? workflow.nodes : [];
+  if (nodes.length === 0) {
+    return null;
+  }
+  return nodes[0] ?? null;
+}
+
+function shouldPreferManualExecution(
+  workflow: Pick<N8nWorkflow, "nodes"> | null | undefined,
+): boolean {
+  const trigger = getWorkflowTriggerNode(workflow);
+  const type = String(trigger?.type ?? "").trim().toLowerCase();
+  if (!type) {
+    return true;
+  }
+  if (type.includes("manual")) {
+    return true;
+  }
+  if (type.includes("schedule") || type.includes("cron")) {
+    return true;
+  }
+  if (type.includes("webhook")) {
+    return true;
+  }
+  return true;
+}
+
+function createActivepiecesSocket(params: {
+  baseUrl: string;
+  token: string;
+  projectId: string;
+}): Socket {
+  return io(params.baseUrl, {
+    transports: ["websocket"],
+    path: ACTIVEPIECES_SOCKET_PATH,
+    autoConnect: false,
+    reconnection: false,
+    auth: {
+      token: params.token,
+      projectId: params.projectId,
+    },
+  });
+}
+
+async function connectActivepiecesSocket(socket: Socket): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      socket.off("connect", onConnect);
+      socket.off("connect_error", onConnectError);
+      socket.off("error", onSocketError);
+      fn();
+    };
+    const onConnect = () => finish(() => resolve());
+    const onConnectError = (err: unknown) =>
+      finish(() => reject(err instanceof Error ? err : new Error(String(err))));
+    const onSocketError = (err: unknown) =>
+      finish(() => reject(err instanceof Error ? err : new Error(String(err))));
+    const timer = setTimeout(() => {
+      finish(() => reject(new Error("Timed out connecting to workflow engine socket.")));
+    }, ACTIVEPIECES_SOCKET_TIMEOUT_MS);
+
+    socket.once("connect", onConnect);
+    socket.once("connect_error", onConnectError);
+    socket.once("error", onSocketError);
+    socket.connect();
+  });
+}
+
+async function waitForActivepiecesRunStarted(params: {
+  socket: Socket;
+  flowVersionId: string;
+}): Promise<JsonObject> {
+  return await new Promise<JsonObject>((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      params.socket.off(
+        ACTIVEPIECES_SOCKET_CLIENT_EVENT_MANUAL_TRIGGER_RUN_STARTED,
+        onRunStarted,
+      );
+      params.socket.off("error", onSocketError);
+      fn();
+    };
+    const onRunStarted = (run: unknown) => {
+      const obj = toObject(run);
+      if (!obj) {
+        return;
+      }
+      const versionId = readId(obj.flowVersionId);
+      if (versionId && versionId !== params.flowVersionId) {
+        return;
+      }
+      finish(() => resolve(obj));
+    };
+    const onSocketError = (err: unknown) =>
+      finish(() => reject(err instanceof Error ? err : new Error(String(err))));
+    const timer = setTimeout(() => {
+      finish(() => reject(new Error("Timed out waiting for workflow engine run start event.")));
+    }, ACTIVEPIECES_SOCKET_TIMEOUT_MS);
+
+    params.socket.on(
+      ACTIVEPIECES_SOCKET_CLIENT_EVENT_MANUAL_TRIGGER_RUN_STARTED,
+      onRunStarted,
+    );
+    params.socket.once("error", onSocketError);
+  });
+}
+
+async function executeWorkflowViaManualTrigger(params: {
+  workspaceId: string;
+  ctx: ActivepiecesContext;
+  flowVersionId: string;
+}): Promise<{ executionId?: string; error?: string }> {
+  const signedIn = await signInWithWorkspaceUser(params.workspaceId, params.ctx);
+  if (!signedIn?.token) {
+    return {
+      error:
+        "Workflow execution needs workspace user credentials. Configure ops.user.email and ops.user.password in Integrations first.",
+    };
+  }
+
+  const projectId = await resolveProjectId(params.workspaceId, params.ctx);
+  const socket = createActivepiecesSocket({
+    baseUrl: params.ctx.baseUrl,
+    token: signedIn.token,
+    projectId,
+  });
+
+  try {
+    await connectActivepiecesSocket(socket);
+    const waitForRun = waitForActivepiecesRunStarted({
+      socket,
+      flowVersionId: params.flowVersionId,
+    });
+    socket.emit(ACTIVEPIECES_SOCKET_SERVER_EVENT_MANUAL_TRIGGER_RUN_STARTED, {
+      flowVersionId: params.flowVersionId,
+    });
+    const started = await waitForRun;
+    return { executionId: readId(started.id) ?? undefined };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    socket.disconnect();
+  }
 }
 
 async function listAppConnectionsRaw(
@@ -1747,6 +1912,23 @@ export async function executeN8nWorkflow(
         error:
           "No workflow-engine credentials configured for your workspace. Configure Activepieces URL/key in Integrations first.",
       };
+    }
+
+    const workflowResult = await getN8nWorkflow(workspaceId, workflowId);
+    const workflow = workflowResult.ok ? workflowResult.workflow ?? null : null;
+
+    if (workflow?.versionId && shouldPreferManualExecution(workflow)) {
+      const manualExecution = await executeWorkflowViaManualTrigger({
+        workspaceId,
+        ctx,
+        flowVersionId: workflow.versionId,
+      });
+      if (manualExecution.executionId) {
+        return { ok: true, executionId: manualExecution.executionId };
+      }
+      if (!manualExecution.error) {
+        return { ok: true };
+      }
     }
 
     const response = await requestJson({

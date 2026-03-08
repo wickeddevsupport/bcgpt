@@ -9,6 +9,8 @@ const WORKSPACES_DIR = path.join(STATE_DIR, "workspaces");
 const MANAGED_SKILLS_DIR = path.join(STATE_DIR, "skills");
 const REPO_SKILLS_DIR = process.env.BCGPT_SHARED_SKILLS_DIR || "/app/bcgpt-skills";
 const MCPORTER_STATE_DIR = process.env.MCPORTER_HOME || "/app/.mcporter";
+const MCPORTER_CONFIG_PATH =
+  process.env.MCPORTER_CONFIG_PATH || "/app/openclaw/config/mcporter.json";
 
 const PRIMER_VERSION = "bcgpt-primer-2026-03-08";
 const DEFAULT_AGENT_ID = "assistant";
@@ -332,6 +334,16 @@ async function syncRepoSkills() {
   return synced;
 }
 
+async function primeMcporterConfig() {
+  const current = (await readJson(MCPORTER_CONFIG_PATH)) ?? {};
+  const next = isRecord(current) ? { ...current } : {};
+  next.figma = isRecord(next.figma) ? { ...next.figma } : {};
+  if (!trimToNull(next.figma.baseUrl)) {
+    next.figma.baseUrl = "https://mcp.figma.com/mcp";
+  }
+  return await writeJson(MCPORTER_CONFIG_PATH, next);
+}
+
 async function primeGlobalConfig() {
   const current = await readJson(GLOBAL_CONFIG_PATH);
   const next = ensureGlobalDefaults(current);
@@ -375,9 +387,10 @@ async function main() {
   const { changed: globalChanged, primaryModel } = await primeGlobalConfig();
   const workspaceResult = await primeWorkspaceConfigs(primaryModel);
   const syncedSkills = await syncRepoSkills();
+  const mcporterChanged = await primeMcporterConfig();
 
   console.log(
-    `[pmos-prime] global=${globalChanged ? "updated" : "ok"} workspaces=${workspaceResult.changed}/${workspaceResult.total} skills=${syncedSkills}`,
+    `[pmos-prime] global=${globalChanged ? "updated" : "ok"} workspaces=${workspaceResult.changed}/${workspaceResult.total} skills=${syncedSkills} mcporter=${mcporterChanged ? "updated" : "ok"}`,
   );
 }
 

@@ -574,6 +574,50 @@ async function callBcgptTool(params: {
   return { ok: true, result: normalizeBcgptToolResult(rawResult), error: null };
 }
 
+async function resolveWorkspaceBcgptAccess(params: {
+  workspaceId: string;
+  allowGlobalSecrets: boolean;
+}): Promise<{ bcgptUrl: string; apiKey: string | null }> {
+  const cfg = loadConfig() as unknown;
+  const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
+  const workspaceConnectors = await readWorkspaceConnectors(params.workspaceId);
+  const bcgptUrl = normalizeBaseUrl(
+    (workspaceConnectors?.bcgpt?.url as string | undefined) ??
+      readConfigString(cfg, ["pmos", "connectors", "bcgpt", "url"]) ??
+      process.env.BCGPT_URL ??
+      null,
+    "https://bcgpt.wickedlab.io",
+  );
+  const apiKey =
+    (workspaceConnectors?.bcgpt?.apiKey as string | undefined)?.trim() ??
+    (params.allowGlobalSecrets
+      ? readConfigString(cfg, ["pmos", "connectors", "bcgpt", "apiKey"]) ??
+        (process.env.BCGPT_API_KEY?.trim() || null)
+      : null);
+  return { bcgptUrl, apiKey };
+}
+
+async function runMcporterJson(args: string[]): Promise<unknown> {
+  const { runCommandWithTimeout } = await import("../../process/exec.js");
+  const result = await runCommandWithTimeout(
+    ["/usr/local/bin/mcporter", ...args],
+    { timeoutMs: 20_000 },
+  );
+  const stdout = result.stdout.trim();
+  const stderr = result.stderr.trim();
+  if (result.code !== 0) {
+    throw new Error(stderr || stdout || `mcporter failed with exit code ${String(result.code)}`);
+  }
+  if (!stdout) {
+    return { ok: true };
+  }
+  try {
+    return JSON.parse(stdout) as unknown;
+  } catch {
+    return { text: stdout, stderr: stderr || null };
+  }
+}
+
 function parseProjectList(result: unknown): Array<{ id: string; name: string; status: string; appUrl: string | null }> {
   const listRaw = (() => {
     if (isJsonObject(result) && Array.isArray(result.projects)) return result.projects;
@@ -2685,6 +2729,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "",
         "### Be proactive, not lazy",
         "- Don't ask the user for information you can discover with a tool call.",
+        "- For Basecamp/project-management requests, call `bcgpt_smart_action` first unless the user specifically asked for a raw project list.",
         "- Always call `pmos_ops_list_credentials` before building any workflow so you know what's actually connected.",
         "- If the user asks about a project or person, call the appropriate tool to find the answer rather than guessing.",
         "",
@@ -2705,10 +2750,18 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "",
         "### Project management questions",
         "- Answer from workspace context when available.",
-        "- For live data (todos, messages, people), call the appropriate tool to get fresh information.",
+        "- For live Basecamp data, prefer `bcgpt_smart_action`; use `bcgpt_list_projects` when you need the exact project list.",
         "- Summarize results meaningfully: 'There are 7 open todos in Project X â€” 3 are overdue. The most recent message was from Alice yesterday about the deploy.'",
         "",
+        "### Figma questions",
+        "- Start with `figma_get_context`.",
+        "- If the user needs live Figma MCP actions, call `figma_mcp_list_tools` first, then `figma_mcp_call`.",
+        "",
         "## Available Tools",
+        "**Basecamp MCP Tools:**",
+        "- `bcgpt_smart_action` â€” run natural-language Basecamp queries through the bcgpt MCP router",
+        "- `bcgpt_list_projects` â€” fetch live Basecamp projects with names, IDs, and status",
+        "",
         "**Workflow Engine Tools:**",
         "- `pmos_ops_list_credentials` â€” see which services are connected (Basecamp, Slack, GitHub, etc.)",
         "- `pmos_ops_list_workflows` â€” list existing workflow-engine flows with names and IDs",
@@ -2718,12 +2771,40 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- `pmos_ops_execute_workflow` â€” test-run a workflow by ID",
         "- `pmos_ops_list_node_types` â€” list available trigger and action node types",
         "",
+        "**Figma Tools:**",
+        "- `figma_get_context` â€” read the selected file/team context from the Figma panel",
+        "- `figma_mcp_list_tools` â€” inspect the live Figma MCP schema exposed through mcporter",
+        "- `figma_mcp_call` â€” call a specific Figma MCP tool once auth/config are ready",
+        "",
         ...(credentialContext ? [credentialContext, ""] : []),
         ...(workspaceAiContext ? ["## Workspace Memory", workspaceAiContext] : []),
       ].join("\n");
 
       // â”€â”€ Tool definitions (OpenAI function-calling format) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const tools = [
+        {
+          type: "function" as const,
+          function: {
+            name: "bcgpt_smart_action",
+            description: "Run a natural-language Basecamp request through the bcgpt MCP smart router.",
+            parameters: {
+              type: "object",
+              required: ["query"],
+              additionalProperties: false,
+              properties: {
+                query: { type: "string", description: "Natural-language Basecamp request" },
+              },
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "bcgpt_list_projects",
+            description: "List live Basecamp projects available through the bcgpt MCP server.",
+            parameters: { type: "object", properties: {}, additionalProperties: false },
+          },
+        },
         {
           type: "function" as const,
           function: {
@@ -2858,6 +2939,33 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             parameters: { type: "object", properties: {}, additionalProperties: false },
           },
         },
+        {
+          type: "function" as const,
+          function: {
+            name: "figma_mcp_list_tools",
+            description: "List the configured Figma MCP tools and schemas through mcporter.",
+            parameters: { type: "object", properties: {}, additionalProperties: false },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "figma_mcp_call",
+            description: "Call a specific Figma MCP tool through mcporter.",
+            parameters: {
+              type: "object",
+              required: ["tool"],
+              additionalProperties: false,
+              properties: {
+                tool: { type: "string", description: "Figma MCP tool name" },
+                arguments: {
+                  type: "object",
+                  description: "JSON object of MCP tool arguments",
+                },
+              },
+            },
+          },
+        },
       ];
 
 
@@ -2878,6 +2986,55 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           : toolName;
 
         switch (normalizedToolName) {
+          case "bcgpt_smart_action": {
+            const query = String(args.query ?? "").trim();
+            if (!query) return JSON.stringify({ error: "query is required" });
+            const { bcgptUrl, apiKey } = await resolveWorkspaceBcgptAccess({
+              workspaceId,
+              allowGlobalSecrets: isSuperAdmin(client),
+            });
+            if (!apiKey) {
+              return JSON.stringify({
+                error: "Basecamp integration is not configured for this workspace.",
+              });
+            }
+            const result = await callBcgptTool({
+              bcgptUrl,
+              apiKey,
+              toolName: "smart_action",
+              toolArgs: { query },
+            });
+            if (!result.ok) {
+              return JSON.stringify({ error: result.error ?? "smart_action failed" });
+            }
+            return JSON.stringify({
+              tool: "smart_action",
+              query,
+              result: result.result,
+            });
+          }
+          case "bcgpt_list_projects": {
+            const { bcgptUrl, apiKey } = await resolveWorkspaceBcgptAccess({
+              workspaceId,
+              allowGlobalSecrets: isSuperAdmin(client),
+            });
+            if (!apiKey) {
+              return JSON.stringify({
+                error: "Basecamp integration is not configured for this workspace.",
+              });
+            }
+            const result = await callBcgptTool({
+              bcgptUrl,
+              apiKey,
+              toolName: "list_projects",
+            });
+            if (!result.ok) {
+              return JSON.stringify({ error: result.error ?? "Failed to list projects" });
+            }
+            return JSON.stringify({
+              projects: parseProjectList(result.result),
+            });
+          }
           case "pmos_ops_list_credentials": {
             const r = await listWorkflowEngineConnections(workspaceId);
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to list credentials" });
@@ -3024,6 +3181,42 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               lastSyncedAt: identity.lastSyncedAt ?? null,
               note: "Use selectedFileId with web_fetch to call Figma REST API.",
             });
+          }
+          case "figma_mcp_list_tools": {
+            const mcporterConfigPath =
+              process.env.MCPORTER_CONFIG_PATH ?? "/app/openclaw/config/mcporter.json";
+            const result = await runMcporterJson([
+              "--config",
+              mcporterConfigPath,
+              "list",
+              "figma",
+              "--schema",
+              "--json",
+            ]);
+            return JSON.stringify(result);
+          }
+          case "figma_mcp_call": {
+            const tool = String(args.tool ?? "").trim();
+            const toolArgs =
+              args.arguments && typeof args.arguments === "object" && !Array.isArray(args.arguments)
+                ? (args.arguments as Record<string, unknown>)
+                : {};
+            if (!tool) {
+              return JSON.stringify({ error: "tool is required" });
+            }
+            const mcporterConfigPath =
+              process.env.MCPORTER_CONFIG_PATH ?? "/app/openclaw/config/mcporter.json";
+            const result = await runMcporterJson([
+              "--config",
+              mcporterConfigPath,
+              "call",
+              `figma.${tool}`,
+              "--args",
+              JSON.stringify(toolArgs),
+              "--output",
+              "json",
+            ]);
+            return JSON.stringify(result);
           }
           default:
             return JSON.stringify({ error: `Unknown tool: ${toolName}` });
@@ -3671,5 +3864,3 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     }
   },
 };
-
-
