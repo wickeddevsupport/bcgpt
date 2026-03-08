@@ -11,8 +11,9 @@ const BASE = "/app/.openclaw";
 const AUTH_FILE = `${BASE}/pmos-auth.json`;
 const GLOBAL_FILE = `${BASE}/openclaw.json`;
 const WS_BASE = `${BASE}/workspaces`;
+const MCPORTER_HOME = process.env.MCPORTER_HOME || "/app/.mcporter";
 const MCPORTER_CONFIG_FILE =
-  process.env.MCPORTER_CONFIG_PATH || "/app/openclaw/config/mcporter.json";
+  process.env.MCPORTER_CONFIG_PATH || path.join(MCPORTER_HOME, "mcporter.json");
 
 const PRIMARY_MODEL = "kilo/minimax/minimax-m2.5:free";
 const KILO_API_KEY =

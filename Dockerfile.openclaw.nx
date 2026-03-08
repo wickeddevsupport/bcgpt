@@ -52,6 +52,8 @@ RUN ./node_modules/.bin/nx run-many -t build --projects=$OPENCLAW_NX_PROJECTS --
 ENV OPENCLAW_PREFER_PNPM=1
 
 ENV NODE_ENV=production
+ENV MCPORTER_HOME=/app/.mcporter
+ENV MCPORTER_CONFIG_PATH=/app/.mcporter/mcporter.json
 
 # Only chown the writable runtime directory; avoid recursive chown on the full repo.
 RUN mkdir -p /app/.openclaw /app/.mcporter && chown -R node:node /app/.openclaw /app/.mcporter

@@ -3184,7 +3184,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           }
           case "figma_mcp_list_tools": {
             const mcporterConfigPath =
-              process.env.MCPORTER_CONFIG_PATH ?? "/app/openclaw/config/mcporter.json";
+              process.env.MCPORTER_CONFIG_PATH ?? "/app/.mcporter/mcporter.json";
             const result = await runMcporterJson([
               "--config",
               mcporterConfigPath,
@@ -3205,7 +3205,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               return JSON.stringify({ error: "tool is required" });
             }
             const mcporterConfigPath =
-              process.env.MCPORTER_CONFIG_PATH ?? "/app/openclaw/config/mcporter.json";
+              process.env.MCPORTER_CONFIG_PATH ?? "/app/.mcporter/mcporter.json";
             const result = await runMcporterJson([
               "--config",
               mcporterConfigPath,

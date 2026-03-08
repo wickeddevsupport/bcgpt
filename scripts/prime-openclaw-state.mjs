@@ -10,7 +10,7 @@ const MANAGED_SKILLS_DIR = path.join(STATE_DIR, "skills");
 const REPO_SKILLS_DIR = process.env.BCGPT_SHARED_SKILLS_DIR || "/app/bcgpt-skills";
 const MCPORTER_STATE_DIR = process.env.MCPORTER_HOME || "/app/.mcporter";
 const MCPORTER_CONFIG_PATH =
-  process.env.MCPORTER_CONFIG_PATH || "/app/openclaw/config/mcporter.json";
+  process.env.MCPORTER_CONFIG_PATH || path.join(MCPORTER_STATE_DIR, "mcporter.json");
 
 const PRIMER_VERSION = "bcgpt-primer-2026-03-08";
 const DEFAULT_AGENT_ID = "assistant";
