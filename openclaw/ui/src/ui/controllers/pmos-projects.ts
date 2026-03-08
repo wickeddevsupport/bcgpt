@@ -63,7 +63,7 @@ export type PmosProjectsState = {
   pmosProjectsLoadSequence?: number;
 };
 
-const PROJECT_SNAPSHOT_TIMEOUT_MS = 18_000;
+const PROJECT_SNAPSHOT_TIMEOUT_MS = 30_000;
 
 async function requestProjectsSnapshot(
   client: GatewayBrowserClient,
@@ -72,7 +72,7 @@ async function requestProjectsSnapshot(
     client.request<PmosProjectsSnapshot>("pmos.projects.snapshot", {}),
     new Promise<PmosProjectsSnapshot>((_, reject) => {
       globalThis.setTimeout(() => {
-        reject(new Error("Project refresh timed out after 18s."));
+        reject(new Error("Project refresh timed out after 30s."));
       }, PROJECT_SNAPSHOT_TIMEOUT_MS);
     }),
   ]);

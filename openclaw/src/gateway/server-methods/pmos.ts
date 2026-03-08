@@ -689,6 +689,11 @@ function hydrateKnownFigmaContextArguments(
 function parseProjectList(result: unknown): Array<{ id: string; name: string; status: string; appUrl: string | null }> {
   const listRaw = (() => {
     if (isJsonObject(result) && Array.isArray(result.projects)) return result.projects;
+    if (isJsonObject(result) && Array.isArray(result.items)) return result.items;
+    if (isJsonObject(result) && Array.isArray(result.data)) return result.data;
+    if (isJsonObject(result) && isJsonObject(result.result) && Array.isArray(result.result.projects)) {
+      return result.result.projects;
+    }
     if (Array.isArray(result)) return result;
     return [];
   })();
@@ -714,10 +719,17 @@ function parseTodoItems(
   key: string,
   projectNameById: Map<string, string>,
 ): PmosProjectTodoItem[] {
-  if (!isJsonObject(result) || !Array.isArray(result[key])) {
-    return [];
-  }
-  const todos = result[key];
+  const todos = (() => {
+    if (!isJsonObject(result)) return null;
+    const keyed = result[key];
+    if (Array.isArray(keyed)) return keyed;
+    if (Array.isArray(result.items)) return result.items;
+    if (Array.isArray(result.data)) return result.data;
+    if (isJsonObject(result.result) && Array.isArray(result.result[key])) return result.result[key];
+    return null;
+  })();
+  if (!todos) return [];
+
   const items: PmosProjectTodoItem[] = [];
   for (const raw of todos) {
     if (!isJsonObject(raw)) continue;
@@ -3400,7 +3412,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
 
       const focusProjects = projects.slice(0, 12);
       const detailsByProjectId = new Map<string, unknown>();
-      await Promise.all(
+      const detailsPromise = Promise.all(
         focusProjects.map(async (project) => {
           const detail = await callBcgptTool({
             bcgptUrl,
@@ -3418,7 +3430,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       );
 
       const todayIso = new Date().toISOString().slice(0, 10);
-      const [overdueRpc, dueTodayRpc] = await Promise.all([
+      const reportsPromise = Promise.all([
         callBcgptTool({
           bcgptUrl,
           apiKey: bcgptApiKey,
@@ -3434,6 +3446,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           timeoutMs: 15_000,
         }),
       ]);
+
+      const [, [overdueRpc, dueTodayRpc]] = await Promise.all([detailsPromise, reportsPromise]);
 
       if (!overdueRpc.ok) {
         errors.push(`Failed to load overdue todos: ${overdueRpc.error ?? "unknown error"}`);

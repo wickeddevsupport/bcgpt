@@ -312,4 +312,106 @@ describe("pmos.projects.snapshot", () => {
     expect(payload.connected).toBe(true);
     expect(payload.errors[0]).toContain("identity check failed");
   });
+
+  it("accepts alternate tool payload shapes for projects and todos", async () => {
+    readWorkspaceConnectorsMock.mockResolvedValue({
+      bcgpt: {
+        url: "https://bcgpt.example.test",
+        apiKey: "workspace-key",
+      },
+    });
+
+    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/action/startbcgpt")) {
+        return jsonResponse({ connected: true, user: { email: "ops@wickedlab.io" } });
+      }
+
+      if (url.endsWith("/mcp")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          params?: { name?: string; arguments?: Record<string, unknown> };
+        };
+        const tool = body.params?.name;
+
+        if (tool === "list_projects") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "1",
+            result: {
+              data: [
+                {
+                  id: 9876,
+                  name: "Shape Variant Project",
+                  status: "active",
+                  app_url: "https://3.basecamp.com/9999999/buckets/9876/projects/9876",
+                },
+              ],
+            },
+          });
+        }
+        if (tool === "list_todos_for_project") {
+          return jsonResponse({ jsonrpc: "2.0", id: "2", result: { groups: [] } });
+        }
+        if (tool === "report_todos_overdue") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "3",
+            result: {
+              items: [
+                {
+                  id: 1,
+                  title: "Escalate overdue API issue",
+                  due_on: "2026-02-22",
+                  project: { id: 9876, name: "Shape Variant Project" },
+                },
+              ],
+            },
+          });
+        }
+        if (tool === "list_todos_due") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "4",
+            result: {
+              data: [
+                {
+                  id: 2,
+                  title: "Same day task",
+                  due_on: "2026-02-23",
+                  project: { id: 9876, name: "Shape Variant Project" },
+                },
+              ],
+            },
+          });
+        }
+      }
+
+      return jsonResponse({ error: "not found" }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const respond = vi.fn();
+    await pmosHandlers["pmos.projects.snapshot"]({
+      params: {},
+      respond,
+      client: {
+        pmosWorkspaceId: "ws-projects",
+        pmosRole: "workspace_admin",
+      } as any,
+    } as any);
+
+    const payload = respond.mock.calls[0]?.[1] as {
+      totals: { projectCount: number; overdueTodos: number; dueTodayTodos: number };
+      projects: Array<{ name: string }>;
+      urgentTodos: Array<{ title: string }>;
+      dueTodayTodos: Array<{ title: string }>;
+    };
+
+    expect(payload.totals.projectCount).toBe(1);
+    expect(payload.totals.overdueTodos).toBe(1);
+    expect(payload.totals.dueTodayTodos).toBe(1);
+    expect(payload.projects[0]?.name).toBe("Shape Variant Project");
+    expect(payload.urgentTodos[0]?.title).toBe("Escalate overdue API issue");
+    expect(payload.dueTodayTodos[0]?.title).toBe("Same day task");
+  });
 });
