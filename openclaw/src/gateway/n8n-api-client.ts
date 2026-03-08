@@ -1929,7 +1929,6 @@ export async function executeN8nWorkflow(
     const workflowResult = await getN8nWorkflow(workspaceId, workflowId);
     const workflow = workflowResult.ok ? workflowResult.workflow ?? null : null;
     const executionMode = getActivepiecesExecutionMode(workflow);
-    let socketExecutionError: string | undefined;
 
     if (workflow?.versionId) {
       const socketExecution = await executeWorkflowViaSocketRun({
@@ -1944,7 +1943,19 @@ export async function executeN8nWorkflow(
       if (!socketExecution.error) {
         return { ok: true };
       }
-      socketExecutionError = socketExecution.error;
+      const projectId = await resolveProjectId(workspaceId, ctx);
+      const latestRuns = await requestJson({
+        workspaceId,
+        ctx,
+        endpoint: `flow-runs?projectId=${encodeURIComponent(projectId)}&flowId=${encodeURIComponent(workflowId)}&limit=1`,
+      }).catch(() => null);
+      const latestObj = toObject(latestRuns);
+      const first = toArrayObjects(latestObj?.data)[0];
+      const executionId = readId(first?.id) ?? undefined;
+      if (executionId) {
+        return { ok: true, executionId };
+      }
+      return { ok: false, error: socketExecution.error };
     }
 
     const response = await requestJson({
@@ -1976,14 +1987,7 @@ export async function executeN8nWorkflow(
     });
     const latestObj = toObject(latestRuns);
     const first = toArrayObjects(latestObj?.data)[0];
-    const executionId = readId(first?.id) ?? undefined;
-    if (executionId) {
-      return { ok: true, executionId };
-    }
-    if (socketExecutionError) {
-      return { ok: false, error: socketExecutionError };
-    }
-    return { ok: true };
+    return { ok: true, executionId: readId(first?.id) ?? undefined };
   } catch (err) {
     return { ok: false, error: `Failed to execute workflow: ${String(err)}` };
   }
