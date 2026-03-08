@@ -192,6 +192,14 @@ function resolveOnboardingMode(): boolean {
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
 }
 
+const PMOS_FIGMA_MESSAGE_TYPES = new Set([
+  "pmos:figma-auth-complete",
+  "pmos:figma-selection-change",
+  "pmos:figma-connection-change",
+]);
+
+const PMOS_FIGMA_AUTO_SYNC_DEBOUNCE_MS = 500;
+
 @customElement("openclaw-app")
 export class OpenClawApp extends LitElement {
   @state() settings: UiSettings = loadSettings();
@@ -668,12 +676,24 @@ export class OpenClawApp extends LitElement {
   private themeMedia: MediaQueryList | null = null;
   private themeMediaHandler: ((event: MediaQueryListEvent) => void) | null = null;
   private topbarObserver: ResizeObserver | null = null;
+  private pmosFigmaAutoSyncTimer: number | null = null;
+  private queuePmosFigmaAutoSync() {
+    if (this.pmosFigmaAutoSyncTimer !== null) {
+      window.clearTimeout(this.pmosFigmaAutoSyncTimer);
+    }
+    this.pmosFigmaAutoSyncTimer = window.setTimeout(() => {
+      this.pmosFigmaAutoSyncTimer = null;
+      void this.handlePmosFigmaSyncContext({ auto: true });
+    }, PMOS_FIGMA_AUTO_SYNC_DEBOUNCE_MS);
+  }
+
   private readonly pmosFigmaAuthMessageHandler = (event: MessageEvent) => {
     const data = event.data;
     if (!data || typeof data !== "object" || Array.isArray(data)) {
       return;
     }
-    if ((data as { type?: unknown }).type !== "pmos:figma-auth-complete") {
+    const messageType = (data as { type?: unknown }).type;
+    if (typeof messageType !== "string" || !PMOS_FIGMA_MESSAGE_TYPES.has(messageType)) {
       return;
     }
     const figmaBaseUrl = String(
@@ -692,8 +712,11 @@ export class OpenClawApp extends LitElement {
     }
     this.pmosFigmaContextError = null;
     this.pmosFigmaContextSyncedOk = false;
-    this.pmosFigmaEmbedVersion = (this.pmosFigmaEmbedVersion ?? 0) + 1;
+    if (messageType === "pmos:figma-auth-complete") {
+      this.pmosFigmaEmbedVersion = (this.pmosFigmaEmbedVersion ?? 0) + 1;
+    }
     void this.handlePmosRefreshConnectors();
+    this.queuePmosFigmaAutoSync();
   };
 
   createRenderRoot() {
@@ -713,6 +736,10 @@ export class OpenClawApp extends LitElement {
 
   disconnectedCallback() {
     window.removeEventListener("message", this.pmosFigmaAuthMessageHandler);
+    if (this.pmosFigmaAutoSyncTimer !== null) {
+      window.clearTimeout(this.pmosFigmaAutoSyncTimer);
+      this.pmosFigmaAutoSyncTimer = null;
+    }
     handleDisconnected(this as unknown as Parameters<typeof handleDisconnected>[0]);
     super.disconnectedCallback();
   }
@@ -1130,9 +1157,11 @@ export class OpenClawApp extends LitElement {
     await loadPmosWorkflowCredentials(this);
   }
 
-  async handlePmosFigmaSyncContext() {
+  async handlePmosFigmaSyncContext(opts?: { auto?: boolean }) {
     if (!this.client || !this.connected) {
-      this.pmosFigmaContextError = "Connect to the gateway first.";
+      if (!opts?.auto) {
+        this.pmosFigmaContextError = "Connect to the gateway first.";
+      }
       return;
     }
 
@@ -1148,6 +1177,10 @@ export class OpenClawApp extends LitElement {
         },
       });
       if (response.status === 401) {
+        if (opts?.auto) {
+          await loadPmosConnectorsStatus(this);
+          return;
+        }
         throw new Error("Sign in to the Figma File Manager first, then retry sync.");
       }
       if (!response.ok) {

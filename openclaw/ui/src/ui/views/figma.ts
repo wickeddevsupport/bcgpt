@@ -63,9 +63,10 @@ export function renderFigma(props: FigmaProps) {
             <div class="page-header" style="margin-bottom: 0;">
               <div>
                 <div class="page-title">Figma</div>
-                <div class="page-subtitle">Embedded Figma File Manager with workspace-synced context for AI design reviews.</div>
+                <div class="page-subtitle">Embedded Figma File Manager with live workspace sync for AI design reviews.</div>
               </div>
               <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <span class="chip">Auto Sync On</span>
                 ${props.syncedOk ? html`<span class="chip chip-ok">Context Synced</span>` : nothing}
                 <button class="btn btn--secondary" @click=${() => props.onOpenAuth()}>
                   Sign In Outside Panel
@@ -74,7 +75,7 @@ export function renderFigma(props: FigmaProps) {
                   ${props.connectorsLoading ? "Refreshing..." : "Reload"}
                 </button>
                 <button class="btn btn--primary" ?disabled=${props.syncing || !props.connected} @click=${() => props.onSyncContext()}>
-                  ${props.syncing ? "Syncing..." : "Sync Figma Context"}
+                  ${props.syncing ? "Syncing..." : "Sync Now"}
                 </button>
               </div>
             </div>
@@ -110,7 +111,7 @@ export function renderFigma(props: FigmaProps) {
                 <section class="card">
                   <div class="card-title">Figma AI Assistant</div>
                   <div class="card-sub">
-                    Keep the file manager open on the left, sync the active team/file context, then run focused design review prompts.
+                    Keep the file manager open on the left. Team and file changes sync into PMOS automatically, and the manual sync button is only a fallback.
                   </div>
 
                   <div class="stat-grid" style="margin-top: 16px;">
@@ -135,7 +136,7 @@ export function renderFigma(props: FigmaProps) {
                           <div class="muted mono" style="margin-top: 4px;">${identity.selectedFileUrl}</div>
                         </div>
                       `
-                    : html`<div class="muted" style="margin-top: 12px; font-size: 12px;">Open a Figma file in the left panel, then run Sync Figma Context to capture it for AI.</div>`}
+                    : html`<div class="muted" style="margin-top: 12px; font-size: 12px;">Open a Figma file in the left panel and PMOS will capture it automatically for AI.</div>`}
 
                   <div class="row" style="margin-top: 14px; gap: 8px; flex-wrap: wrap;">
                     <button class="btn btn--secondary" @click=${() => props.onPrefillPrompt(buildPrompt(figma, "audit"))}>Audit Current File</button>

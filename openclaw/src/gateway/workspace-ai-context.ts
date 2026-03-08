@@ -276,6 +276,10 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
   const figmaActiveTeamId = asNonEmptyString(figmaIdentity.activeTeamId);
   const figmaSelectedFileUrl = asNonEmptyString(figmaIdentity.selectedFileUrl);
   const figmaSelectedFileName = asNonEmptyString(figmaIdentity.selectedFileName);
+  const figmaSelectedFileSummary =
+    figmaSelectedFileName && figmaSelectedFileUrl
+      ? `${figmaSelectedFileName} (${figmaSelectedFileUrl})`
+      : figmaSelectedFileName ?? figmaSelectedFileUrl;
   // Shared key: global BCGPT_API_KEY env var available (server-wide connection)
   const bcgptSharedKeyAvailable = !bcgptApiKeySet && Boolean(process.env.BCGPT_API_KEY?.trim());
 
@@ -304,7 +308,8 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
     `- figma connected user: ${figmaHandle ?? figmaEmail ?? "(not synced)"}`,
     `- figma active connection: ${figmaActiveConnectionName ?? "(not synced)"}`,
     `- figma active team id: ${figmaActiveTeamId ?? "(not synced)"}`,
-    `- figma selected file: ${figmaSelectedFileName ?? figmaSelectedFileUrl ?? "(not synced)"}`,
+      `- figma selected file: ${figmaSelectedFileSummary ?? "(not synced)"}`,
+      `- figma selected file url: ${figmaSelectedFileUrl ?? "(not synced)"}`,
     extraLines.length > 0 ? "### Additional connectors" : "",
     ...extraLines,
   ]

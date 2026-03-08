@@ -2,6 +2,7 @@ import { html, nothing } from "lit";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import type { AssistantIdentity } from "../assistant-identity.ts";
 import type { MessageGroup } from "../types/chat-types.ts";
+import { stripThinkingTags } from "../format.ts";
 import { toSanitizedMarkdownHtml, toStreamingHtml } from "../markdown.ts";
 import { renderCopyAsMarkdownButton } from "./copy-as-markdown.ts";
 import {
@@ -81,20 +82,46 @@ export function renderStreamingGroup(
     minute: "2-digit",
   });
   const name = assistant?.name ?? "Assistant";
+  const visibleText = stripThinkingTags(text).trim();
+  const streamingMessage = {
+    role: "assistant",
+    content: [{ type: "text", text }],
+    timestamp: startedAt,
+  };
+  const extractedThinking = extractThinkingCached(streamingMessage);
+  const thinkingMessage = extractedThinking
+    ? {
+        role: "assistant",
+        content: [{ type: "thinking", thinking: extractedThinking }],
+        timestamp: startedAt,
+      }
+    : null;
+  const textMessage = visibleText
+    ? {
+        role: "assistant",
+        content: [{ type: "text", text: visibleText }],
+        timestamp: startedAt,
+      }
+    : null;
 
   return html`
     <div class="chat-group assistant">
       ${renderAvatar("assistant", assistant)}
       <div class="chat-group-messages">
-        ${renderGroupedMessage(
-          {
-            role: "assistant",
-            content: [{ type: "text", text }],
-            timestamp: startedAt,
-          },
-          { isStreaming: true, showReasoning },
-          onOpenSidebar,
-        )}
+        ${showReasoning && thinkingMessage
+          ? renderGroupedMessage(
+              thinkingMessage,
+              { isStreaming: true, showReasoning: true },
+              onOpenSidebar,
+            )
+          : nothing}
+        ${textMessage
+          ? renderGroupedMessage(
+              textMessage,
+              { isStreaming: true, showReasoning: false },
+              onOpenSidebar,
+            )
+          : nothing}
         <div class="chat-group-footer">
           <span class="chat-sender-name">${name}</span>
           <span class="chat-group-timestamp">${timestamp}</span>
@@ -247,15 +274,6 @@ function renderGroupedMessage(
   const markdown = markdownBase;
   const canCopyMarkdown = role === "assistant" && Boolean(markdown?.trim());
 
-  const bubbleClasses = [
-    "chat-bubble",
-    canCopyMarkdown ? "has-copy" : "",
-    opts.isStreaming ? "streaming" : "",
-    "fade-in",
-  ]
-    .filter(Boolean)
-    .join(" ");
-
   if (!markdown && hasToolCards && isToolResult) {
     return html`${toolCards.map((card) => renderToolCardSidebar(card, onOpenSidebar))}`;
   }
@@ -265,25 +283,65 @@ function renderGroupedMessage(
     return nothing;
   }
 
-  return html`
-    <div class="${bubbleClasses}">
-      ${canCopyMarkdown ? renderCopyAsMarkdownButton(markdown!) : nothing}
-      ${renderMessageImages(images)}
-      ${
-        reasoningMarkdown
+  const renderBubble = (content: {
+    markdown?: string | null;
+    reasoning?: string | null;
+    images?: ImageBlock[];
+    toolCards?: typeof toolCards;
+    canCopy?: boolean;
+    bubbleClass?: string;
+  }) => {
+    const bubbleClasses = [
+      "chat-bubble",
+      content.bubbleClass ?? "",
+      content.canCopy ? "has-copy" : "",
+      opts.isStreaming ? "streaming" : "",
+      "fade-in",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    return html`
+      <div class="${bubbleClasses}">
+        ${content.canCopy && content.markdown ? renderCopyAsMarkdownButton(content.markdown) : nothing}
+        ${content.images?.length ? renderMessageImages(content.images) : nothing}
+        ${content.reasoning
           ? html`<div class="chat-thinking">${unsafeHTML(
-              toSanitizedMarkdownHtml(reasoningMarkdown),
+              toSanitizedMarkdownHtml(content.reasoning),
             )}</div>`
-          : nothing
-      }
-      ${
-        markdown
+          : nothing}
+        ${content.markdown
           ? html`<div class="chat-text">${unsafeHTML(
-              opts.isStreaming ? toStreamingHtml(markdown) : toSanitizedMarkdownHtml(markdown),
+              opts.isStreaming
+                ? toStreamingHtml(content.markdown)
+                : toSanitizedMarkdownHtml(content.markdown),
             )}</div>`
-          : nothing
-      }
-      ${toolCards.map((card) => renderToolCardSidebar(card, onOpenSidebar))}
-    </div>
-  `;
+          : nothing}
+        ${(content.toolCards ?? []).map((card) => renderToolCardSidebar(card, onOpenSidebar))}
+      </div>
+    `;
+  };
+
+  if (reasoningMarkdown && markdown) {
+    return html`
+      ${renderBubble({
+        reasoning: reasoningMarkdown,
+        bubbleClass: "chat-bubble--thinking-only",
+      })}
+      ${renderBubble({
+        markdown,
+        images,
+        toolCards,
+        canCopy: canCopyMarkdown,
+      })}
+    `;
+  }
+
+  return renderBubble({
+    markdown,
+    reasoning: reasoningMarkdown,
+    images,
+    toolCards,
+    canCopy: canCopyMarkdown,
+  });
 }
