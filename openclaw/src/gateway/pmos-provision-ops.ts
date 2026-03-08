@@ -172,17 +172,26 @@ export async function provisionWorkspaceOps(
 ): Promise<ProvisionOpsResult> {
   const { url: opsUrl, apiKey: opsKey } = resolveOpsGlobals();
   const existing = (await readWorkspaceConnectors(workspaceId)) ?? {};
+  const workspaceUserCredentials = readWorkspaceUserCredentials(existing);
   const existingOps =
     existing.ops && typeof existing.ops === "object" && !Array.isArray(existing.ops)
       ? ({ ...(existing.ops as Record<string, unknown>) } as Record<string, unknown>)
       : {};
   const existingProjectId = readString(existingOps.projectId) ?? undefined;
   if (existingProjectId) {
-    return { ok: true, workspaceId, projectId: existingProjectId };
+    const workspaceProjectId = await resolveProjectIdFromWorkspaceUser(opsUrl, workspaceUserCredentials);
+    if (!workspaceProjectId || workspaceProjectId === existingProjectId) {
+      return { ok: true, workspaceId, projectId: existingProjectId };
+    }
+    existingOps.projectId = workspaceProjectId;
+    await writeWorkspaceConnectors(workspaceId, {
+      ...existing,
+      ops: existingOps,
+    });
+    return { ok: true, workspaceId, projectId: workspaceProjectId };
   }
 
   const name = projectName?.trim() || `PMOS workspace ${workspaceId}`;
-  const workspaceUserCredentials = readWorkspaceUserCredentials(existing);
 
   // 1. Create workflow project
   let projectRes: FetchResult = {

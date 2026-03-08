@@ -809,14 +809,24 @@ async function resolveProjectId(
   workspaceId: string,
   ctx: ActivepiecesContext,
 ): Promise<string> {
-  if (ctx.projectId) {
-    return ctx.projectId;
-  }
-
   const tokenCache = userTokenCache.get(workspaceId);
   if (tokenCache?.projectId) {
     ctx.projectId = tokenCache.projectId;
     return tokenCache.projectId;
+  }
+
+  try {
+    const signedIn = await signInWithWorkspaceUser(workspaceId, ctx);
+    if (signedIn?.projectId) {
+      ctx.projectId = signedIn.projectId;
+      return signedIn.projectId;
+    }
+  } catch {
+    // Fall through to connector/global configuration fallback below.
+  }
+
+  if (ctx.projectId) {
+    return ctx.projectId;
   }
 
   const projects = await requestJson({
