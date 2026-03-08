@@ -394,6 +394,11 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
     recordAgentTraceEvent(host, payload);
     handleAgentEvent(host as unknown as Parameters<typeof handleAgentEvent>[0], payload);
     refreshSessionsForRelatedAgentSession(host, payload);
+    // After compaction ends, refresh chat history so the compacted state is visible immediately
+    // instead of waiting for the next message round-trip to trigger a history reload.
+    if (payload?.stream === "compaction" && payload?.data?.phase === "end") {
+      void loadChatHistory(host as unknown as OpenClawApp);
+    }
     return;
   }
 

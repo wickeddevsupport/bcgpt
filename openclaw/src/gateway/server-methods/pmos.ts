@@ -2076,7 +2076,47 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             },
           },
         },
+
+        {
+          type: "function" as const,
+          function: {
+            name: "web_search",
+            description: "Search the web for current information, documentation, or design resources.",
+            parameters: {
+              type: "object",
+              required: ["query"],
+              additionalProperties: false,
+              properties: {
+                query: { type: "string", description: "Search query" },
+              },
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "web_fetch",
+            description: "Fetch the content of a URL. Use to call the Figma REST API or read any web page.",
+            parameters: {
+              type: "object",
+              required: ["url"],
+              additionalProperties: false,
+              properties: {
+                url: { type: "string", description: "URL to fetch" },
+              },
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "figma_get_context",
+            description: "Get the current Figma workspace context: connected status, active file name/ID/URL, team, and connection details.",
+            parameters: { type: "object", properties: {}, additionalProperties: false },
+          },
+        },
       ];
+
 
       // â”€â”€ Progress push helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const pushProgress = (stepOrPayload: string | Record<string, unknown>) => {
@@ -2307,6 +2347,44 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             const r = await executeWorkflowEngineWorkflow(workspaceId, id);
             if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to execute workflow" });
             return JSON.stringify({ success: true, executionId: r.executionId ?? "unknown" });
+          }
+
+          case "web_search": {
+            const q = String(args.query ?? "").trim();
+            if (!q) return JSON.stringify({ error: "query is required" });
+            const { duckDuckGoSearch: ddgSearch } = await import("../pmos-mcp-http.js");
+            const sr = await ddgSearch(q, 5);
+            return JSON.stringify(sr);
+          }
+          case "web_fetch": {
+            const fetchUrl = String(args.url ?? "").trim();
+            if (!fetchUrl) return JSON.stringify({ error: "url is required" });
+            const fetchResp = await fetch(fetchUrl, {
+              signal: AbortSignal.timeout(10000),
+              headers: { "User-Agent": "OpenClaw/1.0" },
+            });
+            const fetchText = await fetchResp.text();
+            return JSON.stringify({ url: fetchUrl, status: fetchResp.status, content: fetchText.slice(0, 15000) });
+          }
+          case "figma_get_context": {
+            const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
+            const connectors = await readWorkspaceConnectors(workspaceId);
+            const figma = (connectors?.figma ?? {}) as Record<string, unknown>;
+            const identity = (figma.identity as Record<string, unknown> | undefined) ?? {};
+            const figmaUrl = String(figma.url ?? "https://fm.wickedlab.io");
+            return JSON.stringify({
+              figmaUrl,
+              connected: identity.connected === true,
+              handle: identity.handle ?? null,
+              email: identity.email ?? null,
+              activeConnectionName: identity.activeConnectionName ?? null,
+              activeTeamId: identity.activeTeamId ?? null,
+              selectedFileName: identity.selectedFileName ?? null,
+              selectedFileUrl: identity.selectedFileUrl ?? null,
+              selectedFileId: identity.selectedFileId ?? null,
+              lastSyncedAt: identity.lastSyncedAt ?? null,
+              note: "Use selectedFileId with web_fetch to call Figma REST API.",
+            });
           }
           default:
             return JSON.stringify({ error: `Unknown tool: ${toolName}` });
@@ -2741,7 +2819,47 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             },
           },
         },
+
+        {
+          type: "function" as const,
+          function: {
+            name: "web_search",
+            description: "Search the web for current information, documentation, or design resources.",
+            parameters: {
+              type: "object",
+              required: ["query"],
+              additionalProperties: false,
+              properties: {
+                query: { type: "string", description: "Search query" },
+              },
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "web_fetch",
+            description: "Fetch the content of a URL. Use to call the Figma REST API or read any web page.",
+            parameters: {
+              type: "object",
+              required: ["url"],
+              additionalProperties: false,
+              properties: {
+                url: { type: "string", description: "URL to fetch" },
+              },
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "figma_get_context",
+            description: "Get the current Figma workspace context: connected status, active file name/ID/URL, team, and connection details.",
+            parameters: { type: "object", properties: {}, additionalProperties: false },
+          },
+        },
       ];
+
 
       // â”€â”€ Tool executor â€” calls n8n-api-client directly â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const executeTool = async (toolName: string, args: Record<string, unknown>): Promise<string> => {
@@ -2867,6 +2985,44 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               workflowId: wfId,
               workflowName: wfName,
               message: `Workflow "${wfName}" (ID: ${wfId}) updated successfully.`,
+            });
+          }
+
+          case "web_search": {
+            const q = String(args.query ?? "").trim();
+            if (!q) return JSON.stringify({ error: "query is required" });
+            const { duckDuckGoSearch: ddgSearch } = await import("../pmos-mcp-http.js");
+            const sr = await ddgSearch(q, 5);
+            return JSON.stringify(sr);
+          }
+          case "web_fetch": {
+            const fetchUrl = String(args.url ?? "").trim();
+            if (!fetchUrl) return JSON.stringify({ error: "url is required" });
+            const fetchResp = await fetch(fetchUrl, {
+              signal: AbortSignal.timeout(10000),
+              headers: { "User-Agent": "OpenClaw/1.0" },
+            });
+            const fetchText = await fetchResp.text();
+            return JSON.stringify({ url: fetchUrl, status: fetchResp.status, content: fetchText.slice(0, 15000) });
+          }
+          case "figma_get_context": {
+            const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
+            const connectors = await readWorkspaceConnectors(workspaceId);
+            const figma = (connectors?.figma ?? {}) as Record<string, unknown>;
+            const identity = (figma.identity as Record<string, unknown> | undefined) ?? {};
+            const figmaUrl = String(figma.url ?? "https://fm.wickedlab.io");
+            return JSON.stringify({
+              figmaUrl,
+              connected: identity.connected === true,
+              handle: identity.handle ?? null,
+              email: identity.email ?? null,
+              activeConnectionName: identity.activeConnectionName ?? null,
+              activeTeamId: identity.activeTeamId ?? null,
+              selectedFileName: identity.selectedFileName ?? null,
+              selectedFileUrl: identity.selectedFileUrl ?? null,
+              selectedFileId: identity.selectedFileId ?? null,
+              lastSyncedAt: identity.lastSyncedAt ?? null,
+              note: "Use selectedFileId with web_fetch to call Figma REST API.",
             });
           }
           default:

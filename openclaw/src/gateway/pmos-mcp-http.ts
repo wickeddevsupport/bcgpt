@@ -244,8 +244,9 @@ async function dispatchTool(
 /**
  * DuckDuckGo Lite search — no API key needed.
  * Fetches https://lite.duckduckgo.com/lite/?q=<query> and parses result links.
+ * Exported for reuse by other modules (pmos.chat.send, etc.)
  */
-async function duckDuckGoSearch(query: string, maxResults: number): Promise<unknown> {
+export async function duckDuckGoSearch(query: string, maxResults: number): Promise<unknown> {
   try {
     const url = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`;
     const res = await fetch(url, {
