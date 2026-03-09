@@ -281,9 +281,12 @@ global.meta = {
 
 writeJson(GLOBAL_FILE, global);
 writeJson(MCPORTER_CONFIG_FILE, {
-  figma: {
-    baseUrl: "https://mcp.figma.com/mcp",
+  mcpServers: {
+    figma: {
+      baseUrl: "https://mcp.figma.com/mcp",
+    },
   },
+  imports: [],
 });
 
 console.log("\n=== Done! Summary ===");

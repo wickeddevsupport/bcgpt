@@ -337,9 +337,18 @@ async function syncRepoSkills() {
 async function primeMcporterConfig() {
   const current = (await readJson(MCPORTER_CONFIG_PATH)) ?? {};
   const next = isRecord(current) ? { ...current } : {};
-  next.figma = isRecord(next.figma) ? { ...next.figma } : {};
-  if (!trimToNull(next.figma.baseUrl)) {
-    next.figma.baseUrl = "https://mcp.figma.com/mcp";
+  next.mcpServers = isRecord(next.mcpServers) ? { ...next.mcpServers } : {};
+  const figma =
+    isRecord(next.mcpServers.figma) ? { ...next.mcpServers.figma } : {};
+  if (!trimToNull(figma.baseUrl)) {
+    figma.baseUrl = "https://mcp.figma.com/mcp";
+  }
+  next.mcpServers.figma = figma;
+  if (isRecord(next.figma)) {
+    delete next.figma;
+  }
+  if (!Array.isArray(next.imports)) {
+    next.imports = [];
   }
   return await writeJson(MCPORTER_CONFIG_PATH, next);
 }
