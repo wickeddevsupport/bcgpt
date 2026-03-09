@@ -84,26 +84,6 @@ function buildConnectionsManagerUrl(baseUrl: string, selected?: ConnectionItem |
   return toHref(url);
 }
 
-function buildFrameNavigationUrl(currentHref: string, selected?: ConnectionItem | null): string {
-  const url = new URL(currentHref);
-  if (!/\/connections(?:\/)?$/i.test(url.pathname)) {
-    url.pathname = url.pathname.replace(/\/(flows|tables|runs)(?:\/[^/]*)?$/i, "/connections");
-  }
-  url.searchParams.set("limit", "10");
-  if (selected?.name?.trim()) {
-    url.searchParams.set("displayName", selected.name.trim());
-  } else {
-    url.searchParams.delete("displayName");
-  }
-  const pieceName = selected ? pieceNameFromCredentialType(selected.type) : null;
-  if (pieceName) {
-    url.searchParams.set("pieceName", pieceName);
-  } else {
-    url.searchParams.delete("pieceName");
-  }
-  return url.toString();
-}
-
 function textButtonMatch(root: ParentNode, text: string): HTMLElement | null {
   const candidates = Array.from(root.querySelectorAll<HTMLElement>("button, [role='tab'], [role='menuitem'], a"));
   return (
@@ -135,14 +115,7 @@ function steerConnectionsFrame(
   }
 
   try {
-    const currentHref = win.location.href;
-    const desiredHref = buildFrameNavigationUrl(currentHref, selected);
-    const current = new URL(currentHref);
-    const desired = new URL(desiredHref);
-    if (current.pathname !== desired.pathname || current.search !== desired.search) {
-      win.location.replace(desiredHref);
-      return;
-    }
+    const current = new URL(win.location.href);
     if (/\/connections(?:\/)?$/i.test(current.pathname) && frameShowsConnectionsUi(doc)) {
       return;
     }
