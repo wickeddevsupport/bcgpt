@@ -185,6 +185,69 @@ function appendAssistantTranscriptMessage(params: {
   }
 }
 
+function appendUserTranscriptMessage(params: {
+  message: string;
+  images?: ChatImageContent[];
+  sessionId: string;
+  storePath: string | undefined;
+  sessionFile?: string;
+  createIfMissing?: boolean;
+}): TranscriptAppendResult {
+  const transcriptPath = resolveTranscriptPath({
+    sessionId: params.sessionId,
+    storePath: params.storePath,
+    sessionFile: params.sessionFile,
+  });
+  if (!transcriptPath) {
+    return { ok: false, error: "transcript path not resolved" };
+  }
+  if (!fs.existsSync(transcriptPath)) {
+    if (!params.createIfMissing) {
+      return { ok: false, error: "transcript file not found" };
+    }
+    const ensured = ensureTranscriptFile({
+      transcriptPath,
+      sessionId: params.sessionId,
+    });
+    if (!ensured.ok) {
+      return { ok: false, error: ensured.error ?? "failed to create transcript file" };
+    }
+  }
+
+  const content: Array<Record<string, unknown>> = [];
+  const text = params.message.trim();
+  if (text) {
+    content.push({ type: "text", text });
+  }
+  for (const image of params.images ?? []) {
+    content.push({
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: image.mimeType,
+        data: image.data,
+      },
+    });
+  }
+  if (content.length === 0) {
+    return { ok: false, error: "user transcript content empty" };
+  }
+
+  const messageBody: AppendMessageArg & Record<string, unknown> = {
+    role: "user",
+    content,
+    timestamp: Date.now(),
+  };
+
+  try {
+    const sessionManager = SessionManager.open(transcriptPath);
+    const messageId = sessionManager.appendMessage(messageBody);
+    return { ok: true, messageId, message: messageBody };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 function nextChatSeq(context: { agentRunSeq: Map<string, number> }, runId: string) {
   const next = (context.agentRunSeq.get(runId) ?? 0) + 1;
   context.agentRunSeq.set(runId, next);
@@ -602,6 +665,22 @@ export const chatHandlers: GatewayRequestHandlers = {
       if (shouldRouteToPmosWorkspaceChat(client, parsedMessage)) {
         void (async () => {
           try {
+            const { storePath: latestStorePath, entry: latestEntry } =
+              loadSessionEntryForConfig(cfg, sessionKey);
+            const sessionId = latestEntry?.sessionId ?? entry?.sessionId ?? clientRunId;
+            const appendedUser = appendUserTranscriptMessage({
+              message: parsedMessage,
+              images: parsedImages,
+              sessionId,
+              storePath: latestStorePath,
+              sessionFile: latestEntry?.sessionFile,
+              createIfMissing: true,
+            });
+            if (!appendedUser.ok) {
+              context.logGateway.warn(
+                `pmos user transcript append failed: ${appendedUser.error ?? "unknown error"}`,
+              );
+            }
             const { pmosHandlers } = await import("./pmos.js");
             let captured:
               | {
@@ -676,9 +755,6 @@ export const chatHandlers: GatewayRequestHandlers = {
             const combinedReply = String(payload.message ?? "").trim();
             let message: Record<string, unknown> | undefined;
             if (combinedReply) {
-              const { storePath: latestStorePath, entry: latestEntry } =
-                loadSessionEntryForConfig(cfg, sessionKey);
-              const sessionId = latestEntry?.sessionId ?? entry?.sessionId ?? clientRunId;
               const appended = appendAssistantTranscriptMessage({
                 message: combinedReply,
                 sessionId,
