@@ -51,7 +51,7 @@ export const PMOS_MODEL_PROVIDER_OPTIONS: Array<{
   { value: "openrouter", label: "OpenRouter", defaultModelId: "google/gemini-2.0-flash:free" },
   { value: "kilo", label: "Kilo (Free)", defaultModelId: "minimax/minimax-m2.5:free" },
   { value: "moonshot", label: "Kimi (Moonshot)", defaultModelId: "moonshotai/kimi-k2.5" },
-  { value: "nvidia", label: "NVIDIA NIM", defaultModelId: "minimaxai/minimax-m2.1" },
+  { value: "nvidia", label: "NVIDIA NIM", defaultModelId: "moonshotai/kimi-k2.5" },
   { value: "custom", label: "Custom (enter manually)", defaultModelId: "" },
 ];
 

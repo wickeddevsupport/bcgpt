@@ -13,10 +13,14 @@ afterEach(async () => {
 });
 
 describe("pmos auth http starter model selection", () => {
-  it("prefers the explicit Kilo starter-safe free model over auto-free", () => {
+  it("prefers the shared tool-capable starter model over weaker free-tier options", () => {
     const ref = __test.findSharedWorkspaceModelRef({
       models: {
         providers: {
+          nvidia: {
+            sharedForWorkspaces: true,
+            models: [{ id: "moonshotai/kimi-k2.5", name: "Kimi K2.5" }],
+          },
           kilo: {
             sharedForWorkspaces: true,
             models: [
@@ -28,12 +32,12 @@ describe("pmos auth http starter model selection", () => {
       },
     });
 
-    expect(ref).toBe("kilo/minimax/minimax-m2.5:free");
+    expect(ref).toBe("nvidia/moonshotai/kimi-k2.5");
   });
 
-  it("repairs legacy auto-free starter refs to the explicit Kilo free model", () => {
+  it("repairs legacy starter refs to the shared Kimi default", () => {
     expect(__test.resolveDeprecatedModelRefReplacement("kilo/auto-free")).toBe(
-      "kilo/minimax/minimax-m2.5:free",
+      "nvidia/moonshotai/kimi-k2.5",
     );
   });
 

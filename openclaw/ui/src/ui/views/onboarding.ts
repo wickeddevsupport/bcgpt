@@ -6,6 +6,7 @@ const PROVIDER_OPTIONS = [
   { value: "google", label: "Google Gemini", defaultModel: "gemini-2.0-flash" },
   { value: "openrouter", label: "OpenRouter", defaultModel: "google/gemini-2.0-flash:free" },
   { value: "zai", label: "GLM (Z.AI)", defaultModel: "glm-4.1" },
+  { value: "nvidia", label: "NVIDIA NIM", defaultModel: "nvidia/moonshotai/kimi-k2.5" },
   { value: "kilo", label: "Kilo", defaultModel: "kilo/minimax/minimax-m2.5:free" },
 ];
 

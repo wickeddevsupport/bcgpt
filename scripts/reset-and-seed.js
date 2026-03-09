@@ -15,7 +15,10 @@ const MCPORTER_HOME = process.env.MCPORTER_HOME || "/app/.mcporter";
 const MCPORTER_CONFIG_FILE =
   process.env.MCPORTER_CONFIG_PATH || path.join(MCPORTER_HOME, "mcporter.json");
 
-const PRIMARY_MODEL = "kilo/minimax/minimax-m2.5:free";
+const PRIMARY_MODEL = "nvidia/moonshotai/kimi-k2.5";
+const NVIDIA_API_KEY =
+  process.env.NVIDIA_API_KEY ||
+  "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";
 const KILO_API_KEY =
   process.env.KILO_API_KEY ||
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbnYiOiJwcm9kdWN0aW9uIiwia2lsb1VzZXJJZCI6IjdjOTY1OGI0LWJjYmQtNGNkMC05MjE4LTU1MzJjMzFiMTY0ZiIsImFwaVRva2VuUGVwcGVyIjpudWxsLCJ2ZXJzaW9uIjozLCJpYXQiOjE3NzEyMzIzMTIsImV4cCI6MTkyODkxMjMxMn0.SbCF4tLykUwOpChzl7KazebP8GZnahl_qaN2Vo5Inv4";
@@ -34,6 +37,22 @@ function wsConfigFor(wsId) {
     },
     models: {
       providers: {
+        nvidia: {
+          baseUrl: "https://integrate.api.nvidia.com/v1",
+          apiKey: NVIDIA_API_KEY,
+          api: "openai-completions",
+          models: [
+            {
+              id: "moonshotai/kimi-k2.5",
+              name: "Kimi K2.5",
+              reasoning: true,
+              input: ["text", "image"],
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+              contextWindow: 256000,
+              maxTokens: 8192,
+            },
+          ],
+        },
         kilo: {
           baseUrl: "https://api.kilo.ai/api/gateway",
           apiKey: KILO_API_KEY,
@@ -70,10 +89,10 @@ function wsConfigFor(wsId) {
         thinkingDefault: "low",
         model: {
           primary: PRIMARY_MODEL,
-          fallbacks: [],
+          fallbacks: ["local-ollama/qwen3:1.7b"],
         },
         models: {
-          [PRIMARY_MODEL]: { alias: "MiniMax M2.5 (Free)" },
+          [PRIMARY_MODEL]: { alias: "Kimi K2.5" },
         },
         subagents: {
           model: PRIMARY_MODEL,
@@ -196,7 +215,7 @@ global.agents = global.agents || {};
 global.agents.defaults = global.agents.defaults || {};
 global.agents.defaults.model = global.agents.defaults.model || {};
 global.agents.defaults.model.primary = PRIMARY_MODEL;
-global.agents.defaults.model.fallbacks = [];
+global.agents.defaults.model.fallbacks = ["local-ollama/qwen3:1.7b"];
 global.agents.defaults.thinkingDefault = global.agents.defaults.thinkingDefault || "low";
 global.agents.defaults.compaction = global.agents.defaults.compaction || {};
 global.agents.defaults.compaction.mode = global.agents.defaults.compaction.mode || "safeguard";

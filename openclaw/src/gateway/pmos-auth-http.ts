@@ -23,19 +23,24 @@ const DEFAULT_STARTER_AGENT_ID = "assistant";
 const DEFAULT_STARTER_AGENT_NAME = "Workspace Assistant";
 const DEFAULT_STARTER_AGENT_WORKSPACE_BASE = "~/.openclaw/workspaces";
 const DEFAULT_STARTER_OLLAMA_MODEL_ID = "qwen3:1.7b";
-const SHARED_PROVIDER_PREFER = new Set(["local-ollama", "ollama", "kilo"]);
+const DEFAULT_SHARED_MODEL_REF = "nvidia/moonshotai/kimi-k2.5";
+const SHARED_PROVIDER_PREFER = new Set(["nvidia", "local-ollama", "ollama", "kilo"]);
 const DEFAULT_KILO_FREE_MODEL_REF = "kilo/minimax/minimax-m2.5:free";
 const DEFAULT_SHARED_THINKING_LEVEL = "low";
 const DEFAULT_SHARED_REASONING_LEVEL = "stream";
 const DEFAULT_SHARED_VERBOSE_LEVEL = "full";
-const UNSUPPORTED_STARTER_MODEL_REFS = new Set(["kilo/auto-free"]);
+const UNSUPPORTED_STARTER_MODEL_REFS = new Set([
+  "kilo/auto-free",
+  "kilo/minimax/minimax-m2.5:free",
+]);
 const requireModule = createRequire(import.meta.url);
 const DEPRECATED_MODEL_REF_REPLACEMENTS: Record<string, string> = {
-  "kilo/auto-free": "kilo/minimax/minimax-m2.5:free",
-  "kilo/z-ai/glm-5:free": "kilo/minimax/minimax-m2.5:free",
-  "kilo/glm-5:free": "kilo/minimax/minimax-m2.5:free",
-  "kilo/z-ai/glm-5": "kilo/minimax/minimax-m2.5:free",
-  "kilo/glm-5": "kilo/minimax/minimax-m2.5:free",
+  "kilo/auto-free": DEFAULT_SHARED_MODEL_REF,
+  "kilo/z-ai/glm-5:free": DEFAULT_SHARED_MODEL_REF,
+  "kilo/glm-5:free": DEFAULT_SHARED_MODEL_REF,
+  "kilo/z-ai/glm-5": DEFAULT_SHARED_MODEL_REF,
+  "kilo/glm-5": DEFAULT_SHARED_MODEL_REF,
+  "kilo/minimax/minimax-m2.5:free": DEFAULT_SHARED_MODEL_REF,
 };
 
 function readEnvValue(names: string[]): string | null {
@@ -1309,8 +1314,11 @@ function findSharedWorkspaceModelRef(cfg: unknown): string | null {
   }
   // When KILO_API_KEY env is set, use Kilo free model as the shared default.
   // Users don't need their own API key — the server key covers free-tier models.
+  if ((process.env.NVIDIA_API_KEY ?? "").trim()) {
+    return DEFAULT_SHARED_MODEL_REF;
+  }
   if ((process.env.KILO_API_KEY ?? "").trim()) {
-    return DEFAULT_KILO_FREE_MODEL_REF;
+    return DEFAULT_SHARED_MODEL_REF;
   }
   if (hasOllamaEnvConfigured()) {
     return `ollama/${resolveStarterOllamaModelId()}`;

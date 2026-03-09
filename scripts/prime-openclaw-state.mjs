@@ -12,11 +12,18 @@ const MCPORTER_STATE_DIR = process.env.MCPORTER_HOME || "/app/.mcporter";
 const MCPORTER_CONFIG_PATH =
   process.env.MCPORTER_CONFIG_PATH || path.join(MCPORTER_STATE_DIR, "mcporter.json");
 
-const PRIMER_VERSION = "bcgpt-primer-2026-03-08";
+const PRIMER_VERSION = "bcgpt-primer-2026-03-09";
 const DEFAULT_AGENT_ID = "assistant";
 const DEFAULT_AGENT_NAME = "Workspace Assistant";
-const DEFAULT_MODEL_REF = "kilo/minimax/minimax-m2.5:free";
-const DEPRECATED_MODEL_REFS = new Set(["kilo/auto-free", "kilo/z-ai/glm-5:free", "kilo/glm-5:free"]);
+const DEFAULT_MODEL_REF = "nvidia/moonshotai/kimi-k2.5";
+const DEFAULT_MODEL_ALIAS = "Kimi K2.5";
+const DEFAULT_MODEL_FALLBACKS = ["local-ollama/qwen3:1.7b"];
+const DEPRECATED_MODEL_REFS = new Set([
+  "kilo/auto-free",
+  "kilo/z-ai/glm-5:free",
+  "kilo/glm-5:free",
+  "kilo/minimax/minimax-m2.5:free",
+]);
 
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -138,13 +145,13 @@ function ensureGlobalDefaults(config) {
 
   defaults.model = isRecord(defaults.model) ? defaults.model : {};
   defaults.model.primary = normalizeModelRef(defaults.model.primary);
-  if (!Array.isArray(defaults.model.fallbacks)) {
-    defaults.model.fallbacks = [];
+  if (!Array.isArray(defaults.model.fallbacks) || defaults.model.fallbacks.length === 0) {
+    defaults.model.fallbacks = [...DEFAULT_MODEL_FALLBACKS];
   }
 
   defaults.models = isRecord(defaults.models) ? defaults.models : {};
   if (!isRecord(defaults.models[defaults.model.primary])) {
-    defaults.models[defaults.model.primary] = { alias: "MiniMax M2.5 (Free)" };
+    defaults.models[defaults.model.primary] = { alias: DEFAULT_MODEL_ALIAS };
   }
 
   defaults.subagents = isRecord(defaults.subagents) ? defaults.subagents : {};
@@ -231,13 +238,13 @@ function ensureWorkspaceDefaults(workspaceId, config, globalPrimaryModel) {
 
   defaults.model = isRecord(defaults.model) ? defaults.model : {};
   defaults.model.primary = primaryModelRef;
-  if (!Array.isArray(defaults.model.fallbacks)) {
-    defaults.model.fallbacks = [];
+  if (!Array.isArray(defaults.model.fallbacks) || defaults.model.fallbacks.length === 0) {
+    defaults.model.fallbacks = [...DEFAULT_MODEL_FALLBACKS];
   }
 
   defaults.models = isRecord(defaults.models) ? defaults.models : {};
   if (!isRecord(defaults.models[primaryModelRef])) {
-    defaults.models[primaryModelRef] = { alias: "MiniMax M2.5 (Free)" };
+    defaults.models[primaryModelRef] = { alias: DEFAULT_MODEL_ALIAS };
   }
 
   defaults.subagents = isRecord(defaults.subagents) ? defaults.subagents : {};
