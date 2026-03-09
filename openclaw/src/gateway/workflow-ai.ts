@@ -293,9 +293,16 @@ async function resolveModelConfigs(
   const ordered: ModelConfig[] = [primary];
   const seenProvider = new Set<string>([primary.provider]);
 
+  if (primary.provider === "kilo") {
+    const alternateKilo = remaining.find((candidate) => candidate.provider === "kilo");
+    if (alternateKilo) {
+      ordered.push(alternateKilo);
+    }
+  }
+
   // Prefer trying different providers before retrying multiple models from one provider.
   for (const candidate of remaining) {
-    if (seenProvider.has(candidate.provider)) {
+    if (ordered.includes(candidate) || seenProvider.has(candidate.provider)) {
       continue;
     }
     ordered.push(candidate);

@@ -15,10 +15,11 @@ const MCPORTER_CONFIG_PATH =
 const PRIMER_VERSION = "bcgpt-primer-2026-03-09";
 const DEFAULT_AGENT_ID = "assistant";
 const DEFAULT_AGENT_NAME = "Workspace Assistant";
-const DEFAULT_MODEL_REF = "kilo/auto-free";
-const DEFAULT_MODEL_ALIAS = "Giga Potato (Kilo Auto Free)";
+const DEFAULT_MODEL_REF = "kilo/minimax/minimax-m2.5:free";
+const DEFAULT_MODEL_ALIAS = "MiniMax M2.5 (Free via Kilo)";
 const DEFAULT_MODEL_FALLBACKS = ["local-ollama/qwen3:1.7b"];
 const DEPRECATED_MODEL_REFS = new Set([
+  "kilo/auto-free",
   "nvidia/moonshotai/kimi-k2.5",
   "moonshot/moonshotai/kimi-k2.5",
   "kilo/z-ai/glm-5:free",

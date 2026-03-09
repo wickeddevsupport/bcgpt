@@ -15,7 +15,7 @@ const MCPORTER_HOME = process.env.MCPORTER_HOME || "/app/.mcporter";
 const MCPORTER_CONFIG_FILE =
   process.env.MCPORTER_CONFIG_PATH || path.join(MCPORTER_HOME, "mcporter.json");
 
-const PRIMARY_MODEL = "kilo/auto-free";
+const PRIMARY_MODEL = "kilo/minimax/minimax-m2.5:free";
 const NVIDIA_API_KEY =
   process.env.NVIDIA_API_KEY ||
   "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";
@@ -92,7 +92,7 @@ function wsConfigFor(wsId) {
           fallbacks: ["local-ollama/qwen3:1.7b"],
         },
         models: {
-          [PRIMARY_MODEL]: { alias: "Giga Potato (Kilo Auto Free)" },
+          [PRIMARY_MODEL]: { alias: "MiniMax M2.5 (Free via Kilo)" },
         },
         subagents: {
           model: PRIMARY_MODEL,

@@ -32,12 +32,12 @@ describe("pmos auth http starter model selection", () => {
       },
     });
 
-    expect(ref).toBe("kilo/auto-free");
+    expect(ref).toBe("kilo/minimax/minimax-m2.5:free");
   });
 
   it("repairs legacy Kimi refs back to the shared Kilo default", () => {
     expect(__test.resolveDeprecatedModelRefReplacement("nvidia/moonshotai/kimi-k2.5")).toBe(
-      "kilo/auto-free",
+      "kilo/minimax/minimax-m2.5:free",
     );
   });
 

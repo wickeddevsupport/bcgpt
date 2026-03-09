@@ -330,7 +330,7 @@ export class OpenClawApp extends LitElement {
 
   // PMOS model auth quick setup (admin UX)
   @state() pmosModelProvider: PmosModelProvider = "kilo";
-  @state() pmosModelId = "auto-free";
+  @state() pmosModelId = "minimax/minimax-m2.5:free";
   @state() pmosModelAlias = "";
   @state() pmosModelApiKeyDraft = "";
   @state() pmosModelApiKeyEditable = false;

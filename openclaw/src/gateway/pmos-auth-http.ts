@@ -23,10 +23,10 @@ const DEFAULT_STARTER_AGENT_ID = "assistant";
 const DEFAULT_STARTER_AGENT_NAME = "Workspace Assistant";
 const DEFAULT_STARTER_AGENT_WORKSPACE_BASE = "~/.openclaw/workspaces";
 const DEFAULT_STARTER_OLLAMA_MODEL_ID = "qwen3:1.7b";
-const DEFAULT_SHARED_MODEL_REF = "kilo/auto-free";
+const DEFAULT_SHARED_MODEL_REF = "kilo/minimax/minimax-m2.5:free";
 const SHARED_PROVIDER_PREFER = new Set(["kilo", "local-ollama", "ollama", "nvidia"]);
 const SHARED_PROVIDER_PRIORITY = ["kilo", "local-ollama", "ollama", "nvidia"] as const;
-const DEFAULT_KILO_FREE_MODEL_REF = "kilo/auto-free";
+const DEFAULT_KILO_FREE_MODEL_REF = "kilo/minimax/minimax-m2.5:free";
 const DEFAULT_SHARED_THINKING_LEVEL = "low";
 const DEFAULT_SHARED_REASONING_LEVEL = "stream";
 const DEFAULT_SHARED_VERBOSE_LEVEL = "full";
@@ -35,6 +35,7 @@ const requireModule = createRequire(import.meta.url);
 const DEPRECATED_MODEL_REF_REPLACEMENTS: Record<string, string> = {
   "nvidia/moonshotai/kimi-k2.5": DEFAULT_SHARED_MODEL_REF,
   "moonshot/moonshotai/kimi-k2.5": DEFAULT_SHARED_MODEL_REF,
+  "kilo/auto-free": DEFAULT_SHARED_MODEL_REF,
   "kilo/z-ai/glm-5:free": DEFAULT_SHARED_MODEL_REF,
   "kilo/glm-5:free": DEFAULT_SHARED_MODEL_REF,
   "kilo/z-ai/glm-5": DEFAULT_SHARED_MODEL_REF,
