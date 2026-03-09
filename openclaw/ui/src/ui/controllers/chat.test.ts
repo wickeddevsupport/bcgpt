@@ -190,4 +190,43 @@ describe("handleChatEvent", () => {
     expect(request.mock.calls.some(([method]) => method === "chat.send")).toBe(true);
     expect(request.mock.calls.some(([method]) => method === "pmos.chat.send")).toBe(false);
   });
+
+  it("refreshes workspace sessions and retries chat.send when the session key is stale", async () => {
+    const request = vi.fn(async (method: string, params?: Record<string, unknown>) => {
+      if (method === "models.list") {
+        return {
+          models: [{ id: "gpt-5", available: true }],
+        };
+      }
+      if (method === "chat.send") {
+        if (params?.sessionKey === "agent:main:main") {
+          throw new Error('session "agent:main:main" not found');
+        }
+        return { ok: true };
+      }
+      if (method === "sessions.list") {
+        return {
+          sessions: [{ key: "agent:assistant:main" }],
+        };
+      }
+      throw new Error(`unexpected method: ${method}`);
+    });
+    const state = createState({
+      sessionKey: "agent:main:main",
+      pmosWorkspaceId: "workspace-123",
+      client: { request } as unknown as ChatState["client"],
+    });
+
+    const runId = await sendChatMessage(state, "hello workspace");
+
+    expect(typeof runId).toBe("string");
+    expect(state.sessionKey).toBe("agent:assistant:main");
+    expect(
+      request.mock.calls.filter(([method]) => method === "chat.send").map(([, params]) => params),
+    ).toEqual([
+      expect.objectContaining({ sessionKey: "agent:main:main" }),
+      expect.objectContaining({ sessionKey: "agent:assistant:main" }),
+    ]);
+    expect(request.mock.calls.some(([method]) => method === "sessions.list")).toBe(true);
+  });
 });

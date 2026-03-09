@@ -243,6 +243,28 @@ async function loadChatHistoryViaHttp(state: ChatState): Promise<{
   };
 }
 
+async function refreshWorkspaceSessionKey(state: ChatState): Promise<string | null> {
+  if (!state.client || !state.connected || !state.pmosWorkspaceId) {
+    return null;
+  }
+  const res = await state.client.request<{
+    sessions?: Array<{ key?: string | null }>;
+  }>("sessions.list", {
+    includeGlobal: false,
+    includeUnknown: false,
+    activeMinutes: 120,
+  });
+  const nextKey =
+    res.sessions
+      ?.map((row) => (typeof row?.key === "string" ? row.key.trim() : ""))
+      .find(Boolean) ?? null;
+  if (!nextKey) {
+    return null;
+  }
+  state.sessionKey = nextKey;
+  return nextKey;
+}
+
 export async function loadChatHistory(state: ChatState) {
   const previousMessages = Array.isArray(state.chatMessages) ? state.chatMessages : [];
   state.chatLoading = true;
@@ -383,13 +405,33 @@ export async function sendChatMessage(
     : undefined;
 
   try {
-    await state.client.request("chat.send", {
+    const sendParams = {
       sessionKey: state.sessionKey,
       message: msg,
       deliver: false,
       idempotencyKey: runId,
       attachments: apiAttachments,
-    });
+    };
+    try {
+      await state.client.request("chat.send", sendParams);
+    } catch (err) {
+      const message = String(err);
+      const canRetryWithFreshSession =
+        Boolean(state.pmosWorkspaceId) &&
+        message.includes("session") &&
+        message.includes("not found");
+      if (!canRetryWithFreshSession) {
+        throw err;
+      }
+      const refreshedSessionKey = await refreshWorkspaceSessionKey(state);
+      if (!refreshedSessionKey) {
+        throw err;
+      }
+      await state.client.request("chat.send", {
+        ...sendParams,
+        sessionKey: refreshedSessionKey,
+      });
+    }
     return runId;
   } catch (err) {
     const error = String(err);
