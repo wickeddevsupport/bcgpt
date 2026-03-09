@@ -1255,6 +1255,8 @@ export class OpenClawApp extends LitElement {
           hasPersonalAccessToken?: boolean | null;
           source?: string | null;
           mcpServerUrl?: string | null;
+          fmMcpUrl?: string | null;
+          fmMcpApiToken?: string | null;
           updatedAt?: string | null;
         } | null;
         activeConnection?: {
@@ -1290,6 +1292,8 @@ export class OpenClawApp extends LitElement {
                 payload.auth?.source ??
                 (fmHasValidatedPat ? "fm-team-pat" : null),
               mcpServerUrl: payload.auth?.mcpServerUrl ?? null,
+              fmMcpUrl: payload.auth?.fmMcpUrl ?? null,
+              fmMcpApiToken: payload.auth?.fmMcpApiToken ?? null,
               updatedAt:
                 payload.auth?.updatedAt ??
                 payload.activeConnection?.updated_at ??

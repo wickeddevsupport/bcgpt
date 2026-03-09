@@ -18,6 +18,9 @@ export type WorkspaceConnectors = {
       hasPersonalAccessToken?: boolean;
       source?: string;
       mcpServerUrl?: string;
+      // FM MCP server endpoint + Bearer token for direct FM tool dispatch.
+      fmMcpUrl?: string;
+      fmMcpApiToken?: string;
       updatedAt?: string;
     };
     identity?: {

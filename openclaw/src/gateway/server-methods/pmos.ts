@@ -780,6 +780,50 @@ async function readWorkspaceFigmaMcpAuth(workspaceId: string): Promise<Workspace
   return readWorkspaceFigmaMcpAuthFromConnectors(connectors);
 }
 
+type WorkspaceFmMcpAuth = {
+  fmMcpUrl: string | null;
+  fmMcpApiToken: string | null;
+};
+
+async function readWorkspaceFmMcpAuth(workspaceId: string): Promise<WorkspaceFmMcpAuth> {
+  const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
+  const connectors = await readWorkspaceConnectors(workspaceId);
+  const figma = isJsonObject(connectors) && isJsonObject(connectors.figma)
+    ? (connectors.figma as Record<string, unknown>)
+    : {};
+  const auth = isJsonObject(figma.auth) ? (figma.auth as Record<string, unknown>) : {};
+  return {
+    fmMcpUrl: stringOrNull(auth.fmMcpUrl),
+    fmMcpApiToken: stringOrNull(auth.fmMcpApiToken),
+  };
+}
+
+async function callFmMcp(
+  fmMcpUrl: string,
+  fmMcpApiToken: string,
+  method: string,
+  params: Record<string, unknown> = {},
+): Promise<unknown> {
+  const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
+  const resp = await fetch(fmMcpUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${fmMcpApiToken}`,
+    },
+    body,
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!resp.ok) {
+    throw new Error(`FM MCP HTTP ${resp.status}`);
+  }
+  const json = (await resp.json()) as { result?: unknown; error?: { message?: string } };
+  if (json.error) {
+    throw new Error(json.error.message ?? "FM MCP error");
+  }
+  return json.result;
+}
+
 async function runWorkspaceFigmaRestAudit(
   workspaceId: string,
   args: Record<string, unknown>,
@@ -1712,7 +1756,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 
-  // â”€â”€ BYOK (Bring Your Own Keys) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ BYOK (Bring Your Own Keys) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
   "pmos.config.get": async ({ respond, client }) => {
     const workspaceId = client?.pmosWorkspaceId;
@@ -1836,7 +1880,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 
-  // â”€â”€ Chat-to-Workflow Creation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Chat-to-Workflow Creation â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
   "pmos.workflow.create": async ({ params, respond, client }) => {
     try {
@@ -1893,7 +1937,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 
-  // â”€â”€ Multi-Agent Orchestration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Multi-Agent Orchestration â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
   "pmos.agent.parallel": async ({ params, respond, client }) => {
     try {
@@ -2005,7 +2049,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 
-  // â”€â”€ Live Flow Builder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Live Flow Builder â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
   "pmos.flow.canvas.subscribe": async ({ params, respond, client }) => {
     try {
@@ -2194,7 +2238,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 
-  // â”€â”€ AI Workflow Assistant (uses global openclaw.json model config) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ AI Workflow Assistant (uses global openclaw.json model config) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
   "pmos.workflow.assist": async ({ params, respond, client, context }) => {
     try {
@@ -2262,7 +2306,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
         "",
       );
       // NOTE: Workspace memory (AI_CONTEXT.md) is intentionally NOT included in the workflow
-      // assistant prompt â€” it causes models to treat workflow requests as memory recall queries.
+      // assistant prompt — it causes models to treat workflow requests as memory recall queries.
       const workspaceContext = `## Workspace Context
 - Workspace ID: ${workspaceId}
 - Use node type names from the live workspace catalog when available.
@@ -2294,12 +2338,12 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       }
       const agentBehaviorRules = [
         "## Critical Behaviour Rules (Automations AI)",
-        "- When asked to create or build a workflow: CALL pmos_ops_create_workflow IMMEDIATELY â€” never output JSON for the user to import manually.",
+        "- When asked to create or build a workflow: CALL pmos_ops_create_workflow IMMEDIATELY — never output JSON for the user to import manually.",
         "- Always call pmos_ops_list_credentials FIRST to discover which integrations are available.",
         "- After creating a workflow, tell the user its name and ID, and what they should do next (e.g. activate it, add a webhook).",
-        "- Never describe a workflow in text and say 'import it' â€” use the tool to create it directly.",
+        "- Never describe a workflow in text and say 'import it' — use the tool to create it directly.",
         "- When the user asks to edit/modify/add nodes/remove nodes from an EXISTING workflow (especially one currently open in the canvas): call pmos_ops_get_workflow first to fetch current state, then call pmos_ops_update_workflow with the FULL updated nodes+connections.",
-        "- pmos_ops_update_workflow replaces the entire workflow â€” always include ALL existing nodes plus any new ones.",
+        "- pmos_ops_update_workflow replaces the entire workflow — always include ALL existing nodes plus any new ones.",
         "- Available tools: pmos_ops_list_credentials, pmos_ops_list_workflows, pmos_ops_list_node_types, pmos_ops_create_workflow, pmos_ops_get_workflow, pmos_ops_update_workflow, pmos_ops_execute_workflow.",
       ].join("\n");
       const systemPrompt = [
@@ -2313,7 +2357,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         .filter((part) => part && part.trim().length > 0)
         .join("\n\n");
 
-      // â”€â”€ Tool definitions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // â"€â"€ Tool definitions â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
       const tools = [
         {
           type: "function" as const,
@@ -2381,7 +2425,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           type: "function" as const,
           function: {
             name: "pmos_ops_update_workflow",
-            description: "Update an existing workflow-engine flow â€” add, remove or modify nodes and connections. Always call pmos_ops_get_workflow first to retrieve current state, then include ALL nodes (existing + modified) in the update.",
+            description: "Update an existing workflow-engine flow — add, remove or modify nodes and connections. Always call pmos_ops_get_workflow first to retrieve current state, then include ALL nodes (existing + modified) in the update.",
             parameters: {
               type: "object",
               required: ["workflow_id", "nodes", "connections"],
@@ -2458,7 +2502,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       ];
 
 
-      // â”€â”€ Progress push helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // â"€â"€ Progress push helper â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
       const pushProgress = (stepOrPayload: string | Record<string, unknown>) => {
         if (client?.connId) {
           const payload = typeof stepOrPayload === "string"
@@ -2472,11 +2516,11 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         }
       };
 
-      // â”€â”€ Track created workflow for UI refresh â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // â"€â"€ Track created workflow for UI refresh â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
       let createdWorkflowId: string | undefined;
       let createdWorkflowName: string | undefined;
 
-      // â”€â”€ Tool executor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // â"€â"€ Tool executor â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
       const executeTool = async (toolName: string, args: Record<string, unknown>): Promise<string> => {
         const {
           createWorkflowEngineWorkflow,
@@ -2516,14 +2560,14 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             const BASECAMP_CUSTOM_NODE = {
               name: "n8n-nodes-basecamp.basecamp",
               displayName: "Basecamp (BCgpt Custom Node)",
-              description: "Full Basecamp integration â€” projects, todos, messages, events, files, and more. ALWAYS use this node type for Basecamp.",
+              description: "Full Basecamp integration — projects, todos, messages, events, files, and more. ALWAYS use this node type for Basecamp.",
               group: ["custom"],
               version: 1,
             };
             const CORE_N8N_NODES = [
               { name: "n8n-nodes-base.manualTrigger", displayName: "Manual Trigger", description: "Start workflow manually", group: ["trigger"], version: 1 },
               { name: "n8n-nodes-base.scheduleTrigger", displayName: "Schedule Trigger", description: "Trigger on a cron schedule (daily, hourly, etc.)", group: ["trigger"], version: 1 },
-              { name: "n8n-nodes-base.webhook", displayName: "Webhook", description: "HTTP webhook trigger â€” use this type name, NOT webhookTrigger", group: ["trigger"], version: 1 },
+              { name: "n8n-nodes-base.webhook", displayName: "Webhook", description: "HTTP webhook trigger — use this type name, NOT webhookTrigger", group: ["trigger"], version: 1 },
               { name: "n8n-nodes-base.if", displayName: "IF", description: "Branch workflow on a condition (true/false)", group: ["transform"], version: 1 },
               { name: "n8n-nodes-base.switch", displayName: "Switch", description: "Route items to multiple output branches", group: ["transform"], version: 1 },
               { name: "n8n-nodes-base.merge", displayName: "Merge", description: "Merge data from multiple branches", group: ["transform"], version: 1 },
@@ -2554,7 +2598,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             if (!name) return JSON.stringify({ error: "name is required" });
             if (!nodes.length) return JSON.stringify({ error: "nodes array is required and must not be empty" });
 
-            // â”€â”€ Node type validation & auto-correction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // â"€â"€ Node type validation & auto-correction â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
             // Correct wrong node type names that the AI commonly uses.
             const NODE_TYPE_CORRECTIONS: Record<string, string> = {
               "n8n-nodes-base.webhookTrigger": "n8n-nodes-base.webhook",
@@ -2585,7 +2629,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               pushProgress(`âš™ï¸ Auto-corrected ${correctedCount} node type(s) to valid workflow aliases.`);
             }
 
-            // â”€â”€ Credential check for Basecamp nodes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // â"€â"€ Credential check for Basecamp nodes â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
             const hasBasecampNode = nodes.some((n: Record<string, unknown>) =>
               String(n.type ?? "") === "n8n-nodes-basecamp.basecamp"
             );
@@ -2619,9 +2663,9 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               });
             }
 
-            // â”€â”€ Per-node streaming â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // â"€â"€ Per-node streaming â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
             // Push one step event per node so UI shows live "building" feel.
-            pushProgress(`ðŸ”§ Building workflow "${name}" with ${nodes.length} nodes...`);
+            pushProgress(`ðŸ"§ Building workflow "${name}" with ${nodes.length} nodes...`);
             for (const node of nodes) {
               const nodeName = String((node as Record<string, unknown>).name ?? "node");
               const nodeType = String((node as Record<string, unknown>).type ?? "");
@@ -2650,7 +2694,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               workflowId: r.workflow?.id,
               workflowName: name,
               nodeCount: nodes.length,
-              message: `Workflow "${name}" created successfully with ${nodes.length} nodes! ID: ${r.workflow?.id}. It's currently inactive â€” activate it in the Workflows panel when ready.`,
+              message: `Workflow "${name}" created successfully with ${nodes.length} nodes! ID: ${r.workflow?.id}. It's currently inactive — activate it in the Workflows panel when ready.`,
             });
           }
           case "pmos_ops_update_workflow": {
@@ -2763,7 +2807,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         return;
       }
 
-      // â”€â”€ JSON-response fallback â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // â"€â"€ JSON-response fallback â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
       // The system prompt asks the AI to return JSON: {message, workflow?}.
       // If the AI returned a workflow object in text (no tool_calls used),
       // parse and create it directly so models without function-calling still work.
@@ -2793,7 +2837,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         return null;
       };
 
-      // â”€â”€ JSON-mode retry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // â"€â"€ JSON-mode retry â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
       // If the agent loop returned plain prose (model doesn't use tool_calls AND
       // didn't output JSON), retry once using callWorkspaceModel with
       // response_format:json_object forced, so the model MUST return JSON.
@@ -2811,7 +2855,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             finalText = retryResult.text;
           }
         } catch {
-          // retry failed â€” proceed with original text
+          // retry failed — proceed with original text
         }
       }
       const jsonCandidate = !createdWorkflowId ? extractJsonFromText(finalText) : null;
@@ -2880,7 +2924,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                 }
               }
               // Emit per-node streaming events
-              pushProgress(`ðŸ”§ Building workflow "${wfName}" with ${wfNodes.length} nodes...`);
+              pushProgress(`ðŸ"§ Building workflow "${wfName}" with ${wfNodes.length} nodes...`);
               for (const node of wfNodes) {
                 const nodeName = String(node.name ?? "node");
                 const nodeType = String(node.type ?? "");
@@ -2908,7 +2952,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             }
           }
         } catch {
-          // Not valid JSON or workflow extraction failed â€” stream text as-is
+          // Not valid JSON or workflow extraction failed — stream text as-is
         }
       }
 
@@ -2949,7 +2993,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     }
   },
 
-  // â”€â”€ Workspace Chat (agentic â€” can directly create/modify workflow-engine flows via tool calls) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Workspace Chat (agentic — can directly create/modify workflow-engine flows via tool calls) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
   "pmos.chat.send": async ({ req, params, respond, client, context }) => {
     try {
@@ -3030,6 +3074,38 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             return `Opening workflow ${String(args.workflow_id ?? "").trim() || ""} to inspect its structure.`;
           case "pmos_ops_execute_workflow":
             return `Running workflow ${String(args.workflow_id ?? "").trim() || ""} to verify its behavior.`;
+          case "fm_get_context":
+            return "Reading your Figma File Manager overview.";
+          case "fm_list_files":
+            return "Listing files in the Figma File Manager.";
+          case "fm_get_file":
+            return `Getting file details for ${String(args.file_id ?? "").trim() || "the selected file"}.`;
+          case "fm_update_file":
+            return `Updating file ${String(args.file_id ?? "").trim() || ""} in the Figma File Manager.`;
+          case "fm_list_tags":
+            return "Listing all tags in the Figma File Manager.";
+          case "fm_create_tag":
+            return `Creating tag "${String(args.name ?? "").trim() || "new tag"}".`;
+          case "fm_rename_tag":
+            return `Renaming tag ${String(args.tag_id ?? "").trim() || ""}.`;
+          case "fm_delete_tag":
+            return `Deleting tag ${String(args.tag_id ?? "").trim() || ""}.`;
+          case "fm_list_folders":
+            return "Listing folders in the Figma File Manager.";
+          case "fm_create_folder":
+            return `Creating folder "${String(args.name ?? "").trim() || "new folder"}".`;
+          case "fm_rename_folder":
+            return `Renaming folder ${String(args.folder_id ?? "").trim() || ""}.`;
+          case "fm_list_categories":
+            return "Listing categories in the Figma File Manager.";
+          case "fm_create_category":
+            return `Creating category "${String(args.name ?? "").trim() || "new category"}".`;
+          case "fm_add_link":
+            return `Adding a link to file ${String(args.file_id ?? "").trim() || ""}.`;
+          case "fm_delete_link":
+            return `Removing link ${String(args.link_id ?? "").trim() || ""}.`;
+          case "fm_sync_team":
+            return "Triggering a Figma team sync to refresh files.";
           case "figma_get_context":
             return "Reading the selected Figma file and team context from the workspace.";
           case "figma_mcp_list_tools":
@@ -3104,27 +3180,27 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const credentialContext = buildCredentialContext(availableCredentials);
 
       const systemPrompt = [
-        `You are an intelligent AI assistant for OpenClaw workspace (ID: ${workspaceId}) â€” a unified project management and automation platform powered by BCgpt.`,
+        `You are an intelligent AI assistant for OpenClaw workspace (ID: ${workspaceId}) — a unified project management and automation platform powered by BCgpt.`,
         "",
         "## What is OpenClaw / BCgpt",
         "OpenClaw combines Basecamp project management with an embedded Activepieces workflow engine and BCgpt AI layer.",
-        "- **Basecamp layer**: Projects, todos, messages, people, schedules, card tables â€” all accessible via BCgpt tools.",
-        "- **Workflow engine layer (Activepieces)**: Visual workflow builder embedded in the platform â€” you can CREATE and EDIT flows directly.",
+        "- **Basecamp layer**: Projects, todos, messages, people, schedules, card tables — all accessible via BCgpt tools.",
+        "- **Workflow engine layer (Activepieces)**: Visual workflow builder embedded in the platform — you can CREATE and EDIT flows directly.",
         "- **BCgpt API**: An intelligent Basecamp integration layer with a smart router (`smart_action`) and full MCP tool set.",
         "",
         "## BCgpt API Reference",
         "BCgpt exposes Basecamp data via MCP (Model Context Protocol) and an OpenAPI compatibility layer:",
-        "- `POST /mcp` â€” MCP JSON-RPC endpoint. Auth: `x-bcgpt-api-key` header.",
-        "- `POST /action/:operation` â€” OpenAPI wrapper for individual tools.",
-        "- `smart_action({query})` â€” Natural-language router. Tell it what you want in plain English; it calls the right Basecamp tools, handles pagination, and returns structured summaries. Best for: listing things, searching, getting project data.",
-        "- `basecamp_raw({method, path, body})` â€” Raw Basecamp API access for anything not covered by named tools.",
+        "- `POST /mcp` — MCP JSON-RPC endpoint. Auth: `x-bcgpt-api-key` header.",
+        "- `POST /action/:operation` — OpenAPI wrapper for individual tools.",
+        "- `smart_action({query})` — Natural-language router. Tell it what you want in plain English; it calls the right Basecamp tools, handles pagination, and returns structured summaries. Best for: listing things, searching, getting project data.",
+        "- `basecamp_raw({method, path, body})` — Raw Basecamp API access for anything not covered by named tools.",
         "",
         "## How to Think and Respond",
         "",
         "### Analyze, don't dump",
         "- Never output raw lists of IDs, raw JSON payloads, or unannotated tool results at the user.",
         "- When you retrieve data (credentials, workflows, todos, projects), INTERPRET it: what matters for this user's question?",
-        "- Example: Instead of listing 50 node types, say 'You have Slack, GitHub, and Basecamp nodes connected â€” I'll use those.'",
+        "- Example: Instead of listing 50 node types, say 'You have Slack, GitHub, and Basecamp nodes connected — I'll use those.'",
         "",
         "### Be proactive, not lazy",
         "- Don't ask the user for information you can discover with a tool call.",
@@ -3141,17 +3217,17 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- 'Open the Executions tab to verify the workflow ran correctly.'",
         "",
         "### Workflow creation rules",
-        "- When asked to CREATE a workflow: call `pmos_ops_create_workflow` immediately â€” never output JSON for the user to import.",
+        "- When asked to CREATE a workflow: call `pmos_ops_create_workflow` immediately — never output JSON for the user to import.",
         "- When asked to EDIT/UPDATE/FIX a workflow: call `pmos_ops_update_workflow` on the existing workflow ID.",
         "- Always call `pmos_ops_list_credentials` first so credential IDs are correct in node parameters.",
         "- For Basecamp steps: always use the compat Basecamp node type `n8n-nodes-basecamp.basecamp`, always include credentials, use `findByName` to resolve project names.",
         "- Position nodes left-to-right: trigger at [250, 300], each next node at x+250.",
-        "- Build complete, runnable workflows â€” no manual rewiring needed.",
+        "- Build complete, runnable workflows — no manual rewiring needed.",
         "",
         "### Project management questions",
         "- Answer from workspace context when available.",
         "- For live Basecamp data, use `bcgpt_list_projects` when the user wants the raw list of projects, and use `bcgpt_smart_action` when the user wants analysis, summaries, or searches.",
-        "- Summarize results meaningfully: 'There are 7 open todos in Project X â€” 3 are overdue. The most recent message was from Alice yesterday about the deploy.'",
+        "- Summarize results meaningfully: 'There are 7 open todos in Project X — 3 are overdue. The most recent message was from Alice yesterday about the deploy.'",
         "",
         "### Figma questions",
         "- Start with `figma_get_context`.",
@@ -3159,31 +3235,54 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- If Figma MCP returns auth required, 405, or unavailable, immediately call `figma_pat_audit_file` on the selected file and continue with a REST-backed audit instead of stopping.",
         "- Do NOT use `web_fetch` for private Figma API access in workspace chat; it cannot inject the workspace PAT.",
         "",
+        "### Figma File Manager (FM) questions",
+        "- For managing files, tags, folders, categories, or links in the FM (fm.wickedlab.io), start with `fm_get_context` to get an overview.",
+        "- Use `fm_list_files` to browse files; use `fm_update_file` to change folder/category; use `fm_create_tag` + `fm_get_file` to tag files.",
+        "- FM tools require the user to be connected via the Figma panel. If FM MCP is not configured, instruct the user to open the Figma panel and sync context.",
+        "",
         "## Available Tools",
         "**Basecamp MCP Tools:**",
-        "- `bcgpt_smart_action` â€” run natural-language Basecamp queries through the bcgpt MCP router",
-        "- `bcgpt_list_projects` â€” fetch live Basecamp projects with names, IDs, and status",
+        "- `bcgpt_smart_action` — run natural-language Basecamp queries through the bcgpt MCP router",
+        "- `bcgpt_list_projects` — fetch live Basecamp projects with names, IDs, and status",
         "",
         "**Workflow Engine Tools:**",
-        "- `pmos_ops_list_credentials` â€” see which services are connected (Basecamp, Slack, GitHub, etc.)",
-        "- `pmos_ops_list_workflows` â€” list existing workflow-engine flows with names and IDs",
-        "- `pmos_ops_create_workflow` â€” CREATE a new workflow-engine flow right now",
-        "- `pmos_ops_update_workflow` â€” UPDATE an existing workflow (by ID)",
-        "- `pmos_ops_get_workflow` â€” get full definition of a specific workflow by ID",
-        "- `pmos_ops_execute_workflow` â€” test-run a workflow by ID",
-        "- `pmos_ops_list_node_types` â€” list available trigger and action node types",
+        "- `pmos_ops_list_credentials` — see which services are connected (Basecamp, Slack, GitHub, etc.)",
+        "- `pmos_ops_list_workflows` — list existing workflow-engine flows with names and IDs",
+        "- `pmos_ops_create_workflow` — CREATE a new workflow-engine flow right now",
+        "- `pmos_ops_update_workflow` — UPDATE an existing workflow (by ID)",
+        "- `pmos_ops_get_workflow` — get full definition of a specific workflow by ID",
+        "- `pmos_ops_execute_workflow` — test-run a workflow by ID",
+        "- `pmos_ops_list_node_types` — list available trigger and action node types",
         "",
         "**Figma Tools:**",
-        "- `figma_get_context` â€” read the selected file/team context from the Figma panel",
-        "- `figma_mcp_list_tools` â€” inspect the live Figma MCP schema exposed through mcporter",
-        "- `figma_mcp_call` â€” call a specific Figma MCP tool once auth/config are ready",
-        "- `figma_pat_audit_file` â€” run a Figma REST audit on the selected file with the workspace PAT when MCP auth is unavailable",
+        "- `figma_get_context` — read the selected file/team context from the Figma panel",
+        "- `figma_mcp_list_tools` — inspect the live Figma MCP schema exposed through mcporter",
+        "- `figma_mcp_call` — call a specific Figma MCP tool once auth/config are ready",
+        "- `figma_pat_audit_file` — run a Figma REST audit on the selected file with the workspace PAT when MCP auth is unavailable",
+        "",
+        "**Figma File Manager (FM) Tools** \u2014 manage files, tags, folders, categories, and links in fm.wickedlab.io:",
+        "- `fm_get_context` — get FM user info and overview of files/tags/folders/categories",
+        "- `fm_list_files` — list Figma files tracked in FM with filters (tag, folder, category, search)",
+        "- `fm_get_file` — get full details for a specific FM file by ID",
+        "- `fm_update_file` — update a file's folder, category, or notes",
+        "- `fm_list_tags` — list all tags and their file counts",
+        "- `fm_create_tag` — create a new tag and optionally apply to a file",
+        "- `fm_rename_tag` — rename an existing tag",
+        "- `fm_delete_tag` — delete a tag",
+        "- `fm_list_folders` — list all folders",
+        "- `fm_create_folder` — create a new folder",
+        "- `fm_rename_folder` — rename a folder",
+        "- `fm_list_categories` — list all categories",
+        "- `fm_create_category` — create a new category",
+        "- `fm_add_link` — add a URL link to a file",
+        "- `fm_delete_link` — remove a link from a file",
+        "- `fm_sync_team` — trigger a sync for a Figma team connection to refresh files",
         "",
         ...(credentialContext ? [credentialContext, ""] : []),
         ...(workspaceAiContext ? ["## Workspace Memory", workspaceAiContext] : []),
       ].join("\n");
 
-      // â”€â”€ Tool definitions (OpenAI function-calling format) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // â"€â"€ Tool definitions (OpenAI function-calling format) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
       const tools = [
         {
           type: "function" as const,
@@ -3399,10 +3498,222 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             },
           },
         },
+        // FM (Figma File Manager) tools
+        {
+          type: "function" as const,
+          function: {
+            name: "fm_get_context",
+            description: "Get an overview of the user's Figma File Manager: user info, file count, tag count, folder count, category count.",
+            parameters: { type: "object", properties: {}, additionalProperties: false },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "fm_list_files",
+            description: "List Figma files tracked in FM. Supports filtering by tag ID, folder ID, category ID, or a search query.",
+            parameters: {
+              type: "object",
+              properties: {
+                tag_id: { type: "number", description: "Filter by tag ID." },
+                folder_id: { type: "number", description: "Filter by folder ID." },
+                category_id: { type: "number", description: "Filter by category ID." },
+                search: { type: "string", description: "Text search across file name/URL." },
+                limit: { type: "number", description: "Max results (default 50)." },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "fm_get_file",
+            description: "Get full details for a specific FM file: name, URL, folder, category, tags, links, notes.",
+            parameters: {
+              type: "object",
+              required: ["file_id"],
+              properties: { file_id: { type: "number", description: "FM file ID." } },
+              additionalProperties: false,
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "fm_update_file",
+            description: "Update a file's folder, category, or notes in FM.",
+            parameters: {
+              type: "object",
+              required: ["file_id"],
+              properties: {
+                file_id: { type: "number", description: "FM file ID." },
+                folder_id: { type: ["number", "null"], description: "New folder ID (null to remove)." },
+                category_id: { type: ["number", "null"], description: "New category ID (null to remove)." },
+                notes: { type: "string", description: "Notes/description for the file." },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "fm_list_tags",
+            description: "List all tags in FM with their file counts.",
+            parameters: { type: "object", properties: {}, additionalProperties: false },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "fm_create_tag",
+            description: "Create a new tag in FM. Optionally apply it to a file.",
+            parameters: {
+              type: "object",
+              required: ["name"],
+              properties: {
+                name: { type: "string", description: "Tag name." },
+                file_id: { type: "number", description: "Optional file ID to apply the new tag to immediately." },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "fm_rename_tag",
+            description: "Rename an existing tag.",
+            parameters: {
+              type: "object",
+              required: ["tag_id", "name"],
+              properties: {
+                tag_id: { type: "number" },
+                name: { type: "string" },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "fm_delete_tag",
+            description: "Delete a tag from FM (unlinks it from all files).",
+            parameters: {
+              type: "object",
+              required: ["tag_id"],
+              properties: { tag_id: { type: "number" } },
+              additionalProperties: false,
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "fm_list_folders",
+            description: "List all folders in FM.",
+            parameters: { type: "object", properties: {}, additionalProperties: false },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "fm_create_folder",
+            description: "Create a new folder in FM.",
+            parameters: {
+              type: "object",
+              required: ["name"],
+              properties: { name: { type: "string" } },
+              additionalProperties: false,
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "fm_rename_folder",
+            description: "Rename an existing folder.",
+            parameters: {
+              type: "object",
+              required: ["folder_id", "name"],
+              properties: {
+                folder_id: { type: "number" },
+                name: { type: "string" },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "fm_list_categories",
+            description: "List all categories in FM.",
+            parameters: { type: "object", properties: {}, additionalProperties: false },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "fm_create_category",
+            description: "Create a new category in FM.",
+            parameters: {
+              type: "object",
+              required: ["name"],
+              properties: { name: { type: "string" } },
+              additionalProperties: false,
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "fm_add_link",
+            description: "Add a URL link (with optional label) to a file in FM.",
+            parameters: {
+              type: "object",
+              required: ["file_id", "url"],
+              properties: {
+                file_id: { type: "number" },
+                url: { type: "string" },
+                label: { type: "string", description: "Display label for the link." },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "fm_delete_link",
+            description: "Delete a link from a file in FM.",
+            parameters: {
+              type: "object",
+              required: ["link_id"],
+              properties: { link_id: { type: "number" } },
+              additionalProperties: false,
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "fm_sync_team",
+            description: "Trigger a sync for a Figma team connection in FM to refresh file listings.",
+            parameters: {
+              type: "object",
+              required: ["connection_id"],
+              properties: { connection_id: { type: "number", description: "FM connection ID to sync." } },
+              additionalProperties: false,
+            },
+          },
+        },
       ];
 
 
-      // â”€â”€ Tool executor â€” calls n8n-api-client directly â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // â"€â"€ Tool executor — calls n8n-api-client directly â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
       const executeTool = async (toolName: string, args: Record<string, unknown>): Promise<string> => {
         const {
           createWorkflowEngineWorkflow,
@@ -3574,7 +3885,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             const CORE_NODES2 = [
               { name: "n8n-nodes-base.manualTrigger", displayName: "Manual Trigger", group: ["trigger"], version: 1 },
               { name: "n8n-nodes-base.scheduleTrigger", displayName: "Schedule Trigger", group: ["trigger"], version: 1 },
-              { name: "n8n-nodes-base.webhook", displayName: "Webhook", description: "HTTP webhook trigger â€” type is webhook NOT webhookTrigger", group: ["trigger"], version: 1 },
+              { name: "n8n-nodes-base.webhook", displayName: "Webhook", description: "HTTP webhook trigger — type is webhook NOT webhookTrigger", group: ["trigger"], version: 1 },
               { name: "n8n-nodes-base.if", displayName: "IF", group: ["transform"], version: 1 },
               { name: "n8n-nodes-base.switch", displayName: "Switch", group: ["transform"], version: 1 },
               { name: "n8n-nodes-base.merge", displayName: "Merge", group: ["transform"], version: 1 },
@@ -3629,7 +3940,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               success: true,
               workflowId: r.workflow?.id,
               workflowName: name,
-              message: `Workflow "${name}" created successfully! ID: ${r.workflow?.id}. It's currently inactive â€” activate it in the Workflows panel when ready.`,
+              message: `Workflow "${name}" created successfully! ID: ${r.workflow?.id}. It's currently inactive — activate it in the Workflows panel when ready.`,
             };
             finishTool(payload);
             return JSON.stringify(payload);
@@ -3822,6 +4133,45 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             finishTool(result);
             return JSON.stringify(result);
           }
+          case "fm_get_context":
+          case "fm_list_files":
+          case "fm_get_file":
+          case "fm_update_file":
+          case "fm_list_tags":
+          case "fm_create_tag":
+          case "fm_rename_tag":
+          case "fm_delete_tag":
+          case "fm_list_folders":
+          case "fm_create_folder":
+          case "fm_rename_folder":
+          case "fm_list_categories":
+          case "fm_create_category":
+          case "fm_add_link":
+          case "fm_delete_link":
+          case "fm_sync_team": {
+            const fmAuth = await readWorkspaceFmMcpAuth(workspaceId);
+            if (!fmAuth.fmMcpUrl || !fmAuth.fmMcpApiToken) {
+              const payload = {
+                error: "FM MCP not configured",
+                hint: "Connect to the Figma File Manager in the Figma panel and sync context. The AI token is provisioned on first sync.",
+              };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
+            // Map tool name to MCP method + params
+            const fmTool = toolName.slice("fm_".length); // e.g. "get_context", "list_files"
+            const mcpMethod = `tools/call`;
+            const mcpParams: Record<string, unknown> = { name: fmTool, arguments: args };
+            try {
+              const result = await callFmMcp(fmAuth.fmMcpUrl, fmAuth.fmMcpApiToken, mcpMethod, mcpParams);
+              finishTool(result);
+              return JSON.stringify(result);
+            } catch (err) {
+              const payload = { error: String(err), tool: toolName };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
+          }
           default:
             {
               const payload = { error: `Unknown tool: ${toolName}` };
@@ -3957,7 +4307,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     }
   },
 
-  // â”€â”€ Connections: Real n8n credential list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Connections: Real n8n credential list â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
   "pmos.projects.snapshot": async ({ respond, client }) => {
     try {
@@ -4205,7 +4555,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     }
   },
 
-  // â”€â”€ Super-admin: Workspace List â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Super-admin: Workspace List â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
   "pmos.workspaces.list": async ({ respond, client }) => {
     try {
@@ -4222,7 +4572,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     }
   },
 
-  // â”€â”€ Basecamp credential setup in workflow engine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Basecamp credential setup in workflow engine â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
   "pmos.workflow.setup.basecamp": async ({ params, respond, client }) => {
     try {
@@ -4293,7 +4643,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     }
   },
 
-  // â”€â”€ Workflow Engine Credentials Management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Workflow Engine Credentials Management â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
   "pmos.n8n.credentials.list": async ({ respond, client }) => {
     try {
@@ -4527,7 +4877,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     }
   },
 
-  // â”€â”€ Super-admin: reset all workspaces to a single fresh starter agent â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Super-admin: reset all workspaces to a single fresh starter agent â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
   "pmos.admin.reset-all-workspaces": async ({ respond, client }) => {
     try {
