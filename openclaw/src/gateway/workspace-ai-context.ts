@@ -288,6 +288,7 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
       ? "validated in FM, but raw token not passed into PMOS"
       : "not available";
   const figmaMcpServerUrl = asNonEmptyString(figmaAuth.mcpServerUrl);
+  const fmMcpReady = Boolean(asNonEmptyString(figmaAuth.fmMcpUrl) && asNonEmptyString(figmaAuth.fmMcpApiToken));
   const figmaSelectedFileSummary =
     figmaSelectedFileName && figmaSelectedFileUrl
       ? `${figmaSelectedFileName} (${figmaSelectedFileUrl})`
@@ -327,6 +328,7 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
     `- figma personal access token present: ${yesNo(figmaPatPresent)}`,
     `- figma PAT handoff to PMOS: ${figmaPatBridgeStatus}`,
     `- figma MCP server URL: ${figmaMcpServerUrl ?? "https://mcp.figma.com/mcp"}`,
+    `- FM MCP tools ready (fm_* tools available): ${yesNo(fmMcpReady)}`,
     ...(figmaConnected
       ? [
           "",
@@ -343,6 +345,18 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
           "- For design audits: analyze structure, naming consistency, spacing systems, color tokens, typography.",
           "- For component audits: check auto-layout usage, detached instances, missing local styles.",
           "- When the user opens a file in the Figma panel and clicks 'Sync Now', the selected file context updates here.",
+          ...(fmMcpReady
+            ? [
+                "",
+                "### Figma File Manager (FM) AI Capabilities",
+                "- FM MCP tools are ready. Use `fm_get_context` first to get a file/tag/folder/category overview.",
+                "- Use `fm_list_files`, `fm_update_file`, `fm_create_tag`, `fm_create_folder`, `fm_create_category`, `fm_add_link` etc. to manage the user's Figma files in FM.",
+                "- You can categorize, tag, folder-assign, and add links to files without the user doing it manually.",
+              ]
+            : [
+                "",
+                "- FM MCP tools are not yet available. Ask the user to open the Figma panel and click 'Sync Context' to activate them.",
+              ]),
         ]
       : []),
     extraLines.length > 0 ? "### Additional connectors" : "",
