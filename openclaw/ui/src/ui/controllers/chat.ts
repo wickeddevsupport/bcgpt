@@ -3,6 +3,8 @@ import type { ChatAttachment } from "../ui-types.ts";
 import { extractText, extractThinking } from "../chat/message-extract.ts";
 import { generateUUID } from "../uuid.ts";
 
+export { extractText, extractThinking } from "../chat/message-extract.ts";
+
 export type ChatState = {
   client: GatewayBrowserClient | null;
   connected: boolean;

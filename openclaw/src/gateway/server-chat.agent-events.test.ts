@@ -49,6 +49,49 @@ describe("agent event handler", () => {
     nowSpy.mockRestore();
   });
 
+  it("emits chat delta for reasoning-only assistant events using buffered text", () => {
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(2_000);
+    const broadcast = vi.fn();
+    const broadcastToConnIds = vi.fn();
+    const nodeSendToSession = vi.fn();
+    const agentRunSeq = new Map<string, number>();
+    const chatRunState = createChatRunState();
+    const toolEventRecipients = createToolEventRecipientRegistry();
+    chatRunState.registry.add("run-2", { sessionKey: "session-1", clientRunId: "client-2" });
+    chatRunState.buffers.set("client-2", "Existing draft");
+
+    const handler = createAgentEventHandler({
+      broadcast,
+      broadcastToConnIds,
+      nodeSendToSession,
+      agentRunSeq,
+      chatRunState,
+      resolveSessionKeyForRun: () => undefined,
+      clearAgentRunContext: vi.fn(),
+      toolEventRecipients,
+    });
+
+    handler({
+      runId: "run-2",
+      seq: 1,
+      stream: "assistant",
+      ts: Date.now(),
+      data: { thinking: "Checking available tools" },
+    });
+
+    const chatCalls = broadcast.mock.calls.filter(([event]) => event === "chat");
+    expect(chatCalls).toHaveLength(1);
+    const payload = chatCalls[0]?.[1] as {
+      state?: string;
+      message?: { content?: Array<{ type?: string; text?: string; thinking?: string }> };
+    };
+    expect(payload.state).toBe("delta");
+    expect(payload.message?.content?.[0]?.type).toBe("thinking");
+    expect(payload.message?.content?.[0]?.thinking).toBe("Checking available tools");
+    expect(payload.message?.content?.[1]?.text).toBe("Existing draft");
+    nowSpy.mockRestore();
+  });
+
   it("routes tool events only to registered recipients when verbose is enabled", () => {
     const broadcast = vi.fn();
     const broadcastToConnIds = vi.fn();

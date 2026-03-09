@@ -380,12 +380,18 @@ export function createAgentEventHandler({
 
     if (sessionKey) {
       nodeSendToSession(sessionKey, "agent", isToolEvent ? toolPayload : agentPayload);
-      if (!isAborted && evt.stream === "assistant" && typeof evt.data?.text === "string") {
+      if (!isAborted && evt.stream === "assistant") {
         const thinkingText =
           typeof evt.data?.thinking === "string" && evt.data.thinking
             ? evt.data.thinking
             : undefined;
-        emitChatDelta(sessionKey, clientRunId, evt.seq, evt.data.text, thinkingText);
+        const nextText =
+          typeof evt.data?.text === "string"
+            ? evt.data.text
+            : (chatRunState.buffers.get(clientRunId) ?? "");
+        if (thinkingText || nextText) {
+          emitChatDelta(sessionKey, clientRunId, evt.seq, nextText, thinkingText);
+        }
       } else if (!isAborted && (lifecyclePhase === "end" || lifecyclePhase === "error")) {
         if (chatLink) {
           const finished = chatRunState.registry.shift(evt.runId);

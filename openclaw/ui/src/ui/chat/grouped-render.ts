@@ -62,6 +62,7 @@ export function renderReadingIndicatorGroup(assistant?: AssistantIdentity) {
       ${renderAvatar("assistant", assistant)}
       <div class="chat-group-messages">
         <div class="chat-bubble chat-reading-indicator" aria-hidden="true">
+          <div class="chat-thinking__label">Thinking</div>
           <span class="chat-reading-indicator__dots">
             <span></span><span></span><span></span>
           </span>
@@ -308,9 +309,10 @@ function renderGroupedMessage(
         ${content.canCopy && content.markdown ? renderCopyAsMarkdownButton(content.markdown) : nothing}
         ${content.images?.length ? renderMessageImages(content.images) : nothing}
         ${content.reasoning
-          ? html`<div class="chat-thinking">${unsafeHTML(
-              toSanitizedMarkdownHtml(content.reasoning),
-            )}</div>`
+          ? html`<div class="chat-thinking">
+              <div class="chat-thinking__label">Thinking</div>
+              ${unsafeHTML(toSanitizedMarkdownHtml(content.reasoning))}
+            </div>`
           : nothing}
         ${content.markdown
           ? html`<div class="chat-text">${unsafeHTML(

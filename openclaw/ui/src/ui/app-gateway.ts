@@ -17,7 +17,7 @@ import { scheduleChatScroll } from "./app-scroll.ts";
 import { handleAgentEvent, resetToolStream, type AgentEventPayload } from "./app-tool-stream.ts";
 import { loadAgents } from "./controllers/agents.ts";
 import { loadAssistantIdentity } from "./controllers/assistant-identity.ts";
-import { loadChatHistory } from "./controllers/chat.ts";
+import { extractText, extractThinking, loadChatHistory } from "./controllers/chat.ts";
 import { handleChatEvent, type ChatEventPayload } from "./controllers/chat.ts";
 import { loadDevices } from "./controllers/devices.ts";
 import {
@@ -37,7 +37,7 @@ import { GatewayBrowserClient } from "./gateway.ts";
 
 // Per-host rAF coalescing state for chat delta events.
 // Batches rapid-fire deltas so at most one Lit re-render fires per animation frame.
-const pendingChatDelta = new WeakMap<object, ChatEventPayload>();
+const pendingChatDelta = new WeakMap<object, ChatEventPayload[]>();
 const chatDeltaRafId = new WeakMap<object, number>();
 const relatedSessionRefreshSeen = new WeakMap<object, Set<string>>();
 
@@ -242,6 +242,37 @@ function recordChatTraceEvent(host: GatewayHost, payload?: ChatEventPayload) {
   if (payload.sessionKey && payload.sessionKey !== host.sessionKey) {
     return;
   }
+  if (payload.state === "delta") {
+    const thinking = extractThinking(payload.message);
+    const text = extractText(payload.message);
+    if (thinking) {
+      appendPmosTraceEvent(host, {
+        id: `chat:reasoning:${payload.runId}`,
+        ts: Date.now(),
+        source: "chat",
+        kind: "chat.reasoning",
+        status: "running",
+        title: "Thinking",
+        detail: summarizeTraceValue(thinking) ?? undefined,
+        runId: payload.runId,
+        sessionKey: payload.sessionKey,
+      });
+    }
+    if (text?.trim()) {
+      appendPmosTraceEvent(host, {
+        id: `chat:response:${payload.runId}`,
+        ts: Date.now(),
+        source: "chat",
+        kind: "chat.response",
+        status: "running",
+        title: "Draft response",
+        detail: summarizeTraceValue(text) ?? undefined,
+        runId: payload.runId,
+        sessionKey: payload.sessionKey,
+      });
+    }
+    return;
+  }
   const id = `chat:${payload.runId}`;
   const status =
     payload.state === "final"
@@ -394,6 +425,9 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
     }
     recordAgentTraceEvent(host, payload);
     handleAgentEvent(host as unknown as Parameters<typeof handleAgentEvent>[0], payload);
+    if (payload?.stream === "tool" || payload?.stream === "compaction") {
+      scheduleChatScroll(host as unknown as Parameters<typeof scheduleChatScroll>[0]);
+    }
     refreshSessionsForRelatedAgentSession(host, payload);
     // After compaction ends, refresh chat history so the compacted state is visible immediately
     // instead of waiting for the next message round-trip to trigger a history reload.
@@ -415,16 +449,20 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
 
     // For streaming deltas, coalesce via rAF: only one Lit re-render per animation frame.
     if (payload?.state === "delta") {
-      pendingChatDelta.set(host, payload);
+      const queue = pendingChatDelta.get(host) ?? [];
+      queue.push(payload);
+      pendingChatDelta.set(host, queue);
       if (!chatDeltaRafId.has(host)) {
         chatDeltaRafId.set(
           host,
           requestAnimationFrame(() => {
             chatDeltaRafId.delete(host);
             const pending = pendingChatDelta.get(host);
-            if (pending) {
+            if (pending?.length) {
               pendingChatDelta.delete(host);
-              handleChatEvent(host as unknown as OpenClawApp, pending);
+              for (const item of pending) {
+                handleChatEvent(host as unknown as OpenClawApp, item);
+              }
               // Keep chat scrolled to bottom during streaming.
               scheduleChatScroll(
                 host as unknown as Parameters<typeof scheduleChatScroll>[0],
@@ -442,9 +480,11 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
       cancelAnimationFrame(pendingRaf);
       chatDeltaRafId.delete(host);
       const pending = pendingChatDelta.get(host);
-      if (pending) {
+      if (pending?.length) {
         pendingChatDelta.delete(host);
-        handleChatEvent(host as unknown as OpenClawApp, pending);
+        for (const item of pending) {
+          handleChatEvent(host as unknown as OpenClawApp, item);
+        }
       }
     }
 

@@ -99,6 +99,25 @@ describe("handleChatEvent", () => {
     expect(state.chatStreamStartedAt).toBe(null);
   });
 
+  it("shows reasoning-only deltas in the live stream", () => {
+    const state = createState({
+      sessionKey: "main",
+      chatRunId: "run-1",
+    });
+    const payload: ChatEventPayload = {
+      runId: "run-1",
+      sessionKey: "main",
+      state: "delta",
+      message: {
+        role: "assistant",
+        content: [{ type: "thinking", thinking: "Reviewing the current config" }],
+      },
+    };
+
+    expect(handleChatEvent(state, payload)).toBe("delta");
+    expect(state.chatStream).toContain("<thinking>Reviewing the current config</thinking>");
+  });
+
   it("keeps pending optimistic user message during history refresh while run is active", async () => {
     const pendingMessage = {
       role: "user",

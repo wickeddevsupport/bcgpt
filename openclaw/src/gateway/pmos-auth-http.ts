@@ -27,6 +27,7 @@ const SHARED_PROVIDER_PREFER = new Set(["local-ollama", "ollama", "kilo"]);
 const DEFAULT_KILO_FREE_MODEL_REF = "kilo/minimax/minimax-m2.5:free";
 const DEFAULT_SHARED_THINKING_LEVEL = "low";
 const DEFAULT_SHARED_REASONING_LEVEL = "stream";
+const DEFAULT_SHARED_VERBOSE_LEVEL = "full";
 const UNSUPPORTED_STARTER_MODEL_REFS = new Set(["kilo/auto-free"]);
 const requireModule = createRequire(import.meta.url);
 const DEPRECATED_MODEL_REF_REPLACEMENTS: Record<string, string> = {
@@ -1419,6 +1420,7 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
         defaults: {
           workspace: starterWorkspace,
           thinkingDefault: DEFAULT_SHARED_THINKING_LEVEL,
+          verboseDefault: DEFAULT_SHARED_VERBOSE_LEVEL,
         },
         list: [
           {
@@ -1449,6 +1451,12 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
             String(getPath(existing, ["agents", "defaults", "thinkingDefault"])).trim()
               ? getPath(existing, ["agents", "defaults", "thinkingDefault"])
               : DEFAULT_SHARED_THINKING_LEVEL,
+          verboseDefault:
+            typeof getPath(existing, ["agents", "defaults", "verboseDefault"]) === "string" &&
+            String(getPath(existing, ["agents", "defaults", "verboseDefault"])).trim() &&
+            String(getPath(existing, ["agents", "defaults", "verboseDefault"])).trim() !== "off"
+              ? getPath(existing, ["agents", "defaults", "verboseDefault"])
+              : DEFAULT_SHARED_VERBOSE_LEVEL,
         },
         ...(repairedAgentsChanged ? { list: repairedAgentsList } : {}),
       };
@@ -1669,6 +1677,12 @@ async function ensureStarterSessionDefaults(params: {
             typeof existing?.thinkingLevel === "string" && existing.thinkingLevel.trim()
               ? existing.thinkingLevel
               : DEFAULT_SHARED_THINKING_LEVEL,
+          verboseLevel:
+            typeof existing?.verboseLevel === "string" &&
+            existing.verboseLevel.trim() &&
+            existing.verboseLevel.trim() !== "off"
+              ? existing.verboseLevel
+              : DEFAULT_SHARED_VERBOSE_LEVEL,
           reasoningLevel:
             typeof existing?.reasoningLevel === "string" && existing.reasoningLevel.trim()
               ? existing.reasoningLevel
