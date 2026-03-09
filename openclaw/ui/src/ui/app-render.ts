@@ -1102,6 +1102,7 @@ export function renderApp(state: AppViewState) {
                   connectorsLoading: state.pmosConnectorsLoading,
                   connectorsError: state.pmosConnectorsError,
                   credentials: state.pmosRealCredentials ?? [],
+                  selectedConnectionId: state.pmosSelectedConnectionId,
                   credentialsLoading: state.pmosRealCredentialsLoading,
                   credentialsError: state.pmosRealCredentialsError,
                   addConnectionUrl:
@@ -1111,6 +1112,9 @@ export function renderApp(state: AppViewState) {
                       : ""),
                   onRefresh: () => {
                     void state.handleLoadRealCredentials();
+                  },
+                  onSelectConnection: (connectionId) => {
+                    state.pmosSelectedConnectionId = connectionId;
                   },
                   onOpenIntegrations: () => state.setTab("integrations"),
                   onAddConnection: () => {

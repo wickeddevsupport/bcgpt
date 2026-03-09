@@ -11,10 +11,12 @@ function createProps(overrides: Partial<ConnectionsProps> = {}): ConnectionsProp
       { id: "conn-1", name: "Basecamp Prod", type: "basecampApi" },
       { id: "conn-2", name: "Slack Alerts", type: "slackApi" },
     ],
+    selectedConnectionId: null,
     credentialsLoading: false,
     credentialsError: null,
     addConnectionUrl: "https://flow.wickedlab.io/connections",
     onRefresh: vi.fn(),
+    onSelectConnection: vi.fn(),
     onOpenIntegrations: vi.fn(),
     onAddConnection: vi.fn(),
     ...overrides,
@@ -26,7 +28,7 @@ describe("connections view", () => {
     const container = document.createElement("div");
     render(renderConnections(createProps()), container);
 
-    expect(container.textContent).toContain("Configured (2)");
+    expect(container.textContent).toContain("Workspace connections");
     expect(container.textContent).toContain("Basecamp Prod");
     expect(container.textContent).toContain("Slack Alerts");
 
@@ -34,7 +36,26 @@ describe("connections view", () => {
       | HTMLIFrameElement
       | null;
     expect(iframe).not.toBeNull();
-    expect(iframe?.getAttribute("src")).toBe("https://flow.wickedlab.io/connections");
+    expect(iframe?.getAttribute("src")).toBe("https://flow.wickedlab.io/connections?limit=10");
+  });
+
+  it("filters the iframe to the selected connection", () => {
+    const container = document.createElement("div");
+    render(
+      renderConnections(
+        createProps({
+          selectedConnectionId: "conn-1",
+        }),
+      ),
+      container,
+    );
+
+    const iframe = container.querySelector("iframe[title='Flow Connections Manager']") as
+      | HTMLIFrameElement
+      | null;
+    expect(iframe).not.toBeNull();
+    expect(iframe?.getAttribute("src")).toContain("displayName=Basecamp+Prod");
+    expect(iframe?.getAttribute("src")).toContain("pieceName=basecamp");
   });
 
   it("shows the integrations callout when Flow is not provisioned", () => {

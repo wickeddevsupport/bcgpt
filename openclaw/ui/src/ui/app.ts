@@ -358,6 +358,7 @@ export class OpenClawApp extends LitElement {
   @state() pmosRealCredentials: Array<{ id: string; name: string; type: string }> | null = null;
   @state() pmosRealCredentialsLoading = false;
   @state() pmosRealCredentialsError: string | null = null;
+  @state() pmosSelectedConnectionId: string | null = null;
 
   // PMOS identity/admin (Phase 4)
   @state() pmosAdminDraftsInitialized = false;
@@ -1176,9 +1177,16 @@ export class OpenClawApp extends LitElement {
         {},
       );
       this.pmosRealCredentials = res?.credentials ?? [];
+      if (
+        this.pmosSelectedConnectionId &&
+        !this.pmosRealCredentials.some((credential) => credential.id === this.pmosSelectedConnectionId)
+      ) {
+        this.pmosSelectedConnectionId = null;
+      }
     } catch (err) {
       this.pmosRealCredentialsError = String(err);
       this.pmosRealCredentials = [];
+      this.pmosSelectedConnectionId = null;
     } finally {
       this.pmosRealCredentialsLoading = false;
     }
