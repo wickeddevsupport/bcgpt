@@ -618,10 +618,14 @@ export const chatHandlers: GatewayRequestHandlers = {
                 method: "pmos.chat.send",
                 params: {
                   messages: [{ role: "user", content: parsedMessage }],
+                  sessionKey: rawSessionKey,
+                  runId: clientRunId,
                 },
               },
               params: {
                 messages: [{ role: "user", content: parsedMessage }],
+                sessionKey: rawSessionKey,
+                runId: clientRunId,
               },
               isWebchatConnect: () => false,
               respond: (ok, payload, error) => {
@@ -641,14 +645,32 @@ export const chatHandlers: GatewayRequestHandlers = {
 
             const payload =
               captured.payload && typeof captured.payload === "object"
-                ? (captured.payload as { ok?: boolean; message?: unknown })
+                ? (captured.payload as {
+                    ok?: boolean;
+                    message?: unknown;
+                    liveStreamed?: boolean;
+                  })
                 : null;
+            const liveStreamed = payload?.liveStreamed === true;
             if (!payload?.ok) {
-              throw new Error(
+              const message =
                 typeof payload?.message === "string" && payload.message.trim()
                   ? payload.message.trim()
-                  : "PMOS chat returned no result.",
-              );
+                  : "PMOS chat returned no result.";
+              if (liveStreamed) {
+                context.dedupe.set(`chat:${clientRunId}`, {
+                  ts: Date.now(),
+                  ok: false,
+                  payload: {
+                    runId: clientRunId,
+                    status: "error" as const,
+                    summary: message,
+                  },
+                  error: errorShape(ErrorCodes.UNAVAILABLE, message),
+                });
+                return;
+              }
+              throw new Error(message);
             }
 
             const combinedReply = String(payload.message ?? "").trim();
@@ -681,12 +703,14 @@ export const chatHandlers: GatewayRequestHandlers = {
               }
             }
 
-            broadcastChatFinal({
-              context,
-              runId: clientRunId,
-              sessionKey: rawSessionKey,
-              message,
-            });
+            if (!liveStreamed) {
+              broadcastChatFinal({
+                context,
+                runId: clientRunId,
+                sessionKey: rawSessionKey,
+                message,
+              });
+            }
             context.dedupe.set(`chat:${clientRunId}`, {
               ts: Date.now(),
               ok: true,

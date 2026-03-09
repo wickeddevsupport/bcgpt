@@ -5,6 +5,7 @@ import { ErrorCodes, errorShape } from "../protocol/index.js";
 import { formatForLog } from "../ws-log.js";
 import { filterByWorkspace, requireWorkspaceId, isSuperAdmin } from "../workspace-context.js";
 import { buildFigmaRestAuditReport, parseFigmaFileKey } from "../figma-rest-audit.js";
+import { emitAgentEvent, registerAgentRunContext } from "../../infra/agent-events.js";
 
 type ConnectorResult = {
   url: string | null;
@@ -2923,13 +2924,15 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
 
   // â”€â”€ Workspace Chat (agentic â€” can directly create/modify workflow-engine flows via tool calls) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  "pmos.chat.send": async ({ params, respond, client }) => {
+  "pmos.chat.send": async ({ req, params, respond, client, context }) => {
     try {
       if (!client) throw new Error("client context required");
       const workspaceId = requireWorkspaceId(client);
 
       const p = params as {
         messages?: Array<{ role: string; content: string }>;
+        sessionKey?: string;
+        runId?: string;
       } | null;
 
       const rawMessages: Array<{ role: string; content: string }> = Array.isArray(p?.messages)
@@ -2944,6 +2947,98 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const messages = rawMessages
         .filter((m) => m.role === "user" || m.role === "assistant")
         .map((m) => ({ role: m.role as "user" | "assistant", content: String(m.content) }));
+
+      const liveSessionKey =
+        typeof p?.sessionKey === "string" && p.sessionKey.trim() ? p.sessionKey.trim() : "";
+      const liveRunId =
+        typeof p?.runId === "string" && p.runId.trim()
+          ? p.runId.trim()
+          : typeof req?.id === "string" && req.id.trim()
+            ? req.id.trim()
+            : "";
+      const liveStreamEnabled = Boolean(liveSessionKey && liveRunId);
+      let liveText = "";
+      let liveToolSeq = 0;
+      const liveStartedAt = Date.now();
+
+      const emitThinking = (thinking: string) => {
+        if (!liveStreamEnabled || !thinking.trim()) {
+          return;
+        }
+        emitAgentEvent({
+          runId: liveRunId,
+          stream: "assistant",
+          sessionKey: liveSessionKey,
+          data: { thinking },
+        });
+      };
+
+      const emitTextChunk = async (text: string, chunkSize = 24, delayMs = 14) => {
+        if (!liveStreamEnabled || !text) {
+          return;
+        }
+        for (let i = 0; i < text.length; i += chunkSize) {
+          liveText += text.slice(i, i + chunkSize);
+          emitAgentEvent({
+            runId: liveRunId,
+            stream: "assistant",
+            sessionKey: liveSessionKey,
+            data: { text: liveText },
+          });
+          await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+        }
+      };
+
+      const describeToolAction = (toolName: string, args: Record<string, unknown>): string => {
+        switch (toolName) {
+          case "bcgpt_smart_action":
+            return `Checking live Basecamp data with smart_action for: ${String(args.query ?? "").trim() || "workspace request"}`;
+          case "bcgpt_list_projects":
+            return "Loading the live Basecamp project list for this workspace.";
+          case "pmos_ops_list_credentials":
+            return "Checking which workflow and integration credentials are available in this workspace.";
+          case "pmos_ops_list_workflows":
+            return "Listing the current workflows so I can inspect what already exists.";
+          case "pmos_ops_get_workflow":
+            return `Opening workflow ${String(args.workflow_id ?? "").trim() || ""} to inspect its structure.`;
+          case "pmos_ops_execute_workflow":
+            return `Running workflow ${String(args.workflow_id ?? "").trim() || ""} to verify its behavior.`;
+          case "figma_get_context":
+            return "Reading the selected Figma file and team context from the workspace.";
+          case "figma_mcp_list_tools":
+            return "Checking which live Figma MCP tools are available for this workspace.";
+          case "figma_mcp_call":
+            return `Calling the Figma MCP tool ${String(args.tool ?? "").trim() || "unknown"}.`;
+          case "figma_pat_audit_file":
+            return "Running a Figma REST audit with the workspace PAT because MCP access is not ready.";
+          case "web_search":
+            return `Searching the web for: ${String(args.query ?? "").trim() || "workspace query"}`;
+          case "web_fetch":
+            return `Fetching ${String(args.url ?? "").trim() || "the requested URL"}.`;
+          default:
+            return `Running ${toolName} to gather the next piece of data I need.`;
+        }
+      };
+
+      if (liveStreamEnabled) {
+        registerAgentRunContext(liveRunId, {
+          sessionKey: liveSessionKey,
+          verboseLevel: "full",
+        });
+        if (client.connId) {
+          context.registerToolEventRecipient(liveRunId, client.connId);
+        }
+        emitAgentEvent({
+          runId: liveRunId,
+          stream: "lifecycle",
+          sessionKey: liveSessionKey,
+          data: {
+            phase: "start",
+            startedAt: liveStartedAt,
+          },
+        });
+        emitThinking("Reviewing workspace context, recent conversation, and available connectors.");
+      }
 
       const { callWorkspaceModelAgentLoop } = await import("../workflow-ai.js");
       const { getWorkspaceAiContextForPrompt } = await import("../workspace-ai-context.js");
@@ -3290,19 +3385,77 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         const normalizedToolName = toolName.startsWith("pmos_n8n_")
           ? `pmos_ops_${toolName.slice("pmos_n8n_".length)}`
           : toolName;
+        const toolCallId = `${liveRunId || "pmos"}:tool:${++liveToolSeq}`;
+        if (liveStreamEnabled) {
+          emitThinking(describeToolAction(normalizedToolName, args));
+          emitAgentEvent({
+            runId: liveRunId,
+            stream: "tool",
+            sessionKey: liveSessionKey,
+            data: {
+              phase: "start",
+              toolCallId,
+              name: normalizedToolName,
+              args,
+            },
+          });
+        }
 
-        switch (normalizedToolName) {
+        const finishTool = (result: unknown) => {
+          if (!liveStreamEnabled) {
+            return;
+          }
+          emitAgentEvent({
+            runId: liveRunId,
+            stream: "tool",
+            sessionKey: liveSessionKey,
+            data: {
+              phase: "result",
+              toolCallId,
+              name: normalizedToolName,
+              result,
+            },
+          });
+        };
+
+        const failTool = (err: unknown) => {
+          if (!liveStreamEnabled) {
+            return;
+          }
+          emitAgentEvent({
+            runId: liveRunId,
+            stream: "tool",
+            sessionKey: liveSessionKey,
+            data: {
+              phase: "result",
+              toolCallId,
+              name: normalizedToolName,
+              result: {
+                error: err instanceof Error ? err.message : String(err),
+              },
+            },
+          });
+        };
+
+        try {
+          switch (normalizedToolName) {
           case "bcgpt_smart_action": {
             const query = String(args.query ?? "").trim();
-            if (!query) return JSON.stringify({ error: "query is required" });
+            if (!query) {
+              const value = JSON.stringify({ error: "query is required" });
+              finishTool({ error: "query is required" });
+              return value;
+            }
             const { bcgptUrl, apiKey } = await resolveWorkspaceBcgptAccess({
               workspaceId,
               allowGlobalSecrets: true,
             });
             if (!apiKey) {
-              return JSON.stringify({
+              const value = JSON.stringify({
                 error: "Basecamp integration is not configured for this workspace.",
               });
+              finishTool({ error: "Basecamp integration is not configured for this workspace." });
+              return value;
             }
             const result = await callBcgptTool({
               bcgptUrl,
@@ -3311,13 +3464,17 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               toolArgs: { query },
             });
             if (!result.ok) {
-              return JSON.stringify({ error: result.error ?? "smart_action failed" });
+              const payload = { error: result.error ?? "smart_action failed" };
+              finishTool(payload);
+              return JSON.stringify(payload);
             }
-            return JSON.stringify({
+            const payload = {
               tool: "smart_action",
               query,
               result: result.result,
-            });
+            };
+            finishTool(payload);
+            return JSON.stringify(payload);
           }
           case "bcgpt_list_projects": {
             const { bcgptUrl, apiKey } = await resolveWorkspaceBcgptAccess({
@@ -3325,9 +3482,11 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               allowGlobalSecrets: true,
             });
             if (!apiKey) {
-              return JSON.stringify({
+              const value = JSON.stringify({
                 error: "Basecamp integration is not configured for this workspace.",
               });
+              finishTool({ error: "Basecamp integration is not configured for this workspace." });
+              return value;
             }
             const result = await callBcgptTool({
               bcgptUrl,
@@ -3335,25 +3494,41 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               toolName: "list_projects",
             });
             if (!result.ok) {
-              return JSON.stringify({ error: result.error ?? "Failed to list projects" });
+              const payload = { error: result.error ?? "Failed to list projects" };
+              finishTool(payload);
+              return JSON.stringify(payload);
             }
-            return JSON.stringify({
+            const payload = {
               projects: parseProjectList(result.result),
-            });
+            };
+            finishTool(payload);
+            return JSON.stringify(payload);
           }
           case "pmos_ops_list_credentials": {
             const r = await listWorkflowEngineConnections(workspaceId);
-            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to list credentials" });
-            return JSON.stringify({
+            if (!r.ok) {
+              const payload = { error: r.error ?? "Failed to list credentials" };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
+            const payload = {
               credentials: (r.credentials ?? []).map((c) => ({ id: c.id, name: c.name, type: c.type })),
-            });
+            };
+            finishTool(payload);
+            return JSON.stringify(payload);
           }
           case "pmos_ops_list_workflows": {
             const r = await listWorkflowEngineWorkflows(workspaceId);
-            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to list workflows" });
-            return JSON.stringify({
+            if (!r.ok) {
+              const payload = { error: r.error ?? "Failed to list workflows" };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
+            const payload = {
               workflows: (r.workflows ?? []).map((w) => ({ id: w.id, name: w.name, active: w.active })),
-            });
+            };
+            finishTool(payload);
+            return JSON.stringify(payload);
           }
           case "pmos_ops_list_node_types": {
             const r2 = await listWorkflowEngineNodeTypes(workspaceId);
@@ -3374,7 +3549,9 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             const live2 = (r2.ok ? (r2.nodeTypes ?? []) : []).filter(
               (n: { name?: string }) => n.name !== "n8n-nodes-basecamp.basecamp" && !CORE_NODES2.some(c => c.name === n.name)
             );
-            return JSON.stringify({ nodeTypes: [BASECAMP_NODE2, ...CORE_NODES2, ...live2].slice(0, 250) });
+            const payload = { nodeTypes: [BASECAMP_NODE2, ...CORE_NODES2, ...live2].slice(0, 250) };
+            finishTool(payload);
+            return JSON.stringify(payload);
           }
           case "pmos_ops_create_workflow": {
             const name = String(args.name ?? "").trim();
@@ -3405,27 +3582,52 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               nodes: nodes2 as Parameters<typeof createWorkflowEngineWorkflow>[1]["nodes"],
               connections,
             });
-            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to create workflow" });
-            return JSON.stringify({
+            if (!r.ok) {
+              const payload = { error: r.error ?? "Failed to create workflow" };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
+            const payload = {
               success: true,
               workflowId: r.workflow?.id,
               workflowName: name,
               message: `Workflow "${name}" created successfully! ID: ${r.workflow?.id}. It's currently inactive â€” activate it in the Workflows panel when ready.`,
-            });
+            };
+            finishTool(payload);
+            return JSON.stringify(payload);
           }
           case "pmos_ops_get_workflow": {
             const id = String(args.workflow_id ?? "").trim();
-            if (!id) return JSON.stringify({ error: "workflow_id is required" });
+            if (!id) {
+              const payload = { error: "workflow_id is required" };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
             const r = await getWorkflowEngineWorkflow(workspaceId, id);
-            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to get workflow" });
+            if (!r.ok) {
+              const payload = { error: r.error ?? "Failed to get workflow" };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
+            finishTool(r.workflow);
             return JSON.stringify(r.workflow);
           }
           case "pmos_ops_execute_workflow": {
             const id = String(args.workflow_id ?? "").trim();
-            if (!id) return JSON.stringify({ error: "workflow_id is required" });
+            if (!id) {
+              const payload = { error: "workflow_id is required" };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
             const r = await executeWorkflowEngineWorkflow(workspaceId, id);
-            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to execute workflow" });
-            return JSON.stringify({ success: true, executionId: r.executionId ?? "unknown" });
+            if (!r.ok) {
+              const payload = { error: r.error ?? "Failed to execute workflow" };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
+            const payload = { success: true, executionId: r.executionId ?? "unknown" };
+            finishTool(payload);
+            return JSON.stringify(payload);
           }
           case "pmos_ops_update_workflow": {
             const wfId = String(args.workflow_id ?? "").trim();
@@ -3435,51 +3637,80 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               args.connections && typeof args.connections === "object"
                 ? (args.connections as Record<string, unknown>)
                 : {};
-            if (!wfId) return JSON.stringify({ error: "workflow_id is required" });
-            if (!wfName) return JSON.stringify({ error: "name is required" });
+            if (!wfId) {
+              const payload = { error: "workflow_id is required" };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
+            if (!wfName) {
+              const payload = { error: "name is required" };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
             const ur = await updateWorkflowEngineWorkflow(workspaceId, wfId, {
               name: wfName,
               nodes: wfNodes as Parameters<typeof updateWorkflowEngineWorkflow>[2]["nodes"],
               connections: wfConnections,
             });
-            if (!ur.ok) return JSON.stringify({ error: ur.error ?? "Failed to update workflow" });
-            return JSON.stringify({
+            if (!ur.ok) {
+              const payload = { error: ur.error ?? "Failed to update workflow" };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
+            const payload = {
               success: true,
               workflowId: wfId,
               workflowName: wfName,
               message: `Workflow "${wfName}" (ID: ${wfId}) updated successfully.`,
-            });
+            };
+            finishTool(payload);
+            return JSON.stringify(payload);
           }
 
           case "web_search": {
             const q = String(args.query ?? "").trim();
-            if (!q) return JSON.stringify({ error: "query is required" });
+            if (!q) {
+              const payload = { error: "query is required" };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
             const { duckDuckGoSearch: ddgSearch } = await import("../pmos-mcp-http.js");
             const sr = await ddgSearch(q, 5);
+            finishTool(sr);
             return JSON.stringify(sr);
           }
           case "web_fetch": {
             const fetchUrl = String(args.url ?? "").trim();
-            if (!fetchUrl) return JSON.stringify({ error: "url is required" });
+            if (!fetchUrl) {
+              const payload = { error: "url is required" };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
             const fetchResp = await fetch(fetchUrl, {
               signal: AbortSignal.timeout(10000),
               headers: { "User-Agent": "OpenClaw/1.0" },
             });
             const fetchText = await fetchResp.text();
-            return JSON.stringify({ url: fetchUrl, status: fetchResp.status, content: fetchText.slice(0, 15000) });
+            const payload = { url: fetchUrl, status: fetchResp.status, content: fetchText.slice(0, 15000) };
+            finishTool(payload);
+            return JSON.stringify(payload);
           }
           case "figma_get_context": {
             const figmaContext = await readWorkspaceFigmaContext(workspaceId);
-            return JSON.stringify({
+            const payload = {
               ...figmaContext,
               note: "Use figma_mcp_list_tools next. If that returns auth required, 405, or unavailable, call figma_pat_audit_file for a PAT-backed file audit.",
               fallbackTool: "figma_pat_audit_file",
-            });
+            };
+            finishTool(payload);
+            return JSON.stringify(payload);
           }
           case "figma_mcp_list_tools": {
             const mcpAuth = await readWorkspaceFigmaMcpAuth(workspaceId);
             if (!mcpAuth.personalAccessToken) {
-              return JSON.stringify(buildFigmaPatMissingPayload(mcpAuth));
+              const payload = buildFigmaPatMissingPayload(mcpAuth);
+              finishTool(payload);
+              return JSON.stringify(payload);
             }
             const mcporterConfigPath =
               process.env.MCPORTER_CONFIG_PATH ?? "/app/.mcporter/mcporter.json";
@@ -3496,9 +3727,12 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                 FIGMA_PERSONAL_ACCESS_TOKEN: mcpAuth.personalAccessToken,
                 MCP_FIGMA_SERVER_URL: mcpAuth.mcpServerUrl,
               });
+              finishTool(result);
               return JSON.stringify(result);
             } catch (err) {
-              return JSON.stringify(buildFigmaMcpFailurePayload(err, mcpAuth, "list_tools"));
+              const payload = buildFigmaMcpFailurePayload(err, mcpAuth, "list_tools");
+              finishTool(payload);
+              return JSON.stringify(payload);
             }
           }
           case "figma_mcp_call": {
@@ -3508,11 +3742,15 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                 ? (args.arguments as Record<string, unknown>)
                 : {};
             if (!tool) {
-              return JSON.stringify({ error: "tool is required" });
+              const payload = { error: "tool is required" };
+              finishTool(payload);
+              return JSON.stringify(payload);
             }
             const mcpAuth = await readWorkspaceFigmaMcpAuth(workspaceId);
             if (!mcpAuth.personalAccessToken) {
-              return JSON.stringify(buildFigmaPatMissingPayload(mcpAuth));
+              const payload = buildFigmaPatMissingPayload(mcpAuth);
+              finishTool(payload);
+              return JSON.stringify(payload);
             }
             const figmaContext = await readWorkspaceFigmaContext(workspaceId);
             const effectiveToolArgs = hydrateKnownFigmaContextArguments(toolArgs, figmaContext);
@@ -3533,17 +3771,29 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                 FIGMA_PERSONAL_ACCESS_TOKEN: mcpAuth.personalAccessToken,
                 MCP_FIGMA_SERVER_URL: mcpAuth.mcpServerUrl,
               });
+              finishTool(result);
               return JSON.stringify(result);
             } catch (err) {
-              return JSON.stringify(buildFigmaMcpFailurePayload(err, mcpAuth, tool));
+              const payload = buildFigmaMcpFailurePayload(err, mcpAuth, tool);
+              finishTool(payload);
+              return JSON.stringify(payload);
             }
           }
           case "figma_pat_audit_file": {
             const result = await runWorkspaceFigmaRestAudit(workspaceId, args);
+            finishTool(result);
             return JSON.stringify(result);
           }
           default:
-            return JSON.stringify({ error: `Unknown tool: ${toolName}` });
+            {
+              const payload = { error: `Unknown tool: ${toolName}` };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
+          }
+        } catch (err) {
+          failTool(err);
+          throw err;
         }
       };
 
@@ -3571,23 +3821,92 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       );
 
       if (!result.ok) {
+        if (liveStreamEnabled) {
+          emitAgentEvent({
+            runId: liveRunId,
+            stream: "lifecycle",
+            sessionKey: liveSessionKey,
+            data: {
+              phase: "error",
+              startedAt: liveStartedAt,
+              endedAt: Date.now(),
+              error: result.error ?? "unknown error",
+            },
+          });
+        }
         respond(
           true,
           {
             ok: false,
             message: `AI model unavailable: ${result.error ?? "unknown error"}. Please check your model configuration in Settings â†’ AI Model Setup.`,
+            liveStreamed: liveStreamEnabled,
           },
           undefined,
         );
         return;
       }
 
+      const finalMessage = result.text ?? "";
+      if (liveStreamEnabled) {
+        if (!liveText) {
+          emitThinking("Drafting the final response from the collected workspace data.");
+        }
+        await emitTextChunk(finalMessage);
+        emitAgentEvent({
+          runId: liveRunId,
+          stream: "lifecycle",
+          sessionKey: liveSessionKey,
+          data: {
+            phase: "end",
+            startedAt: liveStartedAt,
+            endedAt: Date.now(),
+          },
+        });
+      }
+
       respond(
         true,
-        { ok: true, message: result.text ?? "", providerUsed: result.providerUsed },
+        {
+          ok: true,
+          message: finalMessage,
+          providerUsed: result.providerUsed,
+          liveStreamed: liveStreamEnabled,
+        },
         undefined,
       );
     } catch (err) {
+      const liveRunId =
+        typeof req?.id === "string" && req.id.trim() ? req.id.trim() : "";
+      const liveSessionKey =
+        typeof params === "object" &&
+        params &&
+        "sessionKey" in params &&
+        typeof (params as { sessionKey?: unknown }).sessionKey === "string"
+          ? String((params as { sessionKey?: unknown }).sessionKey).trim()
+          : "";
+      if (liveRunId && liveSessionKey) {
+        emitAgentEvent({
+          runId: liveRunId,
+          stream: "lifecycle",
+          sessionKey: liveSessionKey,
+          data: {
+            phase: "error",
+            startedAt: Date.now(),
+            endedAt: Date.now(),
+            error: String(err),
+          },
+        });
+        respond(
+          true,
+          {
+            ok: false,
+            message: String(err),
+            liveStreamed: true,
+          },
+          undefined,
+        );
+        return;
+      }
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }
   },
