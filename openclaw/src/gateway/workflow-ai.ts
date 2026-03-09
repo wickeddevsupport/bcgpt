@@ -831,6 +831,7 @@ export async function callWorkspaceModelAgentLoop(
             message?: {
               role?: string;
               content?: string | null;
+              reasoning?: string | null;
               tool_calls?: AssistantToolCall[];
             };
             finish_reason?: string;
@@ -839,6 +840,33 @@ export async function callWorkspaceModelAgentLoop(
 
         const assistantMsg = data.choices?.[0]?.message;
         if (!assistantMsg) break;
+
+        try {
+          console.debug(
+            "[workflow-ai] agent-loop response",
+            JSON.stringify({
+              workspaceId: wsId,
+              provider,
+              modelId,
+              iteration,
+              finishReason: data.choices?.[0]?.finish_reason ?? null,
+              hasContent: typeof assistantMsg.content === "string" && assistantMsg.content.trim().length > 0,
+              contentLength: typeof assistantMsg.content === "string" ? assistantMsg.content.length : 0,
+              hasReasoning:
+                typeof assistantMsg.reasoning === "string" && assistantMsg.reasoning.trim().length > 0,
+              reasoningPreview:
+                typeof assistantMsg.reasoning === "string"
+                  ? assistantMsg.reasoning.slice(0, 160)
+                  : null,
+              toolCalls:
+                Array.isArray(assistantMsg.tool_calls) && assistantMsg.tool_calls.length
+                  ? assistantMsg.tool_calls.map((tc) => tc.function.name)
+                  : [],
+            }),
+          );
+        } catch {
+          // best-effort debug logging only
+        }
 
         const toolCalls = assistantMsg.tool_calls;
 
