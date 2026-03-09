@@ -531,7 +531,8 @@
   display: flex;
   flex-direction: column;
   gap: 24px;
-  overflow: visible;
+  overflow-x: visible;
+  overflow-y: auto;
   padding-bottom: 16px;
 }
 

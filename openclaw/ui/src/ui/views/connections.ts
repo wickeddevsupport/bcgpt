@@ -111,6 +111,15 @@ function textButtonMatch(root: ParentNode, text: string): HTMLElement | null {
   );
 }
 
+function frameShowsConnectionsUi(doc: Document): boolean {
+  const title = doc.title.trim().toLowerCase();
+  if (title.includes("connections")) {
+    return true;
+  }
+  const connectionMarker = textButtonMatch(doc, "New Connection");
+  return Boolean(connectionMarker);
+}
+
 function steerConnectionsFrame(
   frame: HTMLIFrameElement,
   selected?: ConnectionItem | null,
@@ -134,7 +143,7 @@ function steerConnectionsFrame(
       win.location.replace(desiredHref);
       return;
     }
-    if (/\/connections(?:\/)?$/i.test(current.pathname)) {
+    if (/\/connections(?:\/)?$/i.test(current.pathname) && frameShowsConnectionsUi(doc)) {
       return;
     }
   } catch {
