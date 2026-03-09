@@ -117,7 +117,6 @@ type SetupStep = {
 };
 
 export function renderDashboard(props: DashboardProps) {
-  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
   const bcgpt = props.connectorsStatus?.bcgpt ?? null;
   const ops = props.connectorsStatus?.ops ?? null;
   const checkedAt = props.connectorsStatus?.checkedAtMs ?? null;
@@ -665,7 +664,7 @@ export function renderDashboard(props: DashboardProps) {
               Create workflow
             </button>
           </div>
-          <div class="projects-chat-host dashboard-chat-host" style="${isMobile ? "height: 60vh;" : ""}">
+          <div class="projects-chat-host dashboard-chat-host">
             ${renderChat(props.chatProps)}
           </div>
         </div>

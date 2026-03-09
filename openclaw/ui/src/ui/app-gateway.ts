@@ -13,6 +13,7 @@ import {
   refreshActiveTab,
   setLastActiveSessionKey,
 } from "./app-settings.ts";
+import { scheduleChatScroll } from "./app-scroll.ts";
 import { handleAgentEvent, resetToolStream, type AgentEventPayload } from "./app-tool-stream.ts";
 import { loadAgents } from "./controllers/agents.ts";
 import { loadAssistantIdentity } from "./controllers/assistant-identity.ts";
@@ -424,6 +425,10 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
             if (pending) {
               pendingChatDelta.delete(host);
               handleChatEvent(host as unknown as OpenClawApp, pending);
+              // Keep chat scrolled to bottom during streaming.
+              scheduleChatScroll(
+                host as unknown as Parameters<typeof scheduleChatScroll>[0],
+              );
             }
           }),
         );
@@ -464,7 +469,15 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
       }
     }
     if (state === "final") {
-      void loadChatHistory(host as unknown as OpenClawApp);
+      void loadChatHistory(host as unknown as OpenClawApp).then(() => {
+        scheduleChatScroll(
+          host as unknown as Parameters<typeof scheduleChatScroll>[0],
+        );
+      });
+    } else if (state === "error" || state === "aborted") {
+      scheduleChatScroll(
+        host as unknown as Parameters<typeof scheduleChatScroll>[0],
+      );
     }
     return;
   }

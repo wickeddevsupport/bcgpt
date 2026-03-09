@@ -62,10 +62,10 @@ export function renderConnections(props: ConnectionsProps) {
           </section>
         `
       : html`
-          <div class="page-header">
+          <div class="page-header" style="margin-bottom:0;">
             <div>
               <div class="page-title">Connections</div>
-              <div class="page-subtitle">Workflow engine credentials for this workspace.</div>
+              <div class="page-subtitle">Workflow engine credentials and connection manager.</div>
             </div>
             <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
               <span class="chip chip-ok">Flow Online</span>
@@ -76,9 +76,6 @@ export function renderConnections(props: ConnectionsProps) {
               >
                 ${props.credentialsLoading ? "Refreshing..." : "Refresh"}
               </button>
-              <button class="btn btn--primary" @click=${() => props.onAddConnection()}>
-                + Add Connection
-              </button>
             </div>
           </div>
 
@@ -86,44 +83,67 @@ export function renderConnections(props: ConnectionsProps) {
             ? html`<div class="callout danger" style="margin-bottom: 12px;">${props.credentialsError}</div>`
             : nothing}
 
-          ${props.credentialsLoading && props.credentials.length === 0
-            ? html`<div class="callout" style="text-align:center;padding:32px;">Loading connections...</div>`
-            : nothing}
+          <!-- Two-column split: left = configured connections, right = Flow connections manager iframe -->
+          <div style="display:grid; grid-template-columns:minmax(280px, 1fr) minmax(0, 1.6fr); gap:16px; height:calc(100dvh - var(--topbar-height, 64px) - 120px); min-height:400px;">
 
-          ${props.credentials.length > 0
-            ? html`
-                <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap:12px;">
-                  ${props.credentials.map(
+            <!-- Left: Configured connections list -->
+            <div style="overflow-y:auto; display:flex; flex-direction:column; gap:12px;">
+              <div style="font-weight:600; font-size:14px; padding:4px 0;">
+                Configured (${props.credentials.length})
+              </div>
+
+              ${props.credentialsLoading && props.credentials.length === 0
+                ? html`<div class="callout" style="text-align:center;padding:24px;">Loading...</div>`
+                : nothing}
+
+              ${props.credentials.length > 0
+                ? props.credentials.map(
                     (cred) => html`
-                      <div class="card" style="padding:16px;">
+                      <div class="card" style="padding:14px;">
                         <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
-                          <div>
-                            <div style="font-weight:600;">${cred.name}</div>
-                            <div class="muted" style="font-size:12px; margin-top:4px;">${credentialLabel(cred.type)}</div>
+                          <div style="min-width:0;">
+                            <div style="font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${cred.name}</div>
+                            <div class="muted" style="font-size:12px; margin-top:3px;">${credentialLabel(cred.type)}</div>
                           </div>
-                          <span class="chip chip-ok" style="font-size:11px;">Active</span>
+                          <span class="chip chip-ok" style="font-size:11px; flex-shrink:0;">Active</span>
                         </div>
-                        <div class="muted" style="font-size:11px; margin-top:8px;">
+                        <div class="muted" style="font-size:11px; margin-top:6px;">
                           ID: <code>${cred.id.slice(0, 12)}</code>
                         </div>
                       </div>
                     `,
-                  )}
+                  )
+                : !props.credentialsLoading
+                  ? html`
+                      <div class="card" style="padding:24px; text-align:center;">
+                        <div style="font-weight:600; margin-bottom:6px;">No connections yet</div>
+                        <div class="muted" style="font-size:13px;">
+                          Use the connection manager on the right to add your first connection.
+                        </div>
+                      </div>
+                    `
+                  : nothing}
+            </div>
+
+            <!-- Right: Flow connections manager iframe -->
+            <div class="card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; min-height:0;">
+              <div style="padding:12px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; flex-shrink:0;">
+                <div>
+                  <div style="font-weight:600; font-size:14px;">Connection Manager</div>
+                  <div class="muted" style="font-size:12px;">Add, edit, or test connections in Flow.</div>
                 </div>
-              `
-            : !props.credentialsLoading
-              ? html`
-                  <section class="card" style="padding:32px 24px; text-align:center;">
-                    <div style="font-weight:600; margin-bottom:8px;">No connections yet</div>
-                    <div class="muted" style="max-width:420px; margin:0 auto 16px;">
-                      Add a connection to enable workflows to interact with external services like Basecamp, Slack, or Google Sheets.
-                    </div>
-                    <button class="btn btn--primary" @click=${() => props.onAddConnection()}>
-                      + Add Connection
-                    </button>
-                  </section>
-                `
-              : nothing}
+                <button class="btn btn--sm btn--secondary" @click=${() => props.onAddConnection()}>
+                  Open in Popup
+                </button>
+              </div>
+              <iframe
+                src=${props.addConnectionUrl}
+                title="Flow Connections Manager"
+                style="flex:1 1 auto; width:100%; border:0; display:block; background:var(--bg, #0a0a0f);"
+                allow="clipboard-read; clipboard-write"
+              ></iframe>
+            </div>
+          </div>
         `}
   `;
 }
