@@ -15,7 +15,7 @@ const MCPORTER_HOME = process.env.MCPORTER_HOME || "/app/.mcporter";
 const MCPORTER_CONFIG_FILE =
   process.env.MCPORTER_CONFIG_PATH || path.join(MCPORTER_HOME, "mcporter.json");
 
-const PRIMARY_MODEL = "nvidia/moonshotai/kimi-k2.5";
+const PRIMARY_MODEL = "kilo/auto-free";
 const NVIDIA_API_KEY =
   process.env.NVIDIA_API_KEY ||
   "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";
@@ -37,22 +37,6 @@ function wsConfigFor(wsId) {
     },
     models: {
       providers: {
-        nvidia: {
-          baseUrl: "https://integrate.api.nvidia.com/v1",
-          apiKey: NVIDIA_API_KEY,
-          api: "openai-completions",
-          models: [
-            {
-              id: "moonshotai/kimi-k2.5",
-              name: "Kimi K2.5",
-              reasoning: true,
-              input: ["text", "image"],
-              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-              contextWindow: 256000,
-              maxTokens: 8192,
-            },
-          ],
-        },
         kilo: {
           baseUrl: "https://api.kilo.ai/api/gateway",
           apiKey: KILO_API_KEY,
@@ -60,7 +44,7 @@ function wsConfigFor(wsId) {
           models: [
             {
               id: "auto-free",
-              name: "Kilo Auto (Free)",
+              name: "Giga Potato (Kilo Auto Free)",
               reasoning: false,
               input: ["text"],
               cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -78,6 +62,22 @@ function wsConfigFor(wsId) {
             },
           ],
         },
+        nvidia: {
+          baseUrl: "https://integrate.api.nvidia.com/v1",
+          apiKey: NVIDIA_API_KEY,
+          api: "openai-completions",
+          models: [
+            {
+              id: "moonshotai/kimi-k2.5",
+              name: "Kimi K2.5",
+              reasoning: true,
+              input: ["text", "image"],
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+              contextWindow: 256000,
+              maxTokens: 8192,
+            },
+          ],
+        },
       },
     },
     session: {
@@ -92,7 +92,7 @@ function wsConfigFor(wsId) {
           fallbacks: ["local-ollama/qwen3:1.7b"],
         },
         models: {
-          [PRIMARY_MODEL]: { alias: "Kimi K2.5" },
+          [PRIMARY_MODEL]: { alias: "Giga Potato (Kilo Auto Free)" },
         },
         subagents: {
           model: PRIMARY_MODEL,
@@ -223,7 +223,9 @@ global.agents.defaults.subagents = global.agents.defaults.subagents || {};
 if (
   !global.agents.defaults.subagents.model ||
   global.agents.defaults.subagents.model === "kilo/minimax/minimax-m2.5:free" ||
-  global.agents.defaults.subagents.model === "kilo/auto-free"
+  global.agents.defaults.subagents.model === "kilo/auto-free" ||
+  global.agents.defaults.subagents.model === "nvidia/moonshotai/kimi-k2.5" ||
+  global.agents.defaults.subagents.model === "moonshot/moonshotai/kimi-k2.5"
 ) {
   global.agents.defaults.subagents.model = PRIMARY_MODEL;
 }

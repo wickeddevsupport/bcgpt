@@ -23,24 +23,22 @@ const DEFAULT_STARTER_AGENT_ID = "assistant";
 const DEFAULT_STARTER_AGENT_NAME = "Workspace Assistant";
 const DEFAULT_STARTER_AGENT_WORKSPACE_BASE = "~/.openclaw/workspaces";
 const DEFAULT_STARTER_OLLAMA_MODEL_ID = "qwen3:1.7b";
-const DEFAULT_SHARED_MODEL_REF = "nvidia/moonshotai/kimi-k2.5";
-const SHARED_PROVIDER_PREFER = new Set(["nvidia", "local-ollama", "ollama", "kilo"]);
-const DEFAULT_KILO_FREE_MODEL_REF = "kilo/minimax/minimax-m2.5:free";
+const DEFAULT_SHARED_MODEL_REF = "kilo/auto-free";
+const SHARED_PROVIDER_PREFER = new Set(["kilo", "local-ollama", "ollama", "nvidia"]);
+const SHARED_PROVIDER_PRIORITY = ["kilo", "local-ollama", "ollama", "nvidia"] as const;
+const DEFAULT_KILO_FREE_MODEL_REF = "kilo/auto-free";
 const DEFAULT_SHARED_THINKING_LEVEL = "low";
 const DEFAULT_SHARED_REASONING_LEVEL = "stream";
 const DEFAULT_SHARED_VERBOSE_LEVEL = "full";
-const UNSUPPORTED_STARTER_MODEL_REFS = new Set([
-  "kilo/auto-free",
-  "kilo/minimax/minimax-m2.5:free",
-]);
+const UNSUPPORTED_STARTER_MODEL_REFS = new Set<string>();
 const requireModule = createRequire(import.meta.url);
 const DEPRECATED_MODEL_REF_REPLACEMENTS: Record<string, string> = {
-  "kilo/auto-free": DEFAULT_SHARED_MODEL_REF,
+  "nvidia/moonshotai/kimi-k2.5": DEFAULT_SHARED_MODEL_REF,
+  "moonshot/moonshotai/kimi-k2.5": DEFAULT_SHARED_MODEL_REF,
   "kilo/z-ai/glm-5:free": DEFAULT_SHARED_MODEL_REF,
   "kilo/glm-5:free": DEFAULT_SHARED_MODEL_REF,
   "kilo/z-ai/glm-5": DEFAULT_SHARED_MODEL_REF,
   "kilo/glm-5": DEFAULT_SHARED_MODEL_REF,
-  "kilo/minimax/minimax-m2.5:free": DEFAULT_SHARED_MODEL_REF,
 };
 
 function readEnvValue(names: string[]): string | null {
@@ -1291,7 +1289,13 @@ function findSharedWorkspaceModelRef(cfg: unknown): string | null {
   }
 
   const entries = Object.entries(providers);
-  const preferred = entries.filter(([name]) => SHARED_PROVIDER_PREFER.has(name.trim().toLowerCase()));
+  const preferred = entries
+    .filter(([name]) => SHARED_PROVIDER_PREFER.has(name.trim().toLowerCase()))
+    .sort((a, b) => {
+      const aIndex = SHARED_PROVIDER_PRIORITY.indexOf(a[0].trim().toLowerCase() as (typeof SHARED_PROVIDER_PRIORITY)[number]);
+      const bIndex = SHARED_PROVIDER_PRIORITY.indexOf(b[0].trim().toLowerCase() as (typeof SHARED_PROVIDER_PRIORITY)[number]);
+      return (aIndex === -1 ? Number.MAX_SAFE_INTEGER : aIndex) - (bIndex === -1 ? Number.MAX_SAFE_INTEGER : bIndex);
+    });
   const flagged = entries.filter(([, value]) => {
     if (!isRecord(value)) return false;
     return value.sharedForWorkspaces === true || value.shared === true;
@@ -1314,11 +1318,11 @@ function findSharedWorkspaceModelRef(cfg: unknown): string | null {
   }
   // When KILO_API_KEY env is set, use Kilo free model as the shared default.
   // Users don't need their own API key — the server key covers free-tier models.
-  if ((process.env.NVIDIA_API_KEY ?? "").trim()) {
-    return DEFAULT_SHARED_MODEL_REF;
-  }
   if ((process.env.KILO_API_KEY ?? "").trim()) {
     return DEFAULT_SHARED_MODEL_REF;
+  }
+  if ((process.env.NVIDIA_API_KEY ?? "").trim()) {
+    return "nvidia/moonshotai/kimi-k2.5";
   }
   if (hasOllamaEnvConfigured()) {
     return `ollama/${resolveStarterOllamaModelId()}`;

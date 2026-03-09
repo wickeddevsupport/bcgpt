@@ -329,8 +329,8 @@ export class OpenClawApp extends LitElement {
   @state() pmosOpsSavingManualKey = false;
 
   // PMOS model auth quick setup (admin UX)
-  @state() pmosModelProvider: PmosModelProvider = "nvidia";
-  @state() pmosModelId = "moonshotai/kimi-k2.5";
+  @state() pmosModelProvider: PmosModelProvider = "kilo";
+  @state() pmosModelId = "auto-free";
   @state() pmosModelAlias = "";
   @state() pmosModelApiKeyDraft = "";
   @state() pmosModelApiKeyEditable = false;

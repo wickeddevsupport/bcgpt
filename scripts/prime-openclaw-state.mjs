@@ -15,14 +15,14 @@ const MCPORTER_CONFIG_PATH =
 const PRIMER_VERSION = "bcgpt-primer-2026-03-09";
 const DEFAULT_AGENT_ID = "assistant";
 const DEFAULT_AGENT_NAME = "Workspace Assistant";
-const DEFAULT_MODEL_REF = "nvidia/moonshotai/kimi-k2.5";
-const DEFAULT_MODEL_ALIAS = "Kimi K2.5";
+const DEFAULT_MODEL_REF = "kilo/auto-free";
+const DEFAULT_MODEL_ALIAS = "Giga Potato (Kilo Auto Free)";
 const DEFAULT_MODEL_FALLBACKS = ["local-ollama/qwen3:1.7b"];
 const DEPRECATED_MODEL_REFS = new Set([
-  "kilo/auto-free",
+  "nvidia/moonshotai/kimi-k2.5",
+  "moonshot/moonshotai/kimi-k2.5",
   "kilo/z-ai/glm-5:free",
   "kilo/glm-5:free",
-  "kilo/minimax/minimax-m2.5:free",
 ]);
 
 function isRecord(value) {

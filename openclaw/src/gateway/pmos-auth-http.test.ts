@@ -13,7 +13,7 @@ afterEach(async () => {
 });
 
 describe("pmos auth http starter model selection", () => {
-  it("prefers the shared tool-capable starter model over weaker free-tier options", () => {
+  it("prefers the Kilo shared starter model when both Kilo and NVIDIA are configured", () => {
     const ref = __test.findSharedWorkspaceModelRef({
       models: {
         providers: {
@@ -32,12 +32,12 @@ describe("pmos auth http starter model selection", () => {
       },
     });
 
-    expect(ref).toBe("nvidia/moonshotai/kimi-k2.5");
+    expect(ref).toBe("kilo/auto-free");
   });
 
-  it("repairs legacy starter refs to the shared Kimi default", () => {
-    expect(__test.resolveDeprecatedModelRefReplacement("kilo/auto-free")).toBe(
-      "nvidia/moonshotai/kimi-k2.5",
+  it("repairs legacy Kimi refs back to the shared Kilo default", () => {
+    expect(__test.resolveDeprecatedModelRefReplacement("nvidia/moonshotai/kimi-k2.5")).toBe(
+      "kilo/auto-free",
     );
   });
 

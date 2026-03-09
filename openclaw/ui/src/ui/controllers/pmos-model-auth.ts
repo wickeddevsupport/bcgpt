@@ -49,7 +49,7 @@ export const PMOS_MODEL_PROVIDER_OPTIONS: Array<{
   { value: "anthropic", label: "Anthropic", defaultModelId: "claude-opus-4-6" },
   { value: "zai", label: "GLM (Z.AI)", defaultModelId: "glm-4.7" },
   { value: "openrouter", label: "OpenRouter", defaultModelId: "google/gemini-2.0-flash:free" },
-  { value: "kilo", label: "Kilo (Free)", defaultModelId: "minimax/minimax-m2.5:free" },
+  { value: "kilo", label: "Kilo (Free)", defaultModelId: "auto-free" },
   { value: "moonshot", label: "Kimi (Moonshot)", defaultModelId: "moonshotai/kimi-k2.5" },
   { value: "nvidia", label: "NVIDIA NIM", defaultModelId: "moonshotai/kimi-k2.5" },
   { value: "custom", label: "Custom (enter manually)", defaultModelId: "" },
