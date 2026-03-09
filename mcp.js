@@ -192,7 +192,7 @@ const MCP_RESULT_CHUNK_SIZE = Number(process.env.MCP_RESULT_CHUNK_SIZE || 50);
 const MCP_RESULT_MAX_BYTES = Number(process.env.MCP_RESULT_MAX_BYTES || 450000);
 const MCP_TOOL_RETRIES = Math.max(1, Number(process.env.MCP_TOOL_RETRIES || 2));
 const MCP_TOOL_RETRY_DELAY_MS = Math.max(50, Number(process.env.MCP_TOOL_RETRY_DELAY_MS || 250));
-const SEARCH_QUERY_VARIANTS_MAX = Math.max(1, Number(process.env.SEARCH_QUERY_VARIANTS_MAX || 8));
+const SEARCH_QUERY_VARIANTS_MAX = Math.max(1, Number(process.env.SEARCH_QUERY_VARIANTS_MAX || 6));
 
 const RETRYABLE_CODES = new Set([
   "BASECAMP_FETCH_FAILED",
@@ -6091,8 +6091,39 @@ export async function handleMCP(reqBody, ctx) {
       };
 
       try {
-        const analysis = intelligent.analyzeQuery(query);
         const lower = query.toLowerCase();
+        const quickListProjectsIntent =
+          !args.project &&
+          (/\b(list|show|get|what)\b.*\bprojects?\b/i.test(lower) ||
+            /\bmy projects?\b/i.test(lower) ||
+            /\bprojects?\b.*\b(i have|mine|available)\b/i.test(lower));
+        if (quickListProjectsIntent && !/\b(find|search|lookup|about|summary|summarize)\b/i.test(lower)) {
+          const result = await callTool("list_projects", {});
+          return ok(id, { query, action: "list_projects", confidence: 0.98, fast_path: true, result });
+        }
+
+        const quickSearchProjectsIntent =
+          !args.project &&
+          /\b(find|search|lookup)\b.*\bprojects?\b/i.test(lower);
+        if (quickSearchProjectsIntent) {
+          const result = await callTool("search_projects", {
+            query,
+            include_archived_projects: false,
+            limit: 10,
+          });
+          return ok(id, { query, action: "search_projects", confidence: 0.92, fast_path: true, result });
+        }
+
+        const quickAssignedIntent =
+          /\bassigned to me\b/i.test(lower) || /\bmy todos\b/i.test(lower);
+        if (quickAssignedIntent) {
+          const result = await callTool("list_assigned_to_me", {
+            project: args.project || undefined,
+          });
+          return ok(id, { query, action: "list_assigned_to_me", confidence: 0.95, fast_path: true, result });
+        }
+
+        const analysis = intelligent.analyzeQuery(query);
         const searchQuery = extractSearchQuery(query) || query;
         const wantsComments = /comment(s)?/.test(lower);
         const keywordBoost = /(summarize|summary|dump|list all|everything|full|all cards|all todos|all messages)/i.test(query);

@@ -425,7 +425,8 @@ function describeBcgptSection(input: {
 
   lines.push("");
   lines.push("### Primary Entry Point: bcgpt_smart_action");
-  lines.push("- **Use `bcgpt_smart_action` first** for almost any Basecamp query — it wraps the bcgpt `smart_action` router and picks the right MCP tool automatically");
+  lines.push("- **Use `bcgpt_smart_action` for scoped Basecamp analysis** — summaries, audits, searches, people/activity questions, and project follow-ups.");
+  lines.push("- **Use `bcgpt_list_projects` for exact project lists or project picking** before deeper follow-up questions.");
   lines.push("- `bcgpt_smart_action` handles: list projects, project summary, project context (docs/cards/todos/messages),");
   lines.push("  assigned todos, due-date queries, person queries (activity/assignments/membership),");
   lines.push("  card/kanban search, campfire/team chat, upcoming schedule, daily reports, search");
@@ -445,7 +446,8 @@ function describeBcgptSection(input: {
   lines.push(`- These tools are available through the bcgpt MCP server at ${serverUrl}`);
   lines.push("- When the user asks about Basecamp (projects, todos, messages, etc.), use the appropriate tool");
   lines.push("- Always use tool results as the authoritative source — do not guess Basecamp data");
-  lines.push("- If asked 'what projects do I have', call `bcgpt_smart_action` with query='show my projects'");
+  lines.push("- If asked 'what projects do I have', call `bcgpt_list_projects` first, then summarize the list.");
+  lines.push("- Do not call Basecamp tools for greetings, fresh-session acknowledgements, or other non-Basecamp chatter.");
   lines.push("- The API key is already configured — you do NOT need to ask the user for credentials");
 
   return lines.join("\n");
@@ -657,8 +659,9 @@ function describeAssistantPolicySection(): string {
     "## Basecamp-Specific Policy",
     "- If the Basecamp Integration section shows status CONNECTED, you have access to Basecamp tools.",
     "- When the user asks ANYTHING about their Basecamp projects, todos, messages, people, or schedule: USE tools to get live data — do not guess or make up project names/IDs/content.",
-    "- PRIMARY TOOL: Use `smart_action` with a natural language query for most Basecamp requests — it routes automatically.",
-    "  - 'what projects do I have?' → smart_action({ query: 'show my projects' })",
+    "- Use `list_projects` first when the user wants the raw project list, exact project names, or needs to choose a project.",
+    "- Use `smart_action` with a natural language query for Basecamp summaries, searches, project audits, and follow-up questions.",
+    "  - 'what projects do I have?' → list_projects()",
     "  - 'show me my todos' → smart_action({ query: 'what am I assigned to?' })",
     "  - 'summarize project X' → smart_action({ query: 'summarize project X', project: 'X' })",
     "  - 'show the schedule' → smart_action({ query: 'upcoming schedule' })",
@@ -666,6 +669,7 @@ function describeAssistantPolicySection(): string {
     "- For CREATE operations, use specific tools: create_todo, create_message, create_campfire_line.",
     "- You are the user's Basecamp assistant: you know their workspace and can act on their behalf when asked.",
     "- Never reveal the raw API key value. Reference the bcgpt server URL when explaining connectivity.",
+    "- Never call Basecamp tools for greetings or startup-only responses.",
     "- If a Basecamp operation fails, report the error clearly and suggest checking the Basecamp connector configuration.",
   ].join("\n");
 }

@@ -29,7 +29,6 @@ export const peopleAction = createAction({
         ],
       },
     }),
-    project: projectDropdown(false),
     inputs: Property.DynamicProperties({
       displayName: 'Inputs',
       required: false,
@@ -100,6 +99,7 @@ export const peopleAction = createAction({
             });
             break;
           case 'list_person_activity':
+            fields['project'] = projectDropdown(false);
             fields['person_id'] = Property.Number({
               displayName: 'Person ID (preferred)',
               description: 'Use a numeric person ID to avoid ambiguous name matches.',
@@ -123,6 +123,9 @@ export const peopleAction = createAction({
               displayName: 'Limit (optional)',
               required: false,
             });
+            break;
+          case 'list_project_people':
+            fields['project'] = projectDropdown(true);
             break;
           case 'audit_person':
             fields['person'] = Property.ShortText({
@@ -200,10 +203,10 @@ export const peopleAction = createAction({
     );
 
     const op = String(context.propsValue.operation ?? '');
-    const project = context.propsValue.project
-      ? String(context.propsValue.project)
-      : null;
     const inputs = (context.propsValue.inputs ?? {}) as Record<string, unknown>;
+    const project = inputs['project']
+      ? String(inputs['project'])
+      : null;
 
     switch (op) {
       case 'list_all_people':

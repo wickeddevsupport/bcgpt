@@ -30,12 +30,11 @@ export const projectsAction = createAction({
         ],
       },
     }),
-    project: projectDropdown(false),
     inputs: Property.DynamicProperties({
       displayName: 'Inputs',
       required: false,
       auth: basecampAuth,
-      refreshers: ['operation', 'project'],
+      refreshers: ['operation'],
       props: async ({ operation }) => {
         const op = String(operation ?? '');
         const fields: DynamicPropsValue = {};
@@ -70,6 +69,7 @@ export const projectsAction = createAction({
             break;
           case 'get_project':
           case 'trash_project':
+            fields['project'] = projectDropdown(false);
             fields['project_id'] = Property.Number({
               displayName: 'Project ID (optional)',
               description:
@@ -78,6 +78,7 @@ export const projectsAction = createAction({
             });
             break;
           case 'update_project':
+            fields['project'] = projectDropdown(false);
             fields['project_id'] = Property.Number({
               displayName: 'Project ID (optional)',
               description:
@@ -98,14 +99,17 @@ export const projectsAction = createAction({
             });
             break;
           case 'get_project_structure':
+            fields['project'] = projectDropdown(true);
             break;
           case 'search_project':
+            fields['project'] = projectDropdown(true);
             fields['query'] = Property.ShortText({
               displayName: 'Search query',
               required: true,
             });
             break;
           case 'summarize_project':
+            fields['project'] = projectDropdown(true);
             fields['include_todolists'] = Property.Checkbox({
               displayName: 'Include to-dos',
               required: false,
@@ -140,8 +144,8 @@ export const projectsAction = createAction({
       context.auth as BasecampGatewayAuthConnection | undefined,
     );
     const op = String(context.propsValue.operation ?? '');
-    const projectFromDropdown = context.propsValue.project;
     const inputs = (context.propsValue.inputs ?? {}) as Record<string, unknown>;
+    const projectFromDropdown = inputs['project'];
 
     switch (op) {
       case 'list_projects':

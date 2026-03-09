@@ -567,6 +567,146 @@ type AssistantToolCall = {
   function: { name: string; arguments: string };
 };
 
+type AgentLoopToolRoundResult = {
+  name: string;
+  args: Record<string, unknown>;
+  parsed: unknown;
+  callCount: number;
+};
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function stableSerialize(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableSerialize(entry)).join(",")}]`;
+  }
+  if (isObjectRecord(value)) {
+    const keys = Object.keys(value).sort((a, b) => a.localeCompare(b));
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${stableSerialize(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function parseToolPayload(raw: string): unknown {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return raw;
+  }
+}
+
+function readToolProjectRows(payload: unknown): Array<{ name: string; status: string }> {
+  const value = isObjectRecord(payload) && isObjectRecord(payload.result) ? payload.result : payload;
+  if (isObjectRecord(value) && Array.isArray(value.projects)) {
+    return value.projects
+      .filter((project): project is Record<string, unknown> => isObjectRecord(project))
+      .map((project) => ({
+        name: typeof project.name === "string" ? project.name.trim() : "",
+        status: typeof project.status === "string" && project.status.trim() ? project.status.trim() : "active",
+      }))
+      .filter((project) => project.name);
+  }
+  return [];
+}
+
+function summarizeProjectRows(projects: Array<{ name: string; status: string }>): string | null {
+  if (!projects.length) {
+    return "No Basecamp projects were found.";
+  }
+  const top = projects.slice(0, 5).map((project) => `${project.name} (${project.status})`);
+  return `Basecamp projects (${projects.length}): ${top.join(", ")}${projects.length > top.length ? ", ..." : ""}.`;
+}
+
+function summarizeSmartActionPayload(payload: unknown): string | null {
+  if (!isObjectRecord(payload)) {
+    return null;
+  }
+  const result = isObjectRecord(payload.result) ? payload.result : payload;
+  const directSummary =
+    (typeof payload.summary === "string" && payload.summary.trim()) ||
+    (typeof result.summary === "string" && result.summary.trim()) ||
+    (typeof result.note === "string" && result.note.trim());
+  if (directSummary) {
+    return directSummary;
+  }
+
+  const projects = readToolProjectRows(result);
+  if (projects.length) {
+    return summarizeProjectRows(projects);
+  }
+
+  const project = isObjectRecord(result.project) ? result.project : null;
+  const projectName = typeof project?.name === "string" ? project.name.trim() : "";
+  const action = typeof result.action === "string" ? result.action.trim() : "";
+  const todoSummary = isObjectRecord(result.result) && isObjectRecord(result.result.todo_summary)
+    ? result.result.todo_summary
+    : isObjectRecord(result.todo_summary)
+      ? result.todo_summary
+      : null;
+  const totalOpen = typeof todoSummary?.total_open === "number" ? todoSummary.total_open : null;
+  if (projectName && totalOpen != null) {
+    return `${projectName}: ${totalOpen} open Basecamp tasks${action ? ` via ${action}` : ""}.`;
+  }
+  if (projectName && action) {
+    return `${projectName}: Basecamp ${action.replace(/_/g, " ")} completed.`;
+  }
+  if (action) {
+    return `Basecamp ${action.replace(/_/g, " ")} completed.`;
+  }
+  return null;
+}
+
+export function summarizeAgentLoopToolResult(toolName: string, payload: unknown): string | null {
+  if (isObjectRecord(payload) && typeof payload.error === "string" && payload.error.trim()) {
+    return null;
+  }
+  switch (toolName) {
+    case "bcgpt_list_projects":
+      return summarizeProjectRows(readToolProjectRows(payload));
+    case "bcgpt_smart_action":
+      return summarizeSmartActionPayload(payload);
+    default:
+      return null;
+  }
+}
+
+function buildAgentLoopEarlyExit(
+  toolResults: AgentLoopToolRoundResult[],
+): string | null {
+  const successful = toolResults.filter((result) => {
+    const parsed = result.parsed;
+    return !(isObjectRecord(parsed) && typeof parsed.error === "string" && parsed.error.trim());
+  });
+  if (!successful.length) {
+    return null;
+  }
+
+  const basecampResults = successful.filter(
+    (result) => result.name === "bcgpt_smart_action" || result.name === "bcgpt_list_projects",
+  );
+  if (!basecampResults.length || basecampResults.length !== successful.length) {
+    return null;
+  }
+
+  const repeated = basecampResults.find((result) => result.callCount > 1);
+  if (repeated) {
+    return (
+      summarizeAgentLoopToolResult(repeated.name, repeated.parsed) ??
+      "Basecamp data was retrieved successfully."
+    );
+  }
+
+  for (const result of basecampResults) {
+    const summary = summarizeAgentLoopToolResult(result.name, result.parsed);
+    if (summary) {
+      return summary;
+    }
+  }
+  return "Basecamp data was retrieved successfully.";
+}
+
 /**
  * Agentic model call with tool support (OpenAI-compatible providers).
  * Loops up to maxIterations times, executing tool calls and feeding results back.
@@ -622,6 +762,8 @@ export async function callWorkspaceModelAgentLoop(
 
     let providerUsed = provider;
     let succeeded = false;
+
+    const toolCallCounts = new Map<string, number>();
 
     try {
       for (let iteration = 0; iteration < maxIterations; iteration++) {
@@ -685,22 +827,41 @@ export async function callWorkspaceModelAgentLoop(
           tool_calls: toolCalls,
         });
 
+        const roundResults: AgentLoopToolRoundResult[] = [];
+
         // Execute each tool and append results
         for (const tc of toolCalls) {
           let toolResult: string;
+          let parsedResult: unknown = null;
+          let parsedArgs: Record<string, unknown> = {};
           try {
-            const args = JSON.parse(tc.function.arguments ?? "{}") as Record<string, unknown>;
-            toolResult = await executeTool(tc.function.name, args);
+            parsedArgs = JSON.parse(tc.function.arguments ?? "{}") as Record<string, unknown>;
+            toolResult = await executeTool(tc.function.name, parsedArgs);
           } catch (err) {
             toolResult = JSON.stringify({
               error: `Tool execution failed: ${err instanceof Error ? err.message : String(err)}`,
             });
           }
+          parsedResult = parseToolPayload(toolResult);
+          const signature = `${tc.function.name}:${stableSerialize(parsedArgs)}`;
+          const callCount = (toolCallCounts.get(signature) ?? 0) + 1;
+          toolCallCounts.set(signature, callCount);
+          roundResults.push({
+            name: tc.function.name,
+            args: parsedArgs,
+            parsed: parsedResult,
+            callCount,
+          });
           agentMessages.push({
             role: "tool",
             tool_call_id: tc.id,
             content: toolResult,
           });
+        }
+
+        const earlyExit = buildAgentLoopEarlyExit(roundResults);
+        if (earlyExit) {
+          return { ok: true, text: earlyExit, providerUsed };
         }
         // Loop continues with tool results injected
       }

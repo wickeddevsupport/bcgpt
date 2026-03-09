@@ -38,7 +38,6 @@ export const reportsAction = createAction({
         ],
       },
     }),
-    project: projectDropdown(false),
     inputs: Property.DynamicProperties({
       displayName: 'Inputs',
       required: false,
@@ -68,23 +67,29 @@ export const reportsAction = createAction({
             });
             break;
           case 'search_todos':
+            fields['project'] = projectDropdown(false);
             fields['query'] = Property.ShortText({
               displayName: 'Query',
               required: true,
             });
             break;
           case 'assignment_report':
+            fields['project'] = projectDropdown(true);
             fields['max_todos'] = Property.Number({
               displayName: 'Max to-dos (optional)',
               required: false,
             });
             break;
           case 'get_person_assignments':
+            fields['project'] = projectDropdown(true);
             fields['person'] = Property.ShortText({
               displayName: 'Person',
               description: 'Name, email, or person ID.',
               required: true,
             });
+            break;
+          case 'list_assigned_to_me':
+            fields['project'] = projectDropdown(false);
             break;
           case 'list_timesheet_report':
             fields['start_date'] = Property.ShortText({
@@ -107,10 +112,14 @@ export const reportsAction = createAction({
             });
             break;
           case 'list_recording_timesheet':
+            fields['project'] = projectDropdown(true);
             fields['recording_id'] = Property.Number({
               displayName: 'Recording ID',
               required: true,
             });
+            break;
+          case 'report_todos_assigned':
+            fields['project'] = projectDropdown(false);
             break;
           case 'report_todos_assigned_person':
             fields['person'] = Property.ShortText({
@@ -138,6 +147,7 @@ export const reportsAction = createAction({
             break;
           case 'project_timeline':
           case 'project_timesheet':
+            fields['project'] = projectDropdown(true);
             fields['query'] = Property.ShortText({
               displayName: 'Query (optional)',
               required: false,
@@ -154,6 +164,7 @@ export const reportsAction = createAction({
             });
             break;
           case 'recording_timesheet':
+            fields['project'] = projectDropdown(true);
             fields['recording_id'] = Property.Number({
               displayName: 'Recording ID',
               required: true,
@@ -177,10 +188,10 @@ export const reportsAction = createAction({
     );
 
     const op = String(context.propsValue.operation ?? '');
-    const project = context.propsValue.project
-      ? String(context.propsValue.project)
-      : null;
     const inputs = (context.propsValue.inputs ?? {}) as Record<string, unknown>;
+    const project = inputs['project']
+      ? String(inputs['project'])
+      : null;
 
     switch (op) {
       case 'daily_report':

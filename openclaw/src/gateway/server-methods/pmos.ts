@@ -911,6 +911,83 @@ function parseProjectList(result: unknown): Array<{ id: string; name: string; st
   return out;
 }
 
+function summarizeBasecampProjectList(
+  projects: Array<{ id: string; name: string; status: string; appUrl: string | null }>,
+): string {
+  if (!projects.length) {
+    return "No Basecamp projects were found for this workspace.";
+  }
+  const top = projects.slice(0, 5).map((project) => `${project.name} (${project.status})`);
+  return `Basecamp projects (${projects.length}): ${top.join(", ")}${projects.length > top.length ? ", ..." : ""}.`;
+}
+
+function summarizeBcgptSmartActionResult(
+  query: string,
+  projectHint: string | null,
+  result: unknown,
+): string {
+  if (!isJsonObject(result)) {
+    return `Completed Basecamp request: ${query}`;
+  }
+
+  const action = stringOrNull(result.action);
+  const summary = stringOrNull(result.summary) ?? stringOrNull(result.note);
+  if (summary) {
+    return summary;
+  }
+
+  const projects = parseProjectList(result);
+  if (projects.length) {
+    return summarizeBasecampProjectList(projects);
+  }
+
+  const nestedResult = isJsonObject(result.result) ? result.result : null;
+  if (nestedResult) {
+    const nestedSummary =
+      stringOrNull(nestedResult.summary) ??
+      stringOrNull(nestedResult.note);
+    if (nestedSummary) {
+      return nestedSummary;
+    }
+    const nestedProjects = parseProjectList(nestedResult);
+    if (nestedProjects.length) {
+      return summarizeBasecampProjectList(nestedProjects);
+    }
+    const todoSummary = isJsonObject(nestedResult.todo_summary) ? nestedResult.todo_summary : null;
+    const totalOpen = typeof todoSummary?.total_open === "number" ? todoSummary.total_open : null;
+    const projectName =
+      stringOrNull(isJsonObject(result.project) ? result.project.name : null) ??
+      stringOrNull(projectHint);
+    if (projectName && totalOpen != null) {
+      return `${projectName}: ${totalOpen} open Basecamp tasks${action ? ` via ${action.replace(/_/g, " ")}` : ""}.`;
+    }
+  }
+
+  const projectName =
+    stringOrNull(isJsonObject(result.project) ? result.project.name : null) ??
+    stringOrNull(projectHint);
+  if (projectName && action) {
+    return `${projectName}: Basecamp ${action.replace(/_/g, " ")} completed.`;
+  }
+  if (action) {
+    return `Basecamp ${action.replace(/_/g, " ")} completed.`;
+  }
+  return `Completed Basecamp request: ${query}`;
+}
+
+function isGreetingOnlyMessage(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  if (normalized.length > 80) {
+    return false;
+  }
+  return /^(hi|hello|hey|yo|sup|good (morning|afternoon|evening)|start|new session|test|ping|hola|namaste)([!. ,].*)?$/i.test(
+    normalized,
+  );
+}
+
 function parseTodoItems(
   result: unknown,
   key: string,
@@ -2702,21 +2779,29 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const latestUserMessage = [...messages]
         .reverse()
         .find((message) => message.role === "user")?.content ?? "";
+      const disableBasecampTools = isGreetingOnlyMessage(latestUserMessage);
       const shouldForceFigmaContext =
         /\bfigma\b|\bdesign\b|\bauto[\s-]?layout\b|\bcomponent(?:s)?\b|\bstyle(?:s)?\b|\bfont(?:s)?\b|\bregression\b|\baudit\b/i.test(
           latestUserMessage,
         );
+      const agentTools = disableBasecampTools
+        ? tools.filter(
+            (tool) =>
+              tool.type !== "function" ||
+              (tool.function.name !== "bcgpt_smart_action" && tool.function.name !== "bcgpt_list_projects"),
+          )
+        : tools;
 
       pushProgress("Thinking...");
       const result = await callWorkspaceModelAgentLoop(
         workspaceId,
         systemPrompt,
         messages,
-        tools,
+        agentTools,
         executeTool,
         {
           maxTokens: 2048,
-          maxIterations: 6,
+          maxIterations: 4,
           initialToolChoice: shouldForceFigmaContext
             ? { type: "function", function: { name: "figma_get_context" } }
             : undefined,
@@ -3101,7 +3186,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "",
         "### Be proactive, not lazy",
         "- Don't ask the user for information you can discover with a tool call.",
-        "- For Basecamp/project-management requests, call `bcgpt_smart_action` first unless the user specifically asked for a raw project list.",
+        "- For Basecamp/project-management requests, use `bcgpt_list_projects` for exact project lists or project picking, and use `bcgpt_smart_action` for scoped summaries, searches, audits, or follow-up questions.",
+        "- Never call Basecamp tools for greetings, session-start acknowledgements, or other non-Basecamp chit-chat.",
         "- Always call `pmos_ops_list_credentials` before building any workflow so you know what's actually connected.",
         "- If the user asks about a project or person, call the appropriate tool to find the answer rather than guessing.",
         "",
@@ -3122,7 +3208,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "",
         "### Project management questions",
         "- Answer from workspace context when available.",
-        "- For live Basecamp data, prefer `bcgpt_smart_action`; use `bcgpt_list_projects` when you need the exact project list.",
+        "- For live Basecamp data, use `bcgpt_list_projects` when the user wants the raw list of projects, and use `bcgpt_smart_action` when the user wants analysis, summaries, or searches.",
         "- Summarize results meaningfully: 'There are 7 open todos in Project X â€” 3 are overdue. The most recent message was from Alice yesterday about the deploy.'",
         "",
         "### Figma questions",
@@ -3168,6 +3254,10 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               additionalProperties: false,
               properties: {
                 query: { type: "string", description: "Natural-language Basecamp request" },
+                project: {
+                  type: "string",
+                  description: "Optional project name to scope the Basecamp request.",
+                },
               },
             },
           },
@@ -3441,6 +3531,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           switch (normalizedToolName) {
           case "bcgpt_smart_action": {
             const query = String(args.query ?? "").trim();
+            const project = String(args.project ?? "").trim() || null;
             if (!query) {
               const value = JSON.stringify({ error: "query is required" });
               finishTool({ error: "query is required" });
@@ -3461,7 +3552,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               bcgptUrl,
               apiKey,
               toolName: "smart_action",
-              toolArgs: { query },
+              toolArgs: project ? { query, project } : { query },
             });
             if (!result.ok) {
               const payload = { error: result.error ?? "smart_action failed" };
@@ -3471,6 +3562,9 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             const payload = {
               tool: "smart_action",
               query,
+              project,
+              summary: summarizeBcgptSmartActionResult(query, project, result.result),
+              sufficient: true,
               result: result.result,
             };
             finishTool(payload);
@@ -3500,6 +3594,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             }
             const payload = {
               projects: parseProjectList(result.result),
+              summary: summarizeBasecampProjectList(parseProjectList(result.result)),
+              sufficient: true,
             };
             finishTool(payload);
             return JSON.stringify(payload);
@@ -3800,20 +3896,28 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const latestUserMessage = [...messages]
         .reverse()
         .find((message) => message.role === "user")?.content ?? "";
+      const disableBasecampTools = isGreetingOnlyMessage(latestUserMessage);
       const shouldForceFigmaContext =
         /\bfigma\b|\bdesign\b|\bauto[\s-]?layout\b|\bcomponent(?:s)?\b|\bstyle(?:s)?\b|\bfont(?:s)?\b|\bregression\b|\baudit\b/i.test(
           latestUserMessage,
         );
+      const agentTools = disableBasecampTools
+        ? tools.filter(
+            (tool) =>
+              tool.type !== "function" ||
+              (tool.function.name !== "bcgpt_smart_action" && tool.function.name !== "bcgpt_list_projects"),
+          )
+        : tools;
 
       const result = await callWorkspaceModelAgentLoop(
         workspaceId,
         systemPrompt,
         messages,
-        tools,
+        agentTools,
         executeTool,
         {
           maxTokens: 2048,
-          maxIterations: 6,
+          maxIterations: 4,
           initialToolChoice: shouldForceFigmaContext
             ? { type: "function", function: { name: "figma_get_context" } }
             : undefined,
