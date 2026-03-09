@@ -15,7 +15,19 @@ import {
   revokePmosSessionByToken,
   signupPmosUser,
 } from "./pmos-auth.js";
+import { resolveThinkingDefault } from "../agents/model-selection.js";
+import { loadConfig } from "../config/config.js";
+import { stripEnvelopeFromMessages } from "./chat-sanitize.js";
 import { readJsonBody } from "./hooks.js";
+import { getMaxChatHistoryMessagesBytes } from "./server-constants.js";
+import {
+  capArrayByJsonBytes,
+  listAgentsForGateway,
+  loadSessionEntryForConfig,
+  readSessionMessages,
+  resolveGatewaySessionStoreTarget,
+  resolveSessionModelRef,
+} from "./session-utils.js";
 import { resolveStateDir } from "../config/paths.js";
 
 const MAX_BODY_BYTES = 32 * 1024;
@@ -497,6 +509,14 @@ function resolveAuthRoute(pathname: string, basePath: string): string | null {
     }
   }
   return null;
+}
+
+function resolveChatHistoryRoute(pathname: string, basePath: string): boolean {
+  const normalizedBase = normalizeBasePath(basePath);
+  if (pathname === "/api/pmos/chat/history") {
+    return true;
+  }
+  return Boolean(normalizedBase && pathname === `${normalizedBase}/api/pmos/chat/history`);
 }
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -1680,6 +1700,82 @@ export async function handlePmosAuthHttpRequest(params: {
 }): Promise<boolean> {
   const { req, res, controlUiBasePath } = params;
   const url = new URL(req.url ?? "/", "http://localhost");
+  if (resolveChatHistoryRoute(url.pathname, controlUiBasePath)) {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { ok: false, error: "Method Not Allowed" });
+      return true;
+    }
+    const session = await resolvePmosSessionFromRequest(req);
+    if (!session.ok) {
+      sendJson(res, 401, { ok: false, error: "Authentication required." });
+      return true;
+    }
+    const sessionKey = String(url.searchParams.get("sessionKey") ?? "").trim();
+    if (!sessionKey) {
+      sendJson(res, 400, { ok: false, error: "sessionKey is required." });
+      return true;
+    }
+    let cfg = loadConfig();
+    if (session.user.role !== "super_admin" && session.user.workspaceId) {
+      try {
+        const { loadEffectiveWorkspaceConfig } = await import("./workspace-config.js");
+        const effectiveCfg = await loadEffectiveWorkspaceConfig(session.user.workspaceId);
+        if (effectiveCfg && typeof effectiveCfg === "object") {
+          cfg = effectiveCfg as typeof cfg;
+        }
+      } catch {
+        // Fall back to the global config if the workspace config cannot be loaded.
+      }
+    }
+    if (session.user.role !== "super_admin") {
+      const target = resolveGatewaySessionStoreTarget({ cfg, key: sessionKey });
+      const { agents } = listAgentsForGateway(cfg);
+      const workspaceAgentIds = new Set(
+        agents
+          .filter((agent) => agent.workspaceId === session.user.workspaceId)
+          .map((agent) => agent.id),
+      );
+      if (!workspaceAgentIds.has(target.agentId)) {
+        sendJson(res, 404, { ok: false, error: `session "${sessionKey}" not found` });
+        return true;
+      }
+    }
+    const parsedLimit = Number(url.searchParams.get("limit") ?? "200");
+    const requested = Number.isFinite(parsedLimit) ? parsedLimit : 200;
+    const hardMax = 1000;
+    const limit = Math.min(hardMax, Math.max(1, requested));
+    const { storePath, entry } = loadSessionEntryForConfig(cfg, sessionKey);
+    const sessionId = entry?.sessionId;
+    const rawMessages =
+      sessionId && storePath ? readSessionMessages(sessionId, storePath, entry?.sessionFile) : [];
+    const sliced = rawMessages.length > limit ? rawMessages.slice(-limit) : rawMessages;
+    const sanitized = stripEnvelopeFromMessages(sliced);
+    const capped = capArrayByJsonBytes(sanitized, getMaxChatHistoryMessagesBytes()).items;
+    let thinkingLevel = entry?.thinkingLevel;
+    if (!thinkingLevel) {
+      const configured = cfg.agents?.defaults?.thinkingDefault;
+      if (configured) {
+        thinkingLevel = configured;
+      } else {
+        const { provider, model } = resolveSessionModelRef(cfg, entry, "assistant");
+        thinkingLevel = resolveThinkingDefault({
+          cfg,
+          provider,
+          model,
+          catalog: [],
+        });
+      }
+    }
+    sendJson(res, 200, {
+      ok: true,
+      sessionKey,
+      sessionId,
+      messages: capped,
+      thinkingLevel,
+      verboseLevel: entry?.verboseLevel ?? cfg.agents?.defaults?.verboseDefault ?? null,
+    });
+    return true;
+  }
   const route = resolveAuthRoute(url.pathname, controlUiBasePath);
   if (!route) {
     return false;

@@ -325,11 +325,12 @@ export function connectGateway(host: GatewayHost) {
       host.lastError = null;
       host.hello = hello;
       applySnapshot(host, hello);
-      // Reset orphaned chat run state from before disconnect.
-      // Any in-flight run's final event was lost during the disconnect window.
-      host.chatRunId = null;
-      (host as unknown as { chatStream: string | null }).chatStream = null;
-      (host as unknown as { chatStreamStartedAt: number | null }).chatStreamStartedAt = null;
+      const hasActiveRun = Boolean(host.chatRunId);
+      if (!hasActiveRun) {
+        host.chatRunId = null;
+        (host as unknown as { chatStream: string | null }).chatStream = null;
+        (host as unknown as { chatStreamStartedAt: number | null }).chatStreamStartedAt = null;
+      }
       // Clear gateway restart flag now that we've reconnected successfully.
       (host as unknown as { pmosGatewayRestarting: boolean }).pmosGatewayRestarting = false;
       (host as unknown as { pmosGatewayRestartError: string | null }).pmosGatewayRestartError = null;
@@ -351,6 +352,9 @@ export function connectGateway(host: GatewayHost) {
         void loadAssistantIdentity(app);
       }
       void refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0]);
+      if (hasActiveRun) {
+        void loadChatHistory(app).catch(() => undefined);
+      }
       // Auto-refresh connector status on connect so opsProvisioned is populated
       // immediately (no manual "Provision" click required).
       void app.handlePmosRefreshConnectors();

@@ -23,6 +23,15 @@ export type ChatState = {
   pmosWorkspaceId?: string;
 };
 
+function normalizeBasePath(value: string | null | undefined): string {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed || trimmed === "/") {
+    return "";
+  }
+  const withLeading = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  return withLeading.endsWith("/") ? withLeading.slice(0, -1) : withLeading;
+}
+
 function messageTimestamp(message: unknown): number {
   if (!message || typeof message !== "object") {
     return 0;
@@ -201,21 +210,54 @@ async function resolveChatReadinessError(state: ChatState): Promise<string | nul
   }
 }
 
-export async function loadChatHistory(state: ChatState) {
-  if (!state.client || !state.connected) {
-    return;
+async function loadChatHistoryViaHttp(state: ChatState): Promise<{
+  messages?: unknown[];
+  thinkingLevel?: string | null;
+}> {
+  const globalBasePath =
+    typeof window !== "undefined" &&
+    typeof (window as Window & { __OPENCLAW_CONTROL_UI_BASE_PATH__?: string })
+      .__OPENCLAW_CONTROL_UI_BASE_PATH__ === "string"
+      ? (window as Window & { __OPENCLAW_CONTROL_UI_BASE_PATH__?: string })
+          .__OPENCLAW_CONTROL_UI_BASE_PATH__
+      : "";
+  const basePath = normalizeBasePath(globalBasePath);
+  const url = new URL(
+    `${basePath}/api/pmos/chat/history`,
+    typeof window !== "undefined" ? window.location.origin : "http://localhost",
+  );
+  url.searchParams.set("sessionKey", state.sessionKey);
+  url.searchParams.set("limit", "200");
+  const res = await fetch(url.toString(), {
+    credentials: "include",
+    headers: {
+      accept: "application/json",
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`chat history http failed (${res.status})`);
   }
+  return (await res.json()) as {
+    messages?: unknown[];
+    thinkingLevel?: string | null;
+  };
+}
+
+export async function loadChatHistory(state: ChatState) {
   const previousMessages = Array.isArray(state.chatMessages) ? state.chatMessages : [];
   state.chatLoading = true;
   state.lastError = null;
   try {
-    const res = await state.client.request<{ messages?: Array<unknown>; thinkingLevel?: string }>(
-      "chat.history",
-      {
-        sessionKey: state.sessionKey,
-        limit: 200,
-      },
-    );
+    const res =
+      state.client && state.connected
+        ? await state.client.request<{ messages?: Array<unknown>; thinkingLevel?: string }>(
+            "chat.history",
+            {
+              sessionKey: state.sessionKey,
+              limit: 200,
+            },
+          )
+        : await loadChatHistoryViaHttp(state);
     const historyMessages = Array.isArray(res.messages) ? res.messages : [];
     const recovered = reconcileRunWithHistory(state, historyMessages);
     state.chatMessages = mergePendingMessages({
@@ -225,6 +267,23 @@ export async function loadChatHistory(state: ChatState) {
     });
     state.chatThinkingLevel = res.thinkingLevel ?? null;
   } catch (err) {
+    if (state.client && state.connected) {
+      try {
+        const fallback = await loadChatHistoryViaHttp(state);
+        const historyMessages = Array.isArray(fallback.messages) ? fallback.messages : [];
+        const recovered = reconcileRunWithHistory(state, historyMessages);
+        state.chatMessages = mergePendingMessages({
+          history: historyMessages,
+          previous: previousMessages,
+          activeRunId: recovered ? null : state.chatRunId,
+        });
+        state.chatThinkingLevel = fallback.thinkingLevel ?? null;
+        state.lastError = null;
+        return;
+      } catch {
+        // Fall through to the original gateway error.
+      }
+    }
     state.lastError = String(err);
   } finally {
     state.chatLoading = false;
