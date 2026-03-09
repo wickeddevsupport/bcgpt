@@ -110,10 +110,6 @@ function startChatRecoveryPoll(host: ChatHost, runId: string) {
       clearChatRecoveryPoll(host);
       return;
     }
-    if (!host.connected) {
-      host.chatHistoryRecoveryTimer = window.setTimeout(tick, 2000);
-      return;
-    }
     await loadChatHistory(host as unknown as OpenClawApp);
     if (host.chatRunId !== runId) {
       clearChatRecoveryPoll(host);
