@@ -2586,13 +2586,21 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             const figmaContext = await readWorkspaceFigmaContext(workspaceId);
             return JSON.stringify({
               ...figmaContext,
-              note: "Use selectedFileId with web_fetch to call Figma REST API.",
+              note: "Use figma_mcp_list_tools next, then figma_mcp_call for live Figma operations.",
             });
           }
           default:
             return JSON.stringify({ error: `Unknown tool: ${toolName}` });
         }
       };
+
+      const latestUserMessage = [...messages]
+        .reverse()
+        .find((message) => message.role === "user")?.content ?? "";
+      const shouldForceFigmaContext =
+        /\bfigma\b|\bdesign\b|\bauto[\s-]?layout\b|\bcomponent(?:s)?\b|\bstyle(?:s)?\b|\bfont(?:s)?\b|\bregression\b|\baudit\b/i.test(
+          latestUserMessage,
+        );
 
       pushProgress("Thinking...");
       const result = await callWorkspaceModelAgentLoop(
@@ -2601,7 +2609,13 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         messages,
         tools,
         executeTool,
-        { maxTokens: 2048, maxIterations: 6 },
+        {
+          maxTokens: 2048,
+          maxIterations: 6,
+          initialToolChoice: shouldForceFigmaContext
+            ? { type: "function", function: { name: "figma_get_context" } }
+            : undefined,
+        },
       );
 
       if (!result.ok) {
@@ -2915,6 +2929,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "### Figma questions",
         "- Start with `figma_get_context`.",
         "- If the user needs live Figma MCP actions, call `figma_mcp_list_tools` first, then `figma_mcp_call`.",
+        "- Do NOT use `web_fetch` for private Figma API access in workspace chat; it cannot inject the workspace PAT.",
         "",
         "## Available Tools",
         "**Basecamp MCP Tools:**",
@@ -3325,7 +3340,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             const figmaContext = await readWorkspaceFigmaContext(workspaceId);
             return JSON.stringify({
               ...figmaContext,
-              note: "Use selectedFileId with web_fetch to call Figma REST API.",
+              note: "Use figma_mcp_list_tools next, then figma_mcp_call for live Figma operations.",
             });
           }
           case "figma_mcp_list_tools": {
@@ -3387,13 +3402,27 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         }
       };
 
+      const latestUserMessage = [...messages]
+        .reverse()
+        .find((message) => message.role === "user")?.content ?? "";
+      const shouldForceFigmaContext =
+        /\bfigma\b|\bdesign\b|\bauto[\s-]?layout\b|\bcomponent(?:s)?\b|\bstyle(?:s)?\b|\bfont(?:s)?\b|\bregression\b|\baudit\b/i.test(
+          latestUserMessage,
+        );
+
       const result = await callWorkspaceModelAgentLoop(
         workspaceId,
         systemPrompt,
         messages,
         tools,
         executeTool,
-        { maxTokens: 2048, maxIterations: 6 },
+        {
+          maxTokens: 2048,
+          maxIterations: 6,
+          initialToolChoice: shouldForceFigmaContext
+            ? { type: "function", function: { name: "figma_get_context" } }
+            : undefined,
+        },
       );
 
       if (!result.ok) {

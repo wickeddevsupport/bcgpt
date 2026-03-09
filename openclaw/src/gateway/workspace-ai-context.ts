@@ -333,7 +333,7 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
           "### Figma AI Capabilities",
           "- Use `figma_get_context` to confirm the active file, connection, and team before any analysis.",
           "- If MCP is configured, use `figma_mcp_list_tools` first to inspect the live Figma MCP tool schema, then call `figma_mcp_call` for specific file/design operations.",
-          "- Use `web_fetch` to call the Figma REST API: GET https://api.figma.com/v1/files/{fileId} with Authorization: Bearer {token}.",
+          "- Do not use `web_fetch` for private Figma API calls in workspace chat; it cannot send the workspace PAT. Use `figma_mcp_list_tools` and `figma_mcp_call` instead.",
           "  If FM reports a PAT but PMOS does not have the raw token yet, explain that the PAT exists upstream but is not being passed through connector sync.",
           "  If MCP auth or a Figma Personal Access Token is truly missing, tell the user to complete Figma auth in the Figma panel/Integrations before retrying.",
           "- Use `web_search` for Figma design-system best practices, component naming conventions, or token standards.",

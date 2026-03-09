@@ -578,7 +578,11 @@ export async function callWorkspaceModelAgentLoop(
   userMessages: Array<{ role: "user" | "assistant"; content: string }>,
   tools: ChatToolDefinition[],
   executeTool: (name: string, args: Record<string, unknown>) => Promise<string>,
-  opts: { maxTokens?: number; maxIterations?: number } = {},
+  opts: {
+    maxTokens?: number;
+    maxIterations?: number;
+    initialToolChoice?: "auto" | { type: "function"; function: { name: string } };
+  } = {},
 ): Promise<{ ok: boolean; text?: string; error?: string; providerUsed?: string }> {
   const wsId = String(workspaceId ?? "").trim();
   const cfg = wsId
@@ -627,7 +631,10 @@ export async function callWorkspaceModelAgentLoop(
           max_tokens: maxTokens,
           temperature: 0.35,
           tools,
-          tool_choice: "auto",
+          tool_choice:
+            iteration === 0 && opts.initialToolChoice
+              ? opts.initialToolChoice
+              : "auto",
         };
 
         let res: Response;
