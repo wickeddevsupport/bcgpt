@@ -812,7 +812,16 @@ async function runWorkspaceFigmaRestAudit(
   }
 
   const focus = stringOrNull(args.focus);
-  const fileResponse = await fetchJson(`https://api.figma.com/v1/files/${encodeURIComponent(fileKey)}?branch_data=true`, {
+  const requestedDepth = Number(args.depth);
+  const depth =
+    Number.isFinite(requestedDepth) && requestedDepth >= 1 && requestedDepth <= 8
+      ? Math.trunc(requestedDepth)
+      : 4;
+  const query = new URLSearchParams({
+    branch_data: "true",
+    depth: String(depth),
+  });
+  const fileResponse = await fetchJson(`https://api.figma.com/v1/files/${encodeURIComponent(fileKey)}?${query.toString()}`, {
     method: "GET",
     timeoutMs: 25_000,
     headers: {
@@ -834,6 +843,7 @@ async function runWorkspaceFigmaRestAudit(
 
   return {
     ...buildFigmaRestAuditReport(fileResponse.json, { focus, fileKey }),
+    requestDepth: depth,
     selectedFileId: figmaContext.selectedFileId,
     selectedFileName: figmaContext.selectedFileName,
     selectedFileUrl: figmaContext.selectedFileUrl,
@@ -3252,6 +3262,10 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                 focus: {
                   type: "string",
                   description: "Optional audit focus: general, layout, autolayout, components, styles, fonts, or regression.",
+                },
+                depth: {
+                  type: "number",
+                  description: "Optional file traversal depth for the REST audit. Defaults to 4 to keep large files manageable.",
                 },
               },
               additionalProperties: false,
