@@ -703,14 +703,12 @@ export const chatHandlers: GatewayRequestHandlers = {
               }
             }
 
-            if (!liveStreamed) {
-              broadcastChatFinal({
-                context,
-                runId: clientRunId,
-                sessionKey: rawSessionKey,
-                message,
-              });
-            }
+            broadcastChatFinal({
+              context,
+              runId: clientRunId,
+              sessionKey: rawSessionKey,
+              message,
+            });
             context.dedupe.set(`chat:${clientRunId}`, {
               ts: Date.now(),
               ok: true,
