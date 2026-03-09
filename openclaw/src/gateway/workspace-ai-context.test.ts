@@ -95,6 +95,11 @@ describe("workspace-ai-context", () => {
     await writeWorkspaceConnectors(workspaceId, {
       figma: {
         url: "https://fm.wickedlab.io",
+        auth: {
+          hasPersonalAccessToken: true,
+          source: "fm-session",
+          mcpServerUrl: "https://mcp.figma.com/mcp",
+        },
         identity: {
           connected: true,
           handle: "designer-1",
@@ -117,5 +122,8 @@ describe("workspace-ai-context", () => {
     expect(refreshed.markdown).toContain("figma active team id: team-abc");
     expect(refreshed.markdown).toContain("figma selected file id: FILE123");
     expect(refreshed.markdown).toContain("figma selected file url: https://www.figma.com/file/FILE123/Landing-Page-Revamp");
+    expect(refreshed.markdown).toContain("figma personal access token present: yes");
+    expect(refreshed.markdown).toContain("figma PAT handoff to PMOS: validated in FM, but raw token not passed into PMOS");
+    expect(refreshed.markdown).toContain("figma MCP server URL: https://mcp.figma.com/mcp");
   });
 });

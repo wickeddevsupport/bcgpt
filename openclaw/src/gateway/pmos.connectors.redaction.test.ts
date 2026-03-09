@@ -22,6 +22,16 @@ describe("pmos connector redaction", () => {
       bcgpt: {
         apiKey: "bc-key",
       },
+      figma: {
+        auth: {
+          personalAccessToken: "figd_pat_super_secret",
+          source: "fm-session",
+          mcpServerUrl: "https://mcp.figma.com/mcp",
+        },
+        identity: {
+          connected: true,
+        },
+      },
     }) as Record<string, any>;
 
     expect(redacted.ops).toMatchObject({
@@ -46,5 +56,18 @@ describe("pmos connector redaction", () => {
     expect(redacted.bcgpt).toMatchObject({
       apiKey: "bc-key",
     });
+
+    expect(redacted.figma).toMatchObject({
+      auth: {
+        hasPersonalAccessToken: true,
+        source: "fm-session",
+        mcpServerUrl: "https://mcp.figma.com/mcp",
+      },
+      identity: {
+        connected: true,
+        hasPersonalAccessToken: true,
+      },
+    });
+    expect(redacted.figma?.auth?.personalAccessToken).toBeUndefined();
   });
 });

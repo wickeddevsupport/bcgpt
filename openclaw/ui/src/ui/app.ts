@@ -1232,11 +1232,20 @@ export class OpenClawApp extends LitElement {
 
       const payload = (await response.json()) as {
         user?: { handle?: string | null; email?: string | null };
+        auth?: {
+          personalAccessToken?: string | null;
+          hasPersonalAccessToken?: boolean | null;
+          source?: string | null;
+          mcpServerUrl?: string | null;
+          updatedAt?: string | null;
+        } | null;
         activeConnection?: {
           id?: string | number | null;
           connection_name?: string | null;
           figma_team_id?: string | null;
-          last_synced_at?: string | null;
+          last_synced_at?: string | number | null;
+          last_pat_validated_at?: string | number | null;
+          updated_at?: string | null;
         } | null;
         selection?: {
           selectedFileUrl?: string | null;
@@ -1246,15 +1255,33 @@ export class OpenClawApp extends LitElement {
         } | null;
         connectionsCount?: number;
       };
+      const fmHasValidatedPat =
+        payload.auth?.hasPersonalAccessToken === true ||
+        Boolean(payload.auth?.personalAccessToken) ||
+        payload.activeConnection?.last_pat_validated_at !== null &&
+          payload.activeConnection?.last_pat_validated_at !== undefined;
 
       await this.client.request("pmos.connectors.workspace.set", {
         connectors: {
           figma: {
             url: figmaBaseUrl,
+            auth: {
+              personalAccessToken: payload.auth?.personalAccessToken ?? null,
+              hasPersonalAccessToken: fmHasValidatedPat,
+              source:
+                payload.auth?.source ??
+                (fmHasValidatedPat ? "fm-team-pat" : null),
+              mcpServerUrl: payload.auth?.mcpServerUrl ?? null,
+              updatedAt:
+                payload.auth?.updatedAt ??
+                payload.activeConnection?.updated_at ??
+                new Date().toISOString(),
+            },
             identity: {
               connected: Boolean(payload.user?.handle || payload.user?.email),
               handle: payload.user?.handle ?? null,
               email: payload.user?.email ?? null,
+              hasPersonalAccessToken: fmHasValidatedPat,
               activeConnectionId:
                 payload.activeConnection?.id === null || payload.activeConnection?.id === undefined
                   ? null

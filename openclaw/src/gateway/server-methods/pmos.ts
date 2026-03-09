@@ -337,6 +337,34 @@ function stripSensitiveUserCredentialsFromConnectors(
       ...(Object.keys(safeUser).length > 0 ? { user: safeUser } : {}),
     };
   }
+
+  const figmaConnector = next.figma;
+  if (isJsonObject(figmaConnector)) {
+    const figma = { ...(figmaConnector as Record<string, unknown>) };
+    const identity = isJsonObject(figma.identity)
+      ? ({ ...(figma.identity as Record<string, unknown>) } as Record<string, unknown>)
+      : null;
+    const auth = isJsonObject(figma.auth)
+      ? ({ ...(figma.auth as Record<string, unknown>) } as Record<string, unknown>)
+      : null;
+
+    if (auth) {
+      const token = typeof auth.personalAccessToken === "string" ? auth.personalAccessToken.trim() : "";
+      delete auth.personalAccessToken;
+      const hasPersonalAccessToken = auth.hasPersonalAccessToken === true || Boolean(token);
+      auth.hasPersonalAccessToken = hasPersonalAccessToken;
+      if (identity) {
+        identity.hasPersonalAccessToken = hasPersonalAccessToken;
+      }
+      figma.auth = auth;
+    }
+
+    if (identity) {
+      figma.identity = identity;
+    }
+    next.figma = figma;
+  }
+
   return next;
 }
 
@@ -597,11 +625,14 @@ async function resolveWorkspaceBcgptAccess(params: {
   return { bcgptUrl, apiKey };
 }
 
-async function runMcporterJson(args: string[]): Promise<unknown> {
+async function runMcporterJson(
+  args: string[],
+  envOverrides?: Record<string, string>,
+): Promise<unknown> {
   const { runCommandWithTimeout } = await import("../../process/exec.js");
   const result = await runCommandWithTimeout(
     ["/usr/local/bin/mcporter", ...args],
-    { timeoutMs: 20_000 },
+    { timeoutMs: 20_000, env: envOverrides },
   );
   const stdout = result.stdout.trim();
   const stderr = result.stderr.trim();
@@ -621,6 +652,9 @@ async function runMcporterJson(args: string[]): Promise<unknown> {
 type WorkspaceFigmaContext = {
   figmaUrl: string;
   connected: boolean;
+  hasPersonalAccessToken: boolean;
+  mcpServerUrl: string | null;
+  patSource: string | null;
   handle: string | null;
   email: string | null;
   activeConnectionId: string | null;
@@ -634,15 +668,67 @@ type WorkspaceFigmaContext = {
   updatedAt: string | null;
 };
 
+type WorkspaceFigmaMcpAuth = {
+  personalAccessToken: string | null;
+  hasPersonalAccessToken: boolean;
+  source: string | null;
+  mcpServerUrl: string;
+};
+
+function buildFigmaPatMissingPayload(mcpAuth: WorkspaceFigmaMcpAuth): Record<string, unknown> {
+  if (mcpAuth.hasPersonalAccessToken) {
+    return {
+      error: "Figma PAT appears to exist in FM, but the raw token was not passed into PMOS connector sync.",
+      code: "FIGMA_PAT_NOT_SYNCED_FROM_FM",
+      hasPersonalAccessToken: true,
+      source: mcpAuth.source,
+      mcpServerUrl: mcpAuth.mcpServerUrl,
+    };
+  }
+  return {
+    error: "Figma personal access token is missing from workspace connector sync.",
+    code: "FIGMA_PAT_MISSING",
+    hasPersonalAccessToken: false,
+    source: mcpAuth.source,
+    mcpServerUrl: mcpAuth.mcpServerUrl,
+  };
+}
+
+function readWorkspaceFigmaMcpAuthFromConnectors(connectors: unknown): WorkspaceFigmaMcpAuth {
+  const figma = isJsonObject(connectors) && isJsonObject(connectors.figma)
+    ? (connectors.figma as Record<string, unknown>)
+    : {};
+  const auth = isJsonObject(figma.auth) ? (figma.auth as Record<string, unknown>) : {};
+  const identity = isJsonObject(figma.identity) ? (figma.identity as Record<string, unknown>) : {};
+  const personalAccessToken = stringOrNull(auth.personalAccessToken);
+  const hasPersonalAccessToken =
+    Boolean(personalAccessToken) ||
+    auth.hasPersonalAccessToken === true ||
+    identity.hasPersonalAccessToken === true;
+  const mcpServerUrl = stringOrNull(auth.mcpServerUrl) ?? "https://mcp.figma.com/mcp";
+  const source = stringOrNull(auth.source);
+
+  return {
+    personalAccessToken,
+    hasPersonalAccessToken,
+    source,
+    mcpServerUrl,
+  };
+}
+
 async function readWorkspaceFigmaContext(workspaceId: string): Promise<WorkspaceFigmaContext> {
   const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
   const connectors = await readWorkspaceConnectors(workspaceId);
   const figma = (connectors?.figma ?? {}) as Record<string, unknown>;
   const identity = (figma.identity as Record<string, unknown> | undefined) ?? {};
+  const mcpAuth = readWorkspaceFigmaMcpAuthFromConnectors(connectors);
   const figmaUrl = String(figma.url ?? "https://fm.wickedlab.io");
   return {
     figmaUrl,
     connected: identity.connected === true,
+    hasPersonalAccessToken: mcpAuth.hasPersonalAccessToken,
+    mcpServerUrl: mcpAuth.mcpServerUrl,
+    patSource: mcpAuth.source,
     handle: typeof identity.handle === "string" ? identity.handle : null,
     email: typeof identity.email === "string" ? identity.email : null,
     activeConnectionId:
@@ -658,6 +744,12 @@ async function readWorkspaceFigmaContext(workspaceId: string): Promise<Workspace
     lastSyncedAt: typeof identity.lastSyncedAt === "string" ? identity.lastSyncedAt : null,
     updatedAt: typeof identity.updatedAt === "string" ? identity.updatedAt : null,
   };
+}
+
+async function readWorkspaceFigmaMcpAuth(workspaceId: string): Promise<WorkspaceFigmaMcpAuth> {
+  const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
+  const connectors = await readWorkspaceConnectors(workspaceId);
+  return readWorkspaceFigmaMcpAuthFromConnectors(connectors);
 }
 
 function fillFigmaContextValue(
@@ -3237,6 +3329,10 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             });
           }
           case "figma_mcp_list_tools": {
+            const mcpAuth = await readWorkspaceFigmaMcpAuth(workspaceId);
+            if (!mcpAuth.personalAccessToken) {
+              return JSON.stringify(buildFigmaPatMissingPayload(mcpAuth));
+            }
             const mcporterConfigPath =
               process.env.MCPORTER_CONFIG_PATH ?? "/app/.mcporter/mcporter.json";
             const result = await runMcporterJson([
@@ -3246,7 +3342,11 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               "figma",
               "--schema",
               "--json",
-            ]);
+            ], {
+              FIGMA_API_KEY: mcpAuth.personalAccessToken,
+              FIGMA_PERSONAL_ACCESS_TOKEN: mcpAuth.personalAccessToken,
+              MCP_FIGMA_SERVER_URL: mcpAuth.mcpServerUrl,
+            });
             return JSON.stringify(result);
           }
           case "figma_mcp_call": {
@@ -3257,6 +3357,10 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                 : {};
             if (!tool) {
               return JSON.stringify({ error: "tool is required" });
+            }
+            const mcpAuth = await readWorkspaceFigmaMcpAuth(workspaceId);
+            if (!mcpAuth.personalAccessToken) {
+              return JSON.stringify(buildFigmaPatMissingPayload(mcpAuth));
             }
             const figmaContext = await readWorkspaceFigmaContext(workspaceId);
             const effectiveToolArgs = hydrateKnownFigmaContextArguments(toolArgs, figmaContext);
@@ -3271,7 +3375,11 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               JSON.stringify(effectiveToolArgs),
               "--output",
               "json",
-            ]);
+            ], {
+              FIGMA_API_KEY: mcpAuth.personalAccessToken,
+              FIGMA_PERSONAL_ACCESS_TOKEN: mcpAuth.personalAccessToken,
+              MCP_FIGMA_SERVER_URL: mcpAuth.mcpServerUrl,
+            });
             return JSON.stringify(result);
           }
           default:

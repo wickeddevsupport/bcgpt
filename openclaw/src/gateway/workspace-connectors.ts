@@ -12,6 +12,14 @@ export type WorkspaceConnectors = {
   bcgpt?: { url?: string; apiKey?: string };
   figma?: {
     url?: string;
+    auth?: {
+      // FM-provided PAT/token used for downstream MCP calls.
+      personalAccessToken?: string;
+      hasPersonalAccessToken?: boolean;
+      source?: string;
+      mcpServerUrl?: string;
+      updatedAt?: string;
+    };
     identity?: {
       connected?: boolean;
       handle?: string;
@@ -25,6 +33,7 @@ export type WorkspaceConnectors = {
       selectedFileId?: string;
       selectedFileName?: string;
       updatedAt?: string;
+      hasPersonalAccessToken?: boolean;
     };
   };
   [k: string]: unknown;

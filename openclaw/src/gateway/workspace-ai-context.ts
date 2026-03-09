@@ -269,6 +269,7 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
   const figma = isRecord(raw.figma) ? raw.figma : {};
   const figmaUrl = asNonEmptyString(figma.url);
   const figmaIdentity = isRecord(figma.identity) ? figma.identity : {};
+  const figmaAuth = isRecord(figma.auth) ? figma.auth : {};
   const figmaConnected = figmaIdentity.connected === true;
   const figmaHandle = asNonEmptyString(figmaIdentity.handle);
   const figmaEmail = asNonEmptyString(figmaIdentity.email);
@@ -278,6 +279,15 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
   const figmaSelectedFileUrl = asNonEmptyString(figmaIdentity.selectedFileUrl);
   const figmaSelectedFileId = asNonEmptyString(figmaIdentity.selectedFileId);
   const figmaSelectedFileName = asNonEmptyString(figmaIdentity.selectedFileName);
+  const figmaPatTokenSynced = Boolean(asNonEmptyString(figmaAuth.personalAccessToken));
+  const figmaPatPresent =
+    figmaAuth.hasPersonalAccessToken === true || figmaIdentity.hasPersonalAccessToken === true;
+  const figmaPatBridgeStatus = figmaPatTokenSynced
+    ? "raw token synced into PMOS"
+    : figmaPatPresent
+      ? "validated in FM, but raw token not passed into PMOS"
+      : "not available";
+  const figmaMcpServerUrl = asNonEmptyString(figmaAuth.mcpServerUrl);
   const figmaSelectedFileSummary =
     figmaSelectedFileName && figmaSelectedFileUrl
       ? `${figmaSelectedFileName} (${figmaSelectedFileUrl})`
@@ -314,6 +324,9 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
     `- figma selected file: ${figmaSelectedFileSummary ?? "(not synced)"}`,
     `- figma selected file id: ${figmaSelectedFileId ?? "(not synced)"}`,
     `- figma selected file url: ${figmaSelectedFileUrl ?? "(not synced)"}`,
+    `- figma personal access token present: ${yesNo(figmaPatPresent)}`,
+    `- figma PAT handoff to PMOS: ${figmaPatBridgeStatus}`,
+    `- figma MCP server URL: ${figmaMcpServerUrl ?? "https://mcp.figma.com/mcp"}`,
     ...(figmaConnected
       ? [
           "",
@@ -321,7 +334,8 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
           "- Use `figma_get_context` to confirm the active file, connection, and team before any analysis.",
           "- If MCP is configured, use `figma_mcp_list_tools` first to inspect the live Figma MCP tool schema, then call `figma_mcp_call` for specific file/design operations.",
           "- Use `web_fetch` to call the Figma REST API: GET https://api.figma.com/v1/files/{fileId} with Authorization: Bearer {token}.",
-          "  If MCP auth or a Figma Personal Access Token is missing, tell the user to complete Figma auth in the Figma panel/Integrations before retrying.",
+          "  If FM reports a PAT but PMOS does not have the raw token yet, explain that the PAT exists upstream but is not being passed through connector sync.",
+          "  If MCP auth or a Figma Personal Access Token is truly missing, tell the user to complete Figma auth in the Figma panel/Integrations before retrying.",
           "- Use `web_search` for Figma design-system best practices, component naming conventions, or token standards.",
           "- DO NOT suggest Chrome extensions, browser extensions, or manual copy-paste of Figma data.",
           "- DO NOT ask the user to 'attach a Figma tab' — this platform has a built-in Figma File Manager.",
