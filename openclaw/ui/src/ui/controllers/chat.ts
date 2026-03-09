@@ -23,6 +23,56 @@ export type ChatState = {
   pmosWorkspaceId?: string;
 };
 
+function messageTimestamp(message: unknown): number {
+  if (!message || typeof message !== "object") {
+    return 0;
+  }
+  const raw = message as Record<string, unknown>;
+  const direct = typeof raw.timestamp === "number" ? raw.timestamp : 0;
+  if (direct > 0) {
+    return direct;
+  }
+  const nested = raw.message;
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+    const value = (nested as Record<string, unknown>).timestamp;
+    return typeof value === "number" ? value : 0;
+  }
+  return 0;
+}
+
+function isAssistantReply(message: unknown): boolean {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  const raw = message as Record<string, unknown>;
+  return raw.role === "assistant";
+}
+
+function reconcileRunWithHistory(state: ChatState, historyMessages: unknown[]): boolean {
+  if (!state.chatRunId || !state.chatStreamStartedAt) {
+    return false;
+  }
+  const runStartedAt = state.chatStreamStartedAt;
+  const hasAssistantReply = historyMessages.some((message) => {
+    if (!isAssistantReply(message)) {
+      return false;
+    }
+    if (messageTimestamp(message) < runStartedAt) {
+      return false;
+    }
+    const text = extractText(message)?.trim() ?? "";
+    const thinking = extractThinking(message)?.trim() ?? "";
+    return Boolean(text || thinking);
+  });
+  if (!hasAssistantReply) {
+    return false;
+  }
+  state.chatRunId = null;
+  state.chatStream = null;
+  state.chatStreamStartedAt = null;
+  return true;
+}
+
 export type ChatEventPayload = {
   runId: string;
   sessionKey: string;
@@ -167,10 +217,11 @@ export async function loadChatHistory(state: ChatState) {
       },
     );
     const historyMessages = Array.isArray(res.messages) ? res.messages : [];
+    const recovered = reconcileRunWithHistory(state, historyMessages);
     state.chatMessages = mergePendingMessages({
       history: historyMessages,
       previous: previousMessages,
-      activeRunId: state.chatRunId,
+      activeRunId: recovered ? null : state.chatRunId,
     });
     state.chatThinkingLevel = res.thinkingLevel ?? null;
   } catch (err) {

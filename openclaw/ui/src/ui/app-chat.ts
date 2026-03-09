@@ -17,6 +17,10 @@ export type ChatHost = {
   chatQueue: ChatQueueItem[];
   chatRunId: string | null;
   chatSending: boolean;
+  chatMessages: unknown[];
+  chatStream: string | null;
+  chatStreamStartedAt: number | null;
+  chatHistoryRecoveryTimer?: number | null;
   sessionKey: string;
   basePath: string;
   hello: GatewayHelloOk | null;
@@ -91,6 +95,41 @@ function enqueueChatMessage(
   ];
 }
 
+function clearChatRecoveryPoll(host: ChatHost) {
+  if (host.chatHistoryRecoveryTimer != null) {
+    window.clearTimeout(host.chatHistoryRecoveryTimer);
+    host.chatHistoryRecoveryTimer = null;
+  }
+}
+
+function startChatRecoveryPoll(host: ChatHost, runId: string) {
+  clearChatRecoveryPoll(host);
+  const startedAt = Date.now();
+  const tick = async () => {
+    if (host.chatRunId !== runId) {
+      clearChatRecoveryPoll(host);
+      return;
+    }
+    if (!host.connected) {
+      host.chatHistoryRecoveryTimer = window.setTimeout(tick, 2000);
+      return;
+    }
+    await loadChatHistory(host as unknown as OpenClawApp);
+    if (host.chatRunId !== runId) {
+      clearChatRecoveryPoll(host);
+      const scrollHost = host as unknown as Parameters<typeof scheduleChatScroll>[0];
+      scheduleChatScroll(scrollHost, true);
+      return;
+    }
+    if (Date.now() - startedAt > 60_000) {
+      clearChatRecoveryPoll(host);
+      return;
+    }
+    host.chatHistoryRecoveryTimer = window.setTimeout(tick, 2000);
+  };
+  host.chatHistoryRecoveryTimer = window.setTimeout(tick, 2500);
+}
+
 async function sendChatMessageNow(
   host: ChatHost,
   message: string,
@@ -117,6 +156,9 @@ async function sendChatMessageNow(
       host as unknown as Parameters<typeof setLastActiveSessionKey>[0],
       host.sessionKey,
     );
+    if (runId) {
+      startChatRecoveryPoll(host, runId);
+    }
   }
   if (ok && opts?.restoreDraft && opts.previousDraft?.trim()) {
     host.chatMessage = opts.previousDraft;
