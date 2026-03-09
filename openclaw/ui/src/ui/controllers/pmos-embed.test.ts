@@ -22,7 +22,7 @@ describe("buildOpsUiEmbedUrl", () => {
   it("preserves the workspace project id on embed urls", () => {
     expect(buildOpsUiEmbedUrl("", null, "proj-123")).toBe("/ops-ui/flows?projectId=proj-123");
     expect(buildOpsUiConnectionsUrl("/control", "proj-123")).toBe(
-      "/control/ops-ui/connections?projectId=proj-123",
+      "/control/ops-ui/projects/proj-123/connections?limit=10",
     );
   });
 });

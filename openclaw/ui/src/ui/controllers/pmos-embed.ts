@@ -24,5 +24,9 @@ export function buildOpsUiEmbedUrl(
 
 export function buildOpsUiConnectionsUrl(basePath: string, projectId?: string | null): string {
   const base = normalizeBasePath(basePath ?? "");
-  return appendProjectId(`${base}/ops-ui/connections`, projectId);
+  const trimmedProjectId = typeof projectId === "string" ? projectId.trim() : "";
+  if (trimmedProjectId) {
+    return `${base}/ops-ui/projects/${encodeURIComponent(trimmedProjectId)}/connections?limit=10`;
+  }
+  return `${base}/ops-ui/connections`;
 }
