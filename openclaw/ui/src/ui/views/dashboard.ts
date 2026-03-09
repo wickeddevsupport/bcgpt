@@ -396,7 +396,7 @@ export function renderDashboard(props: DashboardProps) {
               </div>
             </div>
           `)}
-        </div>        </div>
+        </div>
       </div>
     </details>
 
@@ -672,5 +672,4 @@ export function renderDashboard(props: DashboardProps) {
     </section>
   `;
 }
-
 
