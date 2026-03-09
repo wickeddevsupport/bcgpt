@@ -58,9 +58,10 @@ function extractImages(message: unknown): ImageBlock[] {
 
 export function renderReadingIndicatorGroup(assistant?: AssistantIdentity) {
   return html`
-    <div class="chat-group assistant">
-      ${renderAvatar("assistant", assistant)}
+    <div class="chat-group chat-group--timeline assistant">
+      ${renderGroupLead("assistant", assistant)}
       <div class="chat-group-messages">
+        ${renderGroupHeader(assistant?.name ?? "Assistant", null)}
         <div class="chat-bubble chat-reading-indicator" aria-hidden="true">
           <div class="chat-thinking__label">Thinking</div>
           <span class="chat-reading-indicator__dots">
@@ -107,9 +108,10 @@ export function renderStreamingGroup(
     : null;
 
   return html`
-    <div class="chat-group assistant">
-      ${renderAvatar("assistant", assistant)}
+    <div class="chat-group chat-group--timeline assistant">
+      ${renderGroupLead("assistant", assistant)}
       <div class="chat-group-messages">
+        ${renderGroupHeader(name, timestamp)}
         ${showReasoning && thinkingMessage
           ? renderGroupedMessage(
               thinkingMessage,
@@ -124,10 +126,6 @@ export function renderStreamingGroup(
               onOpenSidebar,
             )
           : nothing}
-        <div class="chat-group-footer">
-          <span class="chat-sender-name">${name}</span>
-          <span class="chat-group-timestamp">${timestamp}</span>
-        </div>
       </div>
     </div>
   `;
@@ -158,12 +156,13 @@ export function renderMessageGroup(
   });
 
   return html`
-    <div class="chat-group ${roleClass}">
-      ${renderAvatar(group.role, {
+    <div class="chat-group ${roleClass} ${roleClass === "user" ? "" : "chat-group--timeline"}">
+      ${renderGroupLead(group.role, {
         name: assistantName,
         avatar: opts.assistantAvatar ?? null,
       })}
       <div class="chat-group-messages">
+        ${roleClass === "user" ? nothing : renderGroupHeader(who, timestamp)}
         ${group.messages.map((item, index) =>
           renderGroupedMessage(
             item.message,
@@ -174,16 +173,26 @@ export function renderMessageGroup(
             opts.onOpenSidebar,
           ),
         )}
-        <div class="chat-group-footer">
-          <span class="chat-sender-name">${who}</span>
-          <span class="chat-group-timestamp">${timestamp}</span>
-        </div>
+        ${roleClass === "user" ? renderGroupFooter(who, timestamp) : nothing}
       </div>
     </div>
   `;
 }
 
-function renderAvatar(role: string, assistant?: Pick<AssistantIdentity, "name" | "avatar">) {
+function renderGroupLead(role: string, assistant?: Pick<AssistantIdentity, "name" | "avatar">) {
+  const normalized = normalizeRoleForGrouping(role);
+  if (normalized === "user") {
+    return renderUserAvatar(role, assistant);
+  }
+  return html`
+    <div class="chat-group-rail" aria-hidden="true">
+      <span class="chat-group-rail__line"></span>
+      <span class="chat-group-marker ${normalized}"></span>
+    </div>
+  `;
+}
+
+function renderUserAvatar(role: string, assistant?: Pick<AssistantIdentity, "name" | "avatar">) {
   const normalized = normalizeRoleForGrouping(role);
   const assistantName = assistant?.name?.trim() || "Assistant";
   const assistantAvatar = assistant?.avatar?.trim() || "";
@@ -216,6 +225,24 @@ function renderAvatar(role: string, assistant?: Pick<AssistantIdentity, "name" |
   }
 
   return html`<div class="chat-avatar ${className}">${initial}</div>`;
+}
+
+function renderGroupHeader(name: string, timestamp: string | null) {
+  return html`
+    <div class="chat-group-header">
+      <span class="chat-sender-name">${name}</span>
+      ${timestamp ? html`<span class="chat-group-timestamp">${timestamp}</span>` : nothing}
+    </div>
+  `;
+}
+
+function renderGroupFooter(name: string, timestamp: string | null) {
+  return html`
+    <div class="chat-group-footer">
+      <span class="chat-sender-name">${name}</span>
+      ${timestamp ? html`<span class="chat-group-timestamp">${timestamp}</span>` : nothing}
+    </div>
+  `;
 }
 
 function isAvatarUrl(value: string): boolean {
@@ -294,8 +321,12 @@ function renderGroupedMessage(
     canCopy?: boolean;
     bubbleClass?: string;
   }) => {
+    const normalizedRole = normalizeRoleForGrouping(role);
     const bubbleClasses = [
       "chat-bubble",
+      normalizedRole !== "user" ? "chat-bubble--timeline" : "",
+      normalizedRole === "assistant" ? "chat-bubble--assistant" : "",
+      normalizedRole === "tool" || isToolResult ? "chat-bubble--tool" : "",
       content.bubbleClass ?? "",
       content.canCopy ? "has-copy" : "",
       opts.isStreaming ? "streaming" : "",
