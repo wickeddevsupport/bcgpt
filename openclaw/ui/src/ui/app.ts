@@ -313,6 +313,7 @@ export class OpenClawApp extends LitElement {
   @state() pmosFigmaContextSyncing = false;
   @state() pmosFigmaContextError: string | null = null;
   @state() pmosFigmaContextSyncedOk = false;
+  @state() pmosFigmaLiveAuthVerified = false;
   @state() pmosWorkflowCredentials: Array<{ id: string; name: string; type: string }> | null = null;
   @state() pmosWorkflowCredentialsLoading = false;
   @state() pmosWorkflowCredentialsError: string | null = null;
@@ -715,6 +716,8 @@ export class OpenClawApp extends LitElement {
     this.pmosFigmaContextSyncedOk = false;
     if (messageType === "pmos:figma-auth-complete") {
       this.pmosFigmaEmbedVersion = (this.pmosFigmaEmbedVersion ?? 0) + 1;
+      // Auth just completed — verify live auth and auto-sync immediately
+      void this.verifyFigmaLiveAuth();
     }
     void this.handlePmosRefreshConnectors();
     this.queuePmosFigmaAutoSync();
@@ -839,6 +842,10 @@ export class OpenClawApp extends LitElement {
     if (next === "figma") {
       void this.verifyFigmaLiveAuth();
     }
+    // When switching to connections tab, load real credentials
+    if (next === "connections") {
+      void this.handleLoadRealCredentials();
+    }
   }
 
   /** Quick auth check against FM API — clears stale connected state on 401. */
@@ -850,7 +857,8 @@ export class OpenClawApp extends LitElement {
         headers: { accept: "application/json" },
       });
       if (res.status === 401) {
-        // FM session expired — clear stale connected state
+        this.pmosFigmaLiveAuthVerified = false;
+        // Clear stale connected state so sign-in CTA shows
         if (this.client) {
           await this.client.request("pmos.connectors.workspace.set", {
             connectors: {
@@ -862,9 +870,11 @@ export class OpenClawApp extends LitElement {
           }).catch(() => {});
         }
         await loadPmosConnectorsStatus(this);
+      } else if (res.ok) {
+        this.pmosFigmaLiveAuthVerified = true;
       }
     } catch {
-      // Network error — silently ignore, keep existing state
+      // Network error — keep existing state
     }
   }
 
@@ -1308,6 +1318,7 @@ export class OpenClawApp extends LitElement {
       } catch {
         // Best-effort context refresh only.
       }
+      this.pmosFigmaLiveAuthVerified = true;
       this.pmosFigmaContextSyncedOk = true;
       setTimeout(() => {
         this.pmosFigmaContextSyncedOk = false;

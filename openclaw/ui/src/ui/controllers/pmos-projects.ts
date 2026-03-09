@@ -63,26 +63,20 @@ export type PmosProjectsState = {
   pmosProjectsLoadSequence?: number;
 };
 
-const PROJECT_SNAPSHOT_TIMEOUT_MS = 30_000;
-
 async function requestProjectsSnapshot(
   client: GatewayBrowserClient,
 ): Promise<PmosProjectsSnapshot> {
-  return await Promise.race([
-    client.request<PmosProjectsSnapshot>("pmos.projects.snapshot", {}),
-    new Promise<PmosProjectsSnapshot>((_, reject) => {
-      globalThis.setTimeout(() => {
-        reject(new Error("Project refresh timed out after 30s."));
-      }, PROJECT_SNAPSHOT_TIMEOUT_MS);
-    }),
-  ]);
+  // No client-side timeout — server-side tool timeouts (12-15s each) handle it.
+  return await client.request<PmosProjectsSnapshot>("pmos.projects.snapshot", {});
 }
 
 export async function loadPmosProjectsSnapshot(state: PmosProjectsState) {
   if (!state.client || !state.connected) {
-    state.pmosProjectsSnapshot = null;
+    // Keep previous snapshot visible (stale data is better than empty)
     state.pmosProjectsLoading = false;
-    state.pmosProjectsError = "Connect to Wicked OS to load your project center.";
+    state.pmosProjectsError = state.pmosProjectsSnapshot
+      ? "Reconnect to Wicked OS to refresh projects."
+      : "Connect to Wicked OS to load your project center.";
     return;
   }
 

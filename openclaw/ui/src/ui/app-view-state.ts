@@ -172,6 +172,7 @@ export type AppViewState = {
   pmosFigmaContextSyncing: boolean;
   pmosFigmaContextError: string | null;
   pmosFigmaContextSyncedOk: boolean;
+  pmosFigmaLiveAuthVerified: boolean;
   pmosTraceEvents: PmosExecutionTraceEvent[];
 
   // workspace-scoped Wicked Ops provisioning state

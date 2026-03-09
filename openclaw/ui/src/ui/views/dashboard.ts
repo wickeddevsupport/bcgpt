@@ -215,8 +215,8 @@ export function renderDashboard(props: DashboardProps) {
   return html`
     <section class="dashboard-shell">
       <div class="dashboard-main">
-    <!-- Greeting strip — slim, no card, no chat input -->
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px;flex-wrap:wrap;">
+    <!-- Greeting strip -->
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
       <div>
         <span style="font-size:20px;font-weight:600;">${getTimeGreeting()}</span>
         <span class="muted" style="font-size:13px;margin-left:10px;">Chat is live on the right →</span>
@@ -230,7 +230,7 @@ export function renderDashboard(props: DashboardProps) {
     </div>
 
     <!-- Your AI Team section -->
-    <section class="card" style="margin-bottom: 18px;">
+    <section class="card" style="">
       <div class="row" style="justify-content: space-between; align-items: center;">
         <div>
           <div class="card-title">Your AI Team</div>
@@ -298,7 +298,7 @@ export function renderDashboard(props: DashboardProps) {
       </div>
     </section>
 
-    <details class="card setup-wizard" style="margin-bottom: 18px;" ?open=${wizardOpen}>
+    <details class="card setup-wizard" style="" ?open=${wizardOpen}>
       <summary class="setup-wizard__summary">
         <div class="setup-wizard__summary-main">
           <div class="card-title">System Status</div>
@@ -468,7 +468,7 @@ export function renderDashboard(props: DashboardProps) {
       </div>
     </section>
 
-    <section class="grid grid-cols-2" style="margin-top: 18px;">
+    <section class="grid grid-cols-2">
       <div class="card">
         <div class="card-title">Automation Live</div>
         <div class="card-sub">Recent run activity with direct drill-down.</div>
@@ -558,7 +558,7 @@ export function renderDashboard(props: DashboardProps) {
       </div>
     </section>
 
-    <section class="grid grid-cols-2" style="margin-top: 18px;">
+    <section class="grid grid-cols-2">
       <div class="card">
         <div class="card-title">Agent Timeline</div>
         <div class="card-sub">Live Wicked OS execution trace (model-agnostic schema).</div>

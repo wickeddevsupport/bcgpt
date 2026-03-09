@@ -2478,41 +2478,31 @@
 
 .dashboard-shell {
   display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(340px, 420px);
-  gap: 18px;
-  align-items: stretch;
-  min-height: 0;
+  grid-template-columns: minmax(0, 2fr) minmax(340px, 1fr);
+  gap: 16px;
+  align-items: start;
 }
 
 .dashboard-main {
+  display: grid;
+  gap: 16px;
   min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding-right: 4px;
-  scrollbar-gutter: stable;
 }
 
 .dashboard-side {
   min-width: 0;
-  width: min(100%, 420px);
-  max-width: 420px;
-  display: flex;
-  height: 100%;
-  justify-self: end;
-  min-height: 0;
+  max-width: 100%;
   overflow: hidden;
   position: sticky;
-  top: 0;
-  align-self: stretch;
+  top: 84px;
+  align-self: start;
 }
 
 .dashboard-chat-card {
-  min-width: 0;
-  width: 100%;
-  height: 100%;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 10px;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  min-width: 0;
   overflow: hidden;
 }
 
@@ -2528,13 +2518,15 @@
 }
 
 .dashboard-chat-host {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  height: clamp(420px, calc(100vh - 320px), 880px);
+  max-height: 880px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px;
   min-height: 0;
-}
-
-.dashboard-chat-card .dashboard-chat-host {
-  height: 100%;
-  min-height: 0;
-  max-height: none;
 }
 
 /* ===========================================
@@ -2546,6 +2538,33 @@
   grid-template-columns: minmax(0, 2fr) minmax(340px, 1fr);
   gap: 16px;
   align-items: start;
+}
+
+/* Progress bar */
+.progress-bar {
+  width: 100%;
+  height: 4px;
+  background: var(--border, #333);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-bar__fill {
+  height: 100%;
+  background: var(--accent, #e04545);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.progress-bar__fill--indeterminate {
+  width: 30%;
+  animation: progress-slide 1.4s ease-in-out infinite;
+}
+
+@keyframes progress-slide {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(200%); }
+  100% { transform: translateX(400%); }
 }
 
 .projects-main {
@@ -2870,24 +2889,16 @@
 
   .dashboard-shell {
     grid-template-columns: 1fr;
-    min-height: auto;
   }
 
   .dashboard-side {
     position: static;
-    width: 100%;
     max-width: none;
   }
 
   .dashboard-chat-host {
     height: calc(100dvh - 280px);
     min-height: 400px;
-  }
-
-  .dashboard-main {
-    overflow: visible;
-    padding-right: 0;
-    scrollbar-gutter: auto;
   }
 
   .projects-layout {

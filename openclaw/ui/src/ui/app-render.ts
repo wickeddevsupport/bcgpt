@@ -1012,6 +1012,7 @@ export function renderApp(state: AppViewState) {
                 syncing: state.pmosFigmaContextSyncing,
                 syncError: state.pmosFigmaContextError,
                 syncedOk: state.pmosFigmaContextSyncedOk,
+                liveAuthVerified: state.pmosFigmaLiveAuthVerified,
                 authUrl: figmaAuthUrl,
                 chatProps,
                 onSyncContext: () => void state.handlePmosFigmaSyncContext(),
@@ -1100,16 +1101,26 @@ export function renderApp(state: AppViewState) {
                   opsProvisioned: Boolean(state.pmosOpsProvisioningResult?.apiKey) || state.pmosConnectorsStatus?.ops?.reachable === true,
                   connectorsLoading: state.pmosConnectorsLoading,
                   connectorsError: state.pmosConnectorsError,
-                  embedUrl:
+                  credentials: state.pmosRealCredentials ?? [],
+                  credentialsLoading: state.pmosRealCredentialsLoading,
+                  credentialsError: state.pmosRealCredentialsError,
+                  addConnectionUrl:
                     flowConnectionsEmbedBaseUrl +
                     (state.flowConnectionsEmbedVersion
                       ? `${flowConnectionsEmbedBaseUrl.includes("?") ? "&" : "?"}v=${state.flowConnectionsEmbedVersion}`
                       : ""),
                   onRefresh: () => {
-                    state.flowConnectionsEmbedVersion = (state.flowConnectionsEmbedVersion ?? 0) + 1;
-                    void state.handlePmosRefreshConnectors();
+                    void state.handleLoadRealCredentials();
                   },
                   onOpenIntegrations: () => state.setTab("integrations"),
+                  onAddConnection: () => {
+                    // Open the Flow connections page in a new tab for adding connections
+                    const url = flowConnectionsEmbedBaseUrl +
+                      (state.flowConnectionsEmbedVersion
+                        ? `${flowConnectionsEmbedBaseUrl.includes("?") ? "&" : "?"}v=${state.flowConnectionsEmbedVersion}`
+                        : "");
+                    window.open(url, "pmos-add-connection", "popup=yes,width=900,height=700,resizable=yes,scrollbars=yes");
+                  },
                 });
               })()
             : nothing

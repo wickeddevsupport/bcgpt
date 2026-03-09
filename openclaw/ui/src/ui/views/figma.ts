@@ -14,6 +14,7 @@ export type FigmaProps = {
   syncing: boolean;
   syncError: string | null;
   syncedOk: boolean;
+  liveAuthVerified: boolean;
   chatProps: ChatProps;
   onOpenAuth: () => void;
   onSyncContext: () => void;
@@ -42,8 +43,9 @@ export function renderFigma(props: FigmaProps) {
   const canEmbed = Boolean(props.figmaUrl?.trim());
   const hasSyncedIdentity = identity?.connected === true;
   const hasLiveAuth = figma?.authOk === true;
-  const requiresSignIn = !hasSyncedIdentity || figma?.authOk === false;
-  const canRenderIframe = hasSyncedIdentity && hasLiveAuth;
+  // Only show iframe when live auth has been verified against FM API
+  const requiresSignIn = !hasSyncedIdentity || !hasLiveAuth || !props.liveAuthVerified;
+  const canRenderIframe = hasSyncedIdentity && hasLiveAuth && props.liveAuthVerified;
 
   return html`
     ${props.connectorsError

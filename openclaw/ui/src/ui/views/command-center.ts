@@ -192,17 +192,16 @@ export function renderCommandCenter(props: CommandCenterProps) {
               : nothing}
           </div>
 
-          ${snapshot?.refreshing && snapshot?.projects?.length
+          ${props.loading
             ? html`
-                <div class="callout info" style="margin-top: 12px;">
-                  Refreshing Basecamp data. Showing the last successful snapshot from ${refreshedLabel}.
-                </div>
-              `
-            : nothing}
-          ${props.loading && !snapshot
-            ? html`
-                <div class="callout info" style="margin-top: 12px;">
-                  Refreshing Basecamp data. This can take a few seconds on larger workspaces.
+                <div style="margin-top: 12px;">
+                  <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+                    <span style="font-size:13px; font-weight:500;">Syncing with Basecamp...</span>
+                    ${snapshot?.projects?.length
+                      ? html`<span class="muted" style="font-size:12px;">Showing last data from ${refreshedLabel}</span>`
+                      : nothing}
+                  </div>
+                  <div class="progress-bar"><div class="progress-bar__fill progress-bar__fill--indeterminate"></div></div>
                 </div>
               `
             : nothing}
