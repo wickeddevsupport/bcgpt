@@ -249,7 +249,7 @@ function canAccessSession(
   return workspaceAgentIds.has(target.agentId);
 }
 
-function shouldRouteToPmosFigmaChat(
+export function shouldRouteToPmosWorkspaceChat(
   client: GatewayClient | null,
   message: string,
 ): boolean {
@@ -258,7 +258,7 @@ function shouldRouteToPmosFigmaChat(
   if (!workspaceId) {
     return false;
   }
-  return /\bfigma\b|\bdesign\b|\bauto[\s-]?layout\b|\bcomponent(?:s)?\b|\bstyle(?:s)?\b|\bfont(?:s)?\b|\bregression\b|\baudit\b/i.test(
+  return /\bbasecamp\b|\bbcgpt\b|\bproject(?:s)?\b|\btodo(?:s)?\b|\bschedule\b|\bcampfire\b|\bmessage(?:s)?\b|\bworkflow(?:s)?\b|\bautomation(?:s)?\b|\bconnection(?:s)?\b|\bcredential(?:s)?\b|\bfigma\b|\bdesign\b|\bauto[\s-]?layout\b|\bcomponent(?:s)?\b|\bstyle(?:s)?\b|\bfont(?:s)?\b|\bregression\b|\baudit\b/i.test(
     message,
   );
 }
@@ -599,7 +599,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       };
       respond(true, ackPayload, undefined, { runId: clientRunId });
 
-      if (shouldRouteToPmosFigmaChat(client, parsedMessage)) {
+      if (shouldRouteToPmosWorkspaceChat(client, parsedMessage)) {
         void (async () => {
           try {
             const { pmosHandlers } = await import("./pmos.js");

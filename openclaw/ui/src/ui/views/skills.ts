@@ -87,6 +87,10 @@ export function renderSkills(props: SkillsProps) {
             .value=${props.filter}
             @input=${(e: Event) => props.onFilterChange((e.target as HTMLInputElement).value)}
             placeholder="Search skills"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            name="skills-filter"
           />
         </label>
         <div class="muted">${filtered.length} shown</div>
@@ -106,9 +110,8 @@ export function renderSkills(props: SkillsProps) {
           : html`
             <div class="agent-skills-groups" style="margin-top: 16px;">
               ${groups.map((group) => {
-                const collapsedByDefault = group.id === "workspace";
                 return html`
-                  <details class="agent-skills-group" ?open=${!collapsedByDefault}>
+                  <details class="agent-skills-group" open>
                     <summary class="agent-skills-header">
                       <span>${group.label}</span>
                       <span class="muted">${group.skills.length}</span>

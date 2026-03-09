@@ -424,12 +424,12 @@ function describeBcgptSection(input: {
   }
 
   lines.push("");
-  lines.push("### Primary Entry Point: smart_action");
-  lines.push("- **Use `smart_action` first** for almost any Basecamp query — it routes to the right tool automatically");
-  lines.push("- `smart_action` handles: list projects, project summary, project context (docs/cards/todos/messages),");
+  lines.push("### Primary Entry Point: bcgpt_smart_action");
+  lines.push("- **Use `bcgpt_smart_action` first** for almost any Basecamp query — it wraps the bcgpt `smart_action` router and picks the right MCP tool automatically");
+  lines.push("- `bcgpt_smart_action` handles: list projects, project summary, project context (docs/cards/todos/messages),");
   lines.push("  assigned todos, due-date queries, person queries (activity/assignments/membership),");
   lines.push("  card/kanban search, campfire/team chat, upcoming schedule, daily reports, search");
-  lines.push("- Example queries for smart_action:");
+  lines.push("- Example queries for bcgpt_smart_action:");
   lines.push('  - "show my projects" → routes to list_projects');
   lines.push('  - "summarize project Acme" → routes to project_summary');
   lines.push('  - "what todos are due today?" → routes to list_todos_due');
@@ -445,7 +445,7 @@ function describeBcgptSection(input: {
   lines.push(`- These tools are available through the bcgpt MCP server at ${serverUrl}`);
   lines.push("- When the user asks about Basecamp (projects, todos, messages, etc.), use the appropriate tool");
   lines.push("- Always use tool results as the authoritative source — do not guess Basecamp data");
-  lines.push("- If asked 'what projects do I have', call smart_action with query='show my projects'");
+  lines.push("- If asked 'what projects do I have', call `bcgpt_smart_action` with query='show my projects'");
   lines.push("- The API key is already configured — you do NOT need to ask the user for credentials");
 
   return lines.join("\n");

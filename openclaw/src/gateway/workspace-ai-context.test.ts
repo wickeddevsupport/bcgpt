@@ -67,6 +67,8 @@ describe("workspace-ai-context", () => {
     expect(refreshed.markdown).toContain("OpenClaw - Basecamp");
     expect(refreshed.markdown).toContain("## Active Flow Connections");
     expect(refreshed.markdown).toContain("Treat this list as the current connected apps inventory");
+    expect(refreshed.markdown).toContain("### Primary Entry Point: bcgpt_smart_action");
+    expect(refreshed.markdown).toContain("Use `bcgpt_smart_action` first");
     expect(refreshed.markdown).not.toContain("sk-openrouter-very-secret");
     expect(refreshed.markdown).not.toContain("bcgpt-ultra-secret");
     expect(refreshed.markdown).not.toContain("ops-ultra-secret");

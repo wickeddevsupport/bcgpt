@@ -137,6 +137,8 @@ export function renderCommandCenter(props: CommandCenterProps) {
   const configured = snapshot?.configured ?? false;
   const connected = snapshot?.connected ?? false;
   const identity = snapshot?.identity ?? null;
+  const snapshotLoaded = Boolean(snapshot);
+  const hasBasecampAccess = configured || connected || identity?.connected === true;
   const refreshedLabel = snapshot?.refreshedAtMs
     ? formatRelativeTimestamp(snapshot.refreshedAtMs)
     : "n/a";
@@ -179,8 +181,16 @@ export function renderCommandCenter(props: CommandCenterProps) {
           </div>
 
           <div class="chip-row" style="margin-top: 12px;">
-            <span class="chip ${configured ? "chip-ok" : "chip-danger"}">
-              ${configured ? "Basecamp key configured" : "Basecamp key missing"}
+            <span
+              class="chip ${!snapshotLoaded ? "" : hasBasecampAccess ? "chip-ok" : "chip-danger"}"
+            >
+              ${!snapshotLoaded
+                ? "Checking Basecamp..."
+                : configured
+                  ? "Basecamp key configured"
+                  : hasBasecampAccess
+                    ? "Basecamp available"
+                    : "Basecamp key missing"}
             </span>
             <span class="chip ${connected ? "chip-ok" : "chip-warn"}">
               ${connected ? "Basecamp connected" : "Basecamp disconnected"}
@@ -224,7 +234,7 @@ export function renderCommandCenter(props: CommandCenterProps) {
                   Connect to Wicked OS first to load Projects.
                 </div>
               `
-            : !configured
+            : snapshotLoaded && !hasBasecampAccess
               ? html`
                   <div class="callout info" style="margin-top: 12px;">
                     Add your Basecamp token in Integrations to enable project cards and AI project actions.
