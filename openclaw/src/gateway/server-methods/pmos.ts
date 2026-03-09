@@ -1304,77 +1304,19 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 
-  // Lightweight auto-connect: pings /action/startbcgpt with workspace or global BCGPT key.
-  // Called automatically on every gateway connect so the Basecamp session is always warm.
+  // Legacy compatibility hook. Startup auto-connect is intentionally disabled so
+  // fresh sessions do not generate background Basecamp traffic.
   "pmos.bcgpt.autoconnect": async ({ respond, client }) => {
-    try {
-      const cfg = loadConfig() as unknown;
-      const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
-      const workspaceId = client?.pmosWorkspaceId ?? undefined;
-      const workspaceConnectors = workspaceId ? await readWorkspaceConnectors(workspaceId) : null;
-
-      const bcgptUrl = normalizeBaseUrl(
-        (workspaceConnectors?.bcgpt?.url as string | undefined) ??
-          readConfigString(cfg, ["pmos", "connectors", "bcgpt", "url"]) ??
-          process.env.BCGPT_URL ??
-          null,
-        "https://bcgpt.wickedlab.io",
-      );
-      // Only use workspace-scoped key â€” user must save their own key before auto-connect fires
-      const bcgptKey =
-        ((workspaceConnectors?.bcgpt?.apiKey as string | undefined)?.trim()) ||
-        null;
-
-      if (!bcgptKey) {
-        // No key saved yet â€” silently skip, no error
-        respond(true, { connected: false, configured: false, message: "No API key saved â€” visit Integrations to connect Basecamp" }, undefined);
-        return;
-      }
-
-      const startResult = await fetchJson(`${bcgptUrl}/action/startbcgpt`, {
-        method: "POST",
-        timeoutMs: 10_000,
-        headers: {
-          "content-type": "application/json",
-          "x-bcgpt-api-key": bcgptKey,
-        },
-        body: JSON.stringify({}),
-      });
-
-      if (!startResult.ok || !isJsonObject(startResult.json)) {
-        respond(true, {
-          connected: false,
-          configured: true,
-          reachable: startResult.status ? startResult.status < 500 : false,
-          error: startResult.error || "BCGPT_UNREACHABLE",
-        }, undefined);
-        return;
-      }
-
-      const payload = startResult.json as Record<string, unknown>;
-      const user = isJsonObject(payload.user) ? payload.user : null;
-      const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
-
-      respond(true, {
-        // connected = API key is valid (payload.connected); basecampConnected = OAuth is linked too
-        connected: payload.connected === true,
-        basecampConnected: payload.basecamp_connected === true,
-        configured: true,
-        reachable: true,
-        name: typeof user?.name === "string" ? user.name : null,
-        email: typeof user?.email === "string" ? user.email : null,
-        accountsCount: accounts.length,
-        selectedAccountId:
-          typeof payload.selected_account_id === "string" || typeof payload.selected_account_id === "number"
-            ? String(payload.selected_account_id)
-            : null,
-        message: typeof payload.message === "string" ? payload.message : null,
-        authLink: typeof payload.auth_link === "string" ? payload.auth_link : null,
-        shared: !((workspaceConnectors?.bcgpt?.apiKey as string | undefined)?.trim()),
-      }, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, formatForLog(err)));
-    }
+    respond(
+      true,
+      {
+        ok: true,
+        skipped: true,
+        workspaceId: client?.pmosWorkspaceId ?? null,
+        reason: "startup_autoconnect_disabled",
+      },
+      undefined,
+    );
   },
 
   "pmos.config.global.get": async ({ respond, client }) => {
@@ -4060,15 +4002,23 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       }
 
       const errors: string[] = [];
-      const start = await fetchJson(`${bcgptUrl}/action/startbcgpt`, {
-        method: "POST",
-        timeoutMs: 12_000,
-        headers: {
-          "content-type": "application/json",
-          "x-bcgpt-api-key": bcgptApiKey,
-        },
-        body: JSON.stringify({}),
-      });
+      const [start, listProjectsResult] = await Promise.all([
+        fetchJson(`${bcgptUrl}/action/startbcgpt`, {
+          method: "POST",
+          timeoutMs: 4_000,
+          headers: {
+            "content-type": "application/json",
+            "x-bcgpt-api-key": bcgptApiKey,
+          },
+          body: JSON.stringify({}),
+        }),
+        callBcgptTool({
+          bcgptUrl,
+          apiKey: bcgptApiKey,
+          toolName: "list_projects",
+          toolArgs: {},
+        }),
+      ]);
 
       const startPayload = isJsonObject(start.json) ? start.json : {};
       if (!start.ok && start.error) {
@@ -4085,12 +4035,6 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         message: stringOrNull(startPayload.message),
       };
 
-      const listProjectsResult = await callBcgptTool({
-        bcgptUrl,
-        apiKey: bcgptApiKey,
-        toolName: "list_projects",
-        toolArgs: {},
-      });
       if (!listProjectsResult.ok) {
         errors.push(`Failed to list projects: ${listProjectsResult.error ?? "unknown error"}`);
       }
@@ -4101,7 +4045,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         projectNameById.set(project.id, project.name);
       }
 
-      const focusProjects = projects.slice(0, 12);
+      const focusProjects = projects.slice(0, 8);
       const detailsByProjectId = new Map<string, unknown>();
       const detailsPromise = Promise.all(
         focusProjects.map(async (project) => {

@@ -24,4 +24,16 @@ describe("workflow-ai Basecamp summarization", () => {
 
     expect(summary).toBe("BCGPT Test Project: 3 open Basecamp tasks.");
   });
+
+  it("honors sufficient tool summaries from the PMOS bridge payload", () => {
+    const summary = summarizeAgentLoopToolResult("bcgpt_smart_action", {
+      sufficient: true,
+      summary: "BCGPT Test Project is healthy with 32 open tasks.",
+      result: {
+        action: "project_summary",
+      },
+    });
+
+    expect(summary).toBe("BCGPT Test Project is healthy with 32 open tasks.");
+  });
 });

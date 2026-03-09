@@ -6123,6 +6123,28 @@ export async function handleMCP(reqBody, ctx) {
           return ok(id, { query, action: "list_assigned_to_me", confidence: 0.95, fast_path: true, result });
         }
 
+        const quickProjectSummaryIntent =
+          !!args.project &&
+          /\b(summarize|summary|overview|status report|project report|audit|health)\b/i.test(lower) &&
+          !/\b(search|find|lookup|comment|campfire|message|messages|schedule|calendar)\b/i.test(lower);
+        if (quickProjectSummaryIntent) {
+          const result = await callTool("summarize_project", {
+            project: args.project,
+            include_todolists: args.include_todolists !== false,
+            include_card_tables: args.include_card_tables !== false,
+            include_message_boards: args.include_message_boards !== false,
+            include_vaults: args.include_vaults !== false
+          });
+          return ok(id, {
+            query,
+            action: "summarize_project",
+            confidence: 0.96,
+            fast_path: true,
+            project: { name: String(args.project) },
+            result
+          });
+        }
+
         const analysis = intelligent.analyzeQuery(query);
         const searchQuery = extractSearchQuery(query) || query;
         const wantsComments = /comment(s)?/.test(lower);
@@ -6144,8 +6166,14 @@ export async function handleMCP(reqBody, ctx) {
           /\bbranding\b/.test(lower) ||
           /\bcompany\b/.test(lower) ||
           ((/\babout\b/.test(lower) || /\bcontext\b/.test(lower)) && !/assigned|todo|task|workflow|flow|automation/.test(lower));
+        const needsPeople =
+          analysis.personNames.length > 0 ||
+          extractPersonId(query) != null ||
+          wantsMembership(query) ||
+          wantsAssignments(query) ||
+          wantsActivity(query);
         const ctx_intel = new RequestContext(ctx, `smart_action: ${query}`);
-        await ctx_intel.preloadEssentials({ loadPeople: true, loadProjects: true });
+        await ctx_intel.preloadEssentials({ loadPeople: needsPeople, loadProjects: true });
 
         const buildContextKeywords = (raw, projectName = "") => {
           const base = [
@@ -8302,27 +8330,39 @@ export async function handleMCP(reqBody, ctx) {
         const p = await projectByName(ctx, args.project);
         const summary = projectSummary(p);
         const counts = {};
+        const unavailable_tools = [];
+
+        const safeCount = async (toolKey, fn) => {
+          try {
+            const items = await fn();
+            counts[toolKey] = Array.isArray(items) ? items.length : 0;
+          } catch (e) {
+            const message = e?.message || String(e);
+            unavailable_tools.push({
+              tool: toolKey,
+              message
+            });
+            counts[toolKey] = null;
+          }
+        };
 
         if (args.include_todolists !== false) {
-          const lists = await listTodoLists(ctx, p.id);
-          counts.todolists = Array.isArray(lists) ? lists.length : 0;
+          await safeCount("todolists", () => listTodoLists(ctx, p.id));
         }
         if (args.include_card_tables !== false) {
-          const tables = await listCardTables(ctx, p.id);
-          counts.card_tables = Array.isArray(tables) ? tables.length : 0;
+          await safeCount("card_tables", () => listCardTables(ctx, p.id));
         }
         if (args.include_message_boards !== false) {
-          const boards = await listMessageBoards(ctx, p.id);
-          counts.message_boards = Array.isArray(boards) ? boards.length : 0;
+          await safeCount("message_boards", () => listMessageBoards(ctx, p.id));
         }
         if (args.include_vaults !== false) {
-          const vaults = await listVaults(ctx, p.id);
-          counts.vaults = Array.isArray(vaults) ? vaults.length : 0;
+          await safeCount("vaults", () => listVaults(ctx, p.id));
         }
 
         return ok(id, {
           project: summary,
-          counts
+          counts,
+          unavailable_tools
         });
       } catch (e) {
         console.error(`[summarize_project] Error:`, e.message);

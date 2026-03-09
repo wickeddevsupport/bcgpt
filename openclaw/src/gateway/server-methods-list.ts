@@ -102,8 +102,6 @@ const BASE_METHODS = [
   "pmos.byok.validate",
   // Super-admin: reset all workspace agents
   "pmos.admin.reset-all-workspaces",
-  // Lightweight bcgpt auto-connect (called on every gateway connect)
-  "pmos.bcgpt.autoconnect",
 ];
 
 export function listGatewayMethods(): string[] {

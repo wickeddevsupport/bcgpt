@@ -29,7 +29,6 @@ export const adminAction = createAction({
         ],
       },
     }),
-    project: projectDropdown(false),
     inputs: Property.DynamicProperties({
       displayName: 'Inputs',
       required: false,
@@ -71,12 +70,14 @@ export const adminAction = createAction({
             break;
           case 'get_webhook':
           case 'delete_webhook':
+            fields['project'] = projectDropdown(true);
             fields['webhook_id'] = Property.Number({
               displayName: 'Webhook ID',
               required: true,
             });
             break;
           case 'create_webhook':
+            fields['project'] = projectDropdown(true);
             fields['body'] = Property.Json({
               displayName: 'Body (JSON)',
               description: 'Official Basecamp webhook fields.',
@@ -84,6 +85,7 @@ export const adminAction = createAction({
             });
             break;
           case 'update_webhook':
+            fields['project'] = projectDropdown(true);
             fields['webhook_id'] = Property.Number({
               displayName: 'Webhook ID',
               required: true,
@@ -118,10 +120,10 @@ export const adminAction = createAction({
     );
 
     const op = String(context.propsValue.operation ?? '');
-    const project = context.propsValue.project
-      ? String(context.propsValue.project)
-      : null;
     const inputs = (context.propsValue.inputs ?? {}) as Record<string, unknown>;
+    const project = inputs['project']
+      ? String(inputs['project'])
+      : null;
 
     switch (op) {
       case 'startbcgpt':

@@ -24,7 +24,6 @@ export const commentsAction = createAction({
         ],
       },
     }),
-    project: projectDropdown(false),
     inputs: Property.DynamicProperties({
       displayName: 'Inputs',
       required: false,
@@ -35,6 +34,7 @@ export const commentsAction = createAction({
         const fields: DynamicPropsValue = {};
         switch (op) {
           case 'list_comments':
+            fields['project'] = projectDropdown(true);
             fields['recording'] = Property.ShortText({
               displayName: 'Recording ID or URL',
               description:
@@ -43,12 +43,14 @@ export const commentsAction = createAction({
             });
             break;
           case 'get_comment':
+            fields['project'] = projectDropdown(true);
             fields['comment_id'] = Property.Number({
               displayName: 'Comment ID',
               required: true,
             });
             break;
           case 'create_comment':
+            fields['project'] = projectDropdown(true);
             fields['recording'] = Property.ShortText({
               displayName: 'Recording ID or URL',
               description:
@@ -67,6 +69,7 @@ export const commentsAction = createAction({
             });
             break;
           case 'update_comment':
+            fields['project'] = projectDropdown(true);
             fields['comment_id'] = Property.Number({
               displayName: 'Comment ID',
               required: true,
@@ -110,10 +113,10 @@ export const commentsAction = createAction({
     );
 
     const op = String(context.propsValue.operation ?? '');
-    const project = context.propsValue.project
-      ? String(context.propsValue.project)
-      : null;
     const inputs = (context.propsValue.inputs ?? {}) as Record<string, unknown>;
+    const project = inputs['project']
+      ? String(inputs['project'])
+      : null;
 
     switch (op) {
       case 'create_attachment':

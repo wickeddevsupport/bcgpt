@@ -658,6 +658,23 @@ function summarizeSmartActionPayload(payload: unknown): string | null {
   return null;
 }
 
+function extractSufficientToolSummary(payload: unknown): string | null {
+  if (!isObjectRecord(payload)) {
+    return null;
+  }
+  if (payload.sufficient !== true) {
+    return null;
+  }
+  const result = isObjectRecord(payload.result) ? payload.result : null;
+  const directSummary =
+    (typeof payload.summary === "string" && payload.summary.trim()) ||
+    (typeof result?.summary === "string" && result.summary.trim()) ||
+    (typeof result?.note === "string" && result.note.trim()) ||
+    (typeof payload.note === "string" && payload.note.trim()) ||
+    null;
+  return directSummary;
+}
+
 export function summarizeAgentLoopToolResult(toolName: string, payload: unknown): string | null {
   if (isObjectRecord(payload) && typeof payload.error === "string" && payload.error.trim()) {
     return null;
@@ -681,6 +698,13 @@ function buildAgentLoopEarlyExit(
   });
   if (!successful.length) {
     return null;
+  }
+
+  for (const result of successful) {
+    const sufficientSummary = extractSufficientToolSummary(result.parsed);
+    if (sufficientSummary) {
+      return sufficientSummary;
+    }
   }
 
   const basecampResults = successful.filter(
