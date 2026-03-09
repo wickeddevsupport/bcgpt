@@ -4,6 +4,7 @@ import { redactConfigObject, restoreRedactedValues } from "../../config/redact-s
 import { ErrorCodes, errorShape } from "../protocol/index.js";
 import { formatForLog } from "../ws-log.js";
 import { filterByWorkspace, requireWorkspaceId, isSuperAdmin } from "../workspace-context.js";
+import { buildFigmaRestAuditReport, parseFigmaFileKey } from "../figma-rest-audit.js";
 
 type ConnectorResult = {
   url: string | null;
@@ -675,6 +676,32 @@ type WorkspaceFigmaMcpAuth = {
   mcpServerUrl: string;
 };
 
+function isFigmaMcpAuthRequiredError(message: string): boolean {
+  return /auth required|mcporter auth figma|non-200 status code\s*\(405\)|\b405\b/i.test(message);
+}
+
+function buildFigmaMcpFailurePayload(
+  err: unknown,
+  mcpAuth: WorkspaceFigmaMcpAuth,
+  requestedTool?: string | null,
+): Record<string, unknown> {
+  const message = err instanceof Error ? err.message : String(err);
+  const authRequired = isFigmaMcpAuthRequiredError(message);
+  return {
+    error: message,
+    code: authRequired ? "FIGMA_MCP_AUTH_REQUIRED" : "FIGMA_MCP_CALL_FAILED",
+    requestedTool: requestedTool ?? null,
+    hasPersonalAccessToken: mcpAuth.hasPersonalAccessToken,
+    source: mcpAuth.source,
+    mcpServerUrl: mcpAuth.mcpServerUrl,
+    fallbackSuggested: "figma_pat_audit_file",
+    fallbackReason: authRequired
+      ? "Figma MCP remote auth still requires mcporter OAuth; use the workspace PAT-backed audit fallback."
+      : "Figma MCP call failed; use the workspace PAT-backed audit fallback.",
+    authCommand: authRequired ? "mcporter auth figma" : null,
+  };
+}
+
 function buildFigmaPatMissingPayload(mcpAuth: WorkspaceFigmaMcpAuth): Record<string, unknown> {
   if (mcpAuth.hasPersonalAccessToken) {
     return {
@@ -750,6 +777,73 @@ async function readWorkspaceFigmaMcpAuth(workspaceId: string): Promise<Workspace
   const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
   const connectors = await readWorkspaceConnectors(workspaceId);
   return readWorkspaceFigmaMcpAuthFromConnectors(connectors);
+}
+
+async function runWorkspaceFigmaRestAudit(
+  workspaceId: string,
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const mcpAuth = await readWorkspaceFigmaMcpAuth(workspaceId);
+  if (!mcpAuth.personalAccessToken) {
+    return buildFigmaPatMissingPayload(mcpAuth);
+  }
+
+  const figmaContext = await readWorkspaceFigmaContext(workspaceId);
+  const requestedFileKey =
+    stringOrNull(args.file_key) ??
+    stringOrNull(args.fileKey) ??
+    stringOrNull(args.selected_file_id) ??
+    stringOrNull(args.selectedFileId) ??
+    stringOrNull(args.url);
+  const fileKey =
+    parseFigmaFileKey(requestedFileKey) ??
+    parseFigmaFileKey(figmaContext.selectedFileId) ??
+    parseFigmaFileKey(figmaContext.selectedFileUrl);
+
+  if (!fileKey) {
+    return {
+      error: "No Figma file is selected in workspace context, and no file_key was provided.",
+      code: "FIGMA_FILE_CONTEXT_MISSING",
+      hasPersonalAccessToken: true,
+      source: mcpAuth.source,
+      mcpServerUrl: mcpAuth.mcpServerUrl,
+      fallbackSuggested: "Select a file in the Figma panel, click Sync Now, then retry the audit.",
+    };
+  }
+
+  const focus = stringOrNull(args.focus);
+  const fileResponse = await fetchJson(`https://api.figma.com/v1/files/${encodeURIComponent(fileKey)}?branch_data=true`, {
+    method: "GET",
+    timeoutMs: 25_000,
+    headers: {
+      "X-Figma-Token": mcpAuth.personalAccessToken,
+    },
+  });
+
+  if (!fileResponse.ok || !isJsonObject(fileResponse.json)) {
+    return {
+      error: fileResponse.error ?? `Figma REST file fetch failed with status ${String(fileResponse.status)}`,
+      code: "FIGMA_REST_FILE_FETCH_FAILED",
+      status: fileResponse.status,
+      fileKey,
+      selectedFileId: figmaContext.selectedFileId,
+      selectedFileName: figmaContext.selectedFileName,
+      selectedFileUrl: figmaContext.selectedFileUrl,
+    };
+  }
+
+  return {
+    ...buildFigmaRestAuditReport(fileResponse.json, { focus, fileKey }),
+    selectedFileId: figmaContext.selectedFileId,
+    selectedFileName: figmaContext.selectedFileName,
+    selectedFileUrl: figmaContext.selectedFileUrl,
+    activeConnectionId: figmaContext.activeConnectionId,
+    activeConnectionName: figmaContext.activeConnectionName,
+    activeTeamId: figmaContext.activeTeamId,
+    connected: figmaContext.connected,
+    mcpServerUrl: mcpAuth.mcpServerUrl,
+    patSource: mcpAuth.source,
+  };
 }
 
 function fillFigmaContextValue(
@@ -2929,6 +3023,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "### Figma questions",
         "- Start with `figma_get_context`.",
         "- If the user needs live Figma MCP actions, call `figma_mcp_list_tools` first, then `figma_mcp_call`.",
+        "- If Figma MCP returns auth required, 405, or unavailable, immediately call `figma_pat_audit_file` on the selected file and continue with a REST-backed audit instead of stopping.",
         "- Do NOT use `web_fetch` for private Figma API access in workspace chat; it cannot inject the workspace PAT.",
         "",
         "## Available Tools",
@@ -2949,6 +3044,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- `figma_get_context` â€” read the selected file/team context from the Figma panel",
         "- `figma_mcp_list_tools` â€” inspect the live Figma MCP schema exposed through mcporter",
         "- `figma_mcp_call` â€” call a specific Figma MCP tool once auth/config are ready",
+        "- `figma_pat_audit_file` â€” run a Figma REST audit on the selected file with the workspace PAT when MCP auth is unavailable",
         "",
         ...(credentialContext ? [credentialContext, ""] : []),
         ...(workspaceAiContext ? ["## Workspace Memory", workspaceAiContext] : []),
@@ -3137,6 +3233,28 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                   description: "JSON object of MCP tool arguments",
                 },
               },
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "figma_pat_audit_file",
+            description:
+              "Run a Figma REST audit against the selected file using the workspace PAT. Use this when MCP auth is unavailable or when the user wants components, layout, styles, font, or regression-style structural audits.",
+            parameters: {
+              type: "object",
+              properties: {
+                file_key: {
+                  type: "string",
+                  description: "Optional Figma file key. Defaults to the file selected in the Figma panel.",
+                },
+                focus: {
+                  type: "string",
+                  description: "Optional audit focus: general, layout, autolayout, components, styles, fonts, or regression.",
+                },
+              },
+              additionalProperties: false,
             },
           },
         },
@@ -3340,7 +3458,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             const figmaContext = await readWorkspaceFigmaContext(workspaceId);
             return JSON.stringify({
               ...figmaContext,
-              note: "Use figma_mcp_list_tools next, then figma_mcp_call for live Figma operations.",
+              note: "Use figma_mcp_list_tools next. If that returns auth required, 405, or unavailable, call figma_pat_audit_file for a PAT-backed file audit.",
+              fallbackTool: "figma_pat_audit_file",
             });
           }
           case "figma_mcp_list_tools": {
@@ -3350,19 +3469,23 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             }
             const mcporterConfigPath =
               process.env.MCPORTER_CONFIG_PATH ?? "/app/.mcporter/mcporter.json";
-            const result = await runMcporterJson([
-              "--config",
-              mcporterConfigPath,
-              "list",
-              "figma",
-              "--schema",
-              "--json",
-            ], {
-              FIGMA_API_KEY: mcpAuth.personalAccessToken,
-              FIGMA_PERSONAL_ACCESS_TOKEN: mcpAuth.personalAccessToken,
-              MCP_FIGMA_SERVER_URL: mcpAuth.mcpServerUrl,
-            });
-            return JSON.stringify(result);
+            try {
+              const result = await runMcporterJson([
+                "--config",
+                mcporterConfigPath,
+                "list",
+                "figma",
+                "--schema",
+                "--json",
+              ], {
+                FIGMA_API_KEY: mcpAuth.personalAccessToken,
+                FIGMA_PERSONAL_ACCESS_TOKEN: mcpAuth.personalAccessToken,
+                MCP_FIGMA_SERVER_URL: mcpAuth.mcpServerUrl,
+              });
+              return JSON.stringify(result);
+            } catch (err) {
+              return JSON.stringify(buildFigmaMcpFailurePayload(err, mcpAuth, "list_tools"));
+            }
           }
           case "figma_mcp_call": {
             const tool = String(args.tool ?? "").trim();
@@ -3381,20 +3504,28 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             const effectiveToolArgs = hydrateKnownFigmaContextArguments(toolArgs, figmaContext);
             const mcporterConfigPath =
               process.env.MCPORTER_CONFIG_PATH ?? "/app/.mcporter/mcporter.json";
-            const result = await runMcporterJson([
-              "--config",
-              mcporterConfigPath,
-              "call",
-              `figma.${tool}`,
-              "--args",
-              JSON.stringify(effectiveToolArgs),
-              "--output",
-              "json",
-            ], {
-              FIGMA_API_KEY: mcpAuth.personalAccessToken,
-              FIGMA_PERSONAL_ACCESS_TOKEN: mcpAuth.personalAccessToken,
-              MCP_FIGMA_SERVER_URL: mcpAuth.mcpServerUrl,
-            });
+            try {
+              const result = await runMcporterJson([
+                "--config",
+                mcporterConfigPath,
+                "call",
+                `figma.${tool}`,
+                "--args",
+                JSON.stringify(effectiveToolArgs),
+                "--output",
+                "json",
+              ], {
+                FIGMA_API_KEY: mcpAuth.personalAccessToken,
+                FIGMA_PERSONAL_ACCESS_TOKEN: mcpAuth.personalAccessToken,
+                MCP_FIGMA_SERVER_URL: mcpAuth.mcpServerUrl,
+              });
+              return JSON.stringify(result);
+            } catch (err) {
+              return JSON.stringify(buildFigmaMcpFailurePayload(err, mcpAuth, tool));
+            }
+          }
+          case "figma_pat_audit_file": {
+            const result = await runWorkspaceFigmaRestAudit(workspaceId, args);
             return JSON.stringify(result);
           }
           default:
