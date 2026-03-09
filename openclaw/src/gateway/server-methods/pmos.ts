@@ -3297,7 +3297,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             if (!query) return JSON.stringify({ error: "query is required" });
             const { bcgptUrl, apiKey } = await resolveWorkspaceBcgptAccess({
               workspaceId,
-              allowGlobalSecrets: isSuperAdmin(client),
+              allowGlobalSecrets: true,
             });
             if (!apiKey) {
               return JSON.stringify({
@@ -3322,7 +3322,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           case "bcgpt_list_projects": {
             const { bcgptUrl, apiKey } = await resolveWorkspaceBcgptAccess({
               workspaceId,
-              allowGlobalSecrets: isSuperAdmin(client),
+              allowGlobalSecrets: true,
             });
             if (!apiKey) {
               return JSON.stringify({
@@ -3598,25 +3598,11 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     try {
       if (!client) throw new Error("client context required");
       const workspaceId = requireWorkspaceId(client);
-      const cfg = loadConfig() as unknown;
-      const allowGlobalSecrets = isSuperAdmin(client);
 
-      const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
-      const workspaceConnectors = await readWorkspaceConnectors(workspaceId);
-
-      const bcgptUrl = normalizeBaseUrl(
-        (workspaceConnectors?.bcgpt?.url as string | undefined) ??
-          readConfigString(cfg, ["pmos", "connectors", "bcgpt", "url"]) ??
-          process.env.BCGPT_URL ??
-          null,
-        "https://bcgpt.wickedlab.io",
-      );
-      const bcgptApiKey =
-        (workspaceConnectors?.bcgpt?.apiKey as string | undefined)?.trim() ??
-        (allowGlobalSecrets
-          ? readConfigString(cfg, ["pmos", "connectors", "bcgpt", "apiKey"]) ??
-            (process.env.BCGPT_API_KEY?.trim() || null)
-          : null);
+      const { bcgptUrl, apiKey: bcgptApiKey } = await resolveWorkspaceBcgptAccess({
+        workspaceId,
+        allowGlobalSecrets: true,
+      });
 
       const emptySnapshot = {
         workspaceId,

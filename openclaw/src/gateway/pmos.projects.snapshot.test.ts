@@ -35,6 +35,8 @@ describe("pmos.projects.snapshot", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    delete process.env.BCGPT_API_KEY;
+    delete process.env.BCGPT_URL;
   });
 
   it("returns a non-fatal snapshot when workspace key is missing", async () => {
@@ -311,6 +313,71 @@ describe("pmos.projects.snapshot", () => {
     };
     expect(payload.connected).toBe(true);
     expect(payload.errors[0]).toContain("identity check failed");
+  });
+
+  it("falls back to the shared bcgpt env key for workspace admins", async () => {
+    process.env.BCGPT_API_KEY = "shared-key";
+    process.env.BCGPT_URL = "https://bcgpt.shared.test";
+
+    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/action/startbcgpt")) {
+        return jsonResponse({
+          connected: true,
+          selected_account_id: 12345,
+          user: { name: "Shared User", email: "shared@wickedlab.io" },
+          accounts: [{ id: 12345 }],
+        });
+      }
+
+      if (url.endsWith("/mcp")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          params?: { name?: string };
+        };
+        if (body.params?.name === "list_projects") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "1",
+            result: {
+              projects: [
+                {
+                  id: 1001,
+                  name: "Shared Basecamp Project",
+                  status: "active",
+                  app_url: "https://3.basecamp.com/9999999/buckets/1001/projects/1001",
+                },
+              ],
+            },
+          });
+        }
+        return jsonResponse({ jsonrpc: "2.0", id: "2", result: { groups: [], overdue: [], todos: [] } });
+      }
+
+      return jsonResponse({ error: "not found" }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const respond = vi.fn();
+    await pmosHandlers["pmos.projects.snapshot"]({
+      params: {},
+      respond,
+      client: {
+        pmosWorkspaceId: "ws-shared-projects",
+        pmosRole: "workspace_admin",
+      } as any,
+    } as any);
+
+    const payload = respond.mock.calls[0]?.[1] as {
+      configured: boolean;
+      connected: boolean;
+      connectorUrl: string;
+      totals: { projectCount: number };
+    };
+
+    expect(payload.configured).toBe(true);
+    expect(payload.connected).toBe(true);
+    expect(payload.connectorUrl).toBe("https://bcgpt.shared.test");
+    expect(payload.totals.projectCount).toBe(1);
   });
 
   it("accepts alternate tool payload shapes for projects and todos", async () => {
