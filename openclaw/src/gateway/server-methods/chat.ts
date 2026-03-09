@@ -249,6 +249,20 @@ function canAccessSession(
   return workspaceAgentIds.has(target.agentId);
 }
 
+function shouldRouteToPmosFigmaChat(
+  client: GatewayClient | null,
+  message: string,
+): boolean {
+  const workspaceId =
+    typeof client?.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  if (!workspaceId) {
+    return false;
+  }
+  return /\bfigma\b|\bdesign\b|\bauto[\s-]?layout\b|\bcomponent(?:s)?\b|\bstyle(?:s)?\b|\bfont(?:s)?\b|\bregression\b|\baudit\b/i.test(
+    message,
+  );
+}
+
 async function buildWorkspaceSystemPrompt(
   client: GatewayClient | null,
 ): Promise<string> {
@@ -584,6 +598,124 @@ export const chatHandlers: GatewayRequestHandlers = {
         status: "started" as const,
       };
       respond(true, ackPayload, undefined, { runId: clientRunId });
+
+      if (shouldRouteToPmosFigmaChat(client, parsedMessage)) {
+        void (async () => {
+          try {
+            const { pmosHandlers } = await import("./pmos.js");
+            let captured:
+              | {
+                  ok: boolean;
+                  payload?: unknown;
+                  error?: unknown;
+                }
+              | undefined;
+
+            await pmosHandlers["pmos.chat.send"]({
+              req: {
+                id: clientRunId,
+                type: "req",
+                method: "pmos.chat.send",
+                params: {
+                  messages: [{ role: "user", content: parsedMessage }],
+                },
+              },
+              params: {
+                messages: [{ role: "user", content: parsedMessage }],
+              },
+              isWebchatConnect: () => false,
+              respond: (ok, payload, error) => {
+                captured = { ok, payload, error };
+              },
+              client,
+              context,
+            });
+
+            if (!captured?.ok) {
+              throw new Error(
+                typeof captured?.error === "object" && captured?.error && "message" in captured.error
+                  ? String((captured.error as { message?: unknown }).message ?? "PMOS chat failed")
+                  : "PMOS chat failed",
+              );
+            }
+
+            const payload =
+              captured.payload && typeof captured.payload === "object"
+                ? (captured.payload as { ok?: boolean; message?: unknown })
+                : null;
+            if (!payload?.ok) {
+              throw new Error(
+                typeof payload?.message === "string" && payload.message.trim()
+                  ? payload.message.trim()
+                  : "PMOS chat returned no result.",
+              );
+            }
+
+            const combinedReply = String(payload.message ?? "").trim();
+            let message: Record<string, unknown> | undefined;
+            if (combinedReply) {
+              const { storePath: latestStorePath, entry: latestEntry } =
+                loadSessionEntryForConfig(cfg, sessionKey);
+              const sessionId = latestEntry?.sessionId ?? entry?.sessionId ?? clientRunId;
+              const appended = appendAssistantTranscriptMessage({
+                message: combinedReply,
+                sessionId,
+                storePath: latestStorePath,
+                sessionFile: latestEntry?.sessionFile,
+                createIfMissing: true,
+              });
+              if (appended.ok) {
+                message = appended.message;
+              } else {
+                context.logGateway.warn(
+                  `pmos figma transcript append failed: ${appended.error ?? "unknown error"}`,
+                );
+                const ts = Date.now();
+                message = {
+                  role: "assistant",
+                  content: [{ type: "text", text: combinedReply }],
+                  timestamp: ts,
+                  stopReason: "stop",
+                  usage: { input: 0, output: 0, totalTokens: 0 },
+                };
+              }
+            }
+
+            broadcastChatFinal({
+              context,
+              runId: clientRunId,
+              sessionKey: rawSessionKey,
+              message,
+            });
+            context.dedupe.set(`chat:${clientRunId}`, {
+              ts: Date.now(),
+              ok: true,
+              payload: { runId: clientRunId, status: "ok" as const },
+            });
+          } catch (err) {
+            const error = errorShape(ErrorCodes.UNAVAILABLE, String(err));
+            context.dedupe.set(`chat:${clientRunId}`, {
+              ts: Date.now(),
+              ok: false,
+              payload: {
+                runId: clientRunId,
+                status: "error" as const,
+                summary: String(err),
+              },
+              error,
+            });
+            broadcastChatError({
+              context,
+              runId: clientRunId,
+              sessionKey: rawSessionKey,
+              errorMessage: String(err),
+            });
+          } finally {
+            context.chatAbortControllers.delete(clientRunId);
+          }
+        })();
+        return;
+      }
 
       const trimmedMessage = parsedMessage.trim();
       const injectThinking = Boolean(
