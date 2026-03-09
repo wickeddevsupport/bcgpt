@@ -155,8 +155,11 @@ function ensureGlobalDefaults(config) {
   }
 
   defaults.subagents = isRecord(defaults.subagents) ? defaults.subagents : {};
-  if (!trimToNull(defaults.subagents.model)) {
+  const normalizedSubagentModel = normalizeModelRef(defaults.subagents.model);
+  if (!trimToNull(normalizedSubagentModel)) {
     defaults.subagents.model = defaults.model.primary;
+  } else {
+    defaults.subagents.model = normalizedSubagentModel;
   }
   if (!trimToNull(defaults.subagents.thinking)) {
     defaults.subagents.thinking = "low";
@@ -248,8 +251,11 @@ function ensureWorkspaceDefaults(workspaceId, config, globalPrimaryModel) {
   }
 
   defaults.subagents = isRecord(defaults.subagents) ? defaults.subagents : {};
-  if (!trimToNull(defaults.subagents.model)) {
+  const normalizedSubagentModel = normalizeModelRef(defaults.subagents.model);
+  if (!trimToNull(normalizedSubagentModel)) {
     defaults.subagents.model = primaryModelRef;
+  } else {
+    defaults.subagents.model = normalizedSubagentModel;
   }
   if (!trimToNull(defaults.subagents.thinking)) {
     defaults.subagents.thinking = "low";

@@ -220,6 +220,13 @@ global.agents.defaults.thinkingDefault = global.agents.defaults.thinkingDefault 
 global.agents.defaults.compaction = global.agents.defaults.compaction || {};
 global.agents.defaults.compaction.mode = global.agents.defaults.compaction.mode || "safeguard";
 global.agents.defaults.subagents = global.agents.defaults.subagents || {};
+if (
+  !global.agents.defaults.subagents.model ||
+  global.agents.defaults.subagents.model === "kilo/minimax/minimax-m2.5:free" ||
+  global.agents.defaults.subagents.model === "kilo/auto-free"
+) {
+  global.agents.defaults.subagents.model = PRIMARY_MODEL;
+}
 global.agents.defaults.subagents.model =
   global.agents.defaults.subagents.model || PRIMARY_MODEL;
 global.agents.defaults.subagents.thinking =
