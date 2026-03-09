@@ -816,7 +816,7 @@ async function runWorkspaceFigmaRestAudit(
   const depth =
     Number.isFinite(requestedDepth) && requestedDepth >= 1 && requestedDepth <= 8
       ? Math.trunc(requestedDepth)
-      : 4;
+      : 2;
   const query = new URLSearchParams({
     branch_data: "true",
     depth: String(depth),
@@ -3265,7 +3265,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                 },
                 depth: {
                   type: "number",
-                  description: "Optional file traversal depth for the REST audit. Defaults to 4 to keep large files manageable.",
+                  description: "Optional file traversal depth for the REST audit. Defaults to 2 to keep large files responsive in chat.",
                 },
               },
               additionalProperties: false,
