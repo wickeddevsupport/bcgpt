@@ -411,6 +411,7 @@ export class OpenClawApp extends LitElement {
   @state() pmosProjectsError: string | null = null;
   @state() pmosProjectsSnapshot: PmosProjectsSnapshot | null = null;
   @state() pmosProjectSearch = "";
+  @state() pmosProjectViewMode: "cards" | "status-board" | "timeline" = "cards";
 
   // PMOS workflows native embed (Phase 2)
   @state() apPiecesLoading = false;

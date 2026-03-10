@@ -349,7 +349,7 @@ async function buildWorkspaceSystemPrompt(
     return [
       "## PMOS Workspace Runtime Context",
       `- Workspace ID: ${workspaceId}`,
-      "- This context is trusted runtime state. Use it silently — do NOT echo, quote, or summarize it in responses.",
+      "- This context is trusted runtime state. Use it silently -- do NOT echo, quote, or summarize it in responses.",
       "- Do NOT introduce yourself, greet the user, or re-state your role at the start of each message. Just respond.",
       "- Use this snapshot for connector readiness and workspace defaults, not as a substitute for live Basecamp or Figma tool calls.",
       "- Never ask the user to re-enter a credential that is already marked present in this context.",
@@ -825,7 +825,7 @@ export const chatHandlers: GatewayRequestHandlers = {
 
       const effectiveCfg = cfg;
       // Inject timestamp so agents know the current date/time.
-      // Only BodyForAgent gets the timestamp — Body stays raw for UI display.
+      // Only BodyForAgent gets the timestamp -- Body stays raw for UI display.
       // See: https://github.com/moltbot/moltbot/issues/3658
       const stampedMessage = injectTimestamp(parsedMessage, timestampOptsFromConfig(effectiveCfg));
 
@@ -907,13 +907,14 @@ export const chatHandlers: GatewayRequestHandlers = {
               .filter(Boolean)
               .join("\n\n")
               .trim();
+            const effectiveReply = combinedReply || "Request completed.";
             let message: Record<string, unknown> | undefined;
-            if (combinedReply) {
+            if (effectiveReply) {
               const { storePath: latestStorePath, entry: latestEntry } =
                 loadSessionEntryForConfig(effectiveCfg, sessionKey);
               const sessionId = latestEntry?.sessionId ?? entry?.sessionId ?? clientRunId;
               const appended = appendAssistantTranscriptMessage({
-                message: combinedReply,
+                message: effectiveReply,
                 sessionId,
                 storePath: latestStorePath,
                 sessionFile: latestEntry?.sessionFile,
@@ -928,7 +929,7 @@ export const chatHandlers: GatewayRequestHandlers = {
                 const now = Date.now();
                 message = {
                   role: "assistant",
-                  content: [{ type: "text", text: combinedReply }],
+                  content: [{ type: "text", text: effectiveReply }],
                   timestamp: now,
                   // Keep this compatible with Pi stopReason enums even though this message isn't
                   // persisted to the transcript due to the append failure.

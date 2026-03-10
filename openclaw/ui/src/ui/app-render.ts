@@ -1138,6 +1138,7 @@ export function renderApp(state: AppViewState) {
                 error: state.pmosProjectsError ?? state.pmosCommandError,
                 snapshot: state.pmosProjectsSnapshot,
                 projectSearch: state.pmosProjectSearch,
+                viewMode: state.pmosProjectViewMode,
                 chatProps,
                 onRefresh: () => state.handlePmosProjectsLoad(),
                 onOpenIntegrations: () => state.setTab("integrations"),
@@ -1147,6 +1148,9 @@ export function renderApp(state: AppViewState) {
                 },
                 onProjectSearchChange: (next) => {
                   state.pmosProjectSearch = next;
+                },
+                onViewModeChange: (next) => {
+                  state.pmosProjectViewMode = next;
                 },
               })
             : nothing

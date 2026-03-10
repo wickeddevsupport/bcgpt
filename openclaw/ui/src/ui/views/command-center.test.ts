@@ -46,6 +46,8 @@ function createProps(overrides: Partial<CommandCenterProps> = {}): CommandCenter
     onOpenWorkflows: vi.fn(),
     onPrefillChat: vi.fn(),
     onProjectSearchChange: vi.fn(),
+    viewMode: "cards" as const,
+    onViewModeChange: vi.fn(),
     ...overrides,
   };
 }

@@ -2317,7 +2317,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
         "",
       );
       // NOTE: Workspace memory (AI_CONTEXT.md) is intentionally NOT included in the workflow
-      // assistant prompt — it causes models to treat workflow requests as memory recall queries.
+      // assistant prompt -- it causes models to treat workflow requests as memory recall queries.
       const workspaceContext = `## Workspace Context
 - Workspace ID: ${workspaceId}
 - Use node type names from the live workspace catalog when available.
@@ -2349,12 +2349,12 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       }
       const agentBehaviorRules = [
         "## Critical Behaviour Rules (Automations AI)",
-        "- When asked to create or build a workflow: CALL pmos_ops_create_workflow IMMEDIATELY — never output JSON for the user to import manually.",
+        "- When asked to create or build a workflow: CALL pmos_ops_create_workflow IMMEDIATELY -- never output JSON for the user to import manually.",
         "- Always call pmos_ops_list_credentials FIRST to discover which integrations are available.",
         "- After creating a workflow, tell the user its name and ID, and what they should do next (e.g. activate it, add a webhook).",
-        "- Never describe a workflow in text and say 'import it' — use the tool to create it directly.",
+        "- Never describe a workflow in text and say 'import it' -- use the tool to create it directly.",
         "- When the user asks to edit/modify/add nodes/remove nodes from an EXISTING workflow (especially one currently open in the canvas): call pmos_ops_get_workflow first to fetch current state, then call pmos_ops_update_workflow with the FULL updated nodes+connections.",
-        "- pmos_ops_update_workflow replaces the entire workflow — always include ALL existing nodes plus any new ones.",
+        "- pmos_ops_update_workflow replaces the entire workflow -- always include ALL existing nodes plus any new ones.",
         "- Available tools: pmos_ops_list_credentials, pmos_ops_list_workflows, pmos_ops_list_node_types, pmos_ops_create_workflow, pmos_ops_get_workflow, pmos_ops_update_workflow, pmos_ops_execute_workflow.",
       ].join("\n");
       const systemPrompt = [
@@ -2411,7 +2411,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                 },
                 connections: {
                   type: "object",
-                  description: "Connections object mapping source node name â†’ { main: [[{ node, type, index }]] }",
+                  description: "Connections object mapping source node name â†' { main: [[{ node, type, index }]] }",
                 },
               },
             },
@@ -2436,7 +2436,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           type: "function" as const,
           function: {
             name: "pmos_ops_update_workflow",
-            description: "Update an existing workflow-engine flow — add, remove or modify nodes and connections. Always call pmos_ops_get_workflow first to retrieve current state, then include ALL nodes (existing + modified) in the update.",
+            description: "Update an existing workflow-engine flow -- add, remove or modify nodes and connections. Always call pmos_ops_get_workflow first to retrieve current state, then include ALL nodes (existing + modified) in the update.",
             parameters: {
               type: "object",
               required: ["workflow_id", "nodes", "connections"],
@@ -2571,14 +2571,14 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             const BASECAMP_CUSTOM_NODE = {
               name: "n8n-nodes-basecamp.basecamp",
               displayName: "Basecamp (BCgpt Custom Node)",
-              description: "Full Basecamp integration — projects, todos, messages, events, files, and more. ALWAYS use this node type for Basecamp.",
+              description: "Full Basecamp integration -- projects, todos, messages, events, files, and more. ALWAYS use this node type for Basecamp.",
               group: ["custom"],
               version: 1,
             };
             const CORE_N8N_NODES = [
               { name: "n8n-nodes-base.manualTrigger", displayName: "Manual Trigger", description: "Start workflow manually", group: ["trigger"], version: 1 },
               { name: "n8n-nodes-base.scheduleTrigger", displayName: "Schedule Trigger", description: "Trigger on a cron schedule (daily, hourly, etc.)", group: ["trigger"], version: 1 },
-              { name: "n8n-nodes-base.webhook", displayName: "Webhook", description: "HTTP webhook trigger — use this type name, NOT webhookTrigger", group: ["trigger"], version: 1 },
+              { name: "n8n-nodes-base.webhook", displayName: "Webhook", description: "HTTP webhook trigger -- use this type name, NOT webhookTrigger", group: ["trigger"], version: 1 },
               { name: "n8n-nodes-base.if", displayName: "IF", description: "Branch workflow on a condition (true/false)", group: ["transform"], version: 1 },
               { name: "n8n-nodes-base.switch", displayName: "Switch", description: "Route items to multiple output branches", group: ["transform"], version: 1 },
               { name: "n8n-nodes-base.merge", displayName: "Merge", description: "Merge data from multiple branches", group: ["transform"], version: 1 },
@@ -2651,7 +2651,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               if (!basecampCred) {
                 return JSON.stringify({
                   error: "Basecamp credential not configured",
-                  userMessage: "âš ï¸ Your Basecamp integration is not set up yet. Please go to **Settings â†’ Integrations** and add your Basecamp API key before creating this workflow. Once configured, I'll build the workflow automatically.",
+                  userMessage: "âš ï¸ Your Basecamp integration is not set up yet. Please go to **Settings â†' Integrations** and add your Basecamp API key before creating this workflow. Once configured, I'll build the workflow automatically.",
                   actionRequired: "configure_basecamp_credential",
                 });
               }
@@ -2705,7 +2705,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               workflowId: r.workflow?.id,
               workflowName: name,
               nodeCount: nodes.length,
-              message: `Workflow "${name}" created successfully with ${nodes.length} nodes! ID: ${r.workflow?.id}. It's currently inactive — activate it in the Workflows panel when ready.`,
+              message: `Workflow "${name}" created successfully with ${nodes.length} nodes! ID: ${r.workflow?.id}. It's currently inactive -- activate it in the Workflows panel when ready.`,
             });
           }
           case "pmos_ops_update_workflow": {
@@ -2820,7 +2820,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           true,
           {
             ok: true,
-            message: `AI model unavailable: ${result.error ?? "unknown error"}. Please check your model configuration in Settings â†’ AI Model Setup.`,
+            message: `AI model unavailable: ${result.error ?? "unknown error"}. Please check your model configuration in Settings â†' AI Model Setup.`,
             workflowCreated: false,
           },
           undefined,
@@ -2876,7 +2876,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             finalText = retryResult.text;
           }
         } catch {
-          // retry failed — proceed with original text
+          // retry failed -- proceed with original text
         }
       }
       const jsonCandidate = !createdWorkflowId ? extractJsonFromText(finalText) : null;
@@ -2973,7 +2973,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             }
           }
         } catch {
-          // Not valid JSON or workflow extraction failed — stream text as-is
+          // Not valid JSON or workflow extraction failed -- stream text as-is
         }
       }
 
@@ -3014,7 +3014,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     }
   },
 
-  // â"€â"€ Workspace Chat (agentic — can directly create/modify workflow-engine flows via tool calls) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+  // â"€â"€ Workspace Chat (agentic -- can directly create/modify workflow-engine flows via tool calls) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
   "pmos.chat.send": async ({ req, params, respond, client, context }) => {
     try {
@@ -3201,27 +3201,27 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const credentialContext = buildCredentialContext(availableCredentials);
 
       const systemPrompt = [
-        `You are an intelligent AI assistant for OpenClaw workspace (ID: ${workspaceId}) — a unified project management and automation platform powered by BCgpt.`,
+        `You are an intelligent AI assistant for OpenClaw workspace (ID: ${workspaceId}) -- a unified project management and automation platform powered by BCgpt.`,
         "",
         "## What is OpenClaw / BCgpt",
         "OpenClaw combines Basecamp project management with an embedded Activepieces workflow engine and BCgpt AI layer.",
-        "- **Basecamp layer**: Projects, todos, messages, people, schedules, card tables — all accessible via BCgpt tools.",
-        "- **Workflow engine layer (Activepieces)**: Visual workflow builder embedded in the platform — you can CREATE and EDIT flows directly.",
+        "- **Basecamp layer**: Projects, todos, messages, people, schedules, card tables -- all accessible via BCgpt tools.",
+        "- **Workflow engine layer (Activepieces)**: Visual workflow builder embedded in the platform -- you can CREATE and EDIT flows directly.",
         "- **BCgpt API**: An intelligent Basecamp integration layer with a smart router (`smart_action`) and full MCP tool set.",
         "",
         "## BCgpt API Reference",
         "BCgpt exposes Basecamp data via MCP (Model Context Protocol) and an OpenAPI compatibility layer:",
-        "- `POST /mcp` — MCP JSON-RPC endpoint. Auth: `x-bcgpt-api-key` header.",
-        "- `POST /action/:operation` — OpenAPI wrapper for individual tools.",
-        "- `smart_action({query})` — Natural-language router. Tell it what you want in plain English; it calls the right Basecamp tools, handles pagination, and returns structured summaries. Best for: listing things, searching, getting project data.",
-        "- `basecamp_raw({method, path, body})` — Raw Basecamp API access for anything not covered by named tools.",
+        "- `POST /mcp` -- MCP JSON-RPC endpoint. Auth: `x-bcgpt-api-key` header.",
+        "- `POST /action/:operation` -- OpenAPI wrapper for individual tools.",
+        "- `smart_action({query})` -- Natural-language router. Tell it what you want in plain English; it calls the right Basecamp tools, handles pagination, and returns structured summaries. Best for: listing things, searching, getting project data.",
+        "- `basecamp_raw({method, path, body})` -- Raw Basecamp API access for anything not covered by named tools.",
         "",
         "## How to Think and Respond",
         "",
         "### Analyze, don't dump",
         "- Never output raw lists of IDs, raw JSON payloads, or unannotated tool results at the user.",
         "- When you retrieve data (credentials, workflows, todos, projects), INTERPRET it: what matters for this user's question?",
-        "- Example: Instead of listing 50 node types, say 'You have Slack, GitHub, and Basecamp nodes connected — I'll use those.'",
+        "- Example: Instead of listing 50 node types, say 'You have Slack, GitHub, and Basecamp nodes connected -- I'll use those.'",
         "",
         "### Be proactive, not lazy",
         "- Don't ask the user for information you can discover with a tool call.",
@@ -3233,22 +3233,22 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "### Always provide next steps",
         "Every response should tell the user what to do next. Examples:",
         "- 'Activate the workflow by clicking the toggle in the top right of the workflow editor.'",
-        "- 'Copy the webhook URL from the Webhook Trigger node and paste it into Basecamp project settings â†’ Webhooks.'",
+        "- 'Copy the webhook URL from the Webhook Trigger node and paste it into Basecamp project settings â†' Webhooks.'",
         "- 'Check your Slack credential is pointing to the #alerts channel.'",
         "- 'Open the Executions tab to verify the workflow ran correctly.'",
         "",
         "### Workflow creation rules",
-        "- When asked to CREATE a workflow: call `pmos_ops_create_workflow` immediately — never output JSON for the user to import.",
+        "- When asked to CREATE a workflow: call `pmos_ops_create_workflow` immediately -- never output JSON for the user to import.",
         "- When asked to EDIT/UPDATE/FIX a workflow: call `pmos_ops_update_workflow` on the existing workflow ID.",
         "- Always call `pmos_ops_list_credentials` first so credential IDs are correct in node parameters.",
         "- For Basecamp steps: always use the compat Basecamp node type `n8n-nodes-basecamp.basecamp`, always include credentials, use `findByName` to resolve project names.",
         "- Position nodes left-to-right: trigger at [250, 300], each next node at x+250.",
-        "- Build complete, runnable workflows — no manual rewiring needed.",
+        "- Build complete, runnable workflows -- no manual rewiring needed.",
         "",
         "### Project management questions",
         "- Use workspace context for connector readiness and defaults only; do not answer Basecamp questions from memory when live tools are available.",
         "- For live Basecamp data, use `bcgpt_list_projects` when the user wants the raw list of projects, and use `bcgpt_smart_action` when the user wants analysis, summaries, or searches.",
-        "- Summarize results meaningfully: 'There are 7 open todos in Project X — 3 are overdue. The most recent message was from Alice yesterday about the deploy.'",
+        "- Summarize results meaningfully: 'There are 7 open todos in Project X -- 3 are overdue. The most recent message was from Alice yesterday about the deploy.'",
         "",
         "### Figma questions",
         "- Start with `figma_get_context`.",
@@ -3266,41 +3266,41 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "",
         "## Available Tools",
         "**Basecamp MCP Tools:**",
-        "- `bcgpt_smart_action` — run natural-language Basecamp queries through the bcgpt MCP router",
-        "- `bcgpt_list_projects` — fetch live Basecamp projects with names, IDs, and status",
+        "- `bcgpt_smart_action` -- run natural-language Basecamp queries through the bcgpt MCP router",
+        "- `bcgpt_list_projects` -- fetch live Basecamp projects with names, IDs, and status",
         "",
         "**Workflow Engine Tools:**",
-        "- `pmos_ops_list_credentials` — see which services are connected (Basecamp, Slack, GitHub, etc.)",
-        "- `pmos_ops_list_workflows` — list existing workflow-engine flows with names and IDs",
-        "- `pmos_ops_create_workflow` — CREATE a new workflow-engine flow right now",
-        "- `pmos_ops_update_workflow` — UPDATE an existing workflow (by ID)",
-        "- `pmos_ops_get_workflow` — get full definition of a specific workflow by ID",
-        "- `pmos_ops_execute_workflow` — test-run a workflow by ID",
-        "- `pmos_ops_list_node_types` — list available trigger and action node types",
+        "- `pmos_ops_list_credentials` -- see which services are connected (Basecamp, Slack, GitHub, etc.)",
+        "- `pmos_ops_list_workflows` -- list existing workflow-engine flows with names and IDs",
+        "- `pmos_ops_create_workflow` -- CREATE a new workflow-engine flow right now",
+        "- `pmos_ops_update_workflow` -- UPDATE an existing workflow (by ID)",
+        "- `pmos_ops_get_workflow` -- get full definition of a specific workflow by ID",
+        "- `pmos_ops_execute_workflow` -- test-run a workflow by ID",
+        "- `pmos_ops_list_node_types` -- list available trigger and action node types",
         "",
         "**Figma Tools:**",
-        "- `figma_get_context` — read the selected file/team context from the Figma panel",
-        "- `figma_mcp_list_tools` — inspect the live Figma MCP schema exposed through mcporter",
-        "- `figma_mcp_call` — call a specific Figma MCP tool once auth/config are ready",
-        "- `figma_pat_audit_file` — run a Figma REST audit on the selected file with the workspace PAT when MCP auth is unavailable",
+        "- `figma_get_context` -- read the selected file/team context from the Figma panel",
+        "- `figma_mcp_list_tools` -- inspect the live Figma MCP schema exposed through mcporter",
+        "- `figma_mcp_call` -- call a specific Figma MCP tool once auth/config are ready",
+        "- `figma_pat_audit_file` -- run a Figma REST audit on the selected file with the workspace PAT when MCP auth is unavailable",
         "",
         "**Figma File Manager (FM) Tools** \u2014 manage files, tags, folders, categories, and links in fm.wickedlab.io:",
-        "- `fm_get_context` — get FM user info and overview of files/tags/folders/categories",
-        "- `fm_list_files` — list Figma files tracked in FM with filters (tag, folder, category, search)",
-        "- `fm_get_file` — get full details for a specific FM file by ID",
-        "- `fm_update_file` — update a file's folder, category, or notes",
-        "- `fm_list_tags` — list all tags and their file counts",
-        "- `fm_create_tag` — create a new tag and optionally apply to a file",
-        "- `fm_rename_tag` — rename an existing tag",
-        "- `fm_delete_tag` — delete a tag",
-        "- `fm_list_folders` — list all folders",
-        "- `fm_create_folder` — create a new folder",
-        "- `fm_rename_folder` — rename a folder",
-        "- `fm_list_categories` — list all categories",
-        "- `fm_create_category` — create a new category",
-        "- `fm_add_link` — add a URL link to a file",
-        "- `fm_delete_link` — remove a link from a file",
-        "- `fm_sync_team` — trigger a sync for a Figma team connection to refresh files",
+        "- `fm_get_context` -- get FM user info and overview of files/tags/folders/categories",
+        "- `fm_list_files` -- list Figma files tracked in FM with filters (tag, folder, category, search)",
+        "- `fm_get_file` -- get full details for a specific FM file by ID",
+        "- `fm_update_file` -- update a file's folder, category, or notes",
+        "- `fm_list_tags` -- list all tags and their file counts",
+        "- `fm_create_tag` -- create a new tag and optionally apply to a file",
+        "- `fm_rename_tag` -- rename an existing tag",
+        "- `fm_delete_tag` -- delete a tag",
+        "- `fm_list_folders` -- list all folders",
+        "- `fm_create_folder` -- create a new folder",
+        "- `fm_rename_folder` -- rename a folder",
+        "- `fm_list_categories` -- list all categories",
+        "- `fm_create_category` -- create a new category",
+        "- `fm_add_link` -- add a URL link to a file",
+        "- `fm_delete_link` -- remove a link from a file",
+        "- `fm_sync_team` -- trigger a sync for a Figma team connection to refresh files",
         "",
         ...(credentialContext ? [credentialContext, ""] : []),
         ...(workspaceAiContext ? ["## Workspace Memory", workspaceAiContext] : []),
@@ -3376,7 +3376,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                 },
                 connections: {
                   type: "object",
-                  description: "Connections object mapping source node name â†’ { main: [[{ node, type, index }]] }",
+                  description: "Connections object mapping source node name â†' { main: [[{ node, type, index }]] }",
                 },
               },
             },
@@ -3737,7 +3737,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       ];
 
 
-      // â"€â"€ Tool executor — calls n8n-api-client directly â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+      // â"€â"€ Tool executor -- calls n8n-api-client directly â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
       const executeTool = async (toolName: string, args: Record<string, unknown>): Promise<string> => {
         const {
           createWorkflowEngineWorkflow,
@@ -3909,7 +3909,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             const CORE_NODES2 = [
               { name: "n8n-nodes-base.manualTrigger", displayName: "Manual Trigger", group: ["trigger"], version: 1 },
               { name: "n8n-nodes-base.scheduleTrigger", displayName: "Schedule Trigger", group: ["trigger"], version: 1 },
-              { name: "n8n-nodes-base.webhook", displayName: "Webhook", description: "HTTP webhook trigger — type is webhook NOT webhookTrigger", group: ["trigger"], version: 1 },
+              { name: "n8n-nodes-base.webhook", displayName: "Webhook", description: "HTTP webhook trigger -- type is webhook NOT webhookTrigger", group: ["trigger"], version: 1 },
               { name: "n8n-nodes-base.if", displayName: "IF", group: ["transform"], version: 1 },
               { name: "n8n-nodes-base.switch", displayName: "Switch", group: ["transform"], version: 1 },
               { name: "n8n-nodes-base.merge", displayName: "Merge", group: ["transform"], version: 1 },
@@ -3964,7 +3964,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               success: true,
               workflowId: r.workflow?.id,
               workflowName: name,
-              message: `Workflow "${name}" created successfully! ID: ${r.workflow?.id}. It's currently inactive — activate it in the Workflows panel when ready.`,
+              message: `Workflow "${name}" created successfully! ID: ${r.workflow?.id}. It's currently inactive -- activate it in the Workflows panel when ready.`,
             };
             finishTool(payload);
             return JSON.stringify(payload);
@@ -4270,7 +4270,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           true,
           {
             ok: false,
-            message: `AI model unavailable: ${result.error ?? "unknown error"}. Please check your model configuration in Settings â†’ AI Model Setup.`,
+            message: `AI model unavailable: ${result.error ?? "unknown error"}. Please check your model configuration in Settings â†' AI Model Setup.`,
             liveStreamed: liveStreamEnabled,
           },
           undefined,
@@ -4278,7 +4278,9 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         return;
       }
 
-      const finalMessage = result.text ?? "";
+      const rawFinalMessage = (result.text ?? "").trim();
+      const finalMessage = rawFinalMessage
+        || "I processed your request but couldn't generate a detailed summary. Please try again or rephrase your question.";
       if (liveStreamEnabled) {
         if (!liveText) {
           emitThinking("Drafting the final response from the collected workspace data.");

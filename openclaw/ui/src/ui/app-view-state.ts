@@ -263,6 +263,7 @@ export type AppViewState = {
   pmosProjectsError: string | null;
   pmosProjectsSnapshot: PmosProjectsSnapshot | null;
   pmosProjectSearch: string;
+  pmosProjectViewMode: "cards" | "status-board" | "timeline";
 
   // PMOS workflows native embed (Phase 2)
   apPiecesLoading: boolean;

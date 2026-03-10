@@ -4,18 +4,22 @@ import type { ChatProps } from "./chat.ts";
 import { renderChat } from "./chat.ts";
 import type { PmosProjectCard, PmosProjectTodoItem, PmosProjectsSnapshot } from "../controllers/pmos-projects.ts";
 
+export type ProjectViewMode = "cards" | "status-board" | "timeline";
+
 export type CommandCenterProps = {
   connected: boolean;
   loading: boolean;
   error: string | null;
   snapshot: PmosProjectsSnapshot | null;
   projectSearch: string;
+  viewMode: ProjectViewMode;
   chatProps: ChatProps;
   onRefresh: () => void;
   onOpenIntegrations: () => void;
   onOpenWorkflows: () => void;
   onPrefillChat: (prompt: string) => void;
   onProjectSearchChange: (next: string) => void;
+  onViewModeChange: (next: ProjectViewMode) => void;
 };
 
 function healthChipClass(health: PmosProjectCard["health"]) {
@@ -74,6 +78,8 @@ function renderTodoList(title: string, items: PmosProjectTodoItem[], empty: stri
   `;
 }
 
+// -- View: Project Cards (original) --
+
 function renderProjectCards(props: CommandCenterProps, cards: PmosProjectCard[]) {
   return html`
     <div class="project-cards-grid">
@@ -125,6 +131,163 @@ function renderProjectCards(props: CommandCenterProps, cards: PmosProjectCard[])
   `;
 }
 
+// -- View: Status Board --
+
+const HEALTH_ORDER: PmosProjectCard["health"][] = ["at_risk", "attention", "on_track", "quiet"];
+
+function renderStatusBoard(props: CommandCenterProps, cards: PmosProjectCard[]) {
+  const groups = new Map<PmosProjectCard["health"], PmosProjectCard[]>();
+  for (const h of HEALTH_ORDER) groups.set(h, []);
+  for (const card of cards) {
+    const bucket = groups.get(card.health) ?? groups.get("on_track")!;
+    bucket.push(card);
+  }
+
+  return html`
+    <div class="status-board">
+      ${HEALTH_ORDER.map((health) => {
+        const items = groups.get(health) ?? [];
+        return html`
+          <div class="status-board__column">
+            <div class="status-board__column-header">
+              <span class="chip ${healthChipClass(health)}">${healthLabel(health)}</span>
+              <span class="muted" style="font-size:12px;">${items.length}</span>
+            </div>
+            <div class="status-board__column-body">
+              ${items.length === 0
+                ? html`<div class="muted" style="padding:12px; font-size:13px;">No projects</div>`
+                : items.map(
+                    (project) => html`
+                      <div class="status-board__card">
+                        <div style="font-weight:500; font-size:14px; margin-bottom:4px;">${project.name}</div>
+                        <div class="row" style="gap:12px; font-size:12px;">
+                          <span>Open: <strong>${project.openTodos}</strong></span>
+                          <span>Overdue: <strong class="${project.overdueTodos > 0 ? "warn" : ""}">${project.overdueTodos}</strong></span>
+                          <span>Due today: <strong>${project.dueTodayTodos}</strong></span>
+                        </div>
+                        <div class="row" style="gap:6px; margin-top:6px;">
+                          ${project.appUrl
+                            ? html`<a class="btn btn--xs" href=${project.appUrl} target="_blank" rel="noreferrer">Basecamp</a>`
+                            : nothing}
+                          <button class="btn btn--xs" @click=${() => props.onPrefillChat(quickPromptForProject(project))}>
+                            Chat
+                          </button>
+                        </div>
+                      </div>
+                    `,
+                  )}
+            </div>
+          </div>
+        `;
+      })}
+    </div>
+  `;
+}
+
+// -- View: Timeline --
+
+function renderTimeline(props: CommandCenterProps, snapshot: PmosProjectsSnapshot) {
+  const allTodos = [
+    ...(snapshot.urgentTodos ?? []),
+    ...(snapshot.dueTodayTodos ?? []),
+  ];
+
+  // Deduplicate by id
+  const seen = new Set<string>();
+  const unique: PmosProjectTodoItem[] = [];
+  for (const todo of allTodos) {
+    const key = todo.id ?? todo.title;
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(todo);
+    }
+  }
+
+  // Sort by due date (overdue first, then today, then no date)
+  unique.sort((a, b) => {
+    if (!a.dueOn && !b.dueOn) return 0;
+    if (!a.dueOn) return 1;
+    if (!b.dueOn) return -1;
+    return a.dueOn.localeCompare(b.dueOn);
+  });
+
+  // Group by date
+  const groups = new Map<string, PmosProjectTodoItem[]>();
+  for (const todo of unique) {
+    const key = todo.dueOn ?? "No due date";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(todo);
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  return html`
+    <div class="timeline-view">
+      ${unique.length === 0
+        ? html`<div class="muted" style="padding:16px;">No urgent or due-today items to show in timeline.</div>`
+        : Array.from(groups.entries()).map(
+            ([date, todos]) => html`
+              <div class="timeline-group">
+                <div class="timeline-group__header">
+                  <span class="timeline-group__date ${date < today ? "warn" : date === today ? "highlight" : ""}">
+                    ${date === today ? "Today" : date === "No due date" ? "No due date" : date}
+                  </span>
+                  <span class="muted" style="font-size:12px;">${todos.length} item${todos.length !== 1 ? "s" : ""}</span>
+                  ${date < today && date !== "No due date"
+                    ? html`<span class="chip chip-danger" style="font-size:11px;">Overdue</span>`
+                    : nothing}
+                </div>
+                <div class="timeline-group__items">
+                  ${todos.map(
+                    (todo) => html`
+                      <div class="timeline-item">
+                        <div class="timeline-item__dot ${date < today ? "danger" : date === today ? "warn" : ""}"></div>
+                        <div class="timeline-item__content">
+                          <div class="timeline-item__title">${todo.title}</div>
+                          <div class="timeline-item__meta">
+                            <span class="muted">${todoProjectLabel(todo)}</span>
+                            ${todo.appUrl
+                              ? html`<a class="btn btn--xs" href=${todo.appUrl} target="_blank" rel="noreferrer">Open</a>`
+                              : nothing}
+                          </div>
+                        </div>
+                      </div>
+                    `,
+                  )}
+                </div>
+              </div>
+            `,
+          )}
+    </div>
+  `;
+}
+
+// -- View Mode Switcher --
+
+function renderViewModeSwitcher(props: CommandCenterProps) {
+  const modes: { key: ProjectViewMode; label: string }[] = [
+    { key: "cards", label: "Cards" },
+    { key: "status-board", label: "Status Board" },
+    { key: "timeline", label: "Timeline" },
+  ];
+  return html`
+    <div class="view-mode-switcher">
+      ${modes.map(
+        (mode) => html`
+          <button
+            class="btn btn--sm ${props.viewMode === mode.key ? "btn--active" : ""}"
+            @click=${() => props.onViewModeChange(mode.key)}
+          >
+            ${mode.label}
+          </button>
+        `,
+      )}
+    </div>
+  `;
+}
+
+// -- Main Render --
+
 export function renderCommandCenter(props: CommandCenterProps) {
   const snapshot = props.snapshot;
   const totals = snapshot?.totals ?? {
@@ -154,6 +317,8 @@ export function renderCommandCenter(props: CommandCenterProps) {
     snapshot?.cacheAgeMs && snapshot.cacheAgeMs > 0
       ? formatRelativeTimestamp(Date.now() - snapshot.cacheAgeMs)
       : refreshedLabel;
+
+  const viewMode = props.viewMode ?? "cards";
 
   return html`
     <section class="projects-layout">
@@ -266,23 +431,51 @@ export function renderCommandCenter(props: CommandCenterProps) {
           </div>
         </div>
 
-        <div class="project-priority-grid">
-          ${renderTodoList("Urgent / Overdue", urgentTodos, "No overdue todos right now.")}
-          ${renderTodoList("Due Today", dueTodayTodos, "No todos due today.")}
-        </div>
+        ${viewMode === "cards"
+          ? html`
+              <div class="project-priority-grid">
+                ${renderTodoList("Urgent / Overdue", urgentTodos, "No overdue todos right now.")}
+                ${renderTodoList("Due Today", dueTodayTodos, "No todos due today.")}
+              </div>
+            `
+          : nothing}
 
         <div class="card">
           <div class="projects-header-row">
             <div>
-              <div class="card-title">Project Cards</div>
-              <div class="card-sub">Operational cards with health and action shortcuts.</div>
+              <div class="card-title">
+                ${viewMode === "cards" ? "Project Cards" : viewMode === "status-board" ? "Status Board" : "Timeline"}
+              </div>
+              <div class="card-sub">
+                ${viewMode === "cards"
+                  ? "Operational cards with health and action shortcuts."
+                  : viewMode === "status-board"
+                    ? "Projects grouped by health status for quick triage."
+                    : "Urgent and due-today items in chronological order."}
+              </div>
             </div>
+            ${renderViewModeSwitcher(props)}
           </div>
-          ${cards.length > 0
-            ? renderProjectCards(props, cards)
-            : allCards.length > 0
-              ? html`<div class="muted" style="margin-top: 12px;">No projects match "${props.projectSearch}".</div>`
-              : html`<div class="muted" style="margin-top: 12px;">No project cards available yet.</div>`}
+
+          ${viewMode === "cards"
+            ? cards.length > 0
+              ? renderProjectCards(props, cards)
+              : allCards.length > 0
+                ? html`<div class="muted" style="margin-top: 12px;">No projects match "${props.projectSearch}".</div>`
+                : html`<div class="muted" style="margin-top: 12px;">No project cards available yet.</div>`
+            : nothing}
+
+          ${viewMode === "status-board"
+            ? cards.length > 0
+              ? renderStatusBoard(props, cards)
+              : html`<div class="muted" style="margin-top: 12px;">No project data available yet.</div>`
+            : nothing}
+
+          ${viewMode === "timeline"
+            ? snapshot
+              ? renderTimeline(props, snapshot)
+              : html`<div class="muted" style="margin-top: 12px;">No project data available yet.</div>`
+            : nothing}
         </div>
       </div>
 
