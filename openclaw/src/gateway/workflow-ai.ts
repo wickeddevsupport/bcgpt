@@ -11,6 +11,7 @@
 
 import { getCustomProviderApiKey, resolveEnvApiKey } from "../agents/model-auth.js";
 import { loadConfig, type OpenClawConfig } from "../config/config.js";
+import { resolveMemoryOrchestrationConfig } from "../memory/orchestrator.js";
 import { loadEffectiveWorkspaceConfig } from "./workspace-config.js";
 
 type Message = { role: "user" | "assistant" | "system"; content: string };
@@ -266,6 +267,7 @@ function resolveConfiguredModelRefs(
 async function resolveModelConfigs(
   cfg: OpenClawConfig,
   workspaceId?: string | null,
+  opts: { preferredProviders?: string[] } = {},
 ): Promise<ModelConfig[]> {
   const refs = resolveConfiguredModelRefs(cfg);
   if (refs.length === 0) {
@@ -284,12 +286,31 @@ async function resolveModelConfigs(
       apiKey: apiKey ?? "",
     });
   }
-  if (resolved.length <= 1) {
-    return resolved.slice(0, WORKFLOW_MODEL_CANDIDATE_LIMIT);
+  const preferredProviders = Array.isArray(opts.preferredProviders)
+    ? opts.preferredProviders
+        .map((provider) => normalizeProviderAlias(String(provider ?? "").trim()))
+        .filter(Boolean)
+    : [];
+
+  const prioritizedResolved =
+    preferredProviders.length > 0
+      ? [
+          ...resolved
+            .filter((candidate) => preferredProviders.includes(candidate.provider))
+            .sort(
+              (a, b) =>
+                preferredProviders.indexOf(a.provider) - preferredProviders.indexOf(b.provider),
+            ),
+          ...resolved.filter((candidate) => !preferredProviders.includes(candidate.provider)),
+        ]
+      : resolved;
+
+  if (prioritizedResolved.length <= 1) {
+    return prioritizedResolved.slice(0, WORKFLOW_MODEL_CANDIDATE_LIMIT);
   }
 
-  const primary = resolved[0];
-  const remaining = resolved.slice(1);
+  const primary = prioritizedResolved[0];
+  const remaining = prioritizedResolved.slice(1);
   const ordered: ModelConfig[] = [primary];
   const seenProvider = new Set<string>([primary.provider]);
 
@@ -530,13 +551,15 @@ export async function callWorkspaceModel(
   workspaceId: string,
   systemPrompt: string,
   messages: Message[],
-  opts: { maxTokens?: number; jsonMode?: boolean } = {},
+  opts: { maxTokens?: number; jsonMode?: boolean; preferredProviders?: string[] } = {},
 ): Promise<{ ok: boolean; text?: string; error?: string; providerUsed?: string }> {
   const wsId = String(workspaceId ?? "").trim();
   const cfg = wsId
     ? ((await loadEffectiveWorkspaceConfig(wsId)) as OpenClawConfig)
     : loadConfig();
-  const configs = await resolveModelConfigs(cfg, wsId || null);
+  const configs = await resolveModelConfigs(cfg, wsId || null, {
+    preferredProviders: opts.preferredProviders,
+  });
   if (!configs.length) {
     return {
       ok: false,
@@ -870,6 +893,28 @@ function joinToolSummaries(summaries: string[]): string | null {
   return unique.slice(0, 3).join(" ");
 }
 
+function truncateForSynthesis(value: string, maxChars = 2000): string {
+  const normalized = value.trim();
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxChars)}...`;
+}
+
+function summarizeToolResultForSynthesis(result: AgentLoopToolRoundResult): Record<string, unknown> {
+  const parsedPreview =
+    typeof result.parsed === "string"
+      ? truncateForSynthesis(result.parsed, 1200)
+      : truncateForSynthesis(JSON.stringify(result.parsed), 1200);
+  return {
+    tool: result.name,
+    args: result.args,
+    callCount: result.callCount,
+    summary: summarizeAgentLoopToolResult(result.name, result.parsed),
+    parsedPreview,
+  };
+}
+
 function extractSufficientToolSummary(payload: unknown): string | null {
   if (!isObjectRecord(payload)) {
     return null;
@@ -1067,6 +1112,152 @@ export function buildAgentLoopEarlyExit(
     }
   }
   return "Basecamp data was retrieved successfully.";
+}
+
+async function orchestrateAgentLoopEvidence(
+  cfg: OpenClawConfig,
+  userMessages: Array<{ role: "user" | "assistant"; content: string }>,
+  evidence: Array<Record<string, unknown>>,
+): Promise<{
+  summary: string;
+  results: Array<Record<string, unknown>>;
+  provider: string;
+  model: string;
+} | null> {
+  const resolved = resolveMemoryOrchestrationConfig(cfg);
+  if (!resolved || evidence.length === 0 || resolved.provider !== "ollama") {
+    return null;
+  }
+
+  const candidates = evidence.slice(0, resolved.maxCandidates);
+  const query = [...userMessages]
+    .reverse()
+    .find((message) => message.role === "user")
+    ?.content?.trim() ?? "";
+  const lines = [
+    "You are curating tool-result evidence for an AI orchestration loop.",
+    "Return JSON only.",
+    `Choose up to ${Math.min(resolved.maxResults, candidates.length)} evidence ids that best help answer the user's request.`,
+    'Schema: {"keepIds":["1"],"summary":"short summary"}',
+    `User request: ${query}`,
+    "Evidence:",
+    ...candidates.map((entry, index) => {
+      const summary =
+        typeof entry.summary === "string" ? entry.summary : JSON.stringify(entry.summary ?? "");
+      const preview =
+        typeof entry.parsedPreview === "string"
+          ? entry.parsedPreview
+          : JSON.stringify(entry.parsedPreview ?? "");
+      return `${index + 1}|tool=${String(entry.tool ?? "").trim()}|summary=${truncateForSynthesis(summary, 200)}|preview=${truncateForSynthesis(preview, resolved.maxSnippetChars)}`;
+    }),
+    "Return the most useful evidence ids in ranked order and a concise summary under 160 characters.",
+  ];
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), resolved.timeoutMs);
+  try {
+    const response = await fetch(`${resolved.baseUrl}/api/generate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: resolved.model,
+        stream: false,
+        raw: true,
+        format: "json",
+        prompt: lines.join("\n"),
+        options: {
+          temperature: 0,
+          num_predict: 220,
+          stop: ["\n\n"],
+        },
+      }),
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const payload = (await response.json()) as { response?: string };
+    const trimmed = typeof payload.response === "string" ? payload.response.trim() : "";
+    if (!trimmed) {
+      return null;
+    }
+    const parsed = JSON.parse(trimmed) as { keepIds?: unknown; summary?: unknown };
+    const keepIds = Array.isArray(parsed.keepIds)
+      ? parsed.keepIds.map((entry) => String(entry).trim()).filter(Boolean)
+      : [];
+    const summary =
+      typeof parsed.summary === "string" && parsed.summary.trim()
+        ? parsed.summary.trim()
+        : null;
+    if (!keepIds.length || !summary) {
+      return null;
+    }
+    const byId = new Map(candidates.map((entry, index) => [String(index + 1), entry]));
+    const selected = keepIds
+      .map((id) => byId.get(id))
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry))
+      .slice(0, resolved.maxResults);
+    if (!selected.length) {
+      return null;
+    }
+    return {
+      summary,
+      results: selected,
+      provider: resolved.provider,
+      model: resolved.model,
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function synthesizeAgentLoopResult(
+  cfg: OpenClawConfig,
+  workspaceId: string,
+  baseSystemPrompt: string,
+  userMessages: Array<{ role: "user" | "assistant"; content: string }>,
+  allToolResults: AgentLoopToolRoundResult[],
+): Promise<{ ok: boolean; text?: string; error?: string; providerUsed?: string }> {
+  if (!allToolResults.length) {
+    return { ok: false, error: "No tool results available for synthesis." };
+  }
+
+  const evidence = allToolResults.slice(-10).map(summarizeToolResultForSynthesis);
+  const orchestratedEvidence = await orchestrateAgentLoopEvidence(cfg, userMessages, evidence);
+  const finalEvidence = orchestratedEvidence?.results ?? evidence;
+  const synthesisSystemPrompt = [
+    baseSystemPrompt,
+    "",
+    "## Synthesis Mode",
+    "- The main agent loop already gathered tool evidence but did not finish with a final answer.",
+    "- Use the tool evidence to produce the best possible final answer now.",
+    "- Reconcile the evidence, identify what matters, and answer the user's actual request.",
+    "- If evidence is incomplete, state the exact gap and the most useful next probe.",
+    "- Do not output internal tool traces or ask the user to repeat the request.",
+  ].join("\n");
+
+  const synthesisMessages: Message[] = [
+    ...userMessages.map((message) => ({
+      role: message.role,
+      content: message.content,
+    })),
+    {
+      role: "user",
+      content: [
+        orchestratedEvidence
+          ? `Local tool-result orchestration via ${orchestratedEvidence.provider}/${orchestratedEvidence.model} selected ${finalEvidence.length} of ${evidence.length} evidence items. Summary: ${orchestratedEvidence.summary}`
+          : "Tool evidence gathered by the prior orchestration loop:",
+        JSON.stringify(finalEvidence, null, 2),
+        "Produce the final answer from this evidence.",
+      ].join("\n\n"),
+    },
+  ];
+
+  return callWorkspaceModel(workspaceId, synthesisSystemPrompt, synthesisMessages, {
+    maxTokens: 2048,
+  });
 }
 
 /**
@@ -1290,6 +1481,19 @@ export async function callWorkspaceModelAgentLoop(
           return { ok: true, text: earlyExit, providerUsed };
         }
         // Loop continues with tool results injected
+      }
+
+      if (allToolResults.length) {
+        const synthesized = await synthesizeAgentLoopResult(
+          cfg,
+          workspaceId,
+          systemPrompt,
+          userMessages,
+          allToolResults,
+        );
+        if (synthesized.ok && typeof synthesized.text === "string" && synthesized.text.trim()) {
+          return synthesized;
+        }
       }
 
       // Max iterations reached â€" return last assistant text if any
