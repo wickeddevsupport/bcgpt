@@ -3302,14 +3302,19 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         /\bfigma\b|\bdesign\b|\bauto[\s-]?layout\b|\bcomponent(?:s)?\b|\bstyle(?:s)?\b|\bfont(?:s)?\b|\bregression\b|\baudit\b/i.test(
           latestUserMessage,
         );
-      const shouldPreferExplicitFigmaAudit =
+      const shouldPreferFigmaMcpDiscovery =
+        shouldPreferFigmaContext &&
+        /\bcomment(?:s)?\b|\bannotation(?:s)?\b|\bfeedback\b|\bthread(?:s)?\b|\bnote(?:s)?\b|\bpin(?:ned)?\b|\bvariable(?:s)?\b|\btoken(?:s)?\b|\bscreenshot(?:s)?\b|\bmetadata\b|\bnode(?:s)?\b|\binspect\b|\bimplement(?:ation)?\b/i.test(
+          latestUserMessage,
+        );
+      const shouldPreferExplicitFigmaFileRouting =
         Boolean(pastedUrlHints.figmaUrl) && !hasMixedWorkspaceUrls;
       const runtimeUrlHints = [
         pastedUrlHints.basecampUrl
           ? `- Pasted Basecamp URL detected for this request: ${pastedUrlHints.basecampUrl}. Treat that URL as the exact resource to inspect.${pastedUrlHints.basecampBucketId ? ` Bucket ID: ${pastedUrlHints.basecampBucketId}.` : ""}${pastedUrlHints.basecampCardId ? ` Card ID: ${pastedUrlHints.basecampCardId}.` : ""}${pastedUrlHints.basecampRecordingId ? ` Recording/comment thread ID: ${pastedUrlHints.basecampRecordingId}.` : ""}${pastedUrlHints.basecampCardPath ? ` If you need direct card data, \`bcgpt_basecamp_raw\` can use path \`${pastedUrlHints.basecampCardPath}\`.` : ""}`
           : null,
         pastedUrlHints.figmaUrl
-          ? `- Pasted Figma URL detected for this request: ${pastedUrlHints.figmaUrl}. Use \`figma_pat_audit_file\` with \`file_key\` "${pastedUrlHints.figmaFileKey ?? "from that URL"}" (or pass the full URL) and do not default to the selected Figma panel file if it is different.`
+          ? `- Pasted Figma URL detected for this request: ${pastedUrlHints.figmaUrl}. Anchor to that exact file, do not default to the selected Figma panel file if it is different, and prefer live Figma MCP discovery first: call \`figma_mcp_list_tools\`, then \`figma_mcp_call\` with the exact capability needed for comments, annotations, screenshots, structure, variables, or node context. Fall back to \`figma_pat_audit_file\` only if MCP auth/capability is unavailable or the user explicitly wants a structural audit.`
           : null,
       ].filter((line): line is string => Boolean(line));
       const requestRoutingHints = [
@@ -3319,8 +3324,11 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         pastedUrlCount >= 2
           ? "- This request includes multiple explicit URLs/resources. Consider `pmos_parallel_subtasks` when separate probes can run independently, then aggregate the results into one answer."
           : null,
-        shouldPreferExplicitFigmaAudit
-          ? "- Anchor to the explicit Figma file URL and use live Figma MCP capabilities first when they expose what you need; fall back to `figma_pat_audit_file` only if MCP cannot access that context."
+        shouldPreferExplicitFigmaFileRouting
+          ? "- Anchor to the explicit Figma file URL and use live Figma MCP capabilities first. For deeper inspection, list tools, choose the exact MCP capability the task needs, and only fall back to `figma_pat_audit_file` if MCP cannot reach that file or the user explicitly wants a structural audit."
+          : null,
+        shouldPreferFigmaMcpDiscovery
+          ? "- This Figma request asks for deeper context such as comments, annotations, feedback, variables, screenshots, metadata, or exact node/file understanding. Prefer `figma_mcp_list_tools`, then `figma_mcp_call` with the specific MCP capability that matches that need instead of defaulting to `figma_pat_audit_file`."
           : null,
         shouldPreferProjectList
           ? "- Prefer `bcgpt_list_projects` first because the user appears to want exact project names or a raw project list."
@@ -3328,7 +3336,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         shouldPreferBasecamp && !shouldPreferProjectList && !pastedUrlHints.basecampUrl
           ? "- Prefer `bcgpt_smart_action` first for this Basecamp-centric request, then continue reasoning from the returned data if more work is needed."
           : null,
-        shouldPreferFigmaContext && !shouldPreferExplicitFigmaAudit
+        shouldPreferFigmaContext && !shouldPreferExplicitFigmaFileRouting
           ? "- Consider `figma_get_context` first to anchor design analysis to the active workspace file before auditing or comparing results."
           : null,
       ].filter((line): line is string => Boolean(line));
@@ -3401,8 +3409,10 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "### Figma questions",
         "- Start with `figma_get_context` when the active workspace file matters, but let the model choose the actual sequence from the request instead of forcing a fixed first tool.",
         "- Treat official Figma access and FM MCP as two separate built-in systems.",
-        "- Use official `figma_*` tools for document/design tasks: comments, annotations, nodes, components, styles, variables, fonts, auto-layout, screenshots, structure, and design audits.",
+        "- Use official `figma_*` tools for document/design tasks: comments, annotations, node metadata, design context, components, styles, variables, fonts, auto-layout, screenshots, structure, and design audits.",
         "- For deep Figma understanding, prefer the full live MCP surface: call `figma_mcp_list_tools`, inspect what is available, then use `figma_mcp_call` for the exact capability you need.",
+        "- The official Figma MCP docs emphasize context-first tools such as `get_design_context`, `get_metadata`, `get_screenshot`, and `get_variable_defs`. Prefer those kinds of tools when the task is understanding a file, comments, annotations, or implementation detail.",
+        "- If the user asks about comments, annotations, review feedback, pinned notes, or exact node/file context, do not default to `figma_pat_audit_file`. Discover the relevant MCP capability first and use it.",
         "- Treat `figma_pat_audit_file` as a fallback for structural audits or when official Figma MCP auth/capability is unavailable, not as the default answer path for deeper Figma requests.",
         "- If the user pastes a Figma file URL, extract the file key from that URL and pass it to whichever Figma tool needs it. Do not default to the selected file when an explicit Figma URL is present.",
         "- If official Figma MCP returns auth required, 405, or unavailable, then call `figma_pat_audit_file` on the target file and continue reasoning from that fallback instead of stopping.",
@@ -3433,10 +3443,10 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- `pmos_parallel_subtasks` -- run multiple temporary parallel subagents on independent probes, then aggregate their findings back into the main loop",
         "",
         "**Figma Tools:**",
-        "- `figma_get_context` -- read the selected file/team context from the Figma panel",
-        "- `figma_mcp_list_tools` -- inspect the full live Figma MCP capability surface exposed through mcporter",
-        "- `figma_mcp_call` -- call any discovered Figma MCP capability for comments, annotations, nodes, screenshots, variables, and deeper file context",
-        "- `figma_pat_audit_file` -- run a Figma REST audit with the workspace PAT as a structural fallback when MCP auth or capability is unavailable",
+        "- `figma_get_context` -- read the selected file/team context from the Figma panel so you can reason about workspace state",
+        "- `figma_mcp_list_tools` -- inspect the full live Figma MCP capability surface exposed through mcporter before choosing a Figma operation",
+        "- `figma_mcp_call` -- call any discovered Figma MCP capability, especially context-first tools like `get_design_context`, `get_metadata`, `get_screenshot`, `get_variable_defs`, comments, annotations, nodes, and deeper file context",
+        "- `figma_pat_audit_file` -- run a Figma REST audit with the workspace PAT only as a structural fallback when MCP auth or capability is unavailable, or when the task is explicitly an audit",
         "",
         "**Figma File Manager (FM) Tools** \u2014 manage files, tags, folders, categories, and links in fm.wickedlab.io:",
         "- `fm_get_context` -- get FM user info and overview of files/tags/folders/categories",
@@ -3691,7 +3701,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           type: "function" as const,
           function: {
             name: "figma_mcp_list_tools",
-            description: "List the full configured Figma MCP capability surface and schemas through mcporter. Use this to discover comments, annotations, node, screenshot, variable, and other deeper file tools before choosing a specific MCP call.",
+            description: "List the full configured Figma MCP capability surface and schemas through mcporter. Use this first to discover context-first Figma tools such as get_design_context, get_metadata, get_screenshot, get_variable_defs, comments, annotations, node inspection, and other deeper file capabilities before choosing a specific MCP call.",
             parameters: { type: "object", properties: {}, additionalProperties: false },
           },
         },
@@ -3699,7 +3709,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           type: "function" as const,
           function: {
             name: "figma_mcp_call",
-            description: "Call a specific Figma MCP tool through mcporter for deeper file context such as comments, annotations, nodes, screenshots, variables, components, and other live Figma capabilities discovered through figma_mcp_list_tools.",
+            description: "Call a specific Figma MCP tool through mcporter for deeper file context such as get_design_context, get_metadata, get_screenshot, get_variable_defs, comments, annotations, nodes, screenshots, variables, components, and other live Figma capabilities discovered through figma_mcp_list_tools.",
             parameters: {
               type: "object",
               required: ["tool"],
@@ -3719,7 +3729,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           function: {
             name: "figma_pat_audit_file",
             description:
-              "Run a Figma REST audit against the selected file using the workspace PAT. If the user supplied a Figma URL, extract its file key into file_key or pass the URL directly so the audit targets that file instead of the selected panel file. Use this when MCP auth is unavailable or when the user wants components, layout, styles, font, or regression-style structural audits.",
+              "Run a Figma REST audit against the selected file using the workspace PAT. If the user supplied a Figma URL, extract its file key into file_key or pass the URL directly so the audit targets that file instead of the selected panel file. Use this when MCP auth is unavailable or when the user explicitly wants components, layout, styles, font, or regression-style structural audits. Do not use this as the default path for comments, annotations, or deeper Figma context when MCP tools are available.",
             parameters: {
               type: "object",
               properties: {

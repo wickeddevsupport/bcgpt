@@ -128,7 +128,9 @@ describe("workspace-ai-context", () => {
     expect(refreshed.markdown).toContain("figma personal access token present: yes");
     expect(refreshed.markdown).toContain("figma PAT handoff to PMOS: validated in FM, but raw token not passed into PMOS");
     expect(refreshed.markdown).toContain("figma MCP server URL: https://mcp.figma.com/mcp");
-    expect(refreshed.markdown).toContain("If the user pastes a Figma file URL, extract the file key from that URL");
+    expect(refreshed.markdown).toContain("If the user pastes a Figma file URL, anchor to that exact file");
+    expect(refreshed.markdown).toContain("get_design_context");
+    expect(refreshed.markdown).toContain("do not default to `figma_pat_audit_file`");
     expect(refreshed.markdown).toContain("If the user pastes a Basecamp URL, treat that URL as the resource to inspect");
   });
 });
