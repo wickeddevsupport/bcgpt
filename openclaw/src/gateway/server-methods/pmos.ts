@@ -5,6 +5,7 @@ import { ErrorCodes, errorShape } from "../protocol/index.js";
 import { formatForLog } from "../ws-log.js";
 import { filterByWorkspace, requireWorkspaceId, isSuperAdmin } from "../workspace-context.js";
 import { buildFigmaRestAuditReport, parseFigmaFileKey } from "../figma-rest-audit.js";
+import { inspectWorkspaceChatUrls } from "../url-routing.js";
 import { emitAgentEvent, registerAgentRunContext } from "../../infra/agent-events.js";
 
 type ConnectorResult = {
@@ -2776,18 +2777,22 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const latestUserMessage = [...messages]
         .reverse()
         .find((message) => message.role === "user")?.content ?? "";
+      const pastedUrlHints = inspectWorkspaceChatUrls(latestUserMessage);
       const disableBasecampTools = isGreetingOnlyMessage(latestUserMessage);
       const shouldForceBasecamp =
         !disableBasecampTools &&
-        /\bbasecamp\b|\bbcgpt\b|\bproject(?:s)?\b|\btodo(?:s)?\b|\bschedule\b|\bcampfire\b|\bmessage(?:s)?\b|\bkanban\b|\bcard(?:s)?\b|\bpeople\b|\bperson\b|\bassignment(?:s)?\b/i.test(
-          latestUserMessage,
-        );
+        (Boolean(pastedUrlHints.basecampUrl) ||
+          /\bbasecamp\b|\bbcgpt\b|\bproject(?:s)?\b|\btodo(?:s)?\b|\bschedule\b|\bcampfire\b|\bmessage(?:s)?\b|\bkanban\b|\bcard(?:s)?\b|\bpeople\b|\bperson\b|\bassignment(?:s)?\b/i.test(
+            latestUserMessage,
+          ));
       const shouldForceProjectList =
         shouldForceBasecamp &&
+        !pastedUrlHints.basecampUrl &&
         /\b(list|show|what|which|give|display|name)\b[\s\w-]{0,40}\bprojects?\b|\bprojects?\b[\s\w-]{0,30}\b(names?|ids?|list)\b/i.test(
           latestUserMessage,
         );
       const shouldForceFigmaContext =
+        Boolean(pastedUrlHints.figmaUrl) ||
         /\bfigma\b|\bdesign\b|\bauto[\s-]?layout\b|\bcomponent(?:s)?\b|\bstyle(?:s)?\b|\bfont(?:s)?\b|\bregression\b|\baudit\b/i.test(
           latestUserMessage,
         );
@@ -3199,6 +3204,18 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       ]);
 
       const credentialContext = buildCredentialContext(availableCredentials);
+      const latestUserMessage = [...messages]
+        .reverse()
+        .find((message) => message.role === "user")?.content ?? "";
+      const pastedUrlHints = inspectWorkspaceChatUrls(latestUserMessage);
+      const runtimeUrlHints = [
+        pastedUrlHints.basecampUrl
+          ? `- Pasted Basecamp URL detected for this request: ${pastedUrlHints.basecampUrl}. Treat that URL as the resource to inspect and include the exact URL in \`bcgpt_smart_action.query\`.`
+          : null,
+        pastedUrlHints.figmaUrl
+          ? `- Pasted Figma URL detected for this request: ${pastedUrlHints.figmaUrl}. Use \`figma_pat_audit_file\` with \`file_key\` "${pastedUrlHints.figmaFileKey ?? "from that URL"}" (or pass the full URL) and do not default to the selected Figma panel file if it is different.`
+          : null,
+      ].filter((line): line is string => Boolean(line));
 
       const systemPrompt = [
         `You are an intelligent AI assistant for OpenClaw workspace (ID: ${workspaceId}) -- a unified project management and automation platform powered by BCgpt.`,
@@ -3248,13 +3265,15 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "### Project management questions",
         "- Use workspace context for connector readiness and defaults only; do not answer Basecamp questions from memory when live tools are available.",
         "- For live Basecamp data, use `bcgpt_list_projects` when the user wants the raw list of projects, and use `bcgpt_smart_action` when the user wants analysis, summaries, or searches.",
+        "- If the user pastes a Basecamp URL, treat it as the exact resource to inspect and pass the URL through `bcgpt_smart_action.query`.",
         "- Summarize results meaningfully: 'There are 7 open todos in Project X -- 3 are overdue. The most recent message was from Alice yesterday about the deploy.'",
         "",
         "### Figma questions",
-        "- Start with `figma_get_context`.",
+        "- Start with `figma_get_context` unless the user supplied an explicit Figma URL for a different file.",
         "- Treat official Figma access and FM MCP as two separate built-in systems.",
         "- Use official `figma_*` tools only for document/design tasks: components, styles, variables, fonts, auto-layout, node inspection, screenshots, and design audits.",
         "- If the user needs live official Figma MCP actions, call `figma_mcp_list_tools` first, then `figma_mcp_call`.",
+        "- If the user pastes a Figma file URL, extract the file key from that URL and pass it to `figma_pat_audit_file.file_key` (or pass the full URL). Do not default to the selected file when an explicit Figma URL is present.",
         "- If official Figma MCP returns auth required, 405, or unavailable, immediately call `figma_pat_audit_file` on the selected file and continue with a REST-backed audit instead of stopping. Do not describe FM as offline when only official Figma MCP failed.",
         "- Do NOT use `web_fetch` for private Figma API access in workspace chat; it cannot inject the workspace PAT.",
         "",
@@ -3302,6 +3321,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- `fm_delete_link` -- remove a link from a file",
         "- `fm_sync_team` -- trigger a sync for a Figma team connection to refresh files",
         "",
+        ...(runtimeUrlHints.length ? ["## Request-Specific URL Routing", ...runtimeUrlHints, ""] : []),
         ...(credentialContext ? [credentialContext, ""] : []),
         ...(workspaceAiContext ? ["## Workspace Memory", workspaceAiContext] : []),
       ].join("\n");
@@ -3312,7 +3332,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           type: "function" as const,
           function: {
             name: "bcgpt_smart_action",
-            description: "Run a natural-language Basecamp request through the bcgpt MCP smart router.",
+            description: "Run a natural-language Basecamp request through the bcgpt MCP smart router. If the user pasted a Basecamp URL, include that exact URL in the query.",
             parameters: {
               type: "object",
               required: ["query"],
@@ -3465,7 +3485,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           type: "function" as const,
           function: {
             name: "figma_get_context",
-            description: "Get the current Figma workspace context: connected status, active file name/ID/URL, team, and connection details.",
+            description: "Get the current Figma workspace context: connected status, active selected file name/ID/URL, team, and connection details. This is for workspace readiness and selected-file context.",
             parameters: { type: "object", properties: {}, additionalProperties: false },
           },
         },
@@ -3501,7 +3521,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           function: {
             name: "figma_pat_audit_file",
             description:
-              "Run a Figma REST audit against the selected file using the workspace PAT. Use this when MCP auth is unavailable or when the user wants components, layout, styles, font, or regression-style structural audits.",
+              "Run a Figma REST audit against the selected file using the workspace PAT. If the user supplied a Figma URL, extract its file key into file_key or pass the URL directly so the audit targets that file instead of the selected panel file. Use this when MCP auth is unavailable or when the user wants components, layout, styles, font, or regression-style structural audits.",
             parameters: {
               type: "object",
               properties: {
@@ -3807,8 +3827,16 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         try {
           switch (normalizedToolName) {
           case "bcgpt_smart_action": {
-            const query = String(args.query ?? "").trim();
+            const basecampUrlHint = pastedUrlHints.basecampUrl;
+            let query = String(args.query ?? "").trim();
             const project = String(args.project ?? "").trim() || null;
+            if (basecampUrlHint) {
+              query = query
+                ? query.includes(basecampUrlHint)
+                  ? query
+                  : `${query}\nBasecamp URL: ${basecampUrlHint}`
+                : `Inspect this Basecamp URL and summarize what matters: ${basecampUrlHint}`;
+            }
             if (!query) {
               const value = JSON.stringify({ error: "query is required" });
               finishTool({ error: "query is required" });
@@ -4153,7 +4181,18 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             }
           }
           case "figma_pat_audit_file": {
-            const result = await runWorkspaceFigmaRestAudit(workspaceId, args);
+            const auditArgs =
+              pastedUrlHints.figmaUrl &&
+              !stringOrNull(args.file_key) &&
+              !stringOrNull(args.fileKey) &&
+              !stringOrNull(args.url)
+                ? {
+                    ...args,
+                    file_key: pastedUrlHints.figmaFileKey ?? undefined,
+                    url: pastedUrlHints.figmaUrl,
+                  }
+                : args;
+            const result = await runWorkspaceFigmaRestAudit(workspaceId, auditArgs);
             finishTool(result);
             return JSON.stringify(result);
           }
@@ -4207,24 +4246,25 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         }
       };
 
-      const latestUserMessage = [...messages]
-        .reverse()
-        .find((message) => message.role === "user")?.content ?? "";
       const disableBasecampTools = isGreetingOnlyMessage(latestUserMessage);
       const shouldForceBasecamp =
         !disableBasecampTools &&
-        /\bbasecamp\b|\bbcgpt\b|\bproject(?:s)?\b|\btodo(?:s)?\b|\bschedule\b|\bcampfire\b|\bmessage(?:s)?\b|\bkanban\b|\bcard(?:s)?\b|\bpeople\b|\bperson\b|\bassignment(?:s)?\b/i.test(
-          latestUserMessage,
-        );
+        (Boolean(pastedUrlHints.basecampUrl) ||
+          /\bbasecamp\b|\bbcgpt\b|\bproject(?:s)?\b|\btodo(?:s)?\b|\bschedule\b|\bcampfire\b|\bmessage(?:s)?\b|\bkanban\b|\bcard(?:s)?\b|\bpeople\b|\bperson\b|\bassignment(?:s)?\b/i.test(
+            latestUserMessage,
+          ));
       const shouldForceProjectList =
         shouldForceBasecamp &&
+        !pastedUrlHints.basecampUrl &&
         /\b(list|show|what|which|give|display|name)\b[\s\w-]{0,40}\bprojects?\b|\bprojects?\b[\s\w-]{0,30}\b(names?|ids?|list)\b/i.test(
           latestUserMessage,
         );
       const shouldForceFigmaContext =
+        Boolean(pastedUrlHints.figmaUrl) ||
         /\bfigma\b|\bdesign\b|\bauto[\s-]?layout\b|\bcomponent(?:s)?\b|\bstyle(?:s)?\b|\bfont(?:s)?\b|\bregression\b|\baudit\b/i.test(
           latestUserMessage,
         );
+      const shouldPreferExplicitFigmaAudit = Boolean(pastedUrlHints.figmaUrl);
       const agentTools = disableBasecampTools
         ? tools.filter(
             (tool) =>
@@ -4242,7 +4282,9 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         {
           maxTokens: 2048,
           maxIterations: 4,
-          initialToolChoice: shouldForceFigmaContext
+          initialToolChoice: shouldPreferExplicitFigmaAudit
+            ? { type: "function", function: { name: "figma_pat_audit_file" } }
+            : shouldForceFigmaContext
             ? { type: "function", function: { name: "figma_get_context" } }
             : shouldForceProjectList
               ? { type: "function", function: { name: "bcgpt_list_projects" } }

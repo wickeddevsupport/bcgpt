@@ -957,7 +957,6 @@ function isTerminalToolSummary(name: string): boolean {
   return new Set([
     "bcgpt_list_projects",
     "bcgpt_smart_action",
-    "figma_get_context",
     "figma_pat_audit_file",
     "fm_get_context",
     "fm_list_files",
@@ -979,7 +978,11 @@ function isTerminalToolSummary(name: string): boolean {
   ]).has(name);
 }
 
-function buildAgentLoopEarlyExit(
+function isPreparatoryToolSummary(name: string): boolean {
+  return name === "figma_get_context";
+}
+
+export function buildAgentLoopEarlyExit(
   toolResults: AgentLoopToolRoundResult[],
 ): string | null {
   const successful = toolResults.filter((result) => {
@@ -1006,11 +1009,12 @@ function buildAgentLoopEarlyExit(
     return repeatedSummary;
   }
 
-  const terminalSummaries = successful
+  const actionableSuccessful = successful.filter((result) => !isPreparatoryToolSummary(result.name));
+  const terminalSummaries = actionableSuccessful
     .filter((result) => isTerminalToolSummary(result.name))
     .map((result) => summarizeAgentLoopToolResult(result.name, result.parsed))
     .filter((summary): summary is string => Boolean(summary));
-  if (terminalSummaries.length === successful.length && terminalSummaries.length > 0) {
+  if (actionableSuccessful.length > 0 && terminalSummaries.length === actionableSuccessful.length) {
     return joinToolSummaries(terminalSummaries);
   }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { summarizeAgentLoopToolResult } from "./workflow-ai.js";
+import { buildAgentLoopEarlyExit, summarizeAgentLoopToolResult } from "./workflow-ai.js";
 
 describe("workflow-ai Basecamp summarization", () => {
   it("summarizes project lists for early agent-loop exit", () => {
@@ -81,5 +81,53 @@ describe("workflow-ai Basecamp summarization", () => {
 
     expect(summary).toContain("FM is ready for design on Wicked Lab Team");
     expect(summary).toContain("88 files");
+  });
+
+  it("does not early-exit on figma context alone", () => {
+    const summary = buildAgentLoopEarlyExit([
+      {
+        name: "figma_get_context",
+        args: {},
+        parsed: {
+          connected: true,
+          selectedFileName: "Panel Selection",
+          activeConnectionName: "Product Design",
+        },
+        callCount: 1,
+      },
+    ]);
+
+    expect(summary).toBeNull();
+  });
+
+  it("can early-exit once a figma audit completes after context", () => {
+    const summary = buildAgentLoopEarlyExit([
+      {
+        name: "figma_get_context",
+        args: {},
+        parsed: {
+          connected: true,
+          selectedFileName: "Panel Selection",
+          activeConnectionName: "Product Design",
+        },
+        callCount: 1,
+      },
+      {
+        name: "figma_pat_audit_file",
+        args: { file_key: "3INmNiG3X3NKAZtCI3SMg6" },
+        parsed: {
+          requestedFocus: "general",
+          file: { name: "OKA Online Audit" },
+          summary: {
+            pages: 2,
+            totalNodes: 512,
+            componentsDefined: 18,
+          },
+        },
+        callCount: 1,
+      },
+    ]);
+
+    expect(summary).toContain("Figma general audit for OKA Online Audit");
   });
 });

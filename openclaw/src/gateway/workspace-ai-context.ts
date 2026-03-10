@@ -334,6 +334,7 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
           "",
           "### Figma AI Capabilities",
           "- Use `figma_get_context` first to confirm the active file, connection, and team before any design analysis.",
+          "- If the user pastes a Figma file URL, extract the file key from that URL and pass it to `figma_pat_audit_file.file_key` (or pass the full URL). Do not fall back to the selected FM file when an explicit Figma URL is present.",
           "- Treat FM MCP and official Figma access as two separate built-in systems.",
           "- Use `fm_*` tools for file-manager tasks only: file search, tags, folders, categories, links, FM metadata, and FM sync state.",
           "- Use `figma_mcp_*` only for official Figma document/design operations: components, styles, variables, auto-layout, node inspection, screenshots, and design audits.",
@@ -443,6 +444,7 @@ function describeBcgptSection(input: {
   lines.push("### Primary Entry Point: bcgpt_smart_action");
   lines.push("- **Use `bcgpt_smart_action` for scoped Basecamp analysis** — summaries, audits, searches, people/activity questions, and project follow-ups.");
   lines.push("- **Use `bcgpt_list_projects` for exact project lists or project picking** before deeper follow-up questions.");
+  lines.push("- If the user pastes a Basecamp URL, pass the exact URL through `bcgpt_smart_action.query` and inspect that linked resource instead of ignoring the URL.");
   lines.push("- `bcgpt_smart_action` handles: list projects, project summary, project context (docs/cards/todos/messages),");
   lines.push("  assigned todos, due-date queries, person queries (activity/assignments/membership),");
   lines.push("  card/kanban search, campfire/team chat, upcoming schedule, daily reports, search");
@@ -675,6 +677,7 @@ function describeAssistantPolicySection(): string {
     "## Basecamp-Specific Policy",
     "- If the Basecamp Integration section shows status CONNECTED, you have access to Basecamp tools.",
     "- When the user asks ANYTHING about their Basecamp projects, todos, messages, people, or schedule: USE tools to get live data — do not guess or make up project names/IDs/content.",
+    "- If the user pastes a Basecamp URL, treat that URL as the resource to inspect and include the exact URL in the `smart_action` query.",
     "- Use `list_projects` first when the user wants the raw project list, exact project names, or needs to choose a project.",
     "- Use `smart_action` with a natural language query for Basecamp summaries, searches, project audits, and follow-up questions.",
     "  - 'what projects do I have?' → list_projects()",
