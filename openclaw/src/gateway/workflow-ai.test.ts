@@ -37,6 +37,25 @@ describe("workflow-ai Basecamp summarization", () => {
     expect(summary).toBe("BCGPT Test Project is healthy with 32 open tasks.");
   });
 
+  it("does not early-exit when Basecamp results are marked as continuation context", () => {
+    const summary = buildAgentLoopEarlyExit([
+      {
+        name: "bcgpt_smart_action",
+        args: { query: "Summarize Project X and suggest next steps" },
+        parsed: {
+          continueAgentLoop: true,
+          summary: "Project X has 3 overdue tasks.",
+          result: {
+            action: "project_summary",
+          },
+        },
+        callCount: 1,
+      },
+    ]);
+
+    expect(summary).toBeNull();
+  });
+
   it("summarizes figma PAT audit reports for deterministic fallback output", () => {
     const summary = summarizeAgentLoopToolResult("figma_pat_audit_file", {
       requestedFocus: "components",

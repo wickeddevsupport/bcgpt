@@ -871,6 +871,10 @@ function extractSufficientToolSummary(payload: unknown): string | null {
   return directSummary;
 }
 
+function shouldContinueAgentLoop(payload: unknown): boolean {
+  return isObjectRecord(payload) && payload.continueAgentLoop === true;
+}
+
 export function summarizeAgentLoopToolResult(toolName: string, payload: unknown): string | null {
   if (isObjectRecord(payload) && typeof payload.error === "string" && payload.error.trim()) {
     return null;
@@ -1010,11 +1014,12 @@ export function buildAgentLoopEarlyExit(
   }
 
   const actionableSuccessful = successful.filter((result) => !isPreparatoryToolSummary(result.name));
-  const terminalSummaries = actionableSuccessful
-    .filter((result) => isTerminalToolSummary(result.name))
+  const terminalAutoExitCandidates = actionableSuccessful
+    .filter((result) => isTerminalToolSummary(result.name) && !shouldContinueAgentLoop(result.parsed));
+  const terminalSummaries = terminalAutoExitCandidates
     .map((result) => summarizeAgentLoopToolResult(result.name, result.parsed))
     .filter((summary): summary is string => Boolean(summary));
-  if (actionableSuccessful.length > 0 && terminalSummaries.length === actionableSuccessful.length) {
+  if (terminalAutoExitCandidates.length > 0 && terminalSummaries.length === actionableSuccessful.length) {
     return joinToolSummaries(terminalSummaries);
   }
 
@@ -1022,6 +1027,9 @@ export function buildAgentLoopEarlyExit(
     (result) => result.name === "bcgpt_smart_action" || result.name === "bcgpt_list_projects",
   );
   if (!basecampResults.length || basecampResults.length !== successful.length) {
+    return null;
+  }
+  if (basecampResults.some((result) => shouldContinueAgentLoop(result.parsed))) {
     return null;
   }
 
