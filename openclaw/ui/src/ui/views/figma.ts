@@ -91,7 +91,7 @@ export function renderFigma(props: FigmaProps) {
               : nothing}
 
             <!-- 2-column: left (assistant + iframe stacked), right (chat) -->
-            <div style="display:grid; grid-template-columns:minmax(0, 1.7fr) minmax(320px, 0.9fr); gap:12px; flex:1 1 auto; min-height:0; overflow:hidden;">
+            <div style="display:grid; grid-template-columns:minmax(0, 1.45fr) minmax(420px, 1.1fr); gap:16px; flex:1 1 auto; min-height:0; overflow:hidden;">
 
               <!-- Left column: AI assistant card on top, iframe below -->
               <div style="display:flex; flex-direction:column; gap:12px; min-height:0; overflow:hidden;">

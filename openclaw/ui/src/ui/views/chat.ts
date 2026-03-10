@@ -80,6 +80,7 @@ export type ChatProps = {
 };
 
 const COMPACTION_TOAST_DURATION_MS = 5000;
+type ChatStatusTone = "ready" | "busy" | "warn";
 
 function adjustTextareaHeight(el: HTMLTextAreaElement) {
   el.style.height = "auto";
@@ -113,6 +114,50 @@ function renderCompactionIndicator(status: CompactionIndicatorStatus | null | un
   }
 
   return nothing;
+}
+
+function resolveChatStatus(props: ChatProps): {
+  label: string;
+  detail: string;
+  tone: ChatStatusTone;
+} {
+  if (!props.connected) {
+    return {
+      label: "Offline",
+      detail: "Reconnect to resume chat activity.",
+      tone: "warn",
+    };
+  }
+
+  if (props.compactionStatus?.active) {
+    return {
+      label: "Working",
+      detail: "Compacting context for the next turn.",
+      tone: "busy",
+    };
+  }
+
+  if (props.stream !== null) {
+    return {
+      label: "Working",
+      detail: "Streaming the current response.",
+      tone: "busy",
+    };
+  }
+
+  if (props.sending || props.queue.length > 0 || props.loading) {
+    return {
+      label: "Working",
+      detail: "Preparing the next step in this thread.",
+      tone: "busy",
+    };
+  }
+
+  return {
+    label: "Ready",
+    detail: "Waiting for the next message.",
+    tone: "ready",
+  };
 }
 
 function generateAttachmentId(): string {
@@ -206,6 +251,7 @@ export function renderChat(props: ChatProps) {
   // We keep reading reasoningLevel for other uses (e.g. toolbar icon state), but decouple
   // reasoning display from it so the toggle always works.
   const showReasoning = props.showThinking;
+  const chatStatus = resolveChatStatus(props);
   const assistantIdentity = {
     name: props.assistantName,
     avatar: props.assistantAvatar ?? props.assistantAvatarUrl ?? null,
@@ -316,6 +362,14 @@ export function renderChat(props: ChatProps) {
           `
           : nothing
       }
+
+      <div class="chat-status-row" role="status" aria-live="polite">
+        <span class="chat-status-badge chat-status-badge--${chatStatus.tone}">
+          <span class="chat-status-badge__dot"></span>
+          ${chatStatus.label}
+        </span>
+        <span class="chat-status-detail">${chatStatus.detail}</span>
+      </div>
 
       <div
         class="chat-split-container ${sidebarOpen ? "chat-split-container--open" : ""}"

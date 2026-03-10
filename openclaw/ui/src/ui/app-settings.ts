@@ -59,6 +59,14 @@ type SettingsHost = {
   pendingGatewayUrl?: string | null;
 };
 
+const CHAT_PANEL_TABS = new Set<Tab>([
+  "chat",
+  "dashboard",
+  "command-center",
+  "figma",
+  "automations",
+]);
+
 export function applySettings(host: SettingsHost, next: UiSettings) {
   const normalized = {
     ...next,
@@ -162,7 +170,7 @@ export function setTab(host: SettingsHost, next: Tab) {
   if (host.tab !== next) {
     host.tab = next;
   }
-  if (next === "chat") {
+  if (CHAT_PANEL_TABS.has(next)) {
     host.chatHasAutoScrolled = false;
   }
   if (next === "dashboard") {

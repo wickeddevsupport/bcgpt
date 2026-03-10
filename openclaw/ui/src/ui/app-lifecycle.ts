@@ -37,6 +37,14 @@ type LifecycleHost = {
   topbarObserver: ResizeObserver | null;
 };
 
+const CHAT_PANEL_TABS = new Set<Tab>([
+  "chat",
+  "dashboard",
+  "command-center",
+  "figma",
+  "automations",
+]);
+
 export function handleConnected(host: LifecycleHost) {
   host.basePath = inferBasePath();
   applySettingsFromUrl(host as unknown as Parameters<typeof applySettingsFromUrl>[0]);
@@ -75,11 +83,12 @@ export function handleDisconnected(host: LifecycleHost) {
 }
 
 export function handleUpdated(host: LifecycleHost, changed: Map<PropertyKey, unknown>) {
-  if (host.tab === "chat" && host.chatManualRefreshInFlight) {
+  const chatPanelActive = CHAT_PANEL_TABS.has(host.tab);
+  if (chatPanelActive && host.chatManualRefreshInFlight) {
     return;
   }
   if (
-    host.tab === "chat" &&
+    chatPanelActive &&
     (changed.has("chatMessages") ||
       changed.has("chatToolMessages") ||
       changed.has("chatStream") ||

@@ -2478,7 +2478,7 @@
 
 .dashboard-shell {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 520px);
   gap: 16px;
   min-width: 0;
   align-items: start;
@@ -2549,7 +2549,7 @@
 
 .projects-layout {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(340px, 1fr);
+  grid-template-columns: minmax(0, 1.65fr) minmax(420px, 1.15fr);
   gap: 16px;
   align-items: start;
 }
@@ -2755,8 +2755,8 @@
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
-  height: clamp(420px, calc(100vh - 320px), 880px);
-  max-height: 880px;
+  height: clamp(460px, calc(100vh - 280px), 920px);
+  max-height: 920px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 10px;

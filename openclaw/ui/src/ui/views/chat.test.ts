@@ -49,6 +49,32 @@ function createProps(overrides: Partial<ChatProps> = {}): ChatProps {
 }
 
 describe("chat view", () => {
+  it("shows a ready badge when chat is idle", () => {
+    const container = document.createElement("div");
+    render(renderChat(createProps()), container);
+
+    const badge = container.querySelector(".chat-status-badge--ready");
+    expect(badge?.textContent).toContain("Ready");
+    expect(container.textContent).toContain("Waiting for the next message.");
+  });
+
+  it("shows a working badge while streaming", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          stream: "Working through the reply",
+          streamStartedAt: Date.now(),
+        }),
+      ),
+      container,
+    );
+
+    const badge = container.querySelector(".chat-status-badge--busy");
+    expect(badge?.textContent).toContain("Working");
+    expect(container.textContent).toContain("Streaming the current response.");
+  });
+
   it("renders compacting indicator as a badge", () => {
     const container = document.createElement("div");
     render(
@@ -169,7 +195,7 @@ describe("chat view", () => {
     );
 
     const createBtn = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.textContent?.trim() === 'Create workflow',
+      (b) => b.textContent?.includes('Automate'),
     );
     expect(createBtn).toBeDefined();
     createBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));

@@ -43,6 +43,73 @@
   gap: 8px;
 }
 
+.chat-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 0 4px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.chat-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.chat-status-badge__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.chat-status-badge--ready {
+  color: var(--ok, #22c55e);
+}
+
+.chat-status-badge--warn {
+  color: var(--warn, #f59e0b);
+}
+
+.chat-status-badge--busy {
+  color: var(--accent, #f87171);
+}
+
+.chat-status-badge--busy .chat-status-badge__dot {
+  animation: chat-status-pulse 1.2s ease-in-out infinite;
+}
+
+.chat-status-detail {
+  min-width: 0;
+}
+
+@keyframes chat-status-pulse {
+  0%,
+  100% {
+    transform: scale(0.88);
+    opacity: 0.55;
+  }
+
+  50% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+}
+
 .chat-session {
   min-width: 180px;
 }
