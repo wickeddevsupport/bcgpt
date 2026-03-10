@@ -4199,6 +4199,16 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         .reverse()
         .find((message) => message.role === "user")?.content ?? "";
       const disableBasecampTools = isGreetingOnlyMessage(latestUserMessage);
+      const shouldForceBasecamp =
+        !disableBasecampTools &&
+        /\bbasecamp\b|\bbcgpt\b|\bproject(?:s)?\b|\btodo(?:s)?\b|\bschedule\b|\bcampfire\b|\bmessage(?:s)?\b|\bkanban\b|\bcard(?:s)?\b|\bpeople\b|\bperson\b|\bassignment(?:s)?\b/i.test(
+          latestUserMessage,
+        );
+      const shouldForceProjectList =
+        shouldForceBasecamp &&
+        /\b(list|show|what|which|give|display|name)\b[\s\w-]{0,40}\bprojects?\b|\bprojects?\b[\s\w-]{0,30}\b(names?|ids?|list)\b/i.test(
+          latestUserMessage,
+        );
       const shouldForceFigmaContext =
         /\bfigma\b|\bdesign\b|\bauto[\s-]?layout\b|\bcomponent(?:s)?\b|\bstyle(?:s)?\b|\bfont(?:s)?\b|\bregression\b|\baudit\b/i.test(
           latestUserMessage,
