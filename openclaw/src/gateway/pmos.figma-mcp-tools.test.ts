@@ -49,4 +49,32 @@ describe("pmos figma mcp tool normalization", () => {
       ]),
     );
   });
+
+  it("defers PAT audit for deep-context Figma requests until MCP is attempted or fails", () => {
+    expect(
+      __test.shouldDeferFigmaPatAudit({
+        latestUserMessage:
+          "Inspect comments, annotations, variables, and screenshot context for this Figma file",
+        figmaMcpCallAttempted: false,
+        figmaMcpFailureSeen: false,
+      }),
+    ).toBe(true);
+
+    expect(
+      __test.shouldDeferFigmaPatAudit({
+        latestUserMessage:
+          "Inspect comments, annotations, variables, and screenshot context for this Figma file",
+        figmaMcpCallAttempted: true,
+        figmaMcpFailureSeen: false,
+      }),
+    ).toBe(false);
+
+    expect(
+      __test.shouldDeferFigmaPatAudit({
+        latestUserMessage: "Run a structural component audit on this Figma file",
+        figmaMcpCallAttempted: false,
+        figmaMcpFailureSeen: false,
+      }),
+    ).toBe(false);
+  });
 });

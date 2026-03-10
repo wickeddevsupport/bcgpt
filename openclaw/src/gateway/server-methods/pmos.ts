@@ -304,6 +304,8 @@ function filterEffectiveConfigForWorkspaceUi(
 export const __test = {
   filterEffectiveConfigForWorkspaceUi,
   stripSensitiveUserCredentialsFromConnectors,
+  isFigmaDeepContextRequest,
+  shouldDeferFigmaPatAudit,
   normalizeFigmaMcpToolName,
   normalizeFigmaMcpToolListResult,
 };
@@ -528,6 +530,24 @@ function stringOrNull(value: unknown): string | null {
 function countDistinctAbsoluteUrls(value: string): number {
   const matches = value.match(/https?:\/\/[^\s)>\]"']+/gi) ?? [];
   return new Set(matches.map((entry) => entry.trim())).size;
+}
+
+function isFigmaDeepContextRequest(value: string): boolean {
+  return /\bcomment(?:s)?\b|\bannotation(?:s)?\b|\bfeedback\b|\bthread(?:s)?\b|\bnote(?:s)?\b|\bpin(?:ned)?\b|\bvariable(?:s)?\b|\btoken(?:s)?\b|\bscreenshot(?:s)?\b|\bmetadata\b|\bnode(?:s)?\b|\binspect\b|\bimplement(?:ation)?\b/i.test(
+    value,
+  );
+}
+
+function shouldDeferFigmaPatAudit(params: {
+  latestUserMessage: string;
+  figmaMcpCallAttempted: boolean;
+  figmaMcpFailureSeen: boolean;
+}): boolean {
+  return (
+    isFigmaDeepContextRequest(params.latestUserMessage) &&
+    !params.figmaMcpCallAttempted &&
+    !params.figmaMcpFailureSeen
+  );
 }
 
 function numberStringOrNull(value: unknown): string | null {
@@ -3377,10 +3397,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           latestUserMessage,
         );
       const shouldPreferFigmaMcpDiscovery =
-        shouldPreferFigmaContext &&
-        /\bcomment(?:s)?\b|\bannotation(?:s)?\b|\bfeedback\b|\bthread(?:s)?\b|\bnote(?:s)?\b|\bpin(?:ned)?\b|\bvariable(?:s)?\b|\btoken(?:s)?\b|\bscreenshot(?:s)?\b|\bmetadata\b|\bnode(?:s)?\b|\binspect\b|\bimplement(?:ation)?\b/i.test(
-          latestUserMessage,
-        );
+        shouldPreferFigmaContext && isFigmaDeepContextRequest(latestUserMessage);
       const shouldPreferExplicitFigmaFileRouting =
         Boolean(pastedUrlHints.figmaUrl) && !hasMixedWorkspaceUrls;
       const runtimeUrlHints = [
@@ -4038,6 +4055,9 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         },
       ];
 
+      let figmaMcpCallAttempted = false;
+      let figmaMcpFailureSeen = false;
+
 
       // â"€â"€ Tool executor -- calls n8n-api-client directly â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
       const executeTool = async (toolName: string, args: Record<string, unknown>): Promise<string> => {
@@ -4483,8 +4503,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             const figmaContext = await readWorkspaceFigmaContext(workspaceId);
             const payload = {
               ...figmaContext,
-              note: "Use fm_* tools for file-manager tasks like files, tags, folders, categories, links, and FM sync state. Use figma_mcp_* or figma_pat_audit_file for document/design analysis on the selected file.",
-              fallbackTool: "figma_pat_audit_file",
+              note: "Use fm_* tools for file-manager tasks like files, tags, folders, categories, links, and FM sync state. Use figma_mcp_* first for document/design analysis on the selected file; reserve figma_pat_audit_file for fallback structural audits when MCP cannot reach the needed context.",
               continueAgentLoop: true,
             };
             finishTool(payload);
@@ -4493,6 +4512,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           case "figma_mcp_list_tools": {
             const mcpAuth = await readWorkspaceFigmaMcpAuth(workspaceId);
             if (!mcpAuth.personalAccessToken) {
+              figmaMcpFailureSeen = true;
               const payload = buildFigmaPatMissingPayload(mcpAuth);
               finishTool(payload);
               return JSON.stringify(payload);
@@ -4515,6 +4535,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               finishTool(result);
               return JSON.stringify(result);
             } catch (err) {
+              figmaMcpFailureSeen = true;
               const payload = buildFigmaMcpFailurePayload(err, mcpAuth, "list_tools");
               finishTool(payload);
               return JSON.stringify(payload);
@@ -4532,8 +4553,10 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               finishTool(payload);
               return JSON.stringify(payload);
             }
+            figmaMcpCallAttempted = true;
             const mcpAuth = await readWorkspaceFigmaMcpAuth(workspaceId);
             if (!mcpAuth.personalAccessToken) {
+              figmaMcpFailureSeen = true;
               const payload = buildFigmaPatMissingPayload(mcpAuth);
               finishTool(payload);
               return JSON.stringify(payload);
@@ -4560,12 +4583,29 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               finishTool(result);
               return JSON.stringify(result);
             } catch (err) {
+              figmaMcpFailureSeen = true;
               const payload = buildFigmaMcpFailurePayload(err, mcpAuth, requestedTool || tool);
               finishTool(payload);
               return JSON.stringify(payload);
             }
           }
           case "figma_pat_audit_file": {
+            if (
+              shouldDeferFigmaPatAudit({
+                latestUserMessage,
+                figmaMcpCallAttempted,
+                figmaMcpFailureSeen,
+              })
+            ) {
+              const payload = {
+                code: "FIGMA_PAT_AUDIT_DEFERRED",
+                continueAgentLoop: true,
+                note:
+                  "This Figma request needs deeper context such as comments, annotations, variables, screenshots, metadata, or exact node/file understanding. Call `figma_mcp_list_tools`, then `figma_mcp_call` with a specific MCP capability before using `figma_pat_audit_file`. Use PAT audit only after a real MCP call or an MCP auth/capability failure.",
+              };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
             const auditArgs =
               pastedUrlHints.figmaUrl &&
               !stringOrNull(args.file_key) &&
