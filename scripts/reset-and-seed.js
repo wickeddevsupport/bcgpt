@@ -130,10 +130,27 @@ function wsConfigFor(wsId) {
             sessionMemory: true,
           },
           sources: ["memory", "sessions"],
+          sessions: {
+            recentTurns: 6,
+            includeAssistant: true,
+            durableFacts: {
+              enabled: true,
+              generatedDir: "memory/.derived-sessions",
+              maxFactsPerSession: 24,
+              minChars: 24,
+              includeCompactions: true,
+            },
+          },
           sync: {
             onSessionStart: true,
             onSearch: true,
             watch: true,
+          },
+          query: {
+            maxResults: 8,
+            hybrid: {
+              candidateMultiplier: 6,
+            },
           },
           store: {
             path: `~/.openclaw/workspaces/${wsId}/agents/{agentId}/memory/memory.db`,

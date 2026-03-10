@@ -1585,7 +1585,11 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
     const currentSync = isRecord(getPath(currentMemorySearch, ["sync"]))
       ? (getPath(currentMemorySearch, ["sync"]) as Record<string, unknown>)
       : null;
+    const currentSessions = isRecord(getPath(currentMemorySearch, ["sessions"]))
+      ? (getPath(currentMemorySearch, ["sessions"]) as Record<string, unknown>)
+      : null;
     const syncPatch: Record<string, unknown> = {};
+    const sessionsPatch: Record<string, unknown> = {};
     if (typeof currentSync?.onSessionStart !== "boolean") {
       syncPatch.onSessionStart = true;
     }
@@ -1595,8 +1599,62 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
     if (typeof currentSync?.watch !== "boolean") {
       syncPatch.watch = true;
     }
+    if (typeof currentSessions?.recentTurns !== "number") {
+      sessionsPatch.recentTurns = 6;
+    }
+    if (typeof currentSessions?.includeAssistant !== "boolean") {
+      sessionsPatch.includeAssistant = true;
+    }
+    const currentDurableFacts = isRecord(getPath(currentSessions, ["durableFacts"]))
+      ? (getPath(currentSessions, ["durableFacts"]) as Record<string, unknown>)
+      : null;
+    const durableFactsPatch: Record<string, unknown> = {};
+    if (typeof currentDurableFacts?.enabled !== "boolean") {
+      durableFactsPatch.enabled = true;
+    }
+    if (
+      typeof currentDurableFacts?.generatedDir !== "string" ||
+      !currentDurableFacts.generatedDir.trim()
+    ) {
+      durableFactsPatch.generatedDir = "memory/.derived-sessions";
+    }
+    if (typeof currentDurableFacts?.maxFactsPerSession !== "number") {
+      durableFactsPatch.maxFactsPerSession = 24;
+    }
+    if (typeof currentDurableFacts?.minChars !== "number") {
+      durableFactsPatch.minChars = 24;
+    }
+    if (typeof currentDurableFacts?.includeCompactions !== "boolean") {
+      durableFactsPatch.includeCompactions = true;
+    }
+    if (Object.keys(durableFactsPatch).length > 0) {
+      sessionsPatch.durableFacts = durableFactsPatch;
+    }
     if (Object.keys(syncPatch).length > 0) {
       memorySearchPatch.sync = syncPatch;
+    }
+    if (Object.keys(sessionsPatch).length > 0) {
+      memorySearchPatch.sessions = sessionsPatch;
+    }
+    const currentQuery = isRecord(getPath(currentMemorySearch, ["query"]))
+      ? (getPath(currentMemorySearch, ["query"]) as Record<string, unknown>)
+      : null;
+    const queryPatch: Record<string, unknown> = {};
+    if (typeof currentQuery?.maxResults !== "number") {
+      queryPatch.maxResults = 8;
+    }
+    const currentHybrid = isRecord(getPath(currentQuery, ["hybrid"]))
+      ? (getPath(currentQuery, ["hybrid"]) as Record<string, unknown>)
+      : null;
+    const hybridPatch: Record<string, unknown> = {};
+    if (typeof currentHybrid?.candidateMultiplier !== "number") {
+      hybridPatch.candidateMultiplier = 6;
+    }
+    if (Object.keys(hybridPatch).length > 0) {
+      queryPatch.hybrid = hybridPatch;
+    }
+    if (Object.keys(queryPatch).length > 0) {
+      memorySearchPatch.query = queryPatch;
     }
     if (Object.keys(memorySearchPatch).length > 0) {
       patch.agents = {

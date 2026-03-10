@@ -402,6 +402,23 @@ export const MemorySearchSchema = z
       })
       .strict()
       .optional(),
+    sessions: z
+      .object({
+        recentTurns: z.number().int().nonnegative().optional(),
+        includeAssistant: z.boolean().optional(),
+        durableFacts: z
+          .object({
+            enabled: z.boolean().optional(),
+            generatedDir: z.string().optional(),
+            maxFactsPerSession: z.number().int().positive().optional(),
+            minChars: z.number().int().positive().optional(),
+            includeCompactions: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
     query: z
       .object({
         maxResults: z.number().int().positive().optional(),

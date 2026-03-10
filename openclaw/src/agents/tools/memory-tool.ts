@@ -78,9 +78,15 @@ export function createMemorySearchTool(options: {
           query,
           results,
         });
+        const selectedResults = orchestrated?.results ?? results;
         return jsonResult({
-          results: orchestrated?.results ?? results,
+          results: selectedResults,
           summary: orchestrated?.summary,
+          note: orchestrated
+            ? `Local memory rerank via ${orchestrated.provider}/${orchestrated.model} selected ${selectedResults.length} of ${results.length} candidate snippets.`
+            : `Deterministic memory search returned ${selectedResults.length} snippet${selectedResults.length === 1 ? "" : "s"}.`,
+          candidateCount: results.length,
+          resultCount: selectedResults.length,
           orchestration: orchestrated
             ? {
                 provider: orchestrated.provider,

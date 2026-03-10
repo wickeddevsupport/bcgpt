@@ -213,6 +213,39 @@ function ensureGlobalDefaults(config) {
   if (typeof memorySearch.sync.watch !== "boolean") {
     memorySearch.sync.watch = true;
   }
+  memorySearch.sessions = isRecord(memorySearch.sessions) ? memorySearch.sessions : {};
+  if (typeof memorySearch.sessions.recentTurns !== "number") {
+    memorySearch.sessions.recentTurns = 6;
+  }
+  if (typeof memorySearch.sessions.includeAssistant !== "boolean") {
+    memorySearch.sessions.includeAssistant = true;
+  }
+  memorySearch.sessions.durableFacts = isRecord(memorySearch.sessions.durableFacts)
+    ? memorySearch.sessions.durableFacts
+    : {};
+  if (typeof memorySearch.sessions.durableFacts.enabled !== "boolean") {
+    memorySearch.sessions.durableFacts.enabled = true;
+  }
+  if (!trimToNull(memorySearch.sessions.durableFacts.generatedDir)) {
+    memorySearch.sessions.durableFacts.generatedDir = "memory/.derived-sessions";
+  }
+  if (typeof memorySearch.sessions.durableFacts.maxFactsPerSession !== "number") {
+    memorySearch.sessions.durableFacts.maxFactsPerSession = 24;
+  }
+  if (typeof memorySearch.sessions.durableFacts.minChars !== "number") {
+    memorySearch.sessions.durableFacts.minChars = 24;
+  }
+  if (typeof memorySearch.sessions.durableFacts.includeCompactions !== "boolean") {
+    memorySearch.sessions.durableFacts.includeCompactions = true;
+  }
+  memorySearch.query = isRecord(memorySearch.query) ? memorySearch.query : {};
+  if (typeof memorySearch.query.maxResults !== "number") {
+    memorySearch.query.maxResults = 8;
+  }
+  memorySearch.query.hybrid = isRecord(memorySearch.query.hybrid) ? memorySearch.query.hybrid : {};
+  if (typeof memorySearch.query.hybrid.candidateMultiplier !== "number") {
+    memorySearch.query.hybrid.candidateMultiplier = 6;
+  }
 
   next.agents.list = Array.isArray(next.agents.list) ? next.agents.list : [];
   return next;

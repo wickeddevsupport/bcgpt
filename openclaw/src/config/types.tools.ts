@@ -233,6 +233,25 @@ export type MemorySearchConfig = {
     /** Enable session transcript indexing (experimental, default: false). */
     sessionMemory?: boolean;
   };
+  /** Session-specific extraction and durable-fact generation. */
+  sessions?: {
+    /** Keep the last N user/assistant turns in the session-memory index. */
+    recentTurns?: number;
+    /** Allow assistant-authored decisions/constraints into durable session memory. */
+    includeAssistant?: boolean;
+    durableFacts?: {
+      /** Generate durable markdown notes from session transcripts. */
+      enabled?: boolean;
+      /** Output directory relative to the workspace root. */
+      generatedDir?: string;
+      /** Max durable facts to keep per session. */
+      maxFactsPerSession?: number;
+      /** Ignore candidate facts shorter than this length. */
+      minChars?: number;
+      /** Include compaction summaries in the generated durable memory. */
+      includeCompactions?: boolean;
+    };
+  };
   /** Embedding provider mode. */
   provider?: "openai" | "gemini" | "local" | "voyage";
   remote?: {

@@ -25,6 +25,17 @@ export type ResolvedMemorySearchConfig = {
   experimental: {
     sessionMemory: boolean;
   };
+  sessions: {
+    recentTurns: number;
+    includeAssistant: boolean;
+    durableFacts: {
+      enabled: boolean;
+      generatedDir: string;
+      maxFactsPerSession: number;
+      minChars: number;
+      includeCompactions: boolean;
+    };
+  };
   fallback: "openai" | "gemini" | "local" | "voyage" | "none";
   model: string;
   local: {
@@ -78,6 +89,13 @@ const DEFAULT_CHUNK_OVERLAP = 80;
 const DEFAULT_WATCH_DEBOUNCE_MS = 1500;
 const DEFAULT_SESSION_DELTA_BYTES = 100_000;
 const DEFAULT_SESSION_DELTA_MESSAGES = 50;
+const DEFAULT_SESSION_RECENT_TURNS = 6;
+const DEFAULT_SESSION_INCLUDE_ASSISTANT = true;
+const DEFAULT_DURABLE_FACTS_ENABLED = true;
+const DEFAULT_DURABLE_FACTS_DIR = "memory/.derived-sessions";
+const DEFAULT_DURABLE_FACTS_MAX = 24;
+const DEFAULT_DURABLE_FACTS_MIN_CHARS = 24;
+const DEFAULT_DURABLE_FACTS_INCLUDE_COMPACTIONS = true;
 const DEFAULT_MAX_RESULTS = 6;
 const DEFAULT_MIN_SCORE = 0.35;
 const DEFAULT_HYBRID_ENABLED = true;
@@ -215,6 +233,38 @@ function mergeConfig(
         DEFAULT_SESSION_DELTA_MESSAGES,
     },
   };
+  const sessions = {
+    recentTurns:
+      overrides?.sessions?.recentTurns ??
+      defaults?.sessions?.recentTurns ??
+      DEFAULT_SESSION_RECENT_TURNS,
+    includeAssistant:
+      overrides?.sessions?.includeAssistant ??
+      defaults?.sessions?.includeAssistant ??
+      DEFAULT_SESSION_INCLUDE_ASSISTANT,
+    durableFacts: {
+      enabled:
+        overrides?.sessions?.durableFacts?.enabled ??
+        defaults?.sessions?.durableFacts?.enabled ??
+        DEFAULT_DURABLE_FACTS_ENABLED,
+      generatedDir:
+        overrides?.sessions?.durableFacts?.generatedDir ??
+        defaults?.sessions?.durableFacts?.generatedDir ??
+        DEFAULT_DURABLE_FACTS_DIR,
+      maxFactsPerSession:
+        overrides?.sessions?.durableFacts?.maxFactsPerSession ??
+        defaults?.sessions?.durableFacts?.maxFactsPerSession ??
+        DEFAULT_DURABLE_FACTS_MAX,
+      minChars:
+        overrides?.sessions?.durableFacts?.minChars ??
+        defaults?.sessions?.durableFacts?.minChars ??
+        DEFAULT_DURABLE_FACTS_MIN_CHARS,
+      includeCompactions:
+        overrides?.sessions?.durableFacts?.includeCompactions ??
+        defaults?.sessions?.durableFacts?.includeCompactions ??
+        DEFAULT_DURABLE_FACTS_INCLUDE_COMPACTIONS,
+    },
+  };
   const query = {
     maxResults: overrides?.query?.maxResults ?? defaults?.query?.maxResults ?? DEFAULT_MAX_RESULTS,
     minScore: overrides?.query?.minScore ?? defaults?.query?.minScore ?? DEFAULT_MIN_SCORE,
@@ -260,6 +310,17 @@ function mergeConfig(
     remote,
     experimental: {
       sessionMemory,
+    },
+    sessions: {
+      recentTurns: clampInt(sessions.recentTurns, 0, 20),
+      includeAssistant: Boolean(sessions.includeAssistant),
+      durableFacts: {
+        enabled: Boolean(sessions.durableFacts.enabled),
+        generatedDir: sessions.durableFacts.generatedDir,
+        maxFactsPerSession: clampInt(sessions.durableFacts.maxFactsPerSession, 1, 200),
+        minChars: clampInt(sessions.durableFacts.minChars, 1, 500),
+        includeCompactions: Boolean(sessions.durableFacts.includeCompactions),
+      },
     },
     fallback,
     model,

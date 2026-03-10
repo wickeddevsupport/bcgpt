@@ -54,6 +54,7 @@ import {
 } from "./internal.js";
 import { searchKeyword, searchVector } from "./manager-search.js";
 import { ensureMemoryIndexSchema } from "./memory-schema.js";
+import { extractSessionDurableMemory } from "./session-durable-memory.js";
 import { loadSqliteVecExtension } from "./sqlite-vec.js";
 import { requireNodeSqlite } from "./sqlite.js";
 
@@ -1307,6 +1308,16 @@ export class MemoryIndexManager implements MemorySearchManager {
         this.sources.has("memory") && (params?.force || needsFullReindex || this.dirty);
       const shouldSyncSessions = this.shouldSyncSessions(params, needsFullReindex);
 
+      if ((shouldSyncSessions || needsFullReindex) && this.sources.has("sessions")) {
+        const derivedChanged = await this.syncDerivedSessionMemory({
+          needsFullReindex,
+          progress: progress ?? undefined,
+        });
+        if (derivedChanged) {
+          this.dirty = true;
+        }
+      }
+
       if (shouldSyncMemory) {
         await this.syncMemoryFiles({ needsFullReindex, progress: progress ?? undefined });
         this.dirty = false;
@@ -1458,6 +1469,16 @@ export class MemoryIndexManager implements MemorySearchManager {
         true,
       );
 
+      if (this.sources.has("sessions")) {
+        const derivedChanged = await this.syncDerivedSessionMemory({
+          needsFullReindex: true,
+          progress: params.progress,
+        });
+        if (derivedChanged) {
+          this.dirty = true;
+        }
+      }
+
       if (shouldSyncMemory) {
         await this.syncMemoryFiles({ needsFullReindex: true, progress: params.progress });
         this.dirty = false;
@@ -1563,81 +1584,24 @@ export class MemoryIndexManager implements MemorySearchManager {
     return path.join("sessions", path.basename(absPath)).replace(/\\/g, "/");
   }
 
-  private normalizeSessionText(value: string): string {
-    return value
-      .replace(/\s*\n+\s*/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-  }
-
-  private extractSessionText(content: unknown): string | null {
-    if (typeof content === "string") {
-      const normalized = this.normalizeSessionText(content);
-      return normalized ? normalized : null;
+  private resolveDerivedSessionFactsDir(): string {
+    const raw = this.settings.sessions.durableFacts.generatedDir.trim();
+    if (!raw) {
+      return path.join(this.workspaceDir, "memory", ".derived-sessions");
     }
-    if (!Array.isArray(content)) {
-      return null;
-    }
-    const parts: string[] = [];
-    for (const block of content) {
-      if (!block || typeof block !== "object") {
-        continue;
-      }
-      const record = block as { type?: unknown; text?: unknown };
-      if (record.type !== "text" || typeof record.text !== "string") {
-        continue;
-      }
-      const normalized = this.normalizeSessionText(record.text);
-      if (normalized) {
-        parts.push(normalized);
-      }
-    }
-    if (parts.length === 0) {
-      return null;
-    }
-    return parts.join(" ");
+    return path.isAbsolute(raw) ? raw : path.resolve(this.workspaceDir, raw);
   }
 
   private async buildSessionEntry(absPath: string): Promise<SessionFileEntry | null> {
     try {
       const stat = await fs.stat(absPath);
       const raw = await fs.readFile(absPath, "utf-8");
-      const lines = raw.split("\n");
-      const collected: string[] = [];
-      for (const line of lines) {
-        if (!line.trim()) {
-          continue;
-        }
-        let record: unknown;
-        try {
-          record = JSON.parse(line);
-        } catch {
-          continue;
-        }
-        if (
-          !record ||
-          typeof record !== "object" ||
-          (record as { type?: unknown }).type !== "message"
-        ) {
-          continue;
-        }
-        const message = (record as { message?: unknown }).message as
-          | { role?: unknown; content?: unknown }
-          | undefined;
-        if (!message || typeof message.role !== "string") {
-          continue;
-        }
-        if (message.role !== "user" && message.role !== "assistant") {
-          continue;
-        }
-        const text = this.extractSessionText(message.content);
-        if (!text) {
-          continue;
-        }
-        const label = message.role === "user" ? "User" : "Assistant";
-        collected.push(`${label}: ${text}`);
-      }
-      const content = collected.join("\n");
+      const extracted = extractSessionDurableMemory({
+        raw,
+        sessionPath: this.sessionPathForFile(absPath),
+        config: this.settings.sessions,
+      });
+      const content = extracted.sessionIndexText;
       return {
         path: this.sessionPathForFile(absPath),
         absPath,
@@ -1650,6 +1614,84 @@ export class MemoryIndexManager implements MemorySearchManager {
       log.debug(`Failed reading session file ${absPath}: ${String(err)}`);
       return null;
     }
+  }
+
+  private async syncDerivedSessionMemory(params: {
+    needsFullReindex: boolean;
+    progress?: MemorySyncProgressState;
+  }): Promise<boolean> {
+    if (!this.settings.sessions.durableFacts.enabled || !this.sources.has("memory")) {
+      return false;
+    }
+    const files = await this.listSessionFiles();
+    const derivedDir = this.resolveDerivedSessionFactsDir();
+    await fs.mkdir(derivedDir, { recursive: true });
+    let changed = false;
+
+    if (params.progress) {
+      params.progress.total += files.length;
+      params.progress.report({
+        completed: params.progress.completed,
+        total: params.progress.total,
+        label: "Extracting durable session memory...",
+      });
+    }
+
+    const active = new Set<string>();
+    for (const absPath of files) {
+      const raw = await fs.readFile(absPath, "utf-8").catch(() => null);
+      if (typeof raw !== "string") {
+        if (params.progress) {
+          params.progress.completed += 1;
+          params.progress.report({
+            completed: params.progress.completed,
+            total: params.progress.total,
+          });
+        }
+        continue;
+      }
+      const extracted = extractSessionDurableMemory({
+        raw,
+        sessionPath: this.sessionPathForFile(absPath),
+        config: this.settings.sessions,
+      });
+      const target = path.join(derivedDir, `${extracted.sessionId}.md`);
+      active.add(path.resolve(target));
+      const next = extracted.durableMemoryText?.trim()
+        ? `${extracted.durableMemoryText.trimEnd()}\n`
+        : null;
+      const current = await fs.readFile(target, "utf8").catch(() => null);
+      if (next === null) {
+        if (current !== null) {
+          await fs.rm(target, { force: true });
+          changed = true;
+        }
+      } else if (current !== next) {
+        await fs.writeFile(target, next, "utf8");
+        changed = true;
+      }
+      if (params.progress) {
+        params.progress.completed += 1;
+        params.progress.report({
+          completed: params.progress.completed,
+          total: params.progress.total,
+        });
+      }
+    }
+
+    const existing = await fs.readdir(derivedDir, { withFileTypes: true }).catch(() => []);
+    for (const entry of existing) {
+      if (!entry.isFile() || !entry.name.endsWith(".md")) {
+        continue;
+      }
+      const full = path.resolve(path.join(derivedDir, entry.name));
+      if (active.has(full)) {
+        continue;
+      }
+      await fs.rm(full, { force: true }).catch(() => undefined);
+      changed = true;
+    }
+    return changed;
   }
 
   private estimateEmbeddingTokens(text: string): number {

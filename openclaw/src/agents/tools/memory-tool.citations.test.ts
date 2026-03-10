@@ -154,9 +154,15 @@ describe("memory search citations", () => {
     const details = result.details as {
       results: Array<{ snippet: string }>;
       summary?: string;
+      note?: string;
+      candidateCount?: number;
+      resultCount?: number;
       orchestration?: { provider: string; model: string; applied: boolean };
     };
     expect(details.summary).toBe("Budget memory selected for this query.");
+    expect(details.note).toContain("Local memory rerank via ollama/qwen3:1.7b selected 1 of 1");
+    expect(details.candidateCount).toBe(1);
+    expect(details.resultCount).toBe(1);
     expect(details.orchestration).toEqual({
       provider: "ollama",
       model: "qwen3:1.7b",
