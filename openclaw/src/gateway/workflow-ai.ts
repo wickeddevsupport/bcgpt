@@ -1203,6 +1203,11 @@ export async function callWorkspaceModelAgentLoop(
 
         const roundResults: AgentLoopToolRoundResult[] = [];
 
+        // Deduplicate tool calls within a single round -- if the model calls the
+        // same tool with the same args multiple times, only execute once and reuse
+        // the result for all duplicates.
+        const roundCache = new Map<string, string>();
+
         // Execute each tool and append results
         for (const tc of toolCalls) {
           let toolResult: string;
@@ -1210,7 +1215,14 @@ export async function callWorkspaceModelAgentLoop(
           let parsedArgs: Record<string, unknown> = {};
           try {
             parsedArgs = JSON.parse(tc.function.arguments ?? "{}") as Record<string, unknown>;
-            toolResult = await executeTool(tc.function.name, parsedArgs);
+            const roundSig = `${tc.function.name}:${stableSerialize(parsedArgs)}`;
+            const cached = roundCache.get(roundSig);
+            if (cached !== undefined) {
+              toolResult = cached;
+            } else {
+              toolResult = await executeTool(tc.function.name, parsedArgs);
+              roundCache.set(roundSig, toolResult);
+            }
           } catch (err) {
             toolResult = JSON.stringify({
               error: `Tool execution failed: ${err instanceof Error ? err.message : String(err)}`,
