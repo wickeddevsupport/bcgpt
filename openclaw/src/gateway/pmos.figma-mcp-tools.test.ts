@@ -1,0 +1,52 @@
+import { describe, expect, it } from "vitest";
+import { __test } from "./server-methods/pmos.js";
+
+describe("pmos figma mcp tool normalization", () => {
+  it("accepts fully qualified figma MCP tool names", () => {
+    expect(__test.normalizeFigmaMcpToolName("figma.get_design_context")).toBe(
+      "get_design_context",
+    );
+    expect(__test.normalizeFigmaMcpToolName("get_metadata")).toBe("get_metadata");
+  });
+
+  it("adds short-name summaries and recommended starter tools to list output", () => {
+    const result = __test.normalizeFigmaMcpToolListResult({
+      tools: [
+        {
+          name: "figma.get_design_context",
+          description: "Get design context for a node",
+          inputSchema: { type: "object" },
+        },
+        {
+          name: "figma.get_screenshot",
+          description: "Capture screenshot",
+          inputSchema: { type: "object" },
+        },
+        {
+          name: "figma.get_comments",
+          description: "Read comments",
+          inputSchema: { type: "object" },
+        },
+      ],
+    }) as Record<string, unknown>;
+
+    expect(result.toolNames).toEqual([
+      "get_design_context",
+      "get_screenshot",
+      "get_comments",
+    ]);
+    expect(result.recommendedStartingTools).toEqual([
+      "get_design_context",
+      "get_screenshot",
+    ]);
+    expect(result.callConvention).toContain("short MCP tool name");
+    expect(result.availableTools).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          shortName: "get_design_context",
+          qualifiedName: "figma.get_design_context",
+        }),
+      ]),
+    );
+  });
+});

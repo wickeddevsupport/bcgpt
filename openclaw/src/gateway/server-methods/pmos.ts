@@ -304,6 +304,8 @@ function filterEffectiveConfigForWorkspaceUi(
 export const __test = {
   filterEffectiveConfigForWorkspaceUi,
   stripSensitiveUserCredentialsFromConnectors,
+  normalizeFigmaMcpToolName,
+  normalizeFigmaMcpToolListResult,
 };
 
 /**
@@ -669,6 +671,78 @@ async function runMcporterJson(
   } catch {
     return { text: stdout, stderr: stderr || null };
   }
+}
+
+function normalizeFigmaMcpToolName(value: unknown): string {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) {
+    return "";
+  }
+  return raw.replace(/^(?:figma\.)+/i, "");
+}
+
+function extractFigmaMcpToolList(result: unknown): Array<Record<string, unknown>> {
+  const listRaw = (() => {
+    if (Array.isArray(result)) return result;
+    if (isJsonObject(result) && Array.isArray(result.tools)) return result.tools;
+    if (isJsonObject(result) && isJsonObject(result.result) && Array.isArray(result.result.tools)) {
+      return result.result.tools;
+    }
+    if (isJsonObject(result) && isJsonObject(result.data) && Array.isArray(result.data.tools)) {
+      return result.data.tools;
+    }
+    return [];
+  })();
+
+  return listRaw.filter((item): item is Record<string, unknown> => isJsonObject(item));
+}
+
+function normalizeFigmaMcpToolListResult(result: unknown): unknown {
+  const tools = extractFigmaMcpToolList(result);
+  if (!tools.length) {
+    return result;
+  }
+
+  const availableTools = tools
+    .map((tool) => {
+      const originalName = stringOrNull(tool.name);
+      const shortName = normalizeFigmaMcpToolName(originalName);
+      if (!shortName) {
+        return null;
+      }
+      const qualifiedName = originalName?.startsWith("figma.")
+        ? originalName
+        : `figma.${shortName}`;
+      return {
+        shortName,
+        qualifiedName,
+        description: stringOrNull(tool.description),
+        inputSchema: tool.inputSchema ?? tool.schema ?? tool.parameters ?? null,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+  if (!availableTools.length) {
+    return result;
+  }
+
+  const recommendedStartingTools = availableTools
+    .filter((tool) =>
+      ["get_design_context", "get_metadata", "get_screenshot", "get_variable_defs"].includes(
+        tool.shortName,
+      ),
+    )
+    .map((tool) => tool.shortName);
+
+  const basePayload = isJsonObject(result) ? result : { result };
+  return {
+    ...basePayload,
+    availableTools,
+    toolNames: availableTools.map((tool) => tool.shortName),
+    recommendedStartingTools,
+    callConvention:
+      "Pass either a short MCP tool name like `get_design_context` or a fully qualified name like `figma.get_design_context` to `figma_mcp_call`.",
+  };
 }
 
 type WorkspaceFigmaContext = {
@@ -4426,7 +4500,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             const mcporterConfigPath =
               process.env.MCPORTER_CONFIG_PATH ?? "/app/.mcporter/mcporter.json";
             try {
-              const result = await runMcporterJson([
+              const result = normalizeFigmaMcpToolListResult(await runMcporterJson([
                 "--config",
                 mcporterConfigPath,
                 "list",
@@ -4437,7 +4511,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                 FIGMA_API_KEY: mcpAuth.personalAccessToken,
                 FIGMA_PERSONAL_ACCESS_TOKEN: mcpAuth.personalAccessToken,
                 MCP_FIGMA_SERVER_URL: mcpAuth.mcpServerUrl,
-              });
+              }));
               finishTool(result);
               return JSON.stringify(result);
             } catch (err) {
@@ -4447,7 +4521,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             }
           }
           case "figma_mcp_call": {
-            const tool = String(args.tool ?? "").trim();
+            const requestedTool = String(args.tool ?? "").trim();
+            const tool = normalizeFigmaMcpToolName(requestedTool);
             const toolArgs =
               args.arguments && typeof args.arguments === "object" && !Array.isArray(args.arguments)
                 ? (args.arguments as Record<string, unknown>)
@@ -4485,7 +4560,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               finishTool(result);
               return JSON.stringify(result);
             } catch (err) {
-              const payload = buildFigmaMcpFailurePayload(err, mcpAuth, tool);
+              const payload = buildFigmaMcpFailurePayload(err, mcpAuth, requestedTool || tool);
               finishTool(payload);
               return JSON.stringify(payload);
             }
