@@ -547,17 +547,31 @@ function normalizeBcgptToolResult(result: unknown): unknown {
   if (!Array.isArray(content)) {
     return result;
   }
+  const textBlocks: string[] = [];
+  const parsedBlocks: unknown[] = [];
   for (const item of content) {
     if (!isJsonObject(item)) continue;
     const text = stringOrNull(item.text);
     if (!text) continue;
+    textBlocks.push(text);
     try {
-      return JSON.parse(text) as unknown;
+      parsedBlocks.push(JSON.parse(text) as unknown);
     } catch {
       // Keep scanning; some content entries are plain text.
     }
   }
-  return result;
+  if (parsedBlocks.length === 1 && textBlocks.length === 1) {
+    return parsedBlocks[0];
+  }
+  if (!parsedBlocks.length && !textBlocks.length) {
+    return result;
+  }
+  return {
+    ...result,
+    contentText: textBlocks.length ? textBlocks.join("\n\n") : undefined,
+    parsedContent:
+      parsedBlocks.length > 1 ? parsedBlocks : parsedBlocks.length === 1 ? parsedBlocks[0] : undefined,
+  };
 }
 
 async function callBcgptTool(params: {
@@ -578,7 +592,7 @@ async function callBcgptTool(params: {
   };
   const rpc = await fetchJson(`${params.bcgptUrl}/mcp`, {
     method: "POST",
-    timeoutMs: params.timeoutMs ?? 15_000,
+    timeoutMs: params.timeoutMs ?? 45_000,
     headers: {
       "content-type": "application/json",
       "x-bcgpt-api-key": params.apiKey,
@@ -977,11 +991,66 @@ function summarizeBasecampProjectList(
   return `Basecamp projects (${projects.length}): ${top.join(", ")}${projects.length > top.length ? ", ..." : ""}.`;
 }
 
+function summarizeBcgptNarrative(text: string, maxChars = 420): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "";
+  }
+  return normalized.length <= maxChars ? normalized : `${normalized.slice(0, maxChars - 1).trimEnd()}...`;
+}
+
+function extractBcgptNarrative(result: unknown): string | null {
+  if (typeof result === "string") {
+    const normalized = summarizeBcgptNarrative(result);
+    return normalized || null;
+  }
+  if (!isJsonObject(result)) {
+    return null;
+  }
+  const direct =
+    stringOrNull(result.summary) ??
+    stringOrNull(result.note) ??
+    stringOrNull(result.message);
+  if (direct) {
+    return summarizeBcgptNarrative(direct);
+  }
+  const parsedContent = result.parsedContent;
+  if (Array.isArray(parsedContent)) {
+    for (const item of parsedContent) {
+      const nested = extractBcgptNarrative(item);
+      if (nested) {
+        return nested;
+      }
+    }
+  } else if (parsedContent !== undefined) {
+    const nested = extractBcgptNarrative(parsedContent);
+    if (nested) {
+      return nested;
+    }
+  }
+  const nestedResult = isJsonObject(result.result) ? result.result : null;
+  if (nestedResult) {
+    const nested = extractBcgptNarrative(nestedResult);
+    if (nested) {
+      return nested;
+    }
+  }
+  const contentText = stringOrNull(result.contentText);
+  if (contentText) {
+    return summarizeBcgptNarrative(contentText);
+  }
+  return null;
+}
+
 function summarizeBcgptSmartActionResult(
   query: string,
   projectHint: string | null,
   result: unknown,
 ): string {
+  const narrative = extractBcgptNarrative(result);
+  if (narrative) {
+    return narrative;
+  }
   if (!isJsonObject(result)) {
     return `Completed Basecamp request: ${query}`;
   }
@@ -1029,6 +1098,18 @@ function summarizeBcgptSmartActionResult(
     return `Basecamp ${action.replace(/_/g, " ")} completed.`;
   }
   return `Completed Basecamp request: ${query}`;
+}
+
+function summarizeBcgptRawResult(
+  method: string,
+  path: string,
+  result: unknown,
+): string {
+  const narrative = extractBcgptNarrative(result);
+  if (narrative) {
+    return narrative;
+  }
+  return `Basecamp raw ${method.toUpperCase()} ${path} completed.`;
 }
 
 function isGreetingOnlyMessage(message: string): boolean {
@@ -2800,7 +2881,9 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         ? tools.filter(
             (tool) =>
               tool.type !== "function" ||
-              (tool.function.name !== "bcgpt_smart_action" && tool.function.name !== "bcgpt_list_projects"),
+              (tool.function.name !== "bcgpt_smart_action" &&
+                tool.function.name !== "bcgpt_list_projects" &&
+                tool.function.name !== "bcgpt_basecamp_raw"),
           )
         : tools;
 
@@ -3092,6 +3175,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             return `Checking live Basecamp data with smart_action for: ${String(args.query ?? "").trim() || "workspace request"}`;
           case "bcgpt_list_projects":
             return "Loading the live Basecamp project list for this workspace.";
+          case "bcgpt_basecamp_raw":
+            return `Fetching raw Basecamp data from ${String(args.path ?? "").trim() || "the requested API path"}.`;
           case "pmos_ops_list_credentials":
             return "Checking which workflow and integration credentials are available in this workspace.";
           case "pmos_ops_list_workflows":
@@ -3306,6 +3391,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- Use workspace context for connector readiness and defaults only; do not answer Basecamp questions from memory when live tools are available.",
         "- For live Basecamp data, use `bcgpt_list_projects` when the user wants the raw list of projects, and use `bcgpt_smart_action` when the user wants analysis, summaries, or searches.",
         "- If the user pastes a Basecamp URL, treat it as the exact resource to inspect and pass the URL through `bcgpt_smart_action.query`.",
+        "- If `bcgpt_smart_action` cannot resolve an exact Basecamp resource, use `bcgpt_basecamp_raw` for direct API lookup instead of repeating the same smart_action query.",
         "- Summarize results meaningfully: 'There are 7 open todos in Project X -- 3 are overdue. The most recent message was from Alice yesterday about the deploy.'",
         "",
         "### Figma questions",
@@ -3327,6 +3413,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "**Basecamp MCP Tools:**",
         "- `bcgpt_smart_action` -- run natural-language Basecamp queries through the bcgpt MCP router",
         "- `bcgpt_list_projects` -- fetch live Basecamp projects with names, IDs, and status",
+        "- `bcgpt_basecamp_raw` -- make a direct Basecamp API request through bcgpt when an exact resource lookup is needed",
         "",
         "**Workflow Engine Tools:**",
         "- `pmos_ops_list_credentials` -- see which services are connected (Basecamp, Slack, GitHub, etc.)",
@@ -3394,6 +3481,33 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             name: "bcgpt_list_projects",
             description: "List live Basecamp projects available through the bcgpt MCP server.",
             parameters: { type: "object", properties: {}, additionalProperties: false },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "bcgpt_basecamp_raw",
+            description:
+              "Make a raw Basecamp API request through the bcgpt MCP bridge when an exact resource lookup is needed or smart_action is not specific enough.",
+            parameters: {
+              type: "object",
+              required: ["path"],
+              additionalProperties: false,
+              properties: {
+                method: {
+                  type: "string",
+                  description: "HTTP method for the Basecamp API request. Defaults to GET.",
+                },
+                path: {
+                  type: "string",
+                  description: "Raw Basecamp API path or exact resource path to fetch.",
+                },
+                body: {
+                  type: "object",
+                  description: "Optional JSON body for non-GET Basecamp API requests.",
+                },
+              },
+            },
           },
         },
         {
@@ -3899,6 +4013,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               apiKey,
               toolName: "smart_action",
               toolArgs: project ? { query, project } : { query },
+              timeoutMs: 45_000,
             });
             if (!result.ok) {
               const payload = { error: result.error ?? "smart_action failed" };
@@ -3910,6 +4025,52 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               query,
               project,
               summary: summarizeBcgptSmartActionResult(query, project, result.result),
+              continueAgentLoop: true,
+              result: result.result,
+            };
+            finishTool(payload);
+            return JSON.stringify(payload);
+          }
+          case "bcgpt_basecamp_raw": {
+            const method = String(args.method ?? "GET").trim().toUpperCase() || "GET";
+            const path = String(args.path ?? "").trim();
+            const body =
+              args.body && typeof args.body === "object" && !Array.isArray(args.body)
+                ? (args.body as Record<string, unknown>)
+                : undefined;
+            if (!path) {
+              const payload = { error: "path is required" };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
+            const { bcgptUrl, apiKey } = await resolveWorkspaceBcgptAccess({
+              workspaceId,
+              allowGlobalSecrets: true,
+            });
+            if (!apiKey) {
+              const value = JSON.stringify({
+                error: "Basecamp integration is not configured for this workspace.",
+              });
+              finishTool({ error: "Basecamp integration is not configured for this workspace." });
+              return value;
+            }
+            const result = await callBcgptTool({
+              bcgptUrl,
+              apiKey,
+              toolName: "basecamp_raw",
+              toolArgs: body ? { method, path, body } : { method, path },
+              timeoutMs: 45_000,
+            });
+            if (!result.ok) {
+              const payload = { error: result.error ?? "basecamp_raw failed" };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
+            const payload = {
+              tool: "basecamp_raw",
+              method,
+              path,
+              summary: summarizeBcgptRawResult(method, path, result.result),
               continueAgentLoop: true,
               result: result.result,
             };
@@ -4292,7 +4453,9 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         ? tools.filter(
             (tool) =>
               tool.type !== "function" ||
-              (tool.function.name !== "bcgpt_smart_action" && tool.function.name !== "bcgpt_list_projects"),
+              (tool.function.name !== "bcgpt_smart_action" &&
+                tool.function.name !== "bcgpt_list_projects" &&
+                tool.function.name !== "bcgpt_basecamp_raw"),
           )
         : tools;
 

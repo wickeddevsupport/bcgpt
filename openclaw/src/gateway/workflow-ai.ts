@@ -665,6 +665,22 @@ function summarizeSmartActionPayload(payload: unknown): string | null {
   return null;
 }
 
+function summarizeBasecampRawPayload(payload: unknown): string | null {
+  if (!isObjectRecord(payload)) {
+    return null;
+  }
+  const summary =
+    (typeof payload.summary === "string" && payload.summary.trim()) ||
+    (typeof payload.contentText === "string" && payload.contentText.trim()) ||
+    null;
+  if (summary) {
+    return summary;
+  }
+  const method = typeof payload.method === "string" ? payload.method.trim().toUpperCase() : "GET";
+  const path = typeof payload.path === "string" ? payload.path.trim() : "";
+  return path ? `Basecamp raw ${method} ${path} completed.` : null;
+}
+
 function summarizeCountedNames(
   label: string,
   items: Array<{ name: string; count?: number | null }>,
@@ -884,6 +900,8 @@ export function summarizeAgentLoopToolResult(toolName: string, payload: unknown)
       return summarizeProjectRows(readToolProjectRows(payload));
     case "bcgpt_smart_action":
       return summarizeSmartActionPayload(payload);
+    case "bcgpt_basecamp_raw":
+      return summarizeBasecampRawPayload(payload);
     case "figma_get_context":
       return summarizeFigmaContextPayload(payload);
     case "figma_pat_audit_file":
@@ -961,6 +979,7 @@ function isTerminalToolSummary(name: string): boolean {
   return new Set([
     "bcgpt_list_projects",
     "bcgpt_smart_action",
+    "bcgpt_basecamp_raw",
     "figma_pat_audit_file",
     "fm_get_context",
     "fm_list_files",
@@ -1273,7 +1292,7 @@ export async function callWorkspaceModelAgentLoop(
       // Max iterations reached â€" return last assistant text if any
       const lastText = [...agentMessages]
         .reverse()
-        .find((m) => m.role === "assistant" && m.content);
+        .find((m) => m.role === "assistant" && m.content && !Array.isArray(m.tool_calls));
       if (lastText?.content) {
         return { ok: true, text: String(lastText.content), providerUsed };
       }

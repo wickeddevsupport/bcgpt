@@ -25,6 +25,16 @@ describe("workflow-ai Basecamp summarization", () => {
     expect(summary).toBe("BCGPT Test Project: 3 open Basecamp tasks.");
   });
 
+  it("summarizes raw Basecamp bridge payloads when present", () => {
+    const summary = summarizeAgentLoopToolResult("bcgpt_basecamp_raw", {
+      method: "GET",
+      path: "/buckets/45864540/card_tables/cards/9515058775",
+      summary: "Card 9515058775 is blocked on missing copy approval.",
+    });
+
+    expect(summary).toBe("Card 9515058775 is blocked on missing copy approval.");
+  });
+
   it("honors sufficient tool summaries from the PMOS bridge payload", () => {
     const summary = summarizeAgentLoopToolResult("bcgpt_smart_action", {
       sufficient: true,
