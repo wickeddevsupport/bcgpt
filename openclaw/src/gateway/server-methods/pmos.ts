@@ -3293,6 +3293,9 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         .reverse()
         .find((message) => message.role === "user")?.content ?? "";
       const pastedUrlHints = inspectWorkspaceChatUrls(latestUserMessage);
+      const hasMixedWorkspaceUrls = Boolean(
+        pastedUrlHints.figmaUrl && pastedUrlHints.basecampUrl,
+      );
       const disableBasecampTools = isGreetingOnlyMessage(latestUserMessage);
       const shouldPreferBasecamp =
         !disableBasecampTools &&
@@ -3311,7 +3314,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         /\bfigma\b|\bdesign\b|\bauto[\s-]?layout\b|\bcomponent(?:s)?\b|\bstyle(?:s)?\b|\bfont(?:s)?\b|\bregression\b|\baudit\b/i.test(
           latestUserMessage,
         );
-      const shouldPreferExplicitFigmaAudit = Boolean(pastedUrlHints.figmaUrl);
+      const shouldPreferExplicitFigmaAudit =
+        Boolean(pastedUrlHints.figmaUrl) && !hasMixedWorkspaceUrls;
       const runtimeUrlHints = [
         pastedUrlHints.basecampUrl
           ? `- Pasted Basecamp URL detected for this request: ${pastedUrlHints.basecampUrl}. Treat that URL as the resource to inspect and include the exact URL in \`bcgpt_smart_action.query\`.`
@@ -3321,6 +3325,9 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           : null,
       ].filter((line): line is string => Boolean(line));
       const requestRoutingHints = [
+        hasMixedWorkspaceUrls
+          ? "- Both a Figma URL and a Basecamp URL were supplied. Treat this as a cross-tool task: inspect both resources, reconcile them, and do not stop after the first successful tool call."
+          : null,
         shouldPreferExplicitFigmaAudit
           ? "- Prefer `figma_pat_audit_file` first because the user supplied an explicit Figma file URL."
           : null,
@@ -4396,8 +4403,23 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                   }
                 : args;
             const result = await runWorkspaceFigmaRestAudit(workspaceId, auditArgs);
-            finishTool(result);
-            return JSON.stringify(result);
+            const payload =
+              hasMixedWorkspaceUrls &&
+              result &&
+              typeof result === "object" &&
+              !Array.isArray(result)
+                ? {
+                    ...result,
+                    continueAgentLoop: true,
+                    note:
+                      typeof (result as { note?: unknown }).note === "string" &&
+                      (result as { note?: string }).note?.trim()
+                        ? `${(result as { note: string }).note} Continue with Basecamp lookup and a combined remediation plan before answering.`
+                        : "Continue with Basecamp lookup and a combined remediation plan before answering.",
+                  }
+                : result;
+            finishTool(payload);
+            return JSON.stringify(payload);
           }
           case "fm_get_context":
           case "fm_list_files":

@@ -159,4 +159,26 @@ describe("workflow-ai Basecamp summarization", () => {
 
     expect(summary).toContain("Figma general audit for OKA Online Audit");
   });
+
+  it("does not early-exit when a figma audit is marked as continuation context", () => {
+    const summary = buildAgentLoopEarlyExit([
+      {
+        name: "figma_pat_audit_file",
+        args: { file_key: "3INmNiG3X3NKAZtCI3SMg6" },
+        parsed: {
+          continueAgentLoop: true,
+          requestedFocus: "general",
+          file: { name: "OKA Online Audit" },
+          summary: {
+            pages: 1,
+            totalNodes: 37,
+            componentsDefined: 0,
+          },
+        },
+        callCount: 1,
+      },
+    ]);
+
+    expect(summary).toBeNull();
+  });
 });
