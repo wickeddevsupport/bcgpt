@@ -25,10 +25,10 @@ export type DashboardProps = {
   projectId?: string;
   flowsLoading?: boolean;
   flowsError?: string | null;
-  flows?: Array<{ status?: unknown }>;
+  flows?: Array<{ id?: string; displayName?: string; status?: unknown }>;
   runsLoading?: boolean;
   runsError?: string | null;
-  runs?: Array<{ status?: unknown }>;
+  runs?: Array<{ id?: string; flowId?: string; status?: unknown; created?: unknown }>;
   traceEvents: PmosExecutionTraceEvent[];
   integrationsHref: string;
   automationsHref: string;
@@ -451,7 +451,7 @@ export function renderDashboard(props: DashboardProps) {
           <div class="stat">
             <div class="stat-label">Recent Runs</div>
             <div class="stat-value">${runs.length}</div>
-            <div class="muted">${runBuckets.failed} failed</div>
+            <div class="muted">${runBuckets.failed > 0 ? `${runBuckets.failed} failed` : "All passing"}</div>
           </div>
           <div class="stat">
             <div class="stat-label">Pulse</div>
@@ -476,14 +476,23 @@ export function renderDashboard(props: DashboardProps) {
           <span class="chip chip-ok">Succeeded: ${runBuckets.succeeded}</span>
           <span class="chip chip-danger">Failed: ${runBuckets.failed}</span>
           <span class="chip chip-warn">Running: ${runBuckets.running}</span>
+          ${runs.length > 0
+            ? html`<span class="chip">Success rate: ${Math.round(((runBuckets.succeeded) / Math.max(runBuckets.succeeded + runBuckets.failed, 1)) * 100)}%</span>`
+            : nothing}
         </div>
 
         ${props.runsError ? html`<div class="callout danger" style="margin-top: 12px;">${props.runsError}</div>` : nothing}
+        ${runBuckets.failed > 0
+          ? html`<div class="callout warn" style="margin-top: 12px; font-size: 13px;">
+              ${runBuckets.failed} failed run${runBuckets.failed !== 1 ? "s" : ""} need attention.
+              Check the Workflows tab for details and retry options.
+            </div>`
+          : nothing}
         ${
           runs.length
             ? html`
                 <div class="list" style="margin-top: 12px;">
-                  ${runs.slice(0, 5).map((run) => {
+                  ${runs.slice(0, 8).map((run) => {
                     const status = String(run.status ?? "UNKNOWN");
                     const bucket = runStatusBucket(status);
                     const toneClass =
@@ -494,11 +503,14 @@ export function renderDashboard(props: DashboardProps) {
                           : bucket === "running"
                             ? "chip chip-warn"
                             : "chip";
+                    const flowName = run.flowId
+                      ? flows.find((f) => f.id === run.flowId)?.displayName ?? `flow ${String(run.flowId).slice(0, 8)}`
+                      : "flow n/a";
                     return html`
                       <div class="list-item">
                         <div class="list-main">
-                          <div class="list-title mono">${String(run.id ?? "").slice(0, 8)}</div>
-                          <div class="list-sub">${run.flowId ? `flow ${String(run.flowId).slice(0, 8)}` : "flow n/a"}</div>
+                          <div class="list-title">${flowName}</div>
+                          <div class="list-sub mono">${String(run.id ?? "").slice(0, 8)}</div>
                         </div>
                         <div class="list-meta">
                           <span class=${toneClass}>${status}</span>

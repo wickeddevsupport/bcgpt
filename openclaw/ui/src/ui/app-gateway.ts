@@ -353,6 +353,12 @@ export function connectGateway(host: GatewayHost) {
       }
       void refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0]);
       if (host.chatRunId) {
+        // Ensure chatStreamStartedAt is set so reconcileRunWithHistory can detect
+        // when the run completes during recovery polling.
+        const chatHost = host as unknown as { chatStreamStartedAt: number | null };
+        if (!chatHost.chatStreamStartedAt) {
+          chatHost.chatStreamStartedAt = Date.now() - 5000;
+        }
         void loadChatHistory(app).catch(() => undefined);
       }
       // Auto-refresh connector status on connect so opsProvisioned is populated

@@ -2779,7 +2779,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const disableBasecampTools = isGreetingOnlyMessage(latestUserMessage);
       const shouldForceBasecamp =
         !disableBasecampTools &&
-        /\bbasecamp\b|\bbcgpt\b|\bproject(?:s)?\b|\btodo(?:s)?\b|\bschedule\b|\bcampfire\b|\bmessage(?:s)?\b|\bkanban\b|\bcard(?:s)?\b|\bpeople\b|\bperson\b|\bassignment(?:s)?\b/i.test(
+        /\bbasecamp\b|\bbcgpt\b|\bproject(?:s)?\b|\btodo(?:s)?\b|\bschedule\b|\bcampfire\b|\bmessage(?:s)?\b|\bkanban\b|\bcard(?:s)?\b|\bpeople\b|\bperson\b|\bassignment(?:s)?\b|\boverdue\b|\bdue\s+(?:today|this\s+week|soon)\b|\bblocker(?:s)?\b|\bdeadline(?:s)?\b|\bstatus\s+(?:update|report|check)\b|\bteam\b|\bworkload\b/i.test(
           latestUserMessage,
         );
       const shouldForceProjectList =
@@ -3245,9 +3245,12 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- Position nodes left-to-right: trigger at [250, 300], each next node at x+250.",
         "- Build complete, runnable workflows -- no manual rewiring needed.",
         "",
-        "### Project management questions",
-        "- Use workspace context for connector readiness and defaults only; do not answer Basecamp questions from memory when live tools are available.",
-        "- For live Basecamp data, use `bcgpt_list_projects` when the user wants the raw list of projects, and use `bcgpt_smart_action` when the user wants analysis, summaries, or searches.",
+        "### Project management questions (CRITICAL)",
+        "- ALWAYS use live Basecamp tools for ANY question about projects, todos, people, messages, schedules, or assignments. NEVER answer from memory or prior context alone.",
+        "- If the user asks about projects, todos, deadlines, team members, or any Basecamp data: CALL a tool. Do not say 'based on what I know' or 'from our previous conversation'.",
+        "- Use `bcgpt_list_projects` when the user wants the raw list of projects or needs to pick a project.",
+        "- Use `bcgpt_smart_action` for everything else: summaries, searches, overdue items, person lookups, status reports, audits, and follow-up questions.",
+        "- Do NOT make multiple redundant `bcgpt_smart_action` calls for the same query. One well-formed call is better than three vague ones.",
         "- Summarize results meaningfully: 'There are 7 open todos in Project X -- 3 are overdue. The most recent message was from Alice yesterday about the deploy.'",
         "",
         "### Figma questions",
@@ -4213,7 +4216,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const disableBasecampTools = isGreetingOnlyMessage(latestUserMessage);
       const shouldForceBasecamp =
         !disableBasecampTools &&
-        /\bbasecamp\b|\bbcgpt\b|\bproject(?:s)?\b|\btodo(?:s)?\b|\bschedule\b|\bcampfire\b|\bmessage(?:s)?\b|\bkanban\b|\bcard(?:s)?\b|\bpeople\b|\bperson\b|\bassignment(?:s)?\b/i.test(
+        /\bbasecamp\b|\bbcgpt\b|\bproject(?:s)?\b|\btodo(?:s)?\b|\bschedule\b|\bcampfire\b|\bmessage(?:s)?\b|\bkanban\b|\bcard(?:s)?\b|\bpeople\b|\bperson\b|\bassignment(?:s)?\b|\boverdue\b|\bdue\s+(?:today|this\s+week|soon)\b|\bblocker(?:s)?\b|\bdeadline(?:s)?\b|\bstatus\s+(?:update|report|check)\b|\bteam\b|\bworkload\b/i.test(
           latestUserMessage,
         );
       const shouldForceProjectList =

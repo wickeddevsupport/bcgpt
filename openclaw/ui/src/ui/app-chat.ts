@@ -117,11 +117,16 @@ function startChatRecoveryPoll(host: ChatHost, runId: string) {
       scheduleChatScroll(scrollHost, true);
       return;
     }
-    if (Date.now() - startedAt > 60_000) {
+    if (Date.now() - startedAt > 120_000) {
+      // Run still not reconciled after 2 minutes -- clear the active run indicator
+      // so the UI doesn't appear permanently stuck.
+      host.chatRunId = null;
+      host.chatStream = null;
+      host.chatStreamStartedAt = null;
       clearChatRecoveryPoll(host);
       return;
     }
-    host.chatHistoryRecoveryTimer = window.setTimeout(tick, 2000);
+    host.chatHistoryRecoveryTimer = window.setTimeout(tick, 2500);
   };
   host.chatHistoryRecoveryTimer = window.setTimeout(tick, 2500);
 }
