@@ -2,6 +2,7 @@ import { Type } from "@sinclair/typebox";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { MemoryCitationsMode } from "../../config/types.memory.js";
 import type { MemorySearchResult } from "../../memory/types.js";
+import { orchestrateMemoryResults } from "../../memory/orchestrator.js";
 import type { AnyAgentTool } from "./common.js";
 import { resolveMemoryBackendConfig } from "../../memory/backend-config.js";
 import { getMemorySearchManager } from "../../memory/index.js";
@@ -72,8 +73,21 @@ export function createMemorySearchTool(options: {
           status.backend === "qmd"
             ? clampResultsByInjectedChars(decorated, resolved.qmd?.limits.maxInjectedChars)
             : decorated;
-        return jsonResult({
+        const orchestrated = await orchestrateMemoryResults({
+          cfg,
+          query,
           results,
+        });
+        return jsonResult({
+          results: orchestrated?.results ?? results,
+          summary: orchestrated?.summary,
+          orchestration: orchestrated
+            ? {
+                provider: orchestrated.provider,
+                model: orchestrated.model,
+                applied: true,
+              }
+            : undefined,
           provider: status.provider,
           model: status.model,
           fallback: status.fallback,

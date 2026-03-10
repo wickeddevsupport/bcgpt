@@ -83,6 +83,18 @@ function wsConfigFor(wsId) {
     session: {
       store: `~/.openclaw/workspaces/${wsId}/agents/{agentId}/sessions/sessions.json`,
     },
+    memory: {
+      orchestration: {
+        enabled: true,
+        provider: "ollama",
+        baseUrl: "https://bot.wickedlab.io",
+        model: "qwen3:1.7b",
+        timeoutMs: 2500,
+        maxCandidates: 6,
+        maxResults: 4,
+        maxSnippetChars: 280,
+      },
+    },
     agents: {
       defaults: {
         workspace: `~/.openclaw/workspaces/${wsId}/assistant`,
@@ -263,6 +275,32 @@ if (typeof global.agents.defaults.memorySearch.sync.onSearch !== "boolean") {
 }
 if (typeof global.agents.defaults.memorySearch.sync.watch !== "boolean") {
   global.agents.defaults.memorySearch.sync.watch = true;
+}
+global.memory = global.memory || {};
+global.memory.orchestration = global.memory.orchestration || {};
+if (typeof global.memory.orchestration.enabled !== "boolean") {
+  global.memory.orchestration.enabled = true;
+}
+if (!global.memory.orchestration.provider) {
+  global.memory.orchestration.provider = "ollama";
+}
+if (!global.memory.orchestration.baseUrl) {
+  global.memory.orchestration.baseUrl = "https://bot.wickedlab.io";
+}
+if (!global.memory.orchestration.model) {
+  global.memory.orchestration.model = "qwen3:1.7b";
+}
+if (typeof global.memory.orchestration.timeoutMs !== "number") {
+  global.memory.orchestration.timeoutMs = 2500;
+}
+if (typeof global.memory.orchestration.maxCandidates !== "number") {
+  global.memory.orchestration.maxCandidates = 6;
+}
+if (typeof global.memory.orchestration.maxResults !== "number") {
+  global.memory.orchestration.maxResults = 4;
+}
+if (typeof global.memory.orchestration.maxSnippetChars !== "number") {
+  global.memory.orchestration.maxSnippetChars = 280;
 }
 
 const gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN || "";

@@ -82,10 +82,24 @@ const MemoryQmdSchema = z
   })
   .strict();
 
+const MemoryOrchestrationSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    provider: z.literal("ollama").optional(),
+    baseUrl: z.string().optional(),
+    model: z.string().optional(),
+    timeoutMs: z.number().int().positive().optional(),
+    maxCandidates: z.number().int().positive().optional(),
+    maxResults: z.number().int().positive().optional(),
+    maxSnippetChars: z.number().int().positive().optional(),
+  })
+  .strict();
+
 const MemorySchema = z
   .object({
     backend: z.union([z.literal("builtin"), z.literal("qmd")]).optional(),
     citations: z.union([z.literal("auto"), z.literal("on"), z.literal("off")]).optional(),
+    orchestration: MemoryOrchestrationSchema.optional(),
     qmd: MemoryQmdSchema.optional(),
   })
   .strict()

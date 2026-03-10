@@ -1610,6 +1610,48 @@ async function ensureWorkspaceStarterExperience(user: WarmIdentityUser): Promise
       };
     }
 
+    const existingMemory = isRecord(getPath(existing, ["memory"]))
+      ? (getPath(existing, ["memory"]) as Record<string, unknown>)
+      : null;
+    const currentOrchestration = isRecord(getPath(existingMemory, ["orchestration"]))
+      ? (getPath(existingMemory, ["orchestration"]) as Record<string, unknown>)
+      : null;
+    const memoryPatch: Record<string, unknown> = {};
+    const orchestrationPatch: Record<string, unknown> = {};
+    if (typeof currentOrchestration?.enabled !== "boolean") {
+      orchestrationPatch.enabled = true;
+    }
+    if (typeof currentOrchestration?.provider !== "string") {
+      orchestrationPatch.provider = "ollama";
+    }
+    if (typeof currentOrchestration?.baseUrl !== "string" || !currentOrchestration.baseUrl.trim()) {
+      orchestrationPatch.baseUrl = "https://bot.wickedlab.io";
+    }
+    if (typeof currentOrchestration?.model !== "string" || !currentOrchestration.model.trim()) {
+      orchestrationPatch.model = "qwen3:1.7b";
+    }
+    if (typeof currentOrchestration?.timeoutMs !== "number") {
+      orchestrationPatch.timeoutMs = 2500;
+    }
+    if (typeof currentOrchestration?.maxCandidates !== "number") {
+      orchestrationPatch.maxCandidates = 6;
+    }
+    if (typeof currentOrchestration?.maxResults !== "number") {
+      orchestrationPatch.maxResults = 4;
+    }
+    if (typeof currentOrchestration?.maxSnippetChars !== "number") {
+      orchestrationPatch.maxSnippetChars = 280;
+    }
+    if (Object.keys(orchestrationPatch).length > 0) {
+      memoryPatch.orchestration = orchestrationPatch;
+    }
+    if (Object.keys(memoryPatch).length > 0) {
+      patch.memory = {
+        ...(isRecord(patch.memory) ? (patch.memory as Record<string, unknown>) : {}),
+        ...memoryPatch,
+      };
+    }
+
     if (Object.keys(patch).length > 0) {
       await patchWorkspaceConfig(workspaceId, patch);
     }

@@ -294,6 +294,32 @@ function ensureWorkspaceDefaults(workspaceId, config, globalPrimaryModel) {
   if (!trimToNull(memorySearch.store.path)) {
     memorySearch.store.path = `~/.openclaw/workspaces/${workspaceId}/agents/{agentId}/memory/memory.db`;
   }
+  next.memory = isRecord(next.memory) ? next.memory : {};
+  next.memory.orchestration = isRecord(next.memory.orchestration) ? next.memory.orchestration : {};
+  if (typeof next.memory.orchestration.enabled !== "boolean") {
+    next.memory.orchestration.enabled = true;
+  }
+  if (!trimToNull(next.memory.orchestration.provider)) {
+    next.memory.orchestration.provider = "ollama";
+  }
+  if (!trimToNull(next.memory.orchestration.baseUrl)) {
+    next.memory.orchestration.baseUrl = "https://bot.wickedlab.io";
+  }
+  if (!trimToNull(next.memory.orchestration.model)) {
+    next.memory.orchestration.model = "qwen3:1.7b";
+  }
+  if (typeof next.memory.orchestration.timeoutMs !== "number") {
+    next.memory.orchestration.timeoutMs = 2500;
+  }
+  if (typeof next.memory.orchestration.maxCandidates !== "number") {
+    next.memory.orchestration.maxCandidates = 6;
+  }
+  if (typeof next.memory.orchestration.maxResults !== "number") {
+    next.memory.orchestration.maxResults = 4;
+  }
+  if (typeof next.memory.orchestration.maxSnippetChars !== "number") {
+    next.memory.orchestration.maxSnippetChars = 280;
+  }
 
   const list = Array.isArray(next.agents.list) ? next.agents.list : [];
   if (list.length === 0) {

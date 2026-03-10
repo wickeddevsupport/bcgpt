@@ -41,6 +41,7 @@ import { createMemorySearchTool } from "./memory-tool.js";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("memory search citations", () => {
@@ -119,5 +120,48 @@ describe("memory search citations", () => {
     const result = await tool.execute("auto_mode_group", { query: "notes" });
     const details = result.details as { results: Array<{ snippet: string }> };
     expect(details.results[0]?.snippet).not.toMatch(/Source:/);
+  });
+
+  it("applies local orchestration summary and reranking when configured", async () => {
+    backend = "builtin";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          response:
+            '{"keepIds":["1"],"summary":"Budget memory selected for this query."}',
+        }),
+      })),
+    );
+    const cfg = {
+      memory: {
+        citations: "off",
+        orchestration: {
+          enabled: true,
+          provider: "ollama",
+          baseUrl: "https://bot.wickedlab.io",
+          model: "qwen3:1.7b",
+        },
+      },
+      agents: { list: [{ id: "main", default: true }] },
+    };
+    const tool = createMemorySearchTool({ config: cfg });
+    if (!tool) {
+      throw new Error("tool missing");
+    }
+    const result = await tool.execute("orchestrated_search", { query: "budget" });
+    const details = result.details as {
+      results: Array<{ snippet: string }>;
+      summary?: string;
+      orchestration?: { provider: string; model: string; applied: boolean };
+    };
+    expect(details.summary).toBe("Budget memory selected for this query.");
+    expect(details.orchestration).toEqual({
+      provider: "ollama",
+      model: "qwen3:1.7b",
+      applied: true,
+    });
+    expect(details.results).toHaveLength(1);
   });
 });

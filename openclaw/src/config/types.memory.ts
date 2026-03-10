@@ -6,7 +6,21 @@ export type MemoryCitationsMode = "auto" | "on" | "off";
 export type MemoryConfig = {
   backend?: MemoryBackend;
   citations?: MemoryCitationsMode;
+  orchestration?: MemoryOrchestrationConfig;
   qmd?: MemoryQmdConfig;
+};
+
+export type MemoryOrchestrationProvider = "ollama";
+
+export type MemoryOrchestrationConfig = {
+  enabled?: boolean;
+  provider?: MemoryOrchestrationProvider;
+  baseUrl?: string;
+  model?: string;
+  timeoutMs?: number;
+  maxCandidates?: number;
+  maxResults?: number;
+  maxSnippetChars?: number;
 };
 
 export type MemoryQmdConfig = {
