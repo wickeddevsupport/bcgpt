@@ -1,5 +1,9 @@
 # n8n Integration Guide
 
+> Archive note: this document is historical reference only as of March 6, 2026.
+> PMOS now runs Activepieces / Flow as the default workflow engine.
+> Use [`PMOS_ACTIVEPIECES_STATUS.md`](PMOS_ACTIVEPIECES_STATUS.md) and [`COOLIFY_DEPLOY_NX_RUNBOOK.md`](COOLIFY_DEPLOY_NX_RUNBOOK.md) for current production guidance.
+
 **Last Updated:** 2026-02-27
 **Related:** [`OPENCLAW_AUTOMATION_OS.md`](OPENCLAW_AUTOMATION_OS.md), [`COOLIFY_DEPLOY_NX_RUNBOOK.md`](COOLIFY_DEPLOY_NX_RUNBOOK.md)
 
@@ -7,7 +11,7 @@
 
 ## Overview
 
-OpenClaw uses n8n as its workflow automation engine, replacing Activepieces. This guide covers the technical integration details.
+This guide documents the older embedded `n8n` path that existed before the Activepieces / Flow cutover. Keep it only for legacy compatibility work and archive reference.
 
 ### Current Runtime Notes (2026-02-18)
 

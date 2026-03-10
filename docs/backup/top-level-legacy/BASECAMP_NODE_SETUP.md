@@ -1,5 +1,9 @@
 # Basecamp n8n Node Setup Guide
 
+> Archive note: this document describes the older custom `n8n` Basecamp node path.
+> Current production uses the Activepieces Basecamp piece plus PMOS/BCGPT provisioning.
+> Use [`PMOS_ACTIVEPIECES_STATUS.md`](PMOS_ACTIVEPIECES_STATUS.md) for the live state.
+
 **Last Updated:** 2026-02-17
 **Related:** [`N8N_INTEGRATION_GUIDE.md`](N8N_INTEGRATION_GUIDE.md)
 
@@ -7,7 +11,7 @@
 
 ## Overview
 
-The Basecamp n8n node is a custom node that allows n8n workflows to interact with Basecamp 3/4 through the BCGPT gateway. This enables seamless integration between OpenClaw and Basecamp.
+This document is retained for legacy reference. It does not describe the current default production Basecamp integration path.
 
 ---
 

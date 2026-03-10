@@ -1,5 +1,8 @@
 # OpenClaw Automation OS - Master Document
 
+> Archive note: this master document contains earlier architecture and product notes from the `n8n`-first era.
+> Current production truth is documented in [`PMOS_ACTIVEPIECES_STATUS.md`](PMOS_ACTIVEPIECES_STATUS.md), [`ROADMAP_AND_STATUS.md`](ROADMAP_AND_STATUS.md), and [`COOLIFY_DEPLOY_NX_RUNBOOK.md`](COOLIFY_DEPLOY_NX_RUNBOOK.md).
+
 ## Product Vision and User Journey
 
 OpenClaw Automation OS is a fully AI-powered automation platform that combines workspace isolation, multi-agent capabilities, and chat-driven workflow creation to deliver a true automation operating system.
@@ -10,7 +13,7 @@ OpenClaw Automation OS is a fully AI-powered automation platform that combines w
 3. **Chat-First Interaction**: Users start chatting immediately to create workflows and manage automation
 4. **Multi-Agent Collaboration**: Users deploy multiple specialized agents for parallel task execution
 5. **Live Flow Building**: Users activate/deactivate control flows and build workflows in real-time
-6. **Seamless Integration**: Users interact with n8n through integrated chat without leaving the UI
+6. **Seamless Integration**: Users interact with the workflow engine through integrated chat without leaving the UI
 
 ---
 

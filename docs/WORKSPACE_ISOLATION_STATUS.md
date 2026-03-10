@@ -1,79 +1,70 @@
 # Workspace Isolation Status
 
-**Last Updated:** 2026-02-19  
-**Related:** [`NEXT_STEPS.md`](NEXT_STEPS.md), [`COOLIFY_DEPLOY_NX_RUNBOOK.md`](COOLIFY_DEPLOY_NX_RUNBOOK.md)
-
----
+**Last Updated:** 2026-03-10
 
 ## Scope
 
-This status reflects active production paths only:
+This file covers the active production isolation model for:
 
-- Gateway: `openclaw/src/gateway/*`
-- UI: `openclaw/ui/*`
-- Embedded n8n runtime behind OpenClaw proxy
+- PMOS auth and workspace resolution
+- workspace config overlays
+- workspace connectors
+- agent/session/file roots
+- durable memory paths
+- embedded Flow bootstrap
+- FM/Figma connector sync into PMOS
 
----
+## Current Isolation Model
 
-## Isolation Model
+Current intent and active runtime behavior:
 
-OpenClaw uses workspace-scoped isolation for all user-facing automation data.
-
-- PMOS auth session identifies user + `workspaceId`.
-- Workflow isolation in embedded n8n is enforced with workspace tags at proxy layer.
-- n8n authentication is workspace-scoped and auto-provisioned from PMOS session context.
-
----
+1. User signs into PMOS.
+2. PMOS resolves the user and `workspaceId`.
+3. Workspace config overlays are merged on top of shared config.
+4. Workspace connector state is read from workspace-scoped storage.
+5. Agents, sessions, files, and durable memory resolve under workspace-scoped paths.
+6. PMOS-authenticated Flow bootstrap opens the correct embedded project context.
 
 ## Implementation Matrix
 
-| Domain | Status | Enforcement Point |
+| Domain | Status | Primary Enforcement |
 |---|---|---|
-| Agents | COMPLETE | `openclaw/src/gateway/server-methods/agents.ts` |
-| Cron jobs | COMPLETE | `openclaw/src/gateway/server-methods/cron.ts` |
-| Sessions | COMPLETE | `openclaw/src/gateway/server-methods/sessions.ts` |
-| Workspace config overrides | COMPLETE | `openclaw/src/gateway/workspace-config.ts`, `openclaw/src/gateway/workspace-config-http.ts` |
+| Workspace config overlays | COMPLETE | `openclaw/src/gateway/workspace-config.ts` |
 | Workspace connectors | COMPLETE | `openclaw/src/gateway/workspace-connectors.ts` |
-| Embedded n8n workflow list/create isolation | COMPLETE | `openclaw/src/gateway/pmos-ops-proxy.ts` |
-| Embedded n8n user identity mapping | COMPLETE | `openclaw/src/gateway/n8n-auth-bridge.ts` |
-| Super-admin workspace switcher UI | PARTIAL | Backend role model exists; complete active UI switcher not shipped |
+| Agent/session workspace routing | COMPLETE | gateway server methods |
+| Workspace file roots | COMPLETE | runtime config + UI defaults |
+| Durable memory roots | COMPLETE | `openclaw/src/gateway/pmos-auth-http.ts` |
+| FM/Figma auth handoff into workspace connectors | COMPLETE | PMOS connector sync + FM context payload |
+| Flow bootstrap from PMOS auth | COMPLETE | PMOS auth HTTP + ops proxy |
+| Multi-user regression coverage | PARTIAL | still needs broader automated smoke coverage |
 
----
+## Memory Isolation
 
-## n8n Identity Behavior
+Memory should persist across:
 
-Current behavior for embedded n8n access:
+- chat sessions
+- compaction
+- PMOS restarts
+- container rebuilds
+- source deployments
 
-1. User signs up or logs in to PMOS.
-2. PMOS warms workspace-scoped n8n identity (`pmos-auth-http.ts`).
-3. Auth bridge resolves PMOS session and injects workspace n8n cookie (`n8n-auth-bridge.ts`).
-4. Workflow API calls are filtered to workspace-owned workflows (`pmos-ops-proxy.ts`).
+Current design target is:
 
-Hard guardrails:
+- workspace-scoped durable storage
+- per-agent memory roots
+- no global cross-workspace leakage by default
+- optional workspace-level shared facts only when intentionally written
 
-- `N8N_ALLOW_OWNER_FALLBACK=0` for strict tenant behavior.
-- `N8N_OWNER_EMAIL` and `N8N_OWNER_PASSWORD` are required for invitation-based workspace user provisioning.
+## Remaining Risks
 
----
+- Retrieval quality and extraction policy still need tuning even though storage is durable.
+- Multi-user regression testing should be stronger before claiming this fully hardened.
+- Any hotfix that bypasses the workspace config/connector path can still undermine the intended model.
 
-## Known Gaps
+## Verification Checklist
 
-- No completed super-admin workspace-switcher UX in active `openclaw/ui`.
-- End-to-end multi-user isolation smoke is not yet enforced in CI by default.
-- Some advanced orchestration features are still placeholder/simulated and should not be treated as isolation regressions.
-
----
-
-## Verification (Post-Deploy)
-
-1. Create/login as User A, create workflow, confirm visible in Automations.
-2. Create/login as User B, confirm User A workflow is not visible.
-3. Confirm User B create/delete/enable operations work on User B workflows.
-4. Confirm refresh keeps session and embedded editor renders.
-5. Confirm `/ops-ui/assets/*.js` returns JavaScript content type (not HTML fallback).
-
----
-
-## Rollback Safety
-
-If isolation behavior regresses, roll back to previous working image and rerun the verification checklist above before re-enabling traffic.
+1. Sign into two different workspaces and verify connectors, agents, and chat history do not cross.
+2. Verify FM/Figma context in workspace A does not appear in workspace B.
+3. Verify Basecamp prompts only use the signed-in workspace connector state.
+4. Restart/redeploy PMOS and confirm durable memory remains available.
+5. Open embedded Flow from PMOS and confirm project context belongs to the current workspace user.

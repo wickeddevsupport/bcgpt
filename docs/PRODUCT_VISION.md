@@ -1,8 +1,11 @@
-# OpenClaw - Personal AI Agent with n8n Superpowers
+# OpenClaw - Personal AI Agent with Workflow Superpowers
+
+> Product note: the current production workflow runtime is Activepieces / Flow.
+> Some deeper implementation examples in this document still reflect earlier `n8n` planning and should be treated as conceptual background, not live deployment truth.
 
 ## The Vision
 
-**OpenClaw is your personal AI agent that actually does things.** Not just chat - real actions, real workflows, real results. Powered by n8n for deterministic execution, eliminating AI hallucinations through verified workflows.
+**OpenClaw is your personal AI agent that actually does things.** Not just chat - real actions, real workflows, real results. Powered by PMOS orchestration plus a dedicated workflow engine for deterministic execution and verified automation.
 
 ---
 
@@ -409,6 +412,7 @@ This agent learns your preferences over time.
 
 ## Related Documentation
 
-- [OPENCLAW_AUTOMATION_OS.md](OPENCLAW_AUTOMATION_OS.md) - Technical architecture
+- [DOCS_INDEX.md](DOCS_INDEX.md) - Current active documentation map
 - [NEXT_STEPS.md](NEXT_STEPS.md) - Implementation plan
-- [N8N_INTEGRATION_GUIDE.md](N8N_INTEGRATION_GUIDE.md) - n8n technical details
+- [backup/top-level-legacy/OPENCLAW_AUTOMATION_OS.md](backup/top-level-legacy/OPENCLAW_AUTOMATION_OS.md) - Archived technical architecture notes
+- [backup/top-level-legacy/N8N_INTEGRATION_GUIDE.md](backup/top-level-legacy/N8N_INTEGRATION_GUIDE.md) - Archived n8n-era technical details

@@ -1,77 +1,66 @@
-# OpenClaw Automation OS - Roadmap And Current Status
+# Roadmap And Status
 
-**Last Updated:** 2026-02-19
-
----
+**Last Updated:** 2026-03-10
 
 ## Snapshot
 
-This roadmap reflects active code paths and deployed behavior, not aspirational status.
-
-| Phase | Scope | Status |
+| Area | Status | Notes |
 |---|---|---|
-| Phase 1 | Workspace isolation + auth foundations | MOSTLY COMPLETE |
-| Phase 2 | Embedded n8n runtime + ops proxy | COMPLETE |
-| Phase 3 | Active UI integration + BYOK | IN PROGRESS |
-| Phase 4 | Chat-to-workflow, orchestration, live-builder maturity | PARTIAL / NOT PRODUCTION-READY |
-
----
+| PMOS as primary surface | SHIPPED | active production UI |
+| Flow / Activepieces workflow runtime | SHIPPED | embedded from PMOS |
+| Basecamp live chat + project data | SHIPPED WITH TUNING NEEDED | BCGPT path works, prompt/tool discipline still matters |
+| FM MCP in PMOS chat | SHIPPED | file-manager tasks now available in workspace chat |
+| Figma PAT-backed audits | SHIPPED | reliable fallback path |
+| Official Figma MCP in production | PARTIAL | still auth/OAuth-sensitive |
+| Live chat timeline / tool stream UX | SHIPPED | production UI path exists |
+| Durable workspace memory | SHIPPED WITH TUNING NEEDED | storage path is durable; retrieval quality still evolving |
+| Memory orchestration layer | SHIPPED | local Ollama-backed rerank/summarize |
+| Docs cleanup / source-of-truth docs | IN PROGRESS | this refresh |
 
 ## What Is Shipped
 
-- Embedded n8n boots with gateway and serves under `/ops-ui/`.
-- Active Automations UI embeds n8n canvas directly in the dashboard path.
-- Workflow list/create operations are workspace-filtered through proxy tag enforcement.
-- PMOS session is bridged into n8n auth automatically.
-- Signup/login now warms workspace n8n identity to reduce first-load races.
-- BYOK encrypted storage and APIs are available.
-
-Primary files:
-
-- `openclaw/src/gateway/pmos-ops-proxy.ts`
-- `openclaw/src/gateway/n8n-auth-bridge.ts`
-- `openclaw/src/gateway/pmos-auth-http.ts`
-- `openclaw/ui/src/ui/app-render.ts`
-- `openclaw/ui/src/ui/views/automations.ts`
-
----
+- PMOS owns workspace auth, workspace config, agent runtime, and embedded app entry points.
+- Flow is the active automation engine.
+- BCGPT is the Basecamp integration surface for live project/todo/report access.
+- FM MCP is wired through workspace connector sync and usable in PMOS chat.
+- Figma PAT handoff + REST audit path is live from workspace connector state.
+- Chat panels now show live tool/timeline output instead of only final response dumps.
+- Workspace compaction defaults are less aggressive than the earlier configuration.
+- Durable session extraction writes memory notes into workspace-scoped storage.
 
 ## What Is Still Partial
 
-These exist but are not fully production-complete end-to-end:
+- Official Figma MCP is not the dependable default; PAT-backed REST audit is the reliable production path today.
+- Some prompt/routing behavior is still model-sensitive and needs more deterministic guardrails.
+- Full regression coverage for all major chat/integration flows is not yet enforced in CI.
+- Some top-level docs were stale until this cleanup and still need long-tail reference curation.
 
-- `openclaw/src/gateway/server-methods/chat-to-workflow.ts`
-  - confirmation path still returns generated IDs with placeholder persistence behavior.
-- `openclaw/src/gateway/agent-orchestrator.ts`
-  - orchestration execution contains placeholder runtime behavior.
-- `openclaw/src/gateway/live-flow-builder.ts`
-  - flow control and update paths include simulated or polling-first behavior.
+## Current Priorities
 
----
+### P0
 
-## What Must Happen Before "Production Ready" Claim
+- Make chat output deterministic whenever a tool run succeeded.
+- Reduce remaining false "offline" / "not configured" assistant language.
+- Keep Basecamp answers grounded in live BCGPT data, not memory-only recall.
 
-1. Enforce strict tenant identity in prod env:
-   - `N8N_ALLOW_OWNER_FALLBACK=0`
-   - `PMOS_ALLOW_REMOTE_OPS_FALLBACK=0`
-2. Add CI/deploy smoke for two-user workflow isolation.
-3. Replace placeholder persistence/control code paths with real n8n-backed operations.
-4. Pass build/test gates plus browser test environment setup in CI.
+### P1
 
----
+- Harden Figma routing so FM MCP vs official Figma access is always chosen correctly.
+- Add stronger chat run-state recovery after refresh/reconnect for every panel.
+- Add production smoke coverage for FM/Figma/Basecamp/workflow chat prompts.
 
-## Deployment Health Checklist
+### P2
 
-- `https://os.wickedlab.io/` loads control UI.
-- `https://os.wickedlab.io/ops-ui/` loads embedded n8n editor.
-- `/ops-ui/assets/*.js` returns JavaScript content type (not HTML fallback).
-- Authenticated `/api/ops/workflows` responds and is workspace-isolated.
-- Refresh does not trap users in session-restore loop.
+- Improve durable memory extraction quality and retrieval scoring.
+- Add CI smoke for multi-user workspace isolation and chat/integration flows.
+- Continue removing stale `n8n` naming from active runtime code and docs.
 
----
+## Definition Of Done For This Phase
 
-## Reference Docs
+This phase is done only when all are true:
 
-- [`NEXT_STEPS.md`](NEXT_STEPS.md)
-- [`COOLIFY_DEPLOY_NX_RUNBOOK.md`](COOLIFY_DEPLOY_NX_RUNBOOK.md)
-- [`WORKSPACE_ISOLATION_STATUS.md`](WORKSPACE_ISOLATION_STATUS.md)
+- Basecamp, FM, Figma audit, and workflow prompts return clean user-visible answers from live tools.
+- A successful tool run cannot silently end without a final user-visible answer.
+- Chat panels survive refresh/reconnect without misleading idle status.
+- Durable memory survives deploy/restart and remains workspace/agent isolated.
+- Top-level docs match the actual repo/runtime and archive the old material clearly.
