@@ -817,11 +817,22 @@ async function callFmMcp(
   if (!resp.ok) {
     throw new Error(`FM MCP HTTP ${resp.status}`);
   }
-  const json = (await resp.json()) as { result?: unknown; error?: { message?: string } };
+  const json = (await resp.json()) as {
+    result?: unknown;
+    tools?: unknown;
+    content?: unknown;
+    error?: { message?: string };
+  };
   if (json.error) {
     throw new Error(json.error.message ?? "FM MCP error");
   }
-  return json.result;
+  if (json.result !== undefined) {
+    return json.result;
+  }
+  if (json.tools !== undefined) {
+    return json.tools;
+  }
+  return normalizeBcgptToolResult(json);
 }
 
 async function runWorkspaceFigmaRestAudit(
@@ -4170,10 +4181,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               finishTool(payload);
               return JSON.stringify(payload);
             }
-            // Map tool name to MCP method + params
-            const fmTool = toolName.slice("fm_".length); // e.g. "get_context", "list_files"
             const mcpMethod = `tools/call`;
-            const mcpParams: Record<string, unknown> = { name: fmTool, arguments: args };
+            const mcpParams: Record<string, unknown> = { name: toolName, arguments: args };
             try {
               const result = await callFmMcp(fmAuth.fmMcpUrl, fmAuth.fmMcpApiToken, mcpMethod, mcpParams);
               finishTool(result);
