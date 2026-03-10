@@ -1,418 +1,179 @@
-# OpenClaw - Personal AI Agent with Workflow Superpowers
-
-> Product note: the current production workflow runtime is Activepieces / Flow.
-> Some deeper implementation examples in this document still reflect earlier `n8n` planning and should be treated as conceptual background, not live deployment truth.
-
-## The Vision
-
-**OpenClaw is your personal AI agent that actually does things.** Not just chat - real actions, real workflows, real results. Powered by PMOS orchestration plus a dedicated workflow engine for deterministic execution and verified automation.
-
----
-
-## User Journey
-
-### Day 1: Setup
-
-```
-User signs up → Enters workspace name → Adds AI keys (BYOK) → Ready to go
-
-No complex configuration. No workflow templates to choose. Just start talking.
-```
-
-### Day 2-7: Discovery
-
-```
-User: "What can you help me with?"
-
-OpenClaw: "I can help you with:
-- 📧 Email: Summarize, draft, auto-reply
-- 📋 Tasks: Create, track, remind
-- 📊 Reports: Generate, schedule, deliver
-- 🔗 Connect: Link your tools (Basecamp, GitHub, Slack...)
-- ⚡ Automate: Create workflows that run 24/7
-
-What would you like to start with?"
-```
-
-### Day 30: Power User
-
-```
-User has:
-- 5 active workflows running 24/7
-- 3 specialized agents (Sales, Support, Personal)
-- 50+ automated tasks completed
-- Zero manual repetitive work
-```
-
----
-
-## Anti-Hallucination Architecture
-
-### The Problem with AI Agents
-
-| Issue | Traditional AI | OpenClaw Solution |
-|-------|---------------|-------------------|
-| Hallucination | AI makes up facts | n8n workflows use real APIs |
-| Unreliable Actions | AI forgets or misinterprets | Workflows are deterministic |
-| No Audit Trail | Can't verify what happened | Every workflow execution logged |
-| Context Loss | Long conversations drift | Workflow state persists |
-| Tool Integration | AI pretends to use tools | n8n actually calls APIs |
-
-### How n8n Prevents Hallucinations
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    User Request                              │
-│                 "Send weekly report to team"                 │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    AI Understanding                          │
-│   - Parse intent: Create scheduled workflow                  │
-│   - Identify tools: Data source, email service               │
-│   - Generate workflow definition                             │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    n8n Workflow (Deterministic)              │
-│   ┌─────────┐    ┌─────────┐    ┌─────────┐                 │
-│   │ Schedule │───▶│ Fetch   │───▶│ Format  │                 │
-│   │ (Weekly) │    │ Data    │    │ Report  │                 │
-│   └─────────┘    └─────────┘    └────┬────┘                 │
-│                                       │                      │
-│                                       ▼                      │
-│                                 ┌─────────┐                 │
-│                                 │  Email  │                 │
-│                                 │  Team   │                 │
-│                                 └─────────┘                 │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Verified Execution                        │
-│   - Every step logged                                        │
-│   - API responses recorded                                   │
-│   - Success/failure tracked                                  │
-│   - Retry on failure                                         │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Key Principle: AI Plans, n8n Executes
-
-| AI Role | n8n Role |
-|---------|----------|
-| Understand intent | Execute deterministically |
-| Generate workflow JSON | Run workflow steps |
-| Explain results | Log every action |
-| Handle exceptions | Retry on failure |
-| Learn from feedback | Maintain state |
+# Product Vision
 
----
+**Last Updated:** 2026-03-10
 
-## Robustness Features
-
-### 1. Workflow Verification
+## Vision
 
-Before any workflow runs:
+PMOS should become a true operating system for agency work: one place where AI can understand the workspace, act across tools, keep durable memory, and produce clean visible outcomes instead of vague assistant chatter.
 
-```
-AI: "I'll create a workflow to sync Basecamp todos to GitHub issues.
-     
-     Here's what it will do:
-     1. Watch for new todos in Basecamp project X
-     2. Create matching issue in GitHub repo Y
-     3. Add labels based on todo list name
-     4. Post confirmation to Slack
-     
-     [Preview Workflow] [Edit] [Activate]"
-```
+The product is not "chat plus some integrations." The product is:
 
-User sees exactly what will happen before activation.
+- a workspace-aware AI operator
+- a project manager on top of Basecamp
+- a workflow assistant on top of Flow / Activepieces
+- a creative director on top of FM + Figma
+- a durable organizational memory layer across agents, projects, and sessions
 
-### 2. Execution Transparency
+## What PMOS Should Feel Like
 
-Every action is logged and visible:
+For the user, the ideal experience is simple:
 
-```
-Workflow: "Basecamp → GitHub Sync"
-Last Run: 2 hours ago
-Status: ✅ Success
+1. open PMOS
+2. ask for work in plain language
+3. watch the system reason, call tools, and make progress live
+4. get a clean answer, artifact, or action
+5. come back later and find that the workspace still remembers context
 
-Executed Steps:
-├─ ✅ Basecamp: Found 3 new todos
-├─ ✅ GitHub: Created issue #142 "Fix login bug"
-├─ ✅ GitHub: Created issue #143 "Update docs"
-├─ ✅ GitHub: Created issue #144 "Add tests"
-└─ ✅ Slack: Posted summary to #dev
+The UI should feel operational, not ceremonial. The assistant should not hide behind "I can help with..." filler when the tools are already available.
 
-[View Details] [Edit Workflow] [Pause]
-```
+## Core Product Pillars
 
-### 3. Graceful Failure Handling
+### 1. Autonomous Project Manager
 
-```
-Workflow: "Daily Report"
-Last Run: 5 minutes ago
-Status: ⚠️ Partial Success
+PMOS should understand Basecamp deeply enough to manage real project operations:
 
-Executed Steps:
-├─ ✅ Database: Fetched 50 records
-├─ ✅ Transform: Generated report
-├─ ❌ Email: SMTP timeout (will retry in 5 min)
-└─ ⏳ Slack: Pending (waiting for email)
+- list and inspect projects, todos, schedules, messages, people, and assignments
+- answer project questions from live data, not memory-only recall
+- use `bcgpt_smart_action` as the default Basecamp router when appropriate
+- produce useful summaries, next actions, risks, blockers, and status updates
+- keep outputs grounded in the current workspace context
 
-[Retry Now] [View Error] [Edit]
-```
+The standard is not "Basecamp is connected." The standard is "the assistant behaves like a competent PM using live Basecamp data."
 
-### 4. Rollback Capability
+### 2. Workflow Assistant
 
-```
-"Oops, that workflow created 100 duplicate issues!"
+PMOS should make Flow / Activepieces usable through language first and canvas second:
 
-OpenClaw: "I can undo the last 5 workflow executions:
-          
-          2 hours ago: Created 3 GitHub issues
-          4 hours ago: Created 2 GitHub issues
-          6 hours ago: Created 5 GitHub issues
-          
-          [Undo Last Run] [Undo All] [Keep As Is]"
-```
+- inspect workflows, runs, credentials, and node capabilities
+- create and update workflows without dumping raw JSON on the user
+- monitor workflow health and explain failures
+- surface real execution state and history inside PMOS
+- treat workflow automation as a first-class operational capability, not a side panel
 
-### 5. Confidence Scoring
+The standard is not "workflow tools exist." The standard is "a user can ask for a workflow, understand what was created, and trust it."
 
-AI shows confidence level for each action:
-
-```
-User: "Summarize last week's sales calls"
-
-OpenClaw: "I found 12 sales calls from last week.
-          
-          Confidence: 85%
-          ⚠️ 2 calls might be internal meetings (unclear from title)
-          
-          Summary:
-          - 8 product demos scheduled
-          - 3 follow-ups needed
-          - 1 pricing discussion
-          
-          [View Sources] [Regenerate] [Edit]"
-```
-
----
-
-## User-Friendly Features
-
-### 1. Natural Language Everything
-
-```
-"Create a workflow that..."
-"When a customer emails..."
-"Every Monday at 9am..."
-"If the ticket is urgent..."
-"Summarize all meetings from..."
-```
-
-No technical jargon required. AI translates to n8n workflows.
-
-### 2. Smart Suggestions
-
-```
-OpenClaw notices you manually:
-- Forward emails to the same person 5 times
-- Create similar GitHub issues
-- Post the same Slack updates
-
-Suggestion: "I noticed you keep forwarding emails to Sarah.
-Would you like me to automate this?"
-
-[Yes, Create Workflow] [No, Thanks] [Not Now]
-```
-
-### 3. Progressive Disclosure
-
-Simple at first, powerful when needed:
-
-```
-Level 1: Just chat - "Send weekly report"
-Level 2: View workflow - See what's happening
-Level 3: Edit workflow - Modify parameters
-Level 4: Advanced - Full n8n canvas access
-```
-
-### 4. Contextual Help
-
-```
-User: "Connect to Salesforce"
-
-OpenClaw: "I can help you connect to Salesforce.
-          
-          What would you like to do?
-          - Sync contacts
-          - Create leads from emails
-          - Generate reports
-          
-          Or I can show you all Salesforce capabilities."
-```
-
-### 5. Learning from Corrections
-
-```
-User: "That's not right, the project ID is 12345, not 1234"
-
-OpenClaw: "Got it! I've updated the workflow to use project ID 12345.
-          I'll remember this for future workflows with this project.
-          
-          [Updated Workflow] [Test Now]"
-```
-
----
-
-## Personal Agent Capabilities
-
-### Your AI Team
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Your Agent Team                          │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  🤖 Personal Agent (Default)                                │
-│     └─ General tasks, scheduling, reminders                 │
-│                                                              │
-│  📧 Email Agent                                              │
-│     └─ Inbox management, drafts, auto-replies               │
-│                                                              │
-│  📊 Reports Agent                                            │
-│     └─ Data gathering, formatting, delivery                 │
-│                                                              │
-│  🔗 Integration Agent                                        │
-│     └─ Connect tools, sync data, monitor APIs               │
-│                                                              │
-│  🛠️ Custom Agent (Create Your Own)                          │
-│     └─ Define purpose, train, deploy                        │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Parallel Execution
-
-```
-User: "Prepare for my Monday"
-
-OpenClaw dispatches to multiple agents:
-┌─────────────────────────────────────────────────────────────┐
-│ Personal Agent: Check calendar, block focus time            │
-│ Email Agent: Summarize unread, flag urgent                  │
-│ Reports Agent: Compile weekend metrics                      │
-│ Integration Agent: Sync all tools, check for issues         │
-└─────────────────────────────────────────────────────────────┘
-
-All run in parallel. Results consolidated in 30 seconds.
-```
-
-### Agent Memory
-
-Each agent remembers:
-
-```
-Agent: Personal Agent
-Memory:
-- Prefers morning meetings (9-11am)
-- Always includes Zoom link
-- CCs assistant on external emails
-- Uses bullet points for summaries
-- Prefers concise responses
-
-This agent learns your preferences over time.
-```
-
----
-
-## Competitive Advantages
-
-### vs. Zapier
-
-| OpenClaw | Zapier |
-|----------|--------|
-| AI-powered workflow creation | Manual setup |
-| Natural language interface | Click-based UI |
-| Multi-agent parallel execution | Linear zaps |
-| Integrated chat | No chat interface |
-| BYOK for AI | No AI capabilities |
-
-### vs. ChatGPT
-
-| OpenClaw | ChatGPT |
-|----------|---------|
-| Actually executes actions | Only talks about actions |
-| Deterministic workflows | Can't guarantee execution |
-| 24/7 automation | No scheduling |
-| Tool integrations | Limited plugins |
-| Audit trail | No execution history |
-
-### vs. n8n Alone
-
-| OpenClaw | n8n Alone |
-|----------|-----------|
-| AI creates workflows | Manual node wiring |
-| Natural language | Technical UI |
-| Agent orchestration | Single workflow focus |
-| Chat interface | Web UI only |
-| Learning from usage | Static workflows |
-
----
-
-## Success Metrics
-
-### For Users
-
-- Time saved per week (target: 5+ hours)
-- Workflows created (target: 3+ active)
-- Tasks automated (target: 50+/month)
-- Error rate (target: <5%)
-
-### For the Product
-
-- User activation (created first workflow)
-- User retention (still using after 30 days)
-- Workflow success rate (>95%)
-- User satisfaction (NPS >50)
-
----
-
-## Implementation Priorities
-
-### Must Have (MVP)
-
-1. Natural language workflow creation
-2. n8n execution with logging
-3. Basic agent (Personal Agent)
-4. 5-10 most used integrations
-5. Execution transparency
-
-### Should Have (V2)
-
-1. Multi-agent parallel execution
-2. Workflow rollback
-3. Smart suggestions
-4. Agent memory/learning
-5. Confidence scoring
-
-### Nice to Have (V3)
-
-1. Voice interface
-2. Mobile app
-3. Team collaboration
-4. Marketplace for workflows
-5. Custom agent training
-
----
+### 3. Creative Director
+
+PMOS should make design operations and design analysis feel built-in:
+
+- FM MCP for file-manager tasks: files, tags, folders, categories, links, sync state
+- official Figma access or PAT-backed REST audit for design/document analysis
+- clear routing between FM tasks and Figma document tasks
+- audits for components, styles, variables, fonts, auto-layout, and structural regression
+- project-aware design guidance that references the selected file and workspace state
+
+The standard is not "Figma is authenticated." The standard is "the assistant can inspect the right file, explain what is wrong, and suggest the next design move clearly."
+
+### 4. Durable Workspace Memory
+
+PMOS should remember the right things permanently:
+
+- user preferences
+- project facts
+- design standards
+- workflow conventions
+- ongoing decisions
+- corrections and exceptions
+
+This memory must survive:
+
+- session changes
+- compaction
+- deploys
+- restarts
+- container replacement
+
+The memory model should be:
+
+- per workspace
+- per agent
+- optionally shared only when intentionally promoted
+
+The standard is not "chat history exists." The standard is "the workspace gets smarter over time without leaking context."
+
+## Interaction Principles
+
+### Live, Visible Work
+
+When PMOS is working, the user should see:
+
+- thinking / plan updates
+- tool calls
+- intermediate findings
+- final answer synthesis
+
+Runs should not disappear into silent background work and end with no visible output.
+
+### Deterministic Outcomes Over Vibes
+
+When a tool succeeded, PMOS should produce a final user-visible answer even if the model fails to write one elegantly. Tool success should collapse into clean output, not dead-end loops.
+
+### Workspace Context First
+
+The assistant should always prefer:
+
+- workspace connectors
+- selected project context
+- selected Figma/FM context
+- live workspace tools
+
+before falling back to memory or generic explanation.
+
+### Honest Capability Boundaries
+
+PMOS should never blur distinct systems into one vague "integration":
+
+- FM MCP is not official Figma MCP
+- official Figma MCP is not the PAT-backed REST audit path
+- Basecamp live data is not memory recall
+- workflow execution is not the same as workflow generation
+
+If one path is down, the assistant should name the failed path precisely and use the right fallback.
+
+## Product Direction
+
+### Near-Term Direction
+
+- make chat runs reliable and always output-bearing
+- strengthen deterministic routing for Basecamp, FM, Figma, and workflow tasks
+- harden refresh/reconnect behavior for all chat panels
+- improve durable memory extraction and retrieval quality
+- keep the top-level docs and deploy path aligned with reality
+
+### Mid-Term Direction
+
+- stronger project-level operating views, not just chat answers
+- richer workflow monitoring and remediation
+- better design audit/report formats with actionable recommendations
+- production-grade multi-user regression coverage
+- workspace-level knowledge graphs / structured memory
+
+### Long-Term Direction
+
+PMOS should become the control plane for the agency:
+
+- project state
+- design state
+- automation state
+- organizational memory
+- AI operator execution
+
+The user should not need to think in terms of separate apps most of the time. PMOS should coordinate them.
+
+## Success Criteria
+
+We should consider the vision on track when all of these feel true:
+
+- a Basecamp question returns live, useful project intelligence
+- a workflow request becomes a real working workflow with clear confirmation
+- a Figma/design request uses the right tool path and returns a meaningful audit
+- every chat panel shows live progress and a final answer
+- memory survives deploys and makes later work better
+- the system behaves like one coherent product, not four loosely connected tools
 
 ## Related Documentation
 
-- [DOCS_INDEX.md](DOCS_INDEX.md) - Current active documentation map
-- [NEXT_STEPS.md](NEXT_STEPS.md) - Implementation plan
-- [backup/top-level-legacy/OPENCLAW_AUTOMATION_OS.md](backup/top-level-legacy/OPENCLAW_AUTOMATION_OS.md) - Archived technical architecture notes
-- [backup/top-level-legacy/N8N_INTEGRATION_GUIDE.md](backup/top-level-legacy/N8N_INTEGRATION_GUIDE.md) - Archived n8n-era technical details
+- [DOCS_INDEX.md](DOCS_INDEX.md)
+- [PMOS_ACTIVEPIECES_STATUS.md](PMOS_ACTIVEPIECES_STATUS.md)
+- [ROADMAP_AND_STATUS.md](ROADMAP_AND_STATUS.md)
+- [NEXT_STEPS.md](NEXT_STEPS.md)
