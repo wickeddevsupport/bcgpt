@@ -132,21 +132,22 @@ If one path is down, the assistant should name the failed path precisely and use
 
 ## Product Direction
 
-### Near-Term Direction
+### Near-Term Direction (completed)
 
-- make chat runs reliable and always output-bearing
-- strengthen deterministic routing for Basecamp, FM, Figma, and workflow tasks
-- harden refresh/reconnect behavior for all chat panels
-- improve durable memory extraction and retrieval quality
-- keep the top-level docs and deploy path aligned with reality
+- chat runs are reliable and always output-bearing (4-layer output guards shipped)
+- deterministic routing for Basecamp queries (forced tool calls, memory-only recall blocked)
+- chat panels survive refresh/reconnect (120s recovery polling with auto-clear)
+- project operating views beyond chat (Status Board + Timeline shipped)
+- workflow monitoring with flow names, success rates, and failure callouts
+- docs and deploy path aligned with reality
 
 ### Mid-Term Direction
 
-- stronger project-level operating views, not just chat answers
-- richer workflow monitoring and remediation
-- better design audit/report formats with actionable recommendations
+- CI quality gate enforcing automated smoke tests before deploy
+- structured design audit reports with actionable recommendations
 - production-grade multi-user regression coverage
 - workspace-level knowledge graphs / structured memory
+- improve durable memory extraction and retrieval quality
 
 ### Long-Term Direction
 

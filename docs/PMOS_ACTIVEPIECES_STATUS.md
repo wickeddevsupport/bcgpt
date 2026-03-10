@@ -18,6 +18,8 @@
 - PMOS embeds Flow surfaces inside `/ops-ui`.
 - Dashboard, projects, connections, chat, and Figma panels are live UI paths.
 - Chat timeline UI now shows live thinking/tool/status events rather than only final blobs.
+- Deterministic output guards ensure tool success always produces a user-visible answer.
+- Chat panel state recovers gracefully after hard refresh via 120s recovery polling.
 
 ### Basecamp
 
@@ -25,12 +27,23 @@
 - PMOS uses BCGPT tools directly in chat.
 - `bcgpt_smart_action` is the preferred general Basecamp tool.
 - Project listing and project panel snapshots use live Basecamp data, not just static config.
+- System prompt forces live tool calls for project/todo/overdue/blocker/deadline/team queries -- memory-only answers are blocked.
+- Force-tool regex detects Basecamp-related queries and routes to `bcgpt_smart_action` or `bcgpt_list_projects` automatically.
+
+### Project Operating Views
+
+- Command center offers 3 view modes: Cards, Status Board, and Timeline.
+- **Cards**: Project cards with health status, todo counts, Basecamp links, and "Use in Chat" shortcuts.
+- **Status Board**: Kanban-style 4-column board grouping projects by health (At Risk / Needs Attention / On Track / Quiet).
+- **Timeline**: Chronological view of urgent and due-today items with color-coded overdue indicators.
+- All views consume the same live `PmosProjectsSnapshot` from the gateway.
 
 ### Workflows
 
 - Flow / Activepieces is the active workflow runtime.
 - PMOS embeds workflow and connection surfaces instead of relying on the old custom shell.
 - Flow credentials and project context are workspace-aware from PMOS bootstrap.
+- Dashboard shows workflow names, success rate, failure callouts, and 8 recent runs.
 
 ### Figma + FM
 
@@ -74,8 +87,8 @@ These defaults are enforced through:
 ## Still Partial / Still Risky
 
 - Official Figma MCP remains less reliable than PAT-backed REST audit in production.
-- Some chat flows can still depend on model behavior more than deterministic routing, especially on ambiguous prompts.
 - Full CI coverage for multi-user production regression is still not the default gate.
+- Memory retrieval/ranking quality needs improvement within the current Ollama setup.
 - Remaining internal naming still contains historical `n8n` terminology in some paths.
 
 ## Operational Truth

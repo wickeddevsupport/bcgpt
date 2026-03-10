@@ -8,14 +8,19 @@
 |---|---|---|
 | PMOS as primary surface | SHIPPED | active production UI |
 | Flow / Activepieces workflow runtime | SHIPPED | embedded from PMOS |
-| Basecamp live chat + project data | SHIPPED WITH TUNING NEEDED | BCGPT path works, prompt/tool discipline still matters |
+| Basecamp live chat + project data | SHIPPED | deterministic output guards + forced tool routing |
 | FM MCP in PMOS chat | SHIPPED | file-manager tasks now available in workspace chat |
 | Figma PAT-backed audits | SHIPPED | reliable fallback path |
 | Official Figma MCP in production | PARTIAL | still auth/OAuth-sensitive |
 | Live chat timeline / tool stream UX | SHIPPED | production UI path exists |
+| Chat output determinism | SHIPPED | 4-layer output guards ensure tool success always produces visible output |
+| Chat panel state recovery | SHIPPED | 120s recovery polling with auto-clear of stuck state |
+| Project operating views | SHIPPED | Cards + Status Board + Timeline views in command center |
+| Workflow monitoring dashboard | SHIPPED | flow names, success rate, failure callouts in dashboard |
+| Basecamp prompt discipline | SHIPPED | forced tool routing for project queries, memory-only recall blocked |
 | Durable workspace memory | SHIPPED WITH TUNING NEEDED | storage path is durable; retrieval quality still evolving |
 | Memory orchestration layer | SHIPPED | local Ollama-backed rerank/summarize |
-| Docs cleanup / source-of-truth docs | IN PROGRESS | this refresh |
+| Docs cleanup / source-of-truth docs | DONE | canonical top-level set refreshed |
 
 ## What Is Shipped
 
@@ -25,42 +30,47 @@
 - FM MCP is wired through workspace connector sync and usable in PMOS chat.
 - Figma PAT handoff + REST audit path is live from workspace connector state.
 - Chat panels now show live tool/timeline output instead of only final response dumps.
+- Deterministic output guards ensure every tool success produces a user-visible answer across all 4 output layers (agent loop, PMOS handler, chat broadcast, non-PMOS path).
+- Chat panel state recovers after hard refresh via 120s recovery polling with graceful auto-clear.
+- Project command center has 3 view modes: Cards, Status Board (Kanban by health), and Timeline (chronological todos).
+- Workflow dashboard shows flow names, success rate percentage, failure callouts, and 8 recent runs.
+- Basecamp prompt discipline forces live tool calls for project/todo/overdue/blocker/deadline/team queries.
 - Workspace compaction defaults are less aggressive than the earlier configuration.
 - Durable session extraction writes memory notes into workspace-scoped storage.
 
 ## What Is Still Partial
 
 - Official Figma MCP is not the dependable default; PAT-backed REST audit is the reliable production path today.
-- Some prompt/routing behavior is still model-sensitive and needs more deterministic guardrails.
 - Full regression coverage for all major chat/integration flows is not yet enforced in CI.
-- Some top-level docs were stale until this cleanup and still need long-tail reference curation.
+- Memory retrieval/ranking quality needs tuning within the current Ollama setup.
+- 17 pre-existing UI test failures in unrelated files (automations, format, navigation) need cleanup.
 
 ## Current Priorities
 
 ### P0
 
-- Make chat output deterministic whenever a tool run succeeded.
-- Reduce remaining false "offline" / "not configured" assistant language.
-- Keep Basecamp answers grounded in live BCGPT data, not memory-only recall.
+- Add CI smoke gate so nothing ships without automated verification.
+- Add Playwright regression tests for Basecamp, FM/Figma, and workflow chat prompts.
 
 ### P1
 
 - Harden Figma routing so FM MCP vs official Figma access is always chosen correctly.
-- Add stronger chat run-state recovery after refresh/reconnect for every panel.
-- Add production smoke coverage for FM/Figma/Basecamp/workflow chat prompts.
+- Improve durable memory extraction quality and retrieval scoring.
+- Add multi-user isolation smoke coverage.
 
 ### P2
 
-- Improve durable memory extraction quality and retrieval scoring.
-- Add CI smoke for multi-user workspace isolation and chat/integration flows.
-- Continue removing stale `n8n` naming from active runtime code and docs.
+- Structured design audit reports (components, styles, variables, fonts, auto-layout).
+- Workspace knowledge graphs (entity relationships, project graphs).
+- Remove remaining stale `n8n` naming from active runtime paths.
+- Fix pre-existing UI test failures.
 
 ## Definition Of Done For This Phase
 
 This phase is done only when all are true:
 
 - Basecamp, FM, Figma audit, and workflow prompts return clean user-visible answers from live tools.
-- A successful tool run cannot silently end without a final user-visible answer.
-- Chat panels survive refresh/reconnect without misleading idle status.
+- A successful tool run cannot silently end without a final user-visible answer. **DONE**
+- Chat panels survive refresh/reconnect without misleading idle status. **DONE**
 - Durable memory survives deploy/restart and remains workspace/agent isolated.
-- Top-level docs match the actual repo/runtime and archive the old material clearly.
+- CI gate enforces smoke tests before deploy.
