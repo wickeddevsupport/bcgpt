@@ -3,6 +3,7 @@ import {
   extractFirstBasecampUrl,
   extractFirstFigmaUrl,
   inspectWorkspaceChatUrls,
+  parseBasecampUrlDetails,
 } from "./url-routing.js";
 
 describe("url-routing", () => {
@@ -18,6 +19,7 @@ describe("url-routing", () => {
         "https://www.figma.com/design/3INmNiG3X3NKAZtCI3SMg6/OKA-Online-Audit?node-id=0-1",
       figmaFileKey: "3INmNiG3X3NKAZtCI3SMg6",
       basecampUrl: null,
+      basecampCardPath: null,
     });
   });
 
@@ -33,6 +35,25 @@ describe("url-routing", () => {
       figmaFileKey: null,
       basecampUrl:
         "https://3.basecamp.com/5282924/buckets/45864540/card_tables/cards/9515058775#__recording_9654404048",
+      basecampAccountId: "5282924",
+      basecampBucketId: "45864540",
+      basecampCardId: "9515058775",
+      basecampRecordingId: "9654404048",
+      basecampCardPath: "/buckets/45864540/card_tables/cards/9515058775",
+    });
+  });
+
+  it("parses Basecamp card resource details from a pasted URL", () => {
+    expect(
+      parseBasecampUrlDetails(
+        "https://3.basecamp.com/5282924/buckets/45864540/card_tables/cards/9515058775#__recording_9654404048",
+      ),
+    ).toEqual({
+      accountId: "5282924",
+      bucketId: "45864540",
+      cardId: "9515058775",
+      recordingId: "9654404048",
+      cardPath: "/buckets/45864540/card_tables/cards/9515058775",
     });
   });
 });

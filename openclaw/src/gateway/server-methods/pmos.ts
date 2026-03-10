@@ -3298,7 +3298,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         Boolean(pastedUrlHints.figmaUrl) && !hasMixedWorkspaceUrls;
       const runtimeUrlHints = [
         pastedUrlHints.basecampUrl
-          ? `- Pasted Basecamp URL detected for this request: ${pastedUrlHints.basecampUrl}. Treat that URL as the resource to inspect and include the exact URL in \`bcgpt_smart_action.query\`.`
+          ? `- Pasted Basecamp URL detected for this request: ${pastedUrlHints.basecampUrl}. Treat that URL as the exact resource to inspect.${pastedUrlHints.basecampBucketId ? ` Bucket ID: ${pastedUrlHints.basecampBucketId}.` : ""}${pastedUrlHints.basecampCardId ? ` Card ID: ${pastedUrlHints.basecampCardId}.` : ""}${pastedUrlHints.basecampRecordingId ? ` Recording/comment thread ID: ${pastedUrlHints.basecampRecordingId}.` : ""}${pastedUrlHints.basecampCardPath ? ` If you need direct card data, \`bcgpt_basecamp_raw\` can use path \`${pastedUrlHints.basecampCardPath}\`.` : ""}`
           : null,
         pastedUrlHints.figmaUrl
           ? `- Pasted Figma URL detected for this request: ${pastedUrlHints.figmaUrl}. Use \`figma_pat_audit_file\` with \`file_key\` "${pastedUrlHints.figmaFileKey ?? "from that URL"}" (or pass the full URL) and do not default to the selected Figma panel file if it is different.`
@@ -3971,14 +3971,34 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           switch (normalizedToolName) {
           case "bcgpt_smart_action": {
             const basecampUrlHint = pastedUrlHints.basecampUrl;
+            const basecampResourceHints = [
+              pastedUrlHints.basecampAccountId
+                ? `Basecamp account_id: ${pastedUrlHints.basecampAccountId}`
+                : null,
+              pastedUrlHints.basecampBucketId
+                ? `Basecamp bucket_id: ${pastedUrlHints.basecampBucketId}`
+                : null,
+              pastedUrlHints.basecampCardId
+                ? `Basecamp card_id: ${pastedUrlHints.basecampCardId}`
+                : null,
+              pastedUrlHints.basecampRecordingId
+                ? `Basecamp recording_id: ${pastedUrlHints.basecampRecordingId}`
+                : null,
+              pastedUrlHints.basecampCardPath
+                ? `Exact Basecamp card path: ${pastedUrlHints.basecampCardPath}`
+                : null,
+            ].filter((line): line is string => Boolean(line));
             let query = String(args.query ?? "").trim();
             const project = String(args.project ?? "").trim() || null;
             if (basecampUrlHint) {
               query = query
                 ? query.includes(basecampUrlHint)
                   ? query
-                  : `${query}\nBasecamp URL: ${basecampUrlHint}`
+                  : `${query}\nBasecamp URL: ${basecampUrlHint}${basecampResourceHints.length ? `\n${basecampResourceHints.join("\n")}` : ""}`
                 : `Inspect this Basecamp URL and summarize what matters: ${basecampUrlHint}`;
+              if (basecampResourceHints.length && !query.includes("Basecamp account_id:")) {
+                query = `${query}\n${basecampResourceHints.join("\n")}`;
+              }
             }
             if (!query) {
               const value = JSON.stringify({ error: "query is required" });
