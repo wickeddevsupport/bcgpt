@@ -697,8 +697,8 @@ function buildFigmaMcpFailurePayload(
     mcpServerUrl: mcpAuth.mcpServerUrl,
     fallbackSuggested: "figma_pat_audit_file",
     fallbackReason: authRequired
-      ? "Figma MCP remote auth still requires mcporter OAuth; use the workspace PAT-backed audit fallback."
-      : "Figma MCP call failed; use the workspace PAT-backed audit fallback.",
+      ? "Official Figma MCP remote auth still requires mcporter OAuth; use the workspace PAT-backed audit fallback."
+      : "Official Figma MCP call failed; use the workspace PAT-backed audit fallback.",
     authCommand: authRequired ? "mcporter auth figma" : null,
   };
 }
@@ -3252,13 +3252,14 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "",
         "### Figma questions",
         "- Start with `figma_get_context`.",
-        "- Use official `figma_*` tools for document/design tasks: components, styles, variables, fonts, auto-layout, node inspection, screenshots, and design audits.",
+        "- Treat official Figma access and FM MCP as two separate built-in systems.",
+        "- Use official `figma_*` tools only for document/design tasks: components, styles, variables, fonts, auto-layout, node inspection, screenshots, and design audits.",
         "- If the user needs live official Figma MCP actions, call `figma_mcp_list_tools` first, then `figma_mcp_call`.",
-        "- If official Figma MCP returns auth required, 405, or unavailable, immediately call `figma_pat_audit_file` on the selected file and continue with a REST-backed audit instead of stopping.",
+        "- If official Figma MCP returns auth required, 405, or unavailable, immediately call `figma_pat_audit_file` on the selected file and continue with a REST-backed audit instead of stopping. Do not describe FM as offline when only official Figma MCP failed.",
         "- Do NOT use `web_fetch` for private Figma API access in workspace chat; it cannot inject the workspace PAT.",
         "",
         "### Figma File Manager (FM) questions",
-        "- Use `fm_*` tools only for file-manager tasks in fm.wickedlab.io: finding files, browsing files, tags, folders, categories, links, and FM metadata.",
+        "- Use `fm_*` tools only for file-manager tasks in fm.wickedlab.io: finding files, browsing files, tags, folders, categories, links, FM metadata, and FM sync state.",
         "- For managing files, tags, folders, categories, or links in the FM (fm.wickedlab.io), start with `fm_get_context` to get an overview.",
         "- Use `fm_list_files` to browse files; use `fm_update_file` to change folder/category; use `fm_create_tag` + `fm_get_file` to tag files.",
         "- FM tools require the user to be connected via the Figma panel. If FM MCP is not configured, instruct the user to open the Figma panel and sync context.",
@@ -4071,7 +4072,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             const figmaContext = await readWorkspaceFigmaContext(workspaceId);
             const payload = {
               ...figmaContext,
-              note: "Use fm_* tools for file-manager tasks like files, tags, folders, categories, and links. Use figma_mcp_* or figma_pat_audit_file for document/design analysis on the selected file.",
+              note: "Use fm_* tools for file-manager tasks like files, tags, folders, categories, links, and FM sync state. Use figma_mcp_* or figma_pat_audit_file for document/design analysis on the selected file.",
               fallbackTool: "figma_pat_audit_file",
             };
             finishTool(payload);

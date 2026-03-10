@@ -665,6 +665,195 @@ function summarizeSmartActionPayload(payload: unknown): string | null {
   return null;
 }
 
+function summarizeCountedNames(
+  label: string,
+  items: Array<{ name: string; count?: number | null }>,
+): string | null {
+  if (!items.length) {
+    return `${label}: none found.`;
+  }
+  const top = items
+    .slice(0, 5)
+    .map((item) => `${item.name}${typeof item.count === "number" ? ` (${item.count})` : ""}`);
+  return `${label} (${items.length}): ${top.join(", ")}${items.length > top.length ? ", ..." : ""}.`;
+}
+
+function flattenFolderTree(
+  value: unknown,
+  into: Array<{ name: string; count?: number | null }> = [],
+): Array<{ name: string; count?: number | null }> {
+  if (!Array.isArray(value)) {
+    return into;
+  }
+  for (const entry of value) {
+    if (!isObjectRecord(entry)) {
+      continue;
+    }
+    const name = typeof entry.name === "string" ? entry.name.trim() : "";
+    const count =
+      typeof entry.fileCount === "number"
+        ? entry.fileCount
+        : typeof entry.file_count === "number"
+          ? entry.file_count
+          : null;
+    if (name) {
+      into.push({ name, count });
+    }
+    flattenFolderTree(entry.children, into);
+  }
+  return into;
+}
+
+function summarizeFigmaContextPayload(payload: unknown): string | null {
+  if (!isObjectRecord(payload)) {
+    return null;
+  }
+  const connected = payload.connected === true;
+  const fileName = typeof payload.selectedFileName === "string" ? payload.selectedFileName.trim() : "";
+  const connectionName =
+    typeof payload.activeConnectionName === "string" ? payload.activeConnectionName.trim() : "";
+  const patReady = payload.hasPersonalAccessToken === true;
+  if (connected && fileName) {
+    return `Figma is connected${connectionName ? ` via ${connectionName}` : ""}. Selected file: ${fileName}. PAT audit ready: ${patReady ? "yes" : "no"}.`;
+  }
+  if (connected) {
+    return `Figma is connected${connectionName ? ` via ${connectionName}` : ""}, but no selected file is synced yet.`;
+  }
+  return "Figma is not connected in this workspace yet.";
+}
+
+function summarizeFigmaRestAuditPayload(payload: unknown): string | null {
+  if (!isObjectRecord(payload)) {
+    return null;
+  }
+  const file = isObjectRecord(payload.file) ? payload.file : null;
+  const summary = isObjectRecord(payload.summary) ? payload.summary : null;
+  const autoLayout = isObjectRecord(payload.autoLayout) ? payload.autoLayout : null;
+  const typography = isObjectRecord(payload.typography) ? payload.typography : null;
+  const issues = Array.isArray(payload.issues)
+    ? payload.issues.filter((value): value is string => typeof value === "string" && value.trim()).slice(0, 2)
+    : [];
+  const fileName = typeof file?.name === "string" ? file.name.trim() : "selected Figma file";
+  const requestedFocus =
+    typeof payload.requestedFocus === "string" && payload.requestedFocus.trim()
+      ? payload.requestedFocus.trim()
+      : "general";
+  const summaryBits: string[] = [];
+  if (typeof summary?.pages === "number" && typeof summary?.totalNodes === "number") {
+    summaryBits.push(`${summary.pages} page(s), ${summary.totalNodes} nodes`);
+  }
+  if (typeof summary?.componentsDefined === "number") {
+    summaryBits.push(`${summary.componentsDefined} components`);
+  }
+  if (typeof summary?.componentSetsDefined === "number") {
+    summaryBits.push(`${summary.componentSetsDefined} component sets`);
+  }
+  if (typeof autoLayout?.autoLayoutContainers === "number") {
+    summaryBits.push(`${autoLayout.autoLayoutContainers} auto-layout containers`);
+  }
+  if (typeof typography?.uniqueFontFamilies === "number") {
+    summaryBits.push(`${typography.uniqueFontFamilies} font families`);
+  }
+  const firstSentence = `Figma ${requestedFocus} audit for ${fileName}: ${summaryBits.join(", ") || "audit completed"}.`;
+  if (!issues.length) {
+    return firstSentence;
+  }
+  return `${firstSentence} Key issue${issues.length === 1 ? "" : "s"}: ${issues.join(" ")}`;
+}
+
+function summarizeFmContextPayload(payload: unknown): string | null {
+  if (!isObjectRecord(payload)) {
+    return null;
+  }
+  const user = isObjectRecord(payload.user) ? payload.user : null;
+  const activeConnection = isObjectRecord(payload.activeConnection) ? payload.activeConnection : null;
+  const stats = isObjectRecord(payload.stats) ? payload.stats : null;
+  const identity = typeof user?.handle === "string" ? user.handle.trim() : typeof user?.email === "string" ? user.email.trim() : "user";
+  const connectionName = typeof activeConnection?.name === "string" ? activeConnection.name.trim() : "";
+  const files = typeof stats?.files === "number" ? stats.files : 0;
+  const tags = typeof stats?.tags === "number" ? stats.tags : 0;
+  const folders = typeof stats?.folders === "number" ? stats.folders : 0;
+  const categories = typeof stats?.categories === "number" ? stats.categories : 0;
+  return `FM is ready for ${identity}${connectionName ? ` on ${connectionName}` : ""}. Indexed items: ${files} files, ${tags} tags, ${folders} folders, ${categories} categories.`;
+}
+
+function summarizeFmFileRows(payload: unknown): string | null {
+  if (!isObjectRecord(payload) || !Array.isArray(payload.files)) {
+    return null;
+  }
+  const rows = payload.files
+    .filter((entry): entry is Record<string, unknown> => isObjectRecord(entry))
+    .map((entry) => ({
+      name: typeof entry.name === "string" ? entry.name.trim() : "",
+    }))
+    .filter((entry) => entry.name)
+    .map((entry) => ({ name: entry.name }));
+  if (!rows.length) {
+    return "FM files: none found for the current filter.";
+  }
+  const total = typeof payload.total === "number" ? payload.total : rows.length;
+  const top = rows.slice(0, 5).map((entry) => entry.name);
+  return `FM files (${total}): ${top.join(", ")}${total > top.length ? ", ..." : ""}.`;
+}
+
+function summarizeFmFilePayload(payload: unknown): string | null {
+  if (!isObjectRecord(payload)) {
+    return null;
+  }
+  const name = typeof payload.name === "string" ? payload.name.trim() : "";
+  if (!name) {
+    return null;
+  }
+  const tags = Array.isArray(payload.tags) ? payload.tags.length : 0;
+  const folders = Array.isArray(payload.folders) ? payload.folders.length : 0;
+  const links = Array.isArray(payload.links) ? payload.links.length : 0;
+  const category = isObjectRecord(payload.category) && typeof payload.category.name === "string"
+    ? payload.category.name.trim()
+    : "";
+  return `${name}: category ${category || "none"}, ${tags} tag(s), ${folders} folder(s), ${links} link(s).`;
+}
+
+function summarizeFmSyncStatusPayload(payload: unknown): string | null {
+  if (!isObjectRecord(payload)) {
+    return null;
+  }
+  if (payload.queued === true) {
+    return "FM team sync has been queued.";
+  }
+  const syncing = payload.syncing === true;
+  const queued = payload.queued === true;
+  const connectionName =
+    typeof payload.connection_name === "string" ? payload.connection_name.trim() : "active connection";
+  const lastSyncedAt =
+    typeof payload.last_synced_at === "string" && payload.last_synced_at.trim()
+      ? payload.last_synced_at.trim()
+      : null;
+  return `${connectionName}: sync status ${syncing ? "running" : queued ? "queued" : "idle"}${lastSyncedAt ? `, last synced ${lastSyncedAt}` : ""}.`;
+}
+
+function summarizeFmMutationPayload(prefix: string, payload: unknown): string | null {
+  if (!isObjectRecord(payload)) {
+    return null;
+  }
+  if (payload.deleted === true) {
+    return `${prefix} deleted successfully.`;
+  }
+  const name = typeof payload.name === "string" ? payload.name.trim() : "";
+  const created = payload.created === true ? " created" : payload.created === false ? " already existed" : " updated";
+  if (name) {
+    return `${prefix} ${name}${created}.`;
+  }
+  return null;
+}
+
+function joinToolSummaries(summaries: string[]): string | null {
+  const unique = [...new Set(summaries.map((summary) => summary.trim()).filter(Boolean))];
+  if (!unique.length) {
+    return null;
+  }
+  return unique.slice(0, 3).join(" ");
+}
+
 function extractSufficientToolSummary(payload: unknown): string | null {
   if (!isObjectRecord(payload)) {
     return null;
@@ -691,9 +880,103 @@ export function summarizeAgentLoopToolResult(toolName: string, payload: unknown)
       return summarizeProjectRows(readToolProjectRows(payload));
     case "bcgpt_smart_action":
       return summarizeSmartActionPayload(payload);
+    case "figma_get_context":
+      return summarizeFigmaContextPayload(payload);
+    case "figma_pat_audit_file":
+      return summarizeFigmaRestAuditPayload(payload);
+    case "fm_get_context":
+      return summarizeFmContextPayload(payload);
+    case "fm_list_files":
+      return summarizeFmFileRows(payload);
+    case "fm_get_file":
+    case "fm_update_file":
+      return summarizeFmFilePayload(payload);
+    case "fm_list_tags":
+      return summarizeCountedNames(
+        "FM tags",
+        Array.isArray(payload)
+          ? payload
+              .filter((entry): entry is Record<string, unknown> => isObjectRecord(entry))
+              .map((entry) => ({
+                name: typeof entry.name === "string" ? entry.name.trim() : "",
+                count:
+                  typeof entry.fileCount === "number"
+                    ? entry.fileCount
+                    : typeof entry.file_count === "number"
+                      ? entry.file_count
+                      : null,
+              }))
+              .filter((entry) => entry.name)
+          : [],
+      );
+    case "fm_list_categories":
+      return summarizeCountedNames(
+        "FM categories",
+        Array.isArray(payload)
+          ? payload
+              .filter((entry): entry is Record<string, unknown> => isObjectRecord(entry))
+              .map((entry) => ({
+                name: typeof entry.name === "string" ? entry.name.trim() : "",
+                count:
+                  typeof entry.fileCount === "number"
+                    ? entry.fileCount
+                    : typeof entry.file_count === "number"
+                      ? entry.file_count
+                      : null,
+              }))
+              .filter((entry) => entry.name)
+          : [],
+      );
+    case "fm_list_folders":
+      return summarizeCountedNames("FM folders", flattenFolderTree(payload));
+    case "fm_get_sync_status":
+    case "fm_sync_team":
+      return summarizeFmSyncStatusPayload(payload);
+    case "fm_create_tag":
+    case "fm_rename_tag":
+      return summarizeFmMutationPayload("FM tag", payload);
+    case "fm_delete_tag":
+      return summarizeFmMutationPayload("FM tag", payload);
+    case "fm_create_folder":
+    case "fm_rename_folder":
+      return summarizeFmMutationPayload("FM folder", payload);
+    case "fm_create_category":
+      return summarizeFmMutationPayload("FM category", payload);
+    case "fm_add_link":
+      return isObjectRecord(payload) && typeof payload.url === "string"
+        ? `FM link added: ${payload.url}.`
+        : null;
+    case "fm_delete_link":
+      return summarizeFmMutationPayload("FM link", payload);
     default:
       return null;
   }
+}
+
+function isTerminalToolSummary(name: string): boolean {
+  return new Set([
+    "bcgpt_list_projects",
+    "bcgpt_smart_action",
+    "figma_get_context",
+    "figma_pat_audit_file",
+    "fm_get_context",
+    "fm_list_files",
+    "fm_get_file",
+    "fm_update_file",
+    "fm_list_tags",
+    "fm_list_folders",
+    "fm_list_categories",
+    "fm_create_tag",
+    "fm_rename_tag",
+    "fm_delete_tag",
+    "fm_create_folder",
+    "fm_rename_folder",
+    "fm_create_category",
+    "fm_add_link",
+    "fm_delete_link",
+    "fm_sync_team",
+    "fm_get_sync_status",
+  ]).has(name);
 }
 
 function buildAgentLoopEarlyExit(
@@ -712,6 +995,23 @@ function buildAgentLoopEarlyExit(
     if (sufficientSummary) {
       return sufficientSummary;
     }
+  }
+
+  const repeatedSummaries = successful
+    .filter((result) => result.callCount > 1)
+    .map((result) => summarizeAgentLoopToolResult(result.name, result.parsed))
+    .filter((summary): summary is string => Boolean(summary));
+  const repeatedSummary = joinToolSummaries(repeatedSummaries);
+  if (repeatedSummary) {
+    return repeatedSummary;
+  }
+
+  const terminalSummaries = successful
+    .filter((result) => isTerminalToolSummary(result.name))
+    .map((result) => summarizeAgentLoopToolResult(result.name, result.parsed))
+    .filter((summary): summary is string => Boolean(summary));
+  if (terminalSummaries.length === successful.length && terminalSummaries.length > 0) {
+    return joinToolSummaries(terminalSummaries);
   }
 
   const basecampResults = successful.filter(
@@ -795,6 +1095,7 @@ export async function callWorkspaceModelAgentLoop(
     let succeeded = false;
 
     const toolCallCounts = new Map<string, number>();
+    const allToolResults: AgentLoopToolRoundResult[] = [];
 
     try {
       for (let iteration = 0; iteration < maxIterations; iteration++) {
@@ -911,6 +1212,12 @@ export async function callWorkspaceModelAgentLoop(
             parsed: parsedResult,
             callCount,
           });
+          allToolResults.push({
+            name: tc.function.name,
+            args: parsedArgs,
+            parsed: parsedResult,
+            callCount,
+          });
           agentMessages.push({
             role: "tool",
             tool_call_id: tc.id,
@@ -931,6 +1238,14 @@ export async function callWorkspaceModelAgentLoop(
         .find((m) => m.role === "assistant" && m.content);
       if (lastText?.content) {
         return { ok: true, text: String(lastText.content), providerUsed };
+      }
+      const fallbackToolSummary = joinToolSummaries(
+        allToolResults
+          .map((result) => summarizeAgentLoopToolResult(result.name, result.parsed))
+          .filter((summary): summary is string => Boolean(summary)),
+      );
+      if (fallbackToolSummary) {
+        return { ok: true, text: fallbackToolSummary, providerUsed };
       }
       succeeded = false;
     } catch {
