@@ -2766,6 +2766,16 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         .reverse()
         .find((message) => message.role === "user")?.content ?? "";
       const disableBasecampTools = isGreetingOnlyMessage(latestUserMessage);
+      const shouldForceBasecamp =
+        !disableBasecampTools &&
+        /\bbasecamp\b|\bbcgpt\b|\bproject(?:s)?\b|\btodo(?:s)?\b|\bschedule\b|\bcampfire\b|\bmessage(?:s)?\b|\bkanban\b|\bcard(?:s)?\b|\bpeople\b|\bperson\b|\bassignment(?:s)?\b/i.test(
+          latestUserMessage,
+        );
+      const shouldForceProjectList =
+        shouldForceBasecamp &&
+        /\b(list|show|what|which|give|display|name)\b[\s\w-]{0,40}\bprojects?\b|\bprojects?\b[\s\w-]{0,30}\b(names?|ids?|list)\b/i.test(
+          latestUserMessage,
+        );
       const shouldForceFigmaContext =
         /\bfigma\b|\bdesign\b|\bauto[\s-]?layout\b|\bcomponent(?:s)?\b|\bstyle(?:s)?\b|\bfont(?:s)?\b|\bregression\b|\baudit\b/i.test(
           latestUserMessage,
@@ -3166,7 +3176,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
 
       const [workspaceAiContext, availableCredentials] = await Promise.all([
         withTimeout(
-          getWorkspaceAiContextForPrompt(workspaceId, { ensureFresh: true, maxChars: 10_000 }).catch(() => ""),
+          getWorkspaceAiContextForPrompt(workspaceId, { ensureFresh: false, maxChars: 6000 }).catch(() => ""),
           4000,
           "",
         ),
@@ -3225,7 +3235,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- Build complete, runnable workflows — no manual rewiring needed.",
         "",
         "### Project management questions",
-        "- Answer from workspace context when available.",
+        "- Use workspace context for connector readiness and defaults only; do not answer Basecamp questions from memory when live tools are available.",
         "- For live Basecamp data, use `bcgpt_list_projects` when the user wants the raw list of projects, and use `bcgpt_smart_action` when the user wants analysis, summaries, or searches.",
         "- Summarize results meaningfully: 'There are 7 open todos in Project X — 3 are overdue. The most recent message was from Alice yesterday about the deploy.'",
         "",
@@ -4212,6 +4222,10 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           maxIterations: 4,
           initialToolChoice: shouldForceFigmaContext
             ? { type: "function", function: { name: "figma_get_context" } }
+            : shouldForceProjectList
+              ? { type: "function", function: { name: "bcgpt_list_projects" } }
+              : shouldForceBasecamp
+                ? { type: "function", function: { name: "bcgpt_smart_action" } }
             : undefined,
         },
       );

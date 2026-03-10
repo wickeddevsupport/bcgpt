@@ -681,6 +681,95 @@ export class OpenClawApp extends LitElement {
   private themeMediaHandler: ((event: MediaQueryListEvent) => void) | null = null;
   private topbarObserver: ResizeObserver | null = null;
   private pmosFigmaAutoSyncTimer: number | null = null;
+  private async persistPmosFigmaContext(
+    figmaBaseUrl: string,
+    payload: {
+      user?: { handle?: string | null; email?: string | null };
+      auth?: {
+        personalAccessToken?: string | null;
+        hasPersonalAccessToken?: boolean | null;
+        source?: string | null;
+        mcpServerUrl?: string | null;
+        fmMcpUrl?: string | null;
+        fmMcpApiToken?: string | null;
+        updatedAt?: string | null;
+      } | null;
+      activeConnection?: {
+        id?: string | number | null;
+        connection_name?: string | null;
+        figma_team_id?: string | null;
+        last_synced_at?: string | number | null;
+        last_pat_validated_at?: string | number | null;
+        updated_at?: string | null;
+      } | null;
+      selection?: {
+        selectedFileUrl?: string | null;
+        selectedFileId?: string | null;
+        selectedFileName?: string | null;
+        updatedAt?: string | null;
+      } | null;
+      connectionsCount?: number;
+    },
+  ) {
+    if (!this.client) {
+      return;
+    }
+    const fmHasValidatedPat =
+      payload.auth?.hasPersonalAccessToken === true ||
+      Boolean(payload.auth?.personalAccessToken) ||
+      (payload.activeConnection?.last_pat_validated_at !== null &&
+        payload.activeConnection?.last_pat_validated_at !== undefined);
+
+    await this.client.request("pmos.connectors.workspace.set", {
+      connectors: {
+        figma: {
+          url: figmaBaseUrl,
+          auth: {
+            personalAccessToken: payload.auth?.personalAccessToken ?? null,
+            hasPersonalAccessToken: fmHasValidatedPat,
+            source:
+              payload.auth?.source ??
+              (fmHasValidatedPat ? "fm-team-pat" : null),
+            mcpServerUrl: payload.auth?.mcpServerUrl ?? null,
+            fmMcpUrl: payload.auth?.fmMcpUrl ?? null,
+            fmMcpApiToken: payload.auth?.fmMcpApiToken ?? null,
+            updatedAt:
+              payload.auth?.updatedAt ??
+              payload.activeConnection?.updated_at ??
+              new Date().toISOString(),
+          },
+          identity: {
+            connected: Boolean(payload.user?.handle || payload.user?.email),
+            handle: payload.user?.handle ?? null,
+            email: payload.user?.email ?? null,
+            hasPersonalAccessToken: fmHasValidatedPat,
+            activeConnectionId:
+              payload.activeConnection?.id === null || payload.activeConnection?.id === undefined
+                ? null
+                : String(payload.activeConnection.id),
+            activeConnectionName: payload.activeConnection?.connection_name ?? null,
+            activeTeamId: payload.activeConnection?.figma_team_id ?? null,
+            totalConnections:
+              typeof payload.connectionsCount === "number" ? payload.connectionsCount : undefined,
+            lastSyncedAt: payload.activeConnection?.last_synced_at ?? null,
+            selectedFileUrl: payload.selection?.selectedFileUrl ?? null,
+            selectedFileId: payload.selection?.selectedFileId ?? null,
+            selectedFileName: payload.selection?.selectedFileName ?? null,
+            updatedAt: payload.selection?.updatedAt ?? new Date().toISOString(),
+          },
+        },
+      },
+    });
+
+    await loadPmosConnectorsStatus(this);
+    this.pmosConnectorDraftsInitialized = false;
+    hydratePmosConnectorDraftsFromConfig(this);
+    try {
+      await this.client.request("pmos.context.workspace.refresh", {});
+    } catch {
+      // Best-effort context refresh only.
+    }
+  }
   private queuePmosFigmaAutoSync() {
     if (this.pmosFigmaAutoSyncTimer !== null) {
       window.clearTimeout(this.pmosFigmaAutoSyncTimer);
@@ -842,7 +931,7 @@ export class OpenClawApp extends LitElement {
     }
     // When switching to Figma tab, verify live auth before showing iframe
     if (next === "figma") {
-      void this.verifyFigmaLiveAuth();
+      void this.verifyFigmaLiveAuth({ autoSync: true });
     }
     // When switching to connections tab, load real credentials
     if (next === "connections") {
@@ -850,8 +939,8 @@ export class OpenClawApp extends LitElement {
     }
   }
 
-  /** Quick auth check against FM API — clears stale connected state on 401. */
-  private async verifyFigmaLiveAuth() {
+  /** Quick auth check against FM API — clears stale connected state on 401 and auto-syncs usable context. */
+  private async verifyFigmaLiveAuth(opts?: { autoSync?: boolean }) {
     const figmaBaseUrl = String(this.pmosFigmaUrl ?? "").trim().replace(/\/+$/, "") || "https://fm.wickedlab.io";
     try {
       const res = await fetch(`${figmaBaseUrl}/api/pmos/context`, {
@@ -873,7 +962,41 @@ export class OpenClawApp extends LitElement {
         }
         await loadPmosConnectorsStatus(this);
       } else if (res.ok) {
+        const payload = (await res.json()) as {
+          user?: { handle?: string | null; email?: string | null };
+          auth?: {
+            personalAccessToken?: string | null;
+            hasPersonalAccessToken?: boolean | null;
+            source?: string | null;
+            mcpServerUrl?: string | null;
+            fmMcpUrl?: string | null;
+            fmMcpApiToken?: string | null;
+            updatedAt?: string | null;
+          } | null;
+          activeConnection?: {
+            id?: string | number | null;
+            connection_name?: string | null;
+            figma_team_id?: string | null;
+            last_synced_at?: string | number | null;
+            last_pat_validated_at?: string | number | null;
+            updated_at?: string | null;
+          } | null;
+          selection?: {
+            selectedFileUrl?: string | null;
+            selectedFileId?: string | null;
+            selectedFileName?: string | null;
+            updatedAt?: string | null;
+          } | null;
+          connectionsCount?: number;
+        };
         this.pmosFigmaLiveAuthVerified = true;
+        if (opts?.autoSync !== false && this.client && this.connected) {
+          await this.persistPmosFigmaContext(figmaBaseUrl, payload);
+          this.pmosFigmaContextSyncedOk = true;
+          setTimeout(() => {
+            this.pmosFigmaContextSyncedOk = false;
+          }, 2500);
+        }
       }
     } catch {
       // Network error — keep existing state
@@ -952,6 +1075,10 @@ export class OpenClawApp extends LitElement {
     } catch (err) {
       // ignore workspace-read failures (UI remains usable)
       this.pmosOpsProvisioningResult = null;
+    }
+
+    if (this.client && this.connected && !this.pmosFigmaContextSyncing) {
+      void this.verifyFigmaLiveAuth({ autoSync: true });
     }
   }
 
@@ -1276,61 +1403,7 @@ export class OpenClawApp extends LitElement {
         } | null;
         connectionsCount?: number;
       };
-      const fmHasValidatedPat =
-        payload.auth?.hasPersonalAccessToken === true ||
-        Boolean(payload.auth?.personalAccessToken) ||
-        payload.activeConnection?.last_pat_validated_at !== null &&
-          payload.activeConnection?.last_pat_validated_at !== undefined;
-
-      await this.client.request("pmos.connectors.workspace.set", {
-        connectors: {
-          figma: {
-            url: figmaBaseUrl,
-            auth: {
-              personalAccessToken: payload.auth?.personalAccessToken ?? null,
-              hasPersonalAccessToken: fmHasValidatedPat,
-              source:
-                payload.auth?.source ??
-                (fmHasValidatedPat ? "fm-team-pat" : null),
-              mcpServerUrl: payload.auth?.mcpServerUrl ?? null,
-              fmMcpUrl: payload.auth?.fmMcpUrl ?? null,
-              fmMcpApiToken: payload.auth?.fmMcpApiToken ?? null,
-              updatedAt:
-                payload.auth?.updatedAt ??
-                payload.activeConnection?.updated_at ??
-                new Date().toISOString(),
-            },
-            identity: {
-              connected: Boolean(payload.user?.handle || payload.user?.email),
-              handle: payload.user?.handle ?? null,
-              email: payload.user?.email ?? null,
-              hasPersonalAccessToken: fmHasValidatedPat,
-              activeConnectionId:
-                payload.activeConnection?.id === null || payload.activeConnection?.id === undefined
-                  ? null
-                  : String(payload.activeConnection.id),
-              activeConnectionName: payload.activeConnection?.connection_name ?? null,
-              activeTeamId: payload.activeConnection?.figma_team_id ?? null,
-              totalConnections:
-                typeof payload.connectionsCount === "number" ? payload.connectionsCount : undefined,
-              lastSyncedAt: payload.activeConnection?.last_synced_at ?? null,
-              selectedFileUrl: payload.selection?.selectedFileUrl ?? null,
-              selectedFileId: payload.selection?.selectedFileId ?? null,
-              selectedFileName: payload.selection?.selectedFileName ?? null,
-              updatedAt: payload.selection?.updatedAt ?? new Date().toISOString(),
-            },
-          },
-        },
-      });
-
-      await loadPmosConnectorsStatus(this);
-      this.pmosConnectorDraftsInitialized = false;
-      hydratePmosConnectorDraftsFromConfig(this);
-      try {
-        await this.client.request("pmos.context.workspace.refresh", {});
-      } catch {
-        // Best-effort context refresh only.
-      }
+      await this.persistPmosFigmaContext(figmaBaseUrl, payload);
       this.pmosFigmaLiveAuthVerified = true;
       this.pmosFigmaContextSyncedOk = true;
       setTimeout(() => {

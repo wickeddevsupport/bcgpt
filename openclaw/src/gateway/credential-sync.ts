@@ -256,6 +256,7 @@ export async function fetchWorkspaceCredentials(workspaceId: string): Promise<Cr
  */
 export function buildCredentialContext(credentials: CredentialInfo[]): string {
   if (credentials.length === 0) return "";
+  const visibleCredentials = credentials.slice(0, 16);
 
   // Build reverse map: credentialType → node types that use it
   const credTypeToNodes = new Map<string, string[]>();
@@ -265,13 +266,16 @@ export function buildCredentialContext(credentials: CredentialInfo[]): string {
     credTypeToNodes.set(credType, list);
   }
 
-  const lines = credentials.map(c => {
+  const lines = visibleCredentials.map(c => {
     const nodeTypes = credTypeToNodes.get(c.type) ?? [];
     const usedBy = nodeTypes.length > 0
       ? ` — for nodes: ${nodeTypes.map(t => t.split(".").pop()).join(", ")}`
       : "";
     return `  - name: "${c.name}", credentialType: "${c.type}", id: "${c.id}"${usedBy}`;
   });
+  if (credentials.length > visibleCredentials.length) {
+    lines.push(`  - ... plus ${credentials.length - visibleCredentials.length} more credentials already connected`);
+  }
 
   return `
 ## Available Workspace Credentials
