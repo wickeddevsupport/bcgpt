@@ -523,6 +523,11 @@ function stringOrNull(value: unknown): string | null {
   return trimmed ? trimmed : null;
 }
 
+function countDistinctAbsoluteUrls(value: string): number {
+  const matches = value.match(/https?:\/\/[^\s)>\]"']+/gi) ?? [];
+  return new Set(matches.map((entry) => entry.trim())).size;
+}
+
 function numberStringOrNull(value: unknown): string | null {
   if (typeof value === "number" && Number.isFinite(value)) {
     return String(value);
@@ -3165,6 +3170,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             return `Opening workflow ${String(args.workflow_id ?? "").trim() || ""} to inspect its structure.`;
           case "pmos_ops_execute_workflow":
             return `Running workflow ${String(args.workflow_id ?? "").trim() || ""} to verify its behavior.`;
+          case "pmos_parallel_subtasks":
+            return `Splitting the request into ${Array.isArray(args.tasks) ? args.tasks.length : 0} parallel subtask probe(s).`;
           case "fm_get_context":
             return "Reading your Figma File Manager overview.";
           case "fm_list_files":
@@ -3272,6 +3279,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const latestUserMessage = [...messages]
         .reverse()
         .find((message) => message.role === "user")?.content ?? "";
+      const pastedUrlCount = countDistinctAbsoluteUrls(latestUserMessage);
       const pastedUrlHints = inspectWorkspaceChatUrls(latestUserMessage);
       const hasMixedWorkspaceUrls = Boolean(
         pastedUrlHints.figmaUrl && pastedUrlHints.basecampUrl,
@@ -3307,6 +3315,9 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const requestRoutingHints = [
         hasMixedWorkspaceUrls
           ? "- Both a Figma URL and a Basecamp URL were supplied. Treat this as a cross-tool task: inspect both resources, reconcile them, and do not stop after the first successful tool call."
+          : null,
+        pastedUrlCount >= 2
+          ? "- This request includes multiple explicit URLs/resources. Consider `pmos_parallel_subtasks` when separate probes can run independently, then aggregate the results into one answer."
           : null,
         shouldPreferExplicitFigmaAudit
           ? "- Anchor to the explicit Figma file URL and use live Figma MCP capabilities first when they expose what you need; fall back to `figma_pat_audit_file` only if MCP cannot access that context."
@@ -3358,6 +3369,12 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- Always call `pmos_ops_list_credentials` before building any workflow so you know what's actually connected.",
         "- If the user asks about a project or person, call the appropriate tool to find the answer rather than guessing.",
         "- If a specialist tool only gives setup context, continue to the actual analysis or action instead of stopping there.",
+        "",
+        "### Parallel orchestration",
+        "- For 2 or more independent URLs, resources, or analysis slices, you may call `pmos_parallel_subtasks` to spawn temporary parallel subagents.",
+        "- Give each subagent one narrow job, then aggregate the returned findings yourself.",
+        "- Use parallel subagents to speed up deep audits, cross-system comparisons, or map-reduce style analysis.",
+        "- Do not stop at the returned subagent summary; continue reasoning and call more tools if the combined evidence still has gaps.",
         "",
         "### Always provide next steps",
         "Every response should tell the user what to do next. Examples:",
@@ -3411,6 +3428,9 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- `pmos_ops_get_workflow` -- get full definition of a specific workflow by ID",
         "- `pmos_ops_execute_workflow` -- test-run a workflow by ID",
         "- `pmos_ops_list_node_types` -- list available trigger and action node types",
+        "",
+        "**Parallel Orchestration Tools:**",
+        "- `pmos_parallel_subtasks` -- run multiple temporary parallel subagents on independent probes, then aggregate their findings back into the main loop",
         "",
         "**Figma Tools:**",
         "- `figma_get_context` -- read the selected file/team context from the Figma panel",
@@ -3589,6 +3609,41 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                 name: { type: "string", description: "Workflow name (can keep existing)" },
                 nodes: { type: "array", description: "Full updated array of workflow node objects" },
                 connections: { type: "object", description: "Full updated connections object" },
+              },
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "pmos_parallel_subtasks",
+            description:
+              "Spawn temporary parallel subagents for independent probes, then return their findings so the main agent can aggregate and continue reasoning.",
+            parameters: {
+              type: "object",
+              required: ["tasks"],
+              additionalProperties: false,
+              properties: {
+                tasks: {
+                  type: "array",
+                  description:
+                    "Independent subtasks to run in parallel. Each task should be narrow and self-contained.",
+                  items: {
+                    type: "object",
+                    required: ["task"],
+                    additionalProperties: false,
+                    properties: {
+                      label: {
+                        type: "string",
+                        description: "Short label for the probe, such as Figma, Basecamp, or Accessibility.",
+                      },
+                      task: {
+                        type: "string",
+                        description: "The exact subtask prompt the temporary subagent should complete.",
+                      },
+                    },
+                  },
+                },
               },
             },
           },
@@ -4273,6 +4328,40 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               workflowId: wfId,
               workflowName: wfName,
               message: `Workflow "${wfName}" (ID: ${wfId}) updated successfully.`,
+            };
+            finishTool(payload);
+            return JSON.stringify(payload);
+          }
+          case "pmos_parallel_subtasks": {
+            const rawTasks = Array.isArray(args.tasks)
+              ? args.tasks.filter(
+                  (task): task is Record<string, unknown> =>
+                    Boolean(task && typeof task === "object" && !Array.isArray(task)),
+                )
+              : [];
+            if (rawTasks.length === 0) {
+              const payload = { error: "tasks must be a non-empty array" };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
+            const limitedTasks = rawTasks.slice(0, 6).map((task) => ({
+              label: stringOrNull(task.label) ?? undefined,
+              task: stringOrNull(task.task) ?? "",
+            }));
+            const { runPmosParallelSubtasks } = await import("../pmos-parallel-subtasks.js");
+            const parallel = await runPmosParallelSubtasks({
+              workspaceId,
+              baseSystemPrompt: systemPrompt,
+              userMessages: messages,
+              tasks: limitedTasks,
+              tools,
+              executeTool,
+              maxIterations: 4,
+            });
+            const payload = {
+              continueAgentLoop: true,
+              summary: parallel.summary,
+              results: parallel.results,
             };
             finishTool(payload);
             return JSON.stringify(payload);
