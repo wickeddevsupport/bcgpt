@@ -325,8 +325,8 @@ export function connectGateway(host: GatewayHost) {
       host.lastError = null;
       host.hello = hello;
       applySnapshot(host, hello);
-      const hasActiveRun = Boolean(host.chatRunId);
-      if (!hasActiveRun) {
+      const hadLocalActiveRun = Boolean(host.chatRunId);
+      if (!hadLocalActiveRun) {
         host.chatRunId = null;
         (host as unknown as { chatStream: string | null }).chatStream = null;
         (host as unknown as { chatStreamStartedAt: number | null }).chatStreamStartedAt = null;
@@ -352,7 +352,7 @@ export function connectGateway(host: GatewayHost) {
         void loadAssistantIdentity(app);
       }
       void refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0]);
-      if (hasActiveRun) {
+      if (host.chatRunId) {
         void loadChatHistory(app).catch(() => undefined);
       }
       // Auto-refresh connector status on connect so opsProvisioned is populated

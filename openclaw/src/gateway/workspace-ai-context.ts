@@ -333,9 +333,9 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
       ? [
           "",
           "### Figma AI Capabilities",
-          "- Use `figma_get_context` to confirm the active file, connection, and team before any analysis.",
-          "- If MCP is configured, use `figma_mcp_list_tools` first to inspect the live Figma MCP tool schema, then call `figma_mcp_call` for specific file/design operations.",
-          "- If Figma MCP returns auth required, 405, or unavailable, use `figma_pat_audit_file` to run a PAT-backed REST audit on the selected file.",
+          "- Use `figma_get_context` first to confirm the active file, connection, and team before any design analysis.",
+          "- Use `figma_mcp_*` only for official Figma document/design operations: components, styles, variables, auto-layout, node inspection, screenshots, and design audits.",
+          "- If official Figma MCP returns auth required, 405, or unavailable, immediately use `figma_pat_audit_file` to run a PAT-backed REST audit on the selected file.",
           "- Do not use `web_fetch` for private Figma API calls in workspace chat; it cannot send the workspace PAT. Use `figma_mcp_list_tools`, `figma_mcp_call`, and `figma_pat_audit_file` instead.",
           "  If FM reports a PAT but PMOS does not have the raw token yet, explain that the PAT exists upstream but is not being passed through connector sync.",
           "  If MCP auth or a Figma Personal Access Token is truly missing, tell the user to complete Figma auth in the Figma panel/Integrations before retrying.",
@@ -349,7 +349,7 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
             ? [
                 "",
                 "### Figma File Manager (FM) AI Capabilities",
-                "- FM MCP tools are ready. Use `fm_get_context` first to get a file/tag/folder/category overview.",
+                "- FM MCP tools are ready. Use `fm_get_context` first for file-manager tasks: files, tags, folders, categories, links, and FM metadata.",
                 "- Use `fm_list_files`, `fm_update_file`, `fm_create_tag`, `fm_create_folder`, `fm_create_category`, `fm_add_link` etc. to manage the user's Figma files in FM.",
                 "- You can categorize, tag, folder-assign, and add links to files without the user doing it manually.",
               ]

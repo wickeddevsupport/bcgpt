@@ -27,6 +27,7 @@ import {
   validateSessionsResolveParams,
 } from "../protocol/index.js";
 import {
+  annotateSessionsWithActiveRuns,
   archiveFileOnDisk,
   listAgentsForGateway,
   listSessionsFromStore,
@@ -168,8 +169,34 @@ function withMainSessionFallback(params: {
   };
 }
 
+function collectActiveRunsBySessionKey(
+  chatAbortControllers: ReadonlyMap<string, { sessionKey: string; startedAtMs?: number }>,
+): Map<string, { runId: string }> {
+  const activeRuns = new Map<string, { runId: string; startedAtMs: number }>();
+  for (const [runId, entry] of chatAbortControllers.entries()) {
+    const sessionKey = typeof entry?.sessionKey === "string" ? entry.sessionKey.trim() : "";
+    if (!sessionKey) {
+      continue;
+    }
+    const startedAtMs =
+      typeof entry?.startedAtMs === "number" && Number.isFinite(entry.startedAtMs)
+        ? entry.startedAtMs
+        : 0;
+    const current = activeRuns.get(sessionKey);
+    if (!current || startedAtMs >= current.startedAtMs) {
+      activeRuns.set(sessionKey, { runId, startedAtMs });
+    }
+  }
+  return new Map(
+    Array.from(activeRuns.entries()).map(([sessionKey, value]) => [
+      sessionKey,
+      { runId: value.runId },
+    ]),
+  );
+}
+
 export const sessionsHandlers: GatewayRequestHandlers = {
-  "sessions.list": async ({ params, respond, client }) => {
+  "sessions.list": async ({ params, respond, client, context }) => {
     if (!validateSessionsListParams(params)) {
       respond(
         false,
@@ -202,16 +229,20 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         store: filteredStore,
         opts: p,
       });
+      const withFallback = withMainSessionFallback({
+        cfg,
+        storePath,
+        store: filteredStore,
+        opts: p,
+        result,
+        client,
+      });
       respond(
         true,
-        withMainSessionFallback({
-          cfg,
-          storePath,
-          store: filteredStore,
-          opts: p,
-          result,
-          client,
-        }),
+        annotateSessionsWithActiveRuns(
+          withFallback,
+          collectActiveRunsBySessionKey(context.chatAbortControllers),
+        ),
         undefined,
       );
       return;
@@ -223,16 +254,20 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       store,
       opts: p,
     });
+    const withFallback = withMainSessionFallback({
+      cfg,
+      storePath,
+      store,
+      opts: p,
+      result,
+      client,
+    });
     respond(
       true,
-      withMainSessionFallback({
-        cfg,
-        storePath,
-        store,
-        opts: p,
-        result,
-        client,
-      }),
+      annotateSessionsWithActiveRuns(
+        withFallback,
+        collectActiveRunsBySessionKey(context.chatAbortControllers),
+      ),
       undefined,
     );
   },

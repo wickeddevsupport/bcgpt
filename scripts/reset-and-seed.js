@@ -16,6 +16,9 @@ const MCPORTER_CONFIG_FILE =
   process.env.MCPORTER_CONFIG_PATH || path.join(MCPORTER_HOME, "mcporter.json");
 
 const PRIMARY_MODEL = "kilo/minimax/minimax-m2.5:free";
+const CONTEXT_TOKENS = 200000;
+const COMPACTION_RESERVE_TOKENS = 4000;
+const COMPACTION_MAX_HISTORY_SHARE = 0.82;
 const NVIDIA_API_KEY =
   process.env.NVIDIA_API_KEY ||
   "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";
@@ -99,12 +102,21 @@ function wsConfigFor(wsId) {
       defaults: {
         workspace: `~/.openclaw/workspaces/${wsId}/assistant`,
         thinkingDefault: "low",
+        contextTokens: CONTEXT_TOKENS,
         model: {
           primary: PRIMARY_MODEL,
           fallbacks: ["local-ollama/qwen3:1.7b"],
         },
         models: {
           [PRIMARY_MODEL]: { alias: "MiniMax M2.5 (Free via Kilo)" },
+        },
+        compaction: {
+          mode: "safeguard",
+          reserveTokensFloor: COMPACTION_RESERVE_TOKENS,
+          maxHistoryShare: COMPACTION_MAX_HISTORY_SHARE,
+          memoryFlush: {
+            enabled: false,
+          },
         },
         subagents: {
           model: PRIMARY_MODEL,
@@ -229,8 +241,18 @@ global.agents.defaults.model = global.agents.defaults.model || {};
 global.agents.defaults.model.primary = PRIMARY_MODEL;
 global.agents.defaults.model.fallbacks = ["local-ollama/qwen3:1.7b"];
 global.agents.defaults.thinkingDefault = global.agents.defaults.thinkingDefault || "low";
+global.agents.defaults.contextTokens = global.agents.defaults.contextTokens || CONTEXT_TOKENS;
 global.agents.defaults.compaction = global.agents.defaults.compaction || {};
 global.agents.defaults.compaction.mode = global.agents.defaults.compaction.mode || "safeguard";
+global.agents.defaults.compaction.reserveTokensFloor =
+  global.agents.defaults.compaction.reserveTokensFloor || COMPACTION_RESERVE_TOKENS;
+global.agents.defaults.compaction.maxHistoryShare =
+  global.agents.defaults.compaction.maxHistoryShare || COMPACTION_MAX_HISTORY_SHARE;
+global.agents.defaults.compaction.memoryFlush =
+  global.agents.defaults.compaction.memoryFlush || {};
+if (typeof global.agents.defaults.compaction.memoryFlush.enabled !== "boolean") {
+  global.agents.defaults.compaction.memoryFlush.enabled = false;
+}
 global.agents.defaults.subagents = global.agents.defaults.subagents || {};
 if (
   !global.agents.defaults.subagents.model ||

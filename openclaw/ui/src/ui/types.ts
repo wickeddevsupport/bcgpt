@@ -400,6 +400,8 @@ export type GatewaySessionRow = {
   model?: string;
   modelProvider?: string;
   contextTokens?: number;
+  hasActiveRun?: boolean;
+  activeRunId?: string;
 };
 
 export type SessionsListResult = {

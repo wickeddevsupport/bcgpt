@@ -685,6 +685,8 @@ export class OpenClawApp extends LitElement {
     figmaBaseUrl: string,
     payload: {
       user?: { handle?: string | null; email?: string | null };
+      fmMcpUrl?: string | null;
+      fmMcpApiToken?: string | null;
       auth?: {
         personalAccessToken?: string | null;
         hasPersonalAccessToken?: boolean | null;
@@ -731,8 +733,8 @@ export class OpenClawApp extends LitElement {
               payload.auth?.source ??
               (fmHasValidatedPat ? "fm-team-pat" : null),
             mcpServerUrl: payload.auth?.mcpServerUrl ?? null,
-            fmMcpUrl: payload.auth?.fmMcpUrl ?? null,
-            fmMcpApiToken: payload.auth?.fmMcpApiToken ?? null,
+            fmMcpUrl: payload.fmMcpUrl ?? payload.auth?.fmMcpUrl ?? null,
+            fmMcpApiToken: payload.fmMcpApiToken ?? payload.auth?.fmMcpApiToken ?? null,
             updatedAt:
               payload.auth?.updatedAt ??
               payload.activeConnection?.updated_at ??

@@ -121,6 +121,10 @@ function resolveChatStatus(props: ChatProps): {
   detail: string;
   tone: ChatStatusTone;
 } {
+  const activeSession = props.sessions?.sessions?.find((row) => row.key === props.sessionKey);
+  const sessionHasActiveRun =
+    activeSession?.hasActiveRun === true || Boolean(activeSession?.activeRunId);
+
   if (!props.connected) {
     return {
       label: "Offline",
@@ -141,6 +145,14 @@ function resolveChatStatus(props: ChatProps): {
     return {
       label: "Working",
       detail: "Streaming the current response.",
+      tone: "busy",
+    };
+  }
+
+  if (sessionHasActiveRun) {
+    return {
+      label: "Working",
+      detail: "Restoring the active run after refresh.",
       tone: "busy",
     };
   }
@@ -363,14 +375,6 @@ export function renderChat(props: ChatProps) {
           : nothing
       }
 
-      <div class="chat-status-row" role="status" aria-live="polite">
-        <span class="chat-status-badge chat-status-badge--${chatStatus.tone}">
-          <span class="chat-status-badge__dot"></span>
-          ${chatStatus.label}
-        </span>
-        <span class="chat-status-detail">${chatStatus.detail}</span>
-      </div>
-
       <div
         class="chat-split-container ${sidebarOpen ? "chat-split-container--open" : ""}"
       >
@@ -438,8 +442,6 @@ export function renderChat(props: ChatProps) {
           : nothing
       }
 
-      ${renderCompactionIndicator(props.compactionStatus)}
-
       ${
         props.showNewMessages
           ? html`
@@ -455,6 +457,16 @@ export function renderChat(props: ChatProps) {
       }
 
       <div class="chat-compose">
+        <div class="chat-compose__meta">
+          ${renderCompactionIndicator(props.compactionStatus)}
+          <div class="chat-status-row" role="status" aria-live="polite">
+            <span class="chat-status-badge chat-status-badge--${chatStatus.tone}">
+              <span class="chat-status-badge__dot"></span>
+              ${chatStatus.label}
+            </span>
+            <span class="chat-status-detail">${chatStatus.detail}</span>
+          </div>
+        </div>
         ${renderAttachmentPreview(props)}
         <div class="chat-compose__row" style="flex-direction: column;">
           <label class="field chat-compose__field" style="width: 100%;">

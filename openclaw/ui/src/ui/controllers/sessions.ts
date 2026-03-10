@@ -13,6 +13,7 @@ export type SessionsState = {
   sessionsIncludeGlobal: boolean;
   sessionsIncludeUnknown: boolean;
   sessionKey?: string;
+  chatRunId?: string | null;
   settings?: {
     sessionKey: string;
     lastActiveSessionKey: string;
@@ -68,6 +69,20 @@ function syncWorkspaceSessionSelection(state: SessionsState, res: SessionsListRe
   }
 }
 
+function syncActiveRunState(state: SessionsState, res: SessionsListResult): void {
+  const currentKey = typeof state.sessionKey === "string" ? state.sessionKey.trim() : "";
+  if (!currentKey) {
+    return;
+  }
+  const currentSession = Array.isArray(res.sessions)
+    ? res.sessions.find((row) => (typeof row.key === "string" ? row.key.trim() : "") === currentKey)
+    : undefined;
+  if (!currentSession) {
+    return;
+  }
+  state.chatRunId = typeof currentSession.activeRunId === "string" ? currentSession.activeRunId : null;
+}
+
 export async function loadSessions(
   state: SessionsState,
   overrides?: {
@@ -104,6 +119,7 @@ export async function loadSessions(
     if (res) {
       state.sessionsResult = res;
       syncWorkspaceSessionSelection(state, res);
+      syncActiveRunState(state, res);
     }
   } catch (err) {
     state.sessionsError = String(err);

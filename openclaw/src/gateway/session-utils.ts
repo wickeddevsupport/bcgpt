@@ -732,3 +732,27 @@ export function listSessionsFromStore(params: {
     sessions: finalSessions,
   };
 }
+
+export function annotateSessionsWithActiveRuns(
+  result: SessionsListResult,
+  activeRunsBySessionKey: ReadonlyMap<string, { runId: string }>,
+): SessionsListResult {
+  if (!(activeRunsBySessionKey instanceof Map) || activeRunsBySessionKey.size === 0) {
+    return result;
+  }
+  const sessions = result.sessions.map((session) => {
+    const active = activeRunsBySessionKey.get(session.key);
+    if (!active?.runId) {
+      return session;
+    }
+    return {
+      ...session,
+      hasActiveRun: true,
+      activeRunId: active.runId,
+    } satisfies GatewaySessionRow;
+  });
+  return {
+    ...result,
+    sessions,
+  };
+}

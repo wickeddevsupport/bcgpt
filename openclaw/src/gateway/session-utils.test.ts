@@ -4,6 +4,7 @@ import { describe, expect, test } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import type { SessionEntry } from "../config/sessions.js";
 import {
+  annotateSessionsWithActiveRuns,
   capArrayByJsonBytes,
   classifySessionKey,
   deriveSessionTitle,
@@ -91,6 +92,29 @@ describe("gateway session utils", () => {
     expect(target.canonicalKey).toBe("agent:ops:main");
     expect(target.storeKeys).toEqual(expect.arrayContaining(["agent:ops:main", "main"]));
     expect(target.storePath).toBe(path.resolve(storeTemplate.replace("{agentId}", "ops")));
+  });
+
+  test("annotates active runs onto session rows", () => {
+    const result = listSessionsFromStore({
+      cfg: {
+        session: { mainKey: "main" },
+        agents: { list: [{ id: "main", default: true }] },
+      } as OpenClawConfig,
+      storePath: "/tmp/sessions.json",
+      store: {
+        "agent:main:main": {
+          sessionId: "sess-1",
+          updatedAt: Date.now(),
+        } as SessionEntry,
+      },
+      opts: {},
+    });
+    const annotated = annotateSessionsWithActiveRuns(
+      result,
+      new Map([["agent:main:main", { runId: "run-1" }]]),
+    );
+    expect(annotated.sessions[0]?.hasActiveRun).toBe(true);
+    expect(annotated.sessions[0]?.activeRunId).toBe("run-1");
   });
 });
 

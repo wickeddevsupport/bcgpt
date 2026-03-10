@@ -75,6 +75,36 @@ describe("chat view", () => {
     expect(container.textContent).toContain("Streaming the current response.");
   });
 
+  it("shows a working badge from server session state after refresh", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          sessions: {
+            ts: 0,
+            path: "",
+            count: 1,
+            defaults: { model: null, contextTokens: null },
+            sessions: [
+              {
+                key: "main",
+                kind: "direct",
+                updatedAt: Date.now(),
+                hasActiveRun: true,
+                activeRunId: "run-123",
+              },
+            ],
+          },
+        }),
+      ),
+      container,
+    );
+
+    const badge = container.querySelector(".chat-compose .chat-status-badge--busy");
+    expect(badge?.textContent).toContain("Working");
+    expect(container.textContent).toContain("Restoring the active run after refresh.");
+  });
+
   it("renders compacting indicator as a badge", () => {
     const container = document.createElement("div");
     render(

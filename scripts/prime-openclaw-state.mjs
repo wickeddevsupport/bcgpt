@@ -18,6 +18,9 @@ const DEFAULT_AGENT_NAME = "Workspace Assistant";
 const DEFAULT_MODEL_REF = "kilo/minimax/minimax-m2.5:free";
 const DEFAULT_MODEL_ALIAS = "MiniMax M2.5 (Free via Kilo)";
 const DEFAULT_MODEL_FALLBACKS = ["local-ollama/qwen3:1.7b"];
+const DEFAULT_CONTEXT_TOKENS = 200_000;
+const DEFAULT_COMPACTION_RESERVE_TOKENS = 4_000;
+const DEFAULT_COMPACTION_MAX_HISTORY_SHARE = 0.82;
 const DEPRECATED_MODEL_REFS = new Set([
   "kilo/auto-free",
   "nvidia/moonshotai/kimi-k2.5",
@@ -136,6 +139,22 @@ function ensureGlobalDefaults(config) {
   if (!trimToNull(defaults.compaction.mode)) {
     defaults.compaction.mode = "safeguard";
   }
+  if (typeof defaults.compaction.reserveTokensFloor !== "number") {
+    defaults.compaction.reserveTokensFloor = DEFAULT_COMPACTION_RESERVE_TOKENS;
+  }
+  if (typeof defaults.compaction.maxHistoryShare !== "number") {
+    defaults.compaction.maxHistoryShare = DEFAULT_COMPACTION_MAX_HISTORY_SHARE;
+  }
+  defaults.compaction.memoryFlush = isRecord(defaults.compaction.memoryFlush)
+    ? defaults.compaction.memoryFlush
+    : {};
+  if (typeof defaults.compaction.memoryFlush.enabled !== "boolean") {
+    defaults.compaction.memoryFlush.enabled = false;
+  }
+
+  if (typeof defaults.contextTokens !== "number") {
+    defaults.contextTokens = DEFAULT_CONTEXT_TOKENS;
+  }
 
   if (typeof defaults.maxConcurrent !== "number") {
     defaults.maxConcurrent = 4;
@@ -238,6 +257,26 @@ function ensureWorkspaceDefaults(workspaceId, config, globalPrimaryModel) {
   }
   if (!trimToNull(defaults.thinkingDefault)) {
     defaults.thinkingDefault = "low";
+  }
+  if (typeof defaults.contextTokens !== "number") {
+    defaults.contextTokens = DEFAULT_CONTEXT_TOKENS;
+  }
+
+  defaults.compaction = isRecord(defaults.compaction) ? defaults.compaction : {};
+  if (!trimToNull(defaults.compaction.mode)) {
+    defaults.compaction.mode = "safeguard";
+  }
+  if (typeof defaults.compaction.reserveTokensFloor !== "number") {
+    defaults.compaction.reserveTokensFloor = DEFAULT_COMPACTION_RESERVE_TOKENS;
+  }
+  if (typeof defaults.compaction.maxHistoryShare !== "number") {
+    defaults.compaction.maxHistoryShare = DEFAULT_COMPACTION_MAX_HISTORY_SHARE;
+  }
+  defaults.compaction.memoryFlush = isRecord(defaults.compaction.memoryFlush)
+    ? defaults.compaction.memoryFlush
+    : {};
+  if (typeof defaults.compaction.memoryFlush.enabled !== "boolean") {
+    defaults.compaction.memoryFlush.enabled = false;
   }
 
   defaults.model = isRecord(defaults.model) ? defaults.model : {};
@@ -429,17 +468,73 @@ async function primeWorkspaceConfigs(globalPrimaryModel) {
   return { changed, total };
 }
 
+async function normalizeWorkspaceSessionStores() {
+  if (!(await exists(WORKSPACES_DIR))) {
+    return { changed: 0, stores: 0 };
+  }
+
+  const entries = await fs.readdir(WORKSPACES_DIR, { withFileTypes: true });
+  let changed = 0;
+  let stores = 0;
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const workspaceId = entry.name;
+    const agentsDir = path.join(WORKSPACES_DIR, workspaceId, "agents");
+    if (!(await exists(agentsDir))) {
+      continue;
+    }
+    const agentEntries = await fs.readdir(agentsDir, { withFileTypes: true });
+    for (const agentEntry of agentEntries) {
+      if (!agentEntry.isDirectory()) {
+        continue;
+      }
+      const storePath = path.join(agentsDir, agentEntry.name, "sessions", "sessions.json");
+      const store = await readJson(storePath);
+      if (!isRecord(store)) {
+        continue;
+      }
+      stores += 1;
+      let mutated = false;
+      const nextStore = { ...store };
+      for (const [sessionKey, entryValue] of Object.entries(nextStore)) {
+        if (!isRecord(entryValue)) {
+          continue;
+        }
+        const nextEntry = { ...entryValue };
+        const currentContextTokens =
+          typeof nextEntry.contextTokens === "number" ? nextEntry.contextTokens : 0;
+        if (!Number.isFinite(currentContextTokens) || currentContextTokens < DEFAULT_CONTEXT_TOKENS) {
+          nextEntry.contextTokens = DEFAULT_CONTEXT_TOKENS;
+          mutated = true;
+        }
+        if (nextEntry !== entryValue) {
+          nextStore[sessionKey] = nextEntry;
+        }
+      }
+      if (mutated && (await writeJson(storePath, nextStore))) {
+        changed += 1;
+      }
+    }
+  }
+
+  return { changed, stores };
+}
+
 async function main() {
   await ensureDir(STATE_DIR);
   await ensureDir(MCPORTER_STATE_DIR);
 
   const { changed: globalChanged, primaryModel } = await primeGlobalConfig();
   const workspaceResult = await primeWorkspaceConfigs(primaryModel);
+  const sessionResult = await normalizeWorkspaceSessionStores();
   const syncedSkills = await syncRepoSkills();
   const mcporterChanged = await primeMcporterConfig();
 
   console.log(
-    `[pmos-prime] global=${globalChanged ? "updated" : "ok"} workspaces=${workspaceResult.changed}/${workspaceResult.total} skills=${syncedSkills} mcporter=${mcporterChanged ? "updated" : "ok"}`,
+    `[pmos-prime] global=${globalChanged ? "updated" : "ok"} workspaces=${workspaceResult.changed}/${workspaceResult.total} sessions=${sessionResult.changed}/${sessionResult.stores} skills=${syncedSkills} mcporter=${mcporterChanged ? "updated" : "ok"}`,
   );
 }
 
