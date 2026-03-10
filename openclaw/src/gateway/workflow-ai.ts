@@ -1084,6 +1084,7 @@ export async function callWorkspaceModelAgentLoop(
     maxTokens?: number;
     maxIterations?: number;
     initialToolChoice?: "auto" | { type: "function"; function: { name: string } };
+    allowToolResultEarlyExit?: boolean;
   } = {},
 ): Promise<{ ok: boolean; text?: string; error?: string; providerUsed?: string }> {
   const wsId = String(workspaceId ?? "").trim();
@@ -1282,7 +1283,9 @@ export async function callWorkspaceModelAgentLoop(
           });
         }
 
-        const earlyExit = buildAgentLoopEarlyExit(roundResults);
+        const earlyExit = opts.allowToolResultEarlyExit
+          ? buildAgentLoopEarlyExit(roundResults)
+          : null;
         if (earlyExit) {
           return { ok: true, text: earlyExit, providerUsed };
         }
