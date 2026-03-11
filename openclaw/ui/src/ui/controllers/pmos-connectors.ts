@@ -56,6 +56,20 @@ export type PmosConnectorsStatus = {
       updatedAt?: string | null;
       message?: string | null;
     };
+    mcp?: {
+      url: string | null;
+      configured: boolean;
+      reachable: boolean | null;
+      authOk: boolean | null;
+      authRequired?: boolean;
+      configPath?: string | null;
+      transport?: string | null;
+      source?: string | null;
+      hasPersonalAccessToken?: boolean;
+      fallbackAvailable?: boolean;
+      authCommand?: string | null;
+      error: string | null;
+    };
   };
 };
 

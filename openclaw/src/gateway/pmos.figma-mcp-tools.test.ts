@@ -2,6 +2,43 @@ import { describe, expect, it } from "vitest";
 import { __test } from "./server-methods/pmos.js";
 
 describe("pmos figma mcp tool normalization", () => {
+  it("builds mcporter env without leaking empty PAT variables", () => {
+    expect(
+      __test.buildMcporterEnvForFigma({
+        personalAccessToken: null,
+        hasPersonalAccessToken: false,
+        source: null,
+        mcpServerUrl: "https://mcp.figma.com/mcp",
+      }),
+    ).toEqual({
+      MCP_FIGMA_SERVER_URL: "https://mcp.figma.com/mcp",
+    });
+
+    expect(
+      __test.buildMcporterEnvForFigma({
+        personalAccessToken: "figd_pat_123",
+        hasPersonalAccessToken: true,
+        source: "fm-team-pat",
+        mcpServerUrl: "https://mcp.figma.com/mcp",
+      }),
+    ).toMatchObject({
+      MCP_FIGMA_SERVER_URL: "https://mcp.figma.com/mcp",
+      FIGMA_API_KEY: "figd_pat_123",
+      FIGMA_PERSONAL_ACCESS_TOKEN: "figd_pat_123",
+    });
+  });
+
+  it("classifies official MCP probe auth failures separately from reachability failures", () => {
+    expect(__test.classifyFigmaMcpProbeError("SSE error: Non-200 status code (405)")).toEqual({
+      authRequired: true,
+      reachable: true,
+    });
+    expect(__test.classifyFigmaMcpProbeError("connect ECONNREFUSED 127.0.0.1:443")).toEqual({
+      authRequired: false,
+      reachable: false,
+    });
+  });
+
   it("accepts fully qualified figma MCP tool names", () => {
     expect(__test.normalizeFigmaMcpToolName("figma.get_design_context")).toBe(
       "get_design_context",

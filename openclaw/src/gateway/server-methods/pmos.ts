@@ -7,6 +7,8 @@ import { filterByWorkspace, requireWorkspaceId, isSuperAdmin } from "../workspac
 import { buildFigmaRestAuditReport, parseFigmaFileKey } from "../figma-rest-audit.js";
 import { inspectWorkspaceChatUrls } from "../url-routing.js";
 import { emitAgentEvent, registerAgentRunContext } from "../../infra/agent-events.js";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 type ConnectorResult = {
   url: string | null;
@@ -41,7 +43,24 @@ type ConnectorResult = {
     totalConnections?: number;
     message?: string | null;
   };
+  mcp?: {
+    url: string | null;
+    configured: boolean;
+    reachable: boolean | null;
+    authOk: boolean | null;
+    authRequired?: boolean;
+    configPath?: string | null;
+    transport?: string | null;
+    source?: string | null;
+    hasPersonalAccessToken?: boolean;
+    fallbackAvailable?: boolean;
+    authCommand?: string | null;
+    error: string | null;
+  };
 };
+
+const DEFAULT_MCPORTER_HOME = "/app/.openclaw/mcporter";
+const DEFAULT_MCPORTER_CONFIG_PATH = `${DEFAULT_MCPORTER_HOME}/mcporter.json`;
 
 async function fetchJson(
   url: string,
@@ -308,6 +327,8 @@ export const __test = {
   shouldDeferFigmaPatAudit,
   normalizeFigmaMcpToolName,
   normalizeFigmaMcpToolListResult,
+  buildMcporterEnvForFigma,
+  classifyFigmaMcpProbeError,
 };
 
 /**
@@ -672,11 +693,12 @@ async function resolveWorkspaceBcgptAccess(params: {
 async function runMcporterJson(
   args: string[],
   envOverrides?: Record<string, string>,
+  timeoutMs = 20_000,
 ): Promise<unknown> {
   const { runCommandWithTimeout } = await import("../../process/exec.js");
   const result = await runCommandWithTimeout(
     ["/usr/local/bin/mcporter", ...args],
-    { timeoutMs: 20_000, env: envOverrides },
+    { timeoutMs, env: envOverrides },
   );
   const stdout = result.stdout.trim();
   const stderr = result.stderr.trim();
@@ -691,6 +713,23 @@ async function runMcporterJson(
   } catch {
     return { text: stdout, stderr: stderr || null };
   }
+}
+
+function getMcporterConfigPath(): string {
+  return process.env.MCPORTER_CONFIG_PATH ?? DEFAULT_MCPORTER_CONFIG_PATH;
+}
+
+function buildMcporterEnvForFigma(
+  mcpAuth: WorkspaceFigmaMcpAuth,
+): Record<string, string> {
+  const env: Record<string, string> = {
+    MCP_FIGMA_SERVER_URL: mcpAuth.mcpServerUrl,
+  };
+  if (mcpAuth.personalAccessToken) {
+    env.FIGMA_API_KEY = mcpAuth.personalAccessToken;
+    env.FIGMA_PERSONAL_ACCESS_TOKEN = mcpAuth.personalAccessToken;
+  }
+  return env;
 }
 
 function normalizeFigmaMcpToolName(value: unknown): string {
@@ -791,8 +830,37 @@ type WorkspaceFigmaMcpAuth = {
   mcpServerUrl: string;
 };
 
+type FigmaOfficialMcpStatus = {
+  url: string | null;
+  configured: boolean;
+  reachable: boolean | null;
+  authOk: boolean | null;
+  authRequired: boolean;
+  configPath: string | null;
+  transport: string | null;
+  source: string | null;
+  hasPersonalAccessToken: boolean;
+  fallbackAvailable: boolean;
+  authCommand: string | null;
+  error: string | null;
+};
+
 function isFigmaMcpAuthRequiredError(message: string): boolean {
   return /auth required|mcporter auth figma|non-200 status code\s*\(405\)|\b405\b/i.test(message);
+}
+
+function classifyFigmaMcpProbeError(message: string): {
+  authRequired: boolean;
+  reachable: boolean | null;
+} {
+  const authRequired = isFigmaMcpAuthRequiredError(message);
+  if (authRequired) {
+    return { authRequired: true, reachable: true };
+  }
+  if (/\b(?:ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ECONNRESET)\b|timed out|timeout|fetch failed/i.test(message)) {
+    return { authRequired: false, reachable: false };
+  }
+  return { authRequired: false, reachable: null };
 }
 
 function buildFigmaMcpFailurePayload(
@@ -892,6 +960,137 @@ async function readWorkspaceFigmaMcpAuth(workspaceId: string): Promise<Workspace
   const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
   const connectors = await readWorkspaceConnectors(workspaceId);
   return readWorkspaceFigmaMcpAuthFromConnectors(connectors);
+}
+
+async function ensureFigmaMcporterConfig(serverUrl: string): Promise<{
+  changed: boolean;
+  configPath: string;
+}> {
+  const configPath = getMcporterConfigPath();
+  let parsed: Record<string, unknown> = {};
+  try {
+    const raw = await fs.readFile(configPath, "utf8");
+    const json = JSON.parse(raw) as unknown;
+    parsed = isJsonObject(json) ? { ...json } : {};
+  } catch {
+    parsed = {};
+  }
+
+  const mcpServers = isJsonObject(parsed.mcpServers)
+    ? { ...(parsed.mcpServers as Record<string, unknown>) }
+    : {};
+  const figma = isJsonObject(mcpServers.figma)
+    ? { ...(mcpServers.figma as Record<string, unknown>) }
+    : {};
+  if (stringOrNull(figma.baseUrl) !== serverUrl) {
+    figma.baseUrl = serverUrl;
+  }
+  mcpServers.figma = figma;
+  parsed.mcpServers = mcpServers;
+  if (isJsonObject(parsed.figma)) {
+    delete parsed.figma;
+  }
+  if (!Array.isArray(parsed.imports)) {
+    parsed.imports = [];
+  }
+
+  const next = JSON.stringify(parsed, null, 2).trimEnd() + "\n";
+  const existing = await fs.readFile(configPath, "utf8").catch(() => null);
+  if (existing === next) {
+    return { changed: false, configPath };
+  }
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.writeFile(configPath, next, "utf8");
+  return { changed: true, configPath };
+}
+
+async function readWorkspaceFigmaOfficialMcpStatus(
+  workspaceId: string,
+  opts?: { ensureConfigured?: boolean },
+): Promise<FigmaOfficialMcpStatus> {
+  const mcpAuth = await readWorkspaceFigmaMcpAuth(workspaceId);
+  const configPath = getMcporterConfigPath();
+  if (opts?.ensureConfigured) {
+    await ensureFigmaMcporterConfig(mcpAuth.mcpServerUrl);
+  }
+
+  let configured = false;
+  let transport: string | null = null;
+  let url = mcpAuth.mcpServerUrl;
+  let configError: string | null = null;
+
+  try {
+    const configResult = await runMcporterJson(
+      ["--config", configPath, "config", "get", "figma", "--json"],
+      undefined,
+      5_000,
+    );
+    if (isJsonObject(configResult)) {
+      configured = true;
+      transport = stringOrNull(configResult.transport);
+      url = stringOrNull(configResult.baseUrl) ?? url;
+    } else {
+      configured = true;
+    }
+  } catch (err) {
+    configError = err instanceof Error ? err.message : String(err);
+  }
+
+  if (!configured) {
+    return {
+      url,
+      configured: false,
+      reachable: null,
+      authOk: false,
+      authRequired: false,
+      configPath,
+      transport,
+      source: mcpAuth.source,
+      hasPersonalAccessToken: mcpAuth.hasPersonalAccessToken,
+      fallbackAvailable: mcpAuth.hasPersonalAccessToken,
+      authCommand: null,
+      error: configError || "Official Figma MCP is not configured in mcporter yet.",
+    };
+  }
+
+  try {
+    await runMcporterJson(
+      ["--config", configPath, "list", "figma", "--schema", "--json"],
+      buildMcporterEnvForFigma(mcpAuth),
+      8_000,
+    );
+    return {
+      url,
+      configured: true,
+      reachable: true,
+      authOk: true,
+      authRequired: false,
+      configPath,
+      transport,
+      source: mcpAuth.source,
+      hasPersonalAccessToken: mcpAuth.hasPersonalAccessToken,
+      fallbackAvailable: mcpAuth.hasPersonalAccessToken,
+      authCommand: null,
+      error: null,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const probe = classifyFigmaMcpProbeError(message);
+    return {
+      url,
+      configured: true,
+      reachable: probe.reachable,
+      authOk: false,
+      authRequired: probe.authRequired,
+      configPath,
+      transport,
+      source: mcpAuth.source,
+      hasPersonalAccessToken: mcpAuth.hasPersonalAccessToken,
+      fallbackAvailable: mcpAuth.hasPersonalAccessToken,
+      authCommand: probe.authRequired ? "mcporter auth figma" : null,
+      error: message,
+    };
+  }
 }
 
 type WorkspaceFmMcpAuth = {
@@ -1368,7 +1567,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
       const figmaUrlRaw =
         (typeof figmaConnector.url === "string" ? figmaConnector.url : null) ??
         readConfigString(cfg, ["pmos", "connectors", "figma", "url"]);
-        const figmaUrl = normalizeBaseUrl(figmaUrlRaw, "https://fm.wickedlab.io");
+      const figmaUrl = normalizeBaseUrl(figmaUrlRaw, "https://fm.wickedlab.io");
       const figma: ConnectorResult = {
         url: figmaUrl,
         configured: Boolean(figmaUrlRaw && figmaUrlRaw.trim()),
@@ -1422,6 +1621,28 @@ export const pmosHandlers: GatewayRequestHandlers = {
               }
             : undefined,
       };
+      const figmaMcp =
+        workspaceId && (figma.configured || Object.keys(figmaIdentity).length > 0 || isJsonObject(figmaConnector.auth))
+          ? await readWorkspaceFigmaOfficialMcpStatus(workspaceId)
+          : ({
+              url: stringOrNull(
+                isJsonObject(figmaConnector.auth) ? figmaConnector.auth.mcpServerUrl : null,
+              ) ?? "https://mcp.figma.com/mcp",
+              configured: false,
+              reachable: null,
+              authOk: false,
+              authRequired: false,
+              configPath: getMcporterConfigPath(),
+              transport: null,
+              source: stringOrNull(
+                isJsonObject(figmaConnector.auth) ? figmaConnector.auth.source : null,
+              ),
+              hasPersonalAccessToken: false,
+              fallbackAvailable: false,
+              authCommand: null,
+              error: "Official Figma MCP is not configured for this workspace yet.",
+            } satisfies FigmaOfficialMcpStatus);
+      figma.mcp = figmaMcp;
 
       if (opsUrlRaw && opsUrlRaw.trim()) {
         const remoteHealth = await fetchJson(`${opsUrl}/api/v1/flags`, { method: "GET", timeoutMs: 3500 });
@@ -1537,6 +1758,29 @@ export const pmosHandlers: GatewayRequestHandlers = {
       );
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, formatForLog(err)));
+    }
+  },
+
+  "pmos.figma.mcp.prepare": async ({ respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const mcpAuth = await readWorkspaceFigmaMcpAuth(workspaceId);
+      const prepared = await ensureFigmaMcporterConfig(mcpAuth.mcpServerUrl);
+      const status = await readWorkspaceFigmaOfficialMcpStatus(workspaceId);
+      respond(
+        true,
+        {
+          ok: true,
+          workspaceId,
+          changed: prepared.changed,
+          configPath: prepared.configPath,
+          status,
+        },
+        undefined,
+      );
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }
   },
 
@@ -4281,8 +4525,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               finishTool(payload);
               return JSON.stringify(payload);
             }
-            const mcporterConfigPath =
-              process.env.MCPORTER_CONFIG_PATH ?? "/app/.mcporter/mcporter.json";
+            const mcporterConfigPath = getMcporterConfigPath();
             try {
               const result = normalizeFigmaMcpToolListResult(await runMcporterJson([
                 "--config",
@@ -4291,11 +4534,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                 "figma",
                 "--schema",
                 "--json",
-              ], {
-                FIGMA_API_KEY: mcpAuth.personalAccessToken,
-                FIGMA_PERSONAL_ACCESS_TOKEN: mcpAuth.personalAccessToken,
-                MCP_FIGMA_SERVER_URL: mcpAuth.mcpServerUrl,
-              }));
+              ], buildMcporterEnvForFigma(mcpAuth)));
               finishTool(result);
               return JSON.stringify(result);
             } catch (err) {
@@ -4327,8 +4566,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             }
             const figmaContext = await readWorkspaceFigmaContext(workspaceId);
             const effectiveToolArgs = hydrateKnownFigmaContextArguments(toolArgs, figmaContext);
-            const mcporterConfigPath =
-              process.env.MCPORTER_CONFIG_PATH ?? "/app/.mcporter/mcporter.json";
+            const mcporterConfigPath = getMcporterConfigPath();
             try {
               const result = await runMcporterJson([
                 "--config",
@@ -4339,11 +4577,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                 JSON.stringify(effectiveToolArgs),
                 "--output",
                 "json",
-              ], {
-                FIGMA_API_KEY: mcpAuth.personalAccessToken,
-                FIGMA_PERSONAL_ACCESS_TOKEN: mcpAuth.personalAccessToken,
-                MCP_FIGMA_SERVER_URL: mcpAuth.mcpServerUrl,
-              });
+              ], buildMcporterEnvForFigma(mcpAuth));
               finishTool(result);
               return JSON.stringify(result);
             } catch (err) {

@@ -8,9 +8,10 @@ const GLOBAL_CONFIG_PATH = path.join(STATE_DIR, "openclaw.json");
 const WORKSPACES_DIR = path.join(STATE_DIR, "workspaces");
 const MANAGED_SKILLS_DIR = path.join(STATE_DIR, "skills");
 const REPO_SKILLS_DIR = process.env.BCGPT_SHARED_SKILLS_DIR || "/app/bcgpt-skills";
-const MCPORTER_STATE_DIR = process.env.MCPORTER_HOME || "/app/.mcporter";
+const MCPORTER_STATE_DIR = process.env.MCPORTER_HOME || "/app/.openclaw/mcporter";
 const MCPORTER_CONFIG_PATH =
   process.env.MCPORTER_CONFIG_PATH || path.join(MCPORTER_STATE_DIR, "mcporter.json");
+const LEGACY_MCPORTER_CONFIG_PATH = "/app/.mcporter/mcporter.json";
 
 const PRIMER_VERSION = "bcgpt-primer-2026-03-09";
 const DEFAULT_AGENT_ID = "assistant";
@@ -447,6 +448,14 @@ async function syncRepoSkills() {
 }
 
 async function primeMcporterConfig() {
+  const targetExists = await exists(MCPORTER_CONFIG_PATH);
+  if (!targetExists && MCPORTER_CONFIG_PATH !== LEGACY_MCPORTER_CONFIG_PATH) {
+    const legacy = await readJson(LEGACY_MCPORTER_CONFIG_PATH);
+    if (legacy) {
+      await ensureDir(path.dirname(MCPORTER_CONFIG_PATH));
+      await fs.copyFile(LEGACY_MCPORTER_CONFIG_PATH, MCPORTER_CONFIG_PATH);
+    }
+  }
   const current = (await readJson(MCPORTER_CONFIG_PATH)) ?? {};
   const next = isRecord(current) ? { ...current } : {};
   next.mcpServers = isRecord(next.mcpServers) ? { ...next.mcpServers } : {};

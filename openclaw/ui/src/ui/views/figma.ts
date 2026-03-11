@@ -19,6 +19,7 @@ export type FigmaProps = {
   onOpenAuth: () => void;
   onSyncContext: () => void;
   onRefresh: () => void;
+  onPrepareOfficialMcp: () => void;
   onOpenIntegrations: () => void;
   onPrefillPrompt: (prompt: string) => void;
 };
@@ -40,6 +41,7 @@ function buildPrompt(status: PmosConnectorsStatus["figma"] | null | undefined, m
 export function renderFigma(props: FigmaProps) {
   const figma = props.connectorsStatus?.figma ?? null;
   const identity = figma?.identity ?? null;
+  const officialMcp = figma?.mcp ?? null;
   const canEmbed = Boolean(props.figmaUrl?.trim());
   const hasSyncedIdentity = identity?.connected === true;
   const hasLiveAuth = figma?.authOk === true;
@@ -55,9 +57,9 @@ export function renderFigma(props: FigmaProps) {
     ${!canEmbed
       ? html`
           <section class="card" style="padding: 32px 24px; text-align: center;">
-            <div style="font-weight: 600; margin-bottom: 8px;">Figma File Manager is not configured.</div>
+            <div style="font-weight: 600; margin-bottom: 8px;">Figma panel is not configured.</div>
             <div class="muted" style="max-width: 520px; margin: 0 auto 18px;">
-              Save the Figma File Manager URL in Integrations before opening the embedded panel.
+              Save the Figma panel URL in Integrations before opening the embedded panel.
             </div>
             <button class="btn btn--primary" @click=${() => props.onOpenIntegrations()}>
               Configure Integrations
@@ -69,7 +71,7 @@ export function renderFigma(props: FigmaProps) {
             <div class="page-header" style="margin-bottom: 0; flex-shrink:0;">
               <div>
                 <div class="page-title">Figma</div>
-                <div class="page-subtitle">Embedded Figma File Manager with live workspace sync for AI design reviews.</div>
+                <div class="page-subtitle">Embedded Figma panel for selected-file sync, plus official MCP status for deeper file analysis.</div>
               </div>
               <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                 <span class="chip">Auto Sync On</span>
@@ -106,7 +108,10 @@ export function renderFigma(props: FigmaProps) {
                       </div>
                     </div>
                     <div class="chip-row">
-                      <span class="chip ${canRenderIframe ? "chip-ok" : "chip-warn"}">${canRenderIframe ? "Connected" : "Sign-in required"}</span>
+                      <span class="chip ${canRenderIframe ? "chip-ok" : "chip-warn"}">${canRenderIframe ? "Panel Sync Ready" : "Panel Sign-in Required"}</span>
+                      <span class="chip ${officialMcp?.authOk ? "chip-ok" : officialMcp?.configured ? "chip-warn" : ""}">
+                        ${officialMcp?.authOk ? "Official MCP Ready" : officialMcp?.configured ? "Official MCP Needs Auth" : "Official MCP Not Prepared"}
+                      </span>
                     </div>
                   </div>
 
@@ -117,6 +122,30 @@ export function renderFigma(props: FigmaProps) {
                         </div>
                       `
                     : html`<div class="muted" style="margin-top: 8px; font-size: 12px;">Open a Figma file in the panel below and PMOS will capture it for AI context.</div>`}
+
+                  <div class="callout" style="margin-top: 10px; font-size: 12px;">
+                    <div><strong>Official Figma MCP:</strong> ${officialMcp?.url ?? "https://mcp.figma.com/mcp"}</div>
+                    <div class="muted" style="margin-top: 4px;">
+                      ${officialMcp?.authOk
+                        ? "PMOS can reach the official Figma MCP server."
+                        : officialMcp?.configured
+                          ? officialMcp?.authRequired
+                            ? "mcporter is configured, but server-side Figma MCP auth is still required."
+                            : officialMcp?.error ?? "Official Figma MCP is configured, but the live probe is not passing yet."
+                          : "Prepare mcporter for the official Figma MCP server before relying on deeper MCP tools."}
+                    </div>
+                    ${officialMcp?.configPath
+                      ? html`<div class="muted" style="margin-top: 4px;">Config: ${officialMcp.configPath}</div>`
+                      : nothing}
+                    ${officialMcp?.authCommand
+                      ? html`<div class="muted" style="margin-top: 4px;">Server auth command: ${officialMcp.authCommand}</div>`
+                      : nothing}
+                    <div style="margin-top: 8px;">
+                      <button class="btn btn--secondary" ?disabled=${props.connectorsLoading} @click=${() => props.onPrepareOfficialMcp()}>
+                        ${officialMcp?.configured ? "Recheck Official MCP" : "Prepare Official MCP"}
+                      </button>
+                    </div>
+                  </div>
 
                   <div class="row" style="margin-top: 12px; gap: 8px; flex-wrap: wrap;">
                     <button class="btn btn--secondary" @click=${() => props.onPrefillPrompt(buildPrompt(figma, "audit"))}>Audit File</button>

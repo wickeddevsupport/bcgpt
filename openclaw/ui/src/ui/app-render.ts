@@ -1032,6 +1032,7 @@ export function renderApp(state: AppViewState) {
                   state.pmosFigmaEmbedVersion = (state.pmosFigmaEmbedVersion ?? 0) + 1;
                   void state.handlePmosRefreshConnectors();
                 },
+                onPrepareOfficialMcp: () => void state.handlePmosPrepareFigmaMcp(),
                 onOpenIntegrations: () => state.setTab("integrations"),
                 onPrefillPrompt: (prompt) => {
                   chatProps.onDraftChange(prompt);

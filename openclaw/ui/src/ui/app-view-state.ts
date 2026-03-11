@@ -529,6 +529,7 @@ export type AppViewState = {
   handleChatCreateWorkflow: () => Promise<void>;
   handleAbortChat: () => Promise<void>;
   handlePmosRefreshConnectors: () => Promise<void>;
+  handlePmosPrepareFigmaMcp: () => Promise<void>;
   handlePmosProvisionOps: (opts?: { projectName?: string }) => Promise<void>;
   handlePmosSaveManualOpsKey: () => Promise<void>;
   handlePmosTraceClear: () => void;

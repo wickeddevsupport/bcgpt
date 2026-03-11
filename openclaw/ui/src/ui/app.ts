@@ -1085,6 +1085,20 @@ export class OpenClawApp extends LitElement {
     }
   }
 
+  async handlePmosPrepareFigmaMcp() {
+    if (!this.client || !this.connected) {
+      this.pmosConnectorsError = "Connect to the gateway first.";
+      return;
+    }
+    this.pmosConnectorsError = null;
+    try {
+      await this.client.request("pmos.figma.mcp.prepare", {});
+      await loadPmosConnectorsStatus(this);
+    } catch (err) {
+      this.pmosConnectorsError = String(err);
+    }
+  }
+
   handlePmosTraceClear() {
     this.pmosTraceEvents = [];
   }
