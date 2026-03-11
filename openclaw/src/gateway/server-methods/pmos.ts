@@ -3442,7 +3442,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- **BCgpt API**: An intelligent Basecamp integration layer with a smart router (`smart_action`) and full MCP tool set.",
         "",
         "## Operating Mode",
-        "- Default to broad orchestration. Do not assume the request is only about Basecamp, Figma, FM, or workflows just because those tools exist.",
+        "- Default to broad orchestration. Do not assume the request is only about Basecamp, Figma, or workflows just because those tools exist.",
         "- Enter specialist mode when the request clearly depends on live workspace data, explicit pasted URLs, or a tool-backed action.",
         "- Use the smallest useful chain of tools, but do not stop after a preparatory or specialist lookup if the user still needs analysis, synthesis, or a cross-system action.",
         "- When one specialist tool returns useful context, continue with other tools when that context unlocks the real task.",
@@ -3499,7 +3499,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "",
         "### Figma questions",
         "- Start with `figma_get_context` when the active workspace file matters, but let the model choose the actual sequence from the request instead of forcing a fixed first tool.",
-        "- Treat official Figma access and FM MCP as two separate built-in systems.",
+        "- Workspace chat exposes official Figma MCP plus PAT-backed fallback only. The embedded Figma panel is for syncing selected-file context and PAT handoff, not a separate AI tool system.",
         "- Use official `figma_*` tools for document/design tasks: comments, annotations, node metadata, design context, components, styles, variables, fonts, auto-layout, screenshots, structure, and design audits.",
         "- For deep Figma understanding, prefer the full live MCP surface: call `figma_mcp_list_tools`, inspect what is available, then use `figma_mcp_call` for the exact capability you need.",
         "- The official Figma MCP docs emphasize context-first tools such as `get_design_context`, `get_metadata`, `get_screenshot`, and `get_variable_defs`. Prefer those kinds of tools when the task is understanding a file, comments, annotations, or implementation detail.",
@@ -3508,12 +3508,6 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- If the user pastes a Figma file URL, extract the file key from that URL and pass it to whichever Figma tool needs it. Do not default to the selected file when an explicit Figma URL is present.",
         "- If official Figma MCP returns auth required, 405, or unavailable, then call `figma_pat_audit_file` on the target file and continue reasoning from that fallback instead of stopping.",
         "- Do NOT use `web_fetch` for private Figma API access in workspace chat; it cannot inject the workspace PAT.",
-        "",
-        "### Figma File Manager (FM) questions",
-        "- Use `fm_*` tools only for file-manager tasks in fm.wickedlab.io: finding files, browsing files, tags, folders, categories, links, FM metadata, and FM sync state.",
-        "- For managing files, tags, folders, categories, or links in the FM (fm.wickedlab.io), start with `fm_get_context` to get an overview.",
-        "- Use `fm_list_files` to browse files; use `fm_update_file` to change folder/category; use `fm_create_tag` + `fm_get_file` to tag files.",
-        "- FM tools require the user to be connected via the Figma panel. If FM MCP is not configured, instruct the user to open the Figma panel and sync context.",
         "",
         "## Available Tools",
         "**Basecamp MCP Tools:**",
@@ -3538,24 +3532,6 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- `figma_mcp_list_tools` -- inspect the full live Figma MCP capability surface exposed through mcporter before choosing a Figma operation",
         "- `figma_mcp_call` -- call any discovered Figma MCP capability, especially context-first tools like `get_design_context`, `get_metadata`, `get_screenshot`, `get_variable_defs`, comments, annotations, nodes, and deeper file context",
         "- `figma_pat_audit_file` -- run a Figma REST audit with the workspace PAT only as a structural fallback when MCP auth or capability is unavailable, or when the task is explicitly an audit",
-        "",
-        "**Figma File Manager (FM) Tools** \u2014 manage files, tags, folders, categories, and links in fm.wickedlab.io:",
-        "- `fm_get_context` -- get FM user info and overview of files/tags/folders/categories",
-        "- `fm_list_files` -- list Figma files tracked in FM with filters (tag, folder, category, search)",
-        "- `fm_get_file` -- get full details for a specific FM file by ID",
-        "- `fm_update_file` -- update a file's folder, category, or notes",
-        "- `fm_list_tags` -- list all tags and their file counts",
-        "- `fm_create_tag` -- create a new tag and optionally apply to a file",
-        "- `fm_rename_tag` -- rename an existing tag",
-        "- `fm_delete_tag` -- delete a tag",
-        "- `fm_list_folders` -- list all folders",
-        "- `fm_create_folder` -- create a new folder",
-        "- `fm_rename_folder` -- rename a folder",
-        "- `fm_list_categories` -- list all categories",
-        "- `fm_create_category` -- create a new category",
-        "- `fm_add_link` -- add a URL link to a file",
-        "- `fm_delete_link` -- remove a link from a file",
-        "- `fm_sync_team` -- trigger a sync for a Figma team connection to refresh files",
         "",
         ...(runtimeUrlHints.length ? ["## Request-Specific URL Routing", ...runtimeUrlHints, ""] : []),
         ...(requestRoutingHints.length ? ["## Request-Specific Tool Guidance", ...requestRoutingHints, ""] : []),
@@ -3837,218 +3813,6 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                   description: "Optional file traversal depth for the REST audit. Defaults to 2 to keep large files responsive in chat.",
                 },
               },
-              additionalProperties: false,
-            },
-          },
-        },
-        // FM (Figma File Manager) tools
-        {
-          type: "function" as const,
-          function: {
-            name: "fm_get_context",
-            description: "Get an overview of the user's Figma File Manager: user info, file count, tag count, folder count, category count.",
-            parameters: { type: "object", properties: {}, additionalProperties: false },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "fm_list_files",
-            description: "List Figma files tracked in FM. Supports filtering by tag ID, folder ID, category ID, or a search query.",
-            parameters: {
-              type: "object",
-              properties: {
-                tag_id: { type: "number", description: "Filter by tag ID." },
-                folder_id: { type: "number", description: "Filter by folder ID." },
-                category_id: { type: "number", description: "Filter by category ID." },
-                search: { type: "string", description: "Text search across file name/URL." },
-                limit: { type: "number", description: "Max results (default 50)." },
-              },
-              additionalProperties: false,
-            },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "fm_get_file",
-            description: "Get full details for a specific FM file: name, URL, folder, category, tags, links, notes.",
-            parameters: {
-              type: "object",
-              required: ["file_id"],
-              properties: { file_id: { type: "number", description: "FM file ID." } },
-              additionalProperties: false,
-            },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "fm_update_file",
-            description: "Update a file's folder, category, or notes in FM.",
-            parameters: {
-              type: "object",
-              required: ["file_id"],
-              properties: {
-                file_id: { type: "number", description: "FM file ID." },
-                folder_id: { type: ["number", "null"], description: "New folder ID (null to remove)." },
-                category_id: { type: ["number", "null"], description: "New category ID (null to remove)." },
-                notes: { type: "string", description: "Notes/description for the file." },
-              },
-              additionalProperties: false,
-            },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "fm_list_tags",
-            description: "List all tags in FM with their file counts.",
-            parameters: { type: "object", properties: {}, additionalProperties: false },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "fm_create_tag",
-            description: "Create a new tag in FM. Optionally apply it to a file.",
-            parameters: {
-              type: "object",
-              required: ["name"],
-              properties: {
-                name: { type: "string", description: "Tag name." },
-                file_id: { type: "number", description: "Optional file ID to apply the new tag to immediately." },
-              },
-              additionalProperties: false,
-            },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "fm_rename_tag",
-            description: "Rename an existing tag.",
-            parameters: {
-              type: "object",
-              required: ["tag_id", "name"],
-              properties: {
-                tag_id: { type: "number" },
-                name: { type: "string" },
-              },
-              additionalProperties: false,
-            },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "fm_delete_tag",
-            description: "Delete a tag from FM (unlinks it from all files).",
-            parameters: {
-              type: "object",
-              required: ["tag_id"],
-              properties: { tag_id: { type: "number" } },
-              additionalProperties: false,
-            },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "fm_list_folders",
-            description: "List all folders in FM.",
-            parameters: { type: "object", properties: {}, additionalProperties: false },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "fm_create_folder",
-            description: "Create a new folder in FM.",
-            parameters: {
-              type: "object",
-              required: ["name"],
-              properties: { name: { type: "string" } },
-              additionalProperties: false,
-            },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "fm_rename_folder",
-            description: "Rename an existing folder.",
-            parameters: {
-              type: "object",
-              required: ["folder_id", "name"],
-              properties: {
-                folder_id: { type: "number" },
-                name: { type: "string" },
-              },
-              additionalProperties: false,
-            },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "fm_list_categories",
-            description: "List all categories in FM.",
-            parameters: { type: "object", properties: {}, additionalProperties: false },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "fm_create_category",
-            description: "Create a new category in FM.",
-            parameters: {
-              type: "object",
-              required: ["name"],
-              properties: { name: { type: "string" } },
-              additionalProperties: false,
-            },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "fm_add_link",
-            description: "Add a URL link (with optional label) to a file in FM.",
-            parameters: {
-              type: "object",
-              required: ["file_id", "url"],
-              properties: {
-                file_id: { type: "number" },
-                url: { type: "string" },
-                label: { type: "string", description: "Display label for the link." },
-              },
-              additionalProperties: false,
-            },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "fm_delete_link",
-            description: "Delete a link from a file in FM.",
-            parameters: {
-              type: "object",
-              required: ["link_id"],
-              properties: { link_id: { type: "number" } },
-              additionalProperties: false,
-            },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "fm_sync_team",
-            description: "Trigger a sync for a Figma team connection in FM to refresh file listings.",
-            parameters: {
-              type: "object",
-              required: ["connection_id"],
-              properties: { connection_id: { type: "number", description: "FM connection ID to sync." } },
               additionalProperties: false,
             },
           },
@@ -4503,7 +4267,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             const figmaContext = await readWorkspaceFigmaContext(workspaceId);
             const payload = {
               ...figmaContext,
-              note: "Use fm_* tools for file-manager tasks like files, tags, folders, categories, links, and FM sync state. Use figma_mcp_* first for document/design analysis on the selected file; reserve figma_pat_audit_file for fallback structural audits when MCP cannot reach the needed context.",
+              note: "Use the embedded Figma panel only to sync selected-file context and PAT handoff. Use figma_mcp_* first for document/design analysis on the selected file; reserve figma_pat_audit_file for fallback structural audits when MCP cannot reach the needed context.",
               continueAgentLoop: true,
             };
             finishTool(payload);
