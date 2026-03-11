@@ -194,6 +194,7 @@ function resolveOnboardingMode(): boolean {
 
 const PMOS_FIGMA_MESSAGE_TYPES = new Set([
   "pmos:figma-auth-complete",
+  "pmos:figma-mcp-auth-complete",
   "pmos:figma-selection-change",
   "pmos:figma-connection-change",
 ]);
@@ -792,19 +793,25 @@ export class OpenClawApp extends LitElement {
     if (typeof messageType !== "string" || !PMOS_FIGMA_MESSAGE_TYPES.has(messageType)) {
       return;
     }
-    const figmaBaseUrl = String(
-      this.pmosFigmaUrl || this.pmosConnectorsStatus?.figma?.url || "https://fm.wickedlab.io",
-    )
-      .trim()
-      .replace(/\/+$/, "");
-    let expectedOrigin: string | null = null;
-    try {
-      expectedOrigin = new URL(figmaBaseUrl).origin;
-    } catch {
-      expectedOrigin = null;
-    }
-    if (!expectedOrigin || event.origin !== expectedOrigin) {
-      return;
+    if (messageType === "pmos:figma-mcp-auth-complete") {
+      if (event.origin !== window.location.origin) {
+        return;
+      }
+    } else {
+      const figmaBaseUrl = String(
+        this.pmosFigmaUrl || this.pmosConnectorsStatus?.figma?.url || "https://fm.wickedlab.io",
+      )
+        .trim()
+        .replace(/\/+$/, "");
+      let expectedOrigin: string | null = null;
+      try {
+        expectedOrigin = new URL(figmaBaseUrl).origin;
+      } catch {
+        expectedOrigin = null;
+      }
+      if (!expectedOrigin || event.origin !== expectedOrigin) {
+        return;
+      }
     }
     this.pmosFigmaContextError = null;
     this.pmosFigmaContextSyncedOk = false;
@@ -812,6 +819,9 @@ export class OpenClawApp extends LitElement {
       this.pmosFigmaEmbedVersion = (this.pmosFigmaEmbedVersion ?? 0) + 1;
       // Auth just completed — verify live auth and auto-sync immediately
       void this.verifyFigmaLiveAuth();
+    }
+    if (messageType === "pmos:figma-mcp-auth-complete") {
+      void loadPmosConnectorsStatus(this);
     }
     void this.handlePmosRefreshConnectors();
     this.queuePmosFigmaAutoSync();
@@ -1086,6 +1096,17 @@ export class OpenClawApp extends LitElement {
   }
 
   async handlePmosPrepareFigmaMcp() {
+    const officialMcp = this.pmosConnectorsStatus?.figma?.mcp ?? null;
+    if (officialMcp?.authOk !== true) {
+      const basePath = (this.basePath ?? "").replace(/\/+$/, "");
+      const popupUrl = `${window.location.origin}${basePath}/api/pmos/auth/figma-mcp/start`;
+      window.open(
+        popupUrl,
+        "pmos-figma-mcp-auth",
+        "popup=yes,width=720,height=860,resizable=yes,scrollbars=yes",
+      );
+      return;
+    }
     if (!this.client || !this.connected) {
       this.pmosConnectorsError = "Connect to the gateway first.";
       return;

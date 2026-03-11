@@ -27,6 +27,10 @@ describe("pmos connector redaction", () => {
           personalAccessToken: "figd_pat_super_secret",
           source: "fm-session",
           mcpServerUrl: "https://mcp.figma.com/mcp",
+          mcpOAuth: {
+            access_token: "secret",
+            clientInformation: { client_id: "secret-client" },
+          },
         },
         identity: {
           connected: true,
@@ -69,5 +73,6 @@ describe("pmos connector redaction", () => {
       },
     });
     expect(redacted.figma?.auth?.personalAccessToken).toBeUndefined();
+    expect(redacted.figma?.auth?.mcpOAuth).toBeUndefined();
   });
 });

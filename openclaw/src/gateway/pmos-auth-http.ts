@@ -15,6 +15,11 @@ import {
   revokePmosSessionByToken,
   signupPmosUser,
 } from "./pmos-auth.js";
+import {
+  beginWorkspaceFigmaMcpOAuth,
+  finishWorkspaceFigmaMcpOAuth,
+  resolveWorkspaceIdFromFigmaMcpState,
+} from "./figma-mcp-client.js";
 import { resolveThinkingDefault } from "../agents/model-selection.js";
 import { loadConfig } from "../config/config.js";
 import { stripEnvelopeFromMessages } from "./chat-sanitize.js";
@@ -465,6 +470,54 @@ function normalizeBasePath(value: string): string {
   return withLeading.endsWith("/") ? withLeading.slice(0, -1) : withLeading;
 }
 
+function resolveRequestOrigin(req: IncomingMessage): string {
+  const host = typeof req.headers.host === "string" && req.headers.host.trim() ? req.headers.host : "localhost";
+  const protoHeader = req.headers["x-forwarded-proto"];
+  const proto = Array.isArray(protoHeader) ? protoHeader[0] : protoHeader;
+  const scheme =
+    typeof proto === "string" && proto.trim()
+      ? proto.trim().split(",")[0]!.trim()
+      : (req.socket as { encrypted?: boolean } | undefined)?.encrypted
+        ? "https"
+        : "http";
+  return `${scheme}://${host}`;
+}
+
+function sendHtml(res: ServerResponse, status: number, html: string): void {
+  res.statusCode = status;
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.end(html);
+}
+
+function buildFigmaMcpPopupHtml(params: { origin: string; ok: boolean; message: string }): string {
+  const title = params.ok ? "Figma MCP Connected" : "Figma MCP Connection Failed";
+  const background = params.ok ? "#10261b" : "#2d1414";
+  const border = params.ok ? "#226b42" : "#8d3434";
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${title}</title>
+</head>
+<body style="margin:0;font-family:system-ui,sans-serif;background:${background};color:#f5f7f8;display:flex;align-items:center;justify-content:center;min-height:100vh;">
+  <div style="max-width:420px;padding:24px 20px;border:1px solid ${border};border-radius:14px;background:rgba(0,0,0,0.18);">
+    <h1 style="margin:0 0 12px;font-size:20px;">${title}</h1>
+    <p style="margin:0;line-height:1.5;">${params.message}</p>
+  </div>
+  <script>
+    if (window.opener) {
+      window.opener.postMessage(
+        { type: "pmos:figma-mcp-auth-complete", ok: ${params.ok ? "true" : "false"} },
+        ${JSON.stringify(params.origin)}
+      );
+    }
+    setTimeout(() => window.close(), 1200);
+  </script>
+</body>
+</html>`;
+}
+
 function resolveAuthRoute(pathname: string, basePath: string): string | null {
   const normalizedBase = normalizeBasePath(basePath);
   const rootPrefix = "/api/pmos/auth";
@@ -486,6 +539,12 @@ function resolveAuthRoute(pathname: string, basePath: string): string | null {
   if (pathname === `${rootPrefix}/admin/reset-password`) {
     return "admin-reset-password";
   }
+  if (pathname === `${rootPrefix}/figma-mcp/start`) {
+    return "figma-mcp-start";
+  }
+  if (pathname === `${rootPrefix}/figma-mcp/callback`) {
+    return "figma-mcp-callback";
+  }
 
   if (normalizedBase) {
     const prefixed = `${normalizedBase}${rootPrefix}`;
@@ -506,6 +565,12 @@ function resolveAuthRoute(pathname: string, basePath: string): string | null {
     }
     if (pathname === `${prefixed}/admin/reset-password`) {
       return "admin-reset-password";
+    }
+    if (pathname === `${prefixed}/figma-mcp/start`) {
+      return "figma-mcp-start";
+    }
+    if (pathname === `${prefixed}/figma-mcp/callback`) {
+      return "figma-mcp-callback";
     }
   }
   return null;
@@ -1879,6 +1944,120 @@ export async function handlePmosAuthHttpRequest(params: {
   const route = resolveAuthRoute(url.pathname, controlUiBasePath);
   if (!route) {
     return false;
+  }
+
+  if (route === "figma-mcp-start") {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { ok: false, error: "Method Not Allowed" });
+      return true;
+    }
+    const session = await resolvePmosSessionFromRequest(req);
+    if (!session.ok || !session.user.workspaceId) {
+      sendHtml(
+        res,
+        401,
+        buildFigmaMcpPopupHtml({
+          origin: resolveRequestOrigin(req),
+          ok: false,
+          message: "Authentication required before connecting the official Figma MCP server.",
+        }),
+      );
+      return true;
+    }
+    const normalizedBase = normalizeBasePath(controlUiBasePath);
+    const redirectUrl = `${resolveRequestOrigin(req)}${normalizedBase}/api/pmos/auth/figma-mcp/callback`;
+    try {
+      const started = await beginWorkspaceFigmaMcpOAuth({
+        workspaceId: session.user.workspaceId,
+        redirectUrl,
+      });
+      if (started.alreadyAuthorized) {
+        sendHtml(
+          res,
+          200,
+          buildFigmaMcpPopupHtml({
+            origin: resolveRequestOrigin(req),
+            ok: true,
+            message: "Official Figma MCP is already connected for this workspace.",
+          }),
+        );
+        return true;
+      }
+      res.statusCode = 302;
+      res.setHeader("Location", started.authorizationUrl);
+      res.end();
+      return true;
+    } catch (err) {
+      sendHtml(
+        res,
+        500,
+        buildFigmaMcpPopupHtml({
+          origin: resolveRequestOrigin(req),
+          ok: false,
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      );
+      return true;
+    }
+  }
+
+  if (route === "figma-mcp-callback") {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { ok: false, error: "Method Not Allowed" });
+      return true;
+    }
+    const state = String(url.searchParams.get("state") ?? "").trim();
+    const code = String(url.searchParams.get("code") ?? "").trim();
+    const oauthError = String(url.searchParams.get("error") ?? "").trim();
+    const origin = resolveRequestOrigin(req);
+    if (oauthError) {
+      sendHtml(
+        res,
+        400,
+        buildFigmaMcpPopupHtml({
+          origin,
+          ok: false,
+          message: `Figma returned an OAuth error: ${oauthError}`,
+        }),
+      );
+      return true;
+    }
+    const workspaceId = resolveWorkspaceIdFromFigmaMcpState(state);
+    if (!workspaceId || !code) {
+      sendHtml(
+        res,
+        400,
+        buildFigmaMcpPopupHtml({
+          origin,
+          ok: false,
+          message: "Figma MCP callback is missing the authorization code or workspace state.",
+        }),
+      );
+      return true;
+    }
+    try {
+      await finishWorkspaceFigmaMcpOAuth({ workspaceId, code, state });
+      sendHtml(
+        res,
+        200,
+        buildFigmaMcpPopupHtml({
+          origin,
+          ok: true,
+          message: "Official Figma MCP is now connected in PMOS.",
+        }),
+      );
+    } catch (err) {
+      sendHtml(
+        res,
+        400,
+        buildFigmaMcpPopupHtml({
+          origin,
+          ok: false,
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+    return true;
   }
 
   if (route === "me") {

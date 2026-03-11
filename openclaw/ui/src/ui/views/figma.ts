@@ -130,9 +130,9 @@ export function renderFigma(props: FigmaProps) {
                         ? "PMOS can reach the official Figma MCP server."
                         : officialMcp?.configured
                           ? officialMcp?.authRequired
-                            ? "mcporter is configured, but server-side Figma MCP auth is still required."
+                            ? "PMOS still needs the official Figma MCP OAuth connect flow."
                             : officialMcp?.error ?? "Official Figma MCP is configured, but the live probe is not passing yet."
-                          : "Prepare mcporter for the official Figma MCP server before relying on deeper MCP tools."}
+                          : "Connect the official Figma MCP server before relying on deeper MCP tools."}
                     </div>
                     ${officialMcp?.configPath
                       ? html`<div class="muted" style="margin-top: 4px;">Config: ${officialMcp.configPath}</div>`
@@ -142,7 +142,7 @@ export function renderFigma(props: FigmaProps) {
                       : nothing}
                     <div style="margin-top: 8px;">
                       <button class="btn btn--secondary" ?disabled=${props.connectorsLoading} @click=${() => props.onPrepareOfficialMcp()}>
-                        ${officialMcp?.configured ? "Recheck Official MCP" : "Prepare Official MCP"}
+                        ${officialMcp?.authOk ? "Recheck Official MCP" : "Connect Official MCP"}
                       </button>
                     </div>
                   </div>
