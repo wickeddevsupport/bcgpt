@@ -5,7 +5,8 @@
   "scripts": {
     "start": "node index.js",
     "license:guard": "node scripts/check-no-ee-imports.mjs",
-    "test:basecamp:regression": "node scripts/basecamp-test-project-regression.mjs"
+    "test:basecamp:regression": "node scripts/basecamp-test-project-regression.mjs",
+    "test:basecamp:smart-target": "node --test tests/basecamp-smart-action-target.test.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",

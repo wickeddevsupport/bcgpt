@@ -56,6 +56,7 @@ import fs from "fs";
 import path from "path";
 import { basecampFetch, basecampFetchAll } from "./basecamp.js";
 import { resolveByName, resolveBestEffort, levenshtein } from "./resolvers.js";
+import { extractSmartActionBasecampTarget } from "./smart-action-basecamp-target.js";
 import {
   indexSearchItem,
   searchIndex,
@@ -5845,6 +5846,95 @@ export async function handleMCP(reqBody, ctx) {
         return withAttemptMeta({}, attempts);
       };
 
+      const exactBasecampTarget = extractSmartActionBasecampTarget(query);
+
+      const readExactBasecampResource = async (target) => {
+        const bucketId = Number(target?.bucketId || 0);
+        const cardId = Number(target?.cardId || 0) || null;
+        const commentId = Number(target?.commentId || 0) || null;
+        if (!bucketId || (!cardId && !commentId && !target?.cardPath && !target?.url)) return null;
+
+        const payload = {
+          source: "smart_action_exact_basecamp_target",
+          target: {
+            url: target?.url || null,
+            account_id: target?.accountId || null,
+            bucket_id: bucketId,
+            card_id: cardId,
+            comment_id: commentId,
+            card_path: target?.cardPath || null,
+          },
+          project: { id: bucketId, name: null },
+          card: null,
+          linked_comment: null,
+          comments: [],
+          comments_meta: null,
+        };
+
+        try {
+          const project = await getProject(ctx, bucketId);
+          if (project?.id) {
+            payload.project = {
+              id: project.id,
+              name: project.name || null,
+            };
+          }
+        } catch (error) {
+          payload.project_error = error?.message || String(error);
+        }
+
+        if (target?.url) {
+          try {
+            const resolved = await invokeTool("resolve_entity_from_url", {
+              url: target.url,
+              fetch: true,
+            });
+            payload.resolved_url = resolved;
+            if (resolved?.type === "card" && resolved?.details) {
+              payload.card = resolved.details;
+            }
+          } catch (error) {
+            payload.resolve_error = error?.message || String(error);
+          }
+        }
+
+        if (!payload.card && cardId) {
+          try {
+            payload.card = await getCard(ctx, bucketId, cardId);
+          } catch (error) {
+            payload.card_error = error?.message || String(error);
+          }
+        }
+
+        if (commentId) {
+          try {
+            payload.linked_comment = await getComment(ctx, bucketId, commentId);
+          } catch (error) {
+            payload.linked_comment_error = error?.message || String(error);
+          }
+        }
+
+        const commentsRecordingId =
+          payload.card?.recording?.id ||
+          payload.card?.recording_id ||
+          cardId ||
+          null;
+        if (commentsRecordingId) {
+          try {
+            const commentsResult = await listComments(ctx, bucketId, commentsRecordingId);
+            payload.comments = commentsResult?.comments || [];
+            payload.comments_meta = commentsResult?._meta || null;
+          } catch (error) {
+            payload.comments_error = error?.message || String(error);
+          }
+        }
+
+        if (!payload.card && !payload.linked_comment && !payload.comments.length) {
+          return null;
+        }
+        return payload;
+      };
+
       const computeConfidence = ({ analysis, hasProject, hasResources, hasConstraints, keywordBoost }) => {
         let score = 0.2;
         if (analysis?.pattern && analysis.pattern !== "generic") score += 0.25;
@@ -6143,6 +6233,21 @@ export async function handleMCP(reqBody, ctx) {
             project: { name: String(args.project) },
             result
           });
+        }
+
+        if (exactBasecampTarget.hasExactResource && exactBasecampTarget.bucketId) {
+          const result = await readExactBasecampResource(exactBasecampTarget);
+          if (result) {
+            return ok(id, {
+              query,
+              action: "exact_basecamp_resource",
+              confidence: 0.99,
+              exact_resource: true,
+              project: result.project,
+              result,
+              note: "Resolved directly from the pasted Basecamp URL/resource hints before fuzzy project search."
+            });
+          }
         }
 
         const analysis = intelligent.analyzeQuery(query);
