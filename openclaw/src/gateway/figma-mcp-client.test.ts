@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  __test,
   callWorkspaceFigmaMcpTool,
   listWorkspaceFigmaMcpTools,
   probeWorkspaceFigmaMcpStatus,
@@ -41,6 +42,8 @@ describe("figma mcp compat bridge", () => {
         expect.objectContaining({ name: "figma.get_design_context" }),
         expect.objectContaining({ name: "figma.get_metadata" }),
         expect.objectContaining({ name: "figma.get_comments" }),
+        expect.objectContaining({ name: "figma.get_code_connect_map" }),
+        expect.objectContaining({ name: "figma.create_design_system_rules" }),
       ]),
     );
   });
@@ -129,5 +132,128 @@ describe("figma mcp compat bridge", () => {
         nodeId: "0:1",
       }),
     ]);
+  });
+
+  it("stores and returns PMOS-managed code connect mappings", async () => {
+    await writeWorkspaceConnectors(workspaceId, {
+      figma: {
+        auth: {
+          personalAccessToken: "figd_pat_test",
+          hasPersonalAccessToken: true,
+          source: "fm-session",
+        },
+      },
+    });
+
+    const saved = (await callWorkspaceFigmaMcpTool({
+      workspaceId,
+      toolName: "add_code_connect_map",
+      args: {
+        fileKey: "3INmNiG3X3NKAZtCI3SMg6",
+        nodeId: "0:1",
+        componentName: "HeroBanner",
+        source: "src/components/HeroBanner.tsx",
+        label: "React",
+      },
+    })) as Record<string, unknown>;
+
+    expect(saved.saved).toBe(true);
+
+    const maps = (await callWorkspaceFigmaMcpTool({
+      workspaceId,
+      toolName: "get_code_connect_map",
+      args: {
+        fileKey: "3INmNiG3X3NKAZtCI3SMg6",
+        nodeId: "0:1",
+      },
+    })) as Record<string, unknown>;
+
+    expect(maps.totalMappings).toBe(1);
+    expect(maps.mappings).toEqual([
+      expect.objectContaining({
+        componentName: "HeroBanner",
+        source: "src/components/HeroBanner.tsx",
+        label: "React",
+      }),
+    ]);
+
+    const mappingPath = __test.workspaceFigmaCodeConnectPath(workspaceId);
+    const raw = await fs.readFile(mappingPath, "utf-8");
+    expect(raw).toContain("HeroBanner");
+  });
+
+  it("generates implementation-oriented design system rules from file data", async () => {
+    await writeWorkspaceConnectors(workspaceId, {
+      figma: {
+        auth: {
+          personalAccessToken: "figd_pat_test",
+          hasPersonalAccessToken: true,
+          source: "fm-session",
+        },
+      },
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/variables/local")) {
+          return new Response(
+            JSON.stringify({
+              meta: {
+                variables: {
+                  "1": { id: "1", name: "color/brand/primary" },
+                  "2": { id: "2", name: "space/md" },
+                },
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        if (url.includes("/v1/files/")) {
+          return new Response(
+            JSON.stringify({
+              document: { id: "0:1", name: "Audit", type: "CANVAS" },
+              components: {
+                c1: { name: "Hero/Banner" },
+                c2: { name: "Button/Primary" },
+              },
+              componentSets: {
+                cs1: { name: "Button" },
+              },
+              styles: {
+                s1: { name: "Text/Heading" },
+                s2: { name: "Fill/Brand/Primary" },
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+
+    const result = (await callWorkspaceFigmaMcpTool({
+      workspaceId,
+      toolName: "create_design_system_rules",
+      args: {
+        fileKey: "3INmNiG3X3NKAZtCI3SMg6",
+        clientFrameworks: "react",
+        clientLanguages: "typescript",
+      },
+    })) as Record<string, unknown>;
+
+    expect(result.summary).toEqual({
+      components: 2,
+      componentSets: 1,
+      styles: 2,
+      variables: 2,
+    });
+    expect(String(result.rules)).toContain("Design system implementation rules");
+    expect(String(result.rules)).toContain("react / typescript");
+    expect(String(result.rules)).toContain("Hero/Banner");
   });
 });

@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { ensureDir, CONFIG_DIR } from "../utils.js";
 import { parseFigmaFileKey } from "./figma-rest-audit.js";
 import {
   readWorkspaceConnectors,
@@ -43,6 +46,15 @@ type ResolvedFigmaTarget = {
   selectedFileName: string | null;
   selectedFileUrl: string | null;
   selectedFileId: string | null;
+};
+
+type StoredCodeConnectMap = {
+  fileKey: string;
+  nodeId: string;
+  componentName: string;
+  source: string;
+  label: string;
+  updatedAt: string;
 };
 
 type FigmaApiRequestOptions = {
@@ -101,6 +113,14 @@ function parseNodeIdFromUrl(value: string | null): string | null {
   }
 }
 
+function safeWorkspaceId(workspaceId: string): string {
+  return String(workspaceId).trim() || "default";
+}
+
+function workspaceFigmaCodeConnectPath(workspaceId: string): string {
+  return path.join(CONFIG_DIR, "workspaces", safeWorkspaceId(workspaceId), "figma-code-connect.json");
+}
+
 function toXmlAttr(value: unknown): string {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -148,6 +168,47 @@ function buildMetadataXml(node: Record<string, unknown>, depth = 0, maxDepth = 6
   return `<node ${attrs}>${childXml}</node>`;
 }
 
+async function readWorkspaceCodeConnectMaps(workspaceId: string): Promise<StoredCodeConnectMap[]> {
+  const filePath = workspaceFigmaCodeConnectPath(workspaceId);
+  try {
+    const raw = await fs.readFile(filePath, "utf-8");
+    const parsed = JSON.parse(raw);
+    return asArray(parsed)
+      .filter(isJsonObject)
+      .map((value) => {
+        const fileKey = parseFigmaFileKey(stringOrNull(value.fileKey)) ?? null;
+        const nodeId = normalizeNodeId(value.nodeId);
+        const componentName = stringOrNull(value.componentName);
+        const source = stringOrNull(value.source);
+        const label = stringOrNull(value.label) ?? "unknown";
+        if (!fileKey || !nodeId || !componentName || !source) {
+          return null;
+        }
+        return {
+          fileKey,
+          nodeId,
+          componentName,
+          source,
+          label,
+          updatedAt: stringOrNull(value.updatedAt) ?? new Date(0).toISOString(),
+        } satisfies StoredCodeConnectMap;
+      })
+      .filter(Boolean) as StoredCodeConnectMap[];
+  } catch {
+    return [];
+  }
+}
+
+async function writeWorkspaceCodeConnectMaps(
+  workspaceId: string,
+  maps: StoredCodeConnectMap[],
+): Promise<void> {
+  const filePath = workspaceFigmaCodeConnectPath(workspaceId);
+  await ensureDir(path.dirname(filePath));
+  const raw = JSON.stringify(maps, null, 2).trimEnd().concat("\n");
+  await fs.writeFile(filePath, raw, "utf-8");
+}
+
 function flattenNodes(node: Record<string, unknown>): Array<Record<string, unknown>> {
   const out: Array<Record<string, unknown>> = [];
   const stack = [node];
@@ -186,6 +247,25 @@ function collectNodeStats(node: Record<string, unknown>): Record<string, unknown
     autoLayoutContainers,
     textNodes,
   };
+}
+
+function collectTextNodes(node: Record<string, unknown>, limit = 80): string[] {
+  const flat = flattenNodes(node);
+  const out: string[] = [];
+  for (const current of flat) {
+    if ((stringOrNull(current.type) ?? "") !== "TEXT") {
+      continue;
+    }
+    const characters = stringOrNull(current.characters);
+    if (!characters) {
+      continue;
+    }
+    out.push(characters.trim());
+    if (out.length >= limit) {
+      break;
+    }
+  }
+  return out;
 }
 
 function resolveWorkspaceFigmaMcpAuthFromConnectors(
@@ -457,6 +537,57 @@ function listMapItems(
   return [];
 }
 
+function summarizeListNames(items: Array<Record<string, unknown>>, limit = 8): string[] {
+  return items
+    .map((item) => stringOrNull(item.name) ?? stringOrNull(item.key))
+    .filter(Boolean)
+    .slice(0, limit) as string[];
+}
+
+function buildDesignSystemRules(params: {
+  fileKey: string;
+  fileName: string | null;
+  framework: string | null;
+  language: string | null;
+  componentCount: number;
+  componentSetCount: number;
+  styleCount: number;
+  variableCount: number;
+  topComponentNames: string[];
+  topStyleNames: string[];
+  topVariableNames: string[];
+}): string {
+  const targetStack = [params.framework, params.language].filter(Boolean).join(" / ") || "your stack";
+  const rules = [
+    `Design system implementation rules for ${params.fileName ?? params.fileKey} targeting ${targetStack}.`,
+    "",
+    "Core rules:",
+    "- Treat Figma variables as the source of truth for colors, spacing, typography, and effects.",
+    "- Prefer reusable components and component sets over one-off frame styling.",
+    "- Preserve Auto Layout intent when translating to code, including gap, padding, fill, and hug behavior.",
+    "- Keep component APIs aligned with design variants and documented states.",
+    "",
+    `Observed inventory: ${params.componentCount} components, ${params.componentSetCount} component sets, ${params.styleCount} local styles, ${params.variableCount} variables.`,
+    params.topComponentNames.length
+      ? `Priority component families: ${params.topComponentNames.join(", ")}.`
+      : "Priority component families: no strong component families detected yet.",
+    params.topStyleNames.length
+      ? `Key style names: ${params.topStyleNames.join(", ")}.`
+      : "Key style names: sparse local styles; rely more on variables/tokens.",
+    params.topVariableNames.length
+      ? `Important variable names: ${params.topVariableNames.join(", ")}.`
+      : "Important variable names: variable data is limited or absent.",
+    "",
+    "Implementation guidance:",
+    "- Build primitives first: text, button, input, card, modal, and navigation shells.",
+    "- Convert repeated design values into exported tokens before feature work starts.",
+    "- Keep spacing and type scales centralized; avoid hard-coded pixel drift in components.",
+    "- Add component stories/examples for every major variant before downstream screen assembly.",
+    "- When a node has review comments, resolve the comment thread before freezing the component API.",
+  ];
+  return rules.join("\n");
+}
+
 function buildDesignContextCode(params: {
   fileKey: string;
   nodeId: string | null;
@@ -555,6 +686,19 @@ const FIGMA_REST_COMPAT_TOOLS: FigmaMcpToolDefinition[] = [
     },
   },
   {
+    name: "figma.get_annotations",
+    description:
+      "Return review comments and pinned annotation-style notes, optionally filtered to a node, using the PMOS REST compatibility bridge.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        fileKey: { type: "string" },
+        nodeId: { type: "string" },
+        url: { type: "string" },
+      },
+    },
+  },
+  {
     name: "figma.get_components",
     description:
       "Return defined components and component sets from a file using the PMOS REST compatibility bridge.",
@@ -563,6 +707,64 @@ const FIGMA_REST_COMPAT_TOOLS: FigmaMcpToolDefinition[] = [
       properties: {
         fileKey: { type: "string" },
         url: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "figma.get_code_connect_map",
+    description:
+      "Return PMOS-managed Code Connect mappings for a Figma file or node so design nodes can be related back to source components.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        fileKey: { type: "string" },
+        nodeId: { type: "string" },
+        url: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "figma.add_code_connect_map",
+    description:
+      "Create or update a PMOS-managed Code Connect mapping for a specific Figma node and component source path.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        fileKey: { type: "string" },
+        nodeId: { type: "string" },
+        url: { type: "string" },
+        componentName: { type: "string" },
+        source: { type: "string" },
+        label: { type: "string" },
+      },
+      required: ["componentName", "source"],
+    },
+  },
+  {
+    name: "figma.create_design_system_rules",
+    description:
+      "Generate implementation-facing design system rules from Figma variables, styles, and components using the PMOS REST compatibility bridge.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        fileKey: { type: "string" },
+        url: { type: "string" },
+        clientFrameworks: { type: "string" },
+        clientLanguages: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "figma.get_figjam",
+    description:
+      "Return FigJam-friendly context for a board or node, including metadata, visible text notes, and optional screenshot URLs using the PMOS REST compatibility bridge.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        fileKey: { type: "string" },
+        nodeId: { type: "string" },
+        url: { type: "string" },
+        includeImagesOfNodes: { type: "boolean" },
       },
     },
   },
@@ -669,6 +871,20 @@ async function callCompatTool(params: {
         comments: summarizeComments(comments),
       };
     }
+    case "figma.get_annotations": {
+      const comments = filterCommentsForNode(
+        await fetchComments(token, target.fileKey),
+        target.nodeId,
+      );
+      return {
+        source: "pmos-figma-rest-compat",
+        transport: "rest_compat",
+        fileKey: target.fileKey,
+        nodeId: target.nodeId,
+        totalAnnotations: comments.length,
+        annotations: summarizeComments(comments),
+      };
+    }
     case "figma.get_variable_defs": {
       const node = target.nodeId
         ? await fetchNode(token, target.fileKey, target.nodeId, 6)
@@ -710,6 +926,130 @@ async function callCompatTool(params: {
         transport: "rest_compat",
         fileKey: target.fileKey,
         styles: listMapItems(file.styles),
+      };
+    }
+    case "figma.get_code_connect_map": {
+      const maps = await readWorkspaceCodeConnectMaps(params.workspaceId);
+      const filtered = maps.filter((entry) => {
+        if (entry.fileKey !== target.fileKey) {
+          return false;
+        }
+        if (!target.nodeId) {
+          return true;
+        }
+        return entry.nodeId === target.nodeId;
+      });
+      return {
+        source: "pmos-figma-rest-compat",
+        transport: "rest_compat",
+        fileKey: target.fileKey,
+        nodeId: target.nodeId,
+        mappings: filtered,
+        totalMappings: filtered.length,
+      };
+    }
+    case "figma.add_code_connect_map": {
+      const componentName = stringOrNull(params.args.componentName);
+      const source = stringOrNull(params.args.source);
+      const label = stringOrNull(params.args.label) ?? "unknown";
+      const nodeId = target.nodeId;
+      if (!componentName || !source || !nodeId) {
+        throw new Error("FIGMA_CODE_CONNECT_MAPPING_INVALID");
+      }
+      const maps = await readWorkspaceCodeConnectMaps(params.workspaceId);
+      const nextEntry: StoredCodeConnectMap = {
+        fileKey: target.fileKey,
+        nodeId,
+        componentName,
+        source,
+        label,
+        updatedAt: new Date().toISOString(),
+      };
+      const deduped = maps.filter(
+        (entry) =>
+          !(
+            entry.fileKey === nextEntry.fileKey &&
+            entry.nodeId === nextEntry.nodeId &&
+            entry.label === nextEntry.label
+          ),
+      );
+      deduped.push(nextEntry);
+      await writeWorkspaceCodeConnectMaps(params.workspaceId, deduped);
+      return {
+        source: "pmos-figma-rest-compat",
+        transport: "rest_compat",
+        saved: true,
+        mapping: nextEntry,
+      };
+    }
+    case "figma.create_design_system_rules": {
+      const [file, variablesPayload] = await Promise.all([
+        fetchFile(token, target.fileKey, 2),
+        fetchLocalVariables(token, target.fileKey).catch(() => ({})),
+      ]);
+      const components = listMapItems(file.components);
+      const componentSets = listMapItems(file.componentSets);
+      const styles = listMapItems(file.styles);
+      const variables = normalizeVariableList(asRecord(variablesPayload));
+      const framework = stringOrNull(params.args.clientFrameworks);
+      const language = stringOrNull(params.args.clientLanguages);
+      return {
+        source: "pmos-figma-rest-compat",
+        transport: "rest_compat",
+        fileKey: target.fileKey,
+        framework,
+        language,
+        summary: {
+          components: components.length,
+          componentSets: componentSets.length,
+          styles: styles.length,
+          variables: variables.length,
+        },
+        rules: buildDesignSystemRules({
+          fileKey: target.fileKey,
+          fileName: target.selectedFileName,
+          framework,
+          language,
+          componentCount: components.length,
+          componentSetCount: componentSets.length,
+          styleCount: styles.length,
+          variableCount: variables.length,
+          topComponentNames: summarizeListNames(components),
+          topStyleNames: summarizeListNames(styles),
+          topVariableNames: variables
+            .map((value) => stringOrNull(value.name) ?? stringOrNull(value.key))
+            .filter(Boolean)
+            .slice(0, 8) as string[],
+        }),
+      };
+    }
+    case "figma.get_figjam": {
+      const node = target.nodeId
+        ? await fetchNode(token, target.fileKey, target.nodeId, 6)
+        : asRecord((await fetchFile(token, target.fileKey, 4)).document);
+      const screenshotNodeId = target.nodeId ?? stringOrNull(node.id) ?? "0:1";
+      const includeImages = params.args.includeImagesOfNodes === true;
+      const images = includeImages
+        ? await fetchImages(token, target.fileKey, [screenshotNodeId]).catch(() => ({}))
+        : {};
+      const metadataXml = buildMetadataXml(node);
+      const notes = collectTextNodes(node, 60);
+      return {
+        source: "pmos-figma-rest-compat",
+        transport: "rest_compat",
+        fileKey: target.fileKey,
+        nodeId: target.nodeId ?? stringOrNull(node.id),
+        metadataXml,
+        notes,
+        noteCount: notes.length,
+        imageUrl: stringOrNull(images[screenshotNodeId]),
+        code: [
+          `FigJam context for ${target.selectedFileName ?? target.fileKey}${target.nodeId ? ` node ${target.nodeId}` : ""}.`,
+          `Visible text note count: ${notes.length}.`,
+          notes.length ? `Sample notes: ${notes.slice(0, 10).join(" | ")}` : "Sample notes: none detected.",
+          "Metadata XML:",
+          metadataXml,
+        ].join("\n"),
       };
     }
     case "figma.get_design_context": {
@@ -880,4 +1220,5 @@ export const __test = {
   parseNodeIdFromUrl,
   buildMetadataXml,
   resolveRequestedTarget,
+  workspaceFigmaCodeConnectPath,
 };
