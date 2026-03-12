@@ -463,6 +463,10 @@ async function fetchFile(token: string, fileKey: string, depth = 4): Promise<Rec
   );
 }
 
+async function fetchFileMetadata(token: string, fileKey: string): Promise<Record<string, unknown>> {
+  return asRecord(await fetchFigmaJson(token, `/v1/files/${encodeURIComponent(fileKey)}/meta`));
+}
+
 async function fetchNode(
   token: string,
   fileKey: string,
@@ -493,6 +497,35 @@ async function fetchComments(token: string, fileKey: string): Promise<Record<str
     }),
   );
   return asArray(payload.comments).filter(isJsonObject);
+}
+
+async function fetchVersions(token: string, fileKey: string): Promise<Record<string, unknown>> {
+  return asRecord(
+    await fetchFigmaJson(token, `/v1/files/${encodeURIComponent(fileKey)}/versions`, {
+      timeoutMs: 20_000,
+    }),
+  );
+}
+
+async function fetchDevResources(
+  token: string,
+  fileKey: string,
+  nodeIds: string[],
+): Promise<Record<string, unknown>[]> {
+  const query = new URLSearchParams();
+  const normalizedIds = [...new Set(nodeIds.map((value) => normalizeNodeId(value)).filter(Boolean) as string[])];
+  if (normalizedIds.length > 0) {
+    query.set("node_ids", normalizedIds.join(","));
+  }
+  const suffix = query.toString();
+  const payload = asRecord(
+    await fetchFigmaJson(
+      token,
+      `/v1/files/${encodeURIComponent(fileKey)}/dev_resources${suffix ? `?${suffix}` : ""}`,
+      { timeoutMs: 20_000 },
+    ),
+  );
+  return asArray(payload.dev_resources).filter(isJsonObject);
 }
 
 async function fetchImages(
@@ -848,6 +881,18 @@ const FIGMA_REST_COMPAT_TOOLS: FigmaMcpToolDefinition[] = [
     },
   },
   {
+    name: "figma.get_file_metadata",
+    description:
+      "Return file-level metadata such as editor type, thumbnail, link access, branches, and component/style summaries using the PMOS REST compatibility bridge.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        fileKey: { type: "string" },
+        url: { type: "string" },
+      },
+    },
+  },
+  {
     name: "figma.get_screenshot",
     description:
       "Return a Figma-rendered image URL for a target node or file using the PMOS REST compatibility bridge.",
@@ -888,9 +933,34 @@ const FIGMA_REST_COMPAT_TOOLS: FigmaMcpToolDefinition[] = [
     },
   },
   {
+    name: "figma.get_versions",
+    description:
+      "Return version history for a Figma file using the PMOS REST compatibility bridge.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        fileKey: { type: "string" },
+        url: { type: "string" },
+      },
+    },
+  },
+  {
     name: "figma.get_annotations",
     description:
       "Return review comments and pinned annotation-style notes, optionally filtered to a node, using the PMOS REST compatibility bridge.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        fileKey: { type: "string" },
+        nodeId: { type: "string" },
+        url: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "figma.get_dev_resources",
+    description:
+      "Return Figma Dev Mode resources linked to a file or node using the PMOS REST compatibility bridge.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1395,6 +1465,29 @@ async function callCompatTool(params: {
         },
       };
     }
+    case "figma.get_file_metadata": {
+      const payload = await fetchFileMetadata(token, target.fileKey);
+      return {
+        source: "pmos-figma-rest-compat",
+        transport: "rest_compat",
+        fileKey: target.fileKey,
+        fileName: stringOrNull(payload.name) ?? target.selectedFileName,
+        editorType: stringOrNull(payload.editorType),
+        thumbnailUrl: stringOrNull(payload.thumbnailUrl),
+        version: stringOrNull(payload.version),
+        role: stringOrNull(payload.role),
+        linkAccess: stringOrNull(payload.linkAccess),
+        branches: asArray(payload.branches).filter(isJsonObject),
+        components: listMapItems(payload.components),
+        styles: listMapItems(payload.styles),
+        summary: {
+          branches: asArray(payload.branches).length,
+          components: listMapItems(payload.components).length,
+          styles: listMapItems(payload.styles).length,
+        },
+        raw: payload,
+      };
+    }
     case "figma.get_screenshot": {
       const requestedNodeId = target.nodeId ?? "0:1";
       const format = stringOrNull(params.args.format) ?? "png";
@@ -1460,6 +1553,32 @@ async function callCompatTool(params: {
         comments: summarizeComments(comments),
       };
     }
+    case "figma.get_versions": {
+      const payload = await fetchVersions(token, target.fileKey);
+      const versions = asArray(payload.versions)
+        .filter(isJsonObject)
+        .map((version) => ({
+          id: stringOrNull(version.id),
+          label: stringOrNull(version.label),
+          description: stringOrNull(version.description),
+          createdAt: stringOrNull(version.created_at) ?? stringOrNull(version.createdAt),
+          user: isJsonObject(version.user)
+            ? {
+                id: stringOrNull(version.user.id),
+                handle: stringOrNull(version.user.handle),
+                email: stringOrNull(version.user.email),
+              }
+            : null,
+        }));
+      return {
+        source: "pmos-figma-rest-compat",
+        transport: "rest_compat",
+        fileKey: target.fileKey,
+        totalVersions: versions.length,
+        versions,
+        pagination: isJsonObject(payload.pagination) ? payload.pagination : null,
+      };
+    }
     case "figma.get_annotations": {
       const comments = filterCommentsForNode(
         await fetchComments(token, target.fileKey),
@@ -1472,6 +1591,31 @@ async function callCompatTool(params: {
         nodeId: target.nodeId,
         totalAnnotations: comments.length,
         annotations: summarizeComments(comments),
+      };
+    }
+    case "figma.get_dev_resources": {
+      const devResources = await fetchDevResources(
+        token,
+        target.fileKey,
+        target.nodeId ? [target.nodeId] : [],
+      );
+      const normalized = devResources.map((resource) => ({
+        id: stringOrNull(resource.id),
+        nodeId: normalizeNodeId(resource.node_id),
+        name: stringOrNull(resource.name),
+        url: stringOrNull(resource.url),
+        type: stringOrNull(resource.resource_type) ?? stringOrNull(resource.type),
+        description: stringOrNull(resource.description),
+        language: stringOrNull(resource.language),
+        fileKey: parseFigmaFileKey(stringOrNull(resource.file_key)),
+      }));
+      return {
+        source: "pmos-figma-rest-compat",
+        transport: "rest_compat",
+        fileKey: target.fileKey,
+        nodeId: target.nodeId,
+        totalDevResources: normalized.length,
+        devResources: normalized,
       };
     }
     case "figma.get_variable_defs": {

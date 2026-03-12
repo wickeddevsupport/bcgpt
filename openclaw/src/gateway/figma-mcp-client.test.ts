@@ -41,7 +41,10 @@ describe("figma mcp compat bridge", () => {
       expect.arrayContaining([
         expect.objectContaining({ name: "figma.get_design_context" }),
         expect.objectContaining({ name: "figma.get_metadata" }),
+        expect.objectContaining({ name: "figma.get_file_metadata" }),
         expect.objectContaining({ name: "figma.get_comments" }),
+        expect.objectContaining({ name: "figma.get_versions" }),
+        expect.objectContaining({ name: "figma.get_dev_resources" }),
         expect.objectContaining({ name: "figma.get_code_connect_map" }),
         expect.objectContaining({ name: "figma.get_code_connect_suggestions" }),
         expect.objectContaining({ name: "figma.send_code_connect_mappings" }),
@@ -250,6 +253,177 @@ describe("figma mcp compat bridge", () => {
         id: "c1",
         message: "Audit this hero block",
         nodeId: "0:1",
+      }),
+    ]);
+  });
+
+  it("returns file metadata through the compat tool call path", async () => {
+    await writeWorkspaceConnectors(workspaceId, {
+      figma: {
+        auth: {
+          personalAccessToken: "figd_pat_test",
+          hasPersonalAccessToken: true,
+          source: "fm-session",
+        },
+      },
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/meta")) {
+          return new Response(
+            JSON.stringify({
+              name: "OKA Online Audit",
+              editorType: "figma",
+              thumbnailUrl: "https://example.com/thumb.png",
+              version: "42",
+              role: "editor",
+              linkAccess: "view",
+              branches: [{ key: "b1", name: "Exploration" }],
+              components: { c1: { key: "c1", name: "Hero/Banner" } },
+              styles: { s1: { key: "s1", name: "Text/Heading" } },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+
+    const result = (await callWorkspaceFigmaMcpTool({
+      workspaceId,
+      toolName: "get_file_metadata",
+      args: {
+        fileKey: "3INmNiG3X3NKAZtCI3SMg6",
+      },
+    })) as Record<string, unknown>;
+
+    expect(result.fileName).toBe("OKA Online Audit");
+    expect(result.editorType).toBe("figma");
+    expect(result.summary).toEqual({
+      branches: 1,
+      components: 1,
+      styles: 1,
+    });
+  });
+
+  it("returns file versions through the compat tool call path", async () => {
+    await writeWorkspaceConnectors(workspaceId, {
+      figma: {
+        auth: {
+          personalAccessToken: "figd_pat_test",
+          hasPersonalAccessToken: true,
+          source: "fm-session",
+        },
+      },
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/versions")) {
+          return new Response(
+            JSON.stringify({
+              versions: [
+                {
+                  id: "v1",
+                  label: "Initial audit",
+                  description: "First pass",
+                  created_at: "2026-03-12T09:00:00Z",
+                  user: { id: "u1", handle: "design", email: "design@wickedwebsites.us" },
+                },
+              ],
+              pagination: { prev_page: null, next_page: null },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+
+    const result = (await callWorkspaceFigmaMcpTool({
+      workspaceId,
+      toolName: "get_versions",
+      args: {
+        fileKey: "3INmNiG3X3NKAZtCI3SMg6",
+      },
+    })) as Record<string, unknown>;
+
+    expect(result.totalVersions).toBe(1);
+    expect(result.versions).toEqual([
+      expect.objectContaining({
+        id: "v1",
+        label: "Initial audit",
+      }),
+    ]);
+  });
+
+  it("returns dev resources through the compat tool call path", async () => {
+    await writeWorkspaceConnectors(workspaceId, {
+      figma: {
+        auth: {
+          personalAccessToken: "figd_pat_test",
+          hasPersonalAccessToken: true,
+          source: "fm-session",
+        },
+      },
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/dev_resources")) {
+          return new Response(
+            JSON.stringify({
+              dev_resources: [
+                {
+                  id: "dr1",
+                  node_id: "0:1",
+                  file_key: "3INmNiG3X3NKAZtCI3SMg6",
+                  name: "Homepage component spec",
+                  url: "https://example.com/specs/homepage",
+                  resource_type: "url",
+                  description: "Engineering handoff spec",
+                  language: "typescript",
+                },
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+
+    const result = (await callWorkspaceFigmaMcpTool({
+      workspaceId,
+      toolName: "get_dev_resources",
+      args: {
+        fileKey: "3INmNiG3X3NKAZtCI3SMg6",
+        nodeId: "0:1",
+      },
+    })) as Record<string, unknown>;
+
+    expect(result.totalDevResources).toBe(1);
+    expect(result.devResources).toEqual([
+      expect.objectContaining({
+        id: "dr1",
+        nodeId: "0:1",
+        name: "Homepage component spec",
       }),
     ]);
   });
