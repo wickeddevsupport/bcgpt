@@ -1467,16 +1467,17 @@ async function callCompatTool(params: {
     }
     case "figma.get_file_metadata": {
       const payload = await fetchFileMetadata(token, target.fileKey);
+      const fileEnvelope = isJsonObject(payload.file) ? payload.file : payload;
       return {
         source: "pmos-figma-rest-compat",
         transport: "rest_compat",
         fileKey: target.fileKey,
-        fileName: stringOrNull(payload.name) ?? target.selectedFileName,
-        editorType: stringOrNull(payload.editorType),
-        thumbnailUrl: stringOrNull(payload.thumbnailUrl),
-        version: stringOrNull(payload.version),
-        role: stringOrNull(payload.role),
-        linkAccess: stringOrNull(payload.linkAccess),
+        fileName: stringOrNull(fileEnvelope.name) ?? target.selectedFileName,
+        editorType: stringOrNull(fileEnvelope.editorType),
+        thumbnailUrl: stringOrNull(fileEnvelope.thumbnailUrl) ?? stringOrNull(fileEnvelope.thumbnail_url),
+        version: stringOrNull(fileEnvelope.version),
+        role: stringOrNull(fileEnvelope.role),
+        linkAccess: stringOrNull(fileEnvelope.linkAccess) ?? stringOrNull(fileEnvelope.link_access),
         branches: asArray(payload.branches).filter(isJsonObject),
         components: listMapItems(payload.components),
         styles: listMapItems(payload.styles),

@@ -275,12 +275,14 @@ describe("figma mcp compat bridge", () => {
         if (url.includes("/meta")) {
           return new Response(
             JSON.stringify({
-              name: "OKA Online Audit",
-              editorType: "figma",
-              thumbnailUrl: "https://example.com/thumb.png",
-              version: "42",
-              role: "editor",
-              linkAccess: "view",
+              file: {
+                name: "OKA Online Audit",
+                editorType: "figma",
+                thumbnail_url: "https://example.com/thumb.png",
+                version: "42",
+                role: "editor",
+                link_access: "view",
+              },
               branches: [{ key: "b1", name: "Exploration" }],
               components: { c1: { key: "c1", name: "Hero/Banner" } },
               styles: { s1: { key: "s1", name: "Text/Heading" } },
@@ -305,6 +307,8 @@ describe("figma mcp compat bridge", () => {
 
     expect(result.fileName).toBe("OKA Online Audit");
     expect(result.editorType).toBe("figma");
+    expect(result.thumbnailUrl).toBe("https://example.com/thumb.png");
+    expect(result.linkAccess).toBe("view");
     expect(result.summary).toEqual({
       branches: 1,
       components: 1,
