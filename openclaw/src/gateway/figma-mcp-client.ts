@@ -4,6 +4,11 @@ import { randomUUID } from "node:crypto";
 import { ensureDir, CONFIG_DIR } from "../utils.js";
 import { parseFigmaFileKey } from "./figma-rest-audit.js";
 import {
+  readWorkspaceFigmaPluginBridgeSnapshot,
+  readWorkspaceFigmaPluginBridgeStatus,
+  type FigmaPluginBridgeAnnotation,
+} from "./figma-plugin-bridge.js";
+import {
   readWorkspaceConnectors,
   type WorkspaceConnectors,
 } from "./workspace-connectors.js";
@@ -38,6 +43,9 @@ export type FigmaMcpProbeStatus = {
   source: string | null;
   hasPersonalAccessToken: boolean;
   fallbackAvailable: boolean;
+  pluginBridgeConfigured?: boolean;
+  pluginBridgeLastSyncedAt?: string | null;
+  pluginBridgeSyncedFileCount?: number;
   error: string | null;
 };
 
@@ -647,6 +655,34 @@ function summarizeComments(comments: Record<string, unknown>[]): Array<Record<st
   });
 }
 
+function filterPluginAnnotationsForNode(
+  annotations: FigmaPluginBridgeAnnotation[],
+  nodeId: string | null,
+): FigmaPluginBridgeAnnotation[] {
+  if (!nodeId) return annotations;
+  const wanted = normalizeNodeId(nodeId);
+  return annotations.filter((annotation) => annotation.nodeId === wanted);
+}
+
+function summarizePluginAnnotations(
+  annotations: FigmaPluginBridgeAnnotation[],
+): Array<Record<string, unknown>> {
+  return annotations.map((annotation) => ({
+    id: annotation.id,
+    nodeId: annotation.nodeId,
+    nodeName: annotation.nodeName,
+    pageId: annotation.pageId,
+    pageName: annotation.pageName,
+    labelMarkdown: annotation.labelMarkdown,
+    categoryId: annotation.categoryId,
+    categoryLabel: annotation.categoryLabel,
+    authorName: annotation.authorName,
+    authorId: annotation.authorId,
+    createdAt: annotation.createdAt,
+    updatedAt: annotation.updatedAt,
+  }));
+}
+
 function listMapItems(
   mapValue: unknown,
   limit = 100,
@@ -774,6 +810,7 @@ function buildDesignContextCode(params: {
   metadataXml: string;
   screenshotUrl: string | null;
   comments: Array<Record<string, unknown>>;
+  annotations: Array<Record<string, unknown>>;
   variableDefs: Array<Record<string, unknown>>;
   stats: Record<string, unknown>;
 }): string {
@@ -782,6 +819,7 @@ function buildDesignContextCode(params: {
     `File key: ${params.fileKey}.`,
     params.screenshotUrl ? `Screenshot URL: ${params.screenshotUrl}` : "Screenshot URL: unavailable.",
     `Comment count: ${params.comments.length}.`,
+    `Annotation count: ${params.annotations.length}.`,
     `Variable definition count: ${params.variableDefs.length}.`,
     `Node stats: ${JSON.stringify(params.stats)}.`,
     "Metadata XML:",
@@ -947,7 +985,7 @@ const FIGMA_REST_COMPAT_TOOLS: FigmaMcpToolDefinition[] = [
   {
     name: "figma.get_annotations",
     description:
-      "Return review comments and pinned annotation-style notes, optionally filtered to a node, using the PMOS REST compatibility bridge.",
+      "Return true Figma plugin/dev-mode annotation snapshots, optionally filtered to a node, using the PMOS plugin bridge. This is distinct from file comments and requires a plugin bridge sync.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1139,6 +1177,7 @@ const FIGMA_REST_COMPAT_TOOLS: FigmaMcpToolDefinition[] = [
 
 const FIGMA_TOOLS_AVAILABLE_WITHOUT_PAT = new Set<string>([
   "figma.whoami",
+  "figma.get_annotations",
   "figma.generate_diagram",
   "figma.generate_figma_design",
   "figma.get_code_connect_map",
@@ -1206,7 +1245,48 @@ async function callCompatTool(params: {
       compatibilityMode: true,
       supportedToolCount: FIGMA_REST_COMPAT_TOOLS.length,
       availableWithoutPersonalAccessToken: [...FIGMA_TOOLS_AVAILABLE_WITHOUT_PAT],
+      pluginBridge: await readWorkspaceFigmaPluginBridgeStatus(params.workspaceId),
       user,
+    };
+  }
+
+  if (params.toolName === "figma.get_annotations") {
+    const snapshot = await readWorkspaceFigmaPluginBridgeSnapshot(params.workspaceId, target.fileKey);
+    if (!snapshot) {
+      const pluginBridge = await readWorkspaceFigmaPluginBridgeStatus(params.workspaceId);
+      return {
+        source: "pmos-figma-plugin-bridge",
+        transport: "plugin_bridge",
+        fileKey: target.fileKey,
+        nodeId: target.nodeId,
+        status: "plugin_bridge_required",
+        totalAnnotations: 0,
+        annotations: [],
+        categories: [],
+        pluginBridge,
+        note:
+          pluginBridge.configured
+            ? "PMOS has a Figma plugin bridge token, but no annotation snapshot has been synced for this file yet."
+            : "True Figma annotations require the PMOS Figma plugin bridge. Prepare the bridge, run the plugin in Figma/Dev Mode, and sync the target file before calling get_annotations.",
+      };
+    }
+    const filteredAnnotations = filterPluginAnnotationsForNode(snapshot.annotations, target.nodeId);
+    return {
+      source: "pmos-figma-plugin-bridge",
+      transport: "plugin_bridge",
+      fileKey: target.fileKey,
+      fileName: snapshot.fileName,
+      nodeId: target.nodeId,
+      status: "ok",
+      syncedAt: snapshot.syncedAt,
+      scope: snapshot.scope,
+      editorType: snapshot.editorType,
+      pluginVersion: snapshot.pluginVersion,
+      selectionNodeIds: snapshot.selectionNodeIds,
+      totalAnnotations: filteredAnnotations.length,
+      totalFileAnnotations: snapshot.annotations.length,
+      annotations: summarizePluginAnnotations(filteredAnnotations),
+      categories: snapshot.categories,
     };
   }
 
@@ -1580,20 +1660,6 @@ async function callCompatTool(params: {
         pagination: isJsonObject(payload.pagination) ? payload.pagination : null,
       };
     }
-    case "figma.get_annotations": {
-      const comments = filterCommentsForNode(
-        await fetchComments(token, target.fileKey),
-        target.nodeId,
-      );
-      return {
-        source: "pmos-figma-rest-compat",
-        transport: "rest_compat",
-        fileKey: target.fileKey,
-        nodeId: target.nodeId,
-        totalAnnotations: comments.length,
-        annotations: summarizeComments(comments),
-      };
-    }
     case "figma.get_dev_resources": {
       const devResources = await fetchDevResources(
         token,
@@ -1799,6 +1865,10 @@ async function callCompatTool(params: {
       const node = target.nodeId
         ? await fetchNode(token, target.fileKey, target.nodeId, 6)
         : asRecord((await fetchFile(token, target.fileKey, 4)).document);
+      const pluginAnnotationSnapshot = await readWorkspaceFigmaPluginBridgeSnapshot(
+        params.workspaceId,
+        target.fileKey,
+      );
       const [commentPayload, screenshotPayload, variableDefs] = await Promise.all([
         fetchComments(token, target.fileKey).catch(() => []),
         fetchImages(token, target.fileKey, [target.nodeId ?? stringOrNull(node.id) ?? "0:1"]).catch(() =>
@@ -1807,6 +1877,9 @@ async function callCompatTool(params: {
         fetchLocalVariables(token, target.fileKey).catch(() => ({})),
       ]) as [Record<string, unknown>[], Record<string, string | null>, Record<string, unknown>];
       const normalizedComments = filterCommentsForNode(commentPayload, target.nodeId);
+      const normalizedAnnotations = pluginAnnotationSnapshot
+        ? filterPluginAnnotationsForNode(pluginAnnotationSnapshot.annotations, target.nodeId)
+        : [];
       const normalizedVariables = normalizeVariableList(asRecord(variableDefs));
       const boundIds = new Set(collectBoundVariableIds(node));
       const relevantVariables =
@@ -1832,6 +1905,7 @@ async function callCompatTool(params: {
           metadataXml,
           screenshotUrl,
           comments: summarizeComments(normalizedComments),
+          annotations: summarizePluginAnnotations(normalizedAnnotations),
           variableDefs: relevantVariables,
           stats,
         }),
@@ -1839,6 +1913,8 @@ async function callCompatTool(params: {
         metadataXml,
         screenshotUrl,
         comments: summarizeComments(normalizedComments),
+        annotations: summarizePluginAnnotations(normalizedAnnotations),
+        annotationCategories: pluginAnnotationSnapshot?.categories ?? [],
         variableDefs: relevantVariables,
         stats,
       };
@@ -1882,6 +1958,7 @@ export async function finishWorkspaceFigmaMcpOAuth(params: {
 
 export async function listWorkspaceFigmaMcpTools(workspaceId: string): Promise<unknown> {
   const auth = await readWorkspaceFigmaAuth(workspaceId);
+  const pluginBridge = await readWorkspaceFigmaPluginBridgeStatus(workspaceId);
   return {
     source: "pmos-figma-rest-compat",
     transport: "rest_compat",
@@ -1889,6 +1966,7 @@ export async function listWorkspaceFigmaMcpTools(workspaceId: string): Promise<u
     authRequired: !auth.hasPersonalAccessToken,
     mcpServerUrl: auth.mcpServerUrl,
     availableWithoutPersonalAccessToken: [...FIGMA_TOOLS_AVAILABLE_WITHOUT_PAT],
+    pluginBridge,
     tools: FIGMA_REST_COMPAT_TOOLS,
   };
 }
@@ -1911,6 +1989,7 @@ export async function callWorkspaceFigmaMcpTool(params: {
 
 export async function probeWorkspaceFigmaMcpStatus(workspaceId: string): Promise<FigmaMcpProbeStatus> {
   const auth = await readWorkspaceFigmaAuth(workspaceId);
+  const pluginBridge = await readWorkspaceFigmaPluginBridgeStatus(workspaceId);
   if (!auth.hasPersonalAccessToken) {
     return {
       url: auth.mcpServerUrl,
@@ -1922,6 +2001,9 @@ export async function probeWorkspaceFigmaMcpStatus(workspaceId: string): Promise
       source: auth.source,
       hasPersonalAccessToken: false,
       fallbackAvailable: false,
+      pluginBridgeConfigured: pluginBridge.configured,
+      pluginBridgeLastSyncedAt: pluginBridge.lastSyncedAt,
+      pluginBridgeSyncedFileCount: pluginBridge.syncedFileCount,
       error:
         "Workspace Figma PAT sync is required for the PMOS Figma MCP-compatible REST bridge.",
     };
@@ -1936,6 +2018,9 @@ export async function probeWorkspaceFigmaMcpStatus(workspaceId: string): Promise
     source: auth.source,
     hasPersonalAccessToken: true,
     fallbackAvailable: true,
+    pluginBridgeConfigured: pluginBridge.configured,
+    pluginBridgeLastSyncedAt: pluginBridge.lastSyncedAt,
+    pluginBridgeSyncedFileCount: pluginBridge.syncedFileCount,
     error: null,
   };
 }

@@ -1,0 +1,12 @@
+{
+  "name": "PMOS Figma Annotation Bridge",
+  "id": "io.wickedlab.pmos.figma.annotation-bridge",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma", "dev"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["https://os.wickedlab.io"]
+  }
+}

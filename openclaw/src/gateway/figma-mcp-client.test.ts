@@ -7,6 +7,7 @@ import {
   listWorkspaceFigmaMcpTools,
   probeWorkspaceFigmaMcpStatus,
 } from "./figma-mcp-client.js";
+import { prepareWorkspaceFigmaPluginBridge, syncWorkspaceFigmaPluginBridgeSnapshot } from "./figma-plugin-bridge.js";
 import { workspaceConnectorsPath, writeWorkspaceConnectors } from "./workspace-connectors.js";
 
 describe("figma mcp compat bridge", () => {
@@ -61,6 +62,7 @@ describe("figma mcp compat bridge", () => {
     expect(result.availableWithoutPersonalAccessToken).toEqual(
       expect.arrayContaining([
         "figma.whoami",
+        "figma.get_annotations",
         "figma.generate_diagram",
         "figma.generate_figma_design",
       ]),
@@ -115,6 +117,12 @@ describe("figma mcp compat bridge", () => {
     expect(result.selectedFileName).toBe("OKA Online Audit");
     expect(result.fileKey).toBe("3INmNiG3X3NKAZtCI3SMg6");
     expect(result.hasPersonalAccessToken).toBe(false);
+    expect(result.pluginBridge).toEqual(
+      expect.objectContaining({
+        configured: false,
+        syncedFileCount: 0,
+      }),
+    );
   });
 
   it("anchors whoami to the requested URL and enriches it with live Figma identity when PAT is available", async () => {
@@ -253,6 +261,94 @@ describe("figma mcp compat bridge", () => {
         id: "c1",
         message: "Audit this hero block",
         nodeId: "0:1",
+      }),
+    ]);
+  });
+
+  it("returns a bridge-required result for annotations before a plugin snapshot exists", async () => {
+    await writeWorkspaceConnectors(workspaceId, {
+      figma: {
+        identity: {
+          selectedFileUrl:
+            "https://www.figma.com/design/3INmNiG3X3NKAZtCI3SMg6/OKA-Online-Audit?node-id=0-1",
+          selectedFileId: "3INmNiG3X3NKAZtCI3SMg6",
+          selectedFileName: "OKA Online Audit",
+        },
+      },
+    });
+
+    const result = (await callWorkspaceFigmaMcpTool({
+      workspaceId,
+      toolName: "get_annotations",
+      args: {
+        url: "https://www.figma.com/design/3INmNiG3X3NKAZtCI3SMg6/OKA-Online-Audit?node-id=0-1",
+      },
+    })) as Record<string, unknown>;
+
+    expect(result.source).toBe("pmos-figma-plugin-bridge");
+    expect(result.status).toBe("plugin_bridge_required");
+    expect(result.totalAnnotations).toBe(0);
+  });
+
+  it("returns synced plugin annotations instead of comment aliases", async () => {
+    await writeWorkspaceConnectors(workspaceId, {
+      figma: {
+        identity: {
+          selectedFileUrl:
+            "https://www.figma.com/design/3INmNiG3X3NKAZtCI3SMg6/OKA-Online-Audit?node-id=0-1",
+          selectedFileId: "3INmNiG3X3NKAZtCI3SMg6",
+          selectedFileName: "OKA Online Audit",
+        },
+      },
+    });
+    const prepared = await prepareWorkspaceFigmaPluginBridge(workspaceId);
+    await syncWorkspaceFigmaPluginBridgeSnapshot({
+      workspaceId,
+      bridgeToken: prepared.bridgeToken,
+      payload: {
+        fileKey: "3INmNiG3X3NKAZtCI3SMg6",
+        fileName: "OKA Online Audit",
+        scope: "selection",
+        selectionNodeIds: ["0-1"],
+        categories: [{ id: "cat-feedback", label: "Feedback" }],
+        annotations: [
+          {
+            id: "ann-1",
+            nodeId: "0-1",
+            nodeName: "Hero",
+            labelMarkdown: "Replace this CTA copy",
+            categoryId: "cat-feedback",
+            authorName: "Design QA",
+          },
+          {
+            id: "ann-2",
+            nodeId: "9-9",
+            nodeName: "Footer",
+            labelMarkdown: "Ignore this one",
+            categoryId: "cat-feedback",
+          },
+        ],
+      },
+    });
+
+    const result = (await callWorkspaceFigmaMcpTool({
+      workspaceId,
+      toolName: "get_annotations",
+      args: {
+        url: "https://www.figma.com/design/3INmNiG3X3NKAZtCI3SMg6/OKA-Online-Audit?node-id=0-1",
+      },
+    })) as Record<string, unknown>;
+
+    expect(result.source).toBe("pmos-figma-plugin-bridge");
+    expect(result.status).toBe("ok");
+    expect(result.totalAnnotations).toBe(1);
+    expect(result.totalFileAnnotations).toBe(2);
+    expect(result.annotations).toEqual([
+      expect.objectContaining({
+        id: "ann-1",
+        nodeId: "0:1",
+        categoryLabel: "Feedback",
+        labelMarkdown: "Replace this CTA copy",
       }),
     ]);
   });
