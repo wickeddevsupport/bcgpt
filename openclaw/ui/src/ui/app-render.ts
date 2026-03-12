@@ -53,6 +53,7 @@ import {
 import { loadUsage, loadSessionTimeSeries, loadSessionLogs } from "./controllers/usage.ts";
 import { loadWorkflowRuns } from "./controllers/pmos-workflows.ts";
 import { canManagePmosMembers } from "./controllers/pmos-admin.ts";
+import { isPmosSignupEnabled } from "./controllers/pmos-auth.ts";
 import { DEFAULT_AGENT_WORKSPACE_PATH } from "./app-defaults.ts";
 import type { PmosModelProvider } from "./controllers/pmos-model-auth.ts";
 import { icons } from "./icons.ts";
@@ -312,7 +313,8 @@ function mapToolsProfileToMode(profile: unknown): "autonomous" | "interactive" |
 
 function renderAuthScreen(state: AppViewState) {
   const loading = state.pmosAuthLoading;
-  const isSignup = state.pmosAuthMode === "signup";
+  const signupEnabled = isPmosSignupEnabled();
+  const isSignup = signupEnabled && state.pmosAuthMode === "signup";
   const emailValid = state.pmosAuthEmail.includes("@") && state.pmosAuthEmail.includes(".");
   const passwordValid = state.pmosAuthPassword.length >= 8;
   const canSubmit = !loading && emailValid && passwordValid;
@@ -329,7 +331,9 @@ function renderAuthScreen(state: AppViewState) {
         <div class="pmos-auth-subtitle">
           ${isSignup
             ? "First account becomes super admin. Next signups become workspace admins."
-            : "Use your PMOS account to access your workspace and agents."}
+            : signupEnabled
+              ? "Use your PMOS account to access your workspace and agents."
+              : "Use your PMOS account to access your workspace and agents. Account creation is currently disabled."}
         </div>
         <form
           class="pmos-auth-form"
@@ -384,7 +388,9 @@ function renderAuthScreen(state: AppViewState) {
           </button>
         </form>
         <div class="pmos-auth-switch">
-          ${isSignup
+          ${!signupEnabled
+            ? html`Account creation is currently disabled.`
+            : isSignup
             ? html`
                 Already have an account?
                 <button class="link-button" @click=${() => (state.pmosAuthMode = "signin")}>

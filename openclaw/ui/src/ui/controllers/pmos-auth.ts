@@ -36,6 +36,16 @@ type AuthResponse = {
   user?: PmosAuthUser;
 };
 
+export function isPmosSignupEnabled(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  return (
+    (window as Window & { __OPENCLAW_PMOS_SIGNUP_ENABLED__?: boolean })
+      .__OPENCLAW_PMOS_SIGNUP_ENABLED__ === true
+  );
+}
+
 function normalizeBasePath(basePath: string): string {
   const trimmed = basePath.trim();
   if (!trimmed || trimmed === "/") {

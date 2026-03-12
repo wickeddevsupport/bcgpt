@@ -1416,11 +1416,16 @@ function findSharedWorkspaceModelRef(cfg: unknown): string | null {
   return null;
 }
 
+function isPmosSignupEnabled(): boolean {
+  return String(process.env.PMOS_SIGNUP_ENABLED ?? "false").trim().toLowerCase() === "true";
+}
+
 export const __test = {
   findSharedWorkspaceModelRef,
   resolveDeprecatedModelRefReplacement,
   looksLikeLegacyStarterWorkspacePackage,
   sanitizeLegacyStarterWorkspaceScaffold,
+  isPmosSignupEnabled,
 };
 
 /**
@@ -2173,6 +2178,10 @@ export async function handlePmosAuthHttpRequest(params: {
   }
 
   if (route === "signup") {
+    if (!isPmosSignupEnabled()) {
+      sendJson(res, 403, { ok: false, error: "Account creation is currently disabled." });
+      return true;
+    }
     const name = typeof parsed.name === "string" ? parsed.name : "";
     const email = typeof parsed.email === "string" ? parsed.email : "";
     const password = typeof parsed.password === "string" ? parsed.password : "";

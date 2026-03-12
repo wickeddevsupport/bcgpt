@@ -7,12 +7,19 @@ import { __test } from "./pmos-auth-http.js";
 const tempDirs: string[] = [];
 
 afterEach(async () => {
+  delete process.env.PMOS_SIGNUP_ENABLED;
   await Promise.all(
     tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true }).catch(() => undefined)),
   );
 });
 
 describe("pmos auth http starter model selection", () => {
+  it("disables PMOS signup by default and allows opt-in via env", () => {
+    expect(__test.isPmosSignupEnabled()).toBe(false);
+    process.env.PMOS_SIGNUP_ENABLED = "true";
+    expect(__test.isPmosSignupEnabled()).toBe(true);
+  });
+
   it("prefers the Kilo shared starter model when both Kilo and NVIDIA are configured", () => {
     const ref = __test.findSharedWorkspaceModelRef({
       models: {

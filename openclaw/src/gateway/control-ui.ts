@@ -166,11 +166,16 @@ interface ControlUiInjectionOpts {
   assistantAvatar?: string;
 }
 
+function isPmosSignupEnabled(): boolean {
+  return String(process.env.PMOS_SIGNUP_ENABLED ?? "false").trim().toLowerCase() === "true";
+}
+
 function injectControlUiConfig(html: string, opts: ControlUiInjectionOpts): string {
   const { basePath, assistantName, assistantAvatar } = opts;
   const script =
     `<script>` +
     `window.__OPENCLAW_CONTROL_UI_BASE_PATH__=${JSON.stringify(basePath)};` +
+    `window.__OPENCLAW_PMOS_SIGNUP_ENABLED__=${JSON.stringify(isPmosSignupEnabled())};` +
     `window.__OPENCLAW_ASSISTANT_NAME__=${JSON.stringify(
       assistantName ?? DEFAULT_ASSISTANT_IDENTITY.name,
     )};` +

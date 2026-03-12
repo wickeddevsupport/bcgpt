@@ -109,6 +109,7 @@ import {
 } from "./controllers/pmos-model-auth.ts";
 import {
   adminResetPmosAuthPassword,
+  isPmosSignupEnabled,
   changePmosAuthPassword,
   loadPmosAuthSession,
   loginPmosAuth,
@@ -174,6 +175,7 @@ import { loadConfig } from "./controllers/config.ts";
 declare global {
   interface Window {
     __OPENCLAW_CONTROL_UI_BASE_PATH__?: string;
+    __OPENCLAW_PMOS_SIGNUP_ENABLED__?: boolean;
   }
 }
 
@@ -870,7 +872,9 @@ export class OpenClawApp extends LitElement {
 
   async handlePmosAuthSubmit() {
     const ok =
-      this.pmosAuthMode === "signup" ? await signupPmosAuth(this) : await loginPmosAuth(this);
+      this.pmosAuthMode === "signup" && isPmosSignupEnabled()
+        ? await signupPmosAuth(this)
+        : await loginPmosAuth(this);
     if (!ok) {
       return;
     }
