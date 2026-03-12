@@ -540,8 +540,11 @@ type PmosProjectCard = {
   appUrl: string | null;
   todoLists: number;
   openTodos: number;
+  assignedTodos: number;
   overdueTodos: number;
   dueTodayTodos: number;
+  futureTodos: number;
+  noDueDateTodos: number;
   nextDueOn: string | null;
   health: PmosProjectHealth;
 };
@@ -1442,6 +1445,120 @@ function parseTodoItems(
     });
   }
   return items;
+}
+
+function parseTodoPreviewItems(
+  result: unknown,
+  project: { id: string; name: string },
+): PmosProjectTodoItem[] {
+  if (!isJsonObject(result)) return [];
+  const groups = Array.isArray(result.groups)
+    ? result.groups
+    : isJsonObject(result.result) && Array.isArray(result.result.groups)
+      ? result.result.groups
+      : [];
+  const items: PmosProjectTodoItem[] = [];
+  for (const groupRaw of groups) {
+    if (!isJsonObject(groupRaw)) continue;
+    const preview = Array.isArray(groupRaw.todos_preview)
+      ? groupRaw.todos_preview
+      : Array.isArray(groupRaw.todos)
+        ? groupRaw.todos
+        : [];
+    for (const todoRaw of preview) {
+      if (!isJsonObject(todoRaw)) continue;
+      const title = stringOrNull(todoRaw.title);
+      if (!title) continue;
+      items.push({
+        id: numberStringOrNull(todoRaw.id),
+        title,
+        status: stringOrNull(todoRaw.status),
+        dueOn: stringOrNull(todoRaw.due_on),
+        projectId: project.id,
+        projectName: project.name,
+        appUrl: stringOrNull(todoRaw.app_url) ?? stringOrNull(todoRaw.appUrl),
+      });
+    }
+  }
+  return items;
+}
+
+function dedupeTodoItems(items: PmosProjectTodoItem[]): PmosProjectTodoItem[] {
+  const deduped = new Map<string, PmosProjectTodoItem>();
+  for (const item of items) {
+    const key =
+      item.id ??
+      `${item.projectId ?? ""}:${item.title}:${item.dueOn ?? ""}:${item.appUrl ?? ""}`;
+    if (!deduped.has(key)) {
+      deduped.set(key, item);
+      continue;
+    }
+    const current = deduped.get(key)!;
+    deduped.set(key, {
+      ...current,
+      status: current.status ?? item.status,
+      dueOn: current.dueOn ?? item.dueOn,
+      projectId: current.projectId ?? item.projectId,
+      projectName: current.projectName ?? item.projectName,
+      appUrl: current.appUrl ?? item.appUrl,
+    });
+  }
+  return Array.from(deduped.values());
+}
+
+function isIsoDate(value: string | null): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function classifyTodoDueBucket(
+  dueOn: string | null,
+  todayIso: string,
+): "past" | "today" | "future" | "none" {
+  if (!isIsoDate(dueOn)) return "none";
+  if (dueOn < todayIso) return "past";
+  if (dueOn > todayIso) return "future";
+  return "today";
+}
+
+function sortTodoItems(items: PmosProjectTodoItem[], todayIso: string): PmosProjectTodoItem[] {
+  const bucketRank = (item: PmosProjectTodoItem) => {
+    switch (classifyTodoDueBucket(item.dueOn, todayIso)) {
+      case "past":
+        return 0;
+      case "today":
+        return 1;
+      case "future":
+        return 2;
+      default:
+        return 3;
+    }
+  };
+  return [...items].sort((a, b) => {
+    const bucketDelta = bucketRank(a) - bucketRank(b);
+    if (bucketDelta !== 0) return bucketDelta;
+    if (isIsoDate(a.dueOn) && isIsoDate(b.dueOn) && a.dueOn !== b.dueOn) {
+      return a.dueOn.localeCompare(b.dueOn);
+    }
+    if (a.projectName !== b.projectName) {
+      return (a.projectName ?? "").localeCompare(b.projectName ?? "");
+    }
+    return a.title.localeCompare(b.title);
+  });
+}
+
+function countTodosByProject(items: PmosProjectTodoItem[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    if (!item.projectId) continue;
+    counts.set(item.projectId, (counts.get(item.projectId) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function isAbortLikeError(error: string | null | undefined): boolean {
+  if (!error) return false;
+  const lower = error.toLowerCase();
+  return lower.includes("aborted") || lower.includes("aborterror") || lower.includes("timed out");
 }
 
 function projectHealthFromCounts(counts: {
@@ -4909,12 +5026,18 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           projectCount: 0,
           syncedProjects: 0,
           openTodos: 0,
+          assignedTodos: 0,
           overdueTodos: 0,
           dueTodayTodos: 0,
+          futureTodos: 0,
+          noDueDateTodos: 0,
         },
         projects: [] as PmosProjectCard[],
+        assignedTodos: [] as PmosProjectTodoItem[],
         urgentTodos: [] as PmosProjectTodoItem[],
         dueTodayTodos: [] as PmosProjectTodoItem[],
+        futureTodos: [] as PmosProjectTodoItem[],
+        noDueDateTodos: [] as PmosProjectTodoItem[],
         errors: [] as string[],
         refreshedAtMs: Date.now(),
       };
@@ -5010,32 +5133,69 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           toolArgs: { date: todayIso, include_overdue: false },
           timeoutMs: 15_000,
         }),
+        callBcgptTool({
+          bcgptUrl,
+          apiKey: bcgptApiKey,
+          toolName: "list_assigned_to_me",
+          toolArgs: {},
+          timeoutMs: 20_000,
+        }),
       ]);
 
-      const [, [overdueRpc, dueTodayRpc]] = await Promise.all([detailsPromise, reportsPromise]);
+      const [, [overdueRpc, dueTodayRpc, assignedRpc]] = await Promise.all([detailsPromise, reportsPromise]);
 
       if (!overdueRpc.ok) {
         errors.push(`Failed to load overdue todos: ${overdueRpc.error ?? "unknown error"}`);
       }
-      if (!dueTodayRpc.ok) {
+      if (!dueTodayRpc.ok && !isAbortLikeError(dueTodayRpc.error)) {
         errors.push(`Failed to load due-today todos: ${dueTodayRpc.error ?? "unknown error"}`);
       }
+      if (!assignedRpc.ok) {
+        errors.push(`Failed to load assigned todos: ${assignedRpc.error ?? "unknown error"}`);
+      }
 
-      const overdueTodos = parseTodoItems(overdueRpc.result, "overdue", projectNameById);
-      const dueTodayTodos = parseTodoItems(dueTodayRpc.result, "todos", projectNameById).filter(
-        (todo) => !todo.dueOn || todo.dueOn === todayIso,
+      let overdueTodos = parseTodoItems(overdueRpc.result, "overdue", projectNameById);
+      let dueTodayTodos = parseTodoItems(dueTodayRpc.result, "todos", projectNameById).filter(
+        (todo) => todo.dueOn === todayIso,
+      );
+      const assignedTodos = parseTodoItems(assignedRpc.result, "todos", projectNameById);
+
+      const previewTodos = dedupeTodoItems(
+        focusProjects.flatMap((project) => parseTodoPreviewItems(detailsByProjectId.get(project.id), project)),
+      );
+      const classifiedTodos = dedupeTodoItems([
+        ...previewTodos,
+        ...assignedTodos,
+        ...overdueTodos,
+        ...dueTodayTodos,
+      ]);
+
+      if (!overdueTodos.length) {
+        overdueTodos = classifiedTodos.filter((todo) => classifyTodoDueBucket(todo.dueOn, todayIso) === "past");
+      }
+      if (!dueTodayTodos.length) {
+        dueTodayTodos = classifiedTodos.filter((todo) => classifyTodoDueBucket(todo.dueOn, todayIso) === "today");
+      }
+      const futureTodos = classifiedTodos.filter((todo) => classifyTodoDueBucket(todo.dueOn, todayIso) === "future");
+      const noDueDateTodos = classifiedTodos.filter(
+        (todo) => classifyTodoDueBucket(todo.dueOn, todayIso) === "none",
       );
 
-      const overdueByProject = new Map<string, number>();
-      for (const todo of overdueTodos) {
-        if (!todo.projectId) continue;
-        overdueByProject.set(todo.projectId, (overdueByProject.get(todo.projectId) ?? 0) + 1);
+      if (
+        dueTodayRpc.ok === false &&
+        isAbortLikeError(dueTodayRpc.error) &&
+        !dueTodayTodos.length &&
+        !futureTodos.length &&
+        !noDueDateTodos.length
+      ) {
+        errors.push("Live due-date buckets are temporarily degraded. Showing the todo data that Basecamp returned.");
       }
-      const dueTodayByProject = new Map<string, number>();
-      for (const todo of dueTodayTodos) {
-        if (!todo.projectId) continue;
-        dueTodayByProject.set(todo.projectId, (dueTodayByProject.get(todo.projectId) ?? 0) + 1);
-      }
+
+      const assignedByProject = countTodosByProject(assignedTodos);
+      const overdueByProject = countTodosByProject(overdueTodos);
+      const dueTodayByProject = countTodosByProject(dueTodayTodos);
+      const futureByProject = countTodosByProject(futureTodos);
+      const noDueDateByProject = countTodosByProject(noDueDateTodos);
 
       const cards: PmosProjectCard[] = focusProjects.map((project) => {
         const detail = detailsByProjectId.get(project.id);
@@ -5060,8 +5220,11 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         const nextDueOn = dueDates
           .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date))
           .sort((a, b) => a.localeCompare(b))[0] ?? null;
+        const assignedCount = assignedByProject.get(project.id) ?? 0;
         const overdueCount = overdueByProject.get(project.id) ?? 0;
         const dueTodayCount = dueTodayByProject.get(project.id) ?? 0;
+        const futureCount = futureByProject.get(project.id) ?? 0;
+        const noDueDateCount = noDueDateByProject.get(project.id) ?? 0;
         return {
           id: project.id,
           name: project.name,
@@ -5069,8 +5232,11 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           appUrl: project.appUrl,
           todoLists,
           openTodos,
+          assignedTodos: assignedCount,
           overdueTodos: overdueCount,
           dueTodayTodos: dueTodayCount,
+          futureTodos: futureCount,
+          noDueDateTodos: noDueDateCount,
           nextDueOn,
           health: projectHealthFromCounts({
             openTodos,
@@ -5091,12 +5257,16 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         projectCount: projects.length,
         syncedProjects: cards.length,
         openTodos: cards.reduce((sum, card) => sum + card.openTodos, 0),
+        assignedTodos: assignedTodos.length,
         overdueTodos: overdueTodos.length,
         dueTodayTodos: dueTodayTodos.length,
+        futureTodos: futureTodos.length,
+        noDueDateTodos: noDueDateTodos.length,
       };
       const connected =
         identity.connected ||
         listProjectsResult.ok ||
+        assignedRpc.ok ||
         overdueRpc.ok ||
         dueTodayRpc.ok ||
         detailsByProjectId.size > 0;
@@ -5111,8 +5281,11 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           identity,
           totals,
           projects: cards,
-          urgentTodos: overdueTodos.slice(0, 20),
-          dueTodayTodos: dueTodayTodos.slice(0, 20),
+          assignedTodos: sortTodoItems(assignedTodos, todayIso).slice(0, 20),
+          urgentTodos: sortTodoItems(overdueTodos, todayIso).slice(0, 20),
+          dueTodayTodos: sortTodoItems(dueTodayTodos, todayIso).slice(0, 20),
+          futureTodos: sortTodoItems(futureTodos, todayIso).slice(0, 20),
+          noDueDateTodos: sortTodoItems(noDueDateTodos, todayIso).slice(0, 20),
           errors: errors.slice(0, 20),
           refreshedAtMs: Date.now(),
         },

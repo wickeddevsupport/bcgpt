@@ -174,6 +174,30 @@ describe("pmos.projects.snapshot", () => {
             },
           });
         }
+        if (tool === "list_assigned_to_me") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "6",
+            result: {
+              todos: [
+                {
+                  id: 5001,
+                  title: "Owned by me",
+                  due_on: "2026-02-24",
+                  project: { id: 1001, name: "BCGPT Test Project" },
+                  app_url: "https://3.basecamp.com/9999999/buckets/1001/todos/5001",
+                },
+                {
+                  id: 5002,
+                  title: "No date task",
+                  due_on: null,
+                  project: { id: 2002, name: "Internal Ops" },
+                  app_url: "https://3.basecamp.com/9999999/buckets/2002/todos/5002",
+                },
+              ],
+            },
+          });
+        }
       }
 
       return jsonResponse({ error: "not found" }, 404);
@@ -199,12 +223,18 @@ describe("pmos.projects.snapshot", () => {
         projectCount: number;
         syncedProjects: number;
         openTodos: number;
+        assignedTodos: number;
         overdueTodos: number;
         dueTodayTodos: number;
+        futureTodos: number;
+        noDueDateTodos: number;
       };
-      projects: Array<{ name: string; health: string; overdueTodos: number }>;
+      projects: Array<{ name: string; health: string; overdueTodos: number; assignedTodos: number; futureTodos: number; noDueDateTodos: number }>;
+      assignedTodos: Array<{ title: string }>;
       urgentTodos: Array<{ title: string }>;
       dueTodayTodos: Array<{ title: string }>;
+      futureTodos: Array<{ title: string }>;
+      noDueDateTodos: Array<{ title: string }>;
       errors: string[];
     };
 
@@ -213,13 +243,22 @@ describe("pmos.projects.snapshot", () => {
     expect(payload.totals.projectCount).toBe(2);
     expect(payload.totals.syncedProjects).toBe(2);
     expect(payload.totals.openTodos).toBe(6);
+    expect(payload.totals.assignedTodos).toBe(2);
     expect(payload.totals.overdueTodos).toBe(1);
     expect(payload.totals.dueTodayTodos).toBe(1);
+    expect(payload.totals.futureTodos).toBe(3);
+    expect(payload.totals.noDueDateTodos).toBe(1);
     expect(payload.projects[0]?.name).toBe("BCGPT Test Project");
     expect(payload.projects[0]?.health).toBe("at_risk");
+    expect(payload.projects[0]?.assignedTodos).toBe(1);
     expect(payload.projects[0]?.overdueTodos).toBe(1);
+    expect(payload.projects[0]?.futureTodos).toBe(2);
+    expect(payload.projects[1]?.noDueDateTodos).toBe(1);
+    expect(payload.assignedTodos[0]?.title).toBe("Owned by me");
     expect(payload.urgentTodos[0]?.title).toBe("Critical Basecamp follow-up");
     expect(payload.dueTodayTodos[0]?.title).toBe("Same-day deliverable");
+    expect(payload.futureTodos[0]?.title).toBe("Owned by me");
+    expect(payload.noDueDateTodos[0]?.title).toBe("No date task");
     expect(payload.errors).toEqual([]);
   });
 
@@ -286,6 +325,15 @@ describe("pmos.projects.snapshot", () => {
           return jsonResponse({
             jsonrpc: "2.0",
             id: "4",
+            result: {
+              todos: [],
+            },
+          });
+        }
+        if (tool === "list_assigned_to_me") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "5",
             result: {
               todos: [],
             },
@@ -451,6 +499,22 @@ describe("pmos.projects.snapshot", () => {
             },
           });
         }
+        if (tool === "list_assigned_to_me") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "5",
+            result: {
+              todos: [
+                {
+                  id: 3,
+                  title: "Unscheduled task",
+                  due_on: null,
+                  project: { id: 9876, name: "Shape Variant Project" },
+                },
+              ],
+            },
+          });
+        }
       }
 
       return jsonResponse({ error: "not found" }, 404);
@@ -468,17 +532,158 @@ describe("pmos.projects.snapshot", () => {
     } as any);
 
     const payload = respond.mock.calls[0]?.[1] as {
-      totals: { projectCount: number; overdueTodos: number; dueTodayTodos: number };
+      totals: { projectCount: number; overdueTodos: number; dueTodayTodos: number; assignedTodos: number; noDueDateTodos: number };
       projects: Array<{ name: string }>;
+      assignedTodos: Array<{ title: string }>;
       urgentTodos: Array<{ title: string }>;
       dueTodayTodos: Array<{ title: string }>;
+      noDueDateTodos: Array<{ title: string }>;
     };
 
     expect(payload.totals.projectCount).toBe(1);
+    expect(payload.totals.assignedTodos).toBe(1);
     expect(payload.totals.overdueTodos).toBe(1);
     expect(payload.totals.dueTodayTodos).toBe(1);
+    expect(payload.totals.noDueDateTodos).toBe(1);
     expect(payload.projects[0]?.name).toBe("Shape Variant Project");
+    expect(payload.assignedTodos[0]?.title).toBe("Unscheduled task");
     expect(payload.urgentTodos[0]?.title).toBe("Escalate overdue API issue");
     expect(payload.dueTodayTodos[0]?.title).toBe("Same day task");
+    expect(payload.noDueDateTodos[0]?.title).toBe("Unscheduled task");
+  });
+
+  it("keeps the snapshot usable when due-today lookup aborts", async () => {
+    readWorkspaceConnectorsMock.mockResolvedValue({
+      bcgpt: {
+        url: "https://bcgpt.example.test",
+        apiKey: "workspace-key",
+      },
+    });
+
+    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/action/startbcgpt")) {
+        return jsonResponse({
+          connected: true,
+          selected_account_id: 12345,
+          user: { name: "Rohit", email: "rohit@wickedwebsites.us" },
+          accounts: [{ id: 12345 }],
+        });
+      }
+
+      if (url.endsWith("/mcp")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          params?: { name?: string; arguments?: Record<string, unknown> };
+        };
+        const tool = body.params?.name;
+        if (tool === "list_projects") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "1",
+            result: {
+              projects: [
+                {
+                  id: 1001,
+                  name: "Abort Regression Project",
+                  status: "active",
+                  app_url: "https://3.basecamp.com/9999999/buckets/1001/projects/1001",
+                },
+              ],
+            },
+          });
+        }
+        if (tool === "list_todos_for_project") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "2",
+            result: {
+              groups: [
+                {
+                  name: "Queue",
+                  todos_count: 3,
+                  todos_preview: [
+                    { id: 101, title: "Past item", due_on: "2026-02-22" },
+                    { id: 102, title: "Today item", due_on: "2026-02-23" },
+                    { id: 103, title: "Future item", due_on: "2026-02-24" },
+                  ],
+                },
+              ],
+            },
+          });
+        }
+        if (tool === "report_todos_overdue") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "3",
+            result: {
+              overdue: [
+                {
+                  id: 101,
+                  title: "Past item",
+                  due_on: "2026-02-22",
+                  project: { id: 1001, name: "Abort Regression Project" },
+                },
+              ],
+            },
+          });
+        }
+        if (tool === "list_todos_due") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "4",
+            error: { message: "This operation was aborted" },
+          }, 500);
+        }
+        if (tool === "list_assigned_to_me") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "5",
+            result: {
+              todos: [
+                {
+                  id: 104,
+                  title: "No date assigned",
+                  due_on: null,
+                  project: { id: 1001, name: "Abort Regression Project" },
+                },
+              ],
+            },
+          });
+        }
+      }
+
+      return jsonResponse({ error: "not found" }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const respond = vi.fn();
+    await pmosHandlers["pmos.projects.snapshot"]({
+      params: {},
+      respond,
+      client: {
+        pmosWorkspaceId: "ws-projects",
+        pmosRole: "workspace_admin",
+      } as any,
+    } as any);
+
+    const payload = respond.mock.calls[0]?.[1] as {
+      connected: boolean;
+      totals: { overdueTodos: number; dueTodayTodos: number; futureTodos: number; noDueDateTodos: number; assignedTodos: number };
+      dueTodayTodos: Array<{ title: string }>;
+      futureTodos: Array<{ title: string }>;
+      noDueDateTodos: Array<{ title: string }>;
+      errors: string[];
+    };
+
+    expect(payload.connected).toBe(true);
+    expect(payload.totals.assignedTodos).toBe(1);
+    expect(payload.totals.overdueTodos).toBe(1);
+    expect(payload.totals.dueTodayTodos).toBe(1);
+    expect(payload.totals.futureTodos).toBe(1);
+    expect(payload.totals.noDueDateTodos).toBe(1);
+    expect(payload.dueTodayTodos[0]?.title).toBe("Today item");
+    expect(payload.futureTodos[0]?.title).toBe("Future item");
+    expect(payload.noDueDateTodos[0]?.title).toBe("No date assigned");
+    expect(payload.errors).toEqual([]);
   });
 });

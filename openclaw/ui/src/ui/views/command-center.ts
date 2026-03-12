@@ -96,6 +96,10 @@ function renderProjectCards(props: CommandCenterProps, cards: PmosProjectCard[])
                 <strong>${project.openTodos}</strong>
               </div>
               <div class="project-card__metric">
+                <span class="muted">Assigned</span>
+                <strong>${project.assignedTodos}</strong>
+              </div>
+              <div class="project-card__metric">
                 <span class="muted">Overdue</span>
                 <strong>${project.overdueTodos}</strong>
               </div>
@@ -104,13 +108,17 @@ function renderProjectCards(props: CommandCenterProps, cards: PmosProjectCard[])
                 <strong>${project.dueTodayTodos}</strong>
               </div>
               <div class="project-card__metric">
-                <span class="muted">Todo lists</span>
-                <strong>${project.todoLists}</strong>
+                <span class="muted">Future</span>
+                <strong>${project.futureTodos}</strong>
+              </div>
+              <div class="project-card__metric">
+                <span class="muted">No date</span>
+                <strong>${project.noDueDateTodos}</strong>
               </div>
             </div>
             <div class="project-card__meta">
-              <span>Next due</span>
-              <span class="mono">${project.nextDueOn ?? "n/a"}</span>
+              <span>Next due / Lists</span>
+              <span class="mono">${project.nextDueOn ?? "n/a"} · ${project.todoLists}</span>
             </div>
             <div class="project-card__actions">
               ${project.appUrl
@@ -162,6 +170,7 @@ function renderStatusBoard(props: CommandCenterProps, cards: PmosProjectCard[]) 
                         <div style="font-weight:500; font-size:14px; margin-bottom:4px;">${project.name}</div>
                         <div class="row" style="gap:12px; font-size:12px;">
                           <span>Open: <strong>${project.openTodos}</strong></span>
+                          <span>Assigned: <strong>${project.assignedTodos}</strong></span>
                           <span>Overdue: <strong class="${project.overdueTodos > 0 ? "warn" : ""}">${project.overdueTodos}</strong></span>
                           <span>Due today: <strong>${project.dueTodayTodos}</strong></span>
                         </div>
@@ -190,6 +199,8 @@ function renderTimeline(props: CommandCenterProps, snapshot: PmosProjectsSnapsho
   const allTodos = [
     ...(snapshot.urgentTodos ?? []),
     ...(snapshot.dueTodayTodos ?? []),
+    ...(snapshot.futureTodos ?? []),
+    ...(snapshot.noDueDateTodos ?? []),
   ];
 
   // Deduplicate by id
@@ -224,7 +235,7 @@ function renderTimeline(props: CommandCenterProps, snapshot: PmosProjectsSnapsho
   return html`
     <div class="timeline-view">
       ${unique.length === 0
-        ? html`<div class="muted" style="padding:16px;">No urgent or due-today items to show in timeline.</div>`
+        ? html`<div class="muted" style="padding:16px;">No due-date activity to show in timeline.</div>`
         : Array.from(groups.entries()).map(
             ([date, todos]) => html`
               <div class="timeline-group">
@@ -294,8 +305,11 @@ export function renderCommandCenter(props: CommandCenterProps) {
     projectCount: 0,
     syncedProjects: 0,
     openTodos: 0,
+    assignedTodos: 0,
     overdueTodos: 0,
     dueTodayTodos: 0,
+    futureTodos: 0,
+    noDueDateTodos: 0,
   };
   const configured = snapshot?.configured ?? false;
   const connected = snapshot?.connected ?? false;
@@ -306,8 +320,11 @@ export function renderCommandCenter(props: CommandCenterProps) {
     ? formatRelativeTimestamp(snapshot.refreshedAtMs)
     : "n/a";
   const errors = snapshot?.errors ?? [];
+  const assignedTodos = snapshot?.assignedTodos ?? [];
   const urgentTodos = snapshot?.urgentTodos ?? [];
   const dueTodayTodos = snapshot?.dueTodayTodos ?? [];
+  const futureTodos = snapshot?.futureTodos ?? [];
+  const noDueDateTodos = snapshot?.noDueDateTodos ?? [];
   const allCards = snapshot?.projects ?? [];
   const projectSearch = (props.projectSearch ?? "").trim().toLowerCase();
   const cards = projectSearch
@@ -389,7 +406,7 @@ export function renderCommandCenter(props: CommandCenterProps) {
             : props.error
               ? html`<div class="callout danger" style="margin-top: 12px;">${props.error}</div>`
               : nothing}
-          ${errors.length > 0
+          ${errors.length > 0 && allCards.length === 0 && assignedTodos.length === 0 && urgentTodos.length === 0 && dueTodayTodos.length === 0 && futureTodos.length === 0 && noDueDateTodos.length === 0
             ? html`<div class="callout info" style="margin-top: 12px;">${errors[0]}</div>`
             : nothing}
 
@@ -420,6 +437,11 @@ export function renderCommandCenter(props: CommandCenterProps) {
             <div class="muted">Across synced projects</div>
           </div>
           <div class="stat project-stat-card">
+            <div class="stat-label">Assigned</div>
+            <div class="stat-value ${totals.assignedTodos > 0 ? "warn" : "ok"}">${totals.assignedTodos}</div>
+            <div class="muted">Visible in your queue</div>
+          </div>
+          <div class="stat project-stat-card">
             <div class="stat-label">Overdue</div>
             <div class="stat-value ${totals.overdueTodos > 0 ? "warn" : "ok"}">${totals.overdueTodos}</div>
             <div class="muted">Urgent follow-up required</div>
@@ -429,13 +451,26 @@ export function renderCommandCenter(props: CommandCenterProps) {
             <div class="stat-value ${totals.dueTodayTodos > 0 ? "warn" : "ok"}">${totals.dueTodayTodos}</div>
             <div class="muted">Needs same-day action</div>
           </div>
+          <div class="stat project-stat-card">
+            <div class="stat-label">Future</div>
+            <div class="stat-value">${totals.futureTodos}</div>
+            <div class="muted">Scheduled beyond today</div>
+          </div>
+          <div class="stat project-stat-card">
+            <div class="stat-label">No Due Date</div>
+            <div class="stat-value">${totals.noDueDateTodos}</div>
+            <div class="muted">Needs manual prioritization</div>
+          </div>
         </div>
 
         ${viewMode === "cards"
           ? html`
               <div class="project-priority-grid">
-                ${renderTodoList("Urgent / Overdue", urgentTodos, "No overdue todos right now.")}
+                ${renderTodoList("Assigned to Me", assignedTodos, "No assigned todos right now.")}
+                ${renderTodoList("Past Due", urgentTodos, "No overdue todos right now.")}
                 ${renderTodoList("Due Today", dueTodayTodos, "No todos due today.")}
+                ${renderTodoList("Future", futureTodos, "No upcoming todos in the visible queue.")}
+                ${renderTodoList("No Due Date", noDueDateTodos, "No unscheduled todos in the visible queue.")}
               </div>
             `
           : nothing}
@@ -451,7 +486,7 @@ export function renderCommandCenter(props: CommandCenterProps) {
                   ? "Operational cards with health and action shortcuts."
                   : viewMode === "status-board"
                     ? "Projects grouped by health status for quick triage."
-                    : "Urgent and due-today items in chronological order."}
+                    : "Past, today, future, and no-date items in chronological order."}
               </div>
             </div>
             ${renderViewModeSwitcher(props)}
