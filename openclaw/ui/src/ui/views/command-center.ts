@@ -71,6 +71,18 @@ function quickPromptForProject(project: PmosProjectCard): string {
   return `Review Basecamp project "${project.name}" and give blockers, pending tasks, urgent items, and the next 3 actions.`;
 }
 
+function sortTodosLatestFirst(items: PmosProjectTodoItem[]): PmosProjectTodoItem[] {
+  return [...items].sort((a, b) => {
+    const idA = a.id ? parseInt(a.id, 10) : 0;
+    const idB = b.id ? parseInt(b.id, 10) : 0;
+    if (idA !== idB) return idB - idA;
+    if (a.dueOn && b.dueOn) return a.dueOn.localeCompare(b.dueOn);
+    if (a.dueOn) return -1;
+    if (b.dueOn) return 1;
+    return 0;
+  });
+}
+
 function renderTodoList(title: string, items: PmosProjectTodoItem[], empty: string) {
   return html`
     <div class="project-priority-card">
@@ -568,25 +580,74 @@ function renderCardTablesSection(data: unknown) {
   return html`<pre class="project-section-pre">${JSON.stringify(data, null, 2)}</pre>`;
 }
 
+function parsePeopleData(data: unknown): Array<{ name: string; email: string; role: string }> | null {
+  // Already a structured array
+  if (Array.isArray(data)) {
+    return (data as Array<{ name?: string; email?: string; role?: string }>).map((p) => ({
+      name: p.name ?? "(unknown)",
+      email: p.email ?? "",
+      role: p.role ?? "",
+    }));
+  }
+  // Try to parse JSON string from smart_action
+  if (typeof data === "string") {
+    const trimmed = data.trim();
+    const jsonMatch = trimmed.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (Array.isArray(parsed)) return parsePeopleData(parsed);
+      } catch {
+        // fall through
+      }
+    }
+    // Parse line-by-line: "1. Name - email" or "- Name (role)"
+    const lines = trimmed.split("\n").filter((l) => l.trim().length > 0);
+    const results: Array<{ name: string; email: string; role: string }> = [];
+    for (const line of lines) {
+      const clean = line.replace(/^[-*\d.]+\s*/, "").trim();
+      if (!clean) continue;
+      const emailMatch = clean.match(/([^\s@]+@[^\s,]+)/);
+      const email = emailMatch ? emailMatch[1] : "";
+      const roleMatch = clean.match(/\(([^)]+)\)/);
+      const role = roleMatch ? roleMatch[1] : "";
+      const name = clean
+        .replace(emailMatch?.[0] ?? "", "")
+        .replace(roleMatch?.[0] ?? "", "")
+        .replace(/[-–—,]+/g, " ")
+        .trim();
+      if (name) results.push({ name, email, role });
+    }
+    return results.length > 0 ? results : null;
+  }
+  return null;
+}
+
 function renderPeopleSection(data: unknown) {
   if (!data) return html`<div class="muted">No people data.</div>`;
-  if (typeof data === "string") return html`<pre class="project-section-pre">${data}</pre>`;
-  const people = Array.isArray(data) ? (data as Array<{ name?: string; email?: string; role?: string }>) : null;
-  if (people) {
+  const people = parsePeopleData(data);
+  if (people && people.length > 0) {
     return html`
       <div class="project-section-list">
         ${people.map(
           (person) => html`
             <div class="project-section-item">
-              <div class="project-section-item__title">${person.name ?? "(unknown)"}</div>
+              <div class="project-section-item__title">${person.name}</div>
               <div class="project-section-item__meta">
-                <span class="muted">${person.email ?? ""}</span>
+                ${person.email ? html`<span class="muted">${person.email}</span>` : nothing}
                 ${person.role ? html`<span class="chip">${person.role}</span>` : nothing}
               </div>
             </div>
           `,
         )}
-        ${people.length === 0 ? html`<div class="muted">No people found.</div>` : nothing}
+      </div>
+    `;
+  }
+  // Fallback: display as readable text block
+  if (typeof data === "string") {
+    return html`
+      <div class="project-section-content" style="white-space: pre-wrap; font-size: 13px; line-height: 1.6;">
+        ${data}
       </div>
     `;
   }
@@ -757,11 +818,11 @@ export function renderCommandCenter(props: CommandCenterProps) {
     ? formatRelativeTimestamp(snapshot.refreshedAtMs)
     : "n/a";
   const errors = snapshot?.errors ?? [];
-  const assignedTodos = snapshot?.assignedTodos ?? [];
-  const urgentTodos = snapshot?.urgentTodos ?? [];
-  const dueTodayTodos = snapshot?.dueTodayTodos ?? [];
-  const futureTodos = snapshot?.futureTodos ?? [];
-  const noDueDateTodos = snapshot?.noDueDateTodos ?? [];
+  const assignedTodos = sortTodosLatestFirst(snapshot?.assignedTodos ?? []);
+  const urgentTodos = sortTodosLatestFirst(snapshot?.urgentTodos ?? []);
+  const dueTodayTodos = sortTodosLatestFirst(snapshot?.dueTodayTodos ?? []);
+  const futureTodos = sortTodosLatestFirst(snapshot?.futureTodos ?? []);
+  const noDueDateTodos = sortTodosLatestFirst(snapshot?.noDueDateTodos ?? []);
   const allCards = snapshot?.projects ?? [];
   const projectSearch = (props.projectSearch ?? "").trim().toLowerCase();
   const cards = projectSearch
@@ -977,9 +1038,9 @@ export function renderCommandCenter(props: CommandCenterProps) {
             : snapshotLoaded && !hasBasecampAccess
               ? html`<div class="callout info" style="margin-top: 12px;">Add your Basecamp token in Integrations to enable project cards and AI project actions.</div>`
               : nothing}
-
-          ${tabStrip}
         </div>
+
+        ${tabStrip}
 
         ${tabContent()}
       </div>

@@ -5947,7 +5947,9 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             bcgptUrl,
             apiKey,
             toolName: "smart_action",
-            toolArgs: { query: `List all people and team members in the project "${projectName}"` },
+            toolArgs: {
+              query: `List all people and team members in the Basecamp project "${projectName}". Return a JSON array with this exact format: [{"name": "...", "email": "...", "role": "..."}]. Include every person you find. Output ONLY the JSON array with no other text.`,
+            },
             timeoutMs: 30_000,
           });
           if (!result.ok) {
