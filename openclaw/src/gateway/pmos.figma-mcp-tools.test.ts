@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { __test } from "./server-methods/pmos.js";
 import { resolveWorkspaceIdFromFigmaMcpState } from "./figma-mcp-client.js";
+import {
+  normalizeFigmaMcpToolListResult,
+  normalizeFigmaMcpToolName,
+} from "./figma-mcp-service.js";
 
 describe("pmos figma mcp tool normalization", () => {
   it("extracts workspace ids from PMOS-owned Figma MCP OAuth state tokens", () => {
@@ -9,14 +13,12 @@ describe("pmos figma mcp tool normalization", () => {
   });
 
   it("accepts fully qualified figma MCP tool names", () => {
-    expect(__test.normalizeFigmaMcpToolName("figma.get_design_context")).toBe(
-      "get_design_context",
-    );
-    expect(__test.normalizeFigmaMcpToolName("get_metadata")).toBe("get_metadata");
+    expect(normalizeFigmaMcpToolName("figma.get_design_context")).toBe("get_design_context");
+    expect(normalizeFigmaMcpToolName("get_metadata")).toBe("get_metadata");
   });
 
   it("adds short-name summaries and recommended starter tools to list output", () => {
-    const result = __test.normalizeFigmaMcpToolListResult({
+    const result = normalizeFigmaMcpToolListResult({
       tools: [
         {
           name: "figma.get_design_context",

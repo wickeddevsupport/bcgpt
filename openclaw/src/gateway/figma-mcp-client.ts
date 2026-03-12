@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { ensureDir, CONFIG_DIR } from "../utils.js";
 import { parseFigmaFileKey } from "./figma-rest-audit.js";
 import {
@@ -119,6 +120,37 @@ function safeWorkspaceId(workspaceId: string): string {
 
 function workspaceFigmaCodeConnectPath(workspaceId: string): string {
   return path.join(CONFIG_DIR, "workspaces", safeWorkspaceId(workspaceId), "figma-code-connect.json");
+}
+
+function workspaceFigmaArtifactsDir(workspaceId: string): string {
+  return path.join(CONFIG_DIR, "workspaces", safeWorkspaceId(workspaceId), "figma-artifacts");
+}
+
+function workspaceFigmaCapturePath(workspaceId: string, captureId: string): string {
+  return path.join(workspaceFigmaArtifactsDir(workspaceId), `capture-${captureId}.json`);
+}
+
+function slugifyArtifactStem(value: string | null, fallback: string): string {
+  const cleaned = String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return cleaned || fallback;
+}
+
+async function writeWorkspaceFigmaArtifact(params: {
+  workspaceId: string;
+  stem: string;
+  extension: string;
+  content: string;
+}): Promise<{ artifactId: string; absolutePath: string }> {
+  const artifactId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
+  const fileName = `${slugifyArtifactStem(params.stem, "artifact")}-${artifactId}.${params.extension.replace(/^\.+/, "")}`;
+  const filePath = path.join(workspaceFigmaArtifactsDir(params.workspaceId), fileName);
+  await ensureDir(path.dirname(filePath));
+  await fs.writeFile(filePath, params.content, "utf-8");
+  return { artifactId, absolutePath: filePath };
 }
 
 function toXmlAttr(value: unknown): string {
@@ -476,7 +508,7 @@ function collectBoundVariableIds(node: Record<string, unknown>): string[] {
 }
 
 function normalizeVariableList(payload: Record<string, unknown>): Record<string, unknown>[] {
-  const directCollections = asArray(payload.meta?.variables);
+  const directCollections = asArray(asRecord(payload.meta).variables);
   if (directCollections.some(isJsonObject)) {
     return directCollections.filter(isJsonObject);
   }
@@ -676,6 +708,62 @@ function buildDesignContextCode(params: {
   return lines.join("\n");
 }
 
+function truncateText(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, maxLength)}...`;
+}
+
+function stripHtmlToText(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractHtmlTitle(html: string): string | null {
+  const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  return stringOrNull(match?.[1] ?? null);
+}
+
+async function fetchDesignCaptureSource(params: {
+  url: string | null;
+  html: string | null;
+}): Promise<{
+  sourceUrl: string | null;
+  html: string | null;
+  title: string | null;
+  textExcerpt: string | null;
+}> {
+  let html = params.html;
+  if (!html && params.url) {
+    const response = await fetch(params.url, {
+      headers: {
+        "User-Agent": "OpenClaw/1.0 (+https://wickedlab.io)",
+        Accept: "text/html,application/xhtml+xml",
+      },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => response.statusText);
+      throw new Error(`Design capture fetch failed (${response.status}): ${text || response.statusText}`);
+    }
+    html = await response.text();
+  }
+  const normalizedHtml = stringOrNull(html);
+  const title = extractHtmlTitle(normalizedHtml ?? "") ?? (params.url ? new URL(params.url).hostname : null);
+  const textExcerpt = normalizedHtml ? truncateText(stripHtmlToText(normalizedHtml), 1200) : null;
+  return {
+    sourceUrl: params.url,
+    html: normalizedHtml,
+    title,
+    textExcerpt,
+  };
+}
+
 function requirePat(auth: StoredWorkspaceFigmaMcpAuth): string {
   if (!auth.personalAccessToken) {
     throw new Error("FIGMA_PAT_REQUIRED");
@@ -862,6 +950,38 @@ const FIGMA_REST_COMPAT_TOOLS: FigmaMcpToolDefinition[] = [
     },
   },
   {
+    name: "figma.generate_diagram",
+    description:
+      "Generate a Mermaid diagram artifact in PMOS compatibility mode. This mirrors the official Figma MCP tool name, but saves a local diagram artifact instead of creating a FigJam document.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mermaidSyntax: { type: "string" },
+        name: { type: "string" },
+        userIntent: { type: "string" },
+      },
+      required: ["mermaidSyntax", "name"],
+    },
+  },
+  {
+    name: "figma.generate_figma_design",
+    description:
+      "Capture a URL or HTML snippet into a PMOS design artifact. In compatibility mode this creates a local capture bundle and report instead of a hosted Figma design file.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        captureId: { type: "string" },
+        fileKey: { type: "string" },
+        fileName: { type: "string" },
+        nodeId: { type: "string" },
+        outputMode: { type: "string" },
+        planKey: { type: "string" },
+        url: { type: "string" },
+        html: { type: "string" },
+      },
+    },
+  },
+  {
     name: "figma.get_figjam",
     description:
       "Return FigJam-friendly context for a board or node, including metadata, visible text notes, and optional screenshot URLs using the PMOS REST compatibility bridge.",
@@ -890,7 +1010,7 @@ const FIGMA_REST_COMPAT_TOOLS: FigmaMcpToolDefinition[] = [
   {
     name: "figma.whoami",
     description:
-      "Return the current workspace Figma connector identity and selected-file context from PMOS.",
+      "Return the current workspace Figma connector identity, selected-file context, and compatibility-service status from PMOS.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -898,13 +1018,21 @@ const FIGMA_REST_COMPAT_TOOLS: FigmaMcpToolDefinition[] = [
   },
 ];
 
+const FIGMA_TOOLS_AVAILABLE_WITHOUT_PAT = new Set<string>([
+  "figma.whoami",
+  "figma.generate_diagram",
+  "figma.generate_figma_design",
+  "figma.get_code_connect_map",
+  "figma.add_code_connect_map",
+  "figma.send_code_connect_mappings",
+]);
+
 async function callCompatTool(params: {
   workspaceId: string;
   toolName: string;
   args: Record<string, unknown>;
 }): Promise<unknown> {
   const auth = await readWorkspaceFigmaAuth(params.workspaceId);
-  const token = requirePat(auth);
   const workspaceTarget = await readWorkspaceFigmaTarget(params.workspaceId);
   const target = resolveRequestedTarget(params.args, workspaceTarget);
 
@@ -920,8 +1048,240 @@ async function callCompatTool(params: {
       nodeId: workspaceTarget.nodeId,
       hasPersonalAccessToken: auth.hasPersonalAccessToken,
       sourceLabel: auth.source,
+      mcpServerUrl: auth.mcpServerUrl,
+      compatibilityMode: true,
+      supportedToolCount: FIGMA_REST_COMPAT_TOOLS.length,
+      availableWithoutPersonalAccessToken: [...FIGMA_TOOLS_AVAILABLE_WITHOUT_PAT],
     };
   }
+
+  if (params.toolName === "figma.generate_diagram") {
+    const mermaidSyntax = stringOrNull(params.args.mermaidSyntax);
+    const name = stringOrNull(params.args.name);
+    if (!mermaidSyntax || !name) {
+      throw new Error("FIGMA_GENERATE_DIAGRAM_INVALID");
+    }
+    const artifact = await writeWorkspaceFigmaArtifact({
+      workspaceId: params.workspaceId,
+      stem: name,
+      extension: "mmd",
+      content: `${mermaidSyntax.trimEnd()}\n`,
+    });
+    return {
+      source: "pmos-figma-rest-compat",
+      transport: "rest_compat",
+      compatibilityMode: true,
+      status: "completed",
+      name,
+      mermaidSyntax,
+      userIntent: stringOrNull(params.args.userIntent),
+      artifactPath: artifact.absolutePath,
+      artifactId: artifact.artifactId,
+      note:
+        "PMOS compatibility mode saved the Mermaid diagram as a local artifact instead of creating a FigJam board.",
+    };
+  }
+
+  if (params.toolName === "figma.generate_figma_design") {
+    const captureId = stringOrNull(params.args.captureId);
+    if (captureId) {
+      const capturePath = workspaceFigmaCapturePath(params.workspaceId, captureId);
+      const raw = await fs.readFile(capturePath, "utf-8").catch(() => null);
+      if (!raw) {
+        throw new Error("FIGMA_CAPTURE_NOT_FOUND");
+      }
+      return JSON.parse(raw) as Record<string, unknown>;
+    }
+
+    const outputMode = stringOrNull(params.args.outputMode);
+    if (!outputMode) {
+      return {
+        source: "pmos-figma-rest-compat",
+        transport: "rest_compat",
+        compatibilityMode: true,
+        status: "needs_output_mode",
+        supportedOutputModes: ["newFile", "existingFile", "clipboard"],
+        note:
+          "PMOS compatibility mode creates a local capture bundle and design brief instead of a hosted Figma design file. Call figma.generate_figma_design again with outputMode and either url or html.",
+      };
+    }
+
+    const sourceUrl = stringOrNull(params.args.url);
+    const sourceHtml = stringOrNull(params.args.html);
+    if (!sourceUrl && !sourceHtml) {
+      throw new Error("FIGMA_DESIGN_SOURCE_REQUIRED");
+    }
+    const captured = await fetchDesignCaptureSource({
+      url: sourceUrl,
+      html: sourceHtml,
+    });
+    const effectiveCaptureId = randomUUID();
+    const summary = {
+      title: captured.title,
+      outputMode,
+      sourceUrl: captured.sourceUrl,
+      requestedFileName: stringOrNull(params.args.fileName),
+      targetFileKey: parseFigmaFileKey(stringOrNull(params.args.fileKey)),
+      targetNodeId: normalizeNodeId(params.args.nodeId),
+      planKey: stringOrNull(params.args.planKey),
+      htmlLength: captured.html?.length ?? 0,
+      textExcerpt: captured.textExcerpt,
+      createdAt: new Date().toISOString(),
+    };
+    const htmlArtifact = captured.html
+      ? await writeWorkspaceFigmaArtifact({
+          workspaceId: params.workspaceId,
+          stem: `${captured.title ?? "figma-design-capture"}-source`,
+          extension: "html",
+          content: `${captured.html}\n`,
+        })
+      : null;
+    const artifact = await writeWorkspaceFigmaArtifact({
+      workspaceId: params.workspaceId,
+      stem: captured.title ?? "figma-design-capture",
+      extension: "json",
+      content: `${JSON.stringify(summary, null, 2)}\n`,
+    });
+    const payload = {
+      source: "pmos-figma-rest-compat",
+      transport: "rest_compat",
+      compatibilityMode: true,
+      captureId: effectiveCaptureId,
+      status: "completed",
+      outputMode,
+      artifactPath: artifact.absolutePath,
+      sourceArtifactPath: htmlArtifact?.absolutePath ?? null,
+      summary,
+      note:
+        "PMOS compatibility mode completed a local capture bundle and design brief. It does not create a hosted Figma file.",
+    };
+    await ensureDir(path.dirname(workspaceFigmaCapturePath(params.workspaceId, effectiveCaptureId)));
+    await fs.writeFile(
+      workspaceFigmaCapturePath(params.workspaceId, effectiveCaptureId),
+      `${JSON.stringify(payload, null, 2)}\n`,
+      "utf-8",
+    );
+    return payload;
+  }
+
+  if (params.toolName === "figma.get_code_connect_map") {
+    if (!target.fileKey) {
+      throw new Error("FIGMA_FILE_CONTEXT_MISSING");
+    }
+    const maps = await readWorkspaceCodeConnectMaps(params.workspaceId);
+    const filtered = maps.filter((entry) => {
+      if (entry.fileKey !== target.fileKey) {
+        return false;
+      }
+      if (!target.nodeId) {
+        return true;
+      }
+      return entry.nodeId === target.nodeId;
+    });
+    return {
+      source: "pmos-figma-rest-compat",
+      transport: "rest_compat",
+      fileKey: target.fileKey,
+      nodeId: target.nodeId,
+      mappings: filtered,
+      totalMappings: filtered.length,
+      byNodeId: filtered.reduce<Record<string, { codeConnectSrc: string; codeConnectName: string }>>(
+        (acc, entry) => {
+          acc[entry.nodeId] = {
+            codeConnectSrc: entry.source,
+            codeConnectName: entry.componentName,
+          };
+          return acc;
+        },
+        {},
+      ),
+    };
+  }
+
+  if (params.toolName === "figma.add_code_connect_map") {
+    const componentName = stringOrNull(params.args.componentName);
+    const source = stringOrNull(params.args.source);
+    const label = stringOrNull(params.args.label) ?? "unknown";
+    const nodeId = target.nodeId;
+    if (!target.fileKey || !componentName || !source || !nodeId) {
+      throw new Error("FIGMA_CODE_CONNECT_MAPPING_INVALID");
+    }
+    const maps = await readWorkspaceCodeConnectMaps(params.workspaceId);
+    const nextEntry: StoredCodeConnectMap = {
+      fileKey: target.fileKey,
+      nodeId,
+      componentName,
+      source,
+      label,
+      updatedAt: new Date().toISOString(),
+    };
+    const deduped = maps.filter(
+      (entry) =>
+        !(
+          entry.fileKey === nextEntry.fileKey &&
+          entry.nodeId === nextEntry.nodeId &&
+          entry.label === nextEntry.label
+        ),
+    );
+    deduped.push(nextEntry);
+    await writeWorkspaceCodeConnectMaps(params.workspaceId, deduped);
+    return {
+      source: "pmos-figma-rest-compat",
+      transport: "rest_compat",
+      saved: true,
+      mapping: nextEntry,
+    };
+  }
+
+  if (params.toolName === "figma.send_code_connect_mappings") {
+    const incomingMappings = asArray(params.args.mappings).filter(isJsonObject);
+    if (!incomingMappings.length) {
+      throw new Error("FIGMA_CODE_CONNECT_MAPPING_INVALID");
+    }
+    const existing = await readWorkspaceCodeConnectMaps(params.workspaceId);
+    const normalizedIncoming: StoredCodeConnectMap[] = incomingMappings
+      .map((entry) => {
+        const fileKey = parseFigmaFileKey(stringOrNull(entry.fileKey)) ?? target.fileKey;
+        const nodeId = normalizeNodeId(entry.nodeId) ?? target.nodeId;
+        const componentName = stringOrNull(entry.componentName);
+        const source = stringOrNull(entry.source);
+        const label = stringOrNull(entry.label) ?? "unknown";
+        if (!fileKey || !nodeId || !componentName || !source) {
+          return null;
+        }
+        return {
+          fileKey,
+          nodeId,
+          componentName,
+          source,
+          label,
+          updatedAt: new Date().toISOString(),
+        } satisfies StoredCodeConnectMap;
+      })
+      .filter(Boolean) as StoredCodeConnectMap[];
+    if (!normalizedIncoming.length) {
+      throw new Error("FIGMA_CODE_CONNECT_MAPPING_INVALID");
+    }
+    const retained = existing.filter((saved) => {
+      return !normalizedIncoming.some(
+        (incoming) =>
+          incoming.fileKey === saved.fileKey &&
+          incoming.nodeId === saved.nodeId &&
+          incoming.label === saved.label,
+      );
+    });
+    const merged = [...retained, ...normalizedIncoming];
+    await writeWorkspaceCodeConnectMaps(params.workspaceId, merged);
+    return {
+      source: "pmos-figma-rest-compat",
+      transport: "rest_compat",
+      saved: true,
+      totalSaved: normalizedIncoming.length,
+      mappings: normalizedIncoming,
+    };
+  }
+
+  const token = requirePat(auth);
 
   if (!target.fileKey) {
     throw new Error("FIGMA_FILE_CONTEXT_MISSING");
@@ -1013,6 +1373,18 @@ async function callCompatTool(params: {
         nodeId: target.nodeId,
         matchedCount: matchedVariables.length,
         boundVariableIds: [...boundIds],
+        definitions: matchedVariables.reduce<Record<string, unknown>>((acc, variable) => {
+          const name = stringOrNull(variable.name);
+          if (!name) {
+            return acc;
+          }
+          acc[name] =
+            variable.resolvedValue ??
+            variable.valuesByMode ??
+            variable.defaultValue ??
+            null;
+          return acc;
+        }, {}),
         variables: matchedVariables.slice(0, 200),
       };
     }
@@ -1033,60 +1405,6 @@ async function callCompatTool(params: {
         transport: "rest_compat",
         fileKey: target.fileKey,
         styles: listMapItems(file.styles),
-      };
-    }
-    case "figma.get_code_connect_map": {
-      const maps = await readWorkspaceCodeConnectMaps(params.workspaceId);
-      const filtered = maps.filter((entry) => {
-        if (entry.fileKey !== target.fileKey) {
-          return false;
-        }
-        if (!target.nodeId) {
-          return true;
-        }
-        return entry.nodeId === target.nodeId;
-      });
-      return {
-        source: "pmos-figma-rest-compat",
-        transport: "rest_compat",
-        fileKey: target.fileKey,
-        nodeId: target.nodeId,
-        mappings: filtered,
-        totalMappings: filtered.length,
-      };
-    }
-    case "figma.add_code_connect_map": {
-      const componentName = stringOrNull(params.args.componentName);
-      const source = stringOrNull(params.args.source);
-      const label = stringOrNull(params.args.label) ?? "unknown";
-      const nodeId = target.nodeId;
-      if (!componentName || !source || !nodeId) {
-        throw new Error("FIGMA_CODE_CONNECT_MAPPING_INVALID");
-      }
-      const maps = await readWorkspaceCodeConnectMaps(params.workspaceId);
-      const nextEntry: StoredCodeConnectMap = {
-        fileKey: target.fileKey,
-        nodeId,
-        componentName,
-        source,
-        label,
-        updatedAt: new Date().toISOString(),
-      };
-      const deduped = maps.filter(
-        (entry) =>
-          !(
-            entry.fileKey === nextEntry.fileKey &&
-            entry.nodeId === nextEntry.nodeId &&
-            entry.label === nextEntry.label
-          ),
-      );
-      deduped.push(nextEntry);
-      await writeWorkspaceCodeConnectMaps(params.workspaceId, deduped);
-      return {
-        source: "pmos-figma-rest-compat",
-        transport: "rest_compat",
-        saved: true,
-        mapping: nextEntry,
       };
     }
     case "figma.get_code_connect_suggestions": {
@@ -1112,55 +1430,6 @@ async function callCompatTool(params: {
         fileKey: target.fileKey,
         nodeId,
         suggestions,
-      };
-    }
-    case "figma.send_code_connect_mappings": {
-      const incomingMappings = asArray(params.args.mappings).filter(isJsonObject);
-      if (!incomingMappings.length) {
-        throw new Error("FIGMA_CODE_CONNECT_MAPPING_INVALID");
-      }
-      const existing = await readWorkspaceCodeConnectMaps(params.workspaceId);
-      const normalizedIncoming: StoredCodeConnectMap[] = incomingMappings
-        .map((entry) => {
-          const fileKey =
-            parseFigmaFileKey(stringOrNull(entry.fileKey)) ??
-            target.fileKey;
-          const nodeId = normalizeNodeId(entry.nodeId) ?? target.nodeId;
-          const componentName = stringOrNull(entry.componentName);
-          const source = stringOrNull(entry.source);
-          const label = stringOrNull(entry.label) ?? "unknown";
-          if (!fileKey || !nodeId || !componentName || !source) {
-            return null;
-          }
-          return {
-            fileKey,
-            nodeId,
-            componentName,
-            source,
-            label,
-            updatedAt: new Date().toISOString(),
-          } satisfies StoredCodeConnectMap;
-        })
-        .filter(Boolean) as StoredCodeConnectMap[];
-      if (!normalizedIncoming.length) {
-        throw new Error("FIGMA_CODE_CONNECT_MAPPING_INVALID");
-      }
-      const retained = existing.filter((saved) => {
-        return !normalizedIncoming.some(
-          (incoming) =>
-            incoming.fileKey === saved.fileKey &&
-            incoming.nodeId === saved.nodeId &&
-            incoming.label === saved.label,
-        );
-      });
-      const merged = [...retained, ...normalizedIncoming];
-      await writeWorkspaceCodeConnectMaps(params.workspaceId, merged);
-      return {
-        source: "pmos-figma-rest-compat",
-        transport: "rest_compat",
-        saved: true,
-        totalSaved: normalizedIncoming.length,
-        mappings: normalizedIncoming,
       };
     }
     case "figma.create_design_system_rules": {
@@ -1210,8 +1479,10 @@ async function callCompatTool(params: {
         : asRecord((await fetchFile(token, target.fileKey, 4)).document);
       const screenshotNodeId = target.nodeId ?? stringOrNull(node.id) ?? "0:1";
       const includeImages = params.args.includeImagesOfNodes === true;
-      const images = includeImages
-        ? await fetchImages(token, target.fileKey, [screenshotNodeId]).catch(() => ({}))
+      const images: Record<string, string | null> = includeImages
+        ? await fetchImages(token, target.fileKey, [screenshotNodeId]).catch(
+            () => ({} as Record<string, string | null>),
+          )
         : {};
       const metadataXml = buildMetadataXml(node);
       const notes = collectTextNodes(node, 60);
@@ -1239,11 +1510,11 @@ async function callCompatTool(params: {
         : asRecord((await fetchFile(token, target.fileKey, 4)).document);
       const [commentPayload, screenshotPayload, variableDefs] = await Promise.all([
         fetchComments(token, target.fileKey).catch(() => []),
-        fetchImages(token, target.fileKey, [target.nodeId ?? stringOrNull(node.id) ?? "0:1"]).catch(
-          () => ({}),
+        fetchImages(token, target.fileKey, [target.nodeId ?? stringOrNull(node.id) ?? "0:1"]).catch(() =>
+          ({} as Record<string, string | null>)
         ),
         fetchLocalVariables(token, target.fileKey).catch(() => ({})),
-      ]);
+      ]) as [Record<string, unknown>[], Record<string, string | null>, Record<string, unknown>];
       const normalizedComments = filterCommentsForNode(commentPayload, target.nodeId);
       const normalizedVariables = normalizeVariableList(asRecord(variableDefs));
       const boundIds = new Set(collectBoundVariableIds(node));
@@ -1320,13 +1591,13 @@ export async function finishWorkspaceFigmaMcpOAuth(params: {
 
 export async function listWorkspaceFigmaMcpTools(workspaceId: string): Promise<unknown> {
   const auth = await readWorkspaceFigmaAuth(workspaceId);
-  if (!auth.hasPersonalAccessToken) {
-    throw new Error("FIGMA_PAT_REQUIRED");
-  }
   return {
     source: "pmos-figma-rest-compat",
     transport: "rest_compat",
     compatibilityMode: true,
+    authRequired: !auth.hasPersonalAccessToken,
+    mcpServerUrl: auth.mcpServerUrl,
+    availableWithoutPersonalAccessToken: [...FIGMA_TOOLS_AVAILABLE_WITHOUT_PAT],
     tools: FIGMA_REST_COMPAT_TOOLS,
   };
 }
@@ -1402,4 +1673,6 @@ export const __test = {
   buildMetadataXml,
   resolveRequestedTarget,
   workspaceFigmaCodeConnectPath,
+  workspaceFigmaArtifactsDir,
+  workspaceFigmaCapturePath,
 };

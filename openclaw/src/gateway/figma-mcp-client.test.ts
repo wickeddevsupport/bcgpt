@@ -46,6 +46,25 @@ describe("figma mcp compat bridge", () => {
         expect.objectContaining({ name: "figma.get_code_connect_suggestions" }),
         expect.objectContaining({ name: "figma.send_code_connect_mappings" }),
         expect.objectContaining({ name: "figma.create_design_system_rules" }),
+        expect.objectContaining({ name: "figma.generate_diagram" }),
+        expect.objectContaining({ name: "figma.generate_figma_design" }),
+      ]),
+    );
+  });
+
+  it("lists tools even before PAT sync and marks auth as required", async () => {
+    const result = (await listWorkspaceFigmaMcpTools(workspaceId)) as Record<string, unknown>;
+    expect(result.authRequired).toBe(true);
+    expect(result.availableWithoutPersonalAccessToken).toEqual(
+      expect.arrayContaining([
+        "figma.whoami",
+        "figma.generate_diagram",
+        "figma.generate_figma_design",
+      ]),
+    );
+    expect(result.tools).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "figma.get_design_context" }),
       ]),
     );
   });
@@ -66,6 +85,33 @@ describe("figma mcp compat bridge", () => {
     expect(status.authOk).toBe(true);
     expect(status.authRequired).toBe(false);
     expect(status.hasPersonalAccessToken).toBe(true);
+  });
+
+  it("returns connector identity through whoami without requiring a PAT", async () => {
+    await writeWorkspaceConnectors(workspaceId, {
+      figma: {
+        auth: {
+          hasPersonalAccessToken: false,
+          source: "fm-session",
+        },
+        identity: {
+          selectedFileUrl:
+            "https://www.figma.com/design/3INmNiG3X3NKAZtCI3SMg6/OKA-Online-Audit?node-id=0-1",
+          selectedFileId: "3INmNiG3X3NKAZtCI3SMg6",
+          selectedFileName: "OKA Online Audit",
+        },
+      },
+    });
+
+    const result = (await callWorkspaceFigmaMcpTool({
+      workspaceId,
+      toolName: "whoami",
+      args: {},
+    })) as Record<string, unknown>;
+
+    expect(result.selectedFileName).toBe("OKA Online Audit");
+    expect(result.fileKey).toBe("3INmNiG3X3NKAZtCI3SMg6");
+    expect(result.hasPersonalAccessToken).toBe(false);
   });
 
   it("returns filtered comments for a node through the compat tool call path", async () => {
@@ -356,5 +402,54 @@ describe("figma mcp compat bridge", () => {
     })) as Record<string, unknown>;
 
     expect(maps.totalMappings).toBe(2);
+  });
+
+  it("creates a local Mermaid artifact for generate_diagram", async () => {
+    const result = (await callWorkspaceFigmaMcpTool({
+      workspaceId,
+      toolName: "generate_diagram",
+      args: {
+        name: "Audit Flow",
+        mermaidSyntax: 'flowchart LR\nA["Start"] --> B["Review"]',
+        userIntent: "Map the audit flow",
+      },
+    })) as Record<string, unknown>;
+
+    expect(result.status).toBe("completed");
+    expect(String(result.artifactPath)).toContain("figma-artifacts");
+    const raw = await fs.readFile(String(result.artifactPath), "utf-8");
+    expect(raw).toContain('A["Start"] --> B["Review"]');
+  });
+
+  it("creates and reloads a local capture bundle for generate_figma_design", async () => {
+    const completed = (await callWorkspaceFigmaMcpTool({
+      workspaceId,
+      toolName: "generate_figma_design",
+      args: {
+        outputMode: "newFile",
+        url: "https://example.com/audit",
+        html: "<html><head><title>Audit Page</title></head><body><main>Audit this page now.</main></body></html>",
+      },
+    })) as Record<string, unknown>;
+
+    expect(completed.status).toBe("completed");
+    expect(String(completed.artifactPath)).toContain("figma-artifacts");
+    expect(completed.captureId).toBeTruthy();
+
+    const reloaded = (await callWorkspaceFigmaMcpTool({
+      workspaceId,
+      toolName: "generate_figma_design",
+      args: {
+        captureId: completed.captureId,
+      },
+    })) as Record<string, unknown>;
+
+    expect(reloaded.captureId).toBe(completed.captureId);
+    expect(reloaded.summary).toEqual(
+      expect.objectContaining({
+        title: "Audit Page",
+        outputMode: "newFile",
+      }),
+    );
   });
 });

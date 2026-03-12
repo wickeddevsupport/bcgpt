@@ -6,10 +6,13 @@ import { formatForLog } from "../ws-log.js";
 import { filterByWorkspace, requireWorkspaceId, isSuperAdmin } from "../workspace-context.js";
 import { buildFigmaRestAuditReport, parseFigmaFileKey } from "../figma-rest-audit.js";
 import {
-  callWorkspaceFigmaMcpTool,
-  listWorkspaceFigmaMcpTools,
-  probeWorkspaceFigmaMcpStatus,
-} from "../figma-mcp-client.js";
+  buildWorkspaceFigmaMcpFailurePayload,
+  callWorkspaceFigmaMcpServiceTool,
+  listWorkspaceFigmaMcpServiceTools,
+  normalizeFigmaMcpToolListResult,
+  normalizeFigmaMcpToolName,
+  probeWorkspaceFigmaMcpServiceStatus,
+} from "../figma-mcp-service.js";
 import { inspectWorkspaceChatUrls } from "../url-routing.js";
 import { emitAgentEvent, registerAgentRunContext } from "../../infra/agent-events.js";
 import fs from "node:fs/promises";
@@ -691,78 +694,6 @@ async function resolveWorkspaceBcgptAccess(params: {
   return { bcgptUrl, apiKey };
 }
 
-function normalizeFigmaMcpToolName(value: unknown): string {
-  const raw = typeof value === "string" ? value.trim() : "";
-  if (!raw) {
-    return "";
-  }
-  return raw.replace(/^(?:figma\.)+/i, "");
-}
-
-function extractFigmaMcpToolList(result: unknown): Array<Record<string, unknown>> {
-  const listRaw = (() => {
-    if (Array.isArray(result)) return result;
-    if (isJsonObject(result) && Array.isArray(result.tools)) return result.tools;
-    if (isJsonObject(result) && isJsonObject(result.result) && Array.isArray(result.result.tools)) {
-      return result.result.tools;
-    }
-    if (isJsonObject(result) && isJsonObject(result.data) && Array.isArray(result.data.tools)) {
-      return result.data.tools;
-    }
-    return [];
-  })();
-
-  return listRaw.filter((item): item is Record<string, unknown> => isJsonObject(item));
-}
-
-function normalizeFigmaMcpToolListResult(result: unknown): unknown {
-  const tools = extractFigmaMcpToolList(result);
-  if (!tools.length) {
-    return result;
-  }
-
-  const availableTools = tools
-    .map((tool) => {
-      const originalName = stringOrNull(tool.name);
-      const shortName = normalizeFigmaMcpToolName(originalName);
-      if (!shortName) {
-        return null;
-      }
-      const qualifiedName = originalName?.startsWith("figma.")
-        ? originalName
-        : `figma.${shortName}`;
-      return {
-        shortName,
-        qualifiedName,
-        description: stringOrNull(tool.description),
-        inputSchema: tool.inputSchema ?? tool.schema ?? tool.parameters ?? null,
-      };
-    })
-    .filter((item): item is NonNullable<typeof item> => Boolean(item));
-
-  if (!availableTools.length) {
-    return result;
-  }
-
-  const recommendedStartingTools = availableTools
-    .filter((tool) =>
-      ["get_design_context", "get_metadata", "get_screenshot", "get_variable_defs"].includes(
-        tool.shortName,
-      ),
-    )
-    .map((tool) => tool.shortName);
-
-  const basePayload = isJsonObject(result) ? result : { result };
-  return {
-    ...basePayload,
-    availableTools,
-    toolNames: availableTools.map((tool) => tool.shortName),
-    recommendedStartingTools,
-    callConvention:
-      "Pass either a short MCP tool name like `get_design_context` or a fully qualified name like `figma.get_design_context` to `figma_mcp_call`.",
-  };
-}
-
 type WorkspaceFigmaContext = {
   figmaUrl: string;
   connected: boolean;
@@ -803,38 +734,6 @@ type FigmaOfficialMcpStatus = {
   authCommand: string | null;
   error: string | null;
 };
-
-function buildFigmaMcpFailurePayload(
-  err: unknown,
-  mcpAuth: WorkspaceFigmaMcpAuth,
-  requestedTool?: string | null,
-): Record<string, unknown> {
-  const message = err instanceof Error ? err.message : String(err);
-  const authRequired =
-    /FIGMA_MCP_AUTH_REQUIRED|OAuth auth is required|state mismatch|FIGMA_PAT_REQUIRED/i.test(
-      message,
-    );
-  const patRequired = /FIGMA_PAT_REQUIRED/i.test(message);
-  return {
-    error: message,
-    code: patRequired
-      ? "FIGMA_PAT_REQUIRED"
-      : authRequired
-        ? "FIGMA_MCP_AUTH_REQUIRED"
-        : "FIGMA_MCP_CALL_FAILED",
-    requestedTool: requestedTool ?? null,
-    hasPersonalAccessToken: mcpAuth.hasPersonalAccessToken,
-    source: mcpAuth.source,
-    mcpServerUrl: mcpAuth.mcpServerUrl,
-    fallbackSuggested: "figma_pat_audit_file",
-    fallbackReason: patRequired
-      ? "PMOS needs the workspace Figma PAT from the embedded Figma panel before the MCP-compatible bridge can read comments, metadata, screenshots, or variables."
-      : authRequired
-      ? "PMOS needs the workspace Figma PAT-backed compatibility bridge to be ready before deeper Figma operations can run."
-      : "Official Figma MCP call failed; use the workspace PAT-backed audit fallback.",
-    authCommand: null,
-  };
-}
 
 function buildFigmaPatMissingPayload(mcpAuth: WorkspaceFigmaMcpAuth): Record<string, unknown> {
   if (mcpAuth.hasPersonalAccessToken) {
@@ -914,7 +813,7 @@ async function readWorkspaceFigmaMcpAuth(workspaceId: string): Promise<Workspace
 }
 
 async function readWorkspaceFigmaOfficialMcpStatus(workspaceId: string): Promise<FigmaOfficialMcpStatus> {
-  const status = await probeWorkspaceFigmaMcpStatus(workspaceId);
+  const status = await probeWorkspaceFigmaMcpServiceStatus(workspaceId);
   return {
     url: status.url,
     configured: status.configured,
@@ -3609,8 +3508,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "",
         "**Figma Tools:**",
         "- `figma_get_context` -- read the selected file/team context from the Figma panel so you can reason about workspace state",
-        "- `figma_mcp_list_tools` -- inspect the full live Figma MCP capability surface exposed through the PMOS direct MCP client before choosing a Figma operation",
-        "- `figma_mcp_call` -- call any discovered Figma MCP capability, especially context-first tools like `get_design_context`, `get_metadata`, `get_screenshot`, `get_variable_defs`, comments, annotations, nodes, and deeper file context",
+        "- `figma_mcp_list_tools` -- inspect the full live Figma MCP capability surface exposed through the PMOS-owned Figma MCP service before choosing a Figma operation",
+        "- `figma_mcp_call` -- call any discovered Figma MCP capability through the PMOS-owned Figma MCP service, especially context-first tools like `get_design_context`, `get_metadata`, `get_screenshot`, `get_variable_defs`, comments, annotations, nodes, and deeper file context",
         "- `figma_pat_audit_file` -- run a Figma REST audit with the workspace PAT only as a structural fallback when MCP auth or capability is unavailable, or when the task is explicitly an audit",
         "",
         ...(runtimeUrlHints.length ? ["## Request-Specific URL Routing", ...runtimeUrlHints, ""] : []),
@@ -3848,7 +3747,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           type: "function" as const,
           function: {
             name: "figma_mcp_list_tools",
-            description: "List the full configured Figma MCP capability surface and schemas through the PMOS direct MCP client. Use this first to discover context-first Figma tools such as get_design_context, get_metadata, get_screenshot, get_variable_defs, comments, annotations, node inspection, and other deeper file capabilities before choosing a specific MCP call.",
+            description: "List the full configured Figma MCP capability surface and schemas through the PMOS-owned Figma MCP service. Use this first to discover context-first Figma tools such as get_design_context, get_metadata, get_screenshot, get_variable_defs, comments, annotations, node inspection, and other deeper file capabilities before choosing a specific MCP call.",
             parameters: { type: "object", properties: {}, additionalProperties: false },
           },
         },
@@ -3856,7 +3755,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           type: "function" as const,
           function: {
             name: "figma_mcp_call",
-            description: "Call a specific Figma MCP tool through the PMOS direct MCP client for deeper file context such as get_design_context, get_metadata, get_screenshot, get_variable_defs, comments, annotations, nodes, screenshots, variables, components, and other live Figma capabilities discovered through figma_mcp_list_tools.",
+            description: "Call a specific Figma MCP tool through the PMOS-owned Figma MCP service for deeper file context such as get_design_context, get_metadata, get_screenshot, get_variable_defs, comments, annotations, nodes, screenshots, variables, components, and other live Figma capabilities discovered through figma_mcp_list_tools.",
             parameters: {
               type: "object",
               required: ["tool"],
@@ -4354,16 +4253,17 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             return JSON.stringify(payload);
           }
           case "figma_mcp_list_tools": {
-            const mcpAuth = await readWorkspaceFigmaMcpAuth(workspaceId);
             try {
-              const result = normalizeFigmaMcpToolListResult(
-                await listWorkspaceFigmaMcpTools(workspaceId),
-              );
+              const result = await listWorkspaceFigmaMcpServiceTools(workspaceId);
               finishTool(result);
               return JSON.stringify(result);
             } catch (err) {
               figmaMcpFailureSeen = true;
-              const payload = buildFigmaMcpFailurePayload(err, mcpAuth, "list_tools");
+              const payload = await buildWorkspaceFigmaMcpFailurePayload({
+                workspaceId,
+                err,
+                requestedTool: "list_tools",
+              });
               finishTool(payload);
               return JSON.stringify(payload);
             }
@@ -4381,20 +4281,23 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               return JSON.stringify(payload);
             }
             figmaMcpCallAttempted = true;
-            const mcpAuth = await readWorkspaceFigmaMcpAuth(workspaceId);
             const figmaContext = await readWorkspaceFigmaContext(workspaceId);
             const effectiveToolArgs = hydrateKnownFigmaContextArguments(toolArgs, figmaContext);
             try {
-              const result = await callWorkspaceFigmaMcpTool({
+              const result = await callWorkspaceFigmaMcpServiceTool({
                 workspaceId,
-                toolName: `figma.${tool}`,
+                toolName: tool,
                 args: effectiveToolArgs,
               });
               finishTool(result);
               return JSON.stringify(result);
             } catch (err) {
               figmaMcpFailureSeen = true;
-              const payload = buildFigmaMcpFailurePayload(err, mcpAuth, requestedTool || tool);
+              const payload = await buildWorkspaceFigmaMcpFailurePayload({
+                workspaceId,
+                err,
+                requestedTool: requestedTool || tool,
+              });
               finishTool(payload);
               return JSON.stringify(payload);
             }

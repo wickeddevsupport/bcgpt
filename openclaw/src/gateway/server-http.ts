@@ -54,6 +54,7 @@ import {
 import { handleToolsInvokeHttpRequest } from "./tools-invoke-http.js";
 import { handleN8nAiHttpRequest } from "./n8n-ai-http.js";
 import { handlePmosMcpHttpRequest } from "./pmos-mcp-http.js";
+import { handleFigmaMcpHttpRequest } from "./figma-mcp-http.js";
 
 type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
 
@@ -346,6 +347,9 @@ export function createGatewayHttpServer(opts: {
         return;
       }
       if (await handlePmosMcpHttpRequest(req, res)) {
+        return;
+      }
+      if (await handleFigmaMcpHttpRequest(req, res)) {
         return;
       }
       if (await handleLocalN8nRequest(req, res)) {
