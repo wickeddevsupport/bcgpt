@@ -254,7 +254,7 @@ describe("figma mcp compat bridge", () => {
     ]);
   });
 
-  it("falls back to the first renderable descendant when the requested screenshot node returns null", async () => {
+  it("falls back to the first renderable descendant when the requested screenshot node times out", async () => {
     await writeWorkspaceConnectors(workspaceId, {
       figma: {
         auth: {
@@ -269,41 +269,39 @@ describe("figma mcp compat bridge", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.includes("/nodes?")) {
+        if (url.includes("/v1/files/") && !url.includes("/variables/local")) {
           return new Response(
             JSON.stringify({
-              nodes: {
-                "0:1": {
-                  document: {
-                    id: "0:1",
-                    name: "Audit",
-                    type: "CANVAS",
+              document: {
+                id: "0:1",
+                name: "Audit",
+                type: "CANVAS",
+                children: [
+                  {
+                    id: "4:155",
+                    name: "Page Section",
+                    type: "SECTION",
                     children: [
                       {
-                        id: "4:155",
-                        name: "Page Section",
-                        type: "SECTION",
-                        children: [
-                          {
-                            id: "4:2",
-                            name: "1440w light",
-                            type: "FRAME",
-                          },
-                        ],
+                        id: "4:2",
+                        name: "1440w light",
+                        type: "FRAME",
                       },
                     ],
                   },
-                },
+                ],
               },
             }),
             { status: 200, headers: { "content-type": "application/json" } },
           );
         }
         if (url.includes("/v1/images/")) {
+          if (url.includes("ids=0%3A1")) {
+            throw new Error("The operation was aborted due to timeout");
+          }
           return new Response(
             JSON.stringify({
               images: {
-                "0:1": null,
                 "4:2": "https://example.com/fallback-frame.png",
               },
             }),
@@ -330,6 +328,7 @@ describe("figma mcp compat bridge", () => {
     expect(result.nodeId).toBe("4:2");
     expect(result.imageUrl).toBe("https://example.com/fallback-frame.png");
     expect(result.fallbackUsed).toBe(true);
+    expect(result.attemptedNodeIds).toEqual(["0:1", "4:2"]);
     expect(result.fallbackCandidates).toEqual(
       expect.arrayContaining(["0:1", "4:2"]),
     );

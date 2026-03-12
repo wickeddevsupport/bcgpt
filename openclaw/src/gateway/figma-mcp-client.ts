@@ -1398,14 +1398,35 @@ async function callCompatTool(params: {
     case "figma.get_screenshot": {
       const requestedNodeId = target.nodeId ?? "0:1";
       const format = stringOrNull(params.args.format) ?? "png";
-      const node = target.nodeId
-        ? await fetchNode(token, target.fileKey, target.nodeId, 4)
-        : asRecord((await fetchFile(token, target.fileKey, 3)).document);
-      const screenshotCandidates = collectScreenshotCandidateNodeIds(node, requestedNodeId);
-      const images = await fetchImages(token, target.fileKey, screenshotCandidates, format);
-      const resolvedNodeId =
-        screenshotCandidates.find((candidateId) => stringOrNull(images[candidateId])) ?? requestedNodeId;
-      const imageUrl = stringOrNull(images[resolvedNodeId]);
+      const node =
+        !target.nodeId || requestedNodeId === "0:1"
+          ? asRecord((await fetchFile(token, target.fileKey, 2)).document)
+          : await fetchNode(token, target.fileKey, target.nodeId, 3);
+      const screenshotCandidates = collectScreenshotCandidateNodeIds(node, requestedNodeId, 6);
+      const attemptedNodeIds: string[] = [];
+      const images: Record<string, string | null> = {};
+      let resolvedNodeId = requestedNodeId;
+      let imageUrl: string | null = null;
+      let lastError: unknown = null;
+      for (const candidateId of screenshotCandidates) {
+        attemptedNodeIds.push(candidateId);
+        try {
+          const candidateImages = await fetchImages(token, target.fileKey, [candidateId], format);
+          const candidateUrl = stringOrNull(candidateImages[candidateId]);
+          images[candidateId] = candidateUrl;
+          if (candidateUrl) {
+            resolvedNodeId = candidateId;
+            imageUrl = candidateUrl;
+            break;
+          }
+        } catch (err) {
+          lastError = err;
+          images[candidateId] = null;
+        }
+      }
+      if (!imageUrl && lastError && attemptedNodeIds.length <= 1) {
+        throw lastError;
+      }
       return {
         source: "pmos-figma-rest-compat",
         transport: "rest_compat",
@@ -1417,6 +1438,7 @@ async function callCompatTool(params: {
         images,
         fallbackUsed: resolvedNodeId !== requestedNodeId,
         fallbackCandidates: screenshotCandidates,
+        attemptedNodeIds,
         note: imageUrl
           ? resolvedNodeId !== requestedNodeId
             ? `Figma did not return an image for ${requestedNodeId}; PMOS used fallback node ${resolvedNodeId}.`
