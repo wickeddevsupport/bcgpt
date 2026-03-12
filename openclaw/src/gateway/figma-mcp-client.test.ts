@@ -114,6 +114,77 @@ describe("figma mcp compat bridge", () => {
     expect(result.hasPersonalAccessToken).toBe(false);
   });
 
+  it("anchors whoami to the requested URL and enriches it with live Figma identity when PAT is available", async () => {
+    await writeWorkspaceConnectors(workspaceId, {
+      figma: {
+        auth: {
+          personalAccessToken: "figd_pat_test",
+          hasPersonalAccessToken: true,
+          source: "fm-session",
+        },
+        identity: {
+          selectedFileUrl: "https://www.figma.com/design/t7Tuz7hnuyv2fifnRJZ0zN/806-Technologies-Internal",
+          selectedFileId: "t7Tuz7hnuyv2fifnRJZ0zN",
+          selectedFileName: "806 Technologies - Internal",
+        },
+      },
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/v1/me")) {
+          return new Response(
+            JSON.stringify({
+              id: "u1",
+              handle: "design",
+              email: "design@wickedwebsites.us",
+              img_url: "https://example.com/avatar.png",
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        if (url.includes("/v1/files/3INmNiG3X3NKAZtCI3SMg6")) {
+          return new Response(
+            JSON.stringify({
+              document: {
+                id: "0:1",
+                name: "OKA Online Audit",
+                type: "CANVAS",
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+
+    const result = (await callWorkspaceFigmaMcpTool({
+      workspaceId,
+      toolName: "whoami",
+      args: {
+        url: "https://www.figma.com/design/3INmNiG3X3NKAZtCI3SMg6/OKA-Online-Audit?node-id=0-1",
+      },
+    })) as Record<string, unknown>;
+
+    expect(result.selectedFileName).toBe("806 Technologies - Internal");
+    expect(result.effectiveFileName).toBe("OKA Online Audit");
+    expect(result.effectiveFileId).toBe("3INmNiG3X3NKAZtCI3SMg6");
+    expect(result.fileKey).toBe("3INmNiG3X3NKAZtCI3SMg6");
+    expect(result.nodeId).toBe("0:1");
+    expect(result.user).toEqual(
+      expect.objectContaining({
+        handle: "design",
+        email: "design@wickedwebsites.us",
+      }),
+    );
+  });
+
   it("returns filtered comments for a node through the compat tool call path", async () => {
     await writeWorkspaceConnectors(workspaceId, {
       figma: {

@@ -114,6 +114,22 @@ function parseNodeIdFromUrl(value: string | null): string | null {
   }
 }
 
+function parseFileNameFromUrl(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    const parts = url.pathname.split("/").filter(Boolean);
+    const designIndex = parts.findIndex((part) => part === "design" || part === "file");
+    const slug = designIndex >= 0 ? parts[designIndex + 2] ?? null : parts.at(-1) ?? null;
+    if (!slug) {
+      return null;
+    }
+    return decodeURIComponent(slug).replace(/[-_]+/g, " ").trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 function safeWorkspaceId(workspaceId: string): string {
   return String(workspaceId).trim() || "default";
 }
@@ -1037,6 +1053,36 @@ async function callCompatTool(params: {
   const target = resolveRequestedTarget(params.args, workspaceTarget);
 
   if (params.toolName === "figma.whoami") {
+    const requestedUrl = stringOrNull(params.args.url);
+    let effectiveFileName =
+      target.fileKey && target.fileKey === workspaceTarget.fileKey
+        ? workspaceTarget.selectedFileName
+        : parseFileNameFromUrl(requestedUrl);
+    const effectiveFileUrl = requestedUrl ?? workspaceTarget.selectedFileUrl;
+    const effectiveFileId = target.fileKey ?? workspaceTarget.selectedFileId;
+    let user: Record<string, unknown> | null = null;
+    if (auth.personalAccessToken) {
+      try {
+        const me = asRecord(await fetchFigmaJson(auth.personalAccessToken, "/v1/me", { timeoutMs: 10_000 }));
+        user = {
+          id: stringOrNull(me.id),
+          handle: stringOrNull(me.handle),
+          email: stringOrNull(me.email),
+          imageUrl: stringOrNull(me.img_url),
+        };
+      } catch {
+        user = null;
+      }
+      if (target.fileKey && (!effectiveFileName || target.fileKey !== workspaceTarget.fileKey)) {
+        try {
+          const file = await fetchFile(auth.personalAccessToken, target.fileKey, 1);
+          const document = asRecord(file.document);
+          effectiveFileName = stringOrNull(document.name) ?? effectiveFileName;
+        } catch {
+          // Ignore file lookup failures and fall back to the URL slug or synced panel state.
+        }
+      }
+    }
     return {
       source: "pmos-figma-rest-compat",
       transport: "rest_compat",
@@ -1044,14 +1090,19 @@ async function callCompatTool(params: {
       selectedFileName: workspaceTarget.selectedFileName,
       selectedFileUrl: workspaceTarget.selectedFileUrl,
       selectedFileId: workspaceTarget.selectedFileId,
-      fileKey: workspaceTarget.fileKey,
-      nodeId: workspaceTarget.nodeId,
+      effectiveFileName,
+      effectiveFileUrl,
+      effectiveFileId,
+      requestedUrl,
+      fileKey: target.fileKey,
+      nodeId: target.nodeId,
       hasPersonalAccessToken: auth.hasPersonalAccessToken,
       sourceLabel: auth.source,
       mcpServerUrl: auth.mcpServerUrl,
       compatibilityMode: true,
       supportedToolCount: FIGMA_REST_COMPAT_TOOLS.length,
       availableWithoutPersonalAccessToken: [...FIGMA_TOOLS_AVAILABLE_WITHOUT_PAT],
+      user,
     };
   }
 
