@@ -47,7 +47,7 @@ export type DashboardProps = {
   onOpsManualApiKeyChange?: (next: string) => void;
   onSaveOpsApiKey?: () => Promise<void>;
 
-  onNavigateTab: (tab: "integrations" | "automations" | "chat" | "config" | "agents") => void;
+  onNavigateTab: (tab: "integrations" | "automations" | "chat" | "config" | "agents" | "command-center") => void;
   onSettingsChange: (next: UiSettings) => void;
   onConnect: () => void;
   onRefreshConnectors: () => void;
@@ -64,6 +64,9 @@ export type DashboardProps = {
   onOpenAgentChat: (agentId: string) => void;
   // Inline chat panel
   chatProps: ChatProps;
+  // Dashboard tab state
+  dashboardTab: "home" | "agents" | "workflows" | "system";
+  onDashboardTabChange: (tab: "home" | "agents" | "workflows" | "system") => void;
 };
 
 function renderStatusPill(label: string, value: string, status: "ok" | "warn") {
@@ -211,6 +214,357 @@ export function renderDashboard(props: DashboardProps) {
       : null,
   ].filter((item): item is { title: string; detail: string; href: string } => Boolean(item));
 
+  const tab = props.dashboardTab ?? "home";
+
+  const renderTabContent = () => {
+    if (tab === "home") {
+      return html`
+        <div class="card">
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:space-between;">
+            <div>
+              <div class="card-title">System Pulse</div>
+              <span class="chip ${pulse.tone === "ok" ? "chip-ok" : "chip-warn"}">${pulse.label}</span>
+            </div>
+            <div class="row" style="gap:8px;">
+              <button class="btn btn--sm" @click=${() => props.onNavigateTab("chat")}>Daily Brief</button>
+              <button class="btn btn--sm" @click=${() => props.onNavigateTab("automations")}>Check Workflows</button>
+              <button class="btn btn--sm" @click=${() => props.onNavigateTab("command-center" as Parameters<typeof props.onNavigateTab>[0])}>Open Projects</button>
+            </div>
+          </div>
+        </div>
+
+        ${focusItems.length > 0 ? html`
+          <div class="card">
+            <div class="card-title">Focus Today</div>
+            <div class="card-sub">Prioritized actions to keep operations healthy.</div>
+            <div class="list" style="margin-top: 12px;">
+              ${focusItems.slice(0, 5).map(
+                (item) => html`
+                  <div class="list-item">
+                    <div class="list-main">
+                      <div class="list-title">${item.title}</div>
+                      <div class="list-sub">${item.detail}</div>
+                    </div>
+                    <div class="list-meta">
+                      <button class="btn btn--sm" @click=${() => {
+                        if (item.href === props.integrationsHref) { props.onNavigateTab("integrations"); return; }
+                        if (item.href === props.automationsHref) { props.onNavigateTab("automations"); return; }
+                        props.onNavigateTab("chat");
+                      }}>Open</button>
+                    </div>
+                  </div>
+                `,
+              )}
+            </div>
+          </div>
+        ` : nothing}
+      `;
+    }
+
+    if (tab === "agents") {
+      return html`
+        <section class="card">
+          <div class="row" style="justify-content: space-between; align-items: center;">
+            <div>
+              <div class="card-title">Your AI Team</div>
+              <div class="card-sub">${agents.length} agent${agents.length !== 1 ? 's' : ''} ready to help</div>
+            </div>
+            <button class="btn btn--sm" @click=${() => props.onNavigateTab("agents")}>
+              Manage Agents
+            </button>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 16px;">
+            ${
+              agents.length === 0
+                ? html`
+                  <div class="muted" style="grid-column: 1 / -1; text-align: center; padding: 32px;">
+                    <div style="margin-bottom: 12px;">No agents configured yet.</div>
+                    <button class="btn btn--primary" @click=${() => props.onNavigateTab("agents")}>
+                      Create your first agent
+                    </button>
+                  </div>
+                `
+                : agents.map((agent) => {
+                  const activity = props.agentActivityById[agent.id] ?? {
+                    tasksRunning: 0, tasksQueued: 0, lastActivityAt: null, status: 'idle',
+                  };
+                  const identity = props.agentIdentityById[agent.id];
+                  const displayName = agent.name?.trim() || agent.identity?.name?.trim() || identity?.name?.trim() || agent.id;
+                  const emoji = identity?.emoji?.trim() || agent.identity?.emoji?.trim() || '\uD83E\uDD16';
+                  const theme = agent.identity?.theme?.trim() || 'AI Agent';
+                  const statusLabel = activity.status === 'active' ? 'Active' : activity.status === 'paused' ? 'Paused' : activity.status === 'error' ? 'Error' : 'Ready';
+                  const statusClass = activity.status === 'active' ? 'chip-ok' : activity.status === 'paused' ? 'chip-warn' : activity.status === 'error' ? 'chip-danger' : '';
+                  const taskCount = activity.tasksRunning + activity.tasksQueued;
+                  return html`
+                    <div class="card" style="padding: 16px;">
+                      <div style="font-weight: 600;">${emoji} ${displayName}</div>
+                      <div class="muted">${theme}</div>
+                      <div style="margin-top: 8px;">
+                        <span class="chip ${statusClass}">${statusLabel}</span>
+                        ${taskCount > 0 ? html`<span class="muted">${taskCount} task${taskCount !== 1 ? 's' : ''}</span>` : nothing}
+                      </div>
+                      <div class="row" style="gap: 8px; margin-top: 8px;">
+                        <button class="btn btn--sm btn--primary" @click=${() => props.onOpenAgentChat(agent.id)}>Chat</button>
+                        <button class="btn btn--sm" @click=${() => props.onNavigateTab("agents")}>Settings</button>
+                      </div>
+                    </div>
+                  `;
+                })
+            }
+          </div>
+        </section>
+      `;
+    }
+
+    if (tab === "workflows") {
+      return html`
+        <section class="grid grid-cols-2">
+          <div class="card">
+            <div class="card-title">Automation Live</div>
+            <div class="card-sub">Recent run activity with direct drill-down.</div>
+            <div class="chip-row" style="margin-top: 12px;">
+              <span class="chip chip-ok">Succeeded: ${runBuckets.succeeded}</span>
+              <span class="chip chip-danger">Failed: ${runBuckets.failed}</span>
+              <span class="chip chip-warn">Running: ${runBuckets.running}</span>
+              ${runs.length > 0
+                ? html`<span class="chip">Success rate: ${Math.round(((runBuckets.succeeded) / Math.max(runBuckets.succeeded + runBuckets.failed, 1)) * 100)}%</span>`
+                : nothing}
+            </div>
+            ${props.runsError ? html`<div class="callout danger" style="margin-top: 12px;">${props.runsError}</div>` : nothing}
+            ${runBuckets.failed > 0
+              ? html`<div class="callout warn" style="margin-top: 12px; font-size: 13px;">${runBuckets.failed} failed run${runBuckets.failed !== 1 ? "s" : ""} need attention.</div>`
+              : nothing}
+            ${runs.length
+              ? html`
+                  <div class="list" style="margin-top: 12px;">
+                    ${runs.slice(0, 8).map((run) => {
+                      const status = String(run.status ?? "UNKNOWN");
+                      const bucket = runStatusBucket(status);
+                      const toneClass = bucket === "failed" ? "chip chip-danger" : bucket === "succeeded" ? "chip chip-ok" : bucket === "running" ? "chip chip-warn" : "chip";
+                      const flowName = run.flowId ? flows.find((f) => f.id === run.flowId)?.displayName ?? `flow ${String(run.flowId).slice(0, 8)}` : "flow n/a";
+                      return html`
+                        <div class="list-item">
+                          <div class="list-main">
+                            <div class="list-title">${flowName}</div>
+                            <div class="list-sub mono">${String(run.id ?? "").slice(0, 8)}</div>
+                          </div>
+                          <div class="list-meta">
+                            <span class=${toneClass}>${status}</span>
+                            <span>${relativeFromAny(run.created)}</span>
+                          </div>
+                        </div>
+                      `;
+                    })}
+                  </div>
+                `
+              : html`<div class="muted" style="margin-top: 12px;">No run events yet.</div>`}
+            <div class="row" style="margin-top: 12px;">
+              <button class="btn" @click=${() => props.onRefreshDashboard()} ?disabled=${refreshBusy || !props.connected}>
+                ${refreshBusy ? "Refreshing..." : "Refresh all"}
+              </button>
+              <button class="btn btn--secondary" @click=${() => props.onNavigateTab("automations")}>Open workflows</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Portfolio Pulse</div>
+            <div class="card-sub">Cross-automation health and delivery pressure.</div>
+            <div class="stat-grid" style="margin-top: 16px;">
+              <div class="stat">
+                <div class="stat-label">Flows</div>
+                <div class="stat-value">${flows.length}</div>
+                <div class="muted">${enabledFlows} enabled</div>
+              </div>
+              <div class="stat">
+                <div class="stat-label">Recent Runs</div>
+                <div class="stat-value">${runs.length}</div>
+                <div class="muted">${runBuckets.failed > 0 ? `${runBuckets.failed} failed` : "All passing"}</div>
+              </div>
+              <div class="stat">
+                <div class="stat-label">Pulse</div>
+                <div class="stat-value ${pulse.tone === "ok" ? "ok" : "warn"}">${pulse.label}</div>
+                <div class="muted">${props.opsProvisioned ? "Workflows ready" : "Provisioning..."}</div>
+              </div>
+            </div>
+            <div class="row" style="margin-top: 14px;">
+              <button class="btn" @click=${() => props.onNavigateTab("automations")}>Workflows</button>
+              <button class="btn btn--secondary" @click=${() => props.onNavigateTab("chat")}>Chat</button>
+            </div>
+          </div>
+        </section>
+      `;
+    }
+
+    // "system" tab
+    return html`
+      <section class="grid grid-cols-2">
+        <div class="card">
+          <div class="card-title">Integration Health</div>
+          <div class="card-sub">Connector state for Workflows and Basecamp.</div>
+          <div class="stat-grid" style="margin-top: 16px;">
+            <div class="stat">
+              <div class="stat-label">Workflows</div>
+              <div class="stat-value ${props.opsProvisioned && opsRuntimeStatus.tone === "ok" ? "ok" : "warn"}">
+                ${props.opsProvisioned ? opsRuntimeStatus.label : "Pending"}
+              </div>
+              ${ops?.error ? html`<div class="muted">${ops.error}</div>` : nothing}
+            </div>
+            <div class="stat">
+              <div class="stat-label">Basecamp</div>
+              <div class="stat-value ${bcgptStatus.tone === "ok" ? "ok" : "warn"}">${bcgptStatus.label}</div>
+              <div class="muted mono">${bcgpt?.url ?? "https://bcgpt.wickedlab.io"}</div>
+            </div>
+          </div>
+          <div class="row" style="margin-top: 14px;">
+            <button class="btn" ?disabled=${props.connectorsLoading || !props.connected} @click=${() => props.onRefreshConnectors()}>
+              ${props.connectorsLoading ? "Checking..." : "Refresh status"}
+            </button>
+            <button class="btn btn--secondary" @click=${() => props.onNavigateTab("integrations")}>Open integrations</button>
+            <span class="muted">Last check: ${checkedLabel}</span>
+          </div>
+          ${props.connectorsError ? html`<div class="callout danger" style="margin-top: 14px;">${props.connectorsError}</div>` : nothing}
+        </div>
+
+        <div class="card">
+          <div class="card-title">System</div>
+          <div class="card-sub">Wicked OS access and gateway connection.</div>
+          ${showAccessCard
+            ? html`
+                <div class="form-grid" style="margin-top: 16px;">
+                  <label class="field">
+                    <span>Wicked OS Access Key (optional)</span>
+                    <input type="password" .value=${props.settings.token}
+                      @input=${(e: Event) => { const token = (e.target as HTMLInputElement).value; props.onSettingsChange({ ...props.settings, token }); }}
+                      placeholder="Paste your access key" autocomplete="off" />
+                  </label>
+                </div>
+                <div class="row" style="margin-top: 14px;">
+                  <button class="btn" @click=${() => props.onConnect()} ?disabled=${props.connected}>Connect</button>
+                  <span class="muted">Needed only for legacy/manual gateway access.</span>
+                </div>
+              `
+            : html`
+                <div style="margin-top: 16px; display: grid; gap: 8px;">
+                  ${renderStatusPill("Gateway", props.connected ? "Connected" : "Offline", props.connected ? "ok" : "warn")}
+                  ${renderStatusPill("Workflows", props.opsProvisioned ? "Provisioned" : "Pending", props.opsProvisioned ? "ok" : "warn")}
+                </div>
+              `}
+          ${!props.opsProvisioned ? html`<div class="callout" style="margin-top: 14px;">Workflow workspace is provisioning - workflows will be available shortly.</div>` : nothing}
+          ${props.lastError ? html`<div class="callout danger" style="margin-top: 14px;">${props.lastError}</div>` : nothing}
+        </div>
+      </section>
+
+      <details class="card setup-wizard" style="" ?open=${wizardOpen}>
+        <summary class="setup-wizard__summary">
+          <div class="setup-wizard__summary-main">
+            <div class="card-title">System Status</div>
+            <div class="card-sub">${coreReady ? "Everything is running. Click to expand for details." : "Check that core services are running before using the app."}</div>
+          </div>
+          <span class="chip ${coreReady ? "chip-ok" : "chip-warn"}">${coreReady ? "Ready" : `${setupCompleted}/${setupSteps.length}`}</span>
+        </summary>
+        <div class="setup-wizard__body">
+          <div class="row" style="margin-top: 12px; align-items: center;">
+            <button class="btn btn--secondary" @click=${() => props.onRefreshDashboard()} ?disabled=${refreshBusy || !props.connected}>
+              ${refreshBusy ? "Checking..." : "Run setup check"}
+            </button>
+            ${nextSetupStep
+              ? html`<span class="muted">Next: <strong>${nextSetupStep.title}</strong></span>`
+              : html`<span class="muted">Setup complete. <a href=${props.chatHref} class="btn btn--primary" style="margin-left:8px;">Start Using Chat</a></span>`}
+          </div>
+          ${props.opsProvisioningResult && props.opsProvisioningResult.apiKey
+            ? html`<div class="callout success" style="margin-top:12px;">
+                <div><strong>Workflow project provisioned</strong></div>
+                <div style="margin-top:6px;">Project ID: <code>${props.opsProvisioningResult.projectId ?? "(n/a)"}</code></div>
+                <div style="margin-top:6px;">API key: <code class="mono">${props.opsProvisioningResult.apiKey}</code></div>
+                <div style="margin-top:8px;">
+                  <button class="btn btn--secondary" @click=${() => navigator.clipboard?.writeText(props.opsProvisioningResult?.apiKey ?? "")}>Copy API key</button>
+                  <button class="btn" @click=${() => props.onNavigateTab("integrations")}>Open integrations</button>
+                </div>
+              </div>`
+            : nothing}
+          ${props.opsProvisioningError
+            ? html`<div class="callout warn" style="margin-top:12px;">
+                <div><strong>Automated provisioning failed</strong></div>
+                <div style="margin-top:6px;">${props.opsProvisioningError}</div>
+              </div>
+              <div class="form-grid" style="margin-top:8px;">
+                <label class="field">
+                  <span>Workflow API key</span>
+                  <input type="password" .value=${props.opsManualApiKeyDraft ?? ""}
+                    @input=${(e: Event) => props.onOpsManualApiKeyChange?.((e.target as HTMLInputElement).value)}
+                    placeholder="Paste API key here" autocomplete="off" />
+                </label>
+              </div>
+              <div class="row" style="margin-top:8px;">
+                <button class="btn" @click=${() => props.onSaveOpsApiKey?.()} ?disabled=${!props.opsManualApiKeyDraft}>Save API key</button>
+                <button class="btn btn--secondary" @click=${() => props.onNavigateTab("integrations")}>Open integrations</button>
+              </div>`
+            : nothing}
+          <div style="margin-top:12px;">
+            ${setupSteps.map((step) => html`
+              <div class="setup-step" style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;">
+                <div>
+                  <div style="font-weight:600">${step.title}</div>
+                  <div class="muted" style="margin-top:4px">${step.detail}</div>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center;">
+                  ${step.done ? html`<span class="chip chip-ok">Done</span>` : html`<span class="chip">Pending</span>`}
+                  ${step.actionKind === "connect"
+                    ? html`<button class="btn btn--sm" @click=${() => props.onConnect()} ?disabled=${props.connected}>${step.actionLabel ?? "Connect"}</button>`
+                    : step.actionKind === "refresh"
+                      ? html`<button class="btn btn--sm" @click=${() => props.onRefreshConnectors()} ?disabled=${props.connectorsLoading || !props.connected}>${props.connectorsLoading ? "Checking..." : step.actionLabel ?? "Refresh"}</button>`
+                      : step.href
+                        ? html`<button class="btn btn--sm" @click=${() => {
+                            if (step.id === "bcgpt" || step.id === "model-auth") { props.onNavigateTab("integrations"); return; }
+                            if (step.id === "first-flow") { props.onNavigateTab("automations"); return; }
+                            props.onNavigateTab("chat");
+                          }}>${step.actionLabel ?? "Open"}</button>`
+                        : nothing}
+                </div>
+              </div>
+            `)}
+          </div>
+        </div>
+      </details>
+
+      <div class="card">
+        <div class="card-title">Agent Timeline</div>
+        <div class="card-sub">Live Wicked OS execution trace (model-agnostic schema).</div>
+        ${trace.length
+          ? html`
+              <div class="list" style="margin-top: 12px;">
+                ${trace.slice(0, 8).map(
+                  (entry) => html`
+                    <div class="list-item">
+                      <div class="list-main">
+                        <div class="list-title">${entry.title}</div>
+                        <div class="list-sub">${entry.detail ?? `${entry.source}:${entry.kind}`}</div>
+                      </div>
+                      <div class="list-meta">
+                        <span class=${traceStatusClass(entry.status)}>${entry.status}</span>
+                        <span>${formatRelativeTimestamp(entry.ts)}</span>
+                      </div>
+                    </div>
+                  `,
+                )}
+              </div>
+            `
+          : html`<div class="muted" style="margin-top: 12px;">No execution trace yet. Use Chat to start a run.</div>`}
+        <div class="row" style="margin-top: 12px;">
+          <button class="btn" @click=${() => props.onNavigateTab("chat")}>Open chat</button>
+          <button class="btn btn--secondary" @click=${() => props.onClearTrace()} ?disabled=${trace.length === 0}>Clear trace</button>
+        </div>
+      </div>
+    `;
+  };
+
+  const DASH_TABS: { key: "home" | "agents" | "workflows" | "system"; label: string }[] = [
+    { key: "home", label: "Home" },
+    { key: "agents", label: "Agents" },
+    { key: "workflows", label: "Workflows" },
+    { key: "system", label: "System" },
+  ];
+
   return html`
     <section class="dashboard-shell">
       <div class="dashboard-main">
@@ -218,7 +572,7 @@ export function renderDashboard(props: DashboardProps) {
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
       <div>
         <span style="font-size:20px;font-weight:600;">${getTimeGreeting()}</span>
-        <span class="muted" style="font-size:13px;margin-left:10px;">Chat is live on the right →</span>
+        <span class="muted" style="font-size:13px;margin-left:10px;">Chat is live on the right &rarr;</span>
       </div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         ${props.currentModel
@@ -228,431 +582,22 @@ export function renderDashboard(props: DashboardProps) {
       </div>
     </div>
 
-    <!-- Your AI Team section -->
-    <section class="card" style="">
-      <div class="row" style="justify-content: space-between; align-items: center;">
-        <div>
-          <div class="card-title">Your AI Team</div>
-          <div class="card-sub">${agents.length} agent${agents.length !== 1 ? 's' : ''} ready to help</div>
-        </div>
-        <button class="btn btn--sm" @click=${() => props.onNavigateTab("agents")}>
-          Manage Agents
-        </button>
-      </div>
-      
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 16px;">
-        ${
-          agents.length === 0
-            ? html`
-              <div class="muted" style="grid-column: 1 / -1; text-align: center; padding: 32px;">
-                <div style="margin-bottom: 12px;">No agents configured yet.</div>
-                <button class="btn btn--primary" @click=${() => props.onNavigateTab("agents")}>
-                  Create your first agent
-                </button>
-              </div>
-            `
-            : agents.map((agent) => {
-              const activity = props.agentActivityById[agent.id] ?? {
-                tasksRunning: 0,
-                tasksQueued: 0,
-                lastActivityAt: null,
-                status: 'idle',
-              };
-              const identity = props.agentIdentityById[agent.id];
-              const displayName = agent.name?.trim() || agent.identity?.name?.trim() || identity?.name?.trim() || agent.id;
-              const emoji = identity?.emoji?.trim() || agent.identity?.emoji?.trim() || 'ðŸ¤–';
-              const theme = agent.identity?.theme?.trim() || identity?.theme?.trim() || 'AI Agent';
-              
-              const statusLabel =
-                activity.status === 'active' ? 'Active' :
-                activity.status === 'paused' ? 'Paused' :
-                activity.status === 'error' ? 'Error' : 'Ready';
-              const statusClass =
-                activity.status === 'active' ? 'chip-ok' :
-                activity.status === 'paused' ? 'chip-warn' :
-                activity.status === 'error' ? 'chip-danger' : '';
-
-              const taskCount = activity.tasksRunning + activity.tasksQueued;
-
-              return html`
-                <div class="card" style="padding: 16px;">
-                  <div style="font-weight: 600;">${emoji} ${displayName}</div>
-                  <div class="muted">${theme}</div>
-                  <div style="margin-top: 8px;">
-                    <span class="chip ${statusClass}">${statusLabel}</span>
-                    ${taskCount > 0 ? html`<span class="muted">${taskCount} task${taskCount !== 1 ? 's' : ''}</span>` : nothing}
-                  </div>
-                  <div class="row" style="gap: 8px; margin-top: 8px;">
-                    <button class="btn btn--sm btn--primary" @click=${() => props.onOpenAgentChat(agent.id)}>
-                      Chat
-                    </button>
-                    <button class="btn btn--sm" @click=${() => props.onNavigateTab("agents")}>
-                      Settings
-                    </button>
-                  </div>
-                </div>
-              `;
-            })
-        }
-      </div>
-    </section>
-
-    <details class="card setup-wizard" style="" ?open=${wizardOpen}>
-      <summary class="setup-wizard__summary">
-        <div class="setup-wizard__summary-main">
-          <div class="card-title">System Status</div>
-          <div class="card-sub">
-            ${coreReady ? "Everything is running. Click to expand for details." : "Check that core services are running before using the app."}
-          </div>
-        </div>
-        <span class="chip ${coreReady ? "chip-ok" : "chip-warn"}">
-          ${coreReady ? "Ready" : `${setupCompleted}/${setupSteps.length}`}
-        </span>
-      </summary>
-
-      <div class="setup-wizard__body">
-        <div class="row" style="margin-top: 12px; align-items: center;">
-          <button class="btn btn--secondary" @click=${() => props.onRefreshDashboard()} ?disabled=${refreshBusy || !props.connected}>
-            ${refreshBusy ? "Checking..." : "Run setup check"}
-          </button>
-          ${nextSetupStep
-            ? html`
-                <span class="muted">
-                  Next: <strong>${nextSetupStep.title}</strong>
-                </span>
-              `
-            : html`<span class="muted">Setup complete. <a href=${props.chatHref} class="btn btn--primary" style="margin-left:8px;">Start Using Chat</a></span>`}
-        </div>
-
-        <!-- Provisioning result (shown after provisioning completes) -->
-        ${props.opsProvisioningResult && props.opsProvisioningResult.apiKey
-          ? html`<div class="callout success" style="margin-top:12px;">
-              <div><strong>Workflow project provisioned</strong></div>
-              <div style="margin-top:6px;">Project ID: <code>${props.opsProvisioningResult.projectId ?? "(n/a)"}</code></div>
-              <div style="margin-top:6px;">API key: <code class="mono">${props.opsProvisioningResult.apiKey}</code></div>
-              <div style="margin-top:8px;">
-                <button class="btn btn--secondary" @click=${() => navigator.clipboard?.writeText(props.opsProvisioningResult?.apiKey ?? "")}>Copy API key</button>
-                <button class="btn" @click=${() => props.onNavigateTab("integrations")}>Open integrations</button>
-              </div>
-            </div>`
-          : nothing}
-
-        <!-- Manual API-key fallback when automated provisioning is blocked (license-gated or API missing) -->
-        ${props.opsProvisioningError
-          ? html`<div class="callout warn" style="margin-top:12px;">
-              <div><strong>Automated provisioning failed</strong></div>
-              <div style="margin-top:6px;">${props.opsProvisioningError}</div>
-              <div style="margin-top:8px;">You can set an Activepieces Project ID and API key below to scope workflows to this workspace.</div>
-            </div>
-            <div class="form-grid" style="margin-top:8px;">
-              <label class="field">
-                <span>Workflow API key</span>
-                <input
-                  type="password"
-                  .value=${props.opsManualApiKeyDraft ?? ""}
-                  @input=${(e: Event) => props.onOpsManualApiKeyChange?.((e.target as HTMLInputElement).value)}
-                  placeholder="Paste API key here"
-                  autocomplete="off"
-                />
-              </label>
-            </div>
-            <div class="row" style="margin-top:8px;">
-              <button class="btn" @click=${() => props.onSaveOpsApiKey?.()} ?disabled=${!props.opsManualApiKeyDraft}>Save API key</button>
-              <button class="btn btn--secondary" @click=${() => props.onNavigateTab("integrations")}>Open integrations</button>
-            </div>`
-          : nothing}
-
-        <div style="margin-top:12px;">
-          ${setupSteps.map((step) => html`
-            <div class="setup-step" style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;">
-              <div>
-                <div style="font-weight:600">${step.title}</div>
-                <div class="muted" style="margin-top:4px">${step.detail}</div>
-              </div>
-              <div style="display:flex;gap:8px;align-items:center;">
-                ${step.done ? html`<span class="chip chip-ok">Done</span>` : html`<span class="chip">Pending</span>`}
-
-                ${step.actionKind === "connect"
-                  ? html`<button class="btn btn--sm" @click=${() => props.onConnect()} ?disabled=${props.connected}>${step.actionLabel ?? "Connect"}</button>`
-                  : step.actionKind === "refresh"
-                    ? html`<button class="btn btn--sm" @click=${() => props.onRefreshConnectors()} ?disabled=${props.connectorsLoading || !props.connected}>${props.connectorsLoading ? "Checking..." : step.actionLabel ?? "Refresh"}</button>`
-                  : step.id === "ops"
-                    ? html`<button class="btn btn--sm" @click=${() => props.onProvisionOps?.()} ?disabled=${props.opsProvisioning || !props.connected}>${props.opsProvisioning ? "Provisioning..." : step.actionLabel ?? "Provision"}</button>`
-                    : step.href
-                      ? html`<button class="btn btn--sm" @click=${() => {
-                          if (step.id === "bcgpt" || step.id === "model-auth") {
-                            props.onNavigateTab("integrations");
-                            return;
-                          }
-                          if (step.id === "first-flow") {
-                            props.onNavigateTab("automations");
-                            return;
-                          }
-                          if (step.id === "chat-ready") {
-                            props.onNavigateTab("chat");
-                          }
-                        }}>${step.actionLabel ?? "Open"}</button>`
-                      : nothing}
-              </div>
-            </div>
-          `)}
-        </div>
-      </div>
-    </details>
-
-    <section class="grid grid-cols-2">
-      <div class="card">
-        <div class="card-title">Integration Health</div>
-        <div class="card-sub">Connector state for Workflows and Basecamp.</div>
-
-        <div class="stat-grid" style="margin-top: 16px;">
-          <div class="stat">
-            <div class="stat-label">Workflows</div>
-            <div class="stat-value ${props.opsProvisioned && opsRuntimeStatus.tone === "ok" ? "ok" : "warn"}">
-              ${props.opsProvisioned ? opsRuntimeStatus.label : "Pending"}
-            </div>
-            ${ops?.error ? html`<div class="muted">${ops.error}</div>` : nothing}
-          </div>
-          <div class="stat">
-            <div class="stat-label">Basecamp</div>
-            <div class="stat-value ${bcgptStatus.tone === "ok" ? "ok" : "warn"}">${bcgptStatus.label}</div>
-            <div class="muted mono">${bcgpt?.url ?? "https://bcgpt.wickedlab.io"}</div>
-          </div>
-        </div>
-
-        <div class="row" style="margin-top: 14px;">
+    <!-- Tab strip -->
+    <div class="dashboard-tab-strip">
+      ${DASH_TABS.map(
+        (t) => html`
           <button
-            class="btn"
-            ?disabled=${props.connectorsLoading || !props.connected}
-            @click=${() => props.onRefreshConnectors()}
-            title=${props.connected ? "Refresh connector checks" : "Connect first"}
+            class="dashboard-tab-btn ${tab === t.key ? "active" : ""}"
+            @click=${() => props.onDashboardTabChange(t.key)}
           >
-            ${props.connectorsLoading ? "Checking..." : "Refresh status"}
+            ${t.label}
           </button>
-          <button class="btn btn--secondary" @click=${() => props.onNavigateTab("integrations")}>
-            Open integrations
-          </button>
-          <span class="muted">Last check: ${checkedLabel}</span>
-        </div>
+        `,
+      )}
+    </div>
 
-        ${props.connectorsError ? html`<div class="callout danger" style="margin-top: 14px;">${props.connectorsError}</div>` : nothing}
-      </div>
-
-      <div class="card">
-        <div class="card-title">Portfolio Pulse</div>
-        <div class="card-sub">Cross-automation health and delivery pressure.</div>
-
-        <div class="stat-grid" style="margin-top: 16px;">
-          <div class="stat">
-            <div class="stat-label">Flows</div>
-            <div class="stat-value">${flows.length}</div>
-            <div class="muted">${enabledFlows} enabled</div>
-          </div>
-          <div class="stat">
-            <div class="stat-label">Recent Runs</div>
-            <div class="stat-value">${runs.length}</div>
-            <div class="muted">${runBuckets.failed > 0 ? `${runBuckets.failed} failed` : "All passing"}</div>
-          </div>
-          <div class="stat">
-            <div class="stat-label">Pulse</div>
-            <div class="stat-value ${pulse.tone === "ok" ? "ok" : "warn"}">${pulse.label}</div>
-            <div class="muted">${props.opsProvisioned ? "Workflows ready" : "Provisioning..."}</div>
-          </div>
-        </div>
-
-        <div class="row" style="margin-top: 14px;">
-          <button class="btn" @click=${() => props.onNavigateTab("automations")}>Workflows</button>
-          <button class="btn btn--secondary" @click=${() => props.onNavigateTab("chat")}>Chat</button>
-        </div>
-      </div>
-    </section>
-
-    <section class="grid grid-cols-2">
-      <div class="card">
-        <div class="card-title">Automation Live</div>
-        <div class="card-sub">Recent run activity with direct drill-down.</div>
-
-        <div class="chip-row" style="margin-top: 12px;">
-          <span class="chip chip-ok">Succeeded: ${runBuckets.succeeded}</span>
-          <span class="chip chip-danger">Failed: ${runBuckets.failed}</span>
-          <span class="chip chip-warn">Running: ${runBuckets.running}</span>
-          ${runs.length > 0
-            ? html`<span class="chip">Success rate: ${Math.round(((runBuckets.succeeded) / Math.max(runBuckets.succeeded + runBuckets.failed, 1)) * 100)}%</span>`
-            : nothing}
-        </div>
-
-        ${props.runsError ? html`<div class="callout danger" style="margin-top: 12px;">${props.runsError}</div>` : nothing}
-        ${runBuckets.failed > 0
-          ? html`<div class="callout warn" style="margin-top: 12px; font-size: 13px;">
-              ${runBuckets.failed} failed run${runBuckets.failed !== 1 ? "s" : ""} need attention.
-              Check the Workflows tab for details and retry options.
-            </div>`
-          : nothing}
-        ${
-          runs.length
-            ? html`
-                <div class="list" style="margin-top: 12px;">
-                  ${runs.slice(0, 8).map((run) => {
-                    const status = String(run.status ?? "UNKNOWN");
-                    const bucket = runStatusBucket(status);
-                    const toneClass =
-                      bucket === "failed"
-                        ? "chip chip-danger"
-                        : bucket === "succeeded"
-                          ? "chip chip-ok"
-                          : bucket === "running"
-                            ? "chip chip-warn"
-                            : "chip";
-                    const flowName = run.flowId
-                      ? flows.find((f) => f.id === run.flowId)?.displayName ?? `flow ${String(run.flowId).slice(0, 8)}`
-                      : "flow n/a";
-                    return html`
-                      <div class="list-item">
-                        <div class="list-main">
-                          <div class="list-title">${flowName}</div>
-                          <div class="list-sub mono">${String(run.id ?? "").slice(0, 8)}</div>
-                        </div>
-                        <div class="list-meta">
-                          <span class=${toneClass}>${status}</span>
-                          <span>${relativeFromAny(run.created)}</span>
-                        </div>
-                      </div>
-                    `;
-                  })}
-                </div>
-              `
-            : html`<div class="muted" style="margin-top: 12px;">No run events yet.</div>`
-        }
-
-        <div class="row" style="margin-top: 12px;">
-          <button class="btn" @click=${() => props.onRefreshDashboard()} ?disabled=${refreshBusy || !props.connected}>
-            ${refreshBusy ? "Refreshing..." : "Refresh all"}
-          </button>
-          <button class="btn btn--secondary" @click=${() => props.onNavigateTab("automations")}>Open workflows</button>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">Focus Today</div>
-        <div class="card-sub">Prioritized actions to keep operations healthy.</div>
-        ${focusItems.length === 0 ? html`<div class="muted" style="margin-top: 12px;">All good â€” no issues to address.</div>` : nothing}
-        <div class="list" style="margin-top: 12px;">
-          ${focusItems.slice(0, 5).map(
-            (item) => html`
-              <div class="list-item">
-                <div class="list-main">
-                  <div class="list-title">${item.title}</div>
-                  <div class="list-sub">${item.detail}</div>
-                </div>
-                <div class="list-meta">
-                  <button
-                    class="btn btn--sm"
-                    @click=${() => {
-                      if (item.href === props.integrationsHref) {
-                        props.onNavigateTab("integrations");
-                        return;
-                      }
-                      if (item.href === props.automationsHref) {
-                        props.onNavigateTab("automations");
-                        return;
-                      }
-                      props.onNavigateTab("chat");
-                    }}
-                  >
-                    Open
-                  </button>
-                </div>
-              </div>
-            `,
-          )}
-        </div>
-      </div>
-    </section>
-
-    <section class="grid grid-cols-2">
-      <div class="card">
-        <div class="card-title">Agent Timeline</div>
-        <div class="card-sub">Live Wicked OS execution trace (model-agnostic schema).</div>
-        ${
-          trace.length
-            ? html`
-                <div class="list" style="margin-top: 12px;">
-                  ${trace.slice(0, 8).map(
-                    (entry) => html`
-                      <div class="list-item">
-                        <div class="list-main">
-                          <div class="list-title">${entry.title}</div>
-                          <div class="list-sub">${entry.detail ?? `${entry.source}:${entry.kind}`}</div>
-                        </div>
-                        <div class="list-meta">
-                          <span class=${traceStatusClass(entry.status)}>${entry.status}</span>
-                          <span>${formatRelativeTimestamp(entry.ts)}</span>
-                        </div>
-                      </div>
-                    `,
-                  )}
-                </div>
-              `
-            : html`<div class="muted" style="margin-top: 12px;">No execution trace yet. Use Chat to start a run.</div>`
-        }
-        <div class="row" style="margin-top: 12px;">
-          <button class="btn" @click=${() => props.onNavigateTab("chat")}>Open chat</button>
-          <button class="btn btn--secondary" @click=${() => props.onClearTrace()} ?disabled=${trace.length === 0}>
-            Clear trace
-          </button>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">System</div>
-        <div class="card-sub">Wicked OS access and gateway connection.</div>
-
-        ${
-          showAccessCard
-            ? html`
-                <div class="form-grid" style="margin-top: 16px;">
-                  <label class="field">
-                    <span>Wicked OS Access Key (optional)</span>
-                    <input
-                      type="password"
-                      .value=${props.settings.token}
-                      @input=${(e: Event) => {
-                        const token = (e.target as HTMLInputElement).value;
-                        props.onSettingsChange({ ...props.settings, token });
-                      }}
-                      placeholder="Paste your access key"
-                      autocomplete="off"
-                    />
-                  </label>
-                </div>
-                <div class="row" style="margin-top: 14px;">
-                  <button class="btn" @click=${() => props.onConnect()} ?disabled=${props.connected}>
-                    Connect
-                  </button>
-                  <span class="muted">Needed only for legacy/manual gateway access.</span>
-                </div>
-              `
-            : html`
-                <div style="margin-top: 16px; display: grid; gap: 8px;">
-                  ${renderStatusPill("Gateway", props.connected ? "Connected" : "Offline", props.connected ? "ok" : "warn")}
-                  ${renderStatusPill("Workflows", props.opsProvisioned ? "Provisioned" : "Pending", props.opsProvisioned ? "ok" : "warn")}
-                </div>
-              `
-        }
-
-        ${
-          !props.opsProvisioned
-            ? html`
-                <div class="callout" style="margin-top: 14px;">
-                  Workflow workspace is provisioning - workflows will be available shortly.
-                </div>
-              `
-            : nothing
-        }
-
-        ${props.lastError ? html`<div class="callout danger" style="margin-top: 14px;">${props.lastError}</div>` : nothing}
-      </div>
-    </section>
+    <!-- Tab content -->
+    ${renderTabContent()}
 
       </div>
 

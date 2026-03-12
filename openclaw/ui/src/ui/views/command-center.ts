@@ -2,7 +2,13 @@ import { html, nothing } from "lit";
 import { formatRelativeTimestamp } from "../format.ts";
 import type { ChatProps } from "./chat.ts";
 import { renderChat } from "./chat.ts";
-import type { PmosProjectCard, PmosProjectTodoItem, PmosProjectsSnapshot } from "../controllers/pmos-projects.ts";
+import type {
+  PmosProjectCard,
+  PmosProjectDetailTab,
+  PmosProjectSectionResult,
+  PmosProjectTodoItem,
+  PmosProjectsSnapshot,
+} from "../controllers/pmos-projects.ts";
 
 export type ProjectViewMode = "cards" | "status-board" | "timeline";
 
@@ -14,12 +20,18 @@ export type CommandCenterProps = {
   projectSearch: string;
   viewMode: ProjectViewMode;
   chatProps: ChatProps;
+  selectedProject: PmosProjectCard | null;
+  projectDetailTab: PmosProjectDetailTab;
+  projectSectionData: Record<string, PmosProjectSectionResult>;
   onRefresh: () => void;
   onOpenIntegrations: () => void;
   onOpenWorkflows: () => void;
   onPrefillChat: (prompt: string) => void;
   onProjectSearchChange: (next: string) => void;
   onViewModeChange: (next: ProjectViewMode) => void;
+  onSelectProject: (project: PmosProjectCard | null) => void;
+  onProjectDetailTabChange: (tab: PmosProjectDetailTab) => void;
+  onLoadProjectSection: (projectName: string, section: PmosProjectDetailTab) => void;
 };
 
 function healthChipClass(health: PmosProjectCard["health"]) {
@@ -155,6 +167,9 @@ function renderProjectCards(props: CommandCenterProps, cards: PmosProjectCard[])
                 `
               : nothing}
             <div class="project-card__actions">
+              <button class="btn btn--sm btn--primary" @click=${() => props.onSelectProject(project)}>
+                Explore
+              </button>
               ${project.appUrl
                 ? html`
                     <a class="btn btn--sm" href=${project.appUrl} target="_blank" rel="noreferrer">
@@ -209,6 +224,7 @@ function renderStatusBoard(props: CommandCenterProps, cards: PmosProjectCard[]) 
                           <span>Due today: <strong>${project.dueTodayTodos}</strong></span>
                         </div>
                         <div class="row" style="gap:6px; margin-top:6px;">
+                          <button class="btn btn--xs btn--primary" @click=${() => props.onSelectProject(project)}>Explore</button>
                           ${project.appUrl
                             ? html`<a class="btn btn--xs" href=${project.appUrl} target="_blank" rel="noreferrer">Basecamp</a>`
                             : nothing}
@@ -307,6 +323,385 @@ function renderTimeline(props: CommandCenterProps, snapshot: PmosProjectsSnapsho
   `;
 }
 
+// -- Project Detail View --
+
+const DETAIL_TABS: { key: PmosProjectDetailTab; label: string }[] = [
+  { key: "overview", label: "Overview" },
+  { key: "todos", label: "Todos" },
+  { key: "messages", label: "Messages" },
+  { key: "people", label: "People" },
+  { key: "schedule", label: "Schedule" },
+  { key: "card_tables", label: "Card Tables" },
+];
+
+function renderProjectDetailHeader(props: CommandCenterProps) {
+  const project = props.selectedProject!;
+  return html`
+    <div class="project-detail-header">
+      <button class="btn btn--sm" @click=${() => props.onSelectProject(null)}>
+        &larr; All Projects
+      </button>
+      <div class="project-detail-title">
+        <span>${project.name}</span>
+        <span class="chip ${healthChipClass(project.health)}">${healthLabel(project.health)}</span>
+      </div>
+      ${project.appUrl
+        ? html`<a class="btn btn--sm" href=${project.appUrl} target="_blank" rel="noreferrer">Open in Basecamp</a>`
+        : nothing}
+    </div>
+  `;
+}
+
+function renderProjectDetailTabs(props: CommandCenterProps) {
+  return html`
+    <div class="agent-tabs project-detail-tabs">
+      ${DETAIL_TABS.map(
+        (tab) => html`
+          <button
+            class="agent-tab ${props.projectDetailTab === tab.key ? "active" : ""}"
+            @click=${() => props.onProjectDetailTabChange(tab.key)}
+          >
+            ${tab.label}
+          </button>
+        `,
+      )}
+    </div>
+  `;
+}
+
+function renderOverviewTab(project: PmosProjectCard) {
+  return html`
+    <div class="project-section-content">
+      <div class="project-overview-metrics">
+        <div class="project-card__metrics" style="margin-bottom: 16px;">
+          <div class="project-card__metric">
+            <span class="muted">Open</span>
+            <strong>${project.openTodos}</strong>
+          </div>
+          <div class="project-card__metric">
+            <span class="muted">Assigned</span>
+            <strong>${project.assignedTodos}</strong>
+          </div>
+          <div class="project-card__metric">
+            <span class="muted">Overdue</span>
+            <strong class="${project.overdueTodos > 0 ? "warn" : ""}">${project.overdueTodos}</strong>
+          </div>
+          <div class="project-card__metric">
+            <span class="muted">Due today</span>
+            <strong>${project.dueTodayTodos}</strong>
+          </div>
+          <div class="project-card__metric">
+            <span class="muted">Future</span>
+            <strong>${project.futureTodos}</strong>
+          </div>
+          <div class="project-card__metric">
+            <span class="muted">No date</span>
+            <strong>${project.noDueDateTodos}</strong>
+          </div>
+          <div class="project-card__metric">
+            <span class="muted">Todo lists</span>
+            <strong>${project.todoLists}</strong>
+          </div>
+          <div class="project-card__metric">
+            <span class="muted">Next due</span>
+            <strong class="mono">${project.nextDueOn ?? "n/a"}</strong>
+          </div>
+        </div>
+        ${(project.previewTodos ?? []).length > 0
+          ? html`
+              <div style="margin-bottom: 8px; font-weight: 500; font-size: 14px;">Upcoming todos</div>
+              <div class="project-section-list">
+                ${(project.previewTodos ?? []).map(
+                  (todo) => html`
+                    <div class="project-section-item">
+                      <div class="project-section-item__title">${todo.title}</div>
+                      <div class="project-section-item__meta">
+                        <span class="muted mono">${todo.dueOn ?? "no due date"}</span>
+                        ${todo.appUrl
+                          ? html`<a class="btn btn--xs" href=${todo.appUrl} target="_blank" rel="noreferrer">Open</a>`
+                          : nothing}
+                      </div>
+                    </div>
+                  `,
+                )}
+              </div>
+            `
+          : html`<div class="muted">No preview todos available. Click Todos tab to load all.</div>`}
+      </div>
+    </div>
+  `;
+}
+
+function renderTodosSection(data: unknown) {
+  if (!data || typeof data !== "object") return html`<div class="muted">No todo data.</div>`;
+  // data is likely string or structured object from bcgpt tool
+  if (typeof data === "string") {
+    return html`<pre class="project-section-pre">${data}</pre>`;
+  }
+  const raw = data as Record<string, unknown>;
+  // Try to render as todolists grouped format
+  const todolists = Array.isArray(raw.todolists)
+    ? (raw.todolists as Array<{ name?: string; todos?: Array<{ title?: string; dueOn?: string; appUrl?: string; status?: string }> }>)
+    : null;
+  if (todolists) {
+    return html`
+      <div class="project-section-list">
+        ${todolists.map(
+          (list) => html`
+            <div class="project-section-group">
+              <div class="project-section-group__header">${list.name ?? "Untitled list"}</div>
+              ${(list.todos ?? []).map(
+                (todo) => html`
+                  <div class="project-section-item">
+                    <div class="project-section-item__title">${todo.title}</div>
+                    <div class="project-section-item__meta">
+                      <span class="muted mono">${todo.dueOn ?? "no due date"}</span>
+                      <span class="chip chip--tiny">${todo.status ?? ""}</span>
+                      ${todo.appUrl
+                        ? html`<a class="btn btn--xs" href=${todo.appUrl} target="_blank" rel="noreferrer">Open</a>`
+                        : nothing}
+                    </div>
+                  </div>
+                `,
+              )}
+              ${(list.todos ?? []).length === 0 ? html`<div class="muted" style="font-size:12px; padding:4px 0;">No todos in this list</div>` : nothing}
+            </div>
+          `,
+        )}
+        ${todolists.length === 0 ? html`<div class="muted">No todo lists found.</div>` : nothing}
+      </div>
+    `;
+  }
+  // Fallback: show raw as formatted JSON
+  return html`<pre class="project-section-pre">${JSON.stringify(data, null, 2)}</pre>`;
+}
+
+function renderMessagesSection(data: unknown) {
+  if (!data) return html`<div class="muted">No messages.</div>`;
+  if (typeof data === "string") return html`<pre class="project-section-pre">${data}</pre>`;
+  const messages = Array.isArray(data) ? (data as Array<{ title?: string; author?: string; createdAt?: string; appUrl?: string }>) : null;
+  if (messages) {
+    return html`
+      <div class="project-section-list">
+        ${messages.map(
+          (msg) => html`
+            <div class="project-section-item">
+              <div class="project-section-item__title">${msg.title ?? "(no title)"}</div>
+              <div class="project-section-item__meta">
+                <span class="muted">${msg.author ?? ""}</span>
+                <span class="muted mono">${msg.createdAt ?? ""}</span>
+                ${msg.appUrl
+                  ? html`<a class="btn btn--xs" href=${msg.appUrl} target="_blank" rel="noreferrer">Open</a>`
+                  : nothing}
+              </div>
+            </div>
+          `,
+        )}
+        ${messages.length === 0 ? html`<div class="muted">No messages found.</div>` : nothing}
+      </div>
+    `;
+  }
+  return html`<pre class="project-section-pre">${JSON.stringify(data, null, 2)}</pre>`;
+}
+
+function renderScheduleSection(data: unknown) {
+  if (!data) return html`<div class="muted">No schedule entries.</div>`;
+  if (typeof data === "string") return html`<pre class="project-section-pre">${data}</pre>`;
+  const entries = Array.isArray(data) ? (data as Array<{ title?: string; startsAt?: string; endsAt?: string; appUrl?: string }>) : null;
+  if (entries) {
+    return html`
+      <div class="project-section-list">
+        ${entries.map(
+          (entry) => html`
+            <div class="project-section-item">
+              <div class="project-section-item__title">${entry.title ?? "(no title)"}</div>
+              <div class="project-section-item__meta">
+                <span class="muted mono">${entry.startsAt ?? ""} - ${entry.endsAt ?? ""}</span>
+                ${entry.appUrl
+                  ? html`<a class="btn btn--xs" href=${entry.appUrl} target="_blank" rel="noreferrer">Open</a>`
+                  : nothing}
+              </div>
+            </div>
+          `,
+        )}
+        ${entries.length === 0 ? html`<div class="muted">No schedule entries found.</div>` : nothing}
+      </div>
+    `;
+  }
+  return html`<pre class="project-section-pre">${JSON.stringify(data, null, 2)}</pre>`;
+}
+
+function renderCardTablesSection(data: unknown) {
+  if (!data) return html`<div class="muted">No card tables.</div>`;
+  if (typeof data === "string") return html`<pre class="project-section-pre">${data}</pre>`;
+  const tables = Array.isArray(data)
+    ? (data as Array<{ name?: string; columns?: Array<{ name?: string; cardsCount?: number }> }>)
+    : null;
+  if (tables) {
+    return html`
+      <div class="project-section-list">
+        ${tables.map(
+          (table) => html`
+            <div class="project-section-group">
+              <div class="project-section-group__header">${table.name ?? "Untitled table"}</div>
+              ${(table.columns ?? []).map(
+                (col) => html`
+                  <div class="project-section-item">
+                    <div class="project-section-item__title">${col.name ?? "Untitled column"}</div>
+                    <div class="project-section-item__meta">
+                      <span class="chip">${col.cardsCount ?? 0} cards</span>
+                    </div>
+                  </div>
+                `,
+              )}
+              ${(table.columns ?? []).length === 0 ? html`<div class="muted" style="font-size:12px; padding:4px 0;">No columns</div>` : nothing}
+            </div>
+          `,
+        )}
+        ${tables.length === 0 ? html`<div class="muted">No card tables found.</div>` : nothing}
+      </div>
+    `;
+  }
+  return html`<pre class="project-section-pre">${JSON.stringify(data, null, 2)}</pre>`;
+}
+
+function renderPeopleSection(data: unknown) {
+  if (!data) return html`<div class="muted">No people data.</div>`;
+  if (typeof data === "string") return html`<pre class="project-section-pre">${data}</pre>`;
+  const people = Array.isArray(data) ? (data as Array<{ name?: string; email?: string; role?: string }>) : null;
+  if (people) {
+    return html`
+      <div class="project-section-list">
+        ${people.map(
+          (person) => html`
+            <div class="project-section-item">
+              <div class="project-section-item__title">${person.name ?? "(unknown)"}</div>
+              <div class="project-section-item__meta">
+                <span class="muted">${person.email ?? ""}</span>
+                ${person.role ? html`<span class="chip">${person.role}</span>` : nothing}
+              </div>
+            </div>
+          `,
+        )}
+        ${people.length === 0 ? html`<div class="muted">No people found.</div>` : nothing}
+      </div>
+    `;
+  }
+  return html`<pre class="project-section-pre">${JSON.stringify(data, null, 2)}</pre>`;
+}
+
+function renderSectionTab(props: CommandCenterProps, section: PmosProjectDetailTab) {
+  const project = props.selectedProject!;
+  const key = `${project.id}:${section}`;
+  const sectionData = props.projectSectionData[key];
+
+  if (!sectionData) {
+    return html`
+      <div class="project-section-empty">
+        <div class="muted" style="margin-bottom: 12px;">Not yet loaded.</div>
+        <div class="row" style="gap: 8px;">
+          <button class="btn btn--sm btn--primary" @click=${() => props.onLoadProjectSection(project.name, section)}>
+            Load ${DETAIL_TABS.find((t) => t.key === section)?.label ?? section}
+          </button>
+          <button
+            class="btn btn--sm"
+            @click=${() => props.onPrefillChat(`Tell me about the ${section} for project "${project.name}".`)}
+          >
+            Ask AI
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  if (sectionData.loading) {
+    return html`
+      <div class="project-section-content">
+        <div class="progress-bar"><div class="progress-bar__fill progress-bar__fill--indeterminate"></div></div>
+        <div class="muted" style="margin-top: 8px; font-size: 13px;">Loading ${section}...</div>
+      </div>
+    `;
+  }
+
+  if (sectionData.error) {
+    return html`
+      <div class="project-section-content">
+        <div class="callout danger">${sectionData.error}</div>
+        <div class="row" style="gap: 8px; margin-top: 8px;">
+          <button class="btn btn--sm" @click=${() => props.onLoadProjectSection(project.name, section)}>Retry</button>
+          <button class="btn btn--sm" @click=${() => props.onPrefillChat(`Tell me about the ${section} for project "${project.name}".`)}>
+            Ask AI instead
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  const content =
+    section === "todos" ? renderTodosSection(sectionData.data)
+    : section === "messages" ? renderMessagesSection(sectionData.data)
+    : section === "schedule" ? renderScheduleSection(sectionData.data)
+    : section === "card_tables" ? renderCardTablesSection(sectionData.data)
+    : renderPeopleSection(sectionData.data);
+
+  return html`
+    <div class="project-section-content">
+      <div class="row" style="gap: 8px; margin-bottom: 12px;">
+        <button class="btn btn--sm" @click=${() => props.onLoadProjectSection(project.name, section)}>Refresh</button>
+        <button
+          class="btn btn--sm"
+          @click=${() => props.onPrefillChat(`Tell me about the ${section} for project "${project.name}".`)}
+        >
+          Ask AI
+        </button>
+      </div>
+      ${content}
+    </div>
+  `;
+}
+
+function renderProjectDetail(props: CommandCenterProps) {
+  const project = props.selectedProject!;
+  const tab = props.projectDetailTab;
+
+  return html`
+    <section class="projects-layout">
+      <div class="projects-main">
+        <div class="card project-detail">
+          ${renderProjectDetailHeader(props)}
+          ${renderProjectDetailTabs(props)}
+          <div class="project-detail-body">
+            ${tab === "overview" ? renderOverviewTab(project) : renderSectionTab(props, tab)}
+          </div>
+        </div>
+      </div>
+      <div class="projects-side">
+        <div class="card projects-chat-card">
+          <div class="card-title">Project Copilot</div>
+          <div class="card-sub">Ask about "${project.name}" -- todos, blockers, team, schedule, or any action.</div>
+          <div class="row projects-chat-shortcuts" style="margin-top: 10px;">
+            <button
+              class="btn btn--sm"
+              @click=${() => props.onPrefillChat(`What are the most urgent todos in "${project.name}"?`)}
+            >
+              Urgent Items
+            </button>
+            <button
+              class="btn btn--sm"
+              @click=${() => props.onPrefillChat(`Summarize the current state of "${project.name}" and suggest next steps.`)}
+            >
+              Summary
+            </button>
+          </div>
+          <div class="projects-chat-host">
+            ${renderChat(props.chatProps)}
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 // -- View Mode Switcher --
 
 function renderViewModeSwitcher(props: CommandCenterProps) {
@@ -334,6 +729,11 @@ function renderViewModeSwitcher(props: CommandCenterProps) {
 // -- Main Render --
 
 export function renderCommandCenter(props: CommandCenterProps) {
+  // Show project detail view when a project is selected
+  if (props.selectedProject) {
+    return renderProjectDetail(props);
+  }
+
   const snapshot = props.snapshot;
   const totals = snapshot?.totals ?? {
     projectCount: 0,

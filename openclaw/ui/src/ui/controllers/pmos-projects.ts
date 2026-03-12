@@ -1,5 +1,19 @@
 import type { GatewayBrowserClient } from "../gateway.ts";
 
+export type PmosProjectDetailTab =
+  | "overview"
+  | "todos"
+  | "messages"
+  | "people"
+  | "schedule"
+  | "card_tables";
+
+export type PmosProjectSectionResult = {
+  loading: boolean;
+  error: string | null;
+  data: unknown;
+};
+
 export type PmosProjectTodoItem = {
   id: string | null;
   title: string;
@@ -137,4 +151,16 @@ export async function loadPmosProjectsSnapshot(state: PmosProjectsState) {
       state.pmosProjectsLoading = false;
     }
   }
+}
+
+export async function fetchProjectSection(
+  client: GatewayBrowserClient,
+  projectName: string,
+  section: PmosProjectDetailTab,
+): Promise<unknown> {
+  if (section === "overview") return null;
+  return await client.request<{ ok: boolean; section: string; projectName: string; data: unknown }>(
+    "pmos.project.fetch",
+    { projectName, section },
+  ).then((r) => r.data);
 }

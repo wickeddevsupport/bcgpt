@@ -60,7 +60,12 @@ import type {
   PmosCommandPendingApproval,
   PmosCommandPlanStep,
 } from "./controllers/pmos-command-center.ts";
-import type { PmosProjectsSnapshot } from "./controllers/pmos-projects.ts";
+import type {
+  PmosProjectCard,
+  PmosProjectDetailTab,
+  PmosProjectSectionResult,
+  PmosProjectsSnapshot,
+} from "./controllers/pmos-projects.ts";
 import type {
   PmosFlowGraphEdge,
   PmosFlowGraphNode,
@@ -264,6 +269,11 @@ export type AppViewState = {
   pmosProjectsSnapshot: PmosProjectsSnapshot | null;
   pmosProjectSearch: string;
   pmosProjectViewMode: "cards" | "status-board" | "timeline";
+  pmosSelectedProject: PmosProjectCard | null;
+  pmosProjectDetailTab: PmosProjectDetailTab;
+  pmosProjectSectionData: Record<string, PmosProjectSectionResult>;
+  pmosScreenContext: string | null;
+  dashboardTab: "home" | "agents" | "workflows" | "system";
 
   // PMOS workflows native embed (Phase 2)
   apPiecesLoading: boolean;
@@ -582,6 +592,9 @@ export type AppViewState = {
   handlePmosApRunSelect: (runId: string) => Promise<void>;
   handlePmosApRunRetry: (strategy: "FROM_FAILED_STEP" | "ON_LATEST_VERSION") => Promise<void>;
   handlePmosProjectsLoad: () => Promise<void>;
+  handleSelectProject: (project: PmosProjectCard | null) => void;
+  handleProjectDetailTabChange: (tab: PmosProjectDetailTab) => void;
+  handleLoadProjectSection: (projectName: string, section: PmosProjectDetailTab) => Promise<void>;
   handlePmosCommandPlan: () => Promise<void>;
   handlePmosCommandExecute: () => Promise<void>;
   handlePmosCommandApprove: (approvalId: string) => Promise<void>;

@@ -3683,6 +3683,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         messages?: Array<{ role: string; content: string }>;
         sessionKey?: string;
         runId?: string;
+        screenContext?: string;
       } | null;
 
       const rawMessages: Array<{ role: string; content: string }> = Array.isArray(p?.messages)
@@ -4047,6 +4048,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         ...(requestRoutingHints.length ? ["## Request-Specific Tool Guidance", ...requestRoutingHints, ""] : []),
         ...(credentialContext ? [credentialContext, ""] : []),
         ...(workspaceAiContext ? ["## Workspace Memory", workspaceAiContext] : []),
+        ...(p?.screenContext?.trim() ? ["", "## Current Screen Context", p.screenContext.trim()] : []),
       ].join("\n");
 
       // â"€â"€ Tool definitions (OpenAI function-calling format) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
@@ -5885,6 +5887,95 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       }
       const failed = results.filter((r) => !r.ok);
       respond(true, { results, failed: failed.length }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  // -- Per-project section fetch (Todos, Messages, People, Schedule, Card Tables) --
+
+  "pmos.project.fetch": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+
+      const p = params as { projectName?: unknown; section?: unknown } | null;
+      const projectName = typeof p?.projectName === "string" ? p.projectName.trim() : "";
+      const section = typeof p?.section === "string" ? p.section.trim() : "";
+
+      if (!projectName) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "projectName is required"));
+        return;
+      }
+      if (!section) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "section is required"));
+        return;
+      }
+
+      const { bcgptUrl, apiKey } = await resolveWorkspaceBcgptAccess({
+        workspaceId,
+        allowGlobalSecrets: true,
+      });
+      if (!apiKey) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, "Basecamp integration is not configured for this workspace."));
+        return;
+      }
+
+      let toolName: string;
+      let toolArgs: Record<string, unknown>;
+
+      switch (section) {
+        case "todos":
+          toolName = "list_todos_for_project";
+          toolArgs = { project: projectName, compact: false };
+          break;
+        case "messages":
+          toolName = "list_messages";
+          toolArgs = { project: projectName };
+          break;
+        case "schedule":
+          toolName = "list_schedule_entries";
+          toolArgs = { project: projectName };
+          break;
+        case "card_tables":
+          toolName = "list_card_tables";
+          toolArgs = { project: projectName, include_columns: true };
+          break;
+        case "people": {
+          // No direct list_people tool -- use smart_action
+          const result = await callBcgptTool({
+            bcgptUrl,
+            apiKey,
+            toolName: "smart_action",
+            toolArgs: { query: `List all people and team members in the project "${projectName}"` },
+            timeoutMs: 30_000,
+          });
+          if (!result.ok) {
+            respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error ?? "Failed to fetch people"));
+            return;
+          }
+          respond(true, { ok: true, section, projectName, data: result.result });
+          return;
+        }
+        default:
+          respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, `Unknown section: ${section}`));
+          return;
+      }
+
+      const result = await callBcgptTool({
+        bcgptUrl,
+        apiKey,
+        toolName,
+        toolArgs,
+        timeoutMs: 30_000,
+      });
+
+      if (!result.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error ?? `Failed to fetch ${section}`));
+        return;
+      }
+
+      respond(true, { ok: true, section, projectName, data: result.result });
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }

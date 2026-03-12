@@ -21,6 +21,8 @@ export type ChatState = {
   lastError: string | null;
   /** Set for PMOS workspace users (real UUID, not "default"). Used for workspace-aware validation paths. */
   pmosWorkspaceId?: string;
+  /** Current screen context (selected project + tab) injected into PMOS chat system prompt. */
+  pmosScreenContext?: string | null;
 };
 
 function normalizeBasePath(value: string | null | undefined): string {
@@ -405,12 +407,13 @@ export async function sendChatMessage(
     : undefined;
 
   try {
-    const sendParams = {
+    const sendParams: Record<string, unknown> = {
       sessionKey: state.sessionKey,
       message: msg,
       deliver: false,
       idempotencyKey: runId,
       attachments: apiAttachments,
+      ...(state.pmosScreenContext ? { screenContext: state.pmosScreenContext } : {}),
     };
     try {
       await state.client.request("chat.send", sendParams);

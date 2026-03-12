@@ -3228,3 +3228,149 @@
     max-height: calc(100vh - 140px);
   }
 }
+
+/* -- Project Detail Panel -- */
+
+.project-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.project-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+.project-detail-title {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.project-detail-tabs {
+  margin: 12px 0 4px;
+}
+
+.project-detail-body {
+  min-height: 200px;
+}
+
+.project-section-content {
+  padding: 12px 0;
+}
+
+.project-section-empty {
+  padding: 24px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.project-section-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.project-section-group {
+  margin-bottom: 16px;
+}
+
+.project-section-group__header {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted, #888);
+  padding: 6px 0 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.project-section-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle, var(--border));
+  justify-content: space-between;
+}
+
+.project-section-item:last-child {
+  border-bottom: none;
+}
+
+.project-section-item__title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.project-section-item__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.project-section-pre {
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+  background: var(--surface-raised, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  padding: 12px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.project-overview-metrics {
+  padding: 4px 0;
+}
+
+/* -- Dashboard Tabs -- */
+
+.dashboard-tab-strip {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0;
+}
+
+.dashboard-tab-btn {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-muted, #888);
+  cursor: pointer;
+  margin-bottom: -1px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.dashboard-tab-btn:hover {
+  color: var(--text);
+}
+
+.dashboard-tab-btn.active {
+  color: var(--accent, var(--primary));
+  border-bottom-color: var(--accent, var(--primary));
+}

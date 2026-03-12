@@ -40,6 +40,7 @@ function createSnapshot(): PmosProjectsSnapshot {
         noDueDateTodos: 0,
         nextDueOn: "2026-03-06",
         health: "attention",
+        previewTodos: [],
       },
     ],
     assignedTodos: [],

@@ -141,7 +141,11 @@ import {
   type PmosCommandPlanStep,
 } from "./controllers/pmos-command-center.ts";
 import {
+  fetchProjectSection,
   loadPmosProjectsSnapshot,
+  type PmosProjectCard,
+  type PmosProjectDetailTab,
+  type PmosProjectSectionResult,
   type PmosProjectsSnapshot,
 } from "./controllers/pmos-projects.ts";
 import {
@@ -415,6 +419,11 @@ export class OpenClawApp extends LitElement {
   @state() pmosProjectsSnapshot: PmosProjectsSnapshot | null = null;
   @state() pmosProjectSearch = "";
   @state() pmosProjectViewMode: "cards" | "status-board" | "timeline" = "cards";
+  @state() pmosSelectedProject: PmosProjectCard | null = null;
+  @state() pmosProjectDetailTab: PmosProjectDetailTab = "overview";
+  @state() pmosProjectSectionData: Record<string, PmosProjectSectionResult> = {};
+  @state() pmosScreenContext: string | null = null;
+  @state() dashboardTab: "home" | "agents" | "workflows" | "system" = "home";
 
   // PMOS workflows native embed (Phase 2)
   @state() apPiecesLoading = false;
@@ -1873,6 +1882,57 @@ export class OpenClawApp extends LitElement {
 
   async handlePmosProjectsLoad() {
     await loadPmosProjectsSnapshot(this as unknown as Parameters<typeof loadPmosProjectsSnapshot>[0]);
+  }
+
+  handleSelectProject(project: PmosProjectCard | null) {
+    this.pmosSelectedProject = project;
+    this.pmosProjectDetailTab = "overview";
+    this.pmosScreenContext = project
+      ? `Viewing project: "${project.name}" (${project.health} -- ${project.openTodos} open todos, ${project.overdueTodos} overdue). Overview tab active.`
+      : null;
+  }
+
+  handleProjectDetailTabChange(tab: PmosProjectDetailTab) {
+    this.pmosProjectDetailTab = tab;
+    const project = this.pmosSelectedProject;
+    if (!project) { this.pmosScreenContext = null; return; }
+    if (tab === "overview") {
+      this.pmosScreenContext = `Viewing project: "${project.name}" (${project.health} -- ${project.openTodos} open todos, ${project.overdueTodos} overdue). Overview tab active.`;
+    } else {
+      const key = `${project.id}:${tab}`;
+      const sectionData = this.pmosProjectSectionData[key];
+      if (sectionData && !sectionData.loading && sectionData.data) {
+        this.pmosScreenContext = `Viewing project: "${project.name}", ${tab} tab (data loaded).`;
+      } else {
+        this.pmosScreenContext = `Viewing project: "${project.name}", ${tab} tab (not yet fetched).`;
+      }
+    }
+  }
+
+  async handleLoadProjectSection(projectName: string, section: PmosProjectDetailTab) {
+    if (!this.client || section === "overview") return;
+    const key = `${this.pmosSelectedProject?.id ?? projectName}:${section}`;
+    this.pmosProjectSectionData = {
+      ...this.pmosProjectSectionData,
+      [key]: { loading: true, error: null, data: null },
+    };
+    try {
+      const data = await fetchProjectSection(this.client, projectName, section);
+      this.pmosProjectSectionData = {
+        ...this.pmosProjectSectionData,
+        [key]: { loading: false, error: null, data },
+      };
+      // Update screen context if this is still the active tab
+      if (this.pmosSelectedProject && this.pmosProjectDetailTab === section) {
+        this.pmosScreenContext = `Viewing project: "${projectName}", ${section} tab (data loaded).`;
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.pmosProjectSectionData = {
+        ...this.pmosProjectSectionData,
+        [key]: { loading: false, error: message, data: null },
+      };
+    }
   }
 
   handlePmosCommandClearHistory() {

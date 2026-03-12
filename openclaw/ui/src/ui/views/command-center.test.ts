@@ -41,6 +41,9 @@ function createProps(overrides: Partial<CommandCenterProps> = {}): CommandCenter
     snapshot: null,
     projectSearch: "",
     chatProps: createChatProps(),
+    selectedProject: null,
+    projectDetailTab: "overview",
+    projectSectionData: {},
     onRefresh: vi.fn(),
     onOpenIntegrations: vi.fn(),
     onOpenWorkflows: vi.fn(),
@@ -48,6 +51,9 @@ function createProps(overrides: Partial<CommandCenterProps> = {}): CommandCenter
     onProjectSearchChange: vi.fn(),
     viewMode: "cards" as const,
     onViewModeChange: vi.fn(),
+    onSelectProject: vi.fn(),
+    onProjectDetailTabChange: vi.fn(),
+    onLoadProjectSection: vi.fn(),
     ...overrides,
   };
 }

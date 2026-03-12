@@ -531,6 +531,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       }>;
       timeoutMs?: number;
       idempotencyKey: string;
+      screenContext?: string;
     };
     const stopCommand = isChatStopCommandText(p.message);
     const normalizedAttachments =
@@ -700,12 +701,14 @@ export const chatHandlers: GatewayRequestHandlers = {
                   messages: [{ role: "user", content: parsedMessage }],
                   sessionKey: rawSessionKey,
                   runId: clientRunId,
+                  ...(p.screenContext ? { screenContext: p.screenContext } : {}),
                 },
               },
               params: {
                 messages: [{ role: "user", content: parsedMessage }],
                 sessionKey: rawSessionKey,
                 runId: clientRunId,
+                ...(p.screenContext ? { screenContext: p.screenContext } : {}),
               },
               isWebchatConnect: () => false,
               respond: (ok, payload, error) => {

@@ -864,6 +864,9 @@ export function renderApp(state: AppViewState) {
                 },
                 // Inline chat panel
                 chatProps,
+                // Dashboard tab
+                dashboardTab: state.dashboardTab ?? "home",
+                onDashboardTabChange: (tab) => { state.dashboardTab = tab; },
                 // Quick actions
                 onQuickAction: (action) => {
                   if (action === "check-leads") {
@@ -1158,6 +1161,9 @@ export function renderApp(state: AppViewState) {
                 projectSearch: state.pmosProjectSearch,
                 viewMode: state.pmosProjectViewMode,
                 chatProps,
+                selectedProject: state.pmosSelectedProject ?? null,
+                projectDetailTab: state.pmosProjectDetailTab ?? "overview",
+                projectSectionData: state.pmosProjectSectionData ?? {},
                 onRefresh: () => state.handlePmosProjectsLoad(),
                 onOpenIntegrations: () => state.setTab("integrations"),
                 onOpenWorkflows: () => state.setTab("automations"),
@@ -1170,6 +1176,10 @@ export function renderApp(state: AppViewState) {
                 onViewModeChange: (next) => {
                   state.pmosProjectViewMode = next;
                 },
+                onSelectProject: (project) => state.handleSelectProject(project),
+                onProjectDetailTabChange: (tab) => state.handleProjectDetailTabChange(tab),
+                onLoadProjectSection: (projectName, section) =>
+                  state.handleLoadProjectSection(projectName, section),
               })
             : nothing
         }
