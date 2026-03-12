@@ -1971,6 +1971,18 @@ export async function handlePmosAuthHttpRequest(params: {
         workspaceId: session.user.workspaceId,
         redirectUrl,
       });
+      if (!started.ok) {
+        sendHtml(
+          res,
+          200,
+          buildFigmaMcpPopupHtml({
+            origin: resolveRequestOrigin(req),
+            ok: false,
+            message: started.reason,
+          }),
+        );
+        return true;
+      }
       if (started.alreadyAuthorized) {
         sendHtml(
           res,

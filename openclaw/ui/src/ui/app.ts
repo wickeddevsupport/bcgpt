@@ -1096,17 +1096,6 @@ export class OpenClawApp extends LitElement {
   }
 
   async handlePmosPrepareFigmaMcp() {
-    const officialMcp = this.pmosConnectorsStatus?.figma?.mcp ?? null;
-    if (officialMcp?.authOk !== true) {
-      const basePath = (this.basePath ?? "").replace(/\/+$/, "");
-      const popupUrl = `${window.location.origin}${basePath}/api/pmos/auth/figma-mcp/start`;
-      window.open(
-        popupUrl,
-        "pmos-figma-mcp-auth",
-        "popup=yes,width=720,height=860,resizable=yes,scrollbars=yes",
-      );
-      return;
-    }
     if (!this.client || !this.connected) {
       this.pmosConnectorsError = "Connect to the gateway first.";
       return;
@@ -1115,6 +1104,7 @@ export class OpenClawApp extends LitElement {
     try {
       await this.client.request("pmos.figma.mcp.prepare", {});
       await loadPmosConnectorsStatus(this);
+      await this.verifyFigmaLiveAuth({ autoSync: true });
     } catch (err) {
       this.pmosConnectorsError = String(err);
     }

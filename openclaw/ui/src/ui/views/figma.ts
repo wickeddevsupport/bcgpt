@@ -71,7 +71,7 @@ export function renderFigma(props: FigmaProps) {
             <div class="page-header" style="margin-bottom: 0; flex-shrink:0;">
               <div>
                 <div class="page-title">Figma</div>
-                <div class="page-subtitle">Embedded Figma panel for selected-file sync, plus official MCP status for deeper file analysis.</div>
+                <div class="page-subtitle">Embedded Figma panel for selected-file sync, plus the PMOS Figma MCP-compatible bridge for deeper file analysis.</div>
               </div>
               <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                 <span class="chip">Auto Sync On</span>
@@ -110,7 +110,7 @@ export function renderFigma(props: FigmaProps) {
                     <div class="chip-row">
                       <span class="chip ${canRenderIframe ? "chip-ok" : "chip-warn"}">${canRenderIframe ? "Panel Sync Ready" : "Panel Sign-in Required"}</span>
                       <span class="chip ${officialMcp?.authOk ? "chip-ok" : officialMcp?.configured ? "chip-warn" : ""}">
-                        ${officialMcp?.authOk ? "Official MCP Ready" : officialMcp?.configured ? "Official MCP Needs Auth" : "Official MCP Not Prepared"}
+                        ${officialMcp?.authOk ? "PMOS Figma Bridge Ready" : officialMcp?.configured ? "PMOS Figma Bridge Needs PAT" : "PMOS Figma Bridge Not Ready"}
                       </span>
                     </div>
                   </div>
@@ -124,15 +124,15 @@ export function renderFigma(props: FigmaProps) {
                     : html`<div class="muted" style="margin-top: 8px; font-size: 12px;">Open a Figma file in the panel below and PMOS will capture it for AI context.</div>`}
 
                   <div class="callout" style="margin-top: 10px; font-size: 12px;">
-                    <div><strong>Official Figma MCP:</strong> ${officialMcp?.url ?? "https://mcp.figma.com/mcp"}</div>
+                    <div><strong>PMOS Figma Bridge:</strong> ${officialMcp?.url ?? "https://mcp.figma.com/mcp"}</div>
                     <div class="muted" style="margin-top: 4px;">
                       ${officialMcp?.authOk
-                        ? "PMOS can reach the official Figma MCP server."
+                        ? "PMOS can use its Figma MCP-compatible REST bridge for design context, comments, screenshots, metadata, and variable inspection."
                         : officialMcp?.configured
                           ? officialMcp?.authRequired
-                            ? "PMOS still needs the official Figma MCP OAuth connect flow."
-                            : officialMcp?.error ?? "Official Figma MCP is configured, but the live probe is not passing yet."
-                          : "Connect the official Figma MCP server before relying on deeper MCP tools."}
+                            ? "Sync the workspace PAT through the embedded Figma panel so PMOS can use the local Figma bridge."
+                            : officialMcp?.error ?? "PMOS Figma bridge is configured, but the live probe is not passing yet."
+                          : "Sync the embedded Figma panel before relying on deeper Figma bridge tools."}
                     </div>
                     ${officialMcp?.configPath
                       ? html`<div class="muted" style="margin-top: 4px;">Config: ${officialMcp.configPath}</div>`
@@ -142,7 +142,7 @@ export function renderFigma(props: FigmaProps) {
                       : nothing}
                     <div style="margin-top: 8px;">
                       <button class="btn btn--secondary" ?disabled=${props.connectorsLoading} @click=${() => props.onPrepareOfficialMcp()}>
-                        ${officialMcp?.authOk ? "Recheck Official MCP" : "Connect Official MCP"}
+                        ${officialMcp?.authOk ? "Recheck Figma Bridge" : "Recheck After Panel Sync"}
                       </button>
                     </div>
                   </div>

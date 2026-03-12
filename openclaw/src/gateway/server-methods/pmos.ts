@@ -810,17 +810,27 @@ function buildFigmaMcpFailurePayload(
   requestedTool?: string | null,
 ): Record<string, unknown> {
   const message = err instanceof Error ? err.message : String(err);
-  const authRequired = /FIGMA_MCP_AUTH_REQUIRED|OAuth auth is required|state mismatch/i.test(message);
+  const authRequired =
+    /FIGMA_MCP_AUTH_REQUIRED|OAuth auth is required|state mismatch|FIGMA_PAT_REQUIRED/i.test(
+      message,
+    );
+  const patRequired = /FIGMA_PAT_REQUIRED/i.test(message);
   return {
     error: message,
-    code: authRequired ? "FIGMA_MCP_AUTH_REQUIRED" : "FIGMA_MCP_CALL_FAILED",
+    code: patRequired
+      ? "FIGMA_PAT_REQUIRED"
+      : authRequired
+        ? "FIGMA_MCP_AUTH_REQUIRED"
+        : "FIGMA_MCP_CALL_FAILED",
     requestedTool: requestedTool ?? null,
     hasPersonalAccessToken: mcpAuth.hasPersonalAccessToken,
     source: mcpAuth.source,
     mcpServerUrl: mcpAuth.mcpServerUrl,
     fallbackSuggested: "figma_pat_audit_file",
-    fallbackReason: authRequired
-      ? "Official Figma MCP requires the PMOS OAuth connect flow; use the workspace PAT-backed audit fallback until MCP auth is connected."
+    fallbackReason: patRequired
+      ? "PMOS needs the workspace Figma PAT from the embedded Figma panel before the MCP-compatible bridge can read comments, metadata, screenshots, or variables."
+      : authRequired
+      ? "PMOS needs the workspace Figma PAT-backed compatibility bridge to be ready before deeper Figma operations can run."
       : "Official Figma MCP call failed; use the workspace PAT-backed audit fallback.",
     authCommand: null,
   };
