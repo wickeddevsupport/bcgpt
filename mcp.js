@@ -70,6 +70,7 @@ import {
 import { getTools } from "./mcp/tools.js";
 import { ENDPOINT_TOOL_MAP } from "./mcp/endpoint-tools.js";
 import { handleFlowTool } from "./index.js";
+import { getOrRefreshBasecampWorkspaceSnapshot } from "./basecamp-workspace-sync.js";
 
 const FLOW_TOOLS_ENABLED = String(process.env.ENABLE_FLOW_TOOLS || "false").toLowerCase() === "true";
 
@@ -5225,6 +5226,27 @@ export async function handleMCP(reqBody, ctx) {
         } catch (fbErr) {
           return fail(id, { code: "DAILY_REPORT_ERROR", message: fbErr.message });
         }
+      }
+    }
+
+    if (name === "workspace_todo_snapshot") {
+      try {
+        const previewLimit = Number(args.preview_limit || process.env.BASECAMP_WORKSPACE_SNAPSHOT_PREVIEW_LIMIT || 20);
+        const projectPreviewLimit = Number(args.project_preview_limit || process.env.BASECAMP_WORKSPACE_PROJECT_PREVIEW_LIMIT || 4);
+        const maxProjects = Number(args.max_projects || 0);
+        const snapshot = await getOrRefreshBasecampWorkspaceSnapshot({
+          userKey: ctx.userKey,
+          accountId: ctx.accountId,
+          waitForFresh: true,
+          reason: "mcp:workspace_todo_snapshot",
+          previewLimit: Number.isFinite(previewLimit) && previewLimit > 0 ? previewLimit : 20,
+          projectPreviewLimit:
+            Number.isFinite(projectPreviewLimit) && projectPreviewLimit > 0 ? projectPreviewLimit : 4,
+          maxProjects: Number.isFinite(maxProjects) && maxProjects > 0 ? maxProjects : 0,
+        });
+        return ok(id, snapshot);
+      } catch (e) {
+        return fail(id, { code: "WORKSPACE_TODO_SNAPSHOT_ERROR", message: e.message });
       }
     }
 

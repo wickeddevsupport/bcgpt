@@ -61,10 +61,19 @@ function renderTodoList(title: string, items: PmosProjectTodoItem[], empty: stri
     <div class="project-priority-card">
       <div class="project-priority-card__title">${title}</div>
       <div class="project-priority-list">
-        ${items.slice(0, 8).map(
+        ${items.slice(0, 20).map(
           (todo) => html`
             <div class="project-priority-item">
-              <div class="project-priority-item__title">${todo.title}</div>
+              <div class="project-priority-item__row">
+                <div class="project-priority-item__title">${todo.title}</div>
+                ${todo.appUrl
+                  ? html`
+                      <a class="btn btn--xs" href=${todo.appUrl} target="_blank" rel="noreferrer">
+                        Open
+                      </a>
+                    `
+                  : nothing}
+              </div>
               <div class="project-priority-item__meta">
                 <span>${todoProjectLabel(todo)}</span>
                 <span class="mono">${todo.dueOn ?? "no due date"}</span>
@@ -120,6 +129,31 @@ function renderProjectCards(props: CommandCenterProps, cards: PmosProjectCard[])
               <span>Next due / Lists</span>
               <span class="mono">${project.nextDueOn ?? "n/a"} · ${project.todoLists}</span>
             </div>
+            ${(project.previewTodos ?? []).length > 0
+              ? html`
+                  <div class="project-card__todo-list">
+                    ${(project.previewTodos ?? []).map(
+                      (todo) => html`
+                        <div class="project-card__todo-item">
+                          <div class="project-card__todo-row">
+                            <div class="project-card__todo-title">${todo.title}</div>
+                            ${todo.appUrl
+                              ? html`
+                                  <a class="btn btn--xs" href=${todo.appUrl} target="_blank" rel="noreferrer">
+                                    Open
+                                  </a>
+                                `
+                              : nothing}
+                          </div>
+                          <div class="project-card__todo-meta">
+                            <span>${todo.dueOn ?? "no due date"}</span>
+                          </div>
+                        </div>
+                      `,
+                    )}
+                  </div>
+                `
+              : nothing}
             <div class="project-card__actions">
               ${project.appUrl
                 ? html`

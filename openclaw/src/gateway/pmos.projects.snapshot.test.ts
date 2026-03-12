@@ -59,6 +59,142 @@ describe("pmos.projects.snapshot", () => {
     expect(payload.errors?.[0]).toContain("not configured");
   });
 
+  it("prefers the synced workspace todo snapshot when BCGPT provides it", async () => {
+    readWorkspaceConnectorsMock.mockResolvedValue({
+      bcgpt: {
+        url: "https://bcgpt.example.test",
+        apiKey: "workspace-key",
+      },
+    });
+
+    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/action/startbcgpt")) {
+        return jsonResponse({
+          connected: true,
+          selected_account_id: 5282924,
+          user: { name: "Rohit", email: "rohit@wickedwebsites.us" },
+          accounts: [{ id: 5282924 }],
+        });
+      }
+
+      if (url.endsWith("/mcp")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          params?: { name?: string };
+        };
+        if (body.params?.name === "workspace_todo_snapshot") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "1",
+            result: {
+              fetchedAt: 1773316800,
+              totals: {
+                projectCount: 2,
+                syncedProjects: 2,
+                openTodos: 5,
+                assignedTodos: 2,
+                overdueTodos: 1,
+                dueTodayTodos: 1,
+                futureTodos: 1,
+                noDueDateTodos: 2,
+              },
+              projects: [
+                {
+                  projectId: 27009821,
+                  name: "Rohit's ToDo's",
+                  status: "active",
+                  appUrl: "https://3.basecamp.com/5282924/buckets/27009821/projects/27009821",
+                  todoListsCount: 26,
+                  openTodosCount: 357,
+                  assignedTodosCount: 2,
+                  overdueTodosCount: 1,
+                  dueTodayTodosCount: 1,
+                  futureTodosCount: 1,
+                  noDueDateTodosCount: 40,
+                  nextDueOn: "2026-03-12",
+                  health: "at_risk",
+                  previewTodos: [
+                    {
+                      id: 1003,
+                      title: "Preview item",
+                      dueOn: "2026-03-12",
+                      appUrl: "https://3.basecamp.com/5282924/buckets/27009821/todos/1003",
+                    },
+                  ],
+                },
+              ],
+              assignedTodos: [
+                {
+                  id: 1001,
+                  title: "Assigned item",
+                  dueOn: "2026-03-13",
+                  projectId: 27009821,
+                  projectName: "Rohit's ToDo's",
+                  appUrl: "https://3.basecamp.com/5282924/buckets/27009821/todos/1001",
+                },
+              ],
+              urgentTodos: [
+                {
+                  id: 1002,
+                  title: "Past due item",
+                  dueOn: "2026-03-11",
+                  projectId: 27009821,
+                  projectName: "Rohit's ToDo's",
+                  appUrl: "https://3.basecamp.com/5282924/buckets/27009821/todos/1002",
+                },
+              ],
+              dueTodayTodos: [],
+              futureTodos: [],
+              noDueDateTodos: [],
+            },
+          });
+        }
+        return jsonResponse({ error: "unexpected tool" }, 404);
+      }
+
+      return jsonResponse({ error: "not found" }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const respond = vi.fn();
+    await pmosHandlers["pmos.projects.snapshot"]({
+      params: {},
+      respond,
+      client: {
+        pmosWorkspaceId: "ws-projects",
+        pmosRole: "workspace_admin",
+      } as any,
+    } as any);
+
+    const payload = respond.mock.calls[0]?.[1] as {
+      connected: boolean;
+      totals: { projectCount: number; assignedTodos: number; overdueTodos: number };
+      projects: Array<{
+        name: string;
+        todoLists: number;
+        assignedTodos: number;
+        noDueDateTodos: number;
+        previewTodos?: Array<{ title: string; projectName?: string | null }>;
+      }>;
+      assignedTodos: Array<{ title: string; appUrl: string | null }>;
+      urgentTodos: Array<{ title: string }>;
+    };
+
+    expect(payload.connected).toBe(true);
+    expect(payload.totals.projectCount).toBe(2);
+    expect(payload.totals.assignedTodos).toBe(2);
+    expect(payload.totals.overdueTodos).toBe(1);
+    expect(payload.projects[0]?.name).toBe("Rohit's ToDo's");
+    expect(payload.projects[0]?.todoLists).toBe(26);
+    expect(payload.projects[0]?.assignedTodos).toBe(2);
+    expect(payload.projects[0]?.noDueDateTodos).toBe(40);
+    expect(payload.projects[0]?.previewTodos?.[0]?.title).toBe("Preview item");
+    expect(payload.projects[0]?.previewTodos?.[0]?.projectName).toBe("Rohit's ToDo's");
+    expect(payload.assignedTodos[0]?.title).toBe("Assigned item");
+    expect(payload.assignedTodos[0]?.appUrl).toContain("/todos/1001");
+    expect(payload.urgentTodos[0]?.title).toBe("Past due item");
+  });
+
   it("builds project cards, totals, and urgency from BCGPT tools", async () => {
     readWorkspaceConnectorsMock.mockResolvedValue({
       bcgpt: {

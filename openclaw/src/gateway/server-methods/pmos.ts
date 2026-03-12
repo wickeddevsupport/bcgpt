@@ -547,6 +547,7 @@ type PmosProjectCard = {
   noDueDateTodos: number;
   nextDueOn: string | null;
   health: PmosProjectHealth;
+  previewTodos: PmosProjectTodoItem[];
 };
 
 function stringOrNull(value: unknown): string | null {
@@ -1636,6 +1637,90 @@ function projectHealthFromCounts(counts: {
   if (counts.dueTodayTodos > 0 || counts.openTodos >= 12) return "attention";
   if (counts.openTodos === 0) return "quiet";
   return "on_track";
+}
+
+function mapWorkspaceSnapshotTodoItems(items: unknown): PmosProjectTodoItem[] {
+  if (!Array.isArray(items)) return [];
+  return items
+    .filter((item): item is Record<string, unknown> => isJsonObject(item))
+    .map((item) => ({
+      id: numberStringOrNull(item.id) ?? numberStringOrNull(item.todoId),
+      title: stringOrNull(item.title) ?? "Untitled todo",
+      status: stringOrNull(item.status),
+      dueOn: stringOrNull(item.dueOn) ?? stringOrNull(item.due_on),
+      projectId: numberStringOrNull(item.projectId),
+      projectName: stringOrNull(item.projectName),
+      appUrl: stringOrNull(item.appUrl) ?? stringOrNull(item.app_url),
+    }))
+    .filter((item) => item.title);
+}
+
+function mapWorkspaceSnapshotProjectCards(items: unknown): PmosProjectCard[] {
+  if (!Array.isArray(items)) return [];
+  return items
+    .filter((item): item is Record<string, unknown> => isJsonObject(item))
+    .map((item) => {
+      const projectId = numberStringOrNull(item.projectId) ?? numberStringOrNull(item.id) ?? "";
+      const projectName = stringOrNull(item.name) ?? "Unnamed project";
+      const openTodos = typeof item.openTodosCount === "number"
+        ? item.openTodosCount
+        : typeof item.openTodos === "number"
+          ? item.openTodos
+          : 0;
+      const overdueTodos = typeof item.overdueTodosCount === "number"
+        ? item.overdueTodosCount
+        : typeof item.overdueTodos === "number"
+          ? item.overdueTodos
+          : 0;
+      const dueTodayTodos = typeof item.dueTodayTodosCount === "number"
+        ? item.dueTodayTodosCount
+        : typeof item.dueTodayTodos === "number"
+          ? item.dueTodayTodos
+          : 0;
+      return {
+        id: projectId,
+        name: projectName,
+        status: stringOrNull(item.status) ?? "active",
+        appUrl: stringOrNull(item.appUrl) ?? stringOrNull(item.app_url),
+        todoLists: typeof item.todoListsCount === "number"
+          ? item.todoListsCount
+          : typeof item.todoLists === "number"
+            ? item.todoLists
+            : 0,
+        openTodos,
+        assignedTodos: typeof item.assignedTodosCount === "number"
+          ? item.assignedTodosCount
+          : typeof item.assignedTodos === "number"
+            ? item.assignedTodos
+            : 0,
+        overdueTodos,
+        dueTodayTodos,
+        futureTodos: typeof item.futureTodosCount === "number"
+          ? item.futureTodosCount
+          : typeof item.futureTodos === "number"
+            ? item.futureTodos
+            : 0,
+        noDueDateTodos: typeof item.noDueDateTodosCount === "number"
+          ? item.noDueDateTodosCount
+          : typeof item.noDueDateTodos === "number"
+            ? item.noDueDateTodos
+            : 0,
+        nextDueOn: stringOrNull(item.nextDueOn) ?? stringOrNull(item.next_due_on),
+        health: (() => {
+          const value = stringOrNull(item.health);
+          if (value === "at_risk" || value === "attention" || value === "on_track" || value === "quiet") {
+            return value;
+          }
+          return projectHealthFromCounts({ openTodos, overdueTodos, dueTodayTodos });
+        })(),
+        previewTodos: mapWorkspaceSnapshotTodoItems(item.previewTodos).map((todo) => ({
+          ...todo,
+          projectId: todo.projectId ?? projectId,
+          projectName: todo.projectName ?? projectName,
+        })),
+      };
+    })
+    .filter((item) => item.id && item.name);
 }
 
 export const pmosHandlers: GatewayRequestHandlers = {
@@ -5121,7 +5206,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       }
 
       const errors: string[] = [];
-      const [start, listProjectsResult] = await Promise.all([
+      const [start, workspaceSnapshotResult] = await Promise.all([
         fetchJson(`${bcgptUrl}/action/startbcgpt`, {
           method: "POST",
           timeoutMs: 4_000,
@@ -5134,8 +5219,12 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         callBcgptTool({
           bcgptUrl,
           apiKey: bcgptApiKey,
-          toolName: "list_projects",
-          toolArgs: {},
+          toolName: "workspace_todo_snapshot",
+          toolArgs: {
+            preview_limit: 24,
+            project_preview_limit: 4,
+          },
+          timeoutMs: 180_000,
         }),
       ]);
 
@@ -5154,10 +5243,65 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         message: stringOrNull(startPayload.message),
       };
 
+      if (workspaceSnapshotResult.ok && isJsonObject(workspaceSnapshotResult.result)) {
+        const snapshotPayload = workspaceSnapshotResult.result as Record<string, unknown>;
+        const totalsRaw = isJsonObject(snapshotPayload.totals) ? snapshotPayload.totals : null;
+        const mappedProjects = mapWorkspaceSnapshotProjectCards(snapshotPayload.projects);
+        if (totalsRaw) {
+          const mappedSnapshot = {
+            workspaceId,
+            configured: true,
+            connected: identity.connected === true,
+            connectorUrl: bcgptUrl,
+            identity,
+            totals: {
+              projectCount: typeof totalsRaw.projectCount === "number" ? totalsRaw.projectCount : mappedProjects.length,
+              syncedProjects:
+                typeof totalsRaw.syncedProjects === "number" ? totalsRaw.syncedProjects : mappedProjects.length,
+              openTodos: typeof totalsRaw.openTodos === "number" ? totalsRaw.openTodos : 0,
+              assignedTodos: typeof totalsRaw.assignedTodos === "number" ? totalsRaw.assignedTodos : 0,
+              overdueTodos: typeof totalsRaw.overdueTodos === "number" ? totalsRaw.overdueTodos : 0,
+              dueTodayTodos: typeof totalsRaw.dueTodayTodos === "number" ? totalsRaw.dueTodayTodos : 0,
+              futureTodos: typeof totalsRaw.futureTodos === "number" ? totalsRaw.futureTodos : 0,
+              noDueDateTodos: typeof totalsRaw.noDueDateTodos === "number" ? totalsRaw.noDueDateTodos : 0,
+            },
+            projects: mappedProjects,
+            assignedTodos: mapWorkspaceSnapshotTodoItems(snapshotPayload.assignedTodos),
+            urgentTodos: mapWorkspaceSnapshotTodoItems(snapshotPayload.urgentTodos),
+            dueTodayTodos: mapWorkspaceSnapshotTodoItems(snapshotPayload.dueTodayTodos),
+            futureTodos: mapWorkspaceSnapshotTodoItems(snapshotPayload.futureTodos),
+            noDueDateTodos: mapWorkspaceSnapshotTodoItems(snapshotPayload.noDueDateTodos),
+            errors: [
+              ...errors,
+              ...((Array.isArray(snapshotPayload.errors)
+                ? snapshotPayload.errors.filter((entry): entry is string => typeof entry === "string")
+                : []) as string[]),
+            ].slice(0, 20),
+            refreshedAtMs:
+              typeof snapshotPayload.fetchedAt === "number"
+                ? snapshotPayload.fetchedAt * 1000
+                : Date.now(),
+            stale: snapshotPayload.stale === true,
+            staleReason:
+              stringOrNull(
+                isJsonObject(snapshotPayload.syncState) ? snapshotPayload.syncState.lastError : null,
+              ) ?? null,
+            cacheAgeMs: typeof snapshotPayload.ageMs === "number" ? snapshotPayload.ageMs : 0,
+          };
+          respond(true, mappedSnapshot, undefined);
+          return;
+        }
+      }
+
+      const listProjectsResult = await callBcgptTool({
+        bcgptUrl,
+        apiKey: bcgptApiKey,
+        toolName: "list_projects",
+        toolArgs: {},
+      });
       if (!listProjectsResult.ok) {
         errors.push(`Failed to list projects: ${listProjectsResult.error ?? "unknown error"}`);
       }
-
       const projects = parseProjectList(listProjectsResult.result);
       const projectNameById = new Map<string, string>();
       for (const project of projects) {
@@ -5308,6 +5452,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         const dueTodayCount = dueTodayByProject.get(project.id) ?? aggregate?.dueTodayTodos ?? 0;
         const futureCount = futureByProject.get(project.id) ?? 0;
         const noDueDateCount = noDueDateByProject.get(project.id) ?? 0;
+        const previewTodos = parseTodoPreviewItems(detail, project).slice(0, 4);
         return {
           id: project.id,
           name: project.name,
@@ -5326,6 +5471,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             overdueTodos: overdueCount,
             dueTodayTodos: dueTodayCount,
           }),
+          previewTodos,
         };
       });
 

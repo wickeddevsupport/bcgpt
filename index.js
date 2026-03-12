@@ -97,6 +97,7 @@ import { execSync } from "child_process";
 import crypto from "crypto";
 import { existsSync } from "fs";
 import { runAgent, runAgentStreaming } from "./agent-runtime.js";
+import { startBasecampWorkspaceSyncLoop } from "./basecamp-workspace-sync.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -5091,6 +5092,8 @@ if (ACTIVEPIECES_PROXY_ACTIVE) {
 }
 
 server.listen(PORT, () => console.log(`${UA} running on ${PORT}`));
+
+startBasecampWorkspaceSyncLoop();
 
 const minerIntervalMs = Number(process.env.MINER_INTERVAL_MS || 900000);
 setInterval(() => {

@@ -24,6 +24,7 @@ export type PmosProjectCard = {
   noDueDateTodos: number;
   nextDueOn: string | null;
   health: "at_risk" | "attention" | "on_track" | "quiet";
+  previewTodos: PmosProjectTodoItem[];
 };
 
 export type PmosProjectsSnapshot = {

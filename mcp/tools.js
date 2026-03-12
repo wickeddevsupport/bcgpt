@@ -61,6 +61,16 @@ export function getTools() {
       properties: { date: { type: "string", description: "YYYY-MM-DD (defaults today)" } },
       additionalProperties: false
     }),
+    tool("workspace_todo_snapshot", "Across projects: per-project todo counts and preview buckets for assigned, overdue, due today, future, and no due date.", {
+      type: "object",
+      properties: {
+        date: { type: "string", description: "YYYY-MM-DD (defaults today)" },
+        preview_limit: { type: "integer", description: "Max items to return per global bucket (default 20)." },
+        project_preview_limit: { type: "integer", description: "Max preview todos per project card (default 4)." },
+        max_projects: { type: "integer", description: "Optional cap for open-todo scanning." }
+      },
+      additionalProperties: false
+    }),
     tool("list_todos_due", "Across projects: list open todos due on date; optionally include overdue.", {
       type: "object",
       properties: {

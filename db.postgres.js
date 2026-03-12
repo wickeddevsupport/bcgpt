@@ -98,6 +98,14 @@ function normalizeApiKey(apiKey) {
   return trimmed ? trimmed : null;
 }
 
+function parseJsonSafe(value, fallback) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
 function generateSessionKey() {
   return crypto.randomBytes(18).toString("hex");
 }
@@ -257,6 +265,108 @@ async function ensureSchema() {
       UNIQUE(user_key, idempotency_key, method, path)
     );
     CREATE INDEX IF NOT EXISTS idx_idempotency_user_key ON idempotency_cache(user_key, idempotency_key);
+
+    CREATE TABLE IF NOT EXISTS basecamp_sync_state (
+      user_key TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      scope TEXT NOT NULL DEFAULT 'workspace',
+      status TEXT NOT NULL,
+      last_started_at BIGINT,
+      last_completed_at BIGINT,
+      last_success_at BIGINT,
+      last_error TEXT,
+      stats_json TEXT,
+      PRIMARY KEY(user_key, account_id, scope)
+    );
+
+    CREATE TABLE IF NOT EXISTS basecamp_sync_runs (
+      id BIGSERIAL PRIMARY KEY,
+      user_key TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      scope TEXT NOT NULL DEFAULT 'workspace',
+      status TEXT NOT NULL,
+      started_at BIGINT NOT NULL,
+      completed_at BIGINT,
+      fetched_at BIGINT,
+      stats_json TEXT,
+      error TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_basecamp_sync_runs_user_account
+      ON basecamp_sync_runs(user_key, account_id, started_at DESC);
+
+    CREATE TABLE IF NOT EXISTS basecamp_workspace_snapshots (
+      user_key TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      fetched_at BIGINT NOT NULL,
+      snapshot_json TEXT NOT NULL,
+      PRIMARY KEY(user_key, account_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS basecamp_project_snapshots (
+      user_key TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      status TEXT,
+      app_url TEXT,
+      todo_lists_count INTEGER NOT NULL DEFAULT 0,
+      open_todos_count INTEGER NOT NULL DEFAULT 0,
+      assigned_todos_count INTEGER NOT NULL DEFAULT 0,
+      overdue_todos_count INTEGER NOT NULL DEFAULT 0,
+      due_today_todos_count INTEGER NOT NULL DEFAULT 0,
+      future_todos_count INTEGER NOT NULL DEFAULT 0,
+      no_due_date_todos_count INTEGER NOT NULL DEFAULT 0,
+      next_due_on TEXT,
+      health TEXT,
+      preview_todos_json TEXT NOT NULL DEFAULT '[]',
+      fetched_at BIGINT NOT NULL,
+      source_updated_at BIGINT,
+      PRIMARY KEY(user_key, account_id, project_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_basecamp_project_snapshots_user_account
+      ON basecamp_project_snapshots(user_key, account_id);
+
+    CREATE TABLE IF NOT EXISTS basecamp_todo_snapshots (
+      user_key TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      todo_id TEXT NOT NULL,
+      project_id TEXT,
+      project_name TEXT,
+      todolist_id TEXT,
+      todolist_name TEXT,
+      title TEXT NOT NULL,
+      status TEXT,
+      due_on TEXT,
+      app_url TEXT,
+      assignee_ids_json TEXT NOT NULL DEFAULT '[]',
+      assigned_to_current_user BOOLEAN NOT NULL DEFAULT FALSE,
+      fetched_at BIGINT NOT NULL,
+      source_updated_at BIGINT,
+      PRIMARY KEY(user_key, account_id, todo_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_basecamp_todo_snapshots_user_account_project
+      ON basecamp_todo_snapshots(user_key, account_id, project_id);
+    CREATE INDEX IF NOT EXISTS idx_basecamp_todo_snapshots_user_account_due
+      ON basecamp_todo_snapshots(user_key, account_id, due_on);
+
+    CREATE TABLE IF NOT EXISTS basecamp_raw_records (
+      user_key TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      resource_type TEXT NOT NULL,
+      resource_id TEXT NOT NULL,
+      project_id TEXT,
+      parent_type TEXT,
+      parent_id TEXT,
+      source_path TEXT,
+      source_updated_at BIGINT,
+      fetched_at BIGINT NOT NULL,
+      payload_json TEXT NOT NULL,
+      PRIMARY KEY(user_key, account_id, resource_type, resource_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_basecamp_raw_records_user_account_type
+      ON basecamp_raw_records(user_key, account_id, resource_type);
+    CREATE INDEX IF NOT EXISTS idx_basecamp_raw_records_user_account_project
+      ON basecamp_raw_records(user_key, account_id, project_id);
 
     CREATE TABLE IF NOT EXISTS activepieces_user_projects (
       user_key TEXT PRIMARY KEY,
@@ -947,6 +1057,304 @@ export async function setSelectedAccount(userKey, accountId) {
     [key, value, now]
   );
   return value;
+}
+
+export async function listBasecampSyncTargets() {
+  const res = await pool.query(`
+    SELECT
+      ut.user_key AS user_key,
+      up.selected_account_id AS selected_account_id,
+      uac.accounts AS accounts,
+      uac.identity_email AS identity_email,
+      uac.identity_name AS identity_name
+    FROM user_token ut
+    LEFT JOIN user_preferences up ON up.user_key = ut.user_key
+    LEFT JOIN user_auth_cache uac ON uac.user_key = ut.user_key
+    ORDER BY ut.updated_at DESC
+  `);
+
+  return res.rows
+    .map((row) => {
+      const accountsRaw = Array.isArray(parseJsonSafe(row.accounts || "[]", []))
+        ? parseJsonSafe(row.accounts || "[]", [])
+        : [];
+      const accountId =
+        row.selected_account_id != null && String(row.selected_account_id).trim()
+          ? String(row.selected_account_id).trim()
+          : accountsRaw[0]?.id != null
+            ? String(accountsRaw[0].id)
+            : null;
+      return {
+        userKey: row.user_key,
+        accountId,
+        identityEmail: row.identity_email ?? null,
+        identityName: row.identity_name ?? null,
+        accounts: accountsRaw,
+      };
+    })
+    .filter((row) => row.userKey && row.accountId);
+}
+
+export async function getBasecampSyncState(userKey, accountId, scope = "workspace") {
+  const key = normalizeUserKey(userKey);
+  const acct = accountId == null ? null : String(accountId).trim();
+  if (!key || !acct) return null;
+  const res = await pool.query(`
+    SELECT status, last_started_at, last_completed_at, last_success_at, last_error, stats_json
+    FROM basecamp_sync_state
+    WHERE user_key = $1 AND account_id = $2 AND scope = $3
+  `, [key, acct, scope]);
+  const row = res.rows[0];
+  if (!row) return null;
+  return {
+    status: row.status,
+    lastStartedAt: row.last_started_at ?? null,
+    lastCompletedAt: row.last_completed_at ?? null,
+    lastSuccessAt: row.last_success_at ?? null,
+    lastError: row.last_error ?? null,
+    stats: row.stats_json ? parseJsonSafe(row.stats_json, null) : null,
+  };
+}
+
+export async function upsertBasecampSyncState(userKey, accountId, {
+  scope = "workspace",
+  status,
+  lastStartedAt = null,
+  lastCompletedAt = null,
+  lastSuccessAt = null,
+  lastError = null,
+  stats = null,
+} = {}) {
+  const key = normalizeUserKey(userKey);
+  const acct = accountId == null ? null : String(accountId).trim();
+  if (!key || !acct || !status) return null;
+  await pool.query(`
+    INSERT INTO basecamp_sync_state (
+      user_key, account_id, scope, status, last_started_at, last_completed_at, last_success_at, last_error, stats_json
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    ON CONFLICT (user_key, account_id, scope) DO UPDATE SET
+      status = EXCLUDED.status,
+      last_started_at = EXCLUDED.last_started_at,
+      last_completed_at = EXCLUDED.last_completed_at,
+      last_success_at = EXCLUDED.last_success_at,
+      last_error = EXCLUDED.last_error,
+      stats_json = EXCLUDED.stats_json
+  `, [
+    key,
+    acct,
+    scope,
+    status,
+    lastStartedAt,
+    lastCompletedAt,
+    lastSuccessAt,
+    lastError,
+    stats == null ? null : JSON.stringify(stats),
+  ]);
+  return await getBasecampSyncState(key, acct, scope);
+}
+
+export async function createBasecampSyncRun(userKey, accountId, {
+  scope = "workspace",
+  status = "running",
+  startedAt = nowSec(),
+  stats = null,
+  error = null,
+} = {}) {
+  const key = normalizeUserKey(userKey);
+  const acct = accountId == null ? null : String(accountId).trim();
+  if (!key || !acct) return null;
+  const res = await pool.query(`
+    INSERT INTO basecamp_sync_runs (user_key, account_id, scope, status, started_at, stats_json, error)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    RETURNING id
+  `, [
+    key,
+    acct,
+    scope,
+    status,
+    startedAt,
+    stats == null ? null : JSON.stringify(stats),
+    error,
+  ]);
+  return res.rows[0]?.id ?? null;
+}
+
+export async function finishBasecampSyncRun(runId, {
+  status,
+  completedAt = nowSec(),
+  fetchedAt = null,
+  stats = null,
+  error = null,
+} = {}) {
+  if (!runId || !status) return null;
+  await pool.query(`
+    UPDATE basecamp_sync_runs
+    SET status = $2, completed_at = $3, fetched_at = $4, stats_json = $5, error = $6
+    WHERE id = $1
+  `, [
+    runId,
+    status,
+    completedAt,
+    fetchedAt,
+    stats == null ? null : JSON.stringify(stats),
+    error,
+  ]);
+  return runId;
+}
+
+export async function getLatestBasecampSyncRun(userKey, accountId, scope = "workspace") {
+  const key = normalizeUserKey(userKey);
+  const acct = accountId == null ? null : String(accountId).trim();
+  if (!key || !acct) return null;
+  const res = await pool.query(`
+    SELECT id, status, started_at, completed_at, fetched_at, stats_json, error
+    FROM basecamp_sync_runs
+    WHERE user_key = $1 AND account_id = $2 AND scope = $3
+    ORDER BY started_at DESC, id DESC
+    LIMIT 1
+  `, [key, acct, scope]);
+  const row = res.rows[0];
+  if (!row) return null;
+  return {
+    id: row.id,
+    status: row.status,
+    startedAt: row.started_at ?? null,
+    completedAt: row.completed_at ?? null,
+    fetchedAt: row.fetched_at ?? null,
+    stats: row.stats_json ? parseJsonSafe(row.stats_json, null) : null,
+    error: row.error ?? null,
+  };
+}
+
+export async function getBasecampWorkspaceSnapshot(userKey, accountId) {
+  const key = normalizeUserKey(userKey);
+  const acct = accountId == null ? null : String(accountId).trim();
+  if (!key || !acct) return null;
+  const res = await pool.query(`
+    SELECT fetched_at, snapshot_json
+    FROM basecamp_workspace_snapshots
+    WHERE user_key = $1 AND account_id = $2
+  `, [key, acct]);
+  const row = res.rows[0];
+  if (!row) return null;
+  const snapshot = parseJsonSafe(row.snapshot_json || "null", null);
+  if (!snapshot || typeof snapshot !== "object") return null;
+  return {
+    ...snapshot,
+    fetchedAt: snapshot.fetchedAt ?? row.fetched_at ?? null,
+  };
+}
+
+export async function replaceBasecampWorkspaceSnapshot(userKey, accountId, {
+  fetchedAt = nowSec(),
+  snapshot,
+  projects = [],
+  todos = [],
+  rawRecords = [],
+} = {}) {
+  const key = normalizeUserKey(userKey);
+  const acct = accountId == null ? null : String(accountId).trim();
+  if (!key || !acct || !snapshot) return null;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("DELETE FROM basecamp_project_snapshots WHERE user_key = $1 AND account_id = $2", [key, acct]);
+    await client.query("DELETE FROM basecamp_todo_snapshots WHERE user_key = $1 AND account_id = $2", [key, acct]);
+    await client.query("DELETE FROM basecamp_raw_records WHERE user_key = $1 AND account_id = $2", [key, acct]);
+
+    await client.query(`
+      INSERT INTO basecamp_workspace_snapshots (user_key, account_id, fetched_at, snapshot_json)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (user_key, account_id) DO UPDATE SET
+        fetched_at = EXCLUDED.fetched_at,
+        snapshot_json = EXCLUDED.snapshot_json
+    `, [key, acct, fetchedAt, JSON.stringify(snapshot)]);
+
+    for (const project of projects) {
+      await client.query(`
+        INSERT INTO basecamp_project_snapshots (
+          user_key, account_id, project_id, name, status, app_url, todo_lists_count, open_todos_count,
+          assigned_todos_count, overdue_todos_count, due_today_todos_count, future_todos_count,
+          no_due_date_todos_count, next_due_on, health, preview_todos_json, fetched_at, source_updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+      `, [
+        key,
+        acct,
+        String(project.projectId),
+        project.name,
+        project.status ?? null,
+        project.appUrl ?? null,
+        Number(project.todoListsCount ?? 0),
+        Number(project.openTodosCount ?? 0),
+        Number(project.assignedTodosCount ?? 0),
+        Number(project.overdueTodosCount ?? 0),
+        Number(project.dueTodayTodosCount ?? 0),
+        Number(project.futureTodosCount ?? 0),
+        Number(project.noDueDateTodosCount ?? 0),
+        project.nextDueOn ?? null,
+        project.health ?? null,
+        JSON.stringify(project.previewTodos ?? []),
+        fetchedAt,
+        project.sourceUpdatedAt ?? null,
+      ]);
+    }
+
+    for (const todo of todos) {
+      await client.query(`
+        INSERT INTO basecamp_todo_snapshots (
+          user_key, account_id, todo_id, project_id, project_name, todolist_id, todolist_name, title,
+          status, due_on, app_url, assignee_ids_json, assigned_to_current_user, fetched_at, source_updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      `, [
+        key,
+        acct,
+        String(todo.todoId),
+        todo.projectId == null ? null : String(todo.projectId),
+        todo.projectName ?? null,
+        todo.todolistId == null ? null : String(todo.todolistId),
+        todo.todolistName ?? null,
+        todo.title,
+        todo.status ?? null,
+        todo.dueOn ?? null,
+        todo.appUrl ?? null,
+        JSON.stringify(Array.isArray(todo.assigneeIds) ? todo.assigneeIds : []),
+        Boolean(todo.assignedToCurrentUser),
+        fetchedAt,
+        todo.sourceUpdatedAt ?? null,
+      ]);
+    }
+
+    for (const record of rawRecords) {
+      await client.query(`
+        INSERT INTO basecamp_raw_records (
+          user_key, account_id, resource_type, resource_id, project_id, parent_type, parent_id,
+          source_path, source_updated_at, fetched_at, payload_json
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `, [
+        key,
+        acct,
+        record.resourceType,
+        String(record.resourceId),
+        record.projectId == null ? null : String(record.projectId),
+        record.parentType ?? null,
+        record.parentId == null ? null : String(record.parentId),
+        record.sourcePath ?? null,
+        record.sourceUpdatedAt ?? null,
+        fetchedAt,
+        JSON.stringify(record.payload ?? {}),
+      ]);
+    }
+
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  return await getBasecampWorkspaceSnapshot(key, acct);
 }
 
 // Search index operations

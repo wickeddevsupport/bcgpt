@@ -40,6 +40,14 @@ export const bindApiKeyToUser = async (...args) => await impl.bindApiKeyToUser(.
 
 export const getSelectedAccount = async (...args) => await impl.getSelectedAccount(...args);
 export const setSelectedAccount = async (...args) => await impl.setSelectedAccount(...args);
+export const listBasecampSyncTargets = async (...args) => await impl.listBasecampSyncTargets(...args);
+export const getBasecampSyncState = async (...args) => await impl.getBasecampSyncState(...args);
+export const upsertBasecampSyncState = async (...args) => await impl.upsertBasecampSyncState(...args);
+export const createBasecampSyncRun = async (...args) => await impl.createBasecampSyncRun(...args);
+export const finishBasecampSyncRun = async (...args) => await impl.finishBasecampSyncRun(...args);
+export const getLatestBasecampSyncRun = async (...args) => await impl.getLatestBasecampSyncRun(...args);
+export const getBasecampWorkspaceSnapshot = async (...args) => await impl.getBasecampWorkspaceSnapshot(...args);
+export const replaceBasecampWorkspaceSnapshot = async (...args) => await impl.replaceBasecampWorkspaceSnapshot(...args);
 
 export const indexSearchItem = async (...args) => await impl.indexSearchItem(...args);
 export const clearSearchIndex = async (...args) => await impl.clearSearchIndex(...args);
