@@ -548,10 +548,10 @@
 /* Content header */
 .content-header {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 4px 8px;
+  gap: 12px;
+  padding: 0 6px 2px;
   overflow: hidden;
   transform-origin: top center;
   transition:
@@ -559,7 +559,7 @@
     transform var(--shell-focus-duration) var(--shell-focus-ease),
     max-height var(--shell-focus-duration) var(--shell-focus-ease),
     padding var(--shell-focus-duration) var(--shell-focus-ease);
-  max-height: 80px;
+  max-height: 64px;
 }
 
 .shell--chat-focus .content-header {
@@ -570,25 +570,33 @@
   pointer-events: none;
 }
 
+.content-header--compact {
+  padding: 0;
+  min-height: 0;
+  max-height: 32px;
+}
+
 .page-title {
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.035em;
-  line-height: 1.15;
+  line-height: 1.05;
   color: var(--text-strong);
 }
 
 .page-sub {
   color: var(--muted);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 400;
-  margin-top: 6px;
+  margin-top: 2px;
   letter-spacing: -0.01em;
 }
 
 .page-meta {
   display: flex;
   gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 /* Chat view header adjustments */

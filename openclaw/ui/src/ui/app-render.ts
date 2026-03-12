@@ -105,6 +105,11 @@ import { renderUsage } from "./views/usage.ts";
 
 const AVATAR_DATA_RE = /^data:/i;
 const AVATAR_HTTP_RE = /^https?:\/\//i;
+const LOCAL_PAGE_HEADER_TABS = new Set<Tab>(["connections", "figma", "command-center", "usage"]);
+
+function shouldRenderGlobalContentHeader(tab: Tab): boolean {
+  return !LOCAL_PAGE_HEADER_TABS.has(tab);
+}
 
 function resolveAssistantAvatarUrl(state: AppViewState): string | undefined {
   const list = state.agentsList?.agents ?? [];
@@ -470,6 +475,8 @@ export function renderApp(state: AppViewState) {
   const figmaAuthUrl = `${figmaBaseUrl}/auth/figma?pmosEmbed=1&pmosParentOrigin=${encodeURIComponent(
     typeof window !== "undefined" ? window.location.origin : "",
   )}`;
+  const showGlobalContentHeader = shouldRenderGlobalContentHeader(state.tab);
+  const showContentHeader = showGlobalContentHeader || Boolean(state.lastError) || isChat;
   const sessionDefaults =
     (state.hello?.snapshot as { sessionDefaults?: { mainKey?: string } } | undefined)
       ?.sessionDefaults ?? null;
@@ -754,16 +761,20 @@ export function renderApp(state: AppViewState) {
         </div>
       </aside>
       <main class="content ${isChat ? "content--chat" : ""} ${isDashboard ? "content--dashboard" : ""}">
-        <section class="content-header">
-          <div>
-            ${state.tab === "usage" ? nothing : html`<div class="page-title">${titleForTab(state.tab)}</div>`}
-            ${state.tab === "usage" ? nothing : html`<div class="page-sub">${subtitleForTab(state.tab)}</div>`}
-          </div>
-          <div class="page-meta">
-            ${state.lastError ? html`<div class="pill danger">${state.lastError}</div>` : nothing}
-            ${isChat ? renderChatControls(state) : nothing}
-          </div>
-        </section>
+        ${showContentHeader
+          ? html`
+              <section class="content-header ${showGlobalContentHeader ? "" : "content-header--compact"}">
+                <div>
+                  ${showGlobalContentHeader ? html`<div class="page-title">${titleForTab(state.tab)}</div>` : nothing}
+                  ${showGlobalContentHeader ? html`<div class="page-sub">${subtitleForTab(state.tab)}</div>` : nothing}
+                </div>
+                <div class="page-meta">
+                  ${state.lastError ? html`<div class="pill danger">${state.lastError}</div>` : nothing}
+                  ${isChat ? renderChatControls(state) : nothing}
+                </div>
+              </section>
+            `
+          : nothing}
         ${!tabAllowed
           ? html`
               <section class="card">

@@ -24,10 +24,15 @@ export type FigmaProps = {
   onPrefillPrompt: (prompt: string) => void;
 };
 
-function buildPrompt(status: PmosConnectorsStatus["figma"] | null | undefined, mode: "audit" | "tokens" | "layout") {
+function buildPrompt(
+  status: PmosConnectorsStatus["figma"] | null | undefined,
+  mode: "audit" | "tokens" | "layout",
+) {
   const identity = status?.identity;
-  const connection = identity?.activeConnectionName ?? identity?.activeTeamId ?? "the active Figma workspace";
-  const fileRef = identity?.selectedFileName ?? identity?.selectedFileUrl ?? "the currently selected Figma file";
+  const connection =
+    identity?.activeConnectionName ?? identity?.activeTeamId ?? "the active Figma workspace";
+  const fileRef =
+    identity?.selectedFileName ?? identity?.selectedFileUrl ?? "the currently selected Figma file";
   switch (mode) {
     case "tokens":
       return `Use the figma-design-audit skill mindset to review ${fileRef} from ${connection}. Focus on styles, variables, colors, fonts, and naming consistency.`;
@@ -45,9 +50,28 @@ export function renderFigma(props: FigmaProps) {
   const canEmbed = Boolean(props.figmaUrl?.trim());
   const hasSyncedIdentity = identity?.connected === true;
   const hasLiveAuth = figma?.authOk === true;
-  // Only show iframe when live auth has been verified against FM API
   const requiresSignIn = !hasSyncedIdentity || !hasLiveAuth || !props.liveAuthVerified;
   const canRenderIframe = hasSyncedIdentity && hasLiveAuth && props.liveAuthVerified;
+  const panelStatusLabel = canRenderIframe ? "Panel Sync Ready" : "Panel Sign-in Required";
+  const bridgeReady = officialMcp?.authOk === true;
+  const bridgeStatusLabel = bridgeReady
+    ? "Bridge Ready"
+    : officialMcp?.configured
+      ? officialMcp?.authRequired
+        ? "Bridge Needs PAT"
+        : "Bridge Checking"
+      : "Bridge Not Ready";
+  const identitySummary = hasSyncedIdentity
+    ? `${identity?.handle ?? identity?.email ?? "Connected"} · ${identity?.activeConnectionName ?? identity?.activeTeamId ?? "Team synced"}`
+    : "Open the popup and sync the panel to unlock the embedded file manager.";
+  const selectedFileLabel = identity?.selectedFileName ?? identity?.selectedFileUrl ?? null;
+  const bridgeSummary = bridgeReady
+    ? "Comments, screenshots, metadata, and design context are available."
+    : officialMcp?.configured
+      ? officialMcp?.authRequired
+        ? "Sync the workspace PAT through the embedded panel to enable deeper bridge tools."
+        : officialMcp?.error ?? "The bridge is configured, but the last live probe did not pass."
+      : "Sync the embedded panel before relying on deeper Figma bridge tools.";
 
   return html`
     ${props.connectorsError
@@ -67,128 +91,135 @@ export function renderFigma(props: FigmaProps) {
           </section>
         `
       : html`
-          <div style="display:flex; flex-direction:column; gap:12px; height: calc(100dvh - 140px); min-height: 400px;">
-            <div class="page-header" style="margin-bottom: 0; flex-shrink:0;">
-              <div>
-                <div class="page-title">Figma</div>
-                <div class="page-subtitle">Embedded Figma panel for selected-file sync, plus the PMOS Figma MCP-compatible bridge for deeper file analysis.</div>
+          <div style="display:flex; flex-direction:column; gap:10px; min-height:calc(100dvh - var(--shell-topbar-height, 56px) - 28px);">
+            <section class="card" style="padding:12px 14px; flex-shrink:0;">
+              <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; min-width:0; flex:1 1 420px;">
+                  <div style="font-size:22px; font-weight:700; letter-spacing:-0.03em; line-height:1;">
+                    Figma
+                  </div>
+                  <span class="chip">Auto Sync On</span>
+                  ${props.syncedOk ? html`<span class="chip chip-ok">Context Synced</span>` : nothing}
+                  <span class="chip ${canRenderIframe ? "chip-ok" : "chip-warn"}">
+                    ${panelStatusLabel}
+                  </span>
+                  <span class="chip ${bridgeReady ? "chip-ok" : officialMcp?.configured ? "chip-warn" : ""}">
+                    ${bridgeStatusLabel}
+                  </span>
+                </div>
+                <div style="display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap;">
+                  <button class="btn btn--secondary" @click=${() => props.onOpenAuth()}>
+                    Open Sign-In Popup
+                  </button>
+                  <button
+                    class="btn btn--secondary"
+                    ?disabled=${props.connectorsLoading}
+                    @click=${() => props.onRefresh()}
+                  >
+                    ${props.connectorsLoading ? "Refreshing..." : "Reload"}
+                  </button>
+                  <button
+                    class="btn btn--primary"
+                    ?disabled=${props.syncing || !props.connected}
+                    @click=${() => props.onSyncContext()}
+                  >
+                    ${props.syncing ? "Syncing..." : "Sync Now"}
+                  </button>
+                </div>
               </div>
-              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                <span class="chip">Auto Sync On</span>
-                ${props.syncedOk ? html`<span class="chip chip-ok">Context Synced</span>` : nothing}
-                <button class="btn btn--secondary" @click=${() => props.onOpenAuth()}>
-                  Open Sign-In Popup
-                </button>
-                <button class="btn btn--secondary" ?disabled=${props.connectorsLoading} @click=${() => props.onRefresh()}>
-                  ${props.connectorsLoading ? "Refreshing..." : "Reload"}
-                </button>
-                <button class="btn btn--primary" ?disabled=${props.syncing || !props.connected} @click=${() => props.onSyncContext()}>
-                  ${props.syncing ? "Syncing..." : "Sync Now"}
-                </button>
+
+              <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:10px;">
+                <div style="display:flex; align-items:center; gap:10px 14px; flex-wrap:wrap; min-width:0; flex:1 1 460px; font-size:12px;">
+                  <span class="muted">${identitySummary}</span>
+                  ${selectedFileLabel
+                    ? html`
+                        <span
+                          class="mono"
+                          style="max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+                          title=${selectedFileLabel}
+                        >
+                          ${selectedFileLabel}
+                        </span>
+                      `
+                    : nothing}
+                  <span class="muted">${bridgeSummary}</span>
+                </div>
+                <div style="display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap;">
+                  <button
+                    class="btn btn--secondary"
+                    ?disabled=${props.connectorsLoading}
+                    @click=${() => props.onPrepareOfficialMcp()}
+                  >
+                    Recheck Bridge
+                  </button>
+                  <button
+                    class="btn btn--secondary"
+                    @click=${() => props.onPrefillPrompt(buildPrompt(figma, "audit"))}
+                  >
+                    Audit File
+                  </button>
+                  <button
+                    class="btn btn--secondary"
+                    @click=${() => props.onPrefillPrompt(buildPrompt(figma, "tokens"))}
+                  >
+                    Review Tokens
+                  </button>
+                  <button
+                    class="btn btn--secondary"
+                    @click=${() => props.onPrefillPrompt(buildPrompt(figma, "layout"))}
+                  >
+                    Review Layout
+                  </button>
+                </div>
               </div>
-            </div>
+            </section>
 
             ${props.syncError
               ? html`<div class="callout warn" style="font-size: 12px; flex-shrink:0;">${props.syncError}</div>`
               : nothing}
 
-            <!-- 2-column: left (assistant + iframe stacked), right (chat) -->
-            <div style="display:grid; grid-template-columns:minmax(0, 1.45fr) minmax(420px, 1.1fr); gap:16px; flex:1 1 auto; min-height:0; overflow:hidden;">
-
-              <!-- Left column: AI assistant card on top, iframe below -->
-              <div style="display:flex; flex-direction:column; gap:12px; min-height:0; overflow:hidden;">
-                <section class="card" style="flex-shrink:0;">
-                  <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:10px; flex-wrap:wrap;">
-                    <div>
-                      <div class="card-title">Figma AI Assistant</div>
-                      <div class="card-sub">
-                        ${hasSyncedIdentity
-                          ? `${identity?.handle ?? identity?.email ?? "Connected"} · ${identity?.activeConnectionName ?? identity?.activeTeamId ?? "Team synced"}`
-                          : "Sign in below to connect your Figma workspace."}
+            <div style="display:grid; grid-template-columns:minmax(0, 1.7fr) minmax(360px, 0.95fr); gap:14px; flex:1 1 auto; min-height:0; overflow:hidden;">
+              <div
+                class="card"
+                style="min-height:0; padding:0; overflow:hidden; position:relative; display:flex; flex-direction:column;"
+              >
+                ${requiresSignIn
+                  ? html`
+                      <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; gap:16px; padding:32px 24px; text-align:center;">
+                        <div style="font-size:30px; font-weight:700; letter-spacing:-0.03em;">Figma</div>
+                        <div style="font-weight:600;">Sign in to Figma</div>
+                        <div class="muted" style="max-width:360px; font-size:13px;">
+                          Open the auth popup, finish sign-in, then click Sync Now. The embedded panel unlocks only after live auth is confirmed.
+                        </div>
+                        <button class="btn btn--primary" @click=${() => props.onOpenAuth()}>
+                          Sign In with Figma (Popup)
+                        </button>
+                        <a
+                          href=${props.authUrl}
+                          class="btn btn--secondary"
+                          target="pmos-figma-auth"
+                          rel="noreferrer"
+                        >
+                          Open Sign-In in New Tab
+                        </a>
                       </div>
-                    </div>
-                    <div class="chip-row">
-                      <span class="chip ${canRenderIframe ? "chip-ok" : "chip-warn"}">${canRenderIframe ? "Panel Sync Ready" : "Panel Sign-in Required"}</span>
-                      <span class="chip ${officialMcp?.authOk ? "chip-ok" : officialMcp?.configured ? "chip-warn" : ""}">
-                        ${officialMcp?.authOk ? "PMOS Figma Bridge Ready" : officialMcp?.configured ? "PMOS Figma Bridge Needs PAT" : "PMOS Figma Bridge Not Ready"}
-                      </span>
-                    </div>
-                  </div>
-
-                  ${identity?.selectedFileUrl
-                    ? html`
-                        <div class="callout" style="margin-top: 10px; font-size: 12px;">
-                          <strong>Selected file:</strong> ${identity.selectedFileName ?? identity.selectedFileUrl}
-                        </div>
-                      `
-                    : html`<div class="muted" style="margin-top: 8px; font-size: 12px;">Open a Figma file in the panel below and PMOS will capture it for AI context.</div>`}
-
-                  <div class="callout" style="margin-top: 10px; font-size: 12px;">
-                    <div><strong>PMOS Figma Bridge:</strong> ${officialMcp?.url ?? "https://mcp.figma.com/mcp"}</div>
-                    <div class="muted" style="margin-top: 4px;">
-                      ${officialMcp?.authOk
-                        ? "PMOS can use its Figma MCP-compatible REST bridge for design context, comments, screenshots, metadata, and variable inspection."
-                        : officialMcp?.configured
-                          ? officialMcp?.authRequired
-                            ? "Sync the workspace PAT through the embedded Figma panel so PMOS can use the local Figma bridge."
-                            : officialMcp?.error ?? "PMOS Figma bridge is configured, but the live probe is not passing yet."
-                          : "Sync the embedded Figma panel before relying on deeper Figma bridge tools."}
-                    </div>
-                    ${officialMcp?.configPath
-                      ? html`<div class="muted" style="margin-top: 4px;">Config: ${officialMcp.configPath}</div>`
-                      : nothing}
-                    ${officialMcp?.authCommand
-                      ? html`<div class="muted" style="margin-top: 4px;">Server auth command: ${officialMcp.authCommand}</div>`
-                      : nothing}
-                    <div style="margin-top: 8px;">
-                      <button class="btn btn--secondary" ?disabled=${props.connectorsLoading} @click=${() => props.onPrepareOfficialMcp()}>
-                        ${officialMcp?.authOk ? "Recheck Figma Bridge" : "Recheck After Panel Sync"}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div class="row" style="margin-top: 12px; gap: 8px; flex-wrap: wrap;">
-                    <button class="btn btn--secondary" @click=${() => props.onPrefillPrompt(buildPrompt(figma, "audit"))}>Audit File</button>
-                    <button class="btn btn--secondary" @click=${() => props.onPrefillPrompt(buildPrompt(figma, "tokens"))}>Review Tokens</button>
-                    <button class="btn btn--secondary" @click=${() => props.onPrefillPrompt(buildPrompt(figma, "layout"))}>Review Layout</button>
-                  </div>
-                </section>
-
-                <!-- Iframe area — shows sign-in CTA when not connected -->
-                <div class="card" style="flex:1 1 auto; min-height:0; padding:0; overflow:hidden; position:relative; display:flex; flex-direction:column;">
-                  ${requiresSignIn
-                    ? html`
-                        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; gap:16px; padding:32px 24px; text-align:center;">
-                          <div style="font-size:32px;">🎨</div>
-                          <div style="font-weight:600;">Sign in to Figma</div>
-                          <div class="muted" style="max-width:360px; font-size:13px;">
-                            Open the auth popup, finish sign-in, then click Sync Now. The embedded panel unlocks only after live auth is confirmed.
-                          </div>
-                          <button class="btn btn--primary" @click=${() => props.onOpenAuth()}>
-                            Sign In with Figma (Popup)
-                          </button>
-                          <a href=${props.authUrl} class="btn btn--secondary" target="pmos-figma-auth" rel="noreferrer">
-                            Open Sign-In in New Tab
-                          </a>
-                        </div>
-                      `
-                    : html`
-                        <iframe
-                          src=${props.embedUrl}
-                          title="Figma File Manager"
-                          style="flex:1 1 auto; width:100%; height:100%; border:0; display:block; background:#101418;"
-                          allow="clipboard-read; clipboard-write"
-                        ></iframe>
-                      `}
-                </div>
+                    `
+                  : html`
+                      <iframe
+                        src=${props.embedUrl}
+                        title="Figma File Manager"
+                        style="flex:1 1 auto; width:100%; height:100%; border:0; display:block; background:#101418;"
+                        allow="clipboard-read; clipboard-write"
+                      ></iframe>
+                    `}
               </div>
 
-              <!-- Right column: full-height chat panel -->
               <div style="display:flex; flex-direction:column; min-height:0; overflow:hidden;">
-                <section class="card" style="display:flex; flex-direction:column; flex:1 1 auto; min-height:0; overflow:hidden;">
-                  <div class="card-title">Assistant Chat</div>
-                  <div class="card-sub">Chat with PMOS using synced Figma context and design audit skills.</div>
-                  <div style="margin-top: 12px; min-height: 0; flex:1 1 auto; overflow:hidden;">
+                <section
+                  class="card"
+                  style="display:flex; flex-direction:column; flex:1 1 auto; min-height:0; overflow:hidden;"
+                >
+                  <div style="min-height:0; flex:1 1 auto; overflow:hidden;">
                     ${renderChat(props.chatProps)}
                   </div>
                 </section>
