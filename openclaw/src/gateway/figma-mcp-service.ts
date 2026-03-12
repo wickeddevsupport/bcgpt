@@ -94,6 +94,10 @@ export async function buildWorkspaceFigmaMcpFailurePayload(params: {
   requestedTool?: string | null;
 }): Promise<Record<string, unknown>> {
   const message = params.err instanceof Error ? params.err.message : String(params.err);
+  const requiredScope = (() => {
+    const match = message.match(/requires(?:\s+the)?\s+([a-z_]+:[a-z_]+)/i);
+    return match?.[1] ?? null;
+  })();
   const authRequired =
     /FIGMA_MCP_AUTH_REQUIRED|OAuth auth is required|state mismatch|FIGMA_PAT_REQUIRED/i.test(
       message,
@@ -103,17 +107,22 @@ export async function buildWorkspaceFigmaMcpFailurePayload(params: {
 
   return {
     error: message,
-    code: patRequired
+    code: requiredScope
+      ? "FIGMA_SCOPE_REQUIRED"
+      : patRequired
       ? "FIGMA_PAT_REQUIRED"
       : authRequired
         ? "FIGMA_MCP_AUTH_REQUIRED"
         : "FIGMA_MCP_CALL_FAILED",
     requestedTool: params.requestedTool ?? null,
+    requiredScope,
     hasPersonalAccessToken: status.hasPersonalAccessToken,
     source: status.source,
     mcpServerUrl: status.url,
-    fallbackSuggested: "figma_pat_audit_file",
-    fallbackReason: patRequired
+    fallbackSuggested: requiredScope ? null : "figma_pat_audit_file",
+    fallbackReason: requiredScope
+      ? `The current workspace Figma token is missing the ${requiredScope} scope required by this capability.`
+      : patRequired
       ? "PMOS needs the workspace Figma PAT from the embedded Figma panel before the MCP-compatible bridge can read comments, metadata, screenshots, or variables."
       : authRequired
         ? "PMOS needs the workspace Figma PAT-backed compatibility bridge to be ready before deeper Figma operations can run."

@@ -130,6 +130,12 @@ function parseFileNameFromUrl(value: string | null): string | null {
   }
 }
 
+function parseRequiredScopeFromErrorMessage(value: unknown): string | null {
+  const text = typeof value === "string" ? value : String(value ?? "");
+  const match = text.match(/requires(?:\s+the)?\s+([a-z_]+:[a-z_]+)/i);
+  return match?.[1] ?? null;
+}
+
 function safeWorkspaceId(workspaceId: string): string {
   return String(workspaceId).trim() || "default";
 }
@@ -335,6 +341,33 @@ function collectTextNodes(node: Record<string, unknown>, limit = 80): string[] {
     }
   }
   return out;
+}
+
+function collectScreenshotCandidateNodeIds(
+  node: Record<string, unknown>,
+  preferredNodeId: string | null,
+  limit = 12,
+): string[] {
+  const ordered = new Set<string>();
+  if (preferredNodeId) {
+    ordered.add(preferredNodeId);
+  }
+  const flat = flattenNodes(node);
+  const typePriority = ["FRAME", "SECTION", "COMPONENT", "INSTANCE", "COMPONENT_SET", "GROUP", "CANVAS"];
+  for (const type of typePriority) {
+    for (const current of flat) {
+      const currentType = stringOrNull(current.type);
+      const currentId = stringOrNull(current.id);
+      if (!currentId || currentType !== type) {
+        continue;
+      }
+      ordered.add(currentId);
+      if (ordered.size >= limit) {
+        return [...ordered];
+      }
+    }
+  }
+  return [...ordered];
 }
 
 function resolveWorkspaceFigmaMcpAuthFromConnectors(
@@ -1363,17 +1396,32 @@ async function callCompatTool(params: {
       };
     }
     case "figma.get_screenshot": {
-      const nodeId = target.nodeId ?? "0:1";
+      const requestedNodeId = target.nodeId ?? "0:1";
       const format = stringOrNull(params.args.format) ?? "png";
-      const images = await fetchImages(token, target.fileKey, [nodeId], format);
+      const node = target.nodeId
+        ? await fetchNode(token, target.fileKey, target.nodeId, 4)
+        : asRecord((await fetchFile(token, target.fileKey, 3)).document);
+      const screenshotCandidates = collectScreenshotCandidateNodeIds(node, requestedNodeId);
+      const images = await fetchImages(token, target.fileKey, screenshotCandidates, format);
+      const resolvedNodeId =
+        screenshotCandidates.find((candidateId) => stringOrNull(images[candidateId])) ?? requestedNodeId;
+      const imageUrl = stringOrNull(images[resolvedNodeId]);
       return {
         source: "pmos-figma-rest-compat",
         transport: "rest_compat",
         fileKey: target.fileKey,
-        nodeId,
+        nodeId: resolvedNodeId,
+        requestedNodeId,
         format,
-        imageUrl: images[nodeId] ?? null,
+        imageUrl,
         images,
+        fallbackUsed: resolvedNodeId !== requestedNodeId,
+        fallbackCandidates: screenshotCandidates,
+        note: imageUrl
+          ? resolvedNodeId !== requestedNodeId
+            ? `Figma did not return an image for ${requestedNodeId}; PMOS used fallback node ${resolvedNodeId}.`
+            : null
+          : "Figma did not return a screenshot for the requested node or the fallback candidates.",
       };
     }
     case "figma.get_comments": {
@@ -1408,7 +1456,31 @@ async function callCompatTool(params: {
       const node = target.nodeId
         ? await fetchNode(token, target.fileKey, target.nodeId, 6)
         : asRecord((await fetchFile(token, target.fileKey, 4)).document);
-      const payload = await fetchLocalVariables(token, target.fileKey);
+      let payload: Record<string, unknown>;
+      try {
+        payload = await fetchLocalVariables(token, target.fileKey);
+      } catch (err) {
+        const requiredScope = parseRequiredScopeFromErrorMessage(
+          err instanceof Error ? err.message : String(err),
+        );
+        if (requiredScope) {
+          return {
+            source: "pmos-figma-rest-compat",
+            transport: "rest_compat",
+            fileKey: target.fileKey,
+            nodeId: target.nodeId,
+            status: "scope_required",
+            requiredScope,
+            matchedCount: 0,
+            boundVariableIds: [...new Set(collectBoundVariableIds(node))],
+            definitions: {},
+            variables: [],
+            hasPersonalAccessToken: auth.hasPersonalAccessToken,
+            note: `The current workspace Figma token is missing the ${requiredScope} scope, so variable definitions are unavailable for this file.`,
+          };
+        }
+        throw err;
+      }
       const variables = normalizeVariableList(payload);
       const boundIds = new Set(collectBoundVariableIds(node));
       const matchedVariables =
@@ -1722,6 +1794,7 @@ export function buildFigmaMcpConnectPath(params: FigmaMcpConnectUrlParams): stri
 export const __test = {
   normalizeNodeId,
   parseNodeIdFromUrl,
+  parseRequiredScopeFromErrorMessage,
   buildMetadataXml,
   resolveRequestedTarget,
   workspaceFigmaCodeConnectPath,

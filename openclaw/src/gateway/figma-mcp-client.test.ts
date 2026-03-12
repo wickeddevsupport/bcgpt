@@ -254,6 +254,152 @@ describe("figma mcp compat bridge", () => {
     ]);
   });
 
+  it("falls back to the first renderable descendant when the requested screenshot node returns null", async () => {
+    await writeWorkspaceConnectors(workspaceId, {
+      figma: {
+        auth: {
+          personalAccessToken: "figd_pat_test",
+          hasPersonalAccessToken: true,
+          source: "fm-session",
+        },
+      },
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/nodes?")) {
+          return new Response(
+            JSON.stringify({
+              nodes: {
+                "0:1": {
+                  document: {
+                    id: "0:1",
+                    name: "Audit",
+                    type: "CANVAS",
+                    children: [
+                      {
+                        id: "4:155",
+                        name: "Page Section",
+                        type: "SECTION",
+                        children: [
+                          {
+                            id: "4:2",
+                            name: "1440w light",
+                            type: "FRAME",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                },
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        if (url.includes("/v1/images/")) {
+          return new Response(
+            JSON.stringify({
+              images: {
+                "0:1": null,
+                "4:2": "https://example.com/fallback-frame.png",
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+
+    const result = (await callWorkspaceFigmaMcpTool({
+      workspaceId,
+      toolName: "get_screenshot",
+      args: {
+        fileKey: "3INmNiG3X3NKAZtCI3SMg6",
+        nodeId: "0:1",
+      },
+    })) as Record<string, unknown>;
+
+    expect(result.requestedNodeId).toBe("0:1");
+    expect(result.nodeId).toBe("4:2");
+    expect(result.imageUrl).toBe("https://example.com/fallback-frame.png");
+    expect(result.fallbackUsed).toBe(true);
+    expect(result.fallbackCandidates).toEqual(
+      expect.arrayContaining(["0:1", "4:2"]),
+    );
+  });
+
+  it("returns a scope_required result for variable defs when the Figma token lacks file_variables:read", async () => {
+    await writeWorkspaceConnectors(workspaceId, {
+      figma: {
+        auth: {
+          personalAccessToken: "figd_pat_test",
+          hasPersonalAccessToken: true,
+          source: "fm-session",
+        },
+      },
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/nodes?")) {
+          return new Response(
+            JSON.stringify({
+              nodes: {
+                "0:1": {
+                  document: {
+                    id: "0:1",
+                    name: "Audit",
+                    type: "FRAME",
+                  },
+                },
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        if (url.includes("/variables/local")) {
+          return new Response(
+            JSON.stringify({
+              status: 403,
+              error: true,
+              message:
+                "Invalid scope(s): file_content:read. This endpoint requires the file_variables:read scope",
+            }),
+            { status: 403, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+
+    const result = (await callWorkspaceFigmaMcpTool({
+      workspaceId,
+      toolName: "get_variable_defs",
+      args: {
+        fileKey: "3INmNiG3X3NKAZtCI3SMg6",
+        nodeId: "0:1",
+      },
+    })) as Record<string, unknown>;
+
+    expect(result.status).toBe("scope_required");
+    expect(result.requiredScope).toBe("file_variables:read");
+    expect(result.matchedCount).toBe(0);
+    expect(result.definitions).toEqual({});
+    expect(result.variables).toEqual([]);
+  });
+
   it("stores and returns PMOS-managed code connect mappings", async () => {
     await writeWorkspaceConnectors(workspaceId, {
       figma: {
