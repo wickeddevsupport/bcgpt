@@ -419,6 +419,7 @@ export class OpenClawApp extends LitElement {
   @state() pmosProjectsSnapshot: PmosProjectsSnapshot | null = null;
   @state() pmosProjectSearch = "";
   @state() pmosProjectViewMode: "cards" | "status-board" | "timeline" = "cards";
+  @state() pmosCommandCenterTab: "overview" | "projects" | "timeline" = "overview";
   @state() pmosSelectedProject: PmosProjectCard | null = null;
   @state() pmosProjectDetailTab: PmosProjectDetailTab = "overview";
   @state() pmosProjectSectionData: Record<string, PmosProjectSectionResult> = {};

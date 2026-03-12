@@ -44,6 +44,8 @@ function createProps(overrides: Partial<CommandCenterProps> = {}): CommandCenter
     selectedProject: null,
     projectDetailTab: "overview",
     projectSectionData: {},
+    commandCenterTab: "overview" as const,
+    onCommandCenterTabChange: vi.fn(),
     onRefresh: vi.fn(),
     onOpenIntegrations: vi.fn(),
     onOpenWorkflows: vi.fn(),

@@ -11,6 +11,7 @@ import type {
 } from "../controllers/pmos-projects.ts";
 
 export type ProjectViewMode = "cards" | "status-board" | "timeline";
+export type CommandCenterTab = "overview" | "projects" | "timeline";
 
 export type CommandCenterProps = {
   connected: boolean;
@@ -29,6 +30,8 @@ export type CommandCenterProps = {
   onPrefillChat: (prompt: string) => void;
   onProjectSearchChange: (next: string) => void;
   onViewModeChange: (next: ProjectViewMode) => void;
+  commandCenterTab: CommandCenterTab;
+  onCommandCenterTabChange: (tab: CommandCenterTab) => void;
   onSelectProject: (project: PmosProjectCard | null) => void;
   onProjectDetailTabChange: (tab: PmosProjectDetailTab) => void;
   onLoadProjectSection: (projectName: string, section: PmosProjectDetailTab) => void;
@@ -770,6 +773,138 @@ export function renderCommandCenter(props: CommandCenterProps) {
       : refreshedLabel;
 
   const viewMode = props.viewMode ?? "cards";
+  const ccTab = props.commandCenterTab ?? "overview";
+
+  const CC_TABS: { key: CommandCenterTab; label: string }[] = [
+    { key: "overview", label: "Overview" },
+    { key: "projects", label: "Projects" },
+    { key: "timeline", label: "Timeline" },
+  ];
+
+  const tabStrip = html`
+    <div class="dashboard-tab-strip">
+      ${CC_TABS.map(
+        (t) => html`
+          <button
+            class="dashboard-tab-btn ${ccTab === t.key ? "active" : ""}"
+            @click=${() => props.onCommandCenterTabChange(t.key)}
+          >
+            ${t.label}
+          </button>
+        `,
+      )}
+    </div>
+  `;
+
+  const tabContent = () => {
+    if (ccTab === "overview") {
+      return html`
+        <div class="project-stats-grid">
+          <div class="stat project-stat-card">
+            <div class="stat-label">Projects</div>
+            <div class="stat-value">${totals.projectCount}</div>
+            <div class="muted">Synced: ${totals.syncedProjects}</div>
+          </div>
+          <div class="stat project-stat-card">
+            <div class="stat-label">Open Todos</div>
+            <div class="stat-value">${totals.openTodos}</div>
+            <div class="muted">Across all projects</div>
+          </div>
+          <div class="stat project-stat-card">
+            <div class="stat-label">Assigned</div>
+            <div class="stat-value ${totals.assignedTodos > 0 ? "warn" : "ok"}">${totals.assignedTodos}</div>
+            <div class="muted">Visible in your queue</div>
+          </div>
+          <div class="stat project-stat-card">
+            <div class="stat-label">Overdue</div>
+            <div class="stat-value ${totals.overdueTodos > 0 ? "warn" : "ok"}">${totals.overdueTodos}</div>
+            <div class="muted">Urgent follow-up</div>
+          </div>
+          <div class="stat project-stat-card">
+            <div class="stat-label">Due Today</div>
+            <div class="stat-value ${totals.dueTodayTodos > 0 ? "warn" : "ok"}">${totals.dueTodayTodos}</div>
+            <div class="muted">Same-day action</div>
+          </div>
+          <div class="stat project-stat-card">
+            <div class="stat-label">Future</div>
+            <div class="stat-value">${totals.futureTodos}</div>
+            <div class="muted">Scheduled ahead</div>
+          </div>
+          <div class="stat project-stat-card">
+            <div class="stat-label">No Due Date</div>
+            <div class="stat-value">${totals.noDueDateTodos}</div>
+            <div class="muted">Needs prioritization</div>
+          </div>
+        </div>
+
+        <div class="project-priority-grid">
+          ${renderTodoList("Assigned to Me", assignedTodos, "No assigned todos right now.")}
+          ${renderTodoList("Past Due", urgentTodos, "No overdue todos right now.")}
+          ${renderTodoList("Due Today", dueTodayTodos, "No todos due today.")}
+          ${renderTodoList("Future", futureTodos, "No upcoming todos in the visible queue.")}
+          ${renderTodoList("No Due Date", noDueDateTodos, "No unscheduled todos in the visible queue.")}
+        </div>
+      `;
+    }
+
+    if (ccTab === "projects") {
+      const boardModes: { key: ProjectViewMode; label: string }[] = [
+        { key: "cards", label: "Cards" },
+        { key: "status-board", label: "Status Board" },
+      ];
+      return html`
+        <div class="card">
+          <div class="projects-header-row">
+            <div>
+              <div class="card-title">${viewMode === "status-board" ? "Status Board" : "Project Cards"}</div>
+              <div class="card-sub">
+                ${viewMode === "status-board"
+                  ? "Projects grouped by health status for quick triage."
+                  : "Operational cards with health, metrics, and action shortcuts."}
+              </div>
+            </div>
+            <div class="view-mode-switcher">
+              ${boardModes.map(
+                (m) => html`
+                  <button
+                    class="btn btn--sm ${viewMode === m.key ? "btn--active" : ""}"
+                    @click=${() => props.onViewModeChange(m.key)}
+                  >
+                    ${m.label}
+                  </button>
+                `,
+              )}
+            </div>
+          </div>
+
+          ${viewMode === "cards"
+            ? cards.length > 0
+              ? renderProjectCards(props, cards)
+              : allCards.length > 0
+                ? html`<div class="muted" style="margin-top: 12px;">No projects match "${props.projectSearch}".</div>`
+                : html`<div class="muted" style="margin-top: 12px;">No project cards available yet.</div>`
+            : nothing}
+
+          ${viewMode === "status-board"
+            ? cards.length > 0
+              ? renderStatusBoard(props, cards)
+              : html`<div class="muted" style="margin-top: 12px;">No project data available yet.</div>`
+            : nothing}
+        </div>
+      `;
+    }
+
+    // timeline tab
+    return html`
+      <div class="card">
+        <div class="card-title">Timeline</div>
+        <div class="card-sub">Past, today, future, and no-date items in chronological order.</div>
+        ${snapshot
+          ? renderTimeline(props, snapshot)
+          : html`<div class="muted" style="margin-top: 12px;">No project data available yet.</div>`}
+      </div>
+    `;
+  };
 
   return html`
     <section class="projects-layout">
@@ -797,9 +932,7 @@ export function renderCommandCenter(props: CommandCenterProps) {
           </div>
 
           <div class="chip-row" style="margin-top: 12px;">
-            <span
-              class="chip ${!snapshotLoaded ? "" : hasBasecampAccess ? "chip-ok" : "chip-danger"}"
-            >
+            <span class="chip ${!snapshotLoaded ? "" : hasBasecampAccess ? "chip-ok" : "chip-danger"}">
               ${!snapshotLoaded
                 ? "Checking Basecamp..."
                 : configured
@@ -832,140 +965,41 @@ export function renderCommandCenter(props: CommandCenterProps) {
               `
             : nothing}
           ${snapshot?.stale && snapshot?.staleReason
-            ? html`
-                <div class="callout warn" style="margin-top: 12px;">
-                  Latest refresh failed. Showing the last successful snapshot from ${staleLabel}. ${snapshot.staleReason}
-                </div>
-              `
+            ? html`<div class="callout warn" style="margin-top: 12px;">Latest refresh failed. Showing snapshot from ${staleLabel}. ${snapshot.staleReason}</div>`
             : props.error
               ? html`<div class="callout danger" style="margin-top: 12px;">${props.error}</div>`
               : nothing}
           ${errors.length > 0 && allCards.length === 0 && assignedTodos.length === 0 && urgentTodos.length === 0 && dueTodayTodos.length === 0 && futureTodos.length === 0 && noDueDateTodos.length === 0
             ? html`<div class="callout info" style="margin-top: 12px;">${errors[0]}</div>`
             : nothing}
-
           ${!props.connected
-            ? html`
-                <div class="callout danger" style="margin-top: 12px;">
-                  Connect to Wicked OS first to load Projects.
-                </div>
-              `
+            ? html`<div class="callout danger" style="margin-top: 12px;">Connect to Wicked OS first to load Projects.</div>`
             : snapshotLoaded && !hasBasecampAccess
-              ? html`
-                  <div class="callout info" style="margin-top: 12px;">
-                    Add your Basecamp token in Integrations to enable project cards and AI project actions.
-                  </div>
-                `
+              ? html`<div class="callout info" style="margin-top: 12px;">Add your Basecamp token in Integrations to enable project cards and AI project actions.</div>`
               : nothing}
+
+          ${tabStrip}
         </div>
 
-        <div class="project-stats-grid">
-          <div class="stat project-stat-card">
-            <div class="stat-label">Projects</div>
-            <div class="stat-value">${totals.projectCount}</div>
-            <div class="muted">Synced cards: ${totals.syncedProjects}</div>
-          </div>
-          <div class="stat project-stat-card">
-            <div class="stat-label">Open Todos</div>
-            <div class="stat-value">${totals.openTodos}</div>
-            <div class="muted">Across synced projects</div>
-          </div>
-          <div class="stat project-stat-card">
-            <div class="stat-label">Assigned</div>
-            <div class="stat-value ${totals.assignedTodos > 0 ? "warn" : "ok"}">${totals.assignedTodos}</div>
-            <div class="muted">Visible in your queue</div>
-          </div>
-          <div class="stat project-stat-card">
-            <div class="stat-label">Overdue</div>
-            <div class="stat-value ${totals.overdueTodos > 0 ? "warn" : "ok"}">${totals.overdueTodos}</div>
-            <div class="muted">Urgent follow-up required</div>
-          </div>
-          <div class="stat project-stat-card">
-            <div class="stat-label">Due Today</div>
-            <div class="stat-value ${totals.dueTodayTodos > 0 ? "warn" : "ok"}">${totals.dueTodayTodos}</div>
-            <div class="muted">Needs same-day action</div>
-          </div>
-          <div class="stat project-stat-card">
-            <div class="stat-label">Future</div>
-            <div class="stat-value">${totals.futureTodos}</div>
-            <div class="muted">Scheduled beyond today</div>
-          </div>
-          <div class="stat project-stat-card">
-            <div class="stat-label">No Due Date</div>
-            <div class="stat-value">${totals.noDueDateTodos}</div>
-            <div class="muted">Needs manual prioritization</div>
-          </div>
-        </div>
-
-        ${viewMode === "cards"
-          ? html`
-              <div class="project-priority-grid">
-                ${renderTodoList("Assigned to Me", assignedTodos, "No assigned todos right now.")}
-                ${renderTodoList("Past Due", urgentTodos, "No overdue todos right now.")}
-                ${renderTodoList("Due Today", dueTodayTodos, "No todos due today.")}
-                ${renderTodoList("Future", futureTodos, "No upcoming todos in the visible queue.")}
-                ${renderTodoList("No Due Date", noDueDateTodos, "No unscheduled todos in the visible queue.")}
-              </div>
-            `
-          : nothing}
-
-        <div class="card">
-          <div class="projects-header-row">
-            <div>
-              <div class="card-title">
-                ${viewMode === "cards" ? "Project Cards" : viewMode === "status-board" ? "Status Board" : "Timeline"}
-              </div>
-              <div class="card-sub">
-                ${viewMode === "cards"
-                  ? "Operational cards with health and action shortcuts."
-                  : viewMode === "status-board"
-                    ? "Projects grouped by health status for quick triage."
-                    : "Past, today, future, and no-date items in chronological order."}
-              </div>
-            </div>
-            ${renderViewModeSwitcher(props)}
-          </div>
-
-          ${viewMode === "cards"
-            ? cards.length > 0
-              ? renderProjectCards(props, cards)
-              : allCards.length > 0
-                ? html`<div class="muted" style="margin-top: 12px;">No projects match "${props.projectSearch}".</div>`
-                : html`<div class="muted" style="margin-top: 12px;">No project cards available yet.</div>`
-            : nothing}
-
-          ${viewMode === "status-board"
-            ? cards.length > 0
-              ? renderStatusBoard(props, cards)
-              : html`<div class="muted" style="margin-top: 12px;">No project data available yet.</div>`
-            : nothing}
-
-          ${viewMode === "timeline"
-            ? snapshot
-              ? renderTimeline(props, snapshot)
-              : html`<div class="muted" style="margin-top: 12px;">No project data available yet.</div>`
-            : nothing}
-        </div>
+        ${tabContent()}
       </div>
 
       <div class="projects-side">
         <div class="card projects-chat-card">
           <div class="card-title">Project Copilot</div>
           <div class="card-sub">
-            Ask for updates, blockers, summaries, or direct actions in Basecamp. The same chat engine is available here.
+            Ask for updates, blockers, summaries, or direct actions in Basecamp.
           </div>
           <div class="row projects-chat-shortcuts" style="margin-top: 10px;">
             <button
               class="btn btn--sm"
-              @click=${() =>
-                props.onPrefillChat("Give me a daily project brief: urgent tasks, overdue items, and what to do next.")}
+              @click=${() => props.onPrefillChat("Give me a daily project brief: urgent tasks, overdue items, and what to do next.")}
             >
               Daily Brief
             </button>
             <button
               class="btn btn--sm"
-              @click=${() =>
-                props.onPrefillChat("List all Basecamp projects and flag high-risk items with owners and due dates.")}
+              @click=${() => props.onPrefillChat("List all Basecamp projects and flag high-risk items with owners and due dates.")}
             >
               Risk Check
             </button>

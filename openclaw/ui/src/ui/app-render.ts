@@ -1160,6 +1160,8 @@ export function renderApp(state: AppViewState) {
                 snapshot: state.pmosProjectsSnapshot,
                 projectSearch: state.pmosProjectSearch,
                 viewMode: state.pmosProjectViewMode,
+                commandCenterTab: state.pmosCommandCenterTab ?? "overview",
+                onCommandCenterTabChange: (tab) => { state.pmosCommandCenterTab = tab; },
                 chatProps,
                 selectedProject: state.pmosSelectedProject ?? null,
                 projectDetailTab: state.pmosProjectDetailTab ?? "overview",

@@ -269,6 +269,7 @@ export type AppViewState = {
   pmosProjectsSnapshot: PmosProjectsSnapshot | null;
   pmosProjectSearch: string;
   pmosProjectViewMode: "cards" | "status-board" | "timeline";
+  pmosCommandCenterTab: "overview" | "projects" | "timeline";
   pmosSelectedProject: PmosProjectCard | null;
   pmosProjectDetailTab: PmosProjectDetailTab;
   pmosProjectSectionData: Record<string, PmosProjectSectionResult>;
