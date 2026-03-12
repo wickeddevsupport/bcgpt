@@ -704,6 +704,43 @@ function summarizeBasecampRawPayload(payload: unknown): string | null {
   return path ? `Basecamp raw ${method} ${path} completed.` : null;
 }
 
+function summarizeBcgptToolCatalogPayload(payload: unknown): string | null {
+  if (!isObjectRecord(payload)) {
+    return null;
+  }
+  const directSummary = typeof payload.summary === "string" && payload.summary.trim()
+    ? payload.summary.trim()
+    : null;
+  if (directSummary) {
+    return directSummary;
+  }
+  const tools = Array.isArray(payload.tools)
+    ? payload.tools
+        .filter((tool): tool is Record<string, unknown> => isObjectRecord(tool))
+        .map((tool) => (typeof tool.name === "string" ? tool.name.trim() : ""))
+        .filter(Boolean)
+    : [];
+  if (!tools.length) {
+    return null;
+  }
+  const top = tools.slice(0, 6);
+  return `Basecamp MCP tools available (${tools.length}): ${top.join(", ")}${tools.length > top.length ? ", ..." : ""}.`;
+}
+
+function summarizeBcgptDirectCallPayload(payload: unknown): string | null {
+  if (!isObjectRecord(payload)) {
+    return null;
+  }
+  const directSummary = typeof payload.summary === "string" && payload.summary.trim()
+    ? payload.summary.trim()
+    : null;
+  if (directSummary) {
+    return directSummary;
+  }
+  const tool = typeof payload.tool === "string" ? payload.tool.trim() : "";
+  return tool ? `Basecamp ${tool} completed.` : null;
+}
+
 function summarizeCountedNames(
   label: string,
   items: Array<{ name: string; count?: number | null }>,
@@ -943,6 +980,10 @@ export function summarizeAgentLoopToolResult(toolName: string, payload: unknown)
   switch (toolName) {
     case "bcgpt_list_projects":
       return summarizeProjectRows(readToolProjectRows(payload));
+    case "bcgpt_list_tools":
+      return summarizeBcgptToolCatalogPayload(payload);
+    case "bcgpt_mcp_call":
+      return summarizeBcgptDirectCallPayload(payload);
     case "bcgpt_smart_action":
       return summarizeSmartActionPayload(payload);
     case "bcgpt_basecamp_raw":
@@ -1023,6 +1064,7 @@ export function summarizeAgentLoopToolResult(toolName: string, payload: unknown)
 function isTerminalToolSummary(name: string): boolean {
   return new Set([
     "bcgpt_list_projects",
+    "bcgpt_mcp_call",
     "bcgpt_smart_action",
     "bcgpt_basecamp_raw",
     "figma_pat_audit_file",
@@ -1047,7 +1089,7 @@ function isTerminalToolSummary(name: string): boolean {
 }
 
 function isPreparatoryToolSummary(name: string): boolean {
-  return name === "figma_get_context";
+  return name === "figma_get_context" || name === "bcgpt_list_tools";
 }
 
 export function buildAgentLoopEarlyExit(
@@ -1088,7 +1130,10 @@ export function buildAgentLoopEarlyExit(
   }
 
   const basecampResults = successful.filter(
-    (result) => result.name === "bcgpt_smart_action" || result.name === "bcgpt_list_projects",
+    (result) =>
+      result.name === "bcgpt_smart_action" ||
+      result.name === "bcgpt_list_projects" ||
+      result.name === "bcgpt_mcp_call",
   );
   if (!basecampResults.length || basecampResults.length !== successful.length) {
     return null;

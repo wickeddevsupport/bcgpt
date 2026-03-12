@@ -432,30 +432,25 @@ function describeBcgptSection(input: {
   }
 
   lines.push("");
-  lines.push("### Primary Entry Point: bcgpt_smart_action");
-  lines.push("- **Use `bcgpt_smart_action` for scoped Basecamp analysis** — summaries, audits, searches, people/activity questions, and project follow-ups.");
+  lines.push("### Basecamp Entry Points");
   lines.push("- **Use `bcgpt_list_projects` for exact project lists or project picking** before deeper follow-up questions.");
+  lines.push("- **Use `bcgpt_mcp_call` for deterministic named MCP tools** such as todo lists, project todos, messages, people, schedules, card tables, and documents.");
+  lines.push("- **Use `bcgpt_list_tools` when the right named MCP tool is unclear** and you need to inspect the live tool catalog first.");
+  lines.push("- **Use `bcgpt_smart_action` for scoped Basecamp analysis** — summaries, audits, fuzzy searches, pasted Basecamp URLs, and broader follow-up questions when the exact tool is not obvious.");
   lines.push("- If the user pastes a Basecamp URL, pass the exact URL through `bcgpt_smart_action.query` and inspect that linked resource instead of ignoring the URL.");
-  lines.push("- `bcgpt_smart_action` handles: list projects, project summary, project context (docs/cards/todos/messages),");
-  lines.push("  assigned todos, due-date queries, person queries (activity/assignments/membership),");
-  lines.push("  card/kanban search, campfire/team chat, upcoming schedule, daily reports, search");
-  lines.push("- Example queries for bcgpt_smart_action:");
-  lines.push('  - "show my projects" → routes to list_projects');
-  lines.push('  - "summarize project Acme" → routes to project_summary');
-  lines.push('  - "what todos are due today?" → routes to list_todos_due');
-  lines.push('  - "what am I assigned to?" → routes to list_assigned_to_me');
-  lines.push('  - "who is working on project X?" → routes to assignment_report');
-  lines.push('  - "show campfire for project Y" → routes to get_campfire + list_campfire_lines');
-  lines.push('  - "upcoming events this week" → routes to report_schedules_upcoming');
-  lines.push('  - "find cards about login" → routes to search_cards');
-  lines.push('  - "tell me about the Acme brand" → routes to project_context_summary (docs+messages+cards)');
-  lines.push("- For CREATE operations, use specific tools: create_todo, create_message, create_campfire_line, create_card");
+  lines.push("- Good direct-tool examples:");
+  lines.push('  - "show my todo lists in Project X" -> `bcgpt_mcp_call` with `list_todolists`');
+  lines.push('  - "how many open todos are in Project X?" -> `bcgpt_mcp_call` with `list_todos_for_project`');
+  lines.push('  - "show the schedule for Project X" -> `bcgpt_mcp_call` with `list_schedule_entries`');
+  lines.push('  - "who is on this project?" -> `bcgpt_mcp_call` with `list_people`');
+  lines.push("- Use create-specific tools for mutations like todos, messages, campfire lines, and cards.");
   lines.push("");
   lines.push("### How to Use Basecamp Tools");
   lines.push(`- These tools are available through the bcgpt MCP server at ${serverUrl}`);
-  lines.push("- When the user asks about Basecamp (projects, todos, messages, etc.), use the appropriate tool");
+  lines.push("- When the user asks about Basecamp (projects, todos, messages, etc.), use the exact tool that matches the request when possible.");
   lines.push("- Always use tool results as the authoritative source — do not guess Basecamp data");
   lines.push("- If asked 'what projects do I have', call `bcgpt_list_projects` first, then summarize the list.");
+  lines.push("- If asked for exact todo lists, project todos, people, messages, schedules, or card tables, prefer `bcgpt_mcp_call` over `bcgpt_smart_action`.");
   lines.push("- Do not call Basecamp tools for greetings, fresh-session acknowledgements, or other non-Basecamp chatter.");
   lines.push("- The API key is already configured — you do NOT need to ask the user for credentials");
 
@@ -618,7 +613,7 @@ function describeProjectManagerSection(): string {
     "## AI Project Manager Role",
     "Role: AI Project Manager — access to Basecamp and workflow automation for this workspace.",
     "",
-    "**Basecamp**: Use smart_action for queries, specific tools for creation. View projects/todos/schedules/people live.",
+    "**Basecamp**: Prefer exact named MCP tools for deterministic reads, `smart_action` for ambiguous analysis, and specific tools for creation. View projects/todos/schedules/people live.",
     "**Automation**: Use pmos_ops_* tools to list, create, and execute workflows through conversation.",
     "**Web Search**: Use pmos_web_search for documentation, current events, or external research.",
     "",
@@ -670,11 +665,14 @@ function describeAssistantPolicySection(): string {
     "- When the user asks ANYTHING about their Basecamp projects, todos, messages, people, or schedule: USE tools to get live data — do not guess or make up project names/IDs/content.",
     "- If the user pastes a Basecamp URL, treat that URL as the resource to inspect and include the exact URL in the `smart_action` query.",
     "- Use `list_projects` first when the user wants the raw project list, exact project names, or needs to choose a project.",
-    "- Use `smart_action` with a natural language query for Basecamp summaries, searches, project audits, and follow-up questions.",
+    "- Use `bcgpt_mcp_call` for exact named tools like `list_todolists`, `list_todos_for_project`, `list_messages`, `list_people`, `list_schedule_entries`, and `list_card_tables`.",
+    "- Use `bcgpt_list_tools` once when the right named tool is unclear, then switch to `bcgpt_mcp_call`.",
+    "- Use `smart_action` with a natural language query for Basecamp summaries, searches, project audits, pasted Basecamp URLs, and follow-up questions where the exact tool is not obvious.",
     "  - 'what projects do I have?' → list_projects()",
-    "  - 'show me my todos' → smart_action({ query: 'what am I assigned to?' })",
+    "  - 'show me todo lists for Project X' → bcgpt_mcp_call({ tool: 'list_todolists', arguments: { project: 'Project X' } })",
+    "  - 'show me my todos' → bcgpt_mcp_call({ tool: 'list_assigned_to_me' })",
     "  - 'summarize project X' → smart_action({ query: 'summarize project X', project: 'X' })",
-    "  - 'show the schedule' → smart_action({ query: 'upcoming schedule' })",
+    "  - 'show the schedule' → bcgpt_mcp_call({ tool: 'list_schedule_entries', arguments: { project: 'X' } })",
     "  - 'what's in campfire?' → smart_action({ query: 'show campfire', project: 'X' })",
     "- For CREATE operations, use specific tools: create_todo, create_message, create_campfire_line.",
     "- You are the user's Basecamp assistant: you know their workspace and can act on their behalf when asked.",

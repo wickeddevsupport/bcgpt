@@ -626,6 +626,38 @@ function normalizeBcgptToolResult(result: unknown): unknown {
   };
 }
 
+type BcgptToolDescriptor = {
+  name: string;
+  description: string | null;
+};
+
+function parseBcgptToolCatalog(result: unknown): BcgptToolDescriptor[] {
+  const toolsRaw = (() => {
+    if (isJsonObject(result) && Array.isArray(result.tools)) return result.tools;
+    if (isJsonObject(result) && isJsonObject(result.result) && Array.isArray(result.result.tools)) {
+      return result.result.tools;
+    }
+    return [];
+  })();
+
+  return toolsRaw
+    .filter((item): item is Record<string, unknown> => isJsonObject(item))
+    .map((item) => ({
+      name: stringOrNull(item.name) ?? "",
+      description: stringOrNull(item.description),
+    }))
+    .filter((item) => item.name)
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function summarizeBcgptToolCatalog(tools: BcgptToolDescriptor[]): string {
+  if (!tools.length) {
+    return "No Basecamp MCP tools were returned by bcgpt.";
+  }
+  const top = tools.slice(0, 8).map((tool) => tool.name);
+  return `Basecamp MCP tools available (${tools.length}): ${top.join(", ")}${tools.length > top.length ? ", ..." : ""}.`;
+}
+
 async function callBcgptTool(params: {
   bcgptUrl: string;
   apiKey: string;
@@ -669,6 +701,44 @@ async function callBcgptTool(params: {
 
   const rawResult = payload.result ?? null;
   return { ok: true, result: normalizeBcgptToolResult(rawResult), error: null };
+}
+
+async function listBcgptTools(params: {
+  bcgptUrl: string;
+  apiKey: string;
+  timeoutMs?: number;
+}): Promise<{ ok: boolean; result: unknown | null; error: string | null }> {
+  const rpc = await fetchJson(`${params.bcgptUrl}/mcp`, {
+    method: "POST",
+    timeoutMs: params.timeoutMs ?? 30_000,
+    headers: {
+      "content-type": "application/json",
+      "x-bcgpt-api-key": params.apiKey,
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: `pmos-bcgpt-tools-list-${Date.now()}`,
+      method: "tools/list",
+      params: {},
+    }),
+  });
+
+  if (!rpc.ok || !isJsonObject(rpc.json)) {
+    return { ok: false, result: null, error: rpc.error || "tools/list request failed" };
+  }
+
+  const payload = rpc.json as Record<string, unknown>;
+  if (isJsonObject(payload.error)) {
+    const code = stringOrNull(payload.error.code);
+    const message = stringOrNull(payload.error.message);
+    return {
+      ok: false,
+      result: null,
+      error: [code, message].filter(Boolean).join(": ") || "tools/list failed",
+    };
+  }
+
+  return { ok: true, result: payload.result ?? null, error: null };
 }
 
 async function resolveWorkspaceBcgptAccess(params: {
@@ -1147,6 +1217,110 @@ function summarizeBcgptRawResult(
   return `Basecamp raw ${method.toUpperCase()} ${path} completed.`;
 }
 
+function parseCompletedRatio(value: string | null): { completed: number; total: number; open: number } | null {
+  if (!value) return null;
+  const match = value.match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (!match) return null;
+  const completed = Number(match[1]);
+  const total = Number(match[2]);
+  if (!Number.isFinite(completed) || !Number.isFinite(total) || total < completed) {
+    return null;
+  }
+  return {
+    completed,
+    total,
+    open: total - completed,
+  };
+}
+
+function summarizeBcgptTodoLists(result: unknown): string | null {
+  const payload = isJsonObject(result) ? result : null;
+  const root = isJsonObject(payload?.result) ? payload.result : payload;
+  const lists = Array.isArray(root?.todolists)
+    ? root.todolists
+        .filter((entry): entry is Record<string, unknown> => isJsonObject(entry))
+        .map((entry) => ({
+          name: stringOrNull(entry.name) ?? stringOrNull(entry.title) ?? "",
+          open: parseCompletedRatio(stringOrNull(entry.completed_ratio))?.open ?? null,
+        }))
+        .filter((entry) => entry.name)
+    : [];
+  if (!lists.length) {
+    return null;
+  }
+  const projectName =
+    stringOrNull(isJsonObject(root?.project) ? root.project.name : null) ??
+    "the project";
+  const top = lists
+    .slice(0, 5)
+    .map((entry) => `${entry.name}${typeof entry.open === "number" ? ` (${entry.open} open)` : ""}`);
+  return `${projectName} todo lists (${lists.length}): ${top.join(", ")}${lists.length > top.length ? ", ..." : ""}.`;
+}
+
+function summarizeBcgptTodoGroups(result: unknown): string | null {
+  const payload = isJsonObject(result) ? result : null;
+  const root = isJsonObject(payload?.result) ? payload.result : payload;
+  const groups = Array.isArray(root?.groups)
+    ? root.groups
+        .filter((entry): entry is Record<string, unknown> => isJsonObject(entry))
+        .map((entry) => ({
+          name: stringOrNull(entry.todolist) ?? stringOrNull(entry.name) ?? "",
+          count:
+            typeof entry.todos_count === "number"
+              ? entry.todos_count
+              : typeof entry.count === "number"
+                ? entry.count
+                : null,
+        }))
+        .filter((entry) => entry.name)
+    : [];
+  if (!groups.length) {
+    return null;
+  }
+  const projectName =
+    stringOrNull(isJsonObject(root?.project) ? root.project.name : null) ??
+    "the project";
+  const top = groups
+    .slice(0, 5)
+    .map((entry) => `${entry.name}${typeof entry.count === "number" ? ` (${entry.count} open)` : ""}`);
+  return `${projectName} todo groups (${groups.length}): ${top.join(", ")}${groups.length > top.length ? ", ..." : ""}.`;
+}
+
+function summarizeBcgptDirectToolResult(requestedTool: string, result: unknown): string {
+  const narrative = extractBcgptNarrative(result);
+  if (narrative) {
+    return narrative;
+  }
+
+  if (requestedTool === "list_projects") {
+    const projects = parseProjectList(result);
+    if (projects.length) {
+      return summarizeBasecampProjectList(projects);
+    }
+  }
+  if (requestedTool === "list_todolists") {
+    const summary = summarizeBcgptTodoLists(result);
+    if (summary) return summary;
+  }
+  if (requestedTool === "list_todos_for_project") {
+    const summary = summarizeBcgptTodoGroups(result);
+    if (summary) return summary;
+  }
+
+  const payload = isJsonObject(result) ? result : null;
+  const root = isJsonObject(payload?.result) ? payload.result : payload;
+  const count =
+    typeof root?.count === "number"
+      ? root.count
+      : typeof payload?.count === "number"
+        ? payload.count
+        : null;
+  if (typeof count === "number") {
+    return `Basecamp ${requestedTool} returned ${count} item${count === 1 ? "" : "s"}.`;
+  }
+  return `Basecamp ${requestedTool} completed.`;
+}
+
 function isGreetingOnlyMessage(message: string): boolean {
   const normalized = message.trim().toLowerCase();
   if (!normalized) {
@@ -1158,6 +1332,74 @@ function isGreetingOnlyMessage(message: string): boolean {
   return /^(hi|hello|hey|yo|sup|good (morning|afternoon|evening)|start|new session|test|ping|hola|namaste)([!. ,].*)?$/i.test(
     normalized,
   );
+}
+
+type BasecampNamedToolHint = {
+  tool: string;
+  reason: string;
+};
+
+function normalizeBcgptNamedToolName(tool: string): string {
+  return tool.trim().replace(/^bcgpt[.:/]/i, "");
+}
+
+function inferPreferredBasecampNamedTool(message: string): BasecampNamedToolHint | null {
+  const lower = message.toLowerCase();
+  if (/\b(todo lists?|todolists?)\b/.test(lower) && /\b(open|count|counts|how many)\b/.test(lower)) {
+    return {
+      tool: "list_todos_for_project",
+      reason: "the user wants open todo counts grouped by list, which is an exact project todo query",
+    };
+  }
+  if (/\b(todo lists?|todolists?)\b/.test(lower) || /\ball list names\b/.test(lower)) {
+    return {
+      tool: "list_todolists",
+      reason: "the user wants the exact todo-list catalog for a project",
+    };
+  }
+  if (/\b(my todos|assigned to me)\b/.test(lower)) {
+    return {
+      tool: "list_assigned_to_me",
+      reason: "the user wants assigned todos, not a fuzzy Basecamp search",
+    };
+  }
+  if (/\b(open todos?|open tasks?|todos? in project|tasks? in project)\b/.test(lower)) {
+    return {
+      tool: "list_todos_for_project",
+      reason: "the user wants exact project todo data rather than a broad narrative summary",
+    };
+  }
+  if (/\bmessage board\b/.test(lower) || (/\bmessages?\b/.test(lower) && !/\bcomments?\b/.test(lower))) {
+    return {
+      tool: "list_messages",
+      reason: "the user wants exact message-board data",
+    };
+  }
+  if (/\bpeople\b|\bteam\b|\bwho is\b|\bwho's\b/.test(lower)) {
+    return {
+      tool: "list_people",
+      reason: "the user wants exact roster or people data",
+    };
+  }
+  if (/\bschedule\b|\bcalendar\b|\bevents?\b/.test(lower)) {
+    return {
+      tool: "list_schedule_entries",
+      reason: "the user wants exact schedule entries",
+    };
+  }
+  if (/\bkanban\b|\bcard table\b|\bcard tables\b|\bcards?\b|\bboards?\b|\bcolumns?\b/.test(lower)) {
+    return {
+      tool: "list_card_tables",
+      reason: "the user wants exact card-table data",
+    };
+  }
+  if (/\bdocuments?\b|\bdocs?\b|\buploads?\b|\bfiles?\b/.test(lower)) {
+    return {
+      tool: "list_documents",
+      reason: "the user wants exact document or upload data",
+    };
+  }
+  return null;
 }
 
 function parseTodoItems(
@@ -2944,6 +3186,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               tool.type !== "function" ||
               (tool.function.name !== "bcgpt_smart_action" &&
                 tool.function.name !== "bcgpt_list_projects" &&
+                tool.function.name !== "bcgpt_list_tools" &&
+                tool.function.name !== "bcgpt_mcp_call" &&
                 tool.function.name !== "bcgpt_basecamp_raw"),
           )
         : tools;
@@ -3233,6 +3477,10 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             return `Checking live Basecamp data with smart_action for: ${String(args.query ?? "").trim() || "workspace request"}`;
           case "bcgpt_list_projects":
             return "Loading the live Basecamp project list for this workspace.";
+          case "bcgpt_list_tools":
+            return "Inspecting the full live Basecamp MCP tool catalog before choosing an exact tool.";
+          case "bcgpt_mcp_call":
+            return `Calling the Basecamp MCP tool ${String(args.tool ?? "").trim() || "unknown"}.`;
           case "bcgpt_basecamp_raw":
             return `Fetching raw Basecamp data from ${String(args.path ?? "").trim() || "the requested API path"}.`;
           case "pmos_ops_list_credentials":
@@ -3370,6 +3618,10 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         /\b(list|show|what|which|give|display|name)\b[\s\w-]{0,40}\bprojects?\b|\bprojects?\b[\s\w-]{0,30}\b(names?|ids?|list)\b/i.test(
           latestUserMessage,
         );
+      const preferredBasecampNamedTool =
+        shouldPreferBasecamp && !shouldPreferProjectList && !pastedUrlHints.basecampUrl
+          ? inferPreferredBasecampNamedTool(latestUserMessage)
+          : null;
       const shouldPreferFigmaContext =
         Boolean(pastedUrlHints.figmaUrl) ||
         /\bfigma\b|\bdesign\b|\bauto[\s-]?layout\b|\bcomponent(?:s)?\b|\bstyle(?:s)?\b|\bfont(?:s)?\b|\bregression\b|\baudit\b/i.test(
@@ -3403,8 +3655,11 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         shouldPreferProjectList
           ? "- Prefer `bcgpt_list_projects` first because the user appears to want exact project names or a raw project list."
           : null,
-        shouldPreferBasecamp && !shouldPreferProjectList && !pastedUrlHints.basecampUrl
-          ? "- Prefer `bcgpt_smart_action` first for this Basecamp-centric request, then continue reasoning from the returned data if more work is needed."
+        preferredBasecampNamedTool
+          ? `- Prefer \`bcgpt_mcp_call\` first with tool \`${preferredBasecampNamedTool.tool}\` because ${preferredBasecampNamedTool.reason}. Use \`bcgpt_list_tools\` first only if you need to confirm the exact tool schema.`
+          : null,
+        shouldPreferBasecamp && !shouldPreferProjectList && !preferredBasecampNamedTool && !pastedUrlHints.basecampUrl
+          ? "- This Basecamp request is broader or ambiguous. Use `bcgpt_smart_action` for the first lookup, or `bcgpt_list_tools` followed by `bcgpt_mcp_call` if you need an exact named MCP tool."
           : null,
         shouldPreferFigmaContext && !shouldPreferExplicitFigmaFileRouting
           ? "- Consider `figma_get_context` first to anchor design analysis to the active workspace file before auditing or comparing results."
@@ -3429,8 +3684,11 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "## BCgpt API Reference",
         "BCgpt exposes Basecamp data via MCP (Model Context Protocol) and an OpenAPI compatibility layer:",
         "- `POST /mcp` -- MCP JSON-RPC endpoint. Auth: `x-bcgpt-api-key` header.",
+        "- `POST /mcp` with `tools/list` -- discover the full Basecamp MCP catalog for this workspace before choosing an exact tool.",
+        "- `POST /mcp` with `tools/call` -- invoke an exact named Basecamp MCP tool with structured arguments.",
         "- `POST /action/:operation` -- OpenAPI wrapper for individual tools.",
-        "- `smart_action({query})` -- Natural-language router. Tell it what you want in plain English; it calls the right Basecamp tools, handles pagination, and returns structured summaries. Best for: listing things, searching, getting project data.",
+        "- Named Basecamp MCP tools are best for deterministic reads like todo lists, project todos, people, messages, schedules, card tables, documents, and other exact resources.",
+        "- `smart_action({query})` -- Natural-language router. Best for ambiguous requests, pasted Basecamp URLs, broader searches, and summary or audit style questions when the exact tool is not obvious.",
         "- `basecamp_raw({method, path, body})` -- Raw Basecamp API access for anything not covered by named tools.",
         "",
         "## How to Think and Respond",
@@ -3442,7 +3700,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "",
         "### Be proactive, not lazy",
         "- Don't ask the user for information you can discover with a tool call.",
-        "- For Basecamp/project-management requests, use `bcgpt_list_projects` for exact project lists or project picking, and use `bcgpt_smart_action` for scoped summaries, searches, audits, or follow-up questions.",
+        "- For Basecamp/project-management requests, use `bcgpt_list_projects` for exact project lists, `bcgpt_mcp_call` for deterministic named MCP tools, and `bcgpt_smart_action` only when the request is ambiguous, search-like, or needs broad narrative synthesis.",
+        "- If you are not sure which Basecamp MCP tool exists, call `bcgpt_list_tools` once, then choose the exact tool with `bcgpt_mcp_call`.",
         "- Never call Basecamp tools for greetings, session-start acknowledgements, or other non-Basecamp chit-chat.",
         "- Always call `pmos_ops_list_credentials` before building any workflow so you know what's actually connected.",
         "- If the user asks about a project or person, call the appropriate tool to find the answer rather than guessing.",
@@ -3471,8 +3730,9 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "",
         "### Project management questions",
         "- Use workspace context for connector readiness and defaults only; do not answer Basecamp questions from memory when live tools are available.",
-        "- For live Basecamp data, use `bcgpt_list_projects` when the user wants the raw list of projects, and use `bcgpt_smart_action` when the user wants analysis, summaries, or searches.",
-        "- If the user pastes a Basecamp URL, treat it as the exact resource to inspect and pass the URL through `bcgpt_smart_action.query`.",
+        "- For live Basecamp data, use `bcgpt_list_projects` when the user wants the raw project list, use `bcgpt_mcp_call` for exact named MCP tools like `list_todolists`, `list_todos_for_project`, `list_messages`, `list_people`, `list_schedule_entries`, `list_card_tables`, or `list_documents`, and use `bcgpt_smart_action` when the task is ambiguous, search-oriented, or summary-oriented.",
+        "- If the user pastes a Basecamp URL, treat it as the exact resource to inspect and pass the URL through `bcgpt_smart_action.query` first because it knows how to anchor exact linked resources.",
+        "- If the right named Basecamp MCP tool is unclear, call `bcgpt_list_tools` and then `bcgpt_mcp_call` instead of defaulting to `smart_action`.",
         "- If `bcgpt_smart_action` cannot resolve an exact Basecamp resource, use `bcgpt_basecamp_raw` for direct API lookup instead of repeating the same smart_action query.",
         "- Summarize results meaningfully: 'There are 7 open todos in Project X -- 3 are overdue. The most recent message was from Alice yesterday about the deploy.'",
         "",
@@ -3491,8 +3751,10 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "",
         "## Available Tools",
         "**Basecamp MCP Tools:**",
-        "- `bcgpt_smart_action` -- run natural-language Basecamp queries through the bcgpt MCP router",
         "- `bcgpt_list_projects` -- fetch live Basecamp projects with names, IDs, and status",
+        "- `bcgpt_list_tools` -- inspect the full Basecamp MCP tool catalog when you need an exact named capability",
+        "- `bcgpt_mcp_call` -- call an exact named Basecamp MCP tool with structured arguments",
+        "- `bcgpt_smart_action` -- run natural-language Basecamp queries through the bcgpt MCP router when the task is ambiguous or URL-driven",
         "- `bcgpt_basecamp_raw` -- make a direct Basecamp API request through bcgpt when an exact resource lookup is needed",
         "",
         "**Workflow Engine Tools:**",
@@ -3546,6 +3808,37 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             name: "bcgpt_list_projects",
             description: "List live Basecamp projects available through the bcgpt MCP server.",
             parameters: { type: "object", properties: {}, additionalProperties: false },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "bcgpt_list_tools",
+            description: "List the live Basecamp MCP tool catalog exposed by the bcgpt server. Use when you need to discover the exact named tool instead of defaulting to smart_action.",
+            parameters: { type: "object", properties: {}, additionalProperties: false },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "bcgpt_mcp_call",
+            description:
+              "Call an exact named Basecamp MCP tool through the bcgpt server. Prefer this for deterministic reads like todo lists, todos, messages, people, schedules, documents, or card tables.",
+            parameters: {
+              type: "object",
+              required: ["tool"],
+              additionalProperties: false,
+              properties: {
+                tool: {
+                  type: "string",
+                  description: "Exact Basecamp MCP tool name, such as list_todolists or list_todos_for_project.",
+                },
+                arguments: {
+                  type: "object",
+                  description: "JSON object of arguments for the selected Basecamp MCP tool.",
+                },
+              },
+            },
           },
         },
         {
@@ -3936,6 +4229,83 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               query,
               project,
               summary: summarizeBcgptSmartActionResult(query, project, result.result),
+              continueAgentLoop: true,
+              result: result.result,
+            };
+            finishTool(payload);
+            return JSON.stringify(payload);
+          }
+          case "bcgpt_list_tools": {
+            const { bcgptUrl, apiKey } = await resolveWorkspaceBcgptAccess({
+              workspaceId,
+              allowGlobalSecrets: true,
+            });
+            if (!apiKey) {
+              const value = JSON.stringify({
+                error: "Basecamp integration is not configured for this workspace.",
+              });
+              finishTool({ error: "Basecamp integration is not configured for this workspace." });
+              return value;
+            }
+            const result = await listBcgptTools({
+              bcgptUrl,
+              apiKey,
+              timeoutMs: 45_000,
+            });
+            if (!result.ok) {
+              const payload = { error: result.error ?? "Failed to list Basecamp MCP tools" };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
+            const toolsCatalog = parseBcgptToolCatalog(result.result);
+            const payload = {
+              catalog: result.result,
+              tools: toolsCatalog,
+              summary: summarizeBcgptToolCatalog(toolsCatalog),
+              continueAgentLoop: true,
+            };
+            finishTool(payload);
+            return JSON.stringify(payload);
+          }
+          case "bcgpt_mcp_call": {
+            const requestedToolRaw = String(args.tool ?? "").trim();
+            const requestedTool = normalizeBcgptNamedToolName(requestedToolRaw);
+            const toolArgs =
+              args.arguments && typeof args.arguments === "object" && !Array.isArray(args.arguments)
+                ? (args.arguments as Record<string, unknown>)
+                : {};
+            if (!requestedTool) {
+              const payload = { error: "tool is required" };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
+            const { bcgptUrl, apiKey } = await resolveWorkspaceBcgptAccess({
+              workspaceId,
+              allowGlobalSecrets: true,
+            });
+            if (!apiKey) {
+              const value = JSON.stringify({
+                error: "Basecamp integration is not configured for this workspace.",
+              });
+              finishTool({ error: "Basecamp integration is not configured for this workspace." });
+              return value;
+            }
+            const result = await callBcgptTool({
+              bcgptUrl,
+              apiKey,
+              toolName: requestedTool,
+              toolArgs,
+              timeoutMs: 45_000,
+            });
+            if (!result.ok) {
+              const payload = { error: result.error ?? `Basecamp MCP tool ${requestedTool} failed` };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
+            const payload = {
+              tool: requestedTool,
+              arguments: toolArgs,
+              summary: summarizeBcgptDirectToolResult(requestedTool, result.result),
               continueAgentLoop: true,
               result: result.result,
             };
@@ -4406,6 +4776,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               tool.type !== "function" ||
               (tool.function.name !== "bcgpt_smart_action" &&
                 tool.function.name !== "bcgpt_list_projects" &&
+                tool.function.name !== "bcgpt_list_tools" &&
+                tool.function.name !== "bcgpt_mcp_call" &&
                 tool.function.name !== "bcgpt_basecamp_raw"),
           )
         : tools;

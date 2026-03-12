@@ -25,6 +25,28 @@ describe("workflow-ai Basecamp summarization", () => {
     expect(summary).toBe("BCGPT Test Project: 3 open Basecamp tasks.");
   });
 
+  it("summarizes Basecamp MCP tool discovery payloads", () => {
+    const summary = summarizeAgentLoopToolResult("bcgpt_list_tools", {
+      tools: [
+        { name: "list_projects" },
+        { name: "list_todolists" },
+        { name: "list_todos_for_project" },
+      ],
+    });
+
+    expect(summary).toContain("Basecamp MCP tools available (3)");
+    expect(summary).toContain("list_todolists");
+  });
+
+  it("summarizes direct Basecamp MCP calls", () => {
+    const summary = summarizeAgentLoopToolResult("bcgpt_mcp_call", {
+      tool: "list_todolists",
+      summary: "Rohit's ToDo's todo lists (26): EOD (23 open), By Next Day (14 open), ...",
+    });
+
+    expect(summary).toContain("Rohit's ToDo's todo lists (26)");
+  });
+
   it("summarizes raw Basecamp bridge payloads when present", () => {
     const summary = summarizeAgentLoopToolResult("bcgpt_basecamp_raw", {
       method: "GET",
