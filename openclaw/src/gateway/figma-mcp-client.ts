@@ -129,6 +129,27 @@ function toXmlAttr(value: unknown): string {
     .replace(/>/g, "&gt;");
 }
 
+function normalizeNameKey(value: string | null): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function toComponentStem(value: string | null): string {
+  const cleaned = String(value ?? "")
+    .replace(/[^a-zA-Z0-9]+/g, " ")
+    .trim();
+  if (!cleaned) {
+    return "Component";
+  }
+  return cleaned
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join("");
+}
+
 function getNodeBounds(node: Record<string, unknown>): {
   x: number | null;
   y: number | null;
@@ -544,6 +565,50 @@ function summarizeListNames(items: Array<Record<string, unknown>>, limit = 8): s
     .slice(0, limit) as string[];
 }
 
+function buildCodeConnectSuggestions(params: {
+  nodeName: string | null;
+  fileKey: string;
+  nodeId: string | null;
+  label: string;
+  existingMappings: StoredCodeConnectMap[];
+}): Array<Record<string, unknown>> {
+  const nodeName = params.nodeName ?? "Component";
+  const normalizedTarget = normalizeNameKey(nodeName);
+  const fuzzyMatches = params.existingMappings
+    .filter((entry) => normalizeNameKey(entry.componentName) === normalizedTarget)
+    .slice(0, 5)
+    .map((entry) => ({
+      componentName: entry.componentName,
+      source: entry.source,
+      label: entry.label,
+      nodeId: params.nodeId,
+      confidence: "high",
+      reason: "Matches an existing PMOS Code Connect mapping with the same normalized component name.",
+    }));
+  if (fuzzyMatches.length > 0) {
+    return fuzzyMatches;
+  }
+  const stem = toComponentStem(nodeName);
+  return [
+    {
+      componentName: stem,
+      source: `src/components/${stem}.tsx`,
+      label: params.label,
+      nodeId: params.nodeId,
+      confidence: "medium",
+      reason: "Heuristic suggestion based on the Figma node name because no saved Code Connect mapping matched.",
+    },
+    {
+      componentName: `${stem}View`,
+      source: `src/features/${stem}/${stem}View.tsx`,
+      label: params.label,
+      nodeId: params.nodeId,
+      confidence: "low",
+      reason: "Alternate heuristic suggestion using a feature-folder layout.",
+    },
+  ];
+}
+
 function buildDesignSystemRules(params: {
   fileKey: string;
   fileName: string | null;
@@ -738,6 +803,48 @@ const FIGMA_REST_COMPAT_TOOLS: FigmaMcpToolDefinition[] = [
         label: { type: "string" },
       },
       required: ["componentName", "source"],
+    },
+  },
+  {
+    name: "figma.get_code_connect_suggestions",
+    description:
+      "Generate PMOS-side Code Connect suggestions for a Figma node by using saved mappings first and then node-name heuristics.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        fileKey: { type: "string" },
+        nodeId: { type: "string" },
+        url: { type: "string" },
+        clientFrameworks: { type: "string" },
+        clientLanguages: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "figma.send_code_connect_mappings",
+    description:
+      "Save multiple PMOS-managed Code Connect mappings in bulk for Figma nodes and component source paths.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        fileKey: { type: "string" },
+        nodeId: { type: "string" },
+        url: { type: "string" },
+        mappings: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              nodeId: { type: "string" },
+              componentName: { type: "string" },
+              source: { type: "string" },
+              label: { type: "string" },
+            },
+            required: ["nodeId", "componentName", "source"],
+          },
+        },
+      },
+      required: ["mappings"],
     },
   },
   {
@@ -980,6 +1087,80 @@ async function callCompatTool(params: {
         transport: "rest_compat",
         saved: true,
         mapping: nextEntry,
+      };
+    }
+    case "figma.get_code_connect_suggestions": {
+      const node = target.nodeId
+        ? await fetchNode(token, target.fileKey, target.nodeId, 4)
+        : asRecord((await fetchFile(token, target.fileKey, 3)).document);
+      const nodeId = target.nodeId ?? stringOrNull(node.id);
+      const existingMappings = await readWorkspaceCodeConnectMaps(params.workspaceId);
+      const label =
+        stringOrNull(params.args.clientFrameworks) ??
+        stringOrNull(params.args.clientLanguages) ??
+        "unknown";
+      const suggestions = buildCodeConnectSuggestions({
+        nodeName: stringOrNull(node.name),
+        fileKey: target.fileKey,
+        nodeId,
+        label,
+        existingMappings,
+      });
+      return {
+        source: "pmos-figma-rest-compat",
+        transport: "rest_compat",
+        fileKey: target.fileKey,
+        nodeId,
+        suggestions,
+      };
+    }
+    case "figma.send_code_connect_mappings": {
+      const incomingMappings = asArray(params.args.mappings).filter(isJsonObject);
+      if (!incomingMappings.length) {
+        throw new Error("FIGMA_CODE_CONNECT_MAPPING_INVALID");
+      }
+      const existing = await readWorkspaceCodeConnectMaps(params.workspaceId);
+      const normalizedIncoming: StoredCodeConnectMap[] = incomingMappings
+        .map((entry) => {
+          const fileKey =
+            parseFigmaFileKey(stringOrNull(entry.fileKey)) ??
+            target.fileKey;
+          const nodeId = normalizeNodeId(entry.nodeId) ?? target.nodeId;
+          const componentName = stringOrNull(entry.componentName);
+          const source = stringOrNull(entry.source);
+          const label = stringOrNull(entry.label) ?? "unknown";
+          if (!fileKey || !nodeId || !componentName || !source) {
+            return null;
+          }
+          return {
+            fileKey,
+            nodeId,
+            componentName,
+            source,
+            label,
+            updatedAt: new Date().toISOString(),
+          } satisfies StoredCodeConnectMap;
+        })
+        .filter(Boolean) as StoredCodeConnectMap[];
+      if (!normalizedIncoming.length) {
+        throw new Error("FIGMA_CODE_CONNECT_MAPPING_INVALID");
+      }
+      const retained = existing.filter((saved) => {
+        return !normalizedIncoming.some(
+          (incoming) =>
+            incoming.fileKey === saved.fileKey &&
+            incoming.nodeId === saved.nodeId &&
+            incoming.label === saved.label,
+        );
+      });
+      const merged = [...retained, ...normalizedIncoming];
+      await writeWorkspaceCodeConnectMaps(params.workspaceId, merged);
+      return {
+        source: "pmos-figma-rest-compat",
+        transport: "rest_compat",
+        saved: true,
+        totalSaved: normalizedIncoming.length,
+        mappings: normalizedIncoming,
       };
     }
     case "figma.create_design_system_rules": {

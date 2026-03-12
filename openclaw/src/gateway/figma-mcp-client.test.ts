@@ -43,6 +43,8 @@ describe("figma mcp compat bridge", () => {
         expect.objectContaining({ name: "figma.get_metadata" }),
         expect.objectContaining({ name: "figma.get_comments" }),
         expect.objectContaining({ name: "figma.get_code_connect_map" }),
+        expect.objectContaining({ name: "figma.get_code_connect_suggestions" }),
+        expect.objectContaining({ name: "figma.send_code_connect_mappings" }),
         expect.objectContaining({ name: "figma.create_design_system_rules" }),
       ]),
     );
@@ -255,5 +257,104 @@ describe("figma mcp compat bridge", () => {
     expect(String(result.rules)).toContain("Design system implementation rules");
     expect(String(result.rules)).toContain("react / typescript");
     expect(String(result.rules)).toContain("Hero/Banner");
+  });
+
+  it("suggests code connect mappings from the node name when none are saved", async () => {
+    await writeWorkspaceConnectors(workspaceId, {
+      figma: {
+        auth: {
+          personalAccessToken: "figd_pat_test",
+          hasPersonalAccessToken: true,
+          source: "fm-session",
+        },
+      },
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        return new Response(
+          JSON.stringify({
+            nodes: {
+              "0:1": {
+                document: {
+                  id: "0:1",
+                  name: "Hero Banner",
+                  type: "FRAME",
+                },
+              },
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }),
+    );
+
+    const result = (await callWorkspaceFigmaMcpTool({
+      workspaceId,
+      toolName: "get_code_connect_suggestions",
+      args: {
+        fileKey: "3INmNiG3X3NKAZtCI3SMg6",
+        nodeId: "0:1",
+        clientFrameworks: "React",
+      },
+    })) as Record<string, unknown>;
+
+    expect(result.suggestions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          componentName: "HeroBanner",
+          source: "src/components/HeroBanner.tsx",
+          label: "React",
+        }),
+      ]),
+    );
+  });
+
+  it("bulk-saves code connect mappings", async () => {
+    await writeWorkspaceConnectors(workspaceId, {
+      figma: {
+        auth: {
+          personalAccessToken: "figd_pat_test",
+          hasPersonalAccessToken: true,
+          source: "fm-session",
+        },
+      },
+    });
+
+    const result = (await callWorkspaceFigmaMcpTool({
+      workspaceId,
+      toolName: "send_code_connect_mappings",
+      args: {
+        fileKey: "3INmNiG3X3NKAZtCI3SMg6",
+        mappings: [
+          {
+            nodeId: "0:1",
+            componentName: "HeroBanner",
+            source: "src/components/HeroBanner.tsx",
+            label: "React",
+          },
+          {
+            nodeId: "0:2",
+            componentName: "AuditFooter",
+            source: "src/components/AuditFooter.tsx",
+            label: "React",
+          },
+        ],
+      },
+    })) as Record<string, unknown>;
+
+    expect(result.saved).toBe(true);
+    expect(result.totalSaved).toBe(2);
+
+    const maps = (await callWorkspaceFigmaMcpTool({
+      workspaceId,
+      toolName: "get_code_connect_map",
+      args: {
+        fileKey: "3INmNiG3X3NKAZtCI3SMg6",
+      },
+    })) as Record<string, unknown>;
+
+    expect(maps.totalMappings).toBe(2);
   });
 });
