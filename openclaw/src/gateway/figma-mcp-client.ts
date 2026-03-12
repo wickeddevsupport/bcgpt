@@ -1077,7 +1077,8 @@ async function callCompatTool(params: {
         try {
           const file = await fetchFile(auth.personalAccessToken, target.fileKey, 1);
           const document = asRecord(file.document);
-          effectiveFileName = stringOrNull(document.name) ?? effectiveFileName;
+          effectiveFileName =
+            stringOrNull(file.name) ?? stringOrNull(document.name) ?? effectiveFileName;
         } catch {
           // Ignore file lookup failures and fall back to the URL slug or synced panel state.
         }

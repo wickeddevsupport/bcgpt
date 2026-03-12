@@ -148,9 +148,10 @@ describe("figma mcp compat bridge", () => {
         if (url.includes("/v1/files/3INmNiG3X3NKAZtCI3SMg6")) {
           return new Response(
             JSON.stringify({
+              name: "OKA Online Audit",
               document: {
                 id: "0:1",
-                name: "OKA Online Audit",
+                name: "Document",
                 type: "CANVAS",
               },
             }),
