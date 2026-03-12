@@ -686,4 +686,113 @@ describe("pmos.projects.snapshot", () => {
     expect(payload.noDueDateTodos[0]?.title).toBe("No date assigned");
     expect(payload.errors).toEqual([]);
   });
+
+  it("builds cards for projects outside the old synced slice from aggregate data", async () => {
+    readWorkspaceConnectorsMock.mockResolvedValue({
+      bcgpt: {
+        url: "https://bcgpt.example.test",
+        apiKey: "workspace-key",
+      },
+    });
+
+    const projects = Array.from({ length: 25 }, (_, index) => ({
+      id: 9000 + index,
+      name: index === 24 ? "Rohit's ToDo's" : `Project ${index + 1}`,
+      status: "active",
+      app_url: `https://3.basecamp.com/9999999/buckets/${9000 + index}/projects/${9000 + index}`,
+    }));
+
+    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/action/startbcgpt")) {
+        return jsonResponse({
+          connected: true,
+          user: { email: "rohit@wickedwebsites.us" },
+          selected_account_id: 5282924,
+        });
+      }
+
+      if (url.endsWith("/mcp")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          params?: { name?: string; arguments?: Record<string, unknown> };
+        };
+        const tool = body.params?.name;
+        if (tool === "list_projects") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "1",
+            result: { projects },
+          });
+        }
+        if (tool === "daily_report") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "2",
+            result: {
+              perProject: projects.map((project, index) => ({
+                projectId: project.id,
+                project: project.name,
+                openTodos: index === 24 ? 7 : Math.max(0, 24 - index),
+                dueToday: index === 24 ? 1 : 0,
+                overdue: 0,
+              })),
+            },
+          });
+        }
+        if (tool === "list_todos_for_project") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "3",
+            result: { groups: [] },
+          });
+        }
+        if (tool === "report_todos_overdue") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "4",
+            result: { overdue: [] },
+          });
+        }
+        if (tool === "list_todos_due") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "5",
+            result: { todos: [] },
+          });
+        }
+        if (tool === "list_assigned_to_me") {
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "6",
+            result: { todos: [] },
+          });
+        }
+      }
+
+      return jsonResponse({ error: "not found" }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const respond = vi.fn();
+    await pmosHandlers["pmos.projects.snapshot"]({
+      params: {},
+      respond,
+      client: {
+        pmosWorkspaceId: "ws-projects",
+        pmosRole: "workspace_admin",
+      } as any,
+    } as any);
+
+    const payload = respond.mock.calls[0]?.[1] as {
+      totals: { projectCount: number; syncedProjects: number };
+      projects: Array<{ name: string; openTodos: number; dueTodayTodos: number }>;
+    };
+
+    expect(payload.totals.projectCount).toBe(25);
+    expect(payload.totals.syncedProjects).toBe(25);
+    const rohitProject = payload.projects.find((project) => project.name === "Rohit's ToDo's");
+    expect(rohitProject).toBeTruthy();
+    expect(rohitProject?.openTodos).toBe(7);
+    expect(rohitProject?.dueTodayTodos).toBe(1);
+  });
 });

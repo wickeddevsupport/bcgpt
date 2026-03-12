@@ -1483,6 +1483,51 @@ function parseTodoPreviewItems(
   return items;
 }
 
+function parseDailyReportPerProject(
+  result: unknown,
+): Map<string, { openTodos: number; overdueTodos: number; dueTodayTodos: number }> {
+  const payload = isJsonObject(result) ? result : null;
+  const root = isJsonObject(payload?.result) ? payload.result : payload;
+  const perProject = Array.isArray(root?.perProject)
+    ? root.perProject
+    : Array.isArray(root?.per_project)
+      ? root.per_project
+      : Array.isArray(payload?.perProject)
+        ? payload.perProject
+        : [];
+  const rows = new Map<string, { openTodos: number; overdueTodos: number; dueTodayTodos: number }>();
+  for (const entry of perProject) {
+    if (!isJsonObject(entry)) continue;
+    const projectId = numberStringOrNull(entry.projectId) ?? numberStringOrNull(entry.project_id);
+    if (!projectId) continue;
+    const openTodos = typeof entry.openTodos === "number"
+      ? entry.openTodos
+      : typeof entry.open_todos === "number"
+        ? entry.open_todos
+        : 0;
+    const overdueTodos = typeof entry.overdue === "number"
+      ? entry.overdue
+      : typeof entry.overdueTodos === "number"
+        ? entry.overdueTodos
+        : typeof entry.overdue_todos === "number"
+          ? entry.overdue_todos
+          : 0;
+    const dueTodayTodos = typeof entry.dueToday === "number"
+      ? entry.dueToday
+      : typeof entry.dueTodayTodos === "number"
+        ? entry.dueTodayTodos
+        : typeof entry.due_today === "number"
+          ? entry.due_today
+          : 0;
+    rows.set(projectId, {
+      openTodos,
+      overdueTodos,
+      dueTodayTodos,
+    });
+  }
+  return rows;
+}
+
 function dedupeTodoItems(items: PmosProjectTodoItem[]): PmosProjectTodoItem[] {
   const deduped = new Map<string, PmosProjectTodoItem>();
   for (const item of items) {
@@ -1559,6 +1604,27 @@ function isAbortLikeError(error: string | null | undefined): boolean {
   if (!error) return false;
   const lower = error.toLowerCase();
   return lower.includes("aborted") || lower.includes("aborterror") || lower.includes("timed out");
+}
+
+function rankProjectDetailCandidates(
+  projects: Array<{ id: string; name: string; status: string; appUrl: string | null }>,
+  aggregates: Map<string, { openTodos: number; overdueTodos: number; dueTodayTodos: number }>,
+  assignedByProject: Map<string, number>,
+  limit: number,
+): Array<{ id: string; name: string; status: string; appUrl: string | null }> {
+  return [...projects]
+    .sort((a, b) => {
+      const aAgg = aggregates.get(a.id) ?? { openTodos: 0, overdueTodos: 0, dueTodayTodos: 0 };
+      const bAgg = aggregates.get(b.id) ?? { openTodos: 0, overdueTodos: 0, dueTodayTodos: 0 };
+      const aAssigned = assignedByProject.get(a.id) ?? 0;
+      const bAssigned = assignedByProject.get(b.id) ?? 0;
+      if (bAssigned !== aAssigned) return bAssigned - aAssigned;
+      if (bAgg.overdueTodos !== aAgg.overdueTodos) return bAgg.overdueTodos - aAgg.overdueTodos;
+      if (bAgg.dueTodayTodos !== aAgg.dueTodayTodos) return bAgg.dueTodayTodos - aAgg.dueTodayTodos;
+      if (bAgg.openTodos !== aAgg.openTodos) return bAgg.openTodos - aAgg.openTodos;
+      return a.name.localeCompare(b.name);
+    })
+    .slice(0, limit);
 }
 
 function projectHealthFromCounts(counts: {
@@ -5098,25 +5164,6 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         projectNameById.set(project.id, project.name);
       }
 
-      const focusProjects = projects.slice(0, 8);
-      const detailsByProjectId = new Map<string, unknown>();
-      const detailsPromise = Promise.all(
-        focusProjects.map(async (project) => {
-          const detail = await callBcgptTool({
-            bcgptUrl,
-            apiKey: bcgptApiKey,
-            toolName: "list_todos_for_project",
-            toolArgs: { project: project.id, compact: true, preview_limit: 20 },
-            timeoutMs: 12_000,
-          });
-          if (!detail.ok) {
-            errors.push(`Failed to load todos for ${project.name}: ${detail.error ?? "unknown error"}`);
-            return;
-          }
-          detailsByProjectId.set(project.id, detail.result);
-        }),
-      );
-
       const todayIso = new Date().toISOString().slice(0, 10);
       const reportsPromise = Promise.all([
         callBcgptTool({
@@ -5140,9 +5187,16 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           toolArgs: {},
           timeoutMs: 20_000,
         }),
+        callBcgptTool({
+          bcgptUrl,
+          apiKey: bcgptApiKey,
+          toolName: "daily_report",
+          toolArgs: { date: todayIso },
+          timeoutMs: 20_000,
+        }),
       ]);
 
-      const [, [overdueRpc, dueTodayRpc, assignedRpc]] = await Promise.all([detailsPromise, reportsPromise]);
+      const [overdueRpc, dueTodayRpc, assignedRpc, dailyReportRpc] = await reportsPromise;
 
       if (!overdueRpc.ok) {
         errors.push(`Failed to load overdue todos: ${overdueRpc.error ?? "unknown error"}`);
@@ -5159,9 +5213,35 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         (todo) => todo.dueOn === todayIso,
       );
       const assignedTodos = parseTodoItems(assignedRpc.result, "todos", projectNameById);
+      const aggregateByProjectId = dailyReportRpc.ok
+        ? parseDailyReportPerProject(dailyReportRpc.result)
+        : new Map<string, { openTodos: number; overdueTodos: number; dueTodayTodos: number }>();
+      const detailProjects = rankProjectDetailCandidates(
+        projects,
+        aggregateByProjectId,
+        countTodosByProject(assignedTodos),
+        16,
+      );
+      const detailsByProjectId = new Map<string, unknown>();
+      await Promise.all(
+        detailProjects.map(async (project) => {
+          const detail = await callBcgptTool({
+            bcgptUrl,
+            apiKey: bcgptApiKey,
+            toolName: "list_todos_for_project",
+            toolArgs: { project: project.id, compact: true, preview_limit: 20 },
+            timeoutMs: 12_000,
+          });
+          if (!detail.ok) {
+            errors.push(`Failed to load todos for ${project.name}: ${detail.error ?? "unknown error"}`);
+            return;
+          }
+          detailsByProjectId.set(project.id, detail.result);
+        }),
+      );
 
       const previewTodos = dedupeTodoItems(
-        focusProjects.flatMap((project) => parseTodoPreviewItems(detailsByProjectId.get(project.id), project)),
+        detailProjects.flatMap((project) => parseTodoPreviewItems(detailsByProjectId.get(project.id), project)),
       );
       const classifiedTodos = dedupeTodoItems([
         ...previewTodos,
@@ -5197,10 +5277,11 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const futureByProject = countTodosByProject(futureTodos);
       const noDueDateByProject = countTodosByProject(noDueDateTodos);
 
-      const cards: PmosProjectCard[] = focusProjects.map((project) => {
+      const cards: PmosProjectCard[] = projects.map((project) => {
         const detail = detailsByProjectId.get(project.id);
         const groups = isJsonObject(detail) && Array.isArray(detail.groups) ? detail.groups : [];
-        let openTodos = 0;
+        const aggregate = aggregateByProjectId.get(project.id);
+        let openTodos = aggregate?.openTodos ?? 0;
         let todoLists = 0;
         const dueDates: string[] = [];
         for (const groupRaw of groups) {
@@ -5209,7 +5290,9 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           const todosCount = typeof groupRaw.todos_count === "number" && Number.isFinite(groupRaw.todos_count)
             ? groupRaw.todos_count
             : 0;
-          openTodos += todosCount;
+          if (!aggregate) {
+            openTodos += todosCount;
+          }
           const preview = Array.isArray(groupRaw.todos_preview) ? groupRaw.todos_preview : [];
           for (const todoRaw of preview) {
             if (!isJsonObject(todoRaw)) continue;
@@ -5221,8 +5304,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date))
           .sort((a, b) => a.localeCompare(b))[0] ?? null;
         const assignedCount = assignedByProject.get(project.id) ?? 0;
-        const overdueCount = overdueByProject.get(project.id) ?? 0;
-        const dueTodayCount = dueTodayByProject.get(project.id) ?? 0;
+        const overdueCount = overdueByProject.get(project.id) ?? aggregate?.overdueTodos ?? 0;
+        const dueTodayCount = dueTodayByProject.get(project.id) ?? aggregate?.dueTodayTodos ?? 0;
         const futureCount = futureByProject.get(project.id) ?? 0;
         const noDueDateCount = noDueDateByProject.get(project.id) ?? 0;
         return {
@@ -5266,6 +5349,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const connected =
         identity.connected ||
         listProjectsResult.ok ||
+        dailyReportRpc.ok ||
         assignedRpc.ok ||
         overdueRpc.ok ||
         dueTodayRpc.ok ||
