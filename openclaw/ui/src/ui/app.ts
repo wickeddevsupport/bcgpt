@@ -148,6 +148,48 @@ import {
   type PmosProjectSectionResult,
   type PmosProjectsSnapshot,
 } from "./controllers/pmos-projects.ts";
+
+function buildProjectScreenContext(project: PmosProjectCard, tab: PmosProjectDetailTab, data: unknown): string {
+  const base = `Project: "${project.name}" | Health: ${project.health} | ${project.openTodos} open todos (${project.overdueTodos} overdue, ${project.dueTodayTodos} due today).`;
+  if (tab === "overview") return `${base} Tab: Overview.`;
+  if (!data || !Array.isArray(data)) return `${base} Tab: ${tab} (loading).`;
+  if (tab === "todos") {
+    type Group = { name: string; todos: Array<{ status: string | null; dueOn: string | null; assignee: string | null }> };
+    const groups = data as Group[];
+    const today = new Date().toISOString().slice(0, 10);
+    const lines = groups.map((g) => {
+      const open = g.todos.filter((t) => t.status !== "completed").length;
+      const overdue = g.todos.filter((t) => t.status !== "completed" && t.dueOn && t.dueOn < today).length;
+      return `${g.name}: ${open} open${overdue > 0 ? ` (${overdue} overdue)` : ""}`;
+    });
+    return `${base} Tab: Todos (${groups.length} lists). ${lines.join("; ")}.`;
+  }
+  if (tab === "messages") {
+    type Msg = { title: string; author: string | null; createdAt: string | null };
+    const msgs = data as Msg[];
+    const preview = msgs.slice(0, 3).map((m) => `"${m.title}"${m.author ? ` by ${m.author}` : ""}`).join("; ");
+    return `${base} Tab: Messages (${msgs.length} total). Recent: ${preview}.`;
+  }
+  if (tab === "schedule") {
+    type Entry = { title: string; startsAt: string | null };
+    const entries = data as Entry[];
+    const upcoming = entries.filter((e) => !e.startsAt || e.startsAt >= new Date().toISOString().slice(0, 10));
+    return `${base} Tab: Schedule (${entries.length} entries, ${upcoming.length} upcoming).`;
+  }
+  if (tab === "card_tables") {
+    type Table = { name: string; columns: Array<{ name: string; cardsCount: number }> };
+    const tables = data as Table[];
+    const lines = tables.map((t) => `${t.name}: ${t.columns.map((c) => `${c.name}(${c.cardsCount})`).join(", ")}`);
+    return `${base} Tab: Card tables. ${lines.join(" | ")}.`;
+  }
+  if (tab === "people") {
+    type Person = { name: string; role: string | null };
+    const people = data as Person[];
+    const names = people.slice(0, 5).map((p) => p.name).join(", ");
+    return `${base} Tab: People (${people.length} members). ${names}${people.length > 5 ? ", ..." : ""}.`;
+  }
+  return `${base} Tab: ${tab}.`;
+}
 import {
   applyWorkflowOperationDraft,
   createWorkflowConnection,
@@ -1898,21 +1940,19 @@ export class OpenClawApp extends LitElement {
     const project = this.pmosSelectedProject;
     if (!project) { this.pmosScreenContext = null; return; }
     if (tab === "overview") {
-      this.pmosScreenContext = `Viewing project: "${project.name}" (${project.health} -- ${project.openTodos} open todos, ${project.overdueTodos} overdue). Overview tab active.`;
+      this.pmosScreenContext = buildProjectScreenContext(project, "overview", null);
     } else {
       const key = `${project.id}:${tab}`;
       const sectionData = this.pmosProjectSectionData[key];
-      if (sectionData && !sectionData.loading && sectionData.data) {
-        this.pmosScreenContext = `Viewing project: "${project.name}", ${tab} tab (data loaded).`;
-      } else {
-        this.pmosScreenContext = `Viewing project: "${project.name}", ${tab} tab (not yet fetched).`;
-      }
+      this.pmosScreenContext = buildProjectScreenContext(project, tab, sectionData?.data ?? null);
     }
   }
 
   async handleLoadProjectSection(projectName: string, section: PmosProjectDetailTab) {
     if (!this.client || section === "overview") return;
     const key = `${this.pmosSelectedProject?.id ?? projectName}:${section}`;
+    // Don't re-fetch if already loading
+    if (this.pmosProjectSectionData[key]?.loading) return;
     this.pmosProjectSectionData = {
       ...this.pmosProjectSectionData,
       [key]: { loading: true, error: null, data: null },
@@ -1923,9 +1963,9 @@ export class OpenClawApp extends LitElement {
         ...this.pmosProjectSectionData,
         [key]: { loading: false, error: null, data },
       };
-      // Update screen context if this is still the active tab
+      // Update screen context with rich data summary if still on this tab
       if (this.pmosSelectedProject && this.pmosProjectDetailTab === section) {
-        this.pmosScreenContext = `Viewing project: "${projectName}", ${section} tab (data loaded).`;
+        this.pmosScreenContext = buildProjectScreenContext(this.pmosSelectedProject, section, data);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -447,211 +447,184 @@ function renderOverviewTab(project: PmosProjectCard) {
   `;
 }
 
+type NormalizedTodo = { id: string | null; title: string; status: string | null; dueOn: string | null; appUrl: string | null; assignee: string | null; completedAt: string | null; creator: string | null };
+type NormalizedTodoGroup = { name: string; todosCount: number; todos: NormalizedTodo[] };
+
 function renderTodosSection(data: unknown) {
-  if (!data || typeof data !== "object") return html`<div class="muted">No todo data.</div>`;
-  // data is likely string or structured object from bcgpt tool
-  if (typeof data === "string") {
-    return html`<pre class="project-section-pre">${data}</pre>`;
-  }
-  const raw = data as Record<string, unknown>;
-  // Try to render as todolists grouped format
-  const todolists = Array.isArray(raw.todolists)
-    ? (raw.todolists as Array<{ name?: string; todos?: Array<{ title?: string; dueOn?: string; appUrl?: string; status?: string }> }>)
-    : null;
-  if (todolists) {
-    return html`
-      <div class="project-section-list">
-        ${todolists.map(
-          (list) => html`
-            <div class="project-section-group">
-              <div class="project-section-group__header">${list.name ?? "Untitled list"}</div>
-              ${(list.todos ?? []).map(
-                (todo) => html`
-                  <div class="project-section-item">
-                    <div class="project-section-item__title">${todo.title}</div>
-                    <div class="project-section-item__meta">
-                      <span class="muted mono">${todo.dueOn ?? "no due date"}</span>
-                      <span class="chip chip--tiny">${todo.status ?? ""}</span>
-                      ${todo.appUrl
-                        ? html`<a class="btn btn--xs" href=${todo.appUrl} target="_blank" rel="noreferrer">Open</a>`
-                        : nothing}
-                    </div>
-                  </div>
-                `,
-              )}
-              ${(list.todos ?? []).length === 0 ? html`<div class="muted" style="font-size:12px; padding:4px 0;">No todos in this list</div>` : nothing}
+  if (!Array.isArray(data) || data.length === 0) return html`<div class="muted">No todos found.</div>`;
+  const groups = data as NormalizedTodoGroup[];
+  const totalOpen = groups.reduce((sum, g) => sum + g.todos.filter((t) => t.status !== "completed").length, 0);
+  return html`
+    <div class="project-section-list">
+      <div class="project-section-summary muted" style="font-size:12px; margin-bottom:8px;">${totalOpen} open across ${groups.length} list${groups.length !== 1 ? "s" : ""}</div>
+      ${groups.map((group) => {
+        const open = group.todos.filter((t) => t.status !== "completed");
+        const done = group.todos.filter((t) => t.status === "completed");
+        return html`
+          <div class="project-section-group">
+            <div class="project-section-group__header">
+              ${group.name}
+              <span class="chip chip--tiny" style="margin-left:6px;">${open.length} open${done.length > 0 ? ` / ${done.length} done` : ""}</span>
             </div>
-          `,
-        )}
-        ${todolists.length === 0 ? html`<div class="muted">No todo lists found.</div>` : nothing}
-      </div>
-    `;
-  }
-  // Fallback: show raw as formatted JSON
-  return html`<pre class="project-section-pre">${JSON.stringify(data, null, 2)}</pre>`;
+            ${open.map((todo) => html`
+              <div class="project-section-item">
+                <div class="project-section-item__title">${todo.title}</div>
+                <div class="project-section-item__meta">
+                  ${todo.assignee ? html`<span class="chip chip--tiny">${todo.assignee}</span>` : nothing}
+                  ${todo.dueOn ? html`<span class="muted mono" style="font-size:11px;">${todo.dueOn}</span>` : nothing}
+                  ${todo.appUrl ? html`<a class="btn btn--xs" href=${todo.appUrl} target="_blank" rel="noreferrer">Open</a>` : nothing}
+                </div>
+              </div>
+            `)}
+            ${done.length > 0 ? html`
+              <details style="margin-top:4px;">
+                <summary class="muted" style="font-size:12px; cursor:pointer;">${done.length} completed</summary>
+                ${done.map((todo) => html`
+                  <div class="project-section-item" style="opacity:0.55; text-decoration:line-through;">
+                    <div class="project-section-item__title">${todo.title}</div>
+                  </div>
+                `)}
+              </details>
+            ` : nothing}
+            ${open.length === 0 && done.length === 0 ? html`<div class="muted" style="font-size:12px; padding:4px 0;">No todos in this list</div>` : nothing}
+          </div>
+        `;
+      })}
+    </div>
+  `;
 }
+
+type NormalizedMessage = { id: string | null; title: string; author: string | null; createdAt: string | null; excerpt: string | null; appUrl: string | null };
 
 function renderMessagesSection(data: unknown) {
-  if (!data) return html`<div class="muted">No messages.</div>`;
-  if (typeof data === "string") return html`<pre class="project-section-pre">${data}</pre>`;
-  const messages = Array.isArray(data) ? (data as Array<{ title?: string; author?: string; createdAt?: string; appUrl?: string }>) : null;
-  if (messages) {
-    return html`
-      <div class="project-section-list">
-        ${messages.map(
-          (msg) => html`
-            <div class="project-section-item">
-              <div class="project-section-item__title">${msg.title ?? "(no title)"}</div>
-              <div class="project-section-item__meta">
-                <span class="muted">${msg.author ?? ""}</span>
-                <span class="muted mono">${msg.createdAt ?? ""}</span>
-                ${msg.appUrl
-                  ? html`<a class="btn btn--xs" href=${msg.appUrl} target="_blank" rel="noreferrer">Open</a>`
-                  : nothing}
-              </div>
-            </div>
-          `,
-        )}
-        ${messages.length === 0 ? html`<div class="muted">No messages found.</div>` : nothing}
-      </div>
-    `;
-  }
-  return html`<pre class="project-section-pre">${JSON.stringify(data, null, 2)}</pre>`;
+  if (!Array.isArray(data) || data.length === 0) return html`<div class="muted">No messages found.</div>`;
+  const messages = data as NormalizedMessage[];
+  return html`
+    <div class="project-section-list">
+      <div class="project-section-summary muted" style="font-size:12px; margin-bottom:8px;">${messages.length} message${messages.length !== 1 ? "s" : ""}</div>
+      ${messages.map((msg) => html`
+        <div class="project-section-item">
+          <div class="project-section-item__title">${msg.title}</div>
+          <div class="project-section-item__meta">
+            ${msg.author ? html`<span class="chip chip--tiny">${msg.author}</span>` : nothing}
+            ${msg.createdAt ? html`<span class="muted mono" style="font-size:11px;">${msg.createdAt.slice(0, 10)}</span>` : nothing}
+            ${msg.appUrl ? html`<a class="btn btn--xs" href=${msg.appUrl} target="_blank" rel="noreferrer">Open</a>` : nothing}
+          </div>
+          ${msg.excerpt ? html`<div class="muted" style="font-size:12px; margin-top:3px; line-height:1.4;">${msg.excerpt}</div>` : nothing}
+        </div>
+      `)}
+    </div>
+  `;
 }
+
+type NormalizedEntry = { id: string | null; title: string; startsAt: string | null; endsAt: string | null; allDay: boolean; summary: string | null; appUrl: string | null };
 
 function renderScheduleSection(data: unknown) {
-  if (!data) return html`<div class="muted">No schedule entries.</div>`;
-  if (typeof data === "string") return html`<pre class="project-section-pre">${data}</pre>`;
-  const entries = Array.isArray(data) ? (data as Array<{ title?: string; startsAt?: string; endsAt?: string; appUrl?: string }>) : null;
-  if (entries) {
-    return html`
-      <div class="project-section-list">
-        ${entries.map(
-          (entry) => html`
-            <div class="project-section-item">
-              <div class="project-section-item__title">${entry.title ?? "(no title)"}</div>
-              <div class="project-section-item__meta">
-                <span class="muted mono">${entry.startsAt ?? ""} - ${entry.endsAt ?? ""}</span>
-                ${entry.appUrl
-                  ? html`<a class="btn btn--xs" href=${entry.appUrl} target="_blank" rel="noreferrer">Open</a>`
-                  : nothing}
-              </div>
-            </div>
-          `,
-        )}
-        ${entries.length === 0 ? html`<div class="muted">No schedule entries found.</div>` : nothing}
-      </div>
-    `;
-  }
-  return html`<pre class="project-section-pre">${JSON.stringify(data, null, 2)}</pre>`;
+  if (!Array.isArray(data) || data.length === 0) return html`<div class="muted">No schedule entries found.</div>`;
+  const entries = data as NormalizedEntry[];
+  return html`
+    <div class="project-section-list">
+      <div class="project-section-summary muted" style="font-size:12px; margin-bottom:8px;">${entries.length} event${entries.length !== 1 ? "s" : ""}</div>
+      ${entries.map((entry) => html`
+        <div class="project-section-item">
+          <div class="project-section-item__title">${entry.title}</div>
+          <div class="project-section-item__meta">
+            ${entry.allDay
+              ? html`<span class="chip chip--tiny">All day</span>`
+              : nothing}
+            ${entry.startsAt ? html`<span class="muted mono" style="font-size:11px;">${entry.startsAt.slice(0, 16).replace("T", " ")}</span>` : nothing}
+            ${entry.endsAt && !entry.allDay ? html`<span class="muted" style="font-size:11px;">- ${entry.endsAt.slice(0, 16).replace("T", " ")}</span>` : nothing}
+            ${entry.appUrl ? html`<a class="btn btn--xs" href=${entry.appUrl} target="_blank" rel="noreferrer">Open</a>` : nothing}
+          </div>
+          ${entry.summary ? html`<div class="muted" style="font-size:12px; margin-top:3px;">${entry.summary}</div>` : nothing}
+        </div>
+      `)}
+    </div>
+  `;
 }
+
+type NormalizedCard = { id: string | null; title: string; dueOn: string | null; assignee: string | null; status: string | null; appUrl: string | null };
+type NormalizedColumn = { id: string | null; name: string; cardsCount: number; cards: NormalizedCard[] };
+type NormalizedTable = { id: string | null; name: string; appUrl: string | null; columns: NormalizedColumn[] };
 
 function renderCardTablesSection(data: unknown) {
-  if (!data) return html`<div class="muted">No card tables.</div>`;
-  if (typeof data === "string") return html`<pre class="project-section-pre">${data}</pre>`;
-  const tables = Array.isArray(data)
-    ? (data as Array<{ name?: string; columns?: Array<{ name?: string; cardsCount?: number }> }>)
-    : null;
-  if (tables) {
-    return html`
-      <div class="project-section-list">
-        ${tables.map(
-          (table) => html`
-            <div class="project-section-group">
-              <div class="project-section-group__header">${table.name ?? "Untitled table"}</div>
-              ${(table.columns ?? []).map(
-                (col) => html`
-                  <div class="project-section-item">
-                    <div class="project-section-item__title">${col.name ?? "Untitled column"}</div>
-                    <div class="project-section-item__meta">
-                      <span class="chip">${col.cardsCount ?? 0} cards</span>
+  if (!Array.isArray(data) || data.length === 0) return html`<div class="muted">No card tables found.</div>`;
+  const tables = data as NormalizedTable[];
+  return html`
+    <div class="project-section-list">
+      ${tables.map((table) => html`
+        <div class="project-section-group">
+          <div class="project-section-group__header">
+            ${table.name}
+            ${table.appUrl ? html`<a class="btn btn--xs" href=${table.appUrl} target="_blank" rel="noreferrer" style="margin-left:6px;">Open board</a>` : nothing}
+          </div>
+          ${(table.columns ?? []).map((col) => html`
+            <div class="project-section-item" style="padding-left:8px;">
+              <div class="project-section-item__title" style="font-size:13px; font-weight:600;">${col.name} <span class="chip chip--tiny">${col.cardsCount}</span></div>
+              ${col.cards.length > 0 ? html`
+                <div style="margin-top:4px;">
+                  ${col.cards.map((card) => html`
+                    <div class="project-section-item" style="padding-left:8px; border-left:2px solid var(--color-border, #333);">
+                      <div class="project-section-item__title" style="font-size:12px;">${card.title}</div>
+                      <div class="project-section-item__meta">
+                        ${card.assignee ? html`<span class="chip chip--tiny">${card.assignee}</span>` : nothing}
+                        ${card.dueOn ? html`<span class="muted mono" style="font-size:11px;">${card.dueOn}</span>` : nothing}
+                        ${card.appUrl ? html`<a class="btn btn--xs" href=${card.appUrl} target="_blank" rel="noreferrer">Open</a>` : nothing}
+                      </div>
                     </div>
-                  </div>
-                `,
-              )}
-              ${(table.columns ?? []).length === 0 ? html`<div class="muted" style="font-size:12px; padding:4px 0;">No columns</div>` : nothing}
+                  `)}
+                </div>
+              ` : nothing}
             </div>
-          `,
-        )}
-        ${tables.length === 0 ? html`<div class="muted">No card tables found.</div>` : nothing}
-      </div>
-    `;
-  }
-  return html`<pre class="project-section-pre">${JSON.stringify(data, null, 2)}</pre>`;
+          `)}
+          ${(table.columns ?? []).length === 0 ? html`<div class="muted" style="font-size:12px; padding:4px 0;">No columns</div>` : nothing}
+        </div>
+      `)}
+    </div>
+  `;
 }
 
-function parsePeopleData(data: unknown): Array<{ name: string; email: string; role: string }> | null {
-  // Already a structured array
-  if (Array.isArray(data)) {
-    return (data as Array<{ name?: string; email?: string; role?: string }>).map((p) => ({
-      name: p.name ?? "(unknown)",
-      email: p.email ?? "",
-      role: p.role ?? "",
-    }));
-  }
-  // Try to parse JSON string from smart_action
-  if (typeof data === "string") {
-    const trimmed = data.trim();
-    const jsonMatch = trimmed.match(/\[[\s\S]*\]/);
-    if (jsonMatch) {
-      try {
-        const parsed = JSON.parse(jsonMatch[0]);
-        if (Array.isArray(parsed)) return parsePeopleData(parsed);
-      } catch {
-        // fall through
-      }
-    }
-    // Parse line-by-line: "1. Name - email" or "- Name (role)"
-    const lines = trimmed.split("\n").filter((l) => l.trim().length > 0);
-    const results: Array<{ name: string; email: string; role: string }> = [];
-    for (const line of lines) {
-      const clean = line.replace(/^[-*\d.]+\s*/, "").trim();
-      if (!clean) continue;
-      const emailMatch = clean.match(/([^\s@]+@[^\s,]+)/);
-      const email = emailMatch ? emailMatch[1] : "";
-      const roleMatch = clean.match(/\(([^)]+)\)/);
-      const role = roleMatch ? roleMatch[1] : "";
-      const name = clean
-        .replace(emailMatch?.[0] ?? "", "")
-        .replace(roleMatch?.[0] ?? "", "")
-        .replace(/[-–—,]+/g, " ")
-        .trim();
-      if (name) results.push({ name, email, role });
-    }
-    return results.length > 0 ? results : null;
-  }
-  return null;
-}
+type NormalizedPerson = { id: string | null; name: string; email: string | null; role: string | null; avatarUrl: string | null };
 
 function renderPeopleSection(data: unknown) {
-  if (!data) return html`<div class="muted">No people data.</div>`;
-  const people = parsePeopleData(data);
-  if (people && people.length > 0) {
-    return html`
-      <div class="project-section-list">
-        ${people.map(
-          (person) => html`
-            <div class="project-section-item">
-              <div class="project-section-item__title">${person.name}</div>
-              <div class="project-section-item__meta">
-                ${person.email ? html`<span class="muted">${person.email}</span>` : nothing}
-                ${person.role ? html`<span class="chip">${person.role}</span>` : nothing}
-              </div>
+  if (!Array.isArray(data) || data.length === 0) return html`<div class="muted">No people found.</div>`;
+  const people = data as NormalizedPerson[];
+  return html`
+    <div class="project-section-list">
+      <div class="project-section-summary muted" style="font-size:12px; margin-bottom:8px;">${people.length} team member${people.length !== 1 ? "s" : ""}</div>
+      ${people.map((person) => html`
+        <div class="project-section-item" style="display:flex; align-items:center; gap:10px;">
+          <div class="person-avatar" style="width:32px; height:32px; border-radius:50%; background:var(--color-accent, #5b6ad0); display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:700; color:#fff; flex-shrink:0;">
+            ${person.avatarUrl
+              ? html`<img src=${person.avatarUrl} style="width:32px; height:32px; border-radius:50%; object-fit:cover;" />`
+              : person.name.charAt(0).toUpperCase()}
+          </div>
+          <div style="flex:1; min-width:0;">
+            <div class="project-section-item__title">${person.name}</div>
+            <div class="project-section-item__meta">
+              ${person.role ? html`<span class="chip chip--tiny">${person.role}</span>` : nothing}
+              ${person.email ? html`<span class="muted" style="font-size:11px;">${person.email}</span>` : nothing}
             </div>
-          `,
-        )}
-      </div>
-    `;
+          </div>
+        </div>
+      `)}
+    </div>
+  `;
+}
+
+function askAiPromptForSection(section: PmosProjectDetailTab, projectName: string, data: unknown): string {
+  const base = `Project: "${projectName}"`;
+  if (section === "todos" && Array.isArray(data) && data.length > 0) {
+    const groups = data as NormalizedTodoGroup[];
+    const overdue = groups.flatMap((g) => g.todos).filter((t) => t.dueOn && t.dueOn < new Date().toISOString().slice(0, 10) && t.status !== "completed");
+    if (overdue.length > 0) return `${base} -- which todos are most overdue and what should be prioritized?`;
+    return `${base} -- summarize the open todos and flag anything that needs attention.`;
   }
-  // Fallback: display as readable text block
-  if (typeof data === "string") {
-    return html`
-      <div class="project-section-content" style="white-space: pre-wrap; font-size: 13px; line-height: 1.6;">
-        ${data}
-      </div>
-    `;
-  }
-  return html`<pre class="project-section-pre">${JSON.stringify(data, null, 2)}</pre>`;
+  if (section === "messages") return `${base} -- what are the key decisions or action items from recent messages?`;
+  if (section === "schedule") return `${base} -- what upcoming events do I need to prepare for?`;
+  if (section === "card_tables") return `${base} -- what's the current state of the kanban board and what's blocking progress?`;
+  if (section === "people") return `${base} -- who are the key people on this project and what are their roles?`;
+  return `Tell me about the ${section} for project "${projectName}".`;
 }
 
 function renderSectionTab(props: CommandCenterProps, section: PmosProjectDetailTab) {
@@ -659,21 +632,14 @@ function renderSectionTab(props: CommandCenterProps, section: PmosProjectDetailT
   const key = `${project.id}:${section}`;
   const sectionData = props.projectSectionData[key];
 
+  // Auto-load: trigger load on first render if no data yet
   if (!sectionData) {
+    // Fire load on next microtask so we don't mutate state during render
+    Promise.resolve().then(() => props.onLoadProjectSection(project.name, section));
     return html`
-      <div class="project-section-empty">
-        <div class="muted" style="margin-bottom: 12px;">Not yet loaded.</div>
-        <div class="row" style="gap: 8px;">
-          <button class="btn btn--sm btn--primary" @click=${() => props.onLoadProjectSection(project.name, section)}>
-            Load ${DETAIL_TABS.find((t) => t.key === section)?.label ?? section}
-          </button>
-          <button
-            class="btn btn--sm"
-            @click=${() => props.onPrefillChat(`Tell me about the ${section} for project "${project.name}".`)}
-          >
-            Ask AI
-          </button>
-        </div>
+      <div class="project-section-content">
+        <div class="progress-bar"><div class="progress-bar__fill progress-bar__fill--indeterminate"></div></div>
+        <div class="muted" style="margin-top: 8px; font-size: 13px;">Loading ${DETAIL_TABS.find((t) => t.key === section)?.label ?? section}...</div>
       </div>
     `;
   }
@@ -708,16 +674,13 @@ function renderSectionTab(props: CommandCenterProps, section: PmosProjectDetailT
     : section === "card_tables" ? renderCardTablesSection(sectionData.data)
     : renderPeopleSection(sectionData.data);
 
+  const aiPrompt = askAiPromptForSection(section, project.name, sectionData.data);
+
   return html`
     <div class="project-section-content">
       <div class="row" style="gap: 8px; margin-bottom: 12px;">
         <button class="btn btn--sm" @click=${() => props.onLoadProjectSection(project.name, section)}>Refresh</button>
-        <button
-          class="btn btn--sm"
-          @click=${() => props.onPrefillChat(`Tell me about the ${section} for project "${project.name}".`)}
-        >
-          Ask AI
-        </button>
+        <button class="btn btn--sm btn--primary" @click=${() => props.onPrefillChat(aiPrompt)}>Ask AI</button>
       </div>
       ${content}
     </div>

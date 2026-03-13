@@ -5921,63 +5921,113 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         return;
       }
 
-      let toolName: string;
-      let toolArgs: Record<string, unknown>;
+      // Helper: get root payload (handles { result: {...} } wrapper or flat)
+      const getRoot = (raw: unknown): Record<string, unknown> => {
+        const payload = isJsonObject(raw) ? raw : {};
+        return isJsonObject(payload.result) ? payload.result : payload;
+      };
 
       switch (section) {
-        case "todos":
-          toolName = "list_todos_for_project";
-          toolArgs = { project: projectName, compact: false };
-          break;
-        case "messages":
-          toolName = "list_messages";
-          toolArgs = { project: projectName };
-          break;
-        case "schedule":
-          toolName = "list_schedule_entries";
-          toolArgs = { project: projectName };
-          break;
-        case "card_tables":
-          toolName = "list_card_tables";
-          toolArgs = { project: projectName, include_columns: true };
-          break;
+        case "todos": {
+          const res = await callBcgptTool({ bcgptUrl, apiKey, toolName: "list_todos_for_project", toolArgs: { project: projectName, compact: false }, timeoutMs: 30_000 });
+          if (!res.ok) { respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, res.error ?? "Failed to fetch todos")); return; }
+          const root = getRoot(res.result);
+          const groups = Array.isArray(root.groups) ? root.groups : [];
+          const data = groups.filter(isJsonObject).map((g) => ({
+            name: stringOrNull(g.todolist) ?? stringOrNull(g.name) ?? "Untitled",
+            todosCount: typeof g.todos_count === "number" ? g.todos_count : 0,
+            todos: (Array.isArray(g.todos) ? g.todos : []).filter(isJsonObject).map((t) => ({
+              id: numberStringOrNull(t.id),
+              title: stringOrNull(t.title) ?? "",
+              status: stringOrNull(t.status) ?? "active",
+              dueOn: stringOrNull(t.due_on) ?? stringOrNull(t.dueOn),
+              appUrl: stringOrNull(t.app_url) ?? stringOrNull(t.appUrl),
+              assignee: isJsonObject(t.assignee) ? stringOrNull(t.assignee.name) : stringOrNull(t.assignee),
+              completedAt: stringOrNull(t.completed_at),
+              creator: isJsonObject(t.creator) ? stringOrNull(t.creator.name) : null,
+            })),
+          }));
+          respond(true, { ok: true, section, projectName, data });
+          return;
+        }
+        case "messages": {
+          const res = await callBcgptTool({ bcgptUrl, apiKey, toolName: "list_messages", toolArgs: { project: projectName }, timeoutMs: 30_000 });
+          if (!res.ok) { respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, res.error ?? "Failed to fetch messages")); return; }
+          const root = getRoot(res.result);
+          const msgs = Array.isArray(root.messages) ? root.messages : Array.isArray(root) ? root as unknown[] : [];
+          const data = (msgs as unknown[]).filter(isJsonObject).map((m) => ({
+            id: numberStringOrNull(m.id),
+            title: stringOrNull(m.title) ?? stringOrNull(m.subject) ?? "(no title)",
+            author: isJsonObject(m.creator) ? stringOrNull(m.creator.name) : stringOrNull(m.author),
+            createdAt: stringOrNull(m.created_at) ?? stringOrNull(m.createdAt),
+            excerpt: stringOrNull(m.excerpt) ?? stringOrNull(m.content_excerpt),
+            appUrl: stringOrNull(m.app_url) ?? stringOrNull(m.appUrl),
+          }));
+          respond(true, { ok: true, section, projectName, data });
+          return;
+        }
+        case "schedule": {
+          const res = await callBcgptTool({ bcgptUrl, apiKey, toolName: "list_schedule_entries", toolArgs: { project: projectName }, timeoutMs: 30_000 });
+          if (!res.ok) { respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, res.error ?? "Failed to fetch schedule")); return; }
+          const root = getRoot(res.result);
+          const entries = Array.isArray(root.entries) ? root.entries : Array.isArray(root) ? root as unknown[] : [];
+          const data = (entries as unknown[]).filter(isJsonObject).map((e) => ({
+            id: numberStringOrNull(e.id),
+            title: stringOrNull(e.title) ?? "(no title)",
+            startsAt: stringOrNull(e.starts_at) ?? stringOrNull(e.startsAt),
+            endsAt: stringOrNull(e.ends_at) ?? stringOrNull(e.endsAt),
+            allDay: e.all_day === true || e.allDay === true,
+            summary: stringOrNull(e.summary),
+            appUrl: stringOrNull(e.app_url) ?? stringOrNull(e.appUrl),
+          }));
+          respond(true, { ok: true, section, projectName, data });
+          return;
+        }
+        case "card_tables": {
+          const res = await callBcgptTool({ bcgptUrl, apiKey, toolName: "list_card_tables", toolArgs: { project: projectName, include_columns: true }, timeoutMs: 30_000 });
+          if (!res.ok) { respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, res.error ?? "Failed to fetch card tables")); return; }
+          const root = getRoot(res.result);
+          const tables = Array.isArray(root.card_tables) ? root.card_tables : Array.isArray(root) ? root as unknown[] : [];
+          const data = (tables as unknown[]).filter(isJsonObject).map((t) => ({
+            id: numberStringOrNull(t.id),
+            name: stringOrNull(t.title) ?? stringOrNull(t.name) ?? "Untitled",
+            appUrl: stringOrNull(t.app_url) ?? stringOrNull(t.appUrl),
+            columns: (Array.isArray(t.columns) ? t.columns : []).filter(isJsonObject).map((c) => ({
+              id: numberStringOrNull(c.id),
+              name: stringOrNull(c.title) ?? stringOrNull(c.name) ?? "Untitled column",
+              cardsCount: typeof c.cards_count === "number" ? c.cards_count : (Array.isArray(c.cards) ? c.cards.length : 0),
+              cards: (Array.isArray(c.cards) ? c.cards : []).filter(isJsonObject).map((card) => ({
+                id: numberStringOrNull(card.id),
+                title: stringOrNull(card.title) ?? "(untitled)",
+                dueOn: stringOrNull(card.due_on) ?? stringOrNull(card.dueOn),
+                assignee: isJsonObject(card.assignee) ? stringOrNull(card.assignee.name) : stringOrNull(card.assignee),
+                status: stringOrNull(card.status),
+                appUrl: stringOrNull(card.app_url) ?? stringOrNull(card.appUrl),
+              })),
+            })),
+          }));
+          respond(true, { ok: true, section, projectName, data });
+          return;
+        }
         case "people": {
-          // No direct list_people tool -- use smart_action
-          const result = await callBcgptTool({
-            bcgptUrl,
-            apiKey,
-            toolName: "smart_action",
-            toolArgs: {
-              query: `List all people and team members in the Basecamp project "${projectName}". Return a JSON array with this exact format: [{"name": "...", "email": "...", "role": "..."}]. Include every person you find. Output ONLY the JSON array with no other text.`,
-            },
-            timeoutMs: 30_000,
-          });
-          if (!result.ok) {
-            respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error ?? "Failed to fetch people"));
-            return;
-          }
-          respond(true, { ok: true, section, projectName, data: result.result });
+          const res = await callBcgptTool({ bcgptUrl, apiKey, toolName: "list_people", toolArgs: { project: projectName }, timeoutMs: 30_000 });
+          if (!res.ok) { respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, res.error ?? "Failed to fetch people")); return; }
+          const root = getRoot(res.result);
+          const people = Array.isArray(root.people) ? root.people : Array.isArray(root) ? root as unknown[] : [];
+          const data = (people as unknown[]).filter(isJsonObject).map((p) => ({
+            id: numberStringOrNull(p.id),
+            name: stringOrNull(p.name) ?? "(unknown)",
+            email: stringOrNull(p.email_address) ?? stringOrNull(p.email),
+            role: stringOrNull(p.title) ?? stringOrNull(p.role),
+            avatarUrl: stringOrNull(p.avatar_url) ?? stringOrNull(p.avatarUrl),
+          }));
+          respond(true, { ok: true, section, projectName, data });
           return;
         }
         default:
           respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, `Unknown section: ${section}`));
           return;
       }
-
-      const result = await callBcgptTool({
-        bcgptUrl,
-        apiKey,
-        toolName,
-        toolArgs,
-        timeoutMs: 30_000,
-      });
-
-      if (!result.ok) {
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error ?? `Failed to fetch ${section}`));
-        return;
-      }
-
-      respond(true, { ok: true, section, projectName, data: result.result });
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }
