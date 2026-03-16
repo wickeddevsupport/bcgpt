@@ -6010,14 +6010,14 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           return;
         }
         case "people": {
-          const res = await callBcgptTool({ bcgptUrl, apiKey, toolName: "list_people", toolArgs: { project: projectName }, timeoutMs: 30_000 });
+          const res = await callBcgptTool({ bcgptUrl, apiKey, toolName: "list_project_people", toolArgs: { project: projectName }, timeoutMs: 30_000 });
           if (!res.ok) { respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, res.error ?? "Failed to fetch people")); return; }
           const root = getRoot(res.result);
           const people = Array.isArray(root.people) ? root.people : Array.isArray(root) ? root as unknown[] : [];
           const data = (people as unknown[]).filter(isJsonObject).map((p) => ({
             id: numberStringOrNull(p.id),
             name: stringOrNull(p.name) ?? "(unknown)",
-            email: stringOrNull(p.email_address) ?? stringOrNull(p.email),
+            email: stringOrNull(p.email) ?? stringOrNull(p.email_address),
             role: stringOrNull(p.title) ?? stringOrNull(p.role),
             avatarUrl: stringOrNull(p.avatar_url) ?? stringOrNull(p.avatarUrl),
           }));
