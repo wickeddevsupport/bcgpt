@@ -93,7 +93,7 @@ export type PmosModelAuthState = {
   pmosModelRefDraft?: string;
 };
 
-const PMOS_SHARED_PROVIDER_ALLOWLIST = new Set(["local-ollama", "ollama", "kilo"]);
+const PMOS_SHARED_PROVIDER_ALLOWLIST = new Set(["local-ollama", "ollama", "kilo", "ollama-cloud"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
