@@ -620,7 +620,6 @@ export async function resolveImplicitProviders(params: {
       providers["ollama-cloud"] = {
         ...(await buildOllamaProvider()),
         baseUrl: `${cloudBase}/v1`,
-        apiBaseUrl: cloudBase,
         models: cloudModels,
         apiKey: ollamaCloudKey,
       };
