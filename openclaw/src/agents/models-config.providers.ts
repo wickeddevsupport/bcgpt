@@ -163,23 +163,29 @@ interface OllamaTagsResponse {
   models: OllamaModel[];
 }
 
-async function discoverOllamaModels(): Promise<ModelDefinitionConfig[]> {
+async function discoverOllamaModels(
+  apiBaseUrl?: string,
+  apiKey?: string,
+): Promise<ModelDefinitionConfig[]> {
   // Skip Ollama discovery in test environments
   if (process.env.VITEST || process.env.NODE_ENV === "test") {
     return [];
   }
   try {
-    const { apiBaseUrl } = resolveOllamaBaseUrls();
-    const response = await fetch(`${apiBaseUrl}/api/tags`, {
-      signal: AbortSignal.timeout(5000),
+    const resolvedBase = apiBaseUrl ?? resolveOllamaBaseUrls().apiBaseUrl;
+    const headers: Record<string, string> = {};
+    if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+    const response = await fetch(`${resolvedBase}/api/tags`, {
+      headers,
+      signal: AbortSignal.timeout(8000),
     });
     if (!response.ok) {
-      console.warn(`Failed to discover Ollama models: ${response.status}`);
+      console.warn(`Failed to discover Ollama models from ${resolvedBase}: ${response.status}`);
       return [];
     }
     const data = (await response.json()) as OllamaTagsResponse;
     if (!data.models || data.models.length === 0) {
-      console.warn("No Ollama models found on local instance");
+      console.warn(`No Ollama models found at ${resolvedBase}`);
       return [];
     }
     return data.models.map((model) => {
@@ -601,6 +607,24 @@ export async function resolveImplicitProviders(params: {
     resolveApiKeyFromProfiles({ provider: "ollama", store: authStore });
   if (ollamaKey) {
     providers.ollama = { ...(await buildOllamaProvider()), apiKey: ollamaKey };
+  }
+
+  // Ollama Cloud provider - api.ollama.com hosted models (set OLLAMA_CLOUD_API_KEY)
+  const ollamaCloudKey = process.env.OLLAMA_CLOUD_API_KEY?.trim() || null;
+  if (ollamaCloudKey) {
+    const cloudBase = trimTrailingSlash(
+      (process.env.OLLAMA_CLOUD_API_BASE_URL ?? "https://api.ollama.com").trim(),
+    );
+    const cloudModels = await discoverOllamaModels(cloudBase, ollamaCloudKey);
+    if (cloudModels.length > 0) {
+      providers["ollama-cloud"] = {
+        ...(await buildOllamaProvider()),
+        baseUrl: `${cloudBase}/v1`,
+        apiBaseUrl: cloudBase,
+        models: cloudModels,
+        apiKey: ollamaCloudKey,
+      };
+    }
   }
 
   const togetherKey =
