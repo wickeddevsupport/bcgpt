@@ -248,6 +248,11 @@ function ensureGlobalDefaults(config) {
     memorySearch.query.hybrid.candidateMultiplier = 6;
   }
 
+  // Clean up deprecated config keys that cause validation failures.
+  if (isRecord(next.channels) && isRecord(next.channels.discord)) {
+    delete next.channels.discord.defaultPrefix;
+  }
+
   next.agents.list = Array.isArray(next.agents.list) ? next.agents.list : [];
   return next;
 }
