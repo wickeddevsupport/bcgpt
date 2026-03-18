@@ -772,6 +772,7 @@ export function renderAgents(props: AgentsProps) {
                       onConfigSave: props.onConfigSave,
                       onModelChange: props.onModelChange,
                       onModelFallbacksChange: props.onModelFallbacksChange,
+                      availableModels: props.availableModels,
                     })
                   : nothing
               }
@@ -947,6 +948,7 @@ function renderAgentOverview(params: {
   onConfigSave: () => void;
   onModelChange: (agentId: string, modelId: string | null) => void;
   onModelFallbacksChange: (agentId: string, fallbacks: string[]) => void;
+  availableModels: string[];
 }) {
   const {
     agent,
@@ -962,6 +964,7 @@ function renderAgentOverview(params: {
     onConfigSave,
     onModelChange,
     onModelFallbacksChange,
+    availableModels,
   } = params;
   const config = resolveAgentConfig(configForm, agent.id);
   const workspaceFromFiles =
@@ -1054,7 +1057,11 @@ function renderAgentOverview(params: {
                       </option>
                     `
               }
-              ${buildModelOptions(configForm, effectivePrimary ?? undefined)}
+              ${availableModels.length > 0
+                ? availableModels.map(
+                    (ref) => html`<option value=${ref} ?selected=${ref === effectivePrimary}>${ref}</option>`,
+                  )
+                : buildModelOptions(configForm, effectivePrimary ?? undefined)}
             </select>
           </label>
           <label class="field" style="min-width: 260px; flex: 1;">
@@ -2165,7 +2172,9 @@ function renderCreateAgentModal(props: AgentsProps) {
     ? props.availableSkills.map((s) => ({ id: s, label: s }))
     : DEFAULT_SKILL_OPTIONS;
 
-  const configuredModels = resolveConfiguredModels(props.configForm);
+  const configuredModels: ConfiguredModelOption[] = props.availableModels.length > 0
+    ? props.availableModels.map((ref) => ({ value: ref, label: ref }))
+    : resolveConfiguredModels(props.configForm);
   const modelConfigured = form.model
     ? configuredModels.some((option) => option.value === form.model)
     : true;

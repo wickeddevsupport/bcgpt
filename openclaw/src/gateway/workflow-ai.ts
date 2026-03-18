@@ -1321,13 +1321,36 @@ export async function callWorkspaceModelAgentLoop(
     maxIterations?: number;
     initialToolChoice?: "auto" | { type: "function"; function: { name: string } };
     allowToolResultEarlyExit?: boolean;
+    agentId?: string;
   } = {},
 ): Promise<{ ok: boolean; text?: string; error?: string; providerUsed?: string }> {
   const wsId = String(workspaceId ?? "").trim();
   const cfg = wsId
     ? ((await loadEffectiveWorkspaceConfig(wsId)) as OpenClawConfig)
     : loadConfig();
-  const configs = await resolveModelConfigs(cfg, wsId || null);
+  let configs = await resolveModelConfigs(cfg, wsId || null);
+
+  // If an agentId is provided, resolve the agent's preferred model and prepend it.
+  if (opts.agentId) {
+    try {
+      const { resolveAgentModelPrimary } = await import("../agents/agent-scope.js");
+      const agentModelRef = resolveAgentModelPrimary(cfg, opts.agentId);
+      if (agentModelRef) {
+        const parsed = parsePrimaryRef(agentModelRef);
+        if (parsed) {
+          const apiKey = await resolveProviderApiKey(parsed.provider, cfg, wsId);
+          if (apiKey) {
+            const key = `${parsed.provider}/${parsed.modelId}`;
+            configs = configs.filter((c) => `${c.provider}/${c.modelId}` !== key);
+            configs.unshift({ provider: parsed.provider, modelId: parsed.modelId, apiKey });
+          }
+        }
+      }
+    } catch {
+      // Best-effort agent model resolution; fall through to workspace defaults.
+    }
+  }
+
   if (!configs.length) {
     return {
       ok: false,

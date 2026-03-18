@@ -3758,6 +3758,12 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
 
       const liveSessionKey =
         typeof p?.sessionKey === "string" && p.sessionKey.trim() ? p.sessionKey.trim() : "";
+
+      // Extract agent ID from session key (format: "agent:<agentId>:<rest>")
+      const { parseAgentSessionKey } = await import("../../sessions/session-key-utils.js");
+      const parsedSession = parseAgentSessionKey(liveSessionKey);
+      const chatAgentId = parsedSession?.agentId ?? null;
+
       const liveRunId =
         typeof p?.runId === "string" && p.runId.trim()
           ? p.runId.trim()
@@ -3895,6 +3901,22 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         buildCredentialContext,
       } = await import("../credential-sync.js");
 
+      // Load agent config for agent-specific chat sessions
+      let agentConfig: Awaited<ReturnType<typeof import("../../agents/agent-scope.js").resolveAgentConfig>> = undefined;
+      if (chatAgentId) {
+        try {
+          const { resolveAgentConfig } = await import("../../agents/agent-scope.js");
+          const { loadEffectiveWorkspaceConfig } = await import("../workspace-config.js");
+          const effectiveCfg = await loadEffectiveWorkspaceConfig(workspaceId);
+          agentConfig = resolveAgentConfig(
+            effectiveCfg as import("../../config/config.js").OpenClawConfig,
+            chatAgentId,
+          );
+        } catch {
+          // Best-effort; fall through to workspace defaults.
+        }
+      }
+
       const withTimeout = async <T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> => {
         let t: ReturnType<typeof setTimeout> | null = null;
         try {
@@ -3983,8 +4005,21 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           : null,
       ].filter((line): line is string => Boolean(line));
 
+      // Build agent-aware preamble: custom agents get their identity injected
+      const agentIdentity = agentConfig?.identity as
+        | { name?: string; emoji?: string; theme?: string }
+        | undefined;
+      const agentPreamble =
+        agentIdentity?.name && chatAgentId && chatAgentId !== "main"
+          ? [
+              `You are "${agentIdentity.name}"${agentIdentity.emoji ? ` ${agentIdentity.emoji}` : ""}, a custom AI agent in workspace ${workspaceId}.`,
+              ...(agentIdentity.theme ? [`Your personality/focus: ${agentIdentity.theme}.`] : []),
+              "Think like a general AI orchestrator first, and use specialist tools when the request needs live workspace state or external actions.",
+            ].join(" ")
+          : `You are the OpenClaw workspace operator for workspace ${workspaceId}. Think like a general AI orchestrator first, and use specialist tools when the request needs live workspace state or external actions.`;
+
       const systemPrompt = [
-        `You are the OpenClaw workspace operator for workspace ${workspaceId}. Think like a general AI orchestrator first, and use specialist tools when the request needs live workspace state or external actions.`,
+        agentPreamble,
         "",
         "## What is OpenClaw / BCgpt",
         "OpenClaw combines Basecamp project management with an embedded Activepieces workflow engine and BCgpt AI layer.",
@@ -5126,6 +5161,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         {
           maxTokens: 2048,
           maxIterations: 8,
+          ...(chatAgentId ? { agentId: chatAgentId } : {}),
         },
       );
 
