@@ -2091,49 +2091,6 @@ export function renderApp(state: AppViewState) {
                   state.createModalError = null;
 
                   try {
-                    if (!state.configForm) {
-                      await loadConfig(state);
-                    }
-                    const config = state.configForm as Record<string, unknown> | null;
-                    if (!config) {
-                      throw new Error("Config is not loaded yet. Refresh and try again.");
-                    }
-
-                    const currentAgents = config.agents as { list?: unknown[] } | undefined;
-                    const agentsList = Array.isArray(currentAgents?.list)
-                      ? [...currentAgents.list]
-                      : [];
-                    const editIndex = isEditMode
-                      ? agentsList.findIndex((entry) => {
-                          if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-                            return false;
-                          }
-                          const id = (entry as { id?: unknown }).id;
-                          return typeof id === "string" && id.trim().toLowerCase() === candidateId;
-                        })
-                      : -1;
-                    if (isEditMode && editIndex < 0) {
-                      state.createModalError = `Agent "${candidateId}" was not found in config.`;
-                      return;
-                    }
-
-                    const duplicateId = agentsList.some((entry, index) => {
-                      if (!entry || typeof entry !== "object") {
-                        return false;
-                      }
-                      if (isEditMode && index === editIndex) {
-                        return false;
-                      }
-                      const id = (entry as { id?: unknown }).id;
-                      return (
-                        typeof id === "string" && id.trim().toLowerCase() === candidateId
-                      );
-                    });
-                    if (duplicateId) {
-                      state.createModalError = `Agent ID "${candidateId}" already exists.`;
-                      return;
-                    }
-
                     const modeToProfile: Record<string, string> = {
                       autonomous: "full",
                       interactive: "messaging",
@@ -2150,82 +2107,40 @@ export function renderApp(state: AppViewState) {
                     );
                     const emoji = form.emoji.trim();
                     const theme = form.theme.trim() || form.purpose.trim();
+                    const toolsProfile = modeToProfile[form.mode] ?? "coding";
 
-                    const nextAgentCore: Record<string, unknown> = {
-                      id: candidateId,
-                      name,
-                      ...(isWorkspaceScopedUser ? { workspaceId: wsId } : {}),
-                      workspace,
-                      identity: {
+                    if (isEditMode) {
+                      // Update existing agent via gateway handler
+                      const updateResult = await state.client!.request("agents.update", {
+                        agentId: candidateId,
                         name,
+                        ...(model ? { model } : {}),
                         ...(emoji ? { emoji } : {}),
                         ...(theme ? { theme } : {}),
-                      },
-                      tools: { profile: modeToProfile[form.mode] ?? "coding" },
-                      ...(model ? { model } : {}),
-                      ...(skills.length > 0 ? { skills } : {}),
-                    };
-
-                    if (isEditMode && editIndex >= 0) {
-                      const existingRaw = agentsList[editIndex];
-                      const existing =
-                        existingRaw && typeof existingRaw === "object" && !Array.isArray(existingRaw)
-                          ? ({ ...existingRaw } as Record<string, unknown>)
-                          : {};
-                      const existingIdentityRaw = existing.identity;
-                      const existingIdentity =
-                        existingIdentityRaw &&
-                        typeof existingIdentityRaw === "object" &&
-                        !Array.isArray(existingIdentityRaw)
-                          ? ({ ...existingIdentityRaw } as Record<string, unknown>)
-                          : {};
-                      const existingToolsRaw = existing.tools;
-                      const existingTools =
-                        existingToolsRaw &&
-                        typeof existingToolsRaw === "object" &&
-                        !Array.isArray(existingToolsRaw)
-                          ? ({ ...existingToolsRaw } as Record<string, unknown>)
-                          : {};
-
-                      const nextIdentity: Record<string, unknown> = {
-                        ...existingIdentity,
-                        name,
-                      };
-                      if (emoji) {
-                        nextIdentity.emoji = emoji;
-                      } else {
-                        delete nextIdentity.emoji;
+                        ...(skills.length > 0 ? { skills } : {}),
+                        toolsProfile,
+                      });
+                      if (updateResult && typeof updateResult === "object" && !(updateResult as { ok?: boolean }).ok) {
+                        throw new Error((updateResult as { error?: string }).error ?? "Failed to update agent");
                       }
-                      if (theme) {
-                        nextIdentity.theme = theme;
-                      } else {
-                        delete nextIdentity.theme;
-                      }
-
-                      const nextTools: Record<string, unknown> = {
-                        ...existingTools,
-                        profile: modeToProfile[form.mode] ?? "coding",
-                      };
-
-                      const nextAgent: Record<string, unknown> = {
-                        ...existing,
-                        ...nextAgentCore,
-                        identity: nextIdentity,
-                        tools: nextTools,
-                      };
-                      if (!model) {
-                        delete nextAgent.model;
-                      }
-                      if (skills.length === 0) {
-                        delete nextAgent.skills;
-                      }
-                      agentsList[editIndex] = nextAgent;
                     } else {
-                      agentsList.push(nextAgentCore);
+                      // Create new agent via gateway handler (handles workspace dirs, IDENTITY.md, validation)
+                      const createResult = await state.client!.request("agents.create", {
+                        name,
+                        workspace,
+                        ...(emoji ? { emoji } : {}),
+                        ...(model ? { model } : {}),
+                        ...(theme ? { theme } : {}),
+                        ...(skills.length > 0 ? { skills } : {}),
+                        toolsProfile,
+                      });
+                      if (createResult && typeof createResult === "object" && !(createResult as { ok?: boolean }).ok) {
+                        throw new Error((createResult as { error?: string }).error ?? "Failed to create agent");
+                      }
                     }
-                    updateConfigFormValue(state, ["agents", "list"], agentsList);
-                    await saveConfig(state);
-                    await applyConfig(state);
+
+                    // Reload config and agents list to reflect gateway changes
+                    await loadConfig(state);
                     await loadAgents(state);
                     const agentExists = state.agentsList?.agents?.some((entry) => entry.id === candidateId) ?? false;
                     if (!agentExists) {

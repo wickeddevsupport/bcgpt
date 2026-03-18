@@ -320,14 +320,37 @@ export const agentsHandlers: GatewayRequestHandlers = {
 
     // Resolve agentDir against the config we're about to persist (vs the pre-write config),
     // so subsequent resolutions can't disagree about the agent's directory.
+    const model = resolveOptionalStringParam(params.model);
+    const theme = resolveOptionalStringParam(params.theme);
+    const toolsProfile = resolveOptionalStringParam(params.toolsProfile);
+    const skills = Array.isArray(params.skills)
+      ? params.skills.map((s: unknown) => String(s).trim()).filter(Boolean)
+      : undefined;
+
     let nextConfig = applyAgentConfig(cfg, {
       agentId,
       name: rawName,
       workspace: workspaceDir,
+      ...(model ? { model } : {}),
+      ...(theme ? { theme } : {}),
       ...(typeof client?.pmosWorkspaceId === "string" && client.pmosWorkspaceId.trim()
         ? { workspaceId: client.pmosWorkspaceId.trim() }
         : {}),
     });
+
+    // Apply skills and toolsProfile directly to the agent entry (not covered by applyAgentConfig)
+    if (skills || toolsProfile) {
+      const nextList = [...(nextConfig.agents?.list ?? [])];
+      const idx = nextList.findIndex((a) => a && typeof a === "object" && normalizeAgentId(a.id) === agentId);
+      if (idx >= 0) {
+        const entry = { ...nextList[idx] };
+        if (skills && skills.length > 0) (entry as Record<string, unknown>).skills = skills;
+        if (toolsProfile) (entry as Record<string, unknown>).tools = { ...((entry as Record<string, unknown>).tools as Record<string, unknown> ?? {}), profile: toolsProfile };
+        nextList[idx] = entry;
+        nextConfig = { ...nextConfig, agents: { ...nextConfig.agents, list: nextList } } as typeof nextConfig;
+      }
+    }
+
     const forcedAgentDir =
       client && !isSuperAdmin(client) ? resolveWorkspaceScopedAgentDir(client, agentId) : null;
     const agentDir = resolveUserPath(forcedAgentDir ?? resolveAgentDir(nextConfig, agentId));
@@ -341,7 +364,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
 
     await writeConfigFile(nextConfig);
 
-    // Always write Name to IDENTITY.md; optionally include emoji/avatar.
+    // Always write Name to IDENTITY.md; optionally include emoji/avatar/theme.
     const safeName = sanitizeIdentityLine(rawName);
     const emoji = resolveOptionalStringParam(params.emoji);
     const avatar = resolveOptionalStringParam(params.avatar);
@@ -350,6 +373,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
       "",
       `- Name: ${safeName}`,
       ...(emoji ? [`- Emoji: ${sanitizeIdentityLine(emoji)}`] : []),
+      ...(theme ? [`- Theme: ${sanitizeIdentityLine(theme)}`] : []),
       ...(avatar ? [`- Avatar: ${sanitizeIdentityLine(avatar)}`] : []),
       "",
     ];
@@ -427,6 +451,10 @@ export const agentsHandlers: GatewayRequestHandlers = {
     const emoji = resolveOptionalStringParam(params.emoji);
     const theme = resolveOptionalStringParam(params.theme);
     const avatar = resolveOptionalStringParam(params.avatar);
+    const toolsProfile = resolveOptionalStringParam(params.toolsProfile);
+    const skills = Array.isArray(params.skills)
+      ? params.skills.map((s: unknown) => String(s).trim()).filter(Boolean)
+      : undefined;
 
     let nextConfig = applyAgentConfig(cfg, {
       agentId,
@@ -441,6 +469,19 @@ export const agentsHandlers: GatewayRequestHandlers = {
         ? { workspaceId: client.pmosWorkspaceId.trim() }
         : {}),
     });
+
+    // Apply skills and toolsProfile directly to agent entry
+    if (skills !== undefined || toolsProfile) {
+      const nextList = [...(nextConfig.agents?.list ?? [])];
+      const idx = nextList.findIndex((a) => a && typeof a === "object" && normalizeAgentId(a.id) === agentId);
+      if (idx >= 0) {
+        const entry = { ...nextList[idx] };
+        if (skills !== undefined) (entry as Record<string, unknown>).skills = skills.length > 0 ? skills : undefined;
+        if (toolsProfile) (entry as Record<string, unknown>).tools = { ...((entry as Record<string, unknown>).tools as Record<string, unknown> ?? {}), profile: toolsProfile };
+        nextList[idx] = entry;
+        nextConfig = { ...nextConfig, agents: { ...nextConfig.agents, list: nextList } } as typeof nextConfig;
+      }
+    }
 
     // Re-pin agentDir to workspace-scoped path for PMOS workspace users so updates
     // cannot preserve a previously leaked global agentDir.

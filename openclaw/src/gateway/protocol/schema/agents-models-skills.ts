@@ -50,6 +50,10 @@ export const AgentsCreateParamsSchema = Type.Object(
     workspace: NonEmptyString,
     emoji: Type.Optional(Type.String()),
     avatar: Type.Optional(Type.String()),
+    model: Type.Optional(Type.String()),
+    theme: Type.Optional(Type.String()),
+    skills: Type.Optional(Type.Array(Type.String())),
+    toolsProfile: Type.Optional(Type.String()),
   },
   { additionalProperties: false },
 );
@@ -73,6 +77,8 @@ export const AgentsUpdateParamsSchema = Type.Object(
     emoji: Type.Optional(NonEmptyString),
     theme: Type.Optional(NonEmptyString),
     avatar: Type.Optional(Type.String()),
+    skills: Type.Optional(Type.Array(Type.String())),
+    toolsProfile: Type.Optional(Type.String()),
   },
   { additionalProperties: false },
 );
