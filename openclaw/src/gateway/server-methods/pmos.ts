@@ -1338,6 +1338,63 @@ function isGreetingOnlyMessage(message: string): boolean {
   );
 }
 
+// ── Intent-based tool/context filtering ──────────────────────────────────────
+type ChatIntent = "basecamp" | "workflow" | "figma" | "general";
+
+function detectChatIntents(
+  message: string,
+  urlHints: { basecampUrl?: string; figmaUrl?: string },
+): Set<ChatIntent> {
+  if (isGreetingOnlyMessage(message)) {
+    return new Set<ChatIntent>(["general"]);
+  }
+
+  const intents = new Set<ChatIntent>();
+  const msg = message.toLowerCase();
+
+  if (
+    urlHints.basecampUrl ||
+    /\bbasecamp\b|\bbcgpt\b|\bproject(?:s)?\b|\btodo(?:s)?\b|\bschedule\b|\bcampfire\b|\bmessage(?:s)?\b|\bkanban\b|\bcard(?:s)?\b|\bpeople\b|\bperson\b|\bassignment(?:s)?\b/i.test(msg)
+  ) {
+    intents.add("basecamp");
+  }
+
+  if (
+    /\bworkflow(?:s)?\b|\bautomati(?:on|e|ons|ed|ing)\b|\bactivepieces\b|\bn8n\b|\bcredential(?:s)?\b/i.test(msg)
+  ) {
+    intents.add("workflow");
+  }
+
+  if (
+    urlHints.figmaUrl ||
+    /\bfigma\b|\bauto[\s-]?layout\b|\bdesign\s+(?:file|system|token|audit|review|asset|spec)\b|\bcomponent\s+(?:library|set)\b/i.test(msg)
+  ) {
+    intents.add("figma");
+  }
+
+  if (intents.size === 0) {
+    intents.add("general");
+  }
+
+  return intents;
+}
+
+const BASECAMP_TOOL_NAMES = new Set([
+  "bcgpt_smart_action", "bcgpt_list_projects", "bcgpt_list_tools",
+  "bcgpt_mcp_call", "bcgpt_basecamp_raw",
+]);
+const WORKFLOW_TOOL_NAMES = new Set([
+  "pmos_ops_list_credentials", "pmos_ops_list_workflows", "pmos_ops_list_node_types",
+  "pmos_ops_create_workflow", "pmos_ops_get_workflow", "pmos_ops_execute_workflow",
+  "pmos_ops_update_workflow",
+]);
+const FIGMA_TOOL_NAMES = new Set([
+  "figma_get_context", "figma_mcp_list_tools", "figma_mcp_call", "figma_pat_audit_file",
+]);
+const GENERAL_TOOL_NAMES = new Set([
+  "pmos_parallel_subtasks", "web_search", "web_fetch",
+]);
+
 type BasecampNamedToolHint = {
   tool: string;
   reason: string;
@@ -3874,13 +3931,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const hasMixedWorkspaceUrls = Boolean(
         pastedUrlHints.figmaUrl && pastedUrlHints.basecampUrl,
       );
-      const disableBasecampTools = isGreetingOnlyMessage(latestUserMessage);
-      const shouldPreferBasecamp =
-        !disableBasecampTools &&
-        (Boolean(pastedUrlHints.basecampUrl) ||
-          /\bbasecamp\b|\bbcgpt\b|\bproject(?:s)?\b|\btodo(?:s)?\b|\bschedule\b|\bcampfire\b|\bmessage(?:s)?\b|\bkanban\b|\bcard(?:s)?\b|\bpeople\b|\bperson\b|\bassignment(?:s)?\b/i.test(
-            latestUserMessage,
-          ));
+      const intents = detectChatIntents(latestUserMessage, pastedUrlHints);
+      const shouldPreferBasecamp = intents.has("basecamp");
       const shouldPreferProjectList =
         shouldPreferBasecamp &&
         !pastedUrlHints.basecampUrl &&
@@ -3891,11 +3943,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         shouldPreferBasecamp && !shouldPreferProjectList && !pastedUrlHints.basecampUrl
           ? inferPreferredBasecampNamedTool(latestUserMessage)
           : null;
-      const shouldPreferFigmaContext =
-        Boolean(pastedUrlHints.figmaUrl) ||
-        /\bfigma\b|\bdesign\b|\bauto[\s-]?layout\b|\bcomponent(?:s)?\b|\bstyle(?:s)?\b|\bfont(?:s)?\b|\bregression\b|\baudit\b/i.test(
-          latestUserMessage,
-        );
+      const shouldPreferFigmaContext = intents.has("figma");
       const shouldPreferFigmaMcpDiscovery =
         shouldPreferFigmaContext && isFigmaDeepContextRequest(latestUserMessage);
       const shouldPreferExplicitFigmaFileRouting =
@@ -3949,6 +3997,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- Enter specialist mode when the request clearly depends on live workspace data, explicit pasted URLs, or a tool-backed action.",
         "- Use the smallest useful chain of tools, but do not stop after a preparatory or specialist lookup if the user still needs analysis, synthesis, or a cross-system action.",
         "- When one specialist tool returns useful context, continue with other tools when that context unlocks the real task.",
+        ...(intents.has("basecamp") ? [
         "",
         "## BCgpt API Reference",
         "BCgpt exposes Basecamp data via MCP (Model Context Protocol) and an OpenAPI compatibility layer:",
@@ -3959,6 +4008,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- Named Basecamp MCP tools are best for deterministic reads like todo lists, project todos, people, messages, schedules, card tables, documents, and other exact resources.",
         "- `smart_action({query})` -- Natural-language router. Best for ambiguous requests, pasted Basecamp URLs, broader searches, and summary or audit style questions when the exact tool is not obvious.",
         "- `basecamp_raw({method, path, body})` -- Raw Basecamp API access for anything not covered by named tools.",
+        ] : []),
         "",
         "## How to Think and Respond",
         "",
@@ -3969,10 +4019,14 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "",
         "### Be proactive, not lazy",
         "- Don't ask the user for information you can discover with a tool call.",
+        ...(intents.has("basecamp") ? [
         "- For Basecamp/project-management requests, use `bcgpt_list_projects` for exact project lists, `bcgpt_mcp_call` for deterministic named MCP tools, and `bcgpt_smart_action` only when the request is ambiguous, search-like, or needs broad narrative synthesis.",
         "- If you are not sure which Basecamp MCP tool exists, call `bcgpt_list_tools` once, then choose the exact tool with `bcgpt_mcp_call`.",
         "- Never call Basecamp tools for greetings, session-start acknowledgements, or other non-Basecamp chit-chat.",
+        ] : []),
+        ...(intents.has("workflow") ? [
         "- Always call `pmos_ops_list_credentials` before building any workflow so you know what's actually connected.",
+        ] : []),
         "- If the user asks about a project or person, call the appropriate tool to find the answer rather than guessing.",
         "- If a specialist tool only gives setup context, continue to the actual analysis or action instead of stopping there.",
         "",
@@ -3989,6 +4043,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- 'Check your Slack credential is pointing to the #alerts channel.'",
         "- 'Open the Executions tab to verify the workflow ran correctly.'",
         "",
+        ...(intents.has("workflow") ? [
         "### Workflow creation rules",
         "- When asked to CREATE a workflow: call `pmos_ops_create_workflow` immediately -- never output JSON for the user to import.",
         "- When asked to EDIT/UPDATE/FIX a workflow: call `pmos_ops_update_workflow` on the existing workflow ID.",
@@ -3997,6 +4052,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- Position nodes left-to-right: trigger at [250, 300], each next node at x+250.",
         "- Build complete, runnable workflows -- no manual rewiring needed.",
         "",
+        ] : []),
+        ...(intents.has("basecamp") ? [
         "### Project management questions",
         "- Use workspace context for connector readiness and defaults only; do not answer Basecamp questions from memory when live tools are available.",
         "- For live Basecamp data, use `bcgpt_list_projects` when the user wants the raw project list, use `bcgpt_mcp_call` for exact named MCP tools like `list_todolists`, `list_todos_for_project`, `list_messages`, `list_people`, `list_schedule_entries`, `list_card_tables`, or `list_documents`, and use `bcgpt_smart_action` when the task is ambiguous, search-oriented, or summary-oriented.",
@@ -4005,6 +4062,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- If `bcgpt_smart_action` cannot resolve an exact Basecamp resource, use `bcgpt_basecamp_raw` for direct API lookup instead of repeating the same smart_action query.",
         "- Summarize results meaningfully: 'There are 7 open todos in Project X -- 3 are overdue. The most recent message was from Alice yesterday about the deploy.'",
         "",
+        ] : []),
+        ...(intents.has("figma") ? [
         "### Figma questions",
         "- Start with `figma_get_context` when the active workspace file matters, but let the model choose the actual sequence from the request instead of forcing a fixed first tool.",
         "- Workspace chat exposes official Figma MCP plus PAT-backed fallback only. The embedded Figma panel is for syncing selected-file context and PAT handoff, not a separate AI tool system.",
@@ -4018,7 +4077,9 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- If official Figma MCP returns auth required, 405, or unavailable, then call `figma_pat_audit_file` on the target file and continue reasoning from that fallback instead of stopping.",
         "- Do NOT use `web_fetch` for private Figma API access in workspace chat; it cannot inject the workspace PAT.",
         "",
+        ] : []),
         "## Available Tools",
+        ...(intents.has("basecamp") ? [
         "**Basecamp MCP Tools:**",
         "- `bcgpt_list_projects` -- fetch live Basecamp projects with names, IDs, and status",
         "- `bcgpt_list_tools` -- inspect the full Basecamp MCP tool catalog when you need an exact named capability",
@@ -4026,6 +4087,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- `bcgpt_smart_action` -- run natural-language Basecamp queries through the bcgpt MCP router when the task is ambiguous or URL-driven",
         "- `bcgpt_basecamp_raw` -- make a direct Basecamp API request through bcgpt when an exact resource lookup is needed",
         "",
+        ] : []),
+        ...(intents.has("workflow") ? [
         "**Workflow Engine Tools:**",
         "- `pmos_ops_list_credentials` -- see which services are connected (Basecamp, Slack, GitHub, etc.)",
         "- `pmos_ops_list_workflows` -- list existing workflow-engine flows with names and IDs",
@@ -4035,14 +4098,19 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- `pmos_ops_execute_workflow` -- test-run a workflow by ID",
         "- `pmos_ops_list_node_types` -- list available trigger and action node types",
         "",
-        "**Parallel Orchestration Tools:**",
+        ] : []),
+        "**General Tools:**",
         "- `pmos_parallel_subtasks` -- run multiple temporary parallel subagents on independent probes, then aggregate their findings back into the main loop",
+        "- `web_search` -- search the web for current information",
+        "- `web_fetch` -- fetch the content of a URL",
+        ...(intents.has("figma") ? [
         "",
         "**Figma Tools:**",
         "- `figma_get_context` -- read the selected file/team context from the Figma panel so you can reason about workspace state",
         "- `figma_mcp_list_tools` -- inspect the full live Figma MCP capability surface exposed through the PMOS-owned Figma MCP service before choosing a Figma operation",
         "- `figma_mcp_call` -- call any discovered Figma MCP capability through the PMOS-owned Figma MCP service, especially context-first tools like `get_design_context`, `get_metadata`, `get_screenshot`, `get_variable_defs`, comments, annotations, nodes, and deeper file context",
         "- `figma_pat_audit_file` -- run a Figma REST audit with the workspace PAT only as a structural fallback when MCP auth or capability is unavailable, or when the task is explicitly an audit",
+        ] : []),
         "",
         ...(runtimeUrlHints.length ? ["## Request-Specific URL Routing", ...runtimeUrlHints, ""] : []),
         ...(requestRoutingHints.length ? ["## Request-Specific Tool Guidance", ...requestRoutingHints, ""] : []),
@@ -5040,17 +5108,14 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         }
       };
 
-      const agentTools = disableBasecampTools
-        ? tools.filter(
-            (tool) =>
-              tool.type !== "function" ||
-              (tool.function.name !== "bcgpt_smart_action" &&
-                tool.function.name !== "bcgpt_list_projects" &&
-                tool.function.name !== "bcgpt_list_tools" &&
-                tool.function.name !== "bcgpt_mcp_call" &&
-                tool.function.name !== "bcgpt_basecamp_raw"),
-          )
-        : tools;
+      const allowedToolNames = new Set<string>();
+      GENERAL_TOOL_NAMES.forEach((n) => allowedToolNames.add(n));
+      if (intents.has("basecamp")) BASECAMP_TOOL_NAMES.forEach((n) => allowedToolNames.add(n));
+      if (intents.has("workflow")) WORKFLOW_TOOL_NAMES.forEach((n) => allowedToolNames.add(n));
+      if (intents.has("figma")) FIGMA_TOOL_NAMES.forEach((n) => allowedToolNames.add(n));
+      const agentTools = tools.filter(
+        (tool) => tool.type !== "function" || allowedToolNames.has(tool.function.name),
+      );
 
       const result = await callWorkspaceModelAgentLoop(
         workspaceId,
