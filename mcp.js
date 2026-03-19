@@ -5619,9 +5619,12 @@ export async function handleMCP(reqBody, ctx) {
         const profileId = Number(profile.id);
         let todos = [];
         let projectPayload = null;
+        let source = "workspace_snapshot";
+        let totalCount = null;
         if (args.project) {
           const p = await projectByName(ctx, args.project);
           projectPayload = { id: p.id, name: p.name };
+          source = "project_scan";
           const groups = await listTodosForProject(ctx, p.id);
           todos = groups.flatMap((group) =>
             (group.todos || []).map((todo) => ({
@@ -5634,17 +5637,46 @@ export async function handleMCP(reqBody, ctx) {
             })),
           );
         } else {
-          todos = await reportTodosAssignedPerson(ctx, profileId);
+          const snapshot = await getOrRefreshBasecampWorkspaceSnapshot({
+            userKey: ctx.userKey,
+            accountId: ctx.accountId,
+            waitForFresh: false,
+            reason: "mcp:list_assigned_to_me",
+            previewLimit: 200,
+          });
+          todos = Array.isArray(snapshot?.assignedTodos)
+            ? snapshot.assignedTodos.map((todo) => ({
+                id: todo.todoId ?? null,
+                title: todo.title ?? null,
+                status: "open",
+                completed: false,
+                due_on: todo.dueOn ?? null,
+                overdue: Boolean(todo.dueOn && todo.dueOn < new Date().toISOString().slice(0, 10)),
+                project: todo.projectId || todo.projectName
+                  ? { id: todo.projectId ?? null, name: todo.projectName ?? null }
+                  : null,
+                todolist: todo.todolistId || todo.todolistName
+                  ? { id: todo.todolistId ?? null, name: todo.todolistName ?? null }
+                  : null,
+                assignee_ids: Array.isArray(todo.assigneeIds) ? todo.assigneeIds : [],
+                app_url: todo.appUrl ?? null,
+              }))
+            : [];
+          totalCount = Number(snapshot?.totals?.assignedTodos ?? todos.length);
         }
 
         const assigned = todos.filter((todo) => normalizeTodoAssigneeIds(todo).includes(profileId));
 
-        return ok(id, {
+        const payload = {
           person: { id: profile.id, name: profile.name, email: profile.email },
           project: projectPayload,
-          source: args.project ? "project_scan" : "workspace_scan",
+          source,
           ...buildListPayload("todos", assigned)
-        });
+        };
+        if (Number.isFinite(totalCount)) {
+          payload.count = totalCount;
+        }
+        return ok(id, payload);
       } catch (e) {
         console.error(`[list_assigned_to_me] Error:`, e.message);
         // Fallback: global scan across all open todos
