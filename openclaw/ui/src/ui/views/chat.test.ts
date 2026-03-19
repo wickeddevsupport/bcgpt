@@ -231,4 +231,31 @@ describe("chat view", () => {
     createBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(onCreate).toHaveBeenCalledTimes(1);
   });
+
+  it("renders an attachment button and previews text files", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          attachments: [
+            {
+              id: "file-1",
+              dataUrl: "data:text/plain;base64,SGVsbG8=",
+              mimeType: "text/plain",
+              fileName: "notes.txt",
+              kind: "text",
+              textContent: "Hello",
+            },
+          ],
+          onAttachmentsChange: () => undefined,
+        }),
+      ),
+      container,
+    );
+
+    const attachButton = container.querySelector('button[aria-label="Upload images or text files"]');
+    expect(attachButton).not.toBeNull();
+    expect(container.textContent).toContain("notes.txt");
+    expect(container.textContent).toContain("Text file");
+  });
 });

@@ -368,6 +368,46 @@ function dataUrlToBase64(dataUrl: string): { content: string; mimeType: string }
   return { mimeType: match[1], content: match[2] };
 }
 
+const MAX_TEXT_ATTACHMENT_CHARS = 20_000;
+
+function escapeFileAttr(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function buildMessageWithFileAttachments(
+  message: string,
+  attachments: ChatAttachment[] | undefined,
+): string {
+  const trimmed = message.trim();
+  const blocks: string[] = [];
+
+  for (const attachment of attachments ?? []) {
+    if ((attachment.kind ?? "image") === "image") {
+      continue;
+    }
+    const fileName = attachment.fileName?.trim() || "attachment";
+    const mimeType = attachment.mimeType?.trim() || "application/octet-stream";
+    const textContent = attachment.textContent?.trim();
+    if (textContent) {
+      const limited =
+        textContent.length > MAX_TEXT_ATTACHMENT_CHARS
+          ? `${textContent.slice(0, MAX_TEXT_ATTACHMENT_CHARS)}\n[truncated]`
+          : textContent;
+      blocks.push(
+        `<file name="${escapeFileAttr(fileName)}" mime="${escapeFileAttr(mimeType)}">\n${limited}\n</file>`,
+      );
+      continue;
+    }
+    blocks.push(`[Attached file: ${fileName} (${mimeType})]`);
+  }
+
+  return [trimmed, ...blocks].filter(Boolean).join("\n\n");
+}
+
 export async function sendChatMessage(
   state: ChatState,
   message: string,
@@ -376,9 +416,11 @@ export async function sendChatMessage(
   if (!state.client || !state.connected) {
     return null;
   }
-  const msg = message.trim();
-  const hasAttachments = attachments && attachments.length > 0;
-  if (!msg && !hasAttachments) {
+  const rawAttachments = attachments ?? [];
+  const imageAttachments = rawAttachments.filter((att) => (att.kind ?? "image") === "image");
+  const messageWithFiles = buildMessageWithFileAttachments(message, rawAttachments);
+  const hasImageAttachments = imageAttachments.length > 0;
+  if (!messageWithFiles && !hasImageAttachments) {
     return null;
   }
 
@@ -401,17 +443,23 @@ export async function sendChatMessage(
 
   // Build user message content blocks
   const contentBlocks: Array<{ type: string; text?: string; source?: unknown }> = [];
-  if (msg) {
-    contentBlocks.push({ type: "text", text: msg });
+  if (message.trim()) {
+    contentBlocks.push({ type: "text", text: message.trim() });
   }
-  // Add image previews to the message for display
-  if (hasAttachments) {
-    for (const att of attachments) {
+  for (const att of rawAttachments) {
+    if ((att.kind ?? "image") === "image") {
       contentBlocks.push({
         type: "image",
         source: { type: "base64", media_type: att.mimeType, data: att.dataUrl },
       });
+      continue;
     }
+    const label = att.fileName?.trim() || "Attachment";
+    const description =
+      att.textContent && att.textContent.trim()
+        ? `Attached text file: ${label}`
+        : `Attached file: ${label}`;
+    contentBlocks.push({ type: "text", text: description });
   }
 
   state.chatMessages = [
@@ -436,8 +484,8 @@ export async function sendChatMessage(
   state.chatStreamStartedAt = now;
 
   // Convert attachments to API format
-  const apiAttachments = hasAttachments
-    ? attachments
+  const apiAttachments = hasImageAttachments
+    ? imageAttachments
         .map((att) => {
           const parsed = dataUrlToBase64(att.dataUrl);
           if (!parsed) {
@@ -446,6 +494,7 @@ export async function sendChatMessage(
           return {
             type: "image",
             mimeType: parsed.mimeType,
+            fileName: att.fileName,
             content: parsed.content,
           };
         })
@@ -455,7 +504,7 @@ export async function sendChatMessage(
   try {
     const sendParams: Record<string, unknown> = {
       sessionKey: state.sessionKey,
-      message: msg,
+      message: messageWithFiles,
       deliver: false,
       idempotencyKey: runId,
       attachments: apiAttachments,

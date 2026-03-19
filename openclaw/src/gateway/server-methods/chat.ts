@@ -316,6 +316,7 @@ function canAccessSession(
 export function shouldRouteToPmosWorkspaceChat(
   client: GatewayClient | null,
   message: string,
+  opts?: { hasImages?: boolean },
 ): boolean {
   const workspaceId =
     typeof client?.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
@@ -324,6 +325,9 @@ export function shouldRouteToPmosWorkspaceChat(
   }
   const trimmed = message.trim();
   if (!trimmed) {
+    return false;
+  }
+  if (opts?.hasImages) {
     return false;
   }
 
@@ -687,7 +691,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       };
       respond(true, ackPayload, undefined, { runId: clientRunId });
 
-      if (shouldRouteToPmosWorkspaceChat(client, parsedMessage)) {
+      if (shouldRouteToPmosWorkspaceChat(client, parsedMessage, { hasImages: parsedImages.length > 0 })) {
         void (async () => {
           try {
             const { storePath: latestStorePath, entry: latestEntry } =
