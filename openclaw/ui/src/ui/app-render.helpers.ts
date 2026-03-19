@@ -114,6 +114,36 @@ function resolveSessionModelRef(row?: SessionsListResult["sessions"][number]): s
   return `${provider}/${model}`;
 }
 
+export function resolveSelectedAgentIdForSession(
+  state: Pick<AppViewState, "assistantAgentId" | "agentsList">,
+  sessionKey: string,
+): string | null {
+  const parsedAgentId = parseAgentSessionKey(sessionKey)?.agentId?.trim();
+  if (parsedAgentId) {
+    return parsedAgentId;
+  }
+  const assistantAgentId = state.assistantAgentId?.trim();
+  if (assistantAgentId) {
+    return assistantAgentId;
+  }
+  const defaultAgentId = state.agentsList?.defaultId?.trim();
+  if (defaultAgentId) {
+    return defaultAgentId;
+  }
+  const firstAgentId = state.agentsList?.agents?.[0]?.id?.trim();
+  return firstAgentId || null;
+}
+
+function syncSelectedAgentForSession(
+  state: Pick<AppViewState, "agentsSelectedId" | "assistantAgentId" | "agentsList">,
+  sessionKey: string,
+): void {
+  const nextAgentId = resolveSelectedAgentIdForSession(state, sessionKey);
+  if (nextAgentId) {
+    state.agentsSelectedId = nextAgentId;
+  }
+}
+
 type ActivateChatSessionOptions = {
   ensureExists?: boolean;
   label?: string | null;
@@ -179,6 +209,7 @@ export async function activateChatSession(
     }
   }
   state.sessionKey = next;
+  syncSelectedAgentForSession(state, next);
   state.chatMessage = "";
   state.chatAttachments = [];
   state.chatStream = null;

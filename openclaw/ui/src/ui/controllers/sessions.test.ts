@@ -21,6 +21,8 @@ function createState(overrides: Partial<SessionsState> = {}): SessionsState {
       sessionKey: "agent:assistant:main",
       lastActiveSessionKey: "agent:assistant:main",
     },
+    agentsSelectedId: "assistant",
+    assistantAgentId: "assistant",
     pmosAuthUser: { role: "member" },
     agentsList: {
       defaultId: "assistant",
@@ -80,5 +82,6 @@ describe("syncWorkspaceSessionSelection", () => {
     expect(state.sessionKey).toBe("agent:assistant:main");
     expect(state.settings?.sessionKey).toBe("agent:assistant:main");
     expect(state.settings?.lastActiveSessionKey).toBe("agent:assistant:main");
+    expect(state.agentsSelectedId).toBe("assistant");
   });
 });

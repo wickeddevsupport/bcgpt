@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { SessionsListResult } from "./types.ts";
-import { resolveSessionDisplayName } from "./app-render.helpers.ts";
+import {
+  resolveSelectedAgentIdForSession,
+  resolveSessionDisplayName,
+} from "./app-render.helpers.ts";
 
 type SessionRow = SessionsListResult["sessions"][number];
+type SelectedAgentState = Parameters<typeof resolveSelectedAgentIdForSession>[0];
 
 function row(overrides: Partial<SessionRow> & { key: string }): SessionRow {
   return { kind: "direct", updatedAt: 0, ...overrides };
@@ -75,5 +79,37 @@ describe("resolveSessionDisplayName", () => {
     expect(resolveSessionDisplayName("k", row({ key: "k", displayName: "  My Chat  " }))).toBe(
       "My Chat (k)",
     );
+  });
+});
+
+describe("resolveSelectedAgentIdForSession", () => {
+  it("returns the agent embedded in an agent session key", () => {
+    expect(
+      resolveSelectedAgentIdForSession(
+        {
+          assistantAgentId: "assistant",
+          agentsList: {
+            defaultId: "assistant",
+            agents: [{ id: "assistant" }, { id: "designer" }],
+          },
+        } as SelectedAgentState,
+        "agent:designer:main",
+      ),
+    ).toBe("designer");
+  });
+
+  it("falls back to the workspace assistant when session key is not agent-scoped", () => {
+    expect(
+      resolveSelectedAgentIdForSession(
+        {
+          assistantAgentId: "assistant",
+          agentsList: {
+            defaultId: "assistant",
+            agents: [{ id: "assistant" }, { id: "designer" }],
+          },
+        } as SelectedAgentState,
+        "main",
+      ),
+    ).toBe("assistant");
   });
 });

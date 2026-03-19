@@ -20,6 +20,8 @@ export type SessionsState = {
     lastActiveSessionKey: string;
     [key: string]: unknown;
   };
+  agentsSelectedId?: string | null;
+  assistantAgentId?: string | null;
   applySettings?: (next: Record<string, unknown>) => void;
   pmosAuthUser?: { role?: string | null } | null;
   agentsList?: { defaultId?: string; agents?: Array<{ id: string }> } | null;
@@ -38,6 +40,28 @@ function isKnownWorkspaceAgentSession(state: SessionsState, key: string): boolea
     Array.isArray(state.agentsList?.agents) &&
     state.agentsList.agents.some((agent) => agent.id === agentId)
   );
+}
+
+function syncSelectedAgentForSession(state: SessionsState, key: string): void {
+  const parsedAgentId = parseAgentSessionKey(key)?.agentId?.trim();
+  if (parsedAgentId) {
+    state.agentsSelectedId = parsedAgentId;
+    return;
+  }
+  const assistantAgentId = state.assistantAgentId?.trim();
+  if (assistantAgentId) {
+    state.agentsSelectedId = assistantAgentId;
+    return;
+  }
+  const defaultAgentId = state.agentsList?.defaultId?.trim();
+  if (defaultAgentId) {
+    state.agentsSelectedId = defaultAgentId;
+    return;
+  }
+  const firstAgentId = state.agentsList?.agents?.[0]?.id?.trim();
+  if (firstAgentId) {
+    state.agentsSelectedId = firstAgentId;
+  }
 }
 
 export function syncWorkspaceSessionSelection(
@@ -76,6 +100,7 @@ export function syncWorkspaceSessionSelection(
     return;
   }
   state.sessionKey = nextKey;
+  syncSelectedAgentForSession(state, nextKey);
   if (state.settings && typeof state.applySettings === "function") {
     state.applySettings({
       ...state.settings,

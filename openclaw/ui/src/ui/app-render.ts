@@ -536,6 +536,7 @@ export function renderApp(state: AppViewState) {
     agentId: string,
     opts?: { newSession?: boolean },
   ) => {
+    state.agentsSelectedId = agentId;
     const targetKey = opts?.newSession
       ? buildNewAgentSessionKey(agentId)
       : `agent:${agentId}:${chatMainKey}`;
