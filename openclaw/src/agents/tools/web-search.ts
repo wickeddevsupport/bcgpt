@@ -18,9 +18,11 @@ import {
   writeCache,
 } from "./web-shared.js";
 
-const SEARCH_PROVIDERS = ["brave", "perplexity", "grok"] as const;
+const SEARCH_PROVIDERS = ["duckduckgo", "brave", "perplexity", "grok"] as const;
 const DEFAULT_SEARCH_COUNT = 5;
 const MAX_SEARCH_COUNT = 10;
+
+const DUCKDUCKGO_HTML_ENDPOINT = "https://html.duckduckgo.com/html/";
 
 const BRAVE_SEARCH_ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
 const DEFAULT_PERPLEXITY_BASE_URL = "https://openrouter.ai/api/v1";
@@ -205,7 +207,11 @@ function resolveSearchProvider(search?: WebSearchConfig): (typeof SEARCH_PROVIDE
   if (raw === "brave") {
     return "brave";
   }
-  return "brave";
+  if (raw === "duckduckgo") {
+    return "duckduckgo";
+  }
+  // Default to duckduckgo (no API key required)
+  return "duckduckgo";
 }
 
 function resolvePerplexityConfig(search?: WebSearchConfig): PerplexityConfig {
@@ -408,6 +414,75 @@ function resolveSiteName(url: string | undefined): string | undefined {
   }
 }
 
+type DuckDuckGoResult = {
+  title: string;
+  url: string;
+  description: string;
+};
+
+function parseDuckDuckGoHtml(html: string): DuckDuckGoResult[] {
+  const results: DuckDuckGoResult[] = [];
+  // DuckDuckGo HTML results are in <div class="result results_links results_links_deep web-result">
+  // Each result has: <a class="result__a" href="...">title</a> and <a class="result__snippet">description</a>
+  const resultBlocks = html.split(/class="result results_links/);
+  for (let i = 1; i < resultBlocks.length; i++) {
+    const block = resultBlocks[i];
+
+    // Extract URL from result__a href
+    const urlMatch = block.match(/class="result__a"[^>]*href="([^"]+)"/);
+    let url = urlMatch?.[1] ?? "";
+    // DuckDuckGo wraps URLs in a redirect; extract the actual URL
+    const uddgMatch = url.match(/uddg=([^&]+)/);
+    if (uddgMatch) {
+      url = decodeURIComponent(uddgMatch[1]);
+    }
+    if (!url) {
+      continue;
+    }
+
+    // Extract title text from result__a
+    const titleMatch = block.match(/class="result__a"[^>]*>([^<]*(?:<[^>]*>[^<]*)*)<\/a>/);
+    const rawTitle = titleMatch?.[1] ?? "";
+    const title = rawTitle.replace(/<[^>]*>/g, "").trim();
+
+    // Extract snippet from result__snippet
+    const snippetMatch = block.match(/class="result__snippet"[^>]*>([^<]*(?:<[^>]*>[^<]*)*)<\/(?:a|span)>/);
+    const rawSnippet = snippetMatch?.[1] ?? "";
+    const description = rawSnippet.replace(/<[^>]*>/g, "").trim();
+
+    if (title || description) {
+      results.push({ title, url, description });
+    }
+  }
+  return results;
+}
+
+async function runDuckDuckGoSearch(params: {
+  query: string;
+  count: number;
+  timeoutSeconds: number;
+}): Promise<DuckDuckGoResult[]> {
+  const formBody = `q=${encodeURIComponent(params.query)}`;
+  const res = await fetch(DUCKDUCKGO_HTML_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "User-Agent": "OpenClaw/1.0 (Web Search Tool)",
+    },
+    body: formBody,
+    signal: withTimeout(undefined, params.timeoutSeconds * 1000),
+  });
+
+  if (!res.ok) {
+    const detail = await readResponseText(res);
+    throw new Error(`DuckDuckGo search error (${res.status}): ${detail || res.statusText}`);
+  }
+
+  const html = await res.text();
+  const allResults = parseDuckDuckGoHtml(html);
+  return allResults.slice(0, params.count);
+}
+
 async function runPerplexitySearch(params: {
   query: string;
   apiKey: string;
@@ -503,7 +578,7 @@ async function runGrokSearch(params: {
 async function runWebSearch(params: {
   query: string;
   count: number;
-  apiKey: string;
+  apiKey?: string;
   timeoutSeconds: number;
   cacheTtlMs: number;
   provider: (typeof SEARCH_PROVIDERS)[number];
@@ -517,11 +592,13 @@ async function runWebSearch(params: {
   grokInlineCitations?: boolean;
 }): Promise<Record<string, unknown>> {
   const cacheKey = normalizeCacheKey(
-    params.provider === "brave"
-      ? `${params.provider}:${params.query}:${params.count}:${params.country || "default"}:${params.search_lang || "default"}:${params.ui_lang || "default"}:${params.freshness || "default"}`
-      : params.provider === "perplexity"
-        ? `${params.provider}:${params.query}:${params.perplexityBaseUrl ?? DEFAULT_PERPLEXITY_BASE_URL}:${params.perplexityModel ?? DEFAULT_PERPLEXITY_MODEL}`
-        : `${params.provider}:${params.query}:${params.grokModel ?? DEFAULT_GROK_MODEL}:${String(params.grokInlineCitations ?? false)}`,
+    params.provider === "duckduckgo"
+      ? `${params.provider}:${params.query}:${params.count}`
+      : params.provider === "brave"
+        ? `${params.provider}:${params.query}:${params.count}:${params.country || "default"}:${params.search_lang || "default"}:${params.ui_lang || "default"}:${params.freshness || "default"}`
+        : params.provider === "perplexity"
+          ? `${params.provider}:${params.query}:${params.perplexityBaseUrl ?? DEFAULT_PERPLEXITY_BASE_URL}:${params.perplexityModel ?? DEFAULT_PERPLEXITY_MODEL}`
+          : `${params.provider}:${params.query}:${params.grokModel ?? DEFAULT_GROK_MODEL}:${String(params.grokInlineCitations ?? false)}`,
   );
   const cached = readCache(SEARCH_CACHE, cacheKey);
   if (cached) {
@@ -530,10 +607,33 @@ async function runWebSearch(params: {
 
   const start = Date.now();
 
+  if (params.provider === "duckduckgo") {
+    const results = await runDuckDuckGoSearch({
+      query: params.query,
+      count: params.count,
+      timeoutSeconds: params.timeoutSeconds,
+    });
+    const mapped = results.map((entry) => ({
+      title: entry.title ? wrapWebContent(entry.title, "web_search") : "",
+      url: entry.url,
+      description: entry.description ? wrapWebContent(entry.description, "web_search") : "",
+      siteName: resolveSiteName(entry.url) || undefined,
+    }));
+    const payload = {
+      query: params.query,
+      provider: params.provider,
+      count: mapped.length,
+      tookMs: Date.now() - start,
+      results: mapped,
+    };
+    writeCache(SEARCH_CACHE, cacheKey, payload, params.cacheTtlMs);
+    return payload;
+  }
+
   if (params.provider === "perplexity") {
     const { content, citations } = await runPerplexitySearch({
       query: params.query,
-      apiKey: params.apiKey,
+      apiKey: params.apiKey!,
       baseUrl: params.perplexityBaseUrl ?? DEFAULT_PERPLEXITY_BASE_URL,
       model: params.perplexityModel ?? DEFAULT_PERPLEXITY_MODEL,
       timeoutSeconds: params.timeoutSeconds,
@@ -554,7 +654,7 @@ async function runWebSearch(params: {
   if (params.provider === "grok") {
     const { content, citations, inlineCitations } = await runGrokSearch({
       query: params.query,
-      apiKey: params.apiKey,
+      apiKey: params.apiKey!,
       model: params.grokModel ?? DEFAULT_GROK_MODEL,
       timeoutSeconds: params.timeoutSeconds,
       inlineCitations: params.grokInlineCitations ?? false,
@@ -597,7 +697,7 @@ async function runWebSearch(params: {
     method: "GET",
     headers: {
       Accept: "application/json",
-      "X-Subscription-Token": params.apiKey,
+      "X-Subscription-Token": params.apiKey!,
     },
     signal: withTimeout(undefined, params.timeoutSeconds * 1000),
   });
@@ -648,11 +748,13 @@ export function createWebSearchTool(options?: {
   const grokConfig = resolveGrokConfig(search);
 
   const description =
-    provider === "perplexity"
-      ? "Search the web using Perplexity Sonar (direct or via OpenRouter). Returns AI-synthesized answers with citations from real-time web search."
-      : provider === "grok"
-        ? "Search the web using xAI Grok. Returns AI-synthesized answers with citations from real-time web search."
-        : "Search the web using Brave Search API. Supports region-specific and localized search via country and language parameters. Returns titles, URLs, and snippets for fast research.";
+    provider === "duckduckgo"
+      ? "Search the web using DuckDuckGo. No API key required. Returns titles, URLs, and snippets for fast research."
+      : provider === "perplexity"
+        ? "Search the web using Perplexity Sonar (direct or via OpenRouter). Returns AI-synthesized answers with citations from real-time web search."
+        : provider === "grok"
+          ? "Search the web using xAI Grok. Returns AI-synthesized answers with citations from real-time web search."
+          : "Search the web using Brave Search API. Supports region-specific and localized search via country and language parameters. Returns titles, URLs, and snippets for fast research.";
 
   return {
     label: "Web Search",
@@ -663,13 +765,15 @@ export function createWebSearchTool(options?: {
       const perplexityAuth =
         provider === "perplexity" ? resolvePerplexityApiKey(perplexityConfig) : undefined;
       const apiKey =
-        provider === "perplexity"
-          ? perplexityAuth?.apiKey
-          : provider === "grok"
-            ? resolveGrokApiKey(grokConfig)
-            : resolveSearchApiKey(search);
+        provider === "duckduckgo"
+          ? undefined
+          : provider === "perplexity"
+            ? perplexityAuth?.apiKey
+            : provider === "grok"
+              ? resolveGrokApiKey(grokConfig)
+              : resolveSearchApiKey(search);
 
-      if (!apiKey) {
+      if (!apiKey && provider !== "duckduckgo") {
         return jsonResult(missingSearchKeyPayload(provider));
       }
       const params = args as Record<string, unknown>;
