@@ -6,6 +6,7 @@ import {
   compactAssignmentTodo,
   hydrateScannedTodoRow,
   scanAssignedTodosFromRows,
+  scanOverdueTodosFromRows,
 } from "../mcp/basecamp-assignment-utils.js";
 
 const TODAY_ISO = new Date().toISOString().slice(0, 10);
@@ -118,6 +119,14 @@ test("buildAssignedPeopleSummary groups open todos by assignee with counts and p
   assert.equal(designer.assigned_todos_count, 2);
   assert.equal(designer.overdue_count, 1);
   assert.equal(rohit.todos_preview[0]?.project?.name, "Alpha Project");
+});
+
+test("scanOverdueTodosFromRows finds overdue open todos from the workspace scan", () => {
+  const overdue = scanOverdueTodosFromRows(buildRows(), TODAY_ISO);
+
+  assert.deepEqual(overdue.map((todo) => todo.id), [2001]);
+  assert.equal(overdue[0]?.project?.name, "Beta Project");
+  assert.equal(overdue[0]?.due_on, YESTERDAY_ISO);
 });
 
 test("compactAssignmentTodo keeps ids and project names for snapshot-style todo objects", () => {

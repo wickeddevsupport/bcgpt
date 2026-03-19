@@ -115,6 +115,12 @@ export function scanAssignedTodosFromRows(rows, personId) {
     .filter((todo) => todo && normalizeTodoAssigneeIds(todo).includes(targetId));
 }
 
+export function scanOverdueTodosFromRows(rows, todayIso = new Date().toISOString().slice(0, 10)) {
+  return (Array.isArray(rows) ? rows : [])
+    .map(hydrateScannedTodoRow)
+    .filter((todo) => todo && !todo.completed && todo.due_on && todo.due_on < todayIso);
+}
+
 export function buildAssignedPeopleSummary(rows, people = [], todayIso = new Date().toISOString().slice(0, 10)) {
   const groups = new Map();
   for (const row of Array.isArray(rows) ? rows : []) {

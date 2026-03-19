@@ -77,6 +77,7 @@ import {
   compactAssignmentTodo,
   normalizeTodoAssigneeIds,
   scanAssignedTodosFromRows,
+  scanOverdueTodosFromRows,
 } from "./mcp/basecamp-assignment-utils.js";
 
 const FLOW_TOOLS_ENABLED = String(process.env.ENABLE_FLOW_TOOLS || "false").toLowerCase() === "true";
@@ -4584,7 +4585,12 @@ async function reportTodosAssignedPerson(ctx, personId) {
 }
 
 async function reportTodosOverdue(ctx) {
-  return apiAll(ctx, `/reports/todos/overdue.json`);
+  const rows = await listAllOpenTodos(ctx);
+  const todayIso = new Date().toISOString().slice(0, 10);
+  return scanOverdueTodosFromRows(rows, todayIso).map((todo) => ({
+    ...compactAssignmentTodo(todo),
+    overdue: true,
+  }));
 }
 
 async function reportSchedulesUpcoming(ctx, query) {
@@ -9674,7 +9680,7 @@ export async function handleMCP(reqBody, ctx) {
         const todos = Array.isArray(data)
           ? (compact ? data.map(compactAssignmentTodo).filter(Boolean) : data)
           : [];
-        const payload = { person_id: personId, source: "workspace_scan" };
+        const payload = { person_id: personId, source: "workspace_scan", count: todos.length };
         if (!personSummary) {
           try {
             personSummary = normalizePerson(await getPerson(ctx, personId));
@@ -9693,7 +9699,7 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "report_todos_overdue") {
       try {
         const data = await reportTodosOverdue(ctx);
-        return ok(id, { ...buildListPayload("overdue", data) });
+        return ok(id, { source: "workspace_scan", ...buildListPayload("overdue", data) });
       } catch (e) {
         return fail(id, { code: "REPORT_TODOS_OVERDUE_ERROR", message: e.message });
       }
