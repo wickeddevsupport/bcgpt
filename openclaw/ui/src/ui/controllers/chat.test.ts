@@ -7,9 +7,6 @@ import {
   type ChatState,
 } from "./chat.ts";
 
-const PNG_1X1 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/woAAn8B9FD5fHAAAAAASUVORK5CYII=";
-
 function createState(overrides: Partial<ChatState> = {}): ChatState {
   return {
     chatAttachments: [],
@@ -312,79 +309,5 @@ describe("handleChatEvent", () => {
       expect.objectContaining({ sessionKey: "agent:designer:chat:missing" }),
       expect.objectContaining({ sessionKey: "agent:designer:main" }),
     ]);
-  });
-
-  it("passes image uploads through chat.send attachments", async () => {
-    const request = vi.fn(async (method: string) => {
-      if (method === "models.list") {
-        return { models: [{ id: "gpt-5", available: true }] };
-      }
-      if (method === "chat.send") {
-        return { ok: true };
-      }
-      throw new Error(`unexpected method: ${method}`);
-    });
-    const state = createState({
-      client: { request } as unknown as ChatState["client"],
-    });
-
-    await sendChatMessage(state, "see image", [
-      {
-        id: "img-1",
-        dataUrl: `data:image/png;base64,${PNG_1X1}`,
-        mimeType: "image/png",
-        fileName: "dot.png",
-        kind: "image",
-      },
-    ]);
-
-    expect(request).toHaveBeenCalledWith(
-      "chat.send",
-      expect.objectContaining({
-        message: "see image",
-        attachments: [
-          expect.objectContaining({
-            type: "image",
-            mimeType: "image/png",
-            fileName: "dot.png",
-            content: PNG_1X1,
-          }),
-        ],
-      }),
-    );
-  });
-
-  it("injects text attachments into the sent prompt instead of dropping them", async () => {
-    const request = vi.fn(async (method: string) => {
-      if (method === "models.list") {
-        return { models: [{ id: "gpt-5", available: true }] };
-      }
-      if (method === "chat.send") {
-        return { ok: true };
-      }
-      throw new Error(`unexpected method: ${method}`);
-    });
-    const state = createState({
-      client: { request } as unknown as ChatState["client"],
-    });
-
-    await sendChatMessage(state, "summarize this", [
-      {
-        id: "file-1",
-        dataUrl: "data:text/plain;base64,SGVsbG8gd29ybGQ=",
-        mimeType: "text/plain",
-        fileName: "notes.txt",
-        kind: "text",
-        textContent: "Hello world",
-      },
-    ]);
-
-    expect(request).toHaveBeenCalledWith(
-      "chat.send",
-      expect.objectContaining({
-        message: expect.stringContaining('<file name="notes.txt" mime="text/plain">'),
-        attachments: undefined,
-      }),
-    );
   });
 });

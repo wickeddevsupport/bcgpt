@@ -47,16 +47,6 @@ describe("shouldRouteToPmosWorkspaceChat", () => {
     ).toBe(false);
   });
 
-  it("keeps image-bearing turns on native chat.send instead of PMOS", () => {
-    expect(
-      shouldRouteToPmosWorkspaceChat(
-        workspaceClient as never,
-        "Please analyze this screenshot",
-        { hasImages: true },
-      ),
-    ).toBe(false);
-  });
-
   it("does not route generic chat just because it mentions projects or design", () => {
     expect(
       shouldRouteToPmosWorkspaceChat(

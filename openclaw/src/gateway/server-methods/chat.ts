@@ -2,10 +2,8 @@ import { CURRENT_SESSION_VERSION, SessionManager } from "@mariozechner/pi-coding
 import fs from "node:fs";
 import path from "node:path";
 import type { MsgContext } from "../../auto-reply/templating.js";
-import type { OpenClawConfig } from "../../config/config.js";
 import type { GatewayClient, GatewayRequestContext, GatewayRequestHandlers } from "./types.js";
 import { resolveSessionAgentId } from "../../agents/agent-scope.js";
-import { findModelInCatalog, modelSupportsVision } from "../../agents/model-catalog.js";
 import { resolveThinkingDefault } from "../../agents/model-selection.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { dispatchInboundMessage } from "../../auto-reply/dispatch.js";
@@ -116,115 +114,6 @@ function ensureTranscriptFile(params: { transcriptPath: string; sessionId: strin
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
-
-type SecondaryVisionDescription = {
-  text: string;
-  provider: string;
-  model: string;
-};
-
-function buildSecondaryVisionPrompt(index: number, total: number): string {
-  const position = total > 1 ? `attached image ${index + 1} of ${total}` : "attached image";
-  return [
-    `Describe the ${position} for a text-only assistant.`,
-    "Focus on visible text, UI labels, layout, charts, numbers, error messages, documents, and the details the user is most likely asking about.",
-    "Keep it factual and concise.",
-  ].join(" ");
-}
-
-function appendSecondaryVisionContext(
-  message: string,
-  descriptions: SecondaryVisionDescription[],
-): string {
-  if (descriptions.length === 0) {
-    return message;
-  }
-  const blocks = descriptions.map(
-    (entry, index) =>
-      `<image_context index="${index + 1}" source="${entry.provider}/${entry.model}">\n${entry.text}\n</image_context>`,
-  );
-  return [
-    message.trim(),
-    "Secondary image-reader context for the attached image(s):",
-    ...blocks,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-}
-
-async function describeChatImagesWithFallbackVision(params: {
-  cfg: OpenClawConfig;
-  images: ChatImageContent[];
-}): Promise<SecondaryVisionDescription[]> {
-  const [
-    { resolveOpenClawAgentDir },
-    { runWithImageModelFallback },
-    { resolveImageModelConfigForTool },
-    { describeImageWithModel },
-  ] = await Promise.all([
-    import("../../agents/agent-paths.js"),
-    import("../../agents/model-fallback.js"),
-    import("../../agents/tools/image-tool.js"),
-    import("../../media-understanding/providers/image.js"),
-  ]);
-
-  const agentDir = resolveOpenClawAgentDir();
-  const imageModelConfig = resolveImageModelConfigForTool({
-    cfg: params.cfg,
-    agentDir,
-  });
-  if (!imageModelConfig) {
-    throw new Error(
-      "No secondary image reader is configured. Configure agents.defaults.imageModel or auth for an image-capable provider.",
-    );
-  }
-
-  const effectiveCfg: OpenClawConfig = {
-    ...params.cfg,
-    agents: {
-      ...params.cfg.agents,
-      defaults: {
-        ...params.cfg.agents?.defaults,
-        imageModel: imageModelConfig,
-      },
-    },
-  };
-
-  const descriptions: SecondaryVisionDescription[] = [];
-  for (const [index, image] of params.images.entries()) {
-    const buffer = Buffer.from(image.data, "base64");
-    const described = await runWithImageModelFallback({
-      cfg: effectiveCfg,
-      run: async (provider, model) =>
-        await describeImageWithModel({
-          buffer,
-          fileName: `chat-image-${index + 1}`,
-          mime: image.mimeType,
-          provider,
-          model,
-          prompt: buildSecondaryVisionPrompt(index, params.images.length),
-          timeoutMs: 15_000,
-          agentDir,
-          cfg: effectiveCfg,
-        }),
-    });
-    const text = described.result.text.trim();
-    if (!text) {
-      continue;
-    }
-    descriptions.push({
-      text,
-      provider: described.provider,
-      model: described.model,
-    });
-  }
-  return descriptions;
-}
-
-export const __chatTesting = {
-  buildSecondaryVisionPrompt,
-  appendSecondaryVisionContext,
-} as const;
 
 function appendAssistantTranscriptMessage(params: {
   message: string;
@@ -427,7 +316,6 @@ function canAccessSession(
 export function shouldRouteToPmosWorkspaceChat(
   client: GatewayClient | null,
   message: string,
-  opts?: { hasImages?: boolean },
 ): boolean {
   const workspaceId =
     typeof client?.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
@@ -436,9 +324,6 @@ export function shouldRouteToPmosWorkspaceChat(
   }
   const trimmed = message.trim();
   if (!trimmed) {
-    return false;
-  }
-  if (opts?.hasImages) {
     return false;
   }
 
@@ -718,48 +603,6 @@ export const chatHandlers: GatewayRequestHandlers = {
     const rawSessionKey = p.sessionKey;
     const cfg = await loadChatConfigForClient(client);
     const { entry, canonicalKey: sessionKey } = loadSessionEntryForConfig(cfg, rawSessionKey);
-    const sessionAgentId = resolveSessionAgentId({
-      sessionKey,
-      config: cfg,
-    });
-    const resolvedSessionModel = resolveSessionModelRef(cfg, entry, sessionAgentId);
-    let catalog = [] as Awaited<ReturnType<typeof context.loadGatewayModelCatalog>>;
-    try {
-      catalog = await context.loadGatewayModelCatalog();
-    } catch {
-      catalog = [];
-    }
-    const resolvedSessionModelEntry = findModelInCatalog(
-      catalog,
-      resolvedSessionModel.provider,
-      resolvedSessionModel.model,
-    );
-    const resolvedSessionModelSupportsVision = modelSupportsVision(resolvedSessionModelEntry);
-    let agentMessage = parsedMessage;
-    let agentImages = parsedImages;
-    if (parsedImages.length > 0 && resolvedSessionModelEntry && !resolvedSessionModelSupportsVision) {
-      try {
-        const descriptions = await describeChatImagesWithFallbackVision({
-          cfg,
-          images: parsedImages,
-        });
-        if (descriptions.length > 0) {
-          agentMessage = appendSecondaryVisionContext(parsedMessage, descriptions);
-          agentImages = [];
-        }
-      } catch (err) {
-        context.logGateway.warn(`secondary vision fallback failed: ${String(err)}`);
-        agentMessage = appendSecondaryVisionContext(parsedMessage, [
-          {
-            text:
-              "An image was attached, but the secondary image reader could not extract usable context.",
-            provider: "secondary-vision",
-            model: "unavailable",
-          },
-        ]);
-        agentImages = [];
-      }
-    }
 
     // Check workspace ownership for non-super-admin users
     if (!canAccessSession(rawSessionKey, cfg, client)) {
@@ -844,7 +687,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       };
       respond(true, ackPayload, undefined, { runId: clientRunId });
 
-      if (shouldRouteToPmosWorkspaceChat(client, parsedMessage, { hasImages: parsedImages.length > 0 })) {
+      if (shouldRouteToPmosWorkspaceChat(client, parsedMessage)) {
         void (async () => {
           try {
             const { storePath: latestStorePath, entry: latestEntry } =
@@ -1003,14 +846,14 @@ export const chatHandlers: GatewayRequestHandlers = {
       const injectThinking = Boolean(
         p.thinking && trimmedMessage && !trimmedMessage.startsWith("/"),
       );
-      const commandBody = injectThinking ? `/think ${p.thinking} ${agentMessage}` : agentMessage;
+      const commandBody = injectThinking ? `/think ${p.thinking} ${parsedMessage}` : parsedMessage;
       const clientInfo = client?.connect?.client;
 
       const effectiveCfg = cfg;
       // Inject timestamp so agents know the current date/time.
       // Only BodyForAgent gets the timestamp -- Body stays raw for UI display.
       // See: https://github.com/moltbot/moltbot/issues/3658
-      const stampedMessage = injectTimestamp(agentMessage, timestampOptsFromConfig(effectiveCfg));
+      const stampedMessage = injectTimestamp(parsedMessage, timestampOptsFromConfig(effectiveCfg));
 
       const ctx: MsgContext = {
         Body: parsedMessage,
@@ -1032,7 +875,10 @@ export const chatHandlers: GatewayRequestHandlers = {
         GroupSystemPrompt: workspaceSystemPrompt || undefined,
       };
 
-      const agentId = sessionAgentId;
+      const agentId = resolveSessionAgentId({
+        sessionKey,
+        config: effectiveCfg,
+      });
       const { onModelSelected, ...prefixOptions } = createReplyPrefixOptions({
         cfg: effectiveCfg,
         agentId,
@@ -1064,7 +910,7 @@ export const chatHandlers: GatewayRequestHandlers = {
         replyOptions: {
           runId: clientRunId,
           abortSignal: abortController.signal,
-          images: agentImages.length > 0 ? agentImages : undefined,
+          images: parsedImages.length > 0 ? parsedImages : undefined,
           disableBlockStreaming: true,
           onAgentRunStart: (runId) => {
             agentRunStarted = true;

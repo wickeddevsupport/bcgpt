@@ -235,7 +235,7 @@
   margin-bottom: 0;
 }
 
-/* Attachment preview */
+/* Image attachments preview */
 .chat-attachments {
   display: inline-flex;
   flex-wrap: wrap;
@@ -253,9 +253,6 @@
   position: relative;
   width: 80px;
   height: 80px;
-  display: flex;
-  align-items: stretch;
-  justify-content: stretch;
   border-radius: 6px;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -266,47 +263,6 @@
   width: 100%;
   height: 100%;
   object-fit: contain;
-}
-
-.chat-attachment__file {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 10px 8px;
-  text-align: center;
-}
-
-.chat-attachment__file-icon {
-  width: 18px;
-  height: 18px;
-  color: var(--text-muted);
-}
-
-.chat-attachment__file-icon svg {
-  width: 100%;
-  height: 100%;
-}
-
-.chat-attachment__file-name {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.chat-attachment__file-meta {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 10px;
-  color: var(--text-muted);
 }
 
 .chat-attachment__remove {
@@ -436,48 +392,6 @@
   display: flex;
   align-items: stretch;
   gap: 8px;
-  flex-wrap: wrap;
-}
-
-.chat-compose__file-input {
-  display: none;
-}
-
-.chat-compose__attach-group {
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.chat-compose__attach {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 112px;
-  padding: 0 14px;
-  justify-content: center;
-}
-
-.chat-compose__attach-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.chat-compose__attach svg {
-  width: 16px;
-  height: 16px;
-}
-
-.chat-compose__attach-label {
-  font-weight: 600;
-}
-
-.chat-compose__attachment-hint {
-  font-size: 12px;
-  color: var(--muted);
-  padding: 0 2px;
 }
 
 .chat-compose .chat-compose__actions .btn {
