@@ -1390,7 +1390,7 @@ function detectChatIntents(
 }
 
 const BASECAMP_CORE_TOOL_NAMES = new Set([
-  "bcgpt_smart_action", "bcgpt_list_projects", "bcgpt_mcp_call",
+  "bcgpt_smart_action", "bcgpt_list_projects", "bcgpt_mcp_call", "bcgpt_search_basecamp",
 ]);
 const BASECAMP_DISCOVERY_TOOL_NAMES = new Set([
   "bcgpt_list_tools",
@@ -2130,7 +2130,99 @@ function renderWorkspaceSnapshotReply(result: unknown): string {
     lines.push("", "Priority items:");
     lines.push(...priority.map((todo) => formatTodoBullet(todo, todayIso)));
   }
+  // Resource counts from the full dock sync
+  const rc = isJsonObject(root?.resourceCounts) ? root.resourceCounts : null;
+  if (rc) {
+    const parts: string[] = [];
+    if (typeof rc.messages === "number" && rc.messages > 0) parts.push(`${rc.messages} messages`);
+    if (typeof rc.scheduleEntries === "number" && rc.scheduleEntries > 0) parts.push(`${rc.scheduleEntries} schedule entries`);
+    if (typeof rc.cards === "number" && rc.cards > 0) parts.push(`${rc.cards} cards`);
+    if (typeof rc.documents === "number" && rc.documents > 0) parts.push(`${rc.documents} documents`);
+    if (typeof rc.people === "number" && rc.people > 0) parts.push(`${rc.people} people`);
+    if (parts.length) {
+      lines.push("", `Also synced: ${parts.join(", ")}.`);
+    }
+  }
   lines.push("", "Next step: Start with the first at-risk project and clear its oldest overdue item.");
+  return lines.join("\n");
+}
+
+function renderMessagesReply(result: unknown): string {
+  const payload = isJsonObject(result) ? result : null;
+  const root = isJsonObject(payload?.result) ? payload.result : payload;
+  const projectName = stringOrNull(isJsonObject(root?.project) ? root.project.name : null) ?? "This project";
+  const messages = Array.isArray(root?.messages) ? root.messages : [];
+  const items = messages
+    .filter((m): m is Record<string, unknown> => isJsonObject(m))
+    .map((m) => ({
+      subject: stringOrNull(m.subject) ?? stringOrNull(m.title) ?? "(no subject)",
+      creator: stringOrNull(m.creator_name) ?? (isJsonObject(m.creator) ? stringOrNull(m.creator.name) : null) ?? "",
+      date: stringOrNull(m.created_at)?.slice(0, 10) ?? "",
+    }));
+  const lines = [`${projectName} messages (${items.length}):`, ""];
+  if (!items.length) {
+    lines.push("No messages found on the message board.");
+  } else {
+    lines.push(
+      ...items.slice(0, 15).map((m) => `- ${m.subject}${m.creator ? ` (${m.creator})` : ""}${m.date ? ` -- ${m.date}` : ""}`),
+    );
+    if (items.length > 15) lines.push(`... and ${items.length - 15} more`);
+  }
+  lines.push("", "Next step: Tell me which message you want to read in full, or ask to create a new message.");
+  return lines.join("\n");
+}
+
+function renderCardsReply(result: unknown): string {
+  const payload = isJsonObject(result) ? result : null;
+  const root = isJsonObject(payload?.result) ? payload.result : payload;
+  const projectName = stringOrNull(isJsonObject(root?.project) ? root.project.name : null) ?? "This project";
+  const tables = Array.isArray(root?.card_tables) ? root.card_tables : [];
+  const lines = [`${projectName} card tables (${tables.length}):`, ""];
+  if (!tables.length) {
+    lines.push("No card tables (kanban boards) found.");
+  } else {
+    for (const t of tables.slice(0, 5)) {
+      if (!isJsonObject(t)) continue;
+      const title = stringOrNull(t.title) ?? "(untitled)";
+      const columns = Array.isArray(t.lists) ? t.lists : [];
+      const cardCount = columns.reduce((sum: number, col: unknown) => {
+        if (!isJsonObject(col)) return sum;
+        return sum + (Array.isArray(col.cards) ? col.cards.length : 0);
+      }, 0);
+      lines.push(`## ${title} (${cardCount} cards)`);
+      for (const col of columns.slice(0, 8)) {
+        if (!isJsonObject(col)) continue;
+        const colName = stringOrNull(col.title) ?? stringOrNull(col.name) ?? "Column";
+        const colCards = Array.isArray(col.cards) ? col.cards.length : 0;
+        lines.push(`  - ${colName}: ${colCards} cards`);
+      }
+    }
+  }
+  lines.push("", "Next step: Tell me which column or card you want details on, or ask to create or move a card.");
+  return lines.join("\n");
+}
+
+function renderDocumentsReply(result: unknown): string {
+  const payload = isJsonObject(result) ? result : null;
+  const root = isJsonObject(payload?.result) ? payload.result : payload;
+  const projectName = stringOrNull(isJsonObject(root?.project) ? root.project.name : null) ?? "This project";
+  const docs = Array.isArray(root?.documents) ? root.documents : [];
+  const items = docs
+    .filter((d): d is Record<string, unknown> => isJsonObject(d))
+    .map((d) => ({
+      title: stringOrNull(d.title) ?? "(untitled)",
+      updatedAt: stringOrNull(d.updated_at)?.slice(0, 10) ?? "",
+    }));
+  const lines = [`${projectName} documents (${items.length}):`, ""];
+  if (!items.length) {
+    lines.push("No documents found in the vault.");
+  } else {
+    lines.push(
+      ...items.slice(0, 15).map((d) => `- ${d.title}${d.updatedAt ? ` (updated ${d.updatedAt})` : ""}`),
+    );
+    if (items.length > 15) lines.push(`... and ${items.length - 15} more`);
+  }
+  lines.push("", "Next step: Tell me which document you want to read, or ask to create a new one.");
   return lines.join("\n");
 }
 
@@ -2187,6 +2279,12 @@ function renderDirectBasecampShortcutReply(
       return renderProjectPeopleReply(result);
     case "project_schedule":
       return renderScheduleReply(result);
+    case "project_messages":
+      return renderMessagesReply(result);
+    case "project_cards":
+      return renderCardsReply(result);
+    case "project_documents":
+      return renderDocumentsReply(result);
     case "workspace_snapshot":
       return renderWorkspaceSnapshotReply(result);
     case "inspect_url":
@@ -4298,6 +4396,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         switch (toolName) {
           case "bcgpt_smart_action":
             return `Checking live Basecamp data with smart_action for: ${String(args.query ?? "").trim() || "workspace request"}`;
+          case "bcgpt_search_basecamp":
+            return `Searching across all Basecamp data for: ${String(args.query ?? "").trim() || "search query"}`;
           case "bcgpt_list_projects":
             return "Loading the live Basecamp project list for this workspace.";
           case "bcgpt_list_tools":
@@ -4576,6 +4676,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         "- `POST /mcp` with `tools/call` -- invoke an exact named Basecamp MCP tool with structured arguments.",
         "- `POST /action/:operation` -- OpenAPI wrapper for individual tools.",
         "- Named Basecamp MCP tools are best for deterministic reads like todo lists, project todos, people, messages, schedules, card tables, documents, and other exact resources.",
+        "- `search_basecamp({query})` -- Cross-resource local search across todos, messages, schedule entries, cards, documents, and people. Fast results from the synced local snapshot. Use this when the user is looking for something across multiple resource types.",
         "- `smart_action({query})` -- Natural-language router. Best for ambiguous requests, pasted Basecamp URLs, broader searches, and summary or audit style questions when the exact tool is not obvious.",
         "- `basecamp_raw({method, path, body})` -- Raw Basecamp API access for anything not covered by named tools.",
         ] : []),
@@ -4706,6 +4807,22 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
                   type: "string",
                   description: "Optional project name to scope the Basecamp request.",
                 },
+              },
+            },
+          },
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "bcgpt_search_basecamp",
+            description: "Search across all synced Basecamp data: todos, messages, schedule entries, cards, documents, and people. Fast local search from the synced snapshot.",
+            parameters: {
+              type: "object",
+              required: ["query"],
+              additionalProperties: false,
+              properties: {
+                query: { type: "string", description: "Search query" },
+                project_id: { type: "string", description: "Optional: limit to a specific project ID" },
               },
             },
           },
@@ -5174,6 +5291,37 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             };
             finishTool(payload);
             return JSON.stringify(payload);
+          }
+          case "bcgpt_search_basecamp": {
+            const { bcgptUrl, apiKey } = await resolveWorkspaceBcgptAccess({
+              workspaceId,
+              allowGlobalSecrets: true,
+            });
+            if (!apiKey) {
+              const value = JSON.stringify({ error: "Basecamp integration is not configured." });
+              finishTool({ error: "Basecamp integration is not configured." });
+              return value;
+            }
+            const searchResult = await callBcgptTool({
+              bcgptUrl,
+              apiKey,
+              toolName: "search_basecamp",
+              toolArgs: { query: String(args.query ?? ""), project_id: args.project_id ? String(args.project_id) : undefined },
+              timeoutMs: 15_000,
+            });
+            if (!searchResult.ok) {
+              const payload = { error: searchResult.error ?? "Search failed" };
+              finishTool(payload);
+              return JSON.stringify(payload);
+            }
+            const searchPayload = {
+              tool: "search_basecamp",
+              summary: `Found ${((searchResult.result as Record<string, unknown>)?.results as unknown[])?.length ?? 0} results for "${String(args.query ?? "")}"`,
+              continueAgentLoop: true,
+              result: searchResult.result,
+            };
+            finishTool(searchPayload);
+            return JSON.stringify(searchPayload);
           }
           case "bcgpt_mcp_call": {
             const requestedToolRaw = String(args.tool ?? "").trim();

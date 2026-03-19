@@ -11,7 +11,14 @@ import {
   upsertBasecampSyncState,
 } from "./db.js";
 import { basecampFetch, basecampFetchAll } from "./basecamp.js";
-import { buildWorkspaceTodoSnapshot } from "./basecamp-workspace-snapshot.js";
+import {
+  buildWorkspaceTodoSnapshot,
+  normalizeMessage,
+  normalizeScheduleEntry,
+  normalizeCard,
+  normalizeDocument,
+  normalizePerson,
+} from "./basecamp-workspace-snapshot.js";
 
 const DEFAULT_SYNC_MAX_AGE_MS = Number(process.env.BASECAMP_WORKSPACE_SYNC_MAX_AGE_MS || 5 * 60 * 1000);
 const DEFAULT_SYNC_INTERVAL_MS = Number(process.env.BASECAMP_WORKSPACE_SYNC_INTERVAL_MS || 10 * 60 * 1000);
@@ -183,6 +190,89 @@ async function listTodosForList(token, accountId, projectId, todolist) {
   });
 }
 
+async function listMessagesFromDock(token, accountId, projectId, dock) {
+  const boardDock = dockFind(dock, ["message_board", "message_boards"]);
+  if (!boardDock) return { board: null, messages: [] };
+  try {
+    const board = boardDock.url
+      ? await basecampFetch(token, boardDock.url, { accountId })
+      : await basecampFetch(token, `/buckets/${projectId}/message_boards/${boardDock.id}.json`, { accountId });
+    if (!board?.messages_url) return { board, messages: [] };
+    const msgs = await basecampFetchAll(token, board.messages_url, { accountId, maxPages: 20, pageDelayMs: 40 });
+    return { board, messages: Array.isArray(msgs) ? msgs : [] };
+  } catch {
+    return { board: null, messages: [] };
+  }
+}
+
+async function listScheduleFromDock(token, accountId, projectId, dock) {
+  const schedDock = dockFind(dock, ["schedule", "schedules"]);
+  if (!schedDock) return { schedule: null, entries: [] };
+  try {
+    const schedule = schedDock.url
+      ? await basecampFetch(token, schedDock.url, { accountId })
+      : await basecampFetch(token, `/buckets/${projectId}/schedules/${schedDock.id}.json`, { accountId });
+    const entriesUrl = schedule?.entries_url || schedule?.entries?.url;
+    if (!entriesUrl) return { schedule, entries: [] };
+    const entries = await basecampFetchAll(token, entriesUrl, { accountId, maxPages: 20, pageDelayMs: 40 });
+    return { schedule, entries: Array.isArray(entries) ? entries : [] };
+  } catch {
+    return { schedule: null, entries: [] };
+  }
+}
+
+async function listCardsFromDock(token, accountId, projectId, dock) {
+  const cardDock = dockFind(dock, ["card_table", "card_tables", "kanban_board"]);
+  if (!cardDock) return { cardTables: [], cards: [] };
+  try {
+    // List all card tables
+    let tables = [];
+    try {
+      tables = await basecampFetchAll(token, `/buckets/${projectId}/card_tables.json`, { accountId, maxPages: 10, pageDelayMs: 40 });
+    } catch {
+      // Fallback: try single card table from dock
+      if (cardDock.url || cardDock.id) {
+        try {
+          const single = cardDock.url
+            ? await basecampFetch(token, cardDock.url, { accountId })
+            : await basecampFetch(token, `/buckets/${projectId}/card_tables/${cardDock.id}.json`, { accountId });
+          if (single) tables = [single];
+        } catch { /* ignore */ }
+      }
+    }
+    if (!Array.isArray(tables)) tables = [];
+    const allCards = [];
+    for (const table of tables) {
+      const lists = Array.isArray(table?.lists) ? table.lists : [];
+      for (const col of lists) {
+        const colCards = Array.isArray(col?.cards) ? col.cards : [];
+        for (const card of colCards) {
+          allCards.push({ card, table, column: col });
+        }
+      }
+    }
+    return { cardTables: tables, cards: allCards };
+  } catch {
+    return { cardTables: [], cards: [] };
+  }
+}
+
+async function listDocumentsFromDock(token, accountId, projectId, dock) {
+  const vaultDock = dockFind(dock, ["vault", "documents"]);
+  if (!vaultDock) return { vault: null, documents: [] };
+  try {
+    const vault = vaultDock.url
+      ? await basecampFetch(token, vaultDock.url, { accountId })
+      : await basecampFetch(token, `/buckets/${projectId}/vaults/${vaultDock.id}.json`, { accountId });
+    const docsUrl = vault?.documents_url || vault?.documents?.url;
+    if (!docsUrl) return { vault, documents: [] };
+    const docs = await basecampFetchAll(token, docsUrl, { accountId, maxPages: 20, pageDelayMs: 40 });
+    return { vault, documents: Array.isArray(docs) ? docs : [] };
+  } catch {
+    return { vault: null, documents: [] };
+  }
+}
+
 function buildRawRecord({ resourceType, resourceId, payload, projectId = null, parentType = null, parentId = null, sourcePath = null }) {
   const sourceUpdatedAt =
     toEpochSec(payload?.updated_at) ??
@@ -258,6 +348,11 @@ async function collectWorkspaceTodoData({ token, accountId, previewLimit, projec
   const projects = maxProjects > 0 ? activeProjects.slice(0, maxProjects) : activeProjects;
   const rawRecords = [];
   const todos = [];
+  const allMessages = [];
+  const allScheduleEntries = [];
+  const allCards = [];
+  const allDocuments = [];
+  const peopleMap = new Map();
 
   for (const project of projects) {
     rawRecords.push(
@@ -274,6 +369,7 @@ async function collectWorkspaceTodoData({ token, accountId, previewLimit, projec
   const details = await mapLimit(projects, PROJECT_SYNC_CONCURRENCY, async (project) => {
     try {
       const detail = await getProject(token, accountId, project.id);
+      const dock = Array.isArray(detail?.dock) ? detail.dock : [];
       rawRecords.push(
         buildRawRecord({
           resourceType: "project_detail",
@@ -283,6 +379,8 @@ async function collectWorkspaceTodoData({ token, accountId, previewLimit, projec
           payload: detail,
         }),
       );
+
+      // --- Todos (existing) ---
       const todolists = await listTodoLists(token, accountId, project.id, detail);
       for (const todolist of todolists) {
         rawRecords.push(
@@ -305,11 +403,43 @@ async function collectWorkspaceTodoData({ token, accountId, previewLimit, projec
           return { todolist, todos: [] };
         }
       });
+
+      // --- Messages ---
+      const { board, messages: rawMessages } = await listMessagesFromDock(token, accountId, project.id, dock);
+
+      // --- Schedule ---
+      const { schedule, entries: rawEntries } = await listScheduleFromDock(token, accountId, project.id, dock);
+
+      // --- Cards ---
+      const { cardTables, cards: rawCards } = await listCardsFromDock(token, accountId, project.id, dock);
+
+      // --- Documents ---
+      const { vault, documents: rawDocs } = await listDocumentsFromDock(token, accountId, project.id, dock);
+
+      // --- People (from project membership) ---
+      const membershipUrl = detail?.memberships_url;
+      let projectPeople = [];
+      if (membershipUrl) {
+        try {
+          projectPeople = await basecampFetchAll(token, membershipUrl, { accountId, maxPages: 10, pageDelayMs: 40 });
+          if (!Array.isArray(projectPeople)) projectPeople = [];
+        } catch { projectPeople = []; }
+      }
+
       return {
         project,
         detail,
         todolists,
         todoPages,
+        board,
+        rawMessages,
+        schedule,
+        rawEntries,
+        cardTables,
+        rawCards,
+        vault,
+        rawDocs,
+        projectPeople,
       };
     } catch {
       return {
@@ -317,27 +447,39 @@ async function collectWorkspaceTodoData({ token, accountId, previewLimit, projec
         detail: project,
         todolists: [],
         todoPages: [],
+        board: null,
+        rawMessages: [],
+        schedule: null,
+        rawEntries: [],
+        cardTables: [],
+        rawCards: [],
+        vault: null,
+        rawDocs: [],
+        projectPeople: [],
       };
     }
   });
 
   for (const entry of details) {
+    const project = entry.project;
+
+    // --- Todos ---
     for (const group of entry.todoPages) {
       for (const todo of group.todos) {
         rawRecords.push(
           buildRawRecord({
             resourceType: "todo",
             resourceId: todo.id,
-            projectId: entry.project.id,
+            projectId: project.id,
             parentType: "todolist",
             parentId: group.todolist.id,
-            sourcePath: group.todolist?.todos_url ?? `/buckets/${entry.project.id}/todolists/${group.todolist.id}/todos.json`,
+            sourcePath: group.todolist?.todos_url ?? `/buckets/${project.id}/todolists/${group.todolist.id}/todos.json`,
             payload: todo,
           }),
         );
         const normalized = normalizeTodo({
           todo,
-          project: entry.project,
+          project,
           todolist: group.todolist,
           currentPersonId: identity?.id ?? null,
         });
@@ -346,6 +488,55 @@ async function collectWorkspaceTodoData({ token, accountId, previewLimit, projec
         }
       }
     }
+
+    // --- Messages ---
+    for (const msg of entry.rawMessages) {
+      rawRecords.push(buildRawRecord({ resourceType: "message", resourceId: msg.id, projectId: project.id, parentType: "message_board", parentId: entry.board?.id, payload: msg }));
+      const norm = normalizeMessage({ message: msg, project, board: entry.board });
+      if (norm) allMessages.push(norm);
+    }
+
+    // --- Schedule entries ---
+    for (const se of entry.rawEntries) {
+      rawRecords.push(buildRawRecord({ resourceType: "schedule_entry", resourceId: se.id, projectId: project.id, parentType: "schedule", parentId: entry.schedule?.id, payload: se }));
+      const norm = normalizeScheduleEntry({ entry: se, project, schedule: entry.schedule });
+      if (norm) allScheduleEntries.push(norm);
+    }
+
+    // --- Cards ---
+    for (const { card, table, column } of entry.rawCards) {
+      rawRecords.push(buildRawRecord({ resourceType: "card", resourceId: card.id, projectId: project.id, parentType: "card_table", parentId: table?.id, payload: card }));
+      const norm = normalizeCard({ card, project, cardTable: table, column });
+      if (norm) allCards.push(norm);
+    }
+
+    // --- Documents ---
+    for (const doc of entry.rawDocs) {
+      rawRecords.push(buildRawRecord({ resourceType: "document", resourceId: doc.id, projectId: project.id, parentType: "vault", parentId: entry.vault?.id, payload: doc }));
+      const norm = normalizeDocument({ document: doc, project, vault: entry.vault });
+      if (norm) allDocuments.push(norm);
+    }
+
+    // --- People ---
+    for (const person of entry.projectPeople) {
+      const pid = person?.id != null ? Number(person.id) : null;
+      if (!pid || !Number.isFinite(pid)) continue;
+      const existing = peopleMap.get(pid);
+      if (existing) {
+        if (!existing._projectIds.includes(String(project.id))) {
+          existing._projectIds.push(String(project.id));
+        }
+      } else {
+        peopleMap.set(pid, { ...person, _projectIds: [String(project.id)] });
+      }
+    }
+  }
+
+  // Normalize people
+  const allPeople = [];
+  for (const [, person] of peopleMap) {
+    const norm = normalizePerson({ person, projectIds: person._projectIds || [] });
+    if (norm) allPeople.push(norm);
   }
 
   const projectsForSnapshot = details.map((entry) => ({
@@ -374,6 +565,11 @@ async function collectWorkspaceTodoData({ token, accountId, previewLimit, projec
     identity,
     projects,
     todos,
+    messages: allMessages,
+    scheduleEntries: allScheduleEntries,
+    cards: allCards,
+    documents: allDocuments,
+    people: allPeople,
     rawRecords,
     snapshot,
   };
@@ -422,6 +618,11 @@ export async function runBasecampWorkspaceSync({
         reason,
         projectCount: result.snapshot.totals.projectCount,
         openTodos: result.snapshot.totals.openTodos,
+        messageCount: (result.messages || []).length,
+        scheduleEntryCount: (result.scheduleEntries || []).length,
+        cardCount: (result.cards || []).length,
+        documentCount: (result.documents || []).length,
+        peopleCount: (result.people || []).length,
         rawRecordCount: result.rawRecords.length,
       };
       const snapshot = await replaceBasecampWorkspaceSnapshot(ctx.userKey, ctx.accountId, {
@@ -434,6 +635,11 @@ export async function runBasecampWorkspaceSync({
         },
         projects: result.snapshot.projects,
         todos: result.todos,
+        messages: result.messages || [],
+        scheduleEntries: result.scheduleEntries || [],
+        cards: result.cards || [],
+        documents: result.documents || [],
+        people: result.people || [],
         rawRecords: result.rawRecords,
       });
       await finishBasecampSyncRun(runId, {

@@ -368,6 +368,116 @@ async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_basecamp_raw_records_user_account_project
       ON basecamp_raw_records(user_key, account_id, project_id);
 
+    -- ============ Full Dock Snapshot Tables ============
+
+    CREATE TABLE IF NOT EXISTS basecamp_message_snapshots (
+      user_key TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      project_id TEXT,
+      project_name TEXT,
+      board_id TEXT,
+      subject TEXT NOT NULL,
+      status TEXT,
+      content_preview TEXT,
+      created_at TEXT,
+      updated_at TEXT,
+      creator_id TEXT,
+      creator_name TEXT,
+      app_url TEXT,
+      fetched_at BIGINT NOT NULL,
+      source_updated_at BIGINT,
+      PRIMARY KEY(user_key, account_id, message_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_bc_message_snap_proj
+      ON basecamp_message_snapshots(user_key, account_id, project_id);
+
+    CREATE TABLE IF NOT EXISTS basecamp_schedule_entry_snapshots (
+      user_key TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      entry_id TEXT NOT NULL,
+      project_id TEXT,
+      project_name TEXT,
+      schedule_id TEXT,
+      summary TEXT NOT NULL,
+      description TEXT,
+      starts_at TEXT,
+      ends_at TEXT,
+      all_day BOOLEAN DEFAULT FALSE,
+      created_at TEXT,
+      updated_at TEXT,
+      creator_id TEXT,
+      creator_name TEXT,
+      app_url TEXT,
+      fetched_at BIGINT NOT NULL,
+      source_updated_at BIGINT,
+      PRIMARY KEY(user_key, account_id, entry_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_bc_schedule_snap_proj
+      ON basecamp_schedule_entry_snapshots(user_key, account_id, project_id);
+    CREATE INDEX IF NOT EXISTS idx_bc_schedule_snap_date
+      ON basecamp_schedule_entry_snapshots(user_key, account_id, starts_at);
+
+    CREATE TABLE IF NOT EXISTS basecamp_card_snapshots (
+      user_key TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      card_id TEXT NOT NULL,
+      project_id TEXT,
+      project_name TEXT,
+      card_table_id TEXT,
+      card_table_name TEXT,
+      column_id TEXT,
+      column_name TEXT,
+      title TEXT NOT NULL,
+      content_preview TEXT,
+      due_on TEXT,
+      assignee_ids_json TEXT DEFAULT '[]',
+      position INTEGER,
+      app_url TEXT,
+      fetched_at BIGINT NOT NULL,
+      source_updated_at BIGINT,
+      PRIMARY KEY(user_key, account_id, card_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_bc_card_snap_proj
+      ON basecamp_card_snapshots(user_key, account_id, project_id);
+
+    CREATE TABLE IF NOT EXISTS basecamp_document_snapshots (
+      user_key TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      document_id TEXT NOT NULL,
+      project_id TEXT,
+      project_name TEXT,
+      vault_id TEXT,
+      title TEXT NOT NULL,
+      content_preview TEXT,
+      created_at TEXT,
+      updated_at TEXT,
+      creator_id TEXT,
+      creator_name TEXT,
+      app_url TEXT,
+      fetched_at BIGINT NOT NULL,
+      source_updated_at BIGINT,
+      PRIMARY KEY(user_key, account_id, document_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_bc_document_snap_proj
+      ON basecamp_document_snapshots(user_key, account_id, project_id);
+
+    CREATE TABLE IF NOT EXISTS basecamp_person_snapshots (
+      user_key TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      person_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      email_address TEXT,
+      admin BOOLEAN DEFAULT FALSE,
+      company TEXT,
+      avatar_url TEXT,
+      project_ids_json TEXT DEFAULT '[]',
+      fetched_at BIGINT NOT NULL,
+      PRIMARY KEY(user_key, account_id, person_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_bc_person_snap_user
+      ON basecamp_person_snapshots(user_key, account_id);
+
     CREATE TABLE IF NOT EXISTS activepieces_user_projects (
       user_key TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
@@ -1250,6 +1360,11 @@ export async function replaceBasecampWorkspaceSnapshot(userKey, accountId, {
   snapshot,
   projects = [],
   todos = [],
+  messages = [],
+  scheduleEntries = [],
+  cards = [],
+  documents = [],
+  people = [],
   rawRecords = [],
 } = {}) {
   const key = normalizeUserKey(userKey);
@@ -1261,6 +1376,11 @@ export async function replaceBasecampWorkspaceSnapshot(userKey, accountId, {
     await client.query("BEGIN");
     await client.query("DELETE FROM basecamp_project_snapshots WHERE user_key = $1 AND account_id = $2", [key, acct]);
     await client.query("DELETE FROM basecamp_todo_snapshots WHERE user_key = $1 AND account_id = $2", [key, acct]);
+    await client.query("DELETE FROM basecamp_message_snapshots WHERE user_key = $1 AND account_id = $2", [key, acct]);
+    await client.query("DELETE FROM basecamp_schedule_entry_snapshots WHERE user_key = $1 AND account_id = $2", [key, acct]);
+    await client.query("DELETE FROM basecamp_card_snapshots WHERE user_key = $1 AND account_id = $2", [key, acct]);
+    await client.query("DELETE FROM basecamp_document_snapshots WHERE user_key = $1 AND account_id = $2", [key, acct]);
+    await client.query("DELETE FROM basecamp_person_snapshots WHERE user_key = $1 AND account_id = $2", [key, acct]);
     await client.query("DELETE FROM basecamp_raw_records WHERE user_key = $1 AND account_id = $2", [key, acct]);
 
     await client.query(`
@@ -1325,6 +1445,88 @@ export async function replaceBasecampWorkspaceSnapshot(userKey, accountId, {
       ]);
     }
 
+    for (const msg of messages) {
+      await client.query(`
+        INSERT INTO basecamp_message_snapshots (
+          user_key, account_id, message_id, project_id, project_name, board_id, subject,
+          status, content_preview, created_at, updated_at, creator_id, creator_name, app_url, fetched_at, source_updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+      `, [
+        key, acct, String(msg.messageId), msg.projectId == null ? null : String(msg.projectId),
+        msg.projectName ?? null, msg.boardId == null ? null : String(msg.boardId),
+        msg.subject, msg.status ?? null, msg.contentPreview ?? null,
+        msg.createdAt ?? null, msg.updatedAt ?? null,
+        msg.creatorId == null ? null : String(msg.creatorId), msg.creatorName ?? null,
+        msg.appUrl ?? null, fetchedAt, msg.sourceUpdatedAt ?? null,
+      ]);
+    }
+
+    for (const entry of scheduleEntries) {
+      await client.query(`
+        INSERT INTO basecamp_schedule_entry_snapshots (
+          user_key, account_id, entry_id, project_id, project_name, schedule_id, summary,
+          description, starts_at, ends_at, all_day, created_at, updated_at, creator_id, creator_name,
+          app_url, fetched_at, source_updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+      `, [
+        key, acct, String(entry.entryId), entry.projectId == null ? null : String(entry.projectId),
+        entry.projectName ?? null, entry.scheduleId == null ? null : String(entry.scheduleId),
+        entry.summary, entry.description ?? null,
+        entry.startsAt ?? null, entry.endsAt ?? null, Boolean(entry.allDay),
+        entry.createdAt ?? null, entry.updatedAt ?? null,
+        entry.creatorId == null ? null : String(entry.creatorId), entry.creatorName ?? null,
+        entry.appUrl ?? null, fetchedAt, entry.sourceUpdatedAt ?? null,
+      ]);
+    }
+
+    for (const card of cards) {
+      await client.query(`
+        INSERT INTO basecamp_card_snapshots (
+          user_key, account_id, card_id, project_id, project_name, card_table_id, card_table_name,
+          column_id, column_name, title, content_preview, due_on, assignee_ids_json, position,
+          app_url, fetched_at, source_updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+      `, [
+        key, acct, String(card.cardId), card.projectId == null ? null : String(card.projectId),
+        card.projectName ?? null, card.cardTableId == null ? null : String(card.cardTableId),
+        card.cardTableName ?? null, card.columnId == null ? null : String(card.columnId),
+        card.columnName ?? null, card.title, card.contentPreview ?? null,
+        card.dueOn ?? null, JSON.stringify(Array.isArray(card.assigneeIds) ? card.assigneeIds : []),
+        card.position ?? null, card.appUrl ?? null, fetchedAt, card.sourceUpdatedAt ?? null,
+      ]);
+    }
+
+    for (const doc of documents) {
+      await client.query(`
+        INSERT INTO basecamp_document_snapshots (
+          user_key, account_id, document_id, project_id, project_name, vault_id, title,
+          content_preview, created_at, updated_at, creator_id, creator_name, app_url, fetched_at, source_updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+      `, [
+        key, acct, String(doc.documentId), doc.projectId == null ? null : String(doc.projectId),
+        doc.projectName ?? null, doc.vaultId == null ? null : String(doc.vaultId),
+        doc.title, doc.contentPreview ?? null,
+        doc.createdAt ?? null, doc.updatedAt ?? null,
+        doc.creatorId == null ? null : String(doc.creatorId), doc.creatorName ?? null,
+        doc.appUrl ?? null, fetchedAt, doc.sourceUpdatedAt ?? null,
+      ]);
+    }
+
+    for (const person of people) {
+      await client.query(`
+        INSERT INTO basecamp_person_snapshots (
+          user_key, account_id, person_id, name, email_address, admin, company, avatar_url,
+          project_ids_json, fetched_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `, [
+        key, acct, String(person.personId), person.name,
+        person.emailAddress ?? null, Boolean(person.admin),
+        person.company ?? null, person.avatarUrl ?? null,
+        JSON.stringify(Array.isArray(person.projectIds) ? person.projectIds : []),
+        fetchedAt,
+      ]);
+    }
+
     for (const record of rawRecords) {
       await client.query(`
         INSERT INTO basecamp_raw_records (
@@ -1355,6 +1557,132 @@ export async function replaceBasecampWorkspaceSnapshot(userKey, accountId, {
   }
 
   return await getBasecampWorkspaceSnapshot(key, acct);
+}
+
+// ============ Local Query Functions (Full Dock) ============
+
+export async function queryBasecampMessages(userKey, accountId, { projectId, limit = 50 } = {}) {
+  const key = normalizeUserKey(userKey);
+  const acct = String(accountId).trim();
+  const params = [key, acct];
+  let where = "WHERE user_key = $1 AND account_id = $2";
+  if (projectId) { params.push(String(projectId)); where += ` AND project_id = $${params.length}`; }
+  const res = await pool.query(`SELECT * FROM basecamp_message_snapshots ${where} ORDER BY created_at DESC LIMIT ${Math.min(limit, 200)}`, params);
+  return res.rows;
+}
+
+export async function queryBasecampScheduleEntries(userKey, accountId, { projectId, fromDate, toDate, limit = 50 } = {}) {
+  const key = normalizeUserKey(userKey);
+  const acct = String(accountId).trim();
+  const params = [key, acct];
+  let where = "WHERE user_key = $1 AND account_id = $2";
+  if (projectId) { params.push(String(projectId)); where += ` AND project_id = $${params.length}`; }
+  if (fromDate) { params.push(fromDate); where += ` AND (ends_at >= $${params.length} OR ends_at IS NULL)`; }
+  if (toDate) { params.push(toDate); where += ` AND starts_at <= $${params.length}`; }
+  const res = await pool.query(`SELECT * FROM basecamp_schedule_entry_snapshots ${where} ORDER BY starts_at ASC LIMIT ${Math.min(limit, 200)}`, params);
+  return res.rows;
+}
+
+export async function queryBasecampCards(userKey, accountId, { projectId, columnName, limit = 100 } = {}) {
+  const key = normalizeUserKey(userKey);
+  const acct = String(accountId).trim();
+  const params = [key, acct];
+  let where = "WHERE user_key = $1 AND account_id = $2";
+  if (projectId) { params.push(String(projectId)); where += ` AND project_id = $${params.length}`; }
+  if (columnName) { params.push(columnName); where += ` AND LOWER(column_name) = LOWER($${params.length})`; }
+  const res = await pool.query(`SELECT * FROM basecamp_card_snapshots ${where} ORDER BY position ASC, title ASC LIMIT ${Math.min(limit, 200)}`, params);
+  return res.rows;
+}
+
+export async function queryBasecampDocuments(userKey, accountId, { projectId, limit = 50 } = {}) {
+  const key = normalizeUserKey(userKey);
+  const acct = String(accountId).trim();
+  const params = [key, acct];
+  let where = "WHERE user_key = $1 AND account_id = $2";
+  if (projectId) { params.push(String(projectId)); where += ` AND project_id = $${params.length}`; }
+  const res = await pool.query(`SELECT * FROM basecamp_document_snapshots ${where} ORDER BY updated_at DESC LIMIT ${Math.min(limit, 200)}`, params);
+  return res.rows;
+}
+
+export async function queryBasecampPeople(userKey, accountId, { projectId, limit = 100 } = {}) {
+  const key = normalizeUserKey(userKey);
+  const acct = String(accountId).trim();
+  const params = [key, acct];
+  let where = "WHERE user_key = $1 AND account_id = $2";
+  if (projectId) {
+    params.push(`%${String(projectId)}%`);
+    where += ` AND project_ids_json LIKE $${params.length}`;
+  }
+  const res = await pool.query(`SELECT * FROM basecamp_person_snapshots ${where} ORDER BY name ASC LIMIT ${Math.min(limit, 200)}`, params);
+  return res.rows;
+}
+
+export async function queryBasecampTodos(userKey, accountId, { projectId, overdue, dueOn, assignedToMe, limit = 100 } = {}) {
+  const key = normalizeUserKey(userKey);
+  const acct = String(accountId).trim();
+  const params = [key, acct];
+  let where = "WHERE user_key = $1 AND account_id = $2";
+  if (projectId) { params.push(String(projectId)); where += ` AND project_id = $${params.length}`; }
+  if (assignedToMe) { where += " AND assigned_to_current_user = TRUE"; }
+  if (overdue) {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    params.push(todayIso);
+    where += ` AND due_on IS NOT NULL AND due_on < $${params.length}`;
+  }
+  if (dueOn) { params.push(dueOn); where += ` AND due_on = $${params.length}`; }
+  const res = await pool.query(`SELECT * FROM basecamp_todo_snapshots ${where} ORDER BY due_on ASC NULLS LAST LIMIT ${Math.min(limit, 200)}`, params);
+  return res.rows;
+}
+
+export async function getBasecampSnapshotAge(userKey, accountId) {
+  const key = normalizeUserKey(userKey);
+  const acct = String(accountId).trim();
+  const res = await pool.query(`SELECT fetched_at FROM basecamp_workspace_snapshots WHERE user_key = $1 AND account_id = $2`, [key, acct]);
+  const row = res.rows[0];
+  if (!row?.fetched_at) return null;
+  return Math.max(0, Math.floor(Date.now() / 1000) - Number(row.fetched_at));
+}
+
+export async function upsertBasecampResource(userKey, accountId, table, idColumn, record) {
+  const key = normalizeUserKey(userKey);
+  const acct = String(accountId).trim();
+  const cols = Object.keys(record);
+  const vals = Object.values(record);
+  const placeholders = cols.map((_, i) => `$${i + 3}`);
+  const updates = cols.filter(c => c !== idColumn).map(c => `${c} = EXCLUDED.${c}`).join(", ");
+  await pool.query(`
+    INSERT INTO ${table} (user_key, account_id, ${cols.join(", ")})
+    VALUES ($1, $2, ${placeholders.join(", ")})
+    ON CONFLICT (user_key, account_id, ${idColumn}) DO UPDATE SET ${updates}
+  `, [key, acct, ...vals]);
+}
+
+export async function deleteBasecampResource(userKey, accountId, table, idColumn, resourceId) {
+  const key = normalizeUserKey(userKey);
+  const acct = String(accountId).trim();
+  await pool.query(`DELETE FROM ${table} WHERE user_key = $1 AND account_id = $2 AND ${idColumn} = $3`, [key, acct, String(resourceId)]);
+}
+
+export async function getBasecampResourceCounts(userKey, accountId) {
+  const key = normalizeUserKey(userKey);
+  const acct = String(accountId).trim();
+  const tables = [
+    { name: "messages", table: "basecamp_message_snapshots" },
+    { name: "scheduleEntries", table: "basecamp_schedule_entry_snapshots" },
+    { name: "cards", table: "basecamp_card_snapshots" },
+    { name: "documents", table: "basecamp_document_snapshots" },
+    { name: "people", table: "basecamp_person_snapshots" },
+  ];
+  const counts = {};
+  for (const { name, table } of tables) {
+    try {
+      const res = await pool.query(`SELECT COUNT(*) as count FROM ${table} WHERE user_key = $1 AND account_id = $2`, [key, acct]);
+      counts[name] = Number(res.rows[0]?.count ?? 0);
+    } catch {
+      counts[name] = 0;
+    }
+  }
+  return counts;
 }
 
 // Search index operations

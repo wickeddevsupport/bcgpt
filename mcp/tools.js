@@ -68,6 +68,7 @@ const FOCUSED_TOOL_NAMES = new Set([
   "summarize_document",
   "summarize_upload",
   "search_people",
+  "search_basecamp",
   "search_projects",
   "search_cards",
   "search_entities",
@@ -342,6 +343,17 @@ export function getTools() {
       properties: {
         query: { type: "string" },
         include_archived_projects: { type: "boolean" }
+      },
+      required: ["query"],
+      additionalProperties: false
+    }),
+
+    tool("search_basecamp", "Search across all Basecamp data: todos, messages, schedule entries, cards, documents, and people. Uses local snapshot for fast results.", {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Search query" },
+        project_id: { type: "string", description: "Optional: limit to a specific project ID" },
+        limit: { type: "integer", description: "Max results (default 20)" }
       },
       required: ["query"],
       additionalProperties: false

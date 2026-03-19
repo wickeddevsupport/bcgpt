@@ -31,6 +31,123 @@ function sortTodos(items, todayIso) {
   });
 }
 
+export function normalizeMessage({ message, project, board }) {
+  const messageId = message?.id != null ? String(message.id) : null;
+  if (!messageId) return null;
+  const subject = message?.subject || message?.title || "(no subject)";
+  const rawContent = message?.content || message?.body || "";
+  const contentPreview = typeof rawContent === "string" ? rawContent.replace(/<[^>]*>/g, "").slice(0, 300) : "";
+  const creator = message?.creator || {};
+  return {
+    messageId,
+    projectId: project?.id != null ? String(project.id) : null,
+    projectName: project?.name || null,
+    boardId: board?.id != null ? String(board.id) : null,
+    subject,
+    status: message?.status || "active",
+    contentPreview,
+    createdAt: message?.created_at || null,
+    updatedAt: message?.updated_at || null,
+    creatorId: creator?.id != null ? Number(creator.id) : null,
+    creatorName: creator?.name || null,
+    appUrl: message?.app_url || message?.url || null,
+    sourceUpdatedAt: null,
+  };
+}
+
+export function normalizeScheduleEntry({ entry, project, schedule }) {
+  const entryId = entry?.id != null ? String(entry.id) : null;
+  if (!entryId) return null;
+  const summary = entry?.summary || entry?.title || "(no title)";
+  const rawDesc = entry?.description || "";
+  const description = typeof rawDesc === "string" ? rawDesc.replace(/<[^>]*>/g, "").slice(0, 300) : "";
+  const creator = entry?.creator || {};
+  return {
+    entryId,
+    projectId: project?.id != null ? String(project.id) : null,
+    projectName: project?.name || null,
+    scheduleId: schedule?.id != null ? String(schedule.id) : null,
+    summary,
+    description,
+    startsAt: entry?.starts_at || null,
+    endsAt: entry?.ends_at || null,
+    allDay: Boolean(entry?.all_day),
+    createdAt: entry?.created_at || null,
+    updatedAt: entry?.updated_at || null,
+    creatorId: creator?.id != null ? Number(creator.id) : null,
+    creatorName: creator?.name || null,
+    appUrl: entry?.app_url || entry?.url || null,
+    sourceUpdatedAt: null,
+  };
+}
+
+export function normalizeCard({ card, project, cardTable, column }) {
+  const cardId = card?.id != null ? String(card.id) : null;
+  if (!cardId) return null;
+  const title = card?.title || card?.content || "(no title)";
+  const rawContent = card?.content || card?.description || "";
+  const contentPreview = typeof rawContent === "string" && rawContent !== title
+    ? rawContent.replace(/<[^>]*>/g, "").slice(0, 300) : "";
+  const assigneeIds = Array.isArray(card?.assignee_ids)
+    ? card.assignee_ids.map(Number).filter(Number.isFinite)
+    : Array.isArray(card?.assignees)
+      ? card.assignees.map((a) => Number(a?.id)).filter(Number.isFinite)
+      : [];
+  return {
+    cardId,
+    projectId: project?.id != null ? String(project.id) : null,
+    projectName: project?.name || null,
+    cardTableId: cardTable?.id != null ? String(cardTable.id) : null,
+    cardTableName: cardTable?.title || cardTable?.name || null,
+    columnId: column?.id != null ? String(column.id) : null,
+    columnName: column?.title || column?.name || null,
+    title,
+    contentPreview,
+    dueOn: card?.due_on || null,
+    assigneeIds,
+    position: card?.position ?? null,
+    appUrl: card?.app_url || card?.url || null,
+    sourceUpdatedAt: null,
+  };
+}
+
+export function normalizeDocument({ document, project, vault }) {
+  const documentId = document?.id != null ? String(document.id) : null;
+  if (!documentId) return null;
+  const title = document?.title || "(untitled)";
+  const rawContent = document?.content || "";
+  const contentPreview = typeof rawContent === "string" ? rawContent.replace(/<[^>]*>/g, "").slice(0, 300) : "";
+  const creator = document?.creator || {};
+  return {
+    documentId,
+    projectId: project?.id != null ? String(project.id) : null,
+    projectName: project?.name || null,
+    vaultId: vault?.id != null ? String(vault.id) : null,
+    title,
+    contentPreview,
+    createdAt: document?.created_at || null,
+    updatedAt: document?.updated_at || null,
+    creatorId: creator?.id != null ? Number(creator.id) : null,
+    creatorName: creator?.name || null,
+    appUrl: document?.app_url || document?.url || null,
+    sourceUpdatedAt: null,
+  };
+}
+
+export function normalizePerson({ person, projectIds = [] }) {
+  const personId = person?.id != null ? Number(person.id) : null;
+  if (!personId || !Number.isFinite(personId)) return null;
+  return {
+    personId,
+    name: person?.name || "(unknown)",
+    emailAddress: person?.email_address || null,
+    admin: Boolean(person?.admin),
+    company: person?.company?.name || null,
+    avatarUrl: person?.avatar_url || null,
+    projectIds: projectIds.map(String),
+  };
+}
+
 export function buildWorkspaceTodoSnapshot({
   userKey,
   accountId,

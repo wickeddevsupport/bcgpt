@@ -66,12 +66,25 @@ import {
   saveSessionMemory,
   logOperation,
   saveSnapshot,
+  getBasecampResourceCounts,
 } from "./db.js";
 import { normalizeBasecampRequestPath } from "./mcp/basecamp-request.js";
 import { getTools } from "./mcp/tools.js";
 import { ENDPOINT_TOOL_MAP } from "./mcp/endpoint-tools.js";
 import { handleFlowTool } from "./index.js";
 import { getOrRefreshBasecampWorkspaceSnapshot } from "./basecamp-workspace-sync.js";
+import {
+  localFirstMessages,
+  localFirstScheduleEntries,
+  localFirstCards,
+  localFirstDocuments,
+  localFirstPeople,
+  localFirstTodos,
+  searchLocalBasecamp,
+  syncLocalAfterCreate,
+  syncLocalAfterDelete,
+  RESOURCE_TABLE_MAP,
+} from "./basecamp-local-query.js";
 import {
   buildAssignedPeopleSummary,
   compactAssignmentTodo,
@@ -5326,17 +5339,20 @@ export async function handleMCP(reqBody, ctx) {
         const previewLimit = Number(args.preview_limit || process.env.BASECAMP_WORKSPACE_SNAPSHOT_PREVIEW_LIMIT || 20);
         const projectPreviewLimit = Number(args.project_preview_limit || process.env.BASECAMP_WORKSPACE_PROJECT_PREVIEW_LIMIT || 4);
         const maxProjects = Number(args.max_projects || 0);
-        const snapshot = await getOrRefreshBasecampWorkspaceSnapshot({
-          userKey: ctx.userKey,
-          accountId: ctx.accountId,
-          waitForFresh: true,
-          reason: "mcp:workspace_todo_snapshot",
-          previewLimit: Number.isFinite(previewLimit) && previewLimit > 0 ? previewLimit : 20,
-          projectPreviewLimit:
-            Number.isFinite(projectPreviewLimit) && projectPreviewLimit > 0 ? projectPreviewLimit : 4,
-          maxProjects: Number.isFinite(maxProjects) && maxProjects > 0 ? maxProjects : 0,
-        });
-        return ok(id, snapshot);
+        const [snapshot, resourceCounts] = await Promise.all([
+          getOrRefreshBasecampWorkspaceSnapshot({
+            userKey: ctx.userKey,
+            accountId: ctx.accountId,
+            waitForFresh: true,
+            reason: "mcp:workspace_todo_snapshot",
+            previewLimit: Number.isFinite(previewLimit) && previewLimit > 0 ? previewLimit : 20,
+            projectPreviewLimit:
+              Number.isFinite(projectPreviewLimit) && projectPreviewLimit > 0 ? projectPreviewLimit : 4,
+            maxProjects: Number.isFinite(maxProjects) && maxProjects > 0 ? maxProjects : 0,
+          }),
+          getBasecampResourceCounts(ctx.userKey, ctx.accountId).catch(() => ({})),
+        ]);
+        return ok(id, { ...snapshot, resourceCounts });
       } catch (e) {
         return fail(id, { code: "WORKSPACE_TODO_SNAPSHOT_ERROR", message: e.message });
       }
@@ -7573,6 +7589,11 @@ export async function handleMCP(reqBody, ctx) {
           getProject: (id) => ctx_intel.getProject(id)
         });
 
+        // Write-through: update local snapshot
+        syncLocalAfterCreate(ctx.userKey, ctx.accountId, {
+          table: RESOURCE_TABLE_MAP.card.table, idColumn: RESOURCE_TABLE_MAP.card.idColumn,
+          record: { card_id: String(card.id), project_id: String(p.id), project_name: p.name, card_table_id: args.card_table_id ? String(args.card_table_id) : null, card_table_name: null, column_id: args.column_id ? String(args.column_id) : null, column_name: null, title: card.title || args.title, content_preview: (card.content || "").replace(/<[^>]*>/g, "").slice(0, 300), due_on: card.due_on || args.due_on || null, assignee_ids_json: "[]", position: card.position || args.position || null, app_url: card.app_url, fetched_at: Math.floor(Date.now() / 1000), source_updated_at: null },
+        }).catch(() => {});
         return ok(id, { message: "Card created", project: { id: p.id, name: p.name }, card: enrichedCard, metrics: ctx_intel.getMetrics() });
       } catch (e) {
         console.error(`[create_card] Error:`, e.message);
@@ -7893,6 +7914,11 @@ export async function handleMCP(reqBody, ctx) {
         const body = normalizeMessageBody(args, { defaultStatus: "active" });
         if (args.idempotency_key && !body.idempotency_key) body.idempotency_key = args.idempotency_key;
         const message = await createMessage(ctx, p.id, Number(boardId), body);
+        // Write-through: update local snapshot
+        syncLocalAfterCreate(ctx.userKey, ctx.accountId, {
+          table: RESOURCE_TABLE_MAP.message.table, idColumn: RESOURCE_TABLE_MAP.message.idColumn,
+          record: { message_id: String(message.id), project_id: String(p.id), project_name: p.name, board_id: String(boardId), subject: message.subject || args.subject, status: "active", content_preview: (message.content || "").replace(/<[^>]*>/g, "").slice(0, 300), created_at: message.created_at, updated_at: message.updated_at, creator_id: message.creator?.id ? String(message.creator.id) : null, creator_name: message.creator?.name || null, app_url: message.app_url, fetched_at: Math.floor(Date.now() / 1000), source_updated_at: null },
+        }).catch(() => {});
         return ok(id, { message: "Message created", project: { id: p.id, name: p.name }, message });
       } catch (e) {
         const known = toolFailResult(id, e);
@@ -8294,6 +8320,21 @@ export async function handleMCP(reqBody, ctx) {
         } catch (fbErr) {
           return fail(id, { code: "LIST_SCHEDULE_ENTRIES_ERROR", message: fbErr.message });
         }
+      }
+    }
+
+    // Cross-resource local search: searches todos, messages, schedule, cards, documents, people
+    if (name === "search_basecamp" || name === "search_workspace") {
+      try {
+        const projectId = args.project_id || null;
+        const result = await searchLocalBasecamp(ctx.userKey, ctx.accountId, {
+          query: args.query,
+          projectId,
+          limit: args.limit || 20,
+        });
+        return ok(id, { query: args.query, ...result });
+      } catch (e) {
+        return fail(id, { code: "SEARCH_BASECAMP_ERROR", message: e.message });
       }
     }
 
@@ -10411,6 +10452,11 @@ export async function handleMCP(reqBody, ctx) {
         const body = { ...(args.body || {}) };
         if (args.idempotency_key && !body.idempotency_key) body.idempotency_key = args.idempotency_key;
         const entry = await createScheduleEntry(ctx, p.id, Number(args.schedule_id), body);
+        // Write-through: update local snapshot
+        syncLocalAfterCreate(ctx.userKey, ctx.accountId, {
+          table: RESOURCE_TABLE_MAP.schedule_entry.table, idColumn: RESOURCE_TABLE_MAP.schedule_entry.idColumn,
+          record: { entry_id: String(entry.id), project_id: String(p.id), project_name: p.name, schedule_id: args.schedule_id ? String(args.schedule_id) : null, summary: entry.summary || body.summary, description: (entry.description || "").replace(/<[^>]*>/g, "").slice(0, 300), starts_at: entry.starts_at || body.starts_at, ends_at: entry.ends_at || body.ends_at, all_day: Boolean(entry.all_day || body.all_day), created_at: entry.created_at, updated_at: entry.updated_at, creator_id: entry.creator?.id ? String(entry.creator.id) : null, creator_name: entry.creator?.name || null, app_url: entry.app_url, fetched_at: Math.floor(Date.now() / 1000), source_updated_at: null },
+        }).catch(() => {});
         return ok(id, { message: "Schedule entry created", project: { id: p.id, name: p.name }, entry });
       } catch (e) {
         const known = toolFailResult(id, e);

@@ -49,6 +49,18 @@ export const getLatestBasecampSyncRun = async (...args) => await impl.getLatestB
 export const getBasecampWorkspaceSnapshot = async (...args) => await impl.getBasecampWorkspaceSnapshot(...args);
 export const replaceBasecampWorkspaceSnapshot = async (...args) => await impl.replaceBasecampWorkspaceSnapshot(...args);
 
+// Full dock query + mutation layer
+export const queryBasecampMessages = async (...args) => await impl.queryBasecampMessages(...args);
+export const queryBasecampScheduleEntries = async (...args) => await impl.queryBasecampScheduleEntries(...args);
+export const queryBasecampCards = async (...args) => await impl.queryBasecampCards(...args);
+export const queryBasecampDocuments = async (...args) => await impl.queryBasecampDocuments(...args);
+export const queryBasecampPeople = async (...args) => await impl.queryBasecampPeople(...args);
+export const queryBasecampTodos = async (...args) => await impl.queryBasecampTodos(...args);
+export const getBasecampSnapshotAge = async (...args) => await impl.getBasecampSnapshotAge(...args);
+export const upsertBasecampResource = async (...args) => await impl.upsertBasecampResource(...args);
+export const deleteBasecampResource = async (...args) => await impl.deleteBasecampResource(...args);
+export const getBasecampResourceCounts = async (...args) => await impl.getBasecampResourceCounts(...args);
+
 export const indexSearchItem = async (...args) => await impl.indexSearchItem(...args);
 export const clearSearchIndex = async (...args) => await impl.clearSearchIndex(...args);
 export const searchIndex = async (...args) => await impl.searchIndex(...args);

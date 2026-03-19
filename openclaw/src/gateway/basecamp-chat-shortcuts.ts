@@ -17,6 +17,9 @@ type BasecampProjectRoute =
   | "project_todos"
   | "project_people"
   | "project_schedule"
+  | "project_messages"
+  | "project_cards"
+  | "project_documents"
   | "project_summary";
 
 export type DirectBasecampChatShortcut =
@@ -68,6 +71,9 @@ export type DirectBasecampChatShortcut =
         | "list_todos_for_project"
         | "list_project_people"
         | "list_schedule_entries"
+        | "list_messages"
+        | "list_card_tables"
+        | "list_documents"
         | "smart_action";
       toolArgs:
         | { project: string }
@@ -159,6 +165,30 @@ function inferProjectRoute(message: string, projectName: string): DirectBasecamp
     return {
       kind: "project_schedule",
       toolName: "list_schedule_entries",
+      toolArgs: { project: projectName },
+      projectName,
+    };
+  }
+  if (/\b(messages?|message board|announcements?|posts?|updates?)\b/.test(lower)) {
+    return {
+      kind: "project_messages",
+      toolName: "list_messages",
+      toolArgs: { project: projectName },
+      projectName,
+    };
+  }
+  if (/\b(cards?|kanban|board|card table|columns?)\b/.test(lower)) {
+    return {
+      kind: "project_cards",
+      toolName: "list_card_tables",
+      toolArgs: { project: projectName },
+      projectName,
+    };
+  }
+  if (/\b(docs?|documents?|files?|vault)\b/.test(lower)) {
+    return {
+      kind: "project_documents",
+      toolName: "list_documents",
       toolArgs: { project: projectName },
       projectName,
     };
