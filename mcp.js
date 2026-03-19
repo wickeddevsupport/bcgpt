@@ -76,6 +76,7 @@ import {
   buildAssignedPeopleSummary,
   compactAssignmentTodo,
   normalizeTodoAssigneeIds,
+  scanAssignedTodosFromSnapshot,
   scanAssignedTodosFromRows,
   scanOverdueTodosFromRows,
 } from "./mcp/basecamp-assignment-utils.js";
@@ -4581,7 +4582,30 @@ async function reportTodosAssigned(ctx) {
 }
 
 async function reportTodosAssignedPerson(ctx, personId) {
-  return scanAssignedTodosByPerson(ctx, personId);
+  const targetId = Number(personId);
+  if (Number.isFinite(targetId)) {
+    try {
+      const profile = await getMyProfile(ctx);
+      if (Number(profile?.id) === targetId) {
+        const snapshot = await getOrRefreshBasecampWorkspaceSnapshot({
+          userKey: ctx.userKey,
+          accountId: ctx.accountId,
+          waitForFresh: false,
+          reason: "mcp:report_todos_assigned_person",
+          previewLimit: 200,
+        });
+        const assigned = scanAssignedTodosFromSnapshot(snapshot?.assignedTodos, targetId);
+        assigned._source = "workspace_snapshot";
+        assigned._snapshotTotal = Number(snapshot?.totals?.assignedTodos ?? assigned.length);
+        return assigned;
+      }
+    } catch {
+      // Fall through to the global scan path.
+    }
+  }
+  const assigned = await scanAssignedTodosByPerson(ctx, personId);
+  assigned._source = "workspace_scan";
+  return assigned;
 }
 
 async function reportTodosOverdue(ctx) {
@@ -4612,6 +4636,24 @@ async function reportTodosOverdue(ctx) {
     total: Number(snapshot?.totals?.overdueTodos ?? items.length),
     stale: snapshot?.stale === true,
     ageMs: Number(snapshot?.ageMs ?? 0),
+  };
+}
+
+async function getCurrentUserAssignedSnapshot(ctx, reason = "mcp:list_assigned_to_me") {
+  const profile = await getMyProfile(ctx);
+  const profileId = Number(profile.id);
+  const snapshot = await getOrRefreshBasecampWorkspaceSnapshot({
+    userKey: ctx.userKey,
+    accountId: ctx.accountId,
+    waitForFresh: false,
+    reason,
+    previewLimit: 200,
+  });
+  const assigned = scanAssignedTodosFromSnapshot(snapshot?.assignedTodos, profileId);
+  return {
+    profile,
+    assigned,
+    totalCount: Number(snapshot?.totals?.assignedTodos ?? assigned.length),
   };
 }
 
@@ -5615,13 +5657,14 @@ export async function handleMCP(reqBody, ctx) {
 
     if (name === "list_assigned_to_me") {
       try {
-        const profile = await getMyProfile(ctx);
-        const profileId = Number(profile.id);
+        let profile = null;
         let todos = [];
         let projectPayload = null;
         let source = "workspace_snapshot";
         let totalCount = null;
         if (args.project) {
+          profile = await getMyProfile(ctx);
+          const profileId = Number(profile.id);
           const p = await projectByName(ctx, args.project);
           projectPayload = { id: p.id, name: p.name };
           source = "project_scan";
@@ -5636,42 +5679,19 @@ export async function handleMCP(reqBody, ctx) {
               },
             })),
           );
+          todos = todos.filter((todo) => normalizeTodoAssigneeIds(todo).includes(profileId));
         } else {
-          const snapshot = await getOrRefreshBasecampWorkspaceSnapshot({
-            userKey: ctx.userKey,
-            accountId: ctx.accountId,
-            waitForFresh: false,
-            reason: "mcp:list_assigned_to_me",
-            previewLimit: 200,
-          });
-          todos = Array.isArray(snapshot?.assignedTodos)
-            ? snapshot.assignedTodos.map((todo) => ({
-                id: todo.todoId ?? null,
-                title: todo.title ?? null,
-                status: "open",
-                completed: false,
-                due_on: todo.dueOn ?? null,
-                overdue: Boolean(todo.dueOn && todo.dueOn < new Date().toISOString().slice(0, 10)),
-                project: todo.projectId || todo.projectName
-                  ? { id: todo.projectId ?? null, name: todo.projectName ?? null }
-                  : null,
-                todolist: todo.todolistId || todo.todolistName
-                  ? { id: todo.todolistId ?? null, name: todo.todolistName ?? null }
-                  : null,
-                assignee_ids: Array.isArray(todo.assigneeIds) ? todo.assigneeIds : [],
-                app_url: todo.appUrl ?? null,
-              }))
-            : [];
-          totalCount = Number(snapshot?.totals?.assignedTodos ?? todos.length);
+          const snapshotAssigned = await getCurrentUserAssignedSnapshot(ctx, "mcp:list_assigned_to_me");
+          profile = snapshotAssigned.profile;
+          todos = snapshotAssigned.assigned;
+          totalCount = snapshotAssigned.totalCount;
         }
-
-        const assigned = todos.filter((todo) => normalizeTodoAssigneeIds(todo).includes(profileId));
 
         const payload = {
           person: { id: profile.id, name: profile.name, email: profile.email },
           project: projectPayload,
           source,
-          ...buildListPayload("todos", assigned)
+          ...buildListPayload("todos", todos)
         };
         if (Number.isFinite(totalCount)) {
           payload.count = totalCount;
@@ -6283,6 +6303,19 @@ export async function handleMCP(reqBody, ctx) {
         return /(assigned|todos|tasks)/.test(s);
       };
 
+      const wantsMyAssignments = (raw) => {
+        const s = String(raw || "").toLowerCase();
+        return (
+          /\bassigned to me\b/.test(s) ||
+          /\bmy todos\b/.test(s) ||
+          /\bmy tasks\b/.test(s) ||
+          /\bwhat do i need to do\b/.test(s) ||
+          /\bwhat(?:'s| is) on my plate\b/.test(s) ||
+          /\bmy\b.*\b(assigned|todo|todos|task|tasks)\b/.test(s) ||
+          /\b(assigned|todo|todos|task|tasks)\b.*\b(to me|for me|mine)\b/.test(s)
+        );
+      };
+
       const wantsActivity = (raw) => {
         const s = String(raw || "").toLowerCase();
         return /(activity|recent|comment|comments|timeline)/.test(s);
@@ -6327,11 +6360,7 @@ export async function handleMCP(reqBody, ctx) {
           return ok(id, { query, action: "search_projects", confidence: 0.92, fast_path: true, result });
         }
 
-        const quickAssignedIntent =
-          /\bassigned to me\b/i.test(lower) ||
-          /\bmy todos\b/i.test(lower) ||
-          /\bmy tasks\b/i.test(lower) ||
-          /\bwhat do i need to do\b/i.test(lower);
+        const quickAssignedIntent = wantsMyAssignments(lower);
         if (quickAssignedIntent) {
           const quickTargetDate =
             /\btomorrow\b/i.test(lower)
@@ -6824,7 +6853,7 @@ export async function handleMCP(reqBody, ctx) {
           });
         }
 
-        if (lower.includes("assigned to me") || lower.includes("my todos")) {
+        if (wantsMyAssignments(lower)) {
           const result = await callTool("list_assigned_to_me", { project: args.project });
           return ok(id, { query, action: "list_assigned_to_me", confidence, result });
         }
@@ -9734,7 +9763,12 @@ export async function handleMCP(reqBody, ctx) {
         const todos = Array.isArray(data)
           ? (compact ? data.map(compactAssignmentTodo).filter(Boolean) : data)
           : [];
-        const payload = { person_id: personId, source: "workspace_scan", count: todos.length };
+        const source = Array.isArray(data) && typeof data._source === "string" ? data._source : "workspace_scan";
+        const totalCount =
+          Array.isArray(data) && Number.isFinite(Number(data._snapshotTotal))
+            ? Number(data._snapshotTotal)
+            : todos.length;
+        const payload = { person_id: personId, source, count: totalCount };
         if (!personSummary) {
           try {
             personSummary = normalizePerson(await getPerson(ctx, personId));

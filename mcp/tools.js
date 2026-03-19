@@ -188,7 +188,7 @@ export function getTools() {
       required: ["project", "person"],
       additionalProperties: false
     }),
-    tool("list_assigned_to_me", "List todos assigned to the current user (optionally within a project).", {
+    tool("list_assigned_to_me", "Primary tool for 'my todos' or 'my assigned tasks'. Lists todos assigned to the current authenticated user, optionally within a project.", {
       type: "object",
       properties: { project: { type: "string", nullable: true } },
       additionalProperties: false
@@ -1266,7 +1266,7 @@ export function getTools() {
     }),
 
     tool("report_todos_assigned", "List people who can have todos assigned.", noProps()),
-    tool("report_todos_assigned_person", "List todos assigned to a person (report).", {
+    tool("report_todos_assigned_person", "List todos assigned to a specific person. Prefer list_assigned_to_me for the current authenticated user.", {
       type: "object",
       properties: {
         person_id: { type: "integer" },

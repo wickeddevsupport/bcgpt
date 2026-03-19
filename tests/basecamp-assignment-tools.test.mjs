@@ -4,7 +4,9 @@ import assert from "node:assert/strict";
 import {
   buildAssignedPeopleSummary,
   compactAssignmentTodo,
+  hydrateSnapshotAssignmentTodo,
   hydrateScannedTodoRow,
+  scanAssignedTodosFromSnapshot,
   scanAssignedTodosFromRows,
   scanOverdueTodosFromRows,
 } from "../mcp/basecamp-assignment-utils.js";
@@ -146,4 +148,46 @@ test("compactAssignmentTodo keeps ids and project names for snapshot-style todo 
   assert.equal(compact.due_on, TODAY_ISO);
   assert.equal(compact.app_url, "https://3.basecamp.com/5282924/buckets/88/todos/3001");
   assert.deepEqual(compact.assignee_ids, [101]);
+});
+
+test("hydrateSnapshotAssignmentTodo preserves todolist and overdue metadata", () => {
+  const todo = hydrateSnapshotAssignmentTodo({
+    todoId: "3002",
+    title: "Snapshot QA",
+    dueOn: YESTERDAY_ISO,
+    projectId: "99",
+    projectName: "Snapshot Project",
+    todolistId: "77",
+    todolistName: "Launch Checklist",
+    assigneeIds: [101, 202],
+    appUrl: "https://3.basecamp.com/5282924/buckets/99/todos/3002",
+  });
+
+  assert.equal(todo.id, "3002");
+  assert.equal(todo.project?.name, "Snapshot Project");
+  assert.equal(todo.todolist?.name, "Launch Checklist");
+  assert.equal(todo.overdue, true);
+  assert.deepEqual(todo.assignee_ids, [101, 202]);
+});
+
+test("scanAssignedTodosFromSnapshot filters workspace snapshot todos for the current user", () => {
+  const todos = scanAssignedTodosFromSnapshot([
+    {
+      todoId: "3003",
+      title: "Assigned to Rohit",
+      projectId: "99",
+      projectName: "Snapshot Project",
+      assigneeIds: [101],
+    },
+    {
+      todoId: "3004",
+      title: "Assigned elsewhere",
+      projectId: "100",
+      projectName: "Other Project",
+      assigneeIds: [202],
+    },
+  ], 101);
+
+  assert.deepEqual(todos.map((todo) => todo.id), ["3003"]);
+  assert.equal(todos[0]?.project?.name, "Snapshot Project");
 });

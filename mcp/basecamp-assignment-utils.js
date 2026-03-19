@@ -70,6 +70,34 @@ export function compactAssignmentTodo(todo) {
   };
 }
 
+export function hydrateSnapshotAssignmentTodo(todo, todayIso = new Date().toISOString().slice(0, 10)) {
+  if (!todo || typeof todo !== "object") return null;
+  const dueOn = todo.dueOn ?? todo.due_on ?? todo.due_at ?? null;
+  const project = normalizeTodoProject(todo);
+  const todolist =
+    todo.todolistId != null || todo.todolistName != null
+      ? {
+          id: todo.todolistId ?? null,
+          name: todo.todolistName ?? null,
+        }
+      : null;
+
+  return {
+    id: todo.todoId ?? todo.id ?? todo.todo_id ?? todo.recording_id ?? null,
+    title: todo.title ?? todo.content ?? todo.name ?? null,
+    status: todo.status ?? "open",
+    completed: Boolean(todo.completed || todo.completed_at),
+    due_on: dueOn,
+    overdue: Boolean(dueOn && dueOn < todayIso),
+    project,
+    projectId: project?.id ?? null,
+    projectName: project?.name ?? null,
+    todolist,
+    assignee_ids: normalizeTodoAssigneeIds(todo),
+    app_url: todo.appUrl ?? todo.app_url ?? todo.url ?? null,
+  };
+}
+
 export function hydrateScannedTodoRow(row) {
   if (!row || typeof row !== "object") return null;
   const raw = isPlainObject(row.raw) ? row.raw : {};
@@ -112,6 +140,16 @@ export function scanAssignedTodosFromRows(rows, personId) {
   }
   return (Array.isArray(rows) ? rows : [])
     .map(hydrateScannedTodoRow)
+    .filter((todo) => todo && normalizeTodoAssigneeIds(todo).includes(targetId));
+}
+
+export function scanAssignedTodosFromSnapshot(snapshotTodos, personId, todayIso = new Date().toISOString().slice(0, 10)) {
+  const targetId = Number(personId);
+  if (!Number.isFinite(targetId)) {
+    return [];
+  }
+  return (Array.isArray(snapshotTodos) ? snapshotTodos : [])
+    .map((todo) => hydrateSnapshotAssignmentTodo(todo, todayIso))
     .filter((todo) => todo && normalizeTodoAssigneeIds(todo).includes(targetId));
 }
 
