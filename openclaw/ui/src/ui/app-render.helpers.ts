@@ -134,6 +134,82 @@ export function resolveSelectedAgentIdForSession(
   return firstAgentId || null;
 }
 
+export function resolveWorkspaceAssistantAgentId(
+  state: Pick<AppViewState, "assistantAgentId" | "agentsList">,
+  mainSessionKey?: string | null,
+): string | null {
+  const assistantAgentId = state.assistantAgentId?.trim();
+  if (assistantAgentId) {
+    return assistantAgentId;
+  }
+  const mainAgentId = parseAgentSessionKey(mainSessionKey?.trim() ?? "")?.agentId?.trim();
+  if (mainAgentId) {
+    return mainAgentId;
+  }
+  const defaultAgentId = state.agentsList?.defaultId?.trim();
+  if (defaultAgentId) {
+    return defaultAgentId;
+  }
+  const firstAgentId = state.agentsList?.agents?.[0]?.id?.trim();
+  return firstAgentId || null;
+}
+
+type ChatAgentSelectOption = {
+  value: string;
+  label: string;
+};
+
+function buildChatAgentOptionLabel(
+  agent: NonNullable<AppViewState["agentsList"]>["agents"][number] | null | undefined,
+  fallbackName?: string | null,
+): string {
+  const emoji = agent?.identity?.emoji?.trim() ?? "";
+  const name =
+    fallbackName?.trim() ||
+    agent?.identity?.name?.trim() ||
+    agent?.name?.trim() ||
+    agent?.id?.trim() ||
+    "Workspace Assistant";
+  return `${emoji ? `${emoji} ` : ""}${name}`;
+}
+
+export function resolveChatAgentOptions(
+  state: Pick<AppViewState, "assistantAgentId" | "assistantName" | "agentsList">,
+  mainSessionKey?: string | null,
+): ChatAgentSelectOption[] {
+  const agents = state.agentsList?.agents ?? [];
+  const options: ChatAgentSelectOption[] = [];
+  const seen = new Set<string>();
+  const assistantAgentId = resolveWorkspaceAssistantAgentId(state, mainSessionKey);
+
+  if (assistantAgentId) {
+    const assistantAgent =
+      agents.find((entry) => entry.id?.trim() === assistantAgentId) ?? null;
+    options.push({
+      value: assistantAgentId,
+      label: buildChatAgentOptionLabel(
+        assistantAgent,
+        assistantAgent ? null : state.assistantName || "Workspace Assistant",
+      ),
+    });
+    seen.add(assistantAgentId);
+  }
+
+  agents.forEach((agent) => {
+    const agentId = agent.id?.trim();
+    if (!agentId || seen.has(agentId)) {
+      return;
+    }
+    options.push({
+      value: agentId,
+      label: buildChatAgentOptionLabel(agent),
+    });
+    seen.add(agentId);
+  });
+
+  return options;
+}
+
 function syncSelectedAgentForSession(
   state: Pick<AppViewState, "agentsSelectedId" | "assistantAgentId" | "agentsList">,
   sessionKey: string,
@@ -265,6 +341,8 @@ export function renderChatControls(state: AppViewState) {
   const focusActive = state.onboarding ? true : state.settings.chatFocusMode;
 
   const agents = state.agentsList?.agents ?? [];
+  const assistantAgentId = resolveWorkspaceAssistantAgentId(state, mainSessionKey);
+  const agentOptions = resolveChatAgentOptions(state, mainSessionKey);
   const currentParsed = parseAgentSessionKey(state.sessionKey);
   const activeSession = resolveSessionRow(state.sessionsResult, state.sessionKey);
   const currentSessionModelRef = resolveSessionModelRef(activeSession);
@@ -285,8 +363,7 @@ export function renderChatControls(state: AppViewState) {
     );
   });
   const activeModelRef = modelRows.find((row) => row.active)?.ref?.trim() ?? "";
-  const isWorkspaceAssistantSession = Boolean(mainSessionKey && state.sessionKey === mainSessionKey);
-  const currentAgentId = isWorkspaceAssistantSession ? "" : currentParsed?.agentId ?? "";
+  const currentAgentId = resolveSelectedAgentIdForSession(state, state.sessionKey) ?? "";
 
   const switchSession = (next: string, opts?: { ensureExists?: boolean; replaceHistory?: boolean }) => {
     void activateChatSession(state, next, {
@@ -407,17 +484,20 @@ export function renderChatControls(state: AppViewState) {
             @change=${(e: Event) => {
               const nextAgentId = (e.target as HTMLSelectElement).value;
               if (!nextAgentId) {
-                switchSession(mainSessionKey || "main", { ensureExists: true });
+                if (mainSessionKey) {
+                  switchSession(mainSessionKey, { ensureExists: true });
+                }
+                return;
+              }
+              if (assistantAgentId && nextAgentId === assistantAgentId && mainSessionKey) {
+                switchSession(mainSessionKey, { ensureExists: true });
                 return;
               }
               switchSession(`agent:${nextAgentId}:${agentMainKey}`, { ensureExists: true });
             }}
           >
-            <option value="">Workspace Assistant</option>
-            ${agents.map((agent) => {
-              const emoji = agent.identity?.emoji ?? "";
-              const name = agent.identity?.name ?? agent.name ?? agent.id;
-              return html`<option value=${agent.id}>${emoji ? `${emoji} ` : ""}${name}</option>`;
+            ${agentOptions.map((option) => {
+              return html`<option value=${option.value}>${option.label}</option>`;
             })}
           </select>
         </label>

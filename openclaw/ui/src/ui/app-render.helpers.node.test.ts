@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { SessionsListResult } from "./types.ts";
 import {
+  resolveChatAgentOptions,
   resolveSelectedAgentIdForSession,
   resolveSessionDisplayName,
+  resolveWorkspaceAssistantAgentId,
 } from "./app-render.helpers.ts";
 
 type SessionRow = SessionsListResult["sessions"][number];
 type SelectedAgentState = Parameters<typeof resolveSelectedAgentIdForSession>[0];
+type ChatAgentOptionsState = Parameters<typeof resolveChatAgentOptions>[0];
 
 function row(overrides: Partial<SessionRow> & { key: string }): SessionRow {
   return { kind: "direct", updatedAt: 0, ...overrides };
@@ -111,5 +114,73 @@ describe("resolveSelectedAgentIdForSession", () => {
         "main",
       ),
     ).toBe("assistant");
+  });
+});
+
+describe("resolveWorkspaceAssistantAgentId", () => {
+  it("falls back to the main session agent when assistant identity is not loaded yet", () => {
+    expect(
+      resolveWorkspaceAssistantAgentId(
+        {
+          assistantAgentId: null,
+          agentsList: {
+            defaultId: "assistant",
+            agents: [{ id: "assistant" }, { id: "designer" }],
+          },
+        } as SelectedAgentState,
+        "agent:assistant:main",
+      ),
+    ).toBe("assistant");
+  });
+});
+
+describe("resolveChatAgentOptions", () => {
+  it("deduplicates the workspace assistant when it already exists in the agent list", () => {
+    expect(
+      resolveChatAgentOptions(
+        {
+          assistantAgentId: "assistant",
+          assistantName: "Workspace Assistant",
+          agentsList: {
+            defaultId: "assistant",
+            agents: [
+              {
+                id: "assistant",
+                name: "Workspace Assistant",
+                identity: { name: "Workspace Assistant", emoji: "🏰" },
+              },
+              {
+                id: "research",
+                name: "Research Agent",
+                identity: { name: "Research Agent", emoji: "🔎" },
+              },
+            ],
+          },
+        } as ChatAgentOptionsState,
+        "main",
+      ),
+    ).toEqual([
+      { value: "assistant", label: "🏰 Workspace Assistant" },
+      { value: "research", label: "🔎 Research Agent" },
+    ]);
+  });
+
+  it("creates a synthetic assistant option only when the assistant agent is absent", () => {
+    expect(
+      resolveChatAgentOptions(
+        {
+          assistantAgentId: "assistant",
+          assistantName: "Workspace Assistant",
+          agentsList: {
+            defaultId: "assistant",
+            agents: [{ id: "research", name: "Research Agent", identity: { emoji: "🔎" } }],
+          },
+        } as ChatAgentOptionsState,
+        "main",
+      ),
+    ).toEqual([
+      { value: "assistant", label: "Workspace Assistant" },
+      { value: "research", label: "🔎 Research Agent" },
+    ]);
   });
 });
