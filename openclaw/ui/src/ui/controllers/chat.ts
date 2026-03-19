@@ -1,4 +1,5 @@
 import type { GatewayBrowserClient } from "../gateway.ts";
+import type { SessionsListResult } from "../types.ts";
 import type { ChatAttachment } from "../ui-types.ts";
 import { extractText, extractThinking } from "../chat/message-extract.ts";
 import { generateUUID } from "../uuid.ts";
@@ -10,6 +11,7 @@ export type ChatState = {
   client: GatewayBrowserClient | null;
   connected: boolean;
   sessionKey: string;
+  sessionsResult?: SessionsListResult | null;
   chatLoading: boolean;
   chatMessages: unknown[];
   chatThinkingLevel: string | null;
@@ -24,6 +26,13 @@ export type ChatState = {
   pmosWorkspaceId?: string;
   /** Current screen context (selected project + tab) injected into PMOS chat system prompt. */
   pmosScreenContext?: string | null;
+};
+
+type ChatModelCatalogEntry = {
+  id: string;
+  provider: string;
+  input: Array<"text" | "image">;
+  available: boolean | null;
 };
 
 function normalizeBasePath(value: string | null | undefined): string {
@@ -210,6 +219,166 @@ async function resolveChatReadinessError(state: ChatState): Promise<string | nul
   } catch {
     // If the probe fails, do not block sending; normal chat error handling will catch issues.
     return null;
+  }
+}
+
+function normalizeProviderId(value: string | null | undefined): string {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "local-ollama") {
+    return "ollama";
+  }
+  return normalized;
+}
+
+function normalizeModelCatalogEntries(models: unknown[]): ChatModelCatalogEntry[] {
+  return models
+    .map((model) => {
+      if (!model || typeof model !== "object") {
+        return null;
+      }
+      const raw = model as Record<string, unknown>;
+      const id = typeof raw.id === "string" ? raw.id.trim() : "";
+      const provider = normalizeProviderId(
+        typeof raw.provider === "string" ? raw.provider : "",
+      );
+      if (!id || !provider) {
+        return null;
+      }
+      const input = Array.isArray(raw.input)
+        ? raw.input.filter((item): item is "text" | "image" => item === "text" || item === "image")
+        : ["text"];
+      const available = typeof raw.available === "boolean" ? raw.available : null;
+      return {
+        id,
+        provider,
+        input,
+        available,
+      } satisfies ChatModelCatalogEntry;
+    })
+    .filter((entry): entry is ChatModelCatalogEntry => entry !== null);
+}
+
+function filterUsableChatModels(models: ChatModelCatalogEntry[]): ChatModelCatalogEntry[] {
+  const hasExplicitAvailability = models.some((model) => model.available !== null);
+  if (!hasExplicitAvailability) {
+    return models;
+  }
+  return models.filter((model) => model.available === true);
+}
+
+function resolveCurrentSessionRow(state: ChatState) {
+  return state.sessionsResult?.sessions?.find((row) => row.key === state.sessionKey);
+}
+
+function findModelInChatCatalog(
+  models: ChatModelCatalogEntry[],
+  provider: string,
+  id: string,
+): ChatModelCatalogEntry | undefined {
+  const normalizedProvider = normalizeProviderId(provider);
+  const normalizedId = id.trim().toLowerCase();
+  return models.find(
+    (model) =>
+      model.provider === normalizedProvider && model.id.trim().toLowerCase() === normalizedId,
+  );
+}
+
+function pickFallbackVisionModel(
+  models: ChatModelCatalogEntry[],
+  preferredProvider?: string | null,
+): ChatModelCatalogEntry | null {
+  const usable = filterUsableChatModels(models).filter((model) => model.input.includes("image"));
+  if (usable.length === 0) {
+    return null;
+  }
+  const normalizedPreferredProvider = normalizeProviderId(preferredProvider);
+  const providerPriority = [
+    normalizedPreferredProvider,
+    "openai",
+    "google",
+    "anthropic",
+    "openrouter",
+    "zai",
+    "ollama",
+    "kilo",
+    "moonshot",
+    "nvidia",
+    "custom",
+  ].filter(Boolean);
+
+  const rankForProvider = (provider: string) => {
+    const idx = providerPriority.indexOf(provider);
+    return idx === -1 ? providerPriority.length + 1 : idx;
+  };
+
+  return [...usable].sort((left, right) => {
+    return (
+      rankForProvider(left.provider) - rankForProvider(right.provider) ||
+      left.provider.localeCompare(right.provider) ||
+      left.id.localeCompare(right.id)
+    );
+  })[0] ?? null;
+}
+
+function updateSessionModelInState(state: ChatState, modelRef: string) {
+  if (!state.sessionsResult) {
+    return;
+  }
+  const slash = modelRef.indexOf("/");
+  if (slash <= 0 || slash === modelRef.length - 1) {
+    return;
+  }
+  const provider = modelRef.slice(0, slash);
+  const model = modelRef.slice(slash + 1);
+  state.sessionsResult = {
+    ...state.sessionsResult,
+    sessions: state.sessionsResult.sessions.map((row) =>
+      row.key === state.sessionKey
+        ? { ...row, modelProvider: provider, model }
+        : row,
+    ),
+  };
+}
+
+async function ensureVisionReadyForChat(
+  state: ChatState,
+  models: ChatModelCatalogEntry[],
+): Promise<string | null> {
+  if (!state.client || !state.connected) {
+    return "Connect to Wicked OS first, then try again.";
+  }
+
+  const currentRow = resolveCurrentSessionRow(state);
+  const currentProvider = normalizeProviderId(currentRow?.modelProvider ?? "");
+  const currentModelId = String(currentRow?.model ?? "").trim();
+  if (currentProvider && currentModelId) {
+    const currentModel = findModelInChatCatalog(models, currentProvider, currentModelId);
+    if (currentModel?.input.includes("image")) {
+      return null;
+    }
+  }
+
+  const fallback = pickFallbackVisionModel(models, currentProvider);
+  if (!fallback) {
+    return (
+      "No vision-capable model is available for this workspace. " +
+      "Choose a model with image support in the Model dropdown or configure one in Models."
+    );
+  }
+
+  const fallbackRef = `${fallback.provider}/${fallback.id}`;
+  try {
+    await state.client.request("sessions.patch", {
+      key: state.sessionKey,
+      model: fallbackRef,
+    });
+    updateSessionModelInState(state, fallbackRef);
+    return null;
+  } catch (error) {
+    return (
+      `Image uploads need a vision-capable model, and switching this session to ${fallbackRef} failed: ` +
+      `${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
@@ -436,6 +605,31 @@ export async function sendChatMessage(
       },
     ];
     return null;
+  }
+
+  if (hasImageAttachments) {
+    try {
+      const res = await state.client.request<{ models?: Array<Record<string, unknown>> }>(
+        "models.list",
+        {},
+      );
+      const catalog = normalizeModelCatalogEntries(Array.isArray(res.models) ? res.models : []);
+      const visionError = await ensureVisionReadyForChat(state, catalog);
+      if (visionError) {
+        state.lastError = visionError;
+        state.chatMessages = [
+          ...state.chatMessages,
+          {
+            role: "assistant",
+            content: [{ type: "text", text: `Error: ${visionError}` }],
+            timestamp: Date.now(),
+          },
+        ];
+        return null;
+      }
+    } catch {
+      // If model probing fails, continue with the native chat.send path.
+    }
   }
 
   const now = Date.now();

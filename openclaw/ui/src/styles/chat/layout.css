@@ -436,22 +436,48 @@
   display: flex;
   align-items: stretch;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .chat-compose__file-input {
   display: none;
 }
 
+.chat-compose__attach-group {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .chat-compose__attach {
-  width: 40px;
-  min-width: 40px;
-  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 112px;
+  padding: 0 14px;
+  justify-content: center;
+}
+
+.chat-compose__attach-icon {
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
 }
 
 .chat-compose__attach svg {
   width: 16px;
   height: 16px;
+}
+
+.chat-compose__attach-label {
+  font-weight: 600;
+}
+
+.chat-compose__attachment-hint {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 0 2px;
 }
 
 .chat-compose .chat-compose__actions .btn {

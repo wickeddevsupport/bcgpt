@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { SessionsListResult } from "../types.ts";
 import {
   handleChatEvent,
   loadChatHistory,
@@ -25,7 +26,27 @@ function createState(overrides: Partial<ChatState> = {}): ChatState {
     connected: true,
     lastError: null,
     sessionKey: "main",
+    sessionsResult: null,
     ...overrides,
+  };
+}
+
+function createSessionsResult(
+  overrides: Partial<SessionsListResult["sessions"][number]> = {},
+): SessionsListResult {
+  return {
+    ts: 0,
+    path: "",
+    count: 1,
+    defaults: { model: null, contextTokens: null },
+    sessions: [
+      {
+        key: "main",
+        kind: "direct",
+        updatedAt: Date.now(),
+        ...overrides,
+      },
+    ],
   };
 }
 
@@ -317,7 +338,9 @@ describe("handleChatEvent", () => {
   it("passes image uploads through chat.send attachments", async () => {
     const request = vi.fn(async (method: string) => {
       if (method === "models.list") {
-        return { models: [{ id: "gpt-5", available: true }] };
+        return {
+          models: [{ id: "gpt-5", provider: "openai", input: ["text", "image"], available: true }],
+        };
       }
       if (method === "chat.send") {
         return { ok: true };
@@ -326,6 +349,10 @@ describe("handleChatEvent", () => {
     });
     const state = createState({
       client: { request } as unknown as ChatState["client"],
+      sessionsResult: createSessionsResult({
+        modelProvider: "openai",
+        model: "gpt-5",
+      }),
     });
 
     await sendChatMessage(state, "see image", [
@@ -350,6 +377,56 @@ describe("handleChatEvent", () => {
             content: PNG_1X1,
           }),
         ],
+      }),
+    );
+  });
+
+  it("switches to a vision-capable model before sending image uploads", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === "models.list") {
+        return {
+          models: [
+            { id: "o3-mini", provider: "openai", input: ["text"], available: true },
+            { id: "gpt-5.2", provider: "openai", input: ["text", "image"], available: true },
+          ],
+        };
+      }
+      if (method === "sessions.patch") {
+        return { ok: true };
+      }
+      if (method === "chat.send") {
+        return { ok: true };
+      }
+      throw new Error(`unexpected method: ${method}`);
+    });
+    const state = createState({
+      client: { request } as unknown as ChatState["client"],
+      sessionsResult: createSessionsResult({
+        modelProvider: "openai",
+        model: "o3-mini",
+      }),
+    });
+
+    await sendChatMessage(state, "read this screenshot", [
+      {
+        id: "img-1",
+        dataUrl: `data:image/png;base64,${PNG_1X1}`,
+        mimeType: "image/png",
+        fileName: "screenshot.png",
+        kind: "image",
+      },
+    ]);
+
+    expect(request).toHaveBeenCalledWith("sessions.patch", {
+      key: "main",
+      model: "openai/gpt-5.2",
+    });
+    expect(state.sessionsResult?.sessions[0]?.modelProvider).toBe("openai");
+    expect(state.sessionsResult?.sessions[0]?.model).toBe("gpt-5.2");
+    expect(request).toHaveBeenCalledWith(
+      "chat.send",
+      expect.objectContaining({
+        message: "read this screenshot",
       }),
     );
   });

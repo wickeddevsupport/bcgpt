@@ -115,8 +115,9 @@ const CHAT_TEXT_ATTACHMENT_EXTENSIONS = new Set([
   "log",
 ]);
 
-const CHAT_UPLOAD_ACCEPT =
-  "image/*,text/*,.txt,.md,.markdown,.csv,.tsv,.json,.xml,.yml,.yaml,.js,.jsx,.ts,.tsx,.html,.css,.sql,.log";
+const CHAT_IMAGE_UPLOAD_ACCEPT = "image/*";
+const CHAT_FILE_UPLOAD_ACCEPT =
+  "text/*,.txt,.md,.markdown,.csv,.tsv,.json,.xml,.yml,.yaml,.js,.jsx,.ts,.tsx,.html,.css,.sql,.log";
 
 function extensionFromName(fileName: string | null | undefined): string {
   const trimmed = String(fileName ?? "").trim();
@@ -360,7 +361,27 @@ function renderAttachmentPreview(props: ChatProps) {
   `;
 }
 
+function renderAttachmentHint(props: ChatProps) {
+  const attachments = props.attachments ?? [];
+  if (attachments.length === 0) {
+    return nothing;
+  }
+  const imageCount = attachments.filter((att) => (att.kind ?? "image") === "image").length;
+  const fileCount = attachments.length - imageCount;
+  const parts: string[] = [];
+  if (imageCount > 0) {
+    parts.push(
+      `${imageCount} image${imageCount === 1 ? "" : "s"} ready. Images stay visible in the thread and are sent with the next message.`,
+    );
+  }
+  if (fileCount > 0) {
+    parts.push(`${fileCount} file${fileCount === 1 ? "" : "s"} attached.`);
+  }
+  return html`<div class="chat-compose__attachment-hint">${parts.join(" ")}</div>`;
+}
+
 export function renderChat(props: ChatProps) {
+  let imageInput: HTMLInputElement | null = null;
   let fileInput: HTMLInputElement | null = null;
   const canCompose = props.connected;
   const isBusy = props.sending || props.stream !== null;
@@ -382,8 +403,8 @@ export function renderChat(props: ChatProps) {
   const hasAttachments = (props.attachments?.length ?? 0) > 0;
   const composePlaceholder = props.connected
     ? hasAttachments
-      ? "Add a message or upload more files..."
-      : "Message (↩ to send, Shift+↩ for line breaks, paste or upload files)"
+      ? "Add a message, then send your images or files together..."
+      : "Ask anything. Paste a screenshot, drag files in, or use Add image / Add file."
     : "Connect to the gateway to start chatting…";
 
   const splitRatio = props.splitRatio ?? 0.6;
@@ -578,6 +599,7 @@ export function renderChat(props: ChatProps) {
           </div>
         </div>
         ${renderAttachmentPreview(props)}
+        ${renderAttachmentHint(props)}
         <div class="chat-compose__row" style="flex-direction: column;">
           <label class="field chat-compose__field" style="width: 100%;">
             <span>Message</span>
@@ -631,11 +653,11 @@ export function renderChat(props: ChatProps) {
                 ? html`
                     <input
                       ${ref((el) => {
-                        fileInput = el as HTMLInputElement | null;
+                        imageInput = el as HTMLInputElement | null;
                       })}
                       class="chat-compose__file-input"
                       type="file"
-                      accept=${CHAT_UPLOAD_ACCEPT}
+                      accept=${CHAT_IMAGE_UPLOAD_ACCEPT}
                       multiple
                       @change=${async (e: Event) => {
                         const input = e.target as HTMLInputElement;
@@ -646,16 +668,47 @@ export function renderChat(props: ChatProps) {
                         input.value = "";
                       }}
                     />
-                    <button
-                      class="btn btn--secondary chat-compose__attach"
-                      type="button"
-                      ?disabled=${!props.connected}
-                      title="Upload images or text files"
-                      aria-label="Upload images or text files"
-                      @click=${() => fileInput?.click()}
-                    >
-                      ${icons.paperclip}
-                    </button>
+                    <input
+                      ${ref((el) => {
+                        fileInput = el as HTMLInputElement | null;
+                      })}
+                      class="chat-compose__file-input"
+                      type="file"
+                      accept=${CHAT_FILE_UPLOAD_ACCEPT}
+                      multiple
+                      @change=${async (e: Event) => {
+                        const input = e.target as HTMLInputElement;
+                        if (!input.files?.length) {
+                          return;
+                        }
+                        await appendFilesAsAttachments(input.files, props);
+                        input.value = "";
+                      }}
+                    />
+                    <div class="chat-compose__attach-group">
+                      <button
+                        class="btn btn--secondary chat-compose__attach chat-compose__attach--image"
+                        type="button"
+                        ?disabled=${!props.connected}
+                        title="Upload images"
+                        aria-label="Upload images"
+                        @click=${() => imageInput?.click()}
+                      >
+                        <span class="chat-compose__attach-icon">${icons.image}</span>
+                        <span class="chat-compose__attach-label">Add image</span>
+                      </button>
+                      <button
+                        class="btn btn--secondary chat-compose__attach"
+                        type="button"
+                        ?disabled=${!props.connected}
+                        title="Upload files"
+                        aria-label="Upload files"
+                        @click=${() => fileInput?.click()}
+                      >
+                        <span class="chat-compose__attach-icon">${icons.paperclip}</span>
+                        <span class="chat-compose__attach-label">Add file</span>
+                      </button>
+                    </div>
                   `
                 : nothing
             }
