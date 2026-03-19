@@ -3,7 +3,14 @@ import type { AppViewState } from "./app-view-state.ts";
 import type { UsageState } from "./controllers/usage.ts";
 import { parseAgentSessionKey } from "../../../src/routing/session-key.js";
 import { refreshChatAvatar } from "./app-chat.ts";
-import { renderChatControls, renderTab, renderThemeToggle } from "./app-render.helpers.ts";
+import {
+  activateChatSession,
+  buildNewAgentSessionKey,
+  buildNewSessionLabel,
+  renderChatControls,
+  renderTab,
+  renderThemeToggle,
+} from "./app-render.helpers.ts";
 import { loadAgentFileContent, loadAgentFiles, saveAgentFile } from "./controllers/agent-files.ts";
 import { loadAgentIdentities, loadAgentIdentity } from "./controllers/agent-identity.ts";
 import { loadAgentSkills } from "./controllers/agent-skills.ts";
@@ -525,8 +532,39 @@ export function renderApp(state: AppViewState) {
     (state.hello?.snapshot as { sessionDefaults?: { mainKey?: string } } | undefined)
       ?.sessionDefaults ?? null;
   const chatMainKey = sessionDefaults?.mainKey?.trim() || "main";
-  const buildAgentChatHref = (agentId: string) =>
-    `${pathForTab("chat", state.basePath)}?session=${encodeURIComponent(`agent:${agentId}:${chatMainKey}`)}`;
+  const openAgentChat = async (
+    agentId: string,
+    opts?: { newSession?: boolean },
+  ) => {
+    const targetKey = opts?.newSession
+      ? buildNewAgentSessionKey(agentId)
+      : `agent:${agentId}:${chatMainKey}`;
+    const agentName =
+      state.agentsList?.agents.find((entry) => entry.id === agentId)?.identity?.name?.trim() ||
+      state.agentsList?.agents.find((entry) => entry.id === agentId)?.name?.trim() ||
+      agentId;
+    const activated = await activateChatSession(state, targetKey, {
+      ensureExists: true,
+      label: opts?.newSession ? buildNewSessionLabel(agentName) : null,
+      syncUrl: false,
+    });
+    if (!activated) {
+      return;
+    }
+    state.setTab("chat");
+  };
+  const createNewChatSession = async () => {
+    const currentAgentId =
+      parseAgentSessionKey(state.sessionKey)?.agentId?.trim() ||
+      state.assistantAgentId?.trim() ||
+      state.agentsList?.defaultId?.trim() ||
+      state.agentsList?.agents[0]?.id?.trim() ||
+      "";
+    if (!currentAgentId) {
+      return;
+    }
+    await openAgentChat(currentAgentId, { newSession: true });
+  };
 
   // Auto-exit onboarding once the user has saved an AI key (Step 3 complete)
   if (state.onboarding && state.pmosModelConfigured) {
@@ -538,23 +576,7 @@ export function renderApp(state: AppViewState) {
   const chatProps: ChatProps = {
     sessionKey: state.sessionKey,
     onSessionKeyChange: (next: string) => {
-      state.sessionKey = next;
-      state.chatMessage = "";
-      state.chatAttachments = [];
-      state.chatStream = null;
-      state.chatStreamStartedAt = null;
-      state.chatRunId = null;
-      state.chatQueue = [];
-      state.resetToolStream();
-      state.resetChatScroll();
-      state.applySettings({
-        ...state.settings,
-        sessionKey: next,
-        lastActiveSessionKey: next,
-      });
-      void state.loadAssistantIdentity();
-      void loadChatHistory(state);
-      void refreshChatAvatar(state);
+      void activateChatSession(state, next, { replaceHistory: true });
     },
     thinkingLevel: state.chatThinkingLevel,
     showThinking,
@@ -597,7 +619,7 @@ export function renderApp(state: AppViewState) {
     createWorkflowBusy: state.chatCreateWorkflowBusy,
     onAbort: () => void state.handleAbortChat(),
     onQueueRemove: (id) => state.removeQueuedMessage(id),
-    onNewSession: () => state.handleSendChat("/new", { restoreDraft: true }),
+    onNewSession: () => void createNewChatSession(),
     showNewMessages: state.chatNewMessagesBelow && !state.chatManualRefreshInFlight,
     onScrollToBottom: () => state.scrollToBottom(),
     sidebarOpen: state.sidebarOpen,
@@ -898,7 +920,7 @@ export function renderApp(state: AppViewState) {
                 agentActivityById: state.agentActivityById,
                 agentIdentityById: state.agentIdentityById,
                 onOpenAgentChat: (agentId: string) => {
-                  window.location.href = buildAgentChatHref(agentId);
+                  void openAgentChat(agentId);
                 },
                 // Inline chat panel
                 chatProps,
@@ -2352,7 +2374,7 @@ export function renderApp(state: AppViewState) {
                 // Agent activity and actions
                 agentActivityById: state.agentActivityById,
                 onOpenAgentChat: (agentId: string) => {
-                  window.location.href = buildAgentChatHref(agentId);
+                  void openAgentChat(agentId);
                 },
                 onPauseAgent: (agentId: string) => {
                   // TODO: Implement pause/resume agent

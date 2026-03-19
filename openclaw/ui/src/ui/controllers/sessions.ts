@@ -1,6 +1,7 @@
 import type { GatewayBrowserClient } from "../gateway.ts";
 import type { SessionsListResult } from "../types.ts";
 import { toNumber } from "../format.ts";
+import { parseAgentSessionKey } from "../../../../src/routing/session-key.js";
 
 export type SessionsState = {
   client: GatewayBrowserClient | null;
@@ -24,7 +25,25 @@ export type SessionsState = {
   agentsList?: { defaultId?: string; agents?: Array<{ id: string }> } | null;
 };
 
-function syncWorkspaceSessionSelection(state: SessionsState, res: SessionsListResult): void {
+function isKnownWorkspaceAgentSession(state: SessionsState, key: string): boolean {
+  const parsed = parseAgentSessionKey(key);
+  if (!parsed?.agentId) {
+    return false;
+  }
+  const agentId = parsed.agentId.trim();
+  if (!agentId) {
+    return false;
+  }
+  return (
+    Array.isArray(state.agentsList?.agents) &&
+    state.agentsList.agents.some((agent) => agent.id === agentId)
+  );
+}
+
+export function syncWorkspaceSessionSelection(
+  state: SessionsState,
+  res: SessionsListResult,
+): void {
   const role = state.pmosAuthUser?.role ?? null;
   if (!role || role === "super_admin") {
     return;
@@ -35,7 +54,10 @@ function syncWorkspaceSessionSelection(state: SessionsState, res: SessionsListRe
         .filter(Boolean)
     : [];
   const currentKey = typeof state.sessionKey === "string" ? state.sessionKey.trim() : "";
-  if (currentKey && availableKeys.includes(currentKey)) {
+  if (
+    currentKey &&
+    (availableKeys.includes(currentKey) || isKnownWorkspaceAgentSession(state, currentKey))
+  ) {
     return;
   }
   let nextKey = availableKeys[0] ?? "";

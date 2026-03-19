@@ -2,6 +2,7 @@ import type { GatewayBrowserClient } from "../gateway.ts";
 import type { ChatAttachment } from "../ui-types.ts";
 import { extractText, extractThinking } from "../chat/message-extract.ts";
 import { generateUUID } from "../uuid.ts";
+import { parseAgentSessionKey } from "../../../../src/routing/session-key.js";
 
 export { extractText, extractThinking } from "../chat/message-extract.ts";
 
@@ -249,6 +250,16 @@ async function refreshWorkspaceSessionKey(state: ChatState): Promise<string | nu
   if (!state.client || !state.connected || !state.pmosWorkspaceId) {
     return null;
   }
+  const currentKey = typeof state.sessionKey === "string" ? state.sessionKey.trim() : "";
+  const currentAgentId = parseAgentSessionKey(currentKey)?.agentId?.trim() ?? "";
+  if (currentKey) {
+    try {
+      await state.client.request("sessions.patch", { key: currentKey });
+      return currentKey;
+    } catch {
+      // Fall through to the existing-session recovery path.
+    }
+  }
   const res = await state.client.request<{
     sessions?: Array<{ key?: string | null }>;
   }>("sessions.list", {
@@ -256,10 +267,16 @@ async function refreshWorkspaceSessionKey(state: ChatState): Promise<string | nu
     includeUnknown: false,
     activeMinutes: 120,
   });
-  const nextKey =
+  const availableKeys =
     res.sessions
       ?.map((row) => (typeof row?.key === "string" ? row.key.trim() : ""))
-      .find(Boolean) ?? null;
+      .filter(Boolean) ?? [];
+  const nextKey =
+    (currentAgentId
+      ? availableKeys.find((key) => parseAgentSessionKey(key)?.agentId?.trim() === currentAgentId)
+      : null) ??
+    availableKeys[0] ??
+    null;
   if (!nextKey) {
     return null;
   }
@@ -291,6 +308,35 @@ export async function loadChatHistory(state: ChatState) {
     });
     state.chatThinkingLevel = res.thinkingLevel ?? null;
   } catch (err) {
+    const errorMessage = String(err);
+    const canRepairMissingSession =
+      Boolean(state.client && state.connected && state.pmosWorkspaceId) &&
+      errorMessage.includes("session") &&
+      errorMessage.includes("not found");
+    if (canRepairMissingSession) {
+      try {
+        await state.client!.request("sessions.patch", { key: state.sessionKey });
+        const repaired = await state.client!.request<{
+          messages?: Array<unknown>;
+          thinkingLevel?: string;
+        }>("chat.history", {
+          sessionKey: state.sessionKey,
+          limit: 200,
+        });
+        const historyMessages = Array.isArray(repaired.messages) ? repaired.messages : [];
+        const recovered = reconcileRunWithHistory(state, historyMessages);
+        state.chatMessages = mergePendingMessages({
+          history: historyMessages,
+          previous: previousMessages,
+          activeRunId: recovered ? null : state.chatRunId,
+        });
+        state.chatThinkingLevel = repaired.thinkingLevel ?? null;
+        state.lastError = null;
+        return;
+      } catch {
+        // Fall through to the existing fallback paths.
+      }
+    }
     if (state.client && state.connected) {
       try {
         const fallback = await loadChatHistoryViaHttp(state);

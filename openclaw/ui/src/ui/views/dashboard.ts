@@ -61,7 +61,7 @@ export type DashboardProps = {
   agentsList: AgentsListResult | null;
   agentActivityById: Record<string, AgentActivitySummary>;
   agentIdentityById: Record<string, AgentIdentityResult>;
-  onOpenAgentChat: (agentId: string) => void;
+  onOpenAgentChat: (agentId: string, opts?: { newSession?: boolean }) => void;
   // Inline chat panel
   chatProps: ChatProps;
   // Dashboard tab state
@@ -629,4 +629,3 @@ export function renderDashboard(props: DashboardProps) {
     </section>
   `;
 }
-

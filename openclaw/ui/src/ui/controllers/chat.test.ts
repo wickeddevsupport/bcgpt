@@ -142,6 +142,44 @@ describe("handleChatEvent", () => {
     expect((state.chatMessages[0] as { role?: string }).role).toBe("user");
   });
 
+  it("repairs a missing workspace session during history load instead of falling back", async () => {
+    const request = vi.fn(async (method: string, params?: Record<string, unknown>) => {
+      if (method === "chat.history") {
+        if (params?.sessionKey === "agent:designer:chat:stale" && request.mock.calls.length === 1) {
+          throw new Error('session "agent:designer:chat:stale" not found');
+        }
+        return {
+          messages: [
+            {
+              role: "assistant",
+              content: [{ type: "text", text: "Recovered session history" }],
+              timestamp: 10,
+            },
+          ],
+          thinkingLevel: "off",
+        };
+      }
+      if (method === "sessions.patch") {
+        return { ok: true };
+      }
+      throw new Error(`unexpected method: ${method}`);
+    });
+    const state = createState({
+      sessionKey: "agent:designer:chat:stale",
+      pmosWorkspaceId: "workspace-123",
+      client: { request } as unknown as ChatState["client"],
+    });
+
+    await loadChatHistory(state);
+
+    expect(state.lastError).toBeNull();
+    expect(state.chatMessages).toHaveLength(1);
+    expect(request.mock.calls).toContainEqual([
+      "sessions.patch",
+      { key: "agent:designer:chat:stale" },
+    ]);
+  });
+
   it("clears pending marker when own run final event arrives", () => {
     const state = createState({
       sessionKey: "main",
@@ -191,7 +229,7 @@ describe("handleChatEvent", () => {
     expect(request.mock.calls.some(([method]) => method === "pmos.chat.send")).toBe(false);
   });
 
-  it("refreshes workspace sessions and retries chat.send when the session key is stale", async () => {
+  it("recreates the requested workspace session and retries chat.send without falling back", async () => {
     const request = vi.fn(async (method: string, params?: Record<string, unknown>) => {
       if (method === "models.list") {
         return {
@@ -199,15 +237,14 @@ describe("handleChatEvent", () => {
         };
       }
       if (method === "chat.send") {
-        if (params?.sessionKey === "agent:main:main") {
+        const chatSendCount = request.mock.calls.filter(([name]) => name === "chat.send").length;
+        if (params?.sessionKey === "agent:main:main" && chatSendCount === 1) {
           throw new Error('session "agent:main:main" not found');
         }
         return { ok: true };
       }
-      if (method === "sessions.list") {
-        return {
-          sessions: [{ key: "agent:assistant:main" }],
-        };
+      if (method === "sessions.patch") {
+        return { ok: true };
       }
       throw new Error(`unexpected method: ${method}`);
     });
@@ -220,13 +257,57 @@ describe("handleChatEvent", () => {
     const runId = await sendChatMessage(state, "hello workspace");
 
     expect(typeof runId).toBe("string");
-    expect(state.sessionKey).toBe("agent:assistant:main");
+    expect(state.sessionKey).toBe("agent:main:main");
     expect(
       request.mock.calls.filter(([method]) => method === "chat.send").map(([, params]) => params),
     ).toEqual([
       expect.objectContaining({ sessionKey: "agent:main:main" }),
-      expect.objectContaining({ sessionKey: "agent:assistant:main" }),
+      expect.objectContaining({ sessionKey: "agent:main:main" }),
     ]);
-    expect(request.mock.calls.some(([method]) => method === "sessions.list")).toBe(true);
+    expect(request.mock.calls).toContainEqual([
+      "sessions.patch",
+      { key: "agent:main:main" },
+    ]);
+  });
+
+  it("prefers another session for the same agent before falling back to another agent", async () => {
+    const request = vi.fn(async (method: string, params?: Record<string, unknown>) => {
+      if (method === "models.list") {
+        return {
+          models: [{ id: "gpt-5", available: true }],
+        };
+      }
+      if (method === "chat.send") {
+        if (params?.sessionKey === "agent:designer:chat:missing") {
+          throw new Error('session "agent:designer:chat:missing" not found');
+        }
+        return { ok: true };
+      }
+      if (method === "sessions.patch") {
+        throw new Error("cannot recreate session");
+      }
+      if (method === "sessions.list") {
+        return {
+          sessions: [{ key: "agent:designer:main" }, { key: "agent:assistant:main" }],
+        };
+      }
+      throw new Error(`unexpected method: ${method}`);
+    });
+    const state = createState({
+      sessionKey: "agent:designer:chat:missing",
+      pmosWorkspaceId: "workspace-123",
+      client: { request } as unknown as ChatState["client"],
+    });
+
+    const runId = await sendChatMessage(state, "hello workspace");
+
+    expect(typeof runId).toBe("string");
+    expect(state.sessionKey).toBe("agent:designer:main");
+    expect(
+      request.mock.calls.filter(([method]) => method === "chat.send").map(([, params]) => params),
+    ).toEqual([
+      expect.objectContaining({ sessionKey: "agent:designer:chat:missing" }),
+      expect.objectContaining({ sessionKey: "agent:designer:main" }),
+    ]);
   });
 });

@@ -173,7 +173,7 @@ export type AgentsProps = {
   // Agent activity summaries by ID
   agentActivityById: Record<string, AgentActivitySummary>;
   // Chat integration
-  onOpenAgentChat: (agentId: string) => void;
+  onOpenAgentChat: (agentId: string, opts?: { newSession?: boolean }) => void;
   onPauseAgent: (agentId: string) => void;
   onViewAgentLogs: (agentId: string) => void;
   onEditAgent: (agentId: string) => void;
@@ -737,24 +737,39 @@ export function renderAgents(props: AgentsProps) {
                   const emoji = resolveAgentEmoji(agent, props.agentIdentityById[agent.id] ?? null);
                   const isActive = selectedId === agent.id;
                   return html`
-                    <button
-                      type="button"
-                      class="agent-card ${isActive ? "agent-card--selected" : ""}"
-                      @click=${() => props.onSelectAgent(agent.id)}
-                      style="text-align:left; width:100%;"
-                    >
-                      <div class="agent-card-header">
-                        <div class="agent-avatar">${emoji || normalizeAgentLabel(agent).slice(0, 1)}</div>
-                        <div class="agent-card-info">
-                          <div class="agent-card-title">${normalizeAgentLabel(agent)}</div>
-                          <div class="muted mono" style="font-size:12px;">${agent.id}</div>
+                    <div class="agent-card agent-card--sidebar ${isActive ? "agent-card--selected" : ""}">
+                      <button
+                        type="button"
+                        class="agent-card__select"
+                        @click=${() => props.onSelectAgent(agent.id)}
+                      >
+                        <div class="agent-card-header">
+                          <div class="agent-avatar">${emoji || normalizeAgentLabel(agent).slice(0, 1)}</div>
+                          <div class="agent-card-info">
+                            <div class="agent-card-title">${normalizeAgentLabel(agent)}</div>
+                            <div class="muted mono" style="font-size:12px;">${agent.id}</div>
+                          </div>
                         </div>
+                        <div class="chip-row" style="margin-top:8px;">
+                          ${badge ? html`<span class="chip">${badge}</span>` : nothing}
+                          ${isActive ? html`<span class="chip chip-ok">selected</span>` : nothing}
+                        </div>
+                      </button>
+                      <div class="agent-card-actions agent-card-actions--sidebar">
+                        <button
+                          class="btn btn--sm primary"
+                          @click=${() => props.onOpenAgentChat(agent.id)}
+                        >
+                          Chat
+                        </button>
+                        <button
+                          class="btn btn--sm"
+                          @click=${() => props.onSelectAgent(agent.id)}
+                        >
+                          Manage
+                        </button>
                       </div>
-                      <div class="chip-row" style="margin-top:8px;">
-                        ${badge ? html`<span class="chip">${badge}</span>` : nothing}
-                        ${isActive ? html`<span class="chip chip-ok">selected</span>` : nothing}
-                      </div>
-                    </button>
+                    </div>
                   `;
                 })
           }
@@ -898,7 +913,7 @@ function renderAgentHeader(
   agent: AgentsListResult["agents"][number],
   defaultId: string | null,
   agentIdentity: AgentIdentityResult | null,
-  props: Pick<AgentsProps, "onEditAgent" | "onDeleteAgent">,
+  props: Pick<AgentsProps, "onEditAgent" | "onDeleteAgent" | "onOpenAgentChat">,
 ) {
   const badge = agentBadgeText(agent.id, defaultId);
   const displayName = normalizeAgentLabel(agent);
@@ -918,6 +933,12 @@ function renderAgentHeader(
       <div class="agent-header-meta">
         <div class="mono">${agent.id}</div>
         <div class="row" style="gap: 8px; justify-content: flex-end; flex-wrap: wrap;">
+          <button class="btn btn--sm primary" @click=${() => props.onOpenAgentChat(agent.id)}>
+            Chat
+          </button>
+          <button class="btn btn--sm" @click=${() => props.onOpenAgentChat(agent.id, { newSession: true })}>
+            New Session
+          </button>
           <button class="btn btn--sm" @click=${() => props.onEditAgent(agent.id)}>Edit</button>
           <button class="btn btn--sm danger" @click=${() => props.onDeleteAgent(agent.id)}>
             Delete
