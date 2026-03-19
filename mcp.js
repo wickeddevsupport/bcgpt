@@ -3631,6 +3631,214 @@ function extractRecordingUrlFromText(text) {
   return m ? parseRecordingUrl(m[0]) : null;
 }
 
+function buildPmosDockCapabilities(dock, { includeDisabled = false } = {}) {
+  return (Array.isArray(dock) ? dock : [])
+    .filter((entry) => entry && (includeDisabled ? true : entry.enabled !== false))
+    .map((entry) => ({
+      id: entry.id ?? null,
+      name: entry.name || null,
+      title: entry.title || null,
+      enabled: entry.enabled !== false,
+      position: entry.position ?? null,
+      url: entry.url || null,
+      app_url: entry.app_url || null,
+    }));
+}
+
+function buildPmosDockPayload(dock, { includeDetails = false, includeDisabled = false } = {}) {
+  const filtered = (Array.isArray(dock) ? dock : [])
+    .filter((entry) => entry && (includeDisabled ? true : entry.enabled !== false));
+  return includeDetails
+    ? filtered
+    : filtered.map((entry) => ({
+        id: entry.id ?? null,
+        name: entry.name || null,
+        title: entry.title || null,
+        enabled: entry.enabled !== false,
+        position: entry.position ?? null,
+        url: entry.url || null,
+        app_url: entry.app_url || null,
+      }));
+}
+
+function summarizeTodoGroupsForPmos(groups) {
+  const lists = Array.isArray(groups) ? groups : [];
+  let total = 0;
+  let open = 0;
+  let completed = 0;
+  const dueDates = [];
+  for (const group of lists) {
+    for (const todo of (group?.todos || [])) {
+      total += 1;
+      if (todo?.completed || todo?.completed_at) completed += 1;
+      else open += 1;
+      const dueOn = isoDate(todo?.due_on || todo?.due_at);
+      if (dueOn) dueDates.push(dueOn);
+    }
+  }
+  dueDates.sort();
+  return {
+    todo_lists: lists.length,
+    todos_total: total,
+    todos_open: open,
+    todos_completed: completed,
+    next_due_on: dueDates[0] || null,
+  };
+}
+
+async function hydratePmosProjectBoards(ctx, projectId, {
+  includeDetails = false,
+  maxCardsPerColumn = 0,
+} = {}) {
+  const tables = await listCardTables(ctx, projectId);
+  const boards = await mapLimit(tables || [], 1, async (table) =>
+    summarizeCardTable(ctx, projectId, table, {
+      includeCards: true,
+      maxCardsPerColumn
+    })
+  );
+
+  if (includeDetails) return boards;
+
+  return boards.map((board) => ({
+    id: board.id,
+    title: board.title,
+    status: board.status,
+    type: board.type,
+    total_columns: board.total_columns,
+    total_cards: board.total_cards,
+    truncated: !!board.truncated,
+    columns: (board.columns || []).map((column) => ({
+      id: column.id,
+      title: column.title,
+      type: column.type,
+      cards_count: column.cards_count ?? null,
+      cards: (column.cards || []).map((card) => ({
+        id: card.id ?? null,
+        title: card.title || null,
+        status: card.status || null,
+        due_on: card.due_on || null,
+        app_url: card.app_url || card.url || null,
+      }))
+    }))
+  }));
+}
+
+function buildPmosProjectCard(project, detail = null, dockCapabilities = []) {
+  const source = detail || project || {};
+  return {
+    id: source.id ?? (project?.projectId != null ? Number(project.projectId) : null),
+    name: source.name || project?.name || null,
+    description: source.description || null,
+    status: source.status || project?.status || "active",
+    app_url: source.app_url || source.url || project?.appUrl || null,
+    created_at: source.created_at || null,
+    updated_at: source.updated_at || null,
+    dock_capabilities: dockCapabilities,
+  };
+}
+
+async function fetchPmosEntityPayload(ctx, resolved) {
+  const type = String(resolved?.type || "").toLowerCase();
+  const projectId = Number(resolved?.project_id || resolved?.bucket_id || 0) || null;
+  const entityId = Number(resolved?.id || 0) || null;
+
+  switch (type) {
+    case "project":
+      return { entity: await getProject(ctx, Number(resolved.project_id || resolved.id)), recordingId: null };
+    case "person":
+      return { entity: await getPerson(ctx, entityId), recordingId: null };
+    case "todo": {
+      const todo = await getTodo(ctx, projectId, entityId);
+      return { entity: todo, recordingId: Number(todo?.recording?.id || todo?.recording_id || todo?.id || entityId) || null };
+    }
+    case "todolist":
+      return { entity: await getTodoList(ctx, projectId, entityId), recordingId: null };
+    case "todolist_group":
+      return { entity: await getTodolistGroup(ctx, projectId, entityId), recordingId: null };
+    case "card": {
+      const card = await getCard(ctx, projectId, entityId);
+      return { entity: card, recordingId: Number(card?.recording?.id || card?.recording_id || card?.id || entityId) || null };
+    }
+    case "card_table":
+      return { entity: await getCardTable(ctx, projectId, entityId), recordingId: null };
+    case "message": {
+      const message = await getMessage(ctx, projectId, entityId);
+      return { entity: message, recordingId: Number(message?.recording?.id || message?.recording_id || message?.id || entityId) || null };
+    }
+    case "document": {
+      const document = await getDocument(ctx, projectId, entityId);
+      return { entity: document, recordingId: Number(document?.recording?.id || document?.recording_id || document?.id || entityId) || null };
+    }
+    case "upload": {
+      const upload = await getUpload(ctx, projectId, entityId);
+      return { entity: upload, recordingId: Number(upload?.recording?.id || upload?.recording_id || upload?.id || entityId) || null };
+    }
+    case "schedule":
+      return { entity: await getSchedule(ctx, projectId, entityId), recordingId: null };
+    case "schedule_entry": {
+      const entry = await getScheduleEntry(ctx, projectId, entityId);
+      return { entity: entry, recordingId: Number(entry?.recording?.id || entry?.recording_id || entry?.id || entityId) || null };
+    }
+    case "comment":
+      return {
+        entity: await getComment(ctx, projectId, Number(resolved.comment_id || entityId)),
+        recordingId: Number(resolved.recording_id || resolved.todo_id || resolved.card_id || 0) || null
+      };
+    case "campfire":
+      return { entity: await resolveCampfire(ctx, projectId, entityId), recordingId: null };
+    default:
+      throw new Error(`Unsupported PMOS entity type: ${type || "unknown"}`);
+  }
+}
+
+async function resolvePmosEntityInput(ctx, args = {}) {
+  const url = String(args.url || "").trim();
+  if (url) {
+    const parsed = parseBasecampUrl(url);
+    if (!parsed) throw new Error("URL is not a recognized Basecamp URL.");
+    return parsed;
+  }
+
+  const type = String(args.type || "").trim().toLowerCase();
+  if (!type) throw new Error("Provide either a Basecamp url or a type.");
+
+  const rawId = firstDefined(args.id, args.todo_id, args.card_id, args.message_id, args.document_id, args.upload_id, args.entry_id);
+  const numericId = rawId == null ? null : Number(rawId);
+  if (type !== "project" && type !== "person" && !Number.isFinite(numericId)) {
+    throw new Error("An entity id is required for this PMOS detail lookup.");
+  }
+
+  let project = null;
+  if (args.project) {
+    project = await projectByName(ctx, args.project);
+  }
+
+  if (type === "project") {
+    return {
+      type,
+      id: project?.id ?? (Number.isFinite(numericId) ? numericId : null),
+      project_id: project?.id ?? (Number.isFinite(numericId) ? numericId : null),
+      bucket_id: project?.id ?? (Number.isFinite(numericId) ? numericId : null),
+    };
+  }
+
+  if (type === "person") {
+    return { type, id: numericId };
+  }
+
+  if (!project?.id) {
+    throw new Error("Project name is required when resolving Basecamp items by type/id.");
+  }
+
+  return {
+    type,
+    id: numericId,
+    project_id: project.id,
+    bucket_id: project.id,
+  };
+}
+
 async function postCardComment(ctx, projectId, cardId, text, opts = {}) {
   logCommentDebug("[postCardComment] start", {
     projectId,
@@ -5368,6 +5576,252 @@ export async function handleMCP(reqBody, ctx) {
         return ok(id, { ...snapshot, resourceCounts });
       } catch (e) {
         return fail(id, { code: "WORKSPACE_TODO_SNAPSHOT_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "pmos_workspace_sync") {
+      try {
+        const previewLimit = Number(args.preview_limit || process.env.BASECAMP_WORKSPACE_SNAPSHOT_PREVIEW_LIMIT || 20);
+        const projectPreviewLimit = Number(args.project_preview_limit || process.env.BASECAMP_WORKSPACE_PROJECT_PREVIEW_LIMIT || 4);
+        const maxProjects = Number(args.max_projects || 0);
+        const includeProjectDetails = args.include_project_details === true;
+        const includeProjectDocks = args.include_project_docks === true;
+        const includeDisabledTools = args.include_disabled_tools === true;
+
+        const [snapshot, resourceCounts] = await Promise.all([
+          getOrRefreshBasecampWorkspaceSnapshot({
+            userKey: ctx.userKey,
+            accountId: ctx.accountId,
+            waitForFresh: true,
+            reason: "mcp:pmos_workspace_sync",
+            previewLimit: Number.isFinite(previewLimit) && previewLimit > 0 ? previewLimit : 20,
+            projectPreviewLimit: Number.isFinite(projectPreviewLimit) && projectPreviewLimit > 0 ? projectPreviewLimit : 4,
+            maxProjects: Number.isFinite(maxProjects) && maxProjects > 0 ? maxProjects : 0,
+          }),
+          getBasecampResourceCounts(ctx.userKey, ctx.accountId).catch(() => ({})),
+        ]);
+
+        const payload = {
+          workspace: {
+            userKey: ctx.userKey,
+            accountId: ctx.accountId,
+            fetchedAt: snapshot?.fetchedAt || null,
+            identity: snapshot?.identity || null,
+            syncState: snapshot?.syncState || null,
+          },
+          totals: snapshot?.totals || {},
+          resourceCounts,
+        };
+
+        attachCachedCollection(payload, "projects", snapshot?.projects || [], { compact: false, preview_limit: 0 });
+        attachCachedCollection(payload, "assigned_todos", snapshot?.assignedTodos || [], { compact: false, preview_limit: previewLimit });
+        attachCachedCollection(payload, "overdue_todos", snapshot?.overdueTodos || [], { compact: false, preview_limit: previewLimit });
+        attachCachedCollection(payload, "due_today_todos", snapshot?.dueTodayTodos || [], { compact: false, preview_limit: previewLimit });
+        attachCachedCollection(payload, "future_todos", snapshot?.futureTodos || [], { compact: false, preview_limit: previewLimit });
+        attachCachedCollection(payload, "no_due_date_todos", snapshot?.noDueDateTodos || [], { compact: false, preview_limit: previewLimit });
+
+        if (includeProjectDetails || includeProjectDocks) {
+          const projectCards = Array.isArray(snapshot?.projects) ? snapshot.projects : [];
+          const hydratedProjects = await mapLimit(projectCards, 2, async (projectCard) => {
+            try {
+              const detail = await getProject(ctx, Number(projectCard.projectId || projectCard.id));
+              const dock = Array.isArray(detail?.dock) ? detail.dock : [];
+              const dockCapabilities = buildPmosDockCapabilities(dock, { includeDisabled: includeDisabledTools });
+              const record = buildPmosProjectCard(projectCard, detail, dockCapabilities);
+              if (includeProjectDocks) {
+                record.dock = buildPmosDockPayload(dock, {
+                  includeDetails: true,
+                  includeDisabled: includeDisabledTools
+                });
+              }
+              return record;
+            } catch (error) {
+              return {
+                id: Number(projectCard.projectId || projectCard.id) || null,
+                name: projectCard?.name || null,
+                status: projectCard?.status || "active",
+                app_url: projectCard?.appUrl || null,
+                hydration_error: error?.message || String(error),
+                dock_capabilities: []
+              };
+            }
+          });
+          attachCachedCollection(payload, "project_details", hydratedProjects, { compact: false, preview_limit: 0 });
+        }
+
+        return ok(id, payload);
+      } catch (e) {
+        return fail(id, { code: "PMOS_WORKSPACE_SYNC_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "pmos_project_sync") {
+      try {
+        const includeDetails = args.include_details === true;
+        const includeDisabledTools = args.include_disabled_tools === true;
+        const includeTodos = args.include_todos !== false;
+        const includePeople = args.include_people !== false;
+        const includeCards = args.include_cards !== false;
+        const includeMessages = args.include_messages !== false;
+        const includeDocuments = args.include_documents !== false;
+        const includeSchedule = args.include_schedule !== false;
+        const includeCampfires = args.include_campfires !== false;
+        const maxCardsPerColumn = Math.max(0, Number(args.max_cards_per_column || 0));
+        const messageLimit = Math.max(0, Number(args.message_limit || 80));
+        const documentLimit = Math.max(0, Number(args.document_limit || 80));
+        const scheduleLimit = Math.max(0, Number(args.schedule_limit || 80));
+        const campfireLinesLimit = Math.max(0, Number(args.campfire_lines_limit || 0));
+
+        const project = await projectByName(ctx, args.project);
+        const projectDetail = await getProject(ctx, project.id);
+        const dock = Array.isArray(projectDetail?.dock) ? projectDetail.dock : [];
+        const dockCapabilities = buildPmosDockCapabilities(dock, { includeDisabled: includeDisabledTools });
+
+        const payload = {
+          project: buildPmosProjectCard(project, projectDetail, dockCapabilities),
+          dock: buildPmosDockPayload(dock, {
+            includeDetails,
+            includeDisabled: includeDisabledTools
+          }),
+          sections: {
+            todos: includeTodos,
+            people: includePeople,
+            cards: includeCards,
+            messages: includeMessages,
+            documents: includeDocuments,
+            schedule: includeSchedule,
+            campfires: includeCampfires,
+          },
+          source_status: {}
+        };
+
+        const safeRead = async (key, fn) => {
+          try {
+            const result = await fn();
+            payload.source_status[key] = { ok: true };
+            return result;
+          } catch (error) {
+            payload.source_status[key] = { ok: false, error: error?.message || String(error) };
+            return null;
+          }
+        };
+
+        if (includeTodos) {
+          const todoGroups = await safeRead("todos", () => listTodosForProject(ctx, project.id));
+          if (todoGroups) {
+            payload.todo_summary = summarizeTodoGroupsForPmos(todoGroups);
+            attachCachedCollection(payload, "todo_groups", todoGroups, { compact: false, preview_limit: 0 });
+          }
+        }
+
+        if (includePeople) {
+          const people = await safeRead("people", () => listProjectPeople(ctx, project.id));
+          if (people) {
+            attachCachedCollection(payload, "people", people, { compact: false, preview_limit: 0 });
+          }
+        }
+
+        if (includeCards) {
+          const boards = await safeRead("cards", () => hydratePmosProjectBoards(ctx, project.id, {
+            includeDetails,
+            maxCardsPerColumn
+          }));
+          if (boards) {
+            attachCachedCollection(payload, "card_boards", boards, { compact: false, preview_limit: 0 });
+          }
+        }
+
+        if (includeMessages) {
+          const [boards, messages] = await Promise.all([
+            safeRead("message_boards", () => listMessageBoards(ctx, project.id)),
+            safeRead("messages", () => listMessages(ctx, project.id, { limit: messageLimit || undefined })),
+          ]);
+          if (boards) attachCachedCollection(payload, "message_boards", boards, { compact: false, preview_limit: 0 });
+          if (messages) attachCachedCollection(payload, "messages", messages, { compact: false, preview_limit: 0 });
+        }
+
+        if (includeDocuments) {
+          const documents = await safeRead("documents", () => listDocuments(ctx, project.id, { limit: documentLimit || undefined }));
+          if (documents) attachCachedCollection(payload, "documents", documents, { compact: false, preview_limit: 0 });
+          const uploads = await safeRead("uploads", async () => {
+            const vaults = await listVaults(ctx, project.id);
+            const vaultId = vaults?.[0]?.id;
+            if (!vaultId) return [];
+            return listUploads(ctx, project.id, vaultId);
+          });
+          if (uploads) attachCachedCollection(payload, "uploads", uploads, { compact: false, preview_limit: 0 });
+        }
+
+        if (includeSchedule) {
+          const scheduleEntries = await safeRead("schedule", () => listScheduleEntries(ctx, project.id, { limit: scheduleLimit || undefined }));
+          if (scheduleEntries) attachCachedCollection(payload, "schedule_entries", scheduleEntries, { compact: false, preview_limit: 0 });
+        }
+
+        if (includeCampfires) {
+          const campfires = await safeRead("campfires", () => listCampfires(ctx, project.id));
+          if (campfires) {
+            attachCachedCollection(payload, "campfires", campfires, { compact: false, preview_limit: 0 });
+            const firstCampfireId = campfires?.[0]?.id;
+            if (firstCampfireId && campfireLinesLimit > 0) {
+              const campfireLines = await safeRead("campfire_lines", () =>
+                listCampfireLines(ctx, project.id, Number(firstCampfireId), { limit: campfireLinesLimit })
+              );
+              if (campfireLines) attachCachedCollection(payload, "campfire_lines", campfireLines, { compact: false, preview_limit: 0 });
+            }
+          }
+        }
+
+        return ok(id, payload);
+      } catch (e) {
+        return fail(id, { code: "PMOS_PROJECT_SYNC_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "pmos_entity_detail") {
+      try {
+        const resolved = await resolvePmosEntityInput(ctx, args);
+        const { entity, recordingId } = await fetchPmosEntityPayload(ctx, resolved);
+        const projectId = Number(resolved?.project_id || resolved?.bucket_id || 0) || null;
+        const project = projectId ? await getProject(ctx, projectId).catch(() => null) : null;
+        const payload = {
+          entity: {
+            type: resolved.type || null,
+            id: resolved.id ?? null,
+            url: resolved.url || null,
+            project_id: projectId,
+            recording_id: recordingId,
+          },
+          project: project ? { id: project.id, name: project.name, app_url: project.app_url || null } : null,
+          detail: entity,
+        };
+
+        const commentsTargetId = Number(
+          resolved?.recording_id ||
+          resolved?.todo_id ||
+          resolved?.card_id ||
+          recordingId ||
+          resolved?.id ||
+          0
+        ) || null;
+
+        if (args.include_comments === true && projectId && commentsTargetId) {
+          const comments = await listComments(ctx, projectId, commentsTargetId);
+          attachCachedCollection(payload, "comments", comments?.comments || [], { compact: false, preview_limit: 0, meta: comments?._meta });
+        }
+
+        if (args.include_events === true && projectId && recordingId) {
+          const events = await listRecordingEvents(ctx, projectId, recordingId);
+          const unwrapped = unwrapItemsWithMeta(events);
+          attachCachedCollection(payload, "events", unwrapped.items || [], { compact: false, preview_limit: 0, meta: unwrapped.meta });
+        }
+
+        if (args.include_subscription === true && projectId && recordingId) {
+          payload.subscription = await getSubscription(ctx, projectId, recordingId);
+        }
+
+        return ok(id, payload);
+      } catch (e) {
+        return fail(id, { code: "PMOS_ENTITY_DETAIL_ERROR", message: e.message });
       }
     }
 
