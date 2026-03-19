@@ -147,48 +147,109 @@ import {
   type PmosProjectDetailTab,
   type PmosProjectSectionResult,
   type PmosProjectsSnapshot,
+  type PmosProjectTodoItem,
 } from "./controllers/pmos-projects.ts";
 
 function buildProjectScreenContext(project: PmosProjectCard, tab: PmosProjectDetailTab, data: unknown): string {
-  const base = `Project: "${project.name}" | Health: ${project.health} | ${project.openTodos} open todos (${project.overdueTodos} overdue, ${project.dueTodayTodos} due today).`;
-  if (tab === "overview") return `${base} Tab: Overview.`;
-  if (!data || !Array.isArray(data)) return `${base} Tab: ${tab} (loading).`;
-  if (tab === "todos") {
-    type Group = { name: string; todos: Array<{ status: string | null; dueOn: string | null; assignee: string | null }> };
-    const groups = data as Group[];
+  const projectJson = {
+    view: "project-detail",
+    project: project.name,
+    projectId: project.id,
+    health: project.health,
+    openTodos: project.openTodos,
+    assignedTodos: project.assignedTodos,
+    overdueTodos: project.overdueTodos,
+    dueTodayTodos: project.dueTodayTodos,
+    futureTodos: project.futureTodos,
+    noDueDateTodos: project.noDueDateTodos,
+    todoLists: project.todoLists,
+    nextDueOn: project.nextDueOn,
+    activeTab: tab,
+    appUrl: project.appUrl,
+    tabData: null as unknown,
+  };
+
+  if (data && Array.isArray(data) && data.length > 0) {
     const today = new Date().toISOString().slice(0, 10);
-    const lines = groups.map((g) => {
-      const open = g.todos.filter((t) => t.status !== "completed").length;
-      const overdue = g.todos.filter((t) => t.status !== "completed" && t.dueOn && t.dueOn < today).length;
-      return `${g.name}: ${open} open${overdue > 0 ? ` (${overdue} overdue)` : ""}`;
-    });
-    return `${base} Tab: Todos (${groups.length} lists). ${lines.join("; ")}.`;
+    if (tab === "todos") {
+      type Group = { name: string; todos: Array<{ title: string; status: string | null; dueOn: string | null; assignee: string | null; appUrl: string | null }> };
+      const groups = data as Group[];
+      projectJson.tabData = groups.map((g) => ({
+        listName: g.name,
+        openCount: g.todos.filter((t) => t.status !== "completed").length,
+        overdueCount: g.todos.filter((t) => t.status !== "completed" && t.dueOn && t.dueOn < today).length,
+        todos: g.todos.filter((t) => t.status !== "completed").slice(0, 8).map((t) => ({
+          title: t.title, dueOn: t.dueOn, assignee: t.assignee, overdue: !!(t.dueOn && t.dueOn < today),
+        })),
+      }));
+    } else if (tab === "messages") {
+      type Msg = { title: string; author: string | null; createdAt: string | null; excerpt: string | null };
+      const msgs = data as Msg[];
+      projectJson.tabData = msgs.slice(0, 10).map((m) => ({
+        title: m.title, author: m.author, date: m.createdAt?.slice(0, 10) ?? null, excerpt: m.excerpt?.slice(0, 120) ?? null,
+      }));
+    } else if (tab === "schedule") {
+      type Entry = { title: string; startsAt: string | null; endsAt: string | null; allDay: boolean };
+      const entries = data as Entry[];
+      projectJson.tabData = entries.slice(0, 10).map((e) => ({
+        title: e.title, startsAt: e.startsAt, endsAt: e.endsAt, allDay: e.allDay,
+        isPast: !!(e.startsAt && e.startsAt < today),
+      }));
+    } else if (tab === "card_tables") {
+      type Table = { name: string; columns: Array<{ name: string; cardsCount: number; cards: Array<{ title: string; dueOn: string | null; assignee: string | null }> }> };
+      const tables = data as Table[];
+      projectJson.tabData = tables.map((t) => ({
+        tableName: t.name,
+        columns: (t.columns ?? []).map((c) => ({
+          name: c.name, count: c.cardsCount,
+          cards: c.cards?.slice(0, 5).map((card) => ({ title: card.title, dueOn: card.dueOn, assignee: card.assignee })) ?? [],
+        })),
+      }));
+    } else if (tab === "people") {
+      type Person = { name: string; role: string | null; email: string | null };
+      const people = data as Person[];
+      projectJson.tabData = people.map((p) => ({ name: p.name, role: p.role, email: p.email }));
+    }
   }
-  if (tab === "messages") {
-    type Msg = { title: string; author: string | null; createdAt: string | null };
-    const msgs = data as Msg[];
-    const preview = msgs.slice(0, 3).map((m) => `"${m.title}"${m.author ? ` by ${m.author}` : ""}`).join("; ");
-    return `${base} Tab: Messages (${msgs.length} total). Recent: ${preview}.`;
-  }
-  if (tab === "schedule") {
-    type Entry = { title: string; startsAt: string | null };
-    const entries = data as Entry[];
-    const upcoming = entries.filter((e) => !e.startsAt || e.startsAt >= new Date().toISOString().slice(0, 10));
-    return `${base} Tab: Schedule (${entries.length} entries, ${upcoming.length} upcoming).`;
-  }
-  if (tab === "card_tables") {
-    type Table = { name: string; columns: Array<{ name: string; cardsCount: number }> };
-    const tables = data as Table[];
-    const lines = tables.map((t) => `${t.name}: ${t.columns.map((c) => `${c.name}(${c.cardsCount})`).join(", ")}`);
-    return `${base} Tab: Card tables. ${lines.join(" | ")}.`;
-  }
-  if (tab === "people") {
-    type Person = { name: string; role: string | null };
-    const people = data as Person[];
-    const names = people.slice(0, 5).map((p) => p.name).join(", ");
-    return `${base} Tab: People (${people.length} members). ${names}${people.length > 5 ? ", ..." : ""}.`;
-  }
-  return `${base} Tab: ${tab}.`;
+
+  return JSON.stringify(projectJson);
+}
+
+function buildOverviewScreenContext(snapshot: PmosProjectsSnapshot | null): string {
+  if (!snapshot) return JSON.stringify({ view: "command-center", tab: "overview", status: "loading" });
+  const totals = snapshot.totals ?? {};
+  return JSON.stringify({
+    view: "command-center",
+    tab: "overview",
+    totals,
+    projectCount: totals.projectCount ?? 0,
+    topProjects: (snapshot.projects ?? []).slice(0, 6).map((p: PmosProjectCard) => ({
+      name: p.name, health: p.health, openTodos: p.openTodos, overdueTodos: p.overdueTodos, dueTodayTodos: p.dueTodayTodos,
+    })),
+    urgentTodos: (snapshot.urgentTodos ?? []).slice(0, 5).map((t: PmosProjectTodoItem) => ({
+      title: t.title, projectName: t.projectName, dueOn: t.dueOn,
+    })),
+    dueTodayTodos: (snapshot.dueTodayTodos ?? []).slice(0, 5).map((t: PmosProjectTodoItem) => ({
+      title: t.title, projectName: t.projectName, dueOn: t.dueOn,
+    })),
+  });
+}
+
+function buildProjectsListScreenContext(snapshot: PmosProjectsSnapshot | null, search: string): string {
+  if (!snapshot) return JSON.stringify({ view: "command-center", tab: "projects", status: "loading" });
+  const allCards = snapshot.projects ?? [];
+  const q = (search || "").trim().toLowerCase();
+  const cards = q ? allCards.filter((p: PmosProjectCard) => p.name.toLowerCase().includes(q)) : allCards;
+  return JSON.stringify({
+    view: "command-center",
+    tab: "projects",
+    searchQuery: search || null,
+    projectCount: cards.length,
+    projects: cards.slice(0, 10).map((p: PmosProjectCard) => ({
+      name: p.name, health: p.health, openTodos: p.openTodos, overdueTodos: p.overdueTodos,
+      assignedTodos: p.assignedTodos, dueTodayTodos: p.dueTodayTodos,
+    })),
+  });
 }
 import {
   applyWorkflowOperationDraft,
@@ -1934,14 +1995,38 @@ export class OpenClawApp extends LitElement {
 
   async handlePmosProjectsLoad() {
     await loadPmosProjectsSnapshot(this as unknown as Parameters<typeof loadPmosProjectsSnapshot>[0]);
+    // Auto-inject screen context after snapshot loads
+    if (!this.pmosSelectedProject && this.pmosProjectsSnapshot) {
+      this.pmosScreenContext = this.pmosCommandCenterTab === "projects"
+        ? buildProjectsListScreenContext(this.pmosProjectsSnapshot, this.pmosProjectSearch)
+        : buildOverviewScreenContext(this.pmosProjectsSnapshot);
+    }
+  }
+
+  handleCommandCenterTabChange(tab: "overview" | "projects" | "timeline") {
+    this.pmosCommandCenterTab = tab;
+    if (!this.pmosSelectedProject) {
+      if (tab === "overview") {
+        this.pmosScreenContext = buildOverviewScreenContext(this.pmosProjectsSnapshot);
+      } else if (tab === "projects") {
+        this.pmosScreenContext = buildProjectsListScreenContext(this.pmosProjectsSnapshot, this.pmosProjectSearch);
+      } else {
+        this.pmosScreenContext = JSON.stringify({ view: "command-center", tab: "timeline", totals: this.pmosProjectsSnapshot?.totals ?? {} });
+      }
+    }
   }
 
   handleSelectProject(project: PmosProjectCard | null) {
     this.pmosSelectedProject = project;
     this.pmosProjectDetailTab = "overview";
-    this.pmosScreenContext = project
-      ? `Viewing project: "${project.name}" (${project.health} -- ${project.openTodos} open todos, ${project.overdueTodos} overdue). Overview tab active.`
-      : null;
+    if (project) {
+      this.pmosScreenContext = buildProjectScreenContext(project, "overview", null);
+    } else {
+      // Going back to project list -- set overview context
+      this.pmosScreenContext = this.pmosCommandCenterTab === "projects"
+        ? buildProjectsListScreenContext(this.pmosProjectsSnapshot, this.pmosProjectSearch)
+        : buildOverviewScreenContext(this.pmosProjectsSnapshot);
+    }
   }
 
   handleProjectDetailTabChange(tab: PmosProjectDetailTab) {

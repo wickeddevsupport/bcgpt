@@ -114,6 +114,47 @@ function renderTodoList(title: string, items: PmosProjectTodoItem[], empty: stri
   `;
 }
 
+function renderCommandCenterFocusStrip(props: CommandCenterProps) {
+  const cards = [
+    {
+      title: "My Day",
+      detail: "Start with overdue work, then today’s due items and the next best actions.",
+      prompt: "What do I need to do today in Basecamp? Start with overdue items, then due today, then the next best actions.",
+    },
+    {
+      title: "Overdue",
+      detail: "Show the overdue todos that actually need attention first.",
+      prompt: "What are the most important overdue todos in Basecamp right now? Group them by project and tell me what to do first.",
+    },
+    {
+      title: "Tomorrow",
+      detail: "See tomorrow’s work before it becomes another fire drill.",
+      prompt: "What is due tomorrow in Basecamp? Group it by project and flag anything risky or blocked.",
+    },
+    {
+      title: "Project Risk",
+      detail: "Find the projects slipping, the blockers, and the owners to chase.",
+      prompt: "Which Basecamp projects need attention right now? Show the blockers, overdue work, owners, and the next 3 follow-ups.",
+    },
+  ];
+
+  return html`
+    <div class="command-center-focus-grid">
+      ${cards.map(
+        (card) => html`
+          <article class="command-center-focus-card">
+            <div class="command-center-focus-card__title">${card.title}</div>
+            <div class="command-center-focus-card__detail">${card.detail}</div>
+            <button class="btn btn--sm btn--primary" @click=${() => props.onPrefillChat(card.prompt)}>
+              Ask
+            </button>
+          </article>
+        `,
+      )}
+    </div>
+  `;
+}
+
 // -- View: Project Cards (original) --
 
 function renderProjectCards(props: CommandCenterProps, cards: PmosProjectCard[]) {
@@ -704,21 +745,15 @@ function renderProjectDetail(props: CommandCenterProps) {
       </div>
       <div class="projects-side">
         <div class="card projects-chat-card">
-          <div class="card-title">Project Copilot</div>
-          <div class="card-sub">Ask about "${project.name}" -- todos, blockers, team, schedule, or any action.</div>
-          <div class="row projects-chat-shortcuts" style="margin-top: 10px;">
-            <button
-              class="btn btn--sm"
-              @click=${() => props.onPrefillChat(`What are the most urgent todos in "${project.name}"?`)}
-            >
-              Urgent Items
-            </button>
-            <button
-              class="btn btn--sm"
-              @click=${() => props.onPrefillChat(`Summarize the current state of "${project.name}" and suggest next steps.`)}
-            >
-              Summary
-            </button>
+          <div class="ai-context-bar">
+            <span class="ai-context-dot"></span>
+            <span class="ai-context-label">AI sees: ${project.name} / ${DETAIL_TABS.find((t) => t.key === tab)?.label ?? tab}</span>
+          </div>
+          <div class="row projects-chat-shortcuts">
+            <button class="btn btn--xs" @click=${() => props.onPrefillChat(`What are the most urgent todos in "${project.name}"?`)}>Urgent</button>
+            <button class="btn btn--xs" @click=${() => props.onPrefillChat(`Summarize the current state of "${project.name}" and suggest next steps.`)}>Summary</button>
+            <button class="btn btn--xs" @click=${() => props.onPrefillChat(`What's blocking progress in "${project.name}"?`)}>Blockers</button>
+            <button class="btn btn--xs" @click=${() => props.onPrefillChat(`Create a status update for "${project.name}" for stakeholders.`)}>Status Update</button>
           </div>
           <div class="projects-chat-host">
             ${renderChat(props.chatProps)}
@@ -823,6 +858,8 @@ export function renderCommandCenter(props: CommandCenterProps) {
   const tabContent = () => {
     if (ccTab === "overview") {
       return html`
+        ${renderCommandCenterFocusStrip(props)}
+
         <div class="project-stats-grid">
           <div class="stat project-stat-card">
             <div class="stat-label">Projects</div>
@@ -930,14 +967,20 @@ export function renderCommandCenter(props: CommandCenterProps) {
     `;
   };
 
+  const contextLabel = ccTab === "overview"
+    ? `Workspace overview: ${totals.projectCount} projects, ${totals.overdueTodos} overdue, ${totals.dueTodayTodos} due today`
+    : ccTab === "projects"
+      ? `${cards.length} projects${projectSearch ? ` matching "${projectSearch}"` : ""}`
+      : `Timeline: ${totals.openTodos} open todos`;
+
   return html`
     <section class="projects-layout">
       <div class="projects-main">
         <div class="card">
           <div class="projects-header-row">
             <div>
-              <div class="card-title">Project Pulse</div>
-              <div class="card-sub">Live Basecamp sync with project health, pending work, and urgency.</div>
+              <div class="card-title">Basecamp</div>
+              <div class="card-sub">Live project data -- the AI reads this context automatically.</div>
             </div>
             <div class="row" style="gap:8px; flex-wrap:wrap; align-items:center;">
               <input
@@ -945,61 +988,45 @@ export function renderCommandCenter(props: CommandCenterProps) {
                 .value=${props.projectSearch ?? ""}
                 @input=${(e: Event) => props.onProjectSearchChange((e.target as HTMLInputElement).value)}
                 placeholder="Search projects..."
-                style="padding:4px 10px; font-size:13px; border:1px solid var(--border); border-radius:var(--radius-sm,6px); background:var(--input-bg,var(--surface)); color:inherit; outline:none; width:180px;"
+                style="padding:4px 10px; font-size:13px; border:1px solid var(--border); border-radius:var(--radius-sm,6px); background:var(--input-bg,var(--surface)); color:inherit; outline:none; width:160px;"
               />
               <button class="btn btn--sm" @click=${() => props.onOpenIntegrations()}>Integrations</button>
-              <button class="btn btn--sm" @click=${() => props.onOpenWorkflows()}>Workflows</button>
               <button class="btn btn--sm" ?disabled=${props.loading} @click=${() => props.onRefresh()}>
-                ${props.loading ? "Refreshing..." : "Refresh"}
+                ${props.loading ? "Syncing..." : "Refresh"}
               </button>
             </div>
           </div>
 
-          <div class="chip-row" style="margin-top: 12px;">
+          <div class="chip-row" style="margin-top: 8px;">
             <span class="chip ${!snapshotLoaded ? "" : hasBasecampAccess ? "chip-ok" : "chip-danger"}">
               ${!snapshotLoaded
-                ? "Checking Basecamp..."
+                ? "Checking..."
                 : configured
-                  ? "Basecamp key configured"
+                  ? "Connected"
                   : hasBasecampAccess
-                    ? "Basecamp available"
-                    : "Basecamp key missing"}
+                    ? "Available"
+                    : "Key missing"}
             </span>
-            <span class="chip ${connected ? "chip-ok" : "chip-warn"}">
-              ${connected ? "Basecamp connected" : "Basecamp disconnected"}
-            </span>
-            <span class="chip">Last refresh: ${refreshedLabel}</span>
-            ${identity?.email ? html`<span class="chip">User: ${identity.email}</span>` : nothing}
-            ${identity?.selectedAccountId
-              ? html`<span class="chip">Account: ${identity.selectedAccountId}</span>`
-              : nothing}
+            <span class="chip">Refreshed: ${refreshedLabel}</span>
+            ${identity?.email ? html`<span class="chip">${identity.email}</span>` : nothing}
           </div>
 
           ${props.loading
             ? html`
-                <div style="margin-top: 12px;">
-                  <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
-                    <span style="font-size:13px; font-weight:500;">Syncing with Basecamp...</span>
-                    ${snapshot?.projects?.length
-                      ? html`<span class="muted" style="font-size:12px;">Showing last data from ${refreshedLabel}</span>`
-                      : nothing}
-                  </div>
+                <div style="margin-top: 8px;">
                   <div class="progress-bar"><div class="progress-bar__fill progress-bar__fill--indeterminate"></div></div>
                 </div>
               `
             : nothing}
           ${snapshot?.stale && snapshot?.staleReason
-            ? html`<div class="callout warn" style="margin-top: 12px;">Latest refresh failed. Showing snapshot from ${staleLabel}. ${snapshot.staleReason}</div>`
+            ? html`<div class="callout warn" style="margin-top: 8px; font-size:12px;">${snapshot.staleReason}</div>`
             : props.error
-              ? html`<div class="callout danger" style="margin-top: 12px;">${props.error}</div>`
+              ? html`<div class="callout danger" style="margin-top: 8px; font-size:12px;">${props.error}</div>`
               : nothing}
-          ${errors.length > 0 && allCards.length === 0 && assignedTodos.length === 0 && urgentTodos.length === 0 && dueTodayTodos.length === 0 && futureTodos.length === 0 && noDueDateTodos.length === 0
-            ? html`<div class="callout info" style="margin-top: 12px;">${errors[0]}</div>`
-            : nothing}
           ${!props.connected
-            ? html`<div class="callout danger" style="margin-top: 12px;">Connect to Wicked OS first to load Projects.</div>`
+            ? html`<div class="callout danger" style="margin-top: 8px;">Connect to Wicked OS first.</div>`
             : snapshotLoaded && !hasBasecampAccess
-              ? html`<div class="callout info" style="margin-top: 12px;">Add your Basecamp token in Integrations to enable project cards and AI project actions.</div>`
+              ? html`<div class="callout info" style="margin-top: 8px;">Add your Basecamp token in Integrations.</div>`
               : nothing}
         </div>
 
@@ -1010,23 +1037,18 @@ export function renderCommandCenter(props: CommandCenterProps) {
 
       <div class="projects-side">
         <div class="card projects-chat-card">
-          <div class="card-title">Project Copilot</div>
-          <div class="card-sub">
-            Ask for updates, blockers, summaries, or direct actions in Basecamp.
+          <div class="ai-context-bar">
+            <span class="ai-context-dot"></span>
+            <span class="ai-context-label">AI sees: ${contextLabel}</span>
           </div>
-          <div class="row projects-chat-shortcuts" style="margin-top: 10px;">
-            <button
-              class="btn btn--sm"
-              @click=${() => props.onPrefillChat("Give me a daily project brief: urgent tasks, overdue items, and what to do next.")}
-            >
-              Daily Brief
-            </button>
-            <button
-              class="btn btn--sm"
-              @click=${() => props.onPrefillChat("List all Basecamp projects and flag high-risk items with owners and due dates.")}
-            >
-              Risk Check
-            </button>
+          <div class="row projects-chat-shortcuts">
+            <button class="btn btn--xs" @click=${() => props.onPrefillChat("What do I need to do today in Basecamp? Start with overdue items, then due today, then the next best actions.")}>My Day</button>
+            <button class="btn btn--xs" @click=${() => props.onPrefillChat("What are the most important overdue todos in Basecamp right now? Group them by project and tell me what to do first.")}>Overdue</button>
+            <button class="btn btn--xs" @click=${() => props.onPrefillChat("What is due tomorrow in Basecamp? Group it by project and flag anything risky or blocked.")}>Tomorrow</button>
+            <button class="btn btn--xs" @click=${() => props.onPrefillChat("Which Basecamp projects need attention right now? Show the blockers, overdue work, owners, and the next 3 follow-ups.")}>Risk</button>
+            <button class="btn btn--xs" @click=${() => props.onPrefillChat("Search Basecamp for ")}>Search</button>
+            <button class="btn btn--xs" @click=${() => props.onPrefillChat("Create a todo in Basecamp: ")}>+ Todo</button>
+            <button class="btn btn--xs" @click=${() => props.onPrefillChat("Create a message in Basecamp project ")}>+ Message</button>
           </div>
           <div class="projects-chat-host">
             ${renderChat(props.chatProps)}
