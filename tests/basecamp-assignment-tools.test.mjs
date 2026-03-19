@@ -6,9 +6,12 @@ import {
   compactAssignmentTodo,
   hydrateSnapshotAssignmentTodo,
   hydrateScannedTodoRow,
+  isAssignedToMeIntent,
+  resolveAssignedTodoListOptions,
   scanAssignedTodosFromSnapshot,
   scanAssignedTodosFromRows,
   scanOverdueTodosFromRows,
+  wantsAssignedTodoDetails,
 } from "../mcp/basecamp-assignment-utils.js";
 
 const TODAY_ISO = new Date().toISOString().slice(0, 10);
@@ -190,4 +193,31 @@ test("scanAssignedTodosFromSnapshot filters workspace snapshot todos for the cur
 
   assert.deepEqual(todos.map((todo) => todo.id), ["3003"]);
   assert.equal(todos[0]?.project?.name, "Snapshot Project");
+});
+
+test("assignment intent helpers distinguish summary asks from detailed asks", () => {
+  assert.equal(isAssignedToMeIntent("find all basecamp todos assigned to me"), true);
+  assert.equal(wantsAssignedTodoDetails("find all basecamp todos assigned to me"), false);
+  assert.equal(wantsAssignedTodoDetails("get me details of all basecamp todos assigned to me"), true);
+  assert.equal(wantsAssignedTodoDetails("what does this todo assigned to me mean"), true);
+});
+
+test("resolveAssignedTodoListOptions expands detail requests by default", () => {
+  const summaryOptions = resolveAssignedTodoListOptions({
+    query: "find all basecamp todos assigned to me",
+  });
+  const detailedOptions = resolveAssignedTodoListOptions({
+    query: "get me details of all basecamp todos assigned to me",
+  });
+
+  assert.deepEqual(summaryOptions, {
+    include_details: false,
+    compact: true,
+    preview_limit: undefined,
+  });
+  assert.deepEqual(detailedOptions, {
+    include_details: true,
+    compact: false,
+    preview_limit: 25,
+  });
 });

@@ -2,8 +2,50 @@ function todoText(todo) {
   return String(todo?.content || todo?.title || todo?.name || "").trim();
 }
 
+function normalizedIntentText(value) {
+  return String(value || "").toLowerCase().trim();
+}
+
 export function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+export function isAssignedToMeIntent(raw) {
+  const s = normalizedIntentText(raw);
+  return (
+    /\bassigned to me\b/.test(s) ||
+    /\bmy todos\b/.test(s) ||
+    /\bmy tasks\b/.test(s) ||
+    /\bwhat do i need to do\b/.test(s) ||
+    /\bwhat(?:'s| is) on my plate\b/.test(s) ||
+    /\bmy\b.*\b(assigned|todo|todos|task|tasks)\b/.test(s) ||
+    /\b(assigned|todo|todos|task|tasks)\b.*\b(to me|for me|mine)\b/.test(s)
+  );
+}
+
+export function wantsAssignedTodoDetails(raw) {
+  const s = normalizedIntentText(raw);
+  if (!isAssignedToMeIntent(s)) {
+    return false;
+  }
+  return (
+    /\b(detail|details|detailed|full|fully|expanded|expand|everything|complete|verbose)\b/.test(s) ||
+    /\b(all|full)\b.*\b(details?|info|information)\b/.test(s) ||
+    /\binclude\b.*\b(details?|description|descriptions|notes?|comments?)\b/.test(s) ||
+    /\b(show|get|give|list|open)\b.*\b(details?|description|descriptions|notes?|comments?)\b/.test(s) ||
+    /\bwhat does\b.*\b(todo|todos|task|tasks)\b.*\bmean\b/.test(s)
+  );
+}
+
+export function resolveAssignedTodoListOptions({ query, include_details, compact, preview_limit } = {}) {
+  const wantsDetails = include_details === true || wantsAssignedTodoDetails(query);
+  const parsedPreviewLimit = Number(preview_limit);
+
+  return {
+    include_details: wantsDetails,
+    compact: typeof compact === "boolean" ? compact : !wantsDetails,
+    preview_limit: Number.isFinite(parsedPreviewLimit) ? parsedPreviewLimit : (wantsDetails ? 25 : undefined),
+  };
 }
 
 export function normalizeTodoAssigneeIds(todo) {

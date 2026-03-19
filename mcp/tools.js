@@ -189,9 +189,14 @@ export function getTools() {
       required: ["project", "person"],
       additionalProperties: false
     }),
-    tool("list_assigned_to_me", "Primary tool for 'my todos' or 'my assigned tasks'. Lists todos assigned to the current authenticated user, optionally within a project.", {
+    tool("list_assigned_to_me", "Primary tool for 'my todos' or 'my assigned tasks'. Lists todos assigned to the current authenticated user, optionally within a project. Set include_details to true for full todo objects instead of compact queue summaries.", {
       type: "object",
-      properties: { project: { type: "string", nullable: true } },
+      properties: {
+        project: { type: "string", nullable: true },
+        include_details: { type: "boolean", description: "Return full todo objects instead of compact summary rows." },
+        compact: { type: "boolean", description: "Override compact list formatting. Defaults to false when include_details is true." },
+        preview_limit: { type: "integer", description: "Override preview length for the returned todos." }
+      },
       additionalProperties: false
     }),
     tool("smart_action", [

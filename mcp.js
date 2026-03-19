@@ -88,7 +88,9 @@ import {
 import {
   buildAssignedPeopleSummary,
   compactAssignmentTodo,
+  isAssignedToMeIntent,
   normalizeTodoAssigneeIds,
+  resolveAssignedTodoListOptions,
   scanAssignedTodosFromSnapshot,
   scanAssignedTodosFromRows,
   scanOverdueTodosFromRows,
@@ -5672,6 +5674,7 @@ export async function handleMCP(reqBody, ctx) {
     }
 
     if (name === "list_assigned_to_me") {
+      const listOptions = resolveAssignedTodoListOptions(args);
       try {
         let profile = null;
         let todos = [];
@@ -5707,7 +5710,8 @@ export async function handleMCP(reqBody, ctx) {
           person: { id: profile.id, name: profile.name, email: profile.email },
           project: projectPayload,
           source,
-          ...buildListPayload("todos", todos)
+          include_details: listOptions.include_details,
+          ...buildListPayload("todos", todos, listOptions)
         };
         if (Number.isFinite(totalCount)) {
           payload.count = totalCount;
@@ -5724,7 +5728,8 @@ export async function handleMCP(reqBody, ctx) {
             person: { id: profile.id, name: profile.name, email: profile.email },
             fallback: true,
             source: "workspace_scan_fallback",
-            ...buildListPayload("todos", assigned)
+            include_details: listOptions.include_details,
+            ...buildListPayload("todos", assigned, listOptions)
           });
         } catch (fbErr) {
           return fail(id, { code: "LIST_ASSIGNED_TO_ME_ERROR", message: fbErr.message });
@@ -6319,19 +6324,6 @@ export async function handleMCP(reqBody, ctx) {
         return /(assigned|todos|tasks)/.test(s);
       };
 
-      const wantsMyAssignments = (raw) => {
-        const s = String(raw || "").toLowerCase();
-        return (
-          /\bassigned to me\b/.test(s) ||
-          /\bmy todos\b/.test(s) ||
-          /\bmy tasks\b/.test(s) ||
-          /\bwhat do i need to do\b/.test(s) ||
-          /\bwhat(?:'s| is) on my plate\b/.test(s) ||
-          /\bmy\b.*\b(assigned|todo|todos|task|tasks)\b/.test(s) ||
-          /\b(assigned|todo|todos|task|tasks)\b.*\b(to me|for me|mine)\b/.test(s)
-        );
-      };
-
       const wantsActivity = (raw) => {
         const s = String(raw || "").toLowerCase();
         return /(activity|recent|comment|comments|timeline)/.test(s);
@@ -6376,8 +6368,9 @@ export async function handleMCP(reqBody, ctx) {
           return ok(id, { query, action: "search_projects", confidence: 0.92, fast_path: true, result });
         }
 
-        const quickAssignedIntent = wantsMyAssignments(lower);
+        const quickAssignedIntent = isAssignedToMeIntent(lower);
         if (quickAssignedIntent) {
+          const assignedListOptions = resolveAssignedTodoListOptions({ query });
           const quickTargetDate =
             /\btomorrow\b/i.test(lower)
               ? addDaysToIsoDate(new Date().toISOString().slice(0, 10), 1)
@@ -6386,6 +6379,9 @@ export async function handleMCP(reqBody, ctx) {
                 : null;
           const result = await callTool("list_assigned_to_me", {
             project: args.project || undefined,
+            include_details: assignedListOptions.include_details,
+            compact: assignedListOptions.compact,
+            preview_limit: assignedListOptions.preview_limit,
           });
           const assignedTodos = Array.isArray(result?.todos)
             ? result.todos
@@ -6407,12 +6403,18 @@ export async function handleMCP(reqBody, ctx) {
               date: quickTargetDate,
               result: {
                 ...result,
-                count: filtered.length,
-                todos: filtered
+                include_details: assignedListOptions.include_details,
+                ...buildListPayload("todos", filtered, assignedListOptions)
               }
             });
           }
-          return ok(id, { query, action: "list_assigned_to_me", confidence: 0.95, fast_path: true, result });
+          return ok(id, {
+            query,
+            action: assignedListOptions.include_details ? "list_assigned_to_me_detailed" : "list_assigned_to_me",
+            confidence: 0.95,
+            fast_path: true,
+            result
+          });
         }
 
         if (/\boverdue|past due|late\b/i.test(lower) && /\b(todo|task)s?\b/i.test(lower)) {
@@ -6869,9 +6871,20 @@ export async function handleMCP(reqBody, ctx) {
           });
         }
 
-        if (wantsMyAssignments(lower)) {
-          const result = await callTool("list_assigned_to_me", { project: args.project });
-          return ok(id, { query, action: "list_assigned_to_me", confidence, result });
+        if (isAssignedToMeIntent(lower)) {
+          const assignedListOptions = resolveAssignedTodoListOptions({ query });
+          const result = await callTool("list_assigned_to_me", {
+            project: args.project,
+            include_details: assignedListOptions.include_details,
+            compact: assignedListOptions.compact,
+            preview_limit: assignedListOptions.preview_limit,
+          });
+          return ok(id, {
+            query,
+            action: assignedListOptions.include_details ? "list_assigned_to_me_detailed" : "list_assigned_to_me",
+            confidence,
+            result
+          });
         }
 
         if (analysis.personNames.length || extractPersonId(query)) {
