@@ -43,7 +43,6 @@ import { isSuperAdmin } from "../workspace-context.js";
 import { rateLimiter } from "../../security/rate-limiter.js";
 import { listAgentsForGateway, resolveGatewaySessionStoreTarget } from "../session-utils.js";
 import { inspectWorkspaceChatUrls } from "../url-routing.js";
-import { inferDirectBasecampChatShortcut } from "../basecamp-chat-shortcuts.js";
 
 type TranscriptAppendResult = {
   ok: boolean;
@@ -333,7 +332,22 @@ export function shouldRouteToPmosWorkspaceChat(
   }
 
   const urlHints = inspectWorkspaceChatUrls(trimmed);
-  if (inferDirectBasecampChatShortcut(trimmed, urlHints)) {
+  const basecampExplicit =
+    Boolean(urlHints.basecampUrl) ||
+    /\bbasecamp\b|\bbcgpt\b|\bcampfire\b|\bmessage\s+board\b|\bhill\s*chart\b/i.test(trimmed) ||
+    /\b(?:what do i need to do today|what should i focus on today|what should i do today)\b/i.test(
+      trimmed,
+    ) ||
+    /\b(?:my|assigned to me|what am i responsible for|what is due|what's due)\b[\s\w-]{0,30}\b(?:todo|todos|task|tasks|schedule|projects?)\b/i.test(
+      trimmed,
+    ) ||
+    /\b(?:overdue|due today|due tomorrow|today|tomorrow)\b[\s\w-]{0,20}\b(?:todo|todos|task|tasks|schedule)\b/i.test(
+      trimmed,
+    ) ||
+    /\b(?:show|list|find|get|open|check|review|summarize)\b[\s\w-]{0,40}\b(?:todo|todos|task|tasks|schedule|campfire|projects?|message board|card)\b/i.test(
+      trimmed,
+    );
+  if (basecampExplicit) {
     return true;
   }
 
