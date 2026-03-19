@@ -48,14 +48,14 @@ function syncSelectedAgentForSession(state: SessionsState, key: string): void {
     state.agentsSelectedId = parsedAgentId;
     return;
   }
-  const assistantAgentId = state.assistantAgentId?.trim();
-  if (assistantAgentId) {
-    state.agentsSelectedId = assistantAgentId;
-    return;
-  }
   const defaultAgentId = state.agentsList?.defaultId?.trim();
   if (defaultAgentId) {
     state.agentsSelectedId = defaultAgentId;
+    return;
+  }
+  const assistantAgentId = state.assistantAgentId?.trim();
+  if (assistantAgentId) {
+    state.agentsSelectedId = assistantAgentId;
     return;
   }
   const firstAgentId = state.agentsList?.agents?.[0]?.id?.trim();

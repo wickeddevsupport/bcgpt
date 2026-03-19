@@ -122,13 +122,13 @@ export function resolveSelectedAgentIdForSession(
   if (parsedAgentId) {
     return parsedAgentId;
   }
-  const assistantAgentId = state.assistantAgentId?.trim();
-  if (assistantAgentId) {
-    return assistantAgentId;
-  }
   const defaultAgentId = state.agentsList?.defaultId?.trim();
   if (defaultAgentId) {
     return defaultAgentId;
+  }
+  const assistantAgentId = state.assistantAgentId?.trim();
+  if (assistantAgentId) {
+    return assistantAgentId;
   }
   const firstAgentId = state.agentsList?.agents?.[0]?.id?.trim();
   return firstAgentId || null;
@@ -138,10 +138,6 @@ export function resolveWorkspaceAssistantAgentId(
   state: Pick<AppViewState, "assistantAgentId" | "agentsList">,
   mainSessionKey?: string | null,
 ): string | null {
-  const assistantAgentId = state.assistantAgentId?.trim();
-  if (assistantAgentId) {
-    return assistantAgentId;
-  }
   const mainAgentId = parseAgentSessionKey(mainSessionKey?.trim() ?? "")?.agentId?.trim();
   if (mainAgentId) {
     return mainAgentId;
@@ -149,6 +145,10 @@ export function resolveWorkspaceAssistantAgentId(
   const defaultAgentId = state.agentsList?.defaultId?.trim();
   if (defaultAgentId) {
     return defaultAgentId;
+  }
+  const assistantAgentId = state.assistantAgentId?.trim();
+  if (assistantAgentId) {
+    return assistantAgentId;
   }
   const firstAgentId = state.agentsList?.agents?.[0]?.id?.trim();
   return firstAgentId || null;

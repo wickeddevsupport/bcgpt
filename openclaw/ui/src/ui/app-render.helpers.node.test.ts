@@ -105,7 +105,7 @@ describe("resolveSelectedAgentIdForSession", () => {
     expect(
       resolveSelectedAgentIdForSession(
         {
-          assistantAgentId: "assistant",
+          assistantAgentId: "research",
           agentsList: {
             defaultId: "assistant",
             agents: [{ id: "assistant" }, { id: "designer" }],
@@ -118,6 +118,21 @@ describe("resolveSelectedAgentIdForSession", () => {
 });
 
 describe("resolveWorkspaceAssistantAgentId", () => {
+  it("prefers the workspace default over the last loaded session agent", () => {
+    expect(
+      resolveWorkspaceAssistantAgentId(
+        {
+          assistantAgentId: "research",
+          agentsList: {
+            defaultId: "assistant",
+            agents: [{ id: "assistant" }, { id: "research" }],
+          },
+        } as SelectedAgentState,
+        "main",
+      ),
+    ).toBe("assistant");
+  });
+
   it("falls back to the main session agent when assistant identity is not loaded yet", () => {
     expect(
       resolveWorkspaceAssistantAgentId(
@@ -139,7 +154,7 @@ describe("resolveChatAgentOptions", () => {
     expect(
       resolveChatAgentOptions(
         {
-          assistantAgentId: "assistant",
+          assistantAgentId: "research",
           assistantName: "Workspace Assistant",
           agentsList: {
             defaultId: "assistant",
