@@ -114,6 +114,75 @@
   min-width: 180px;
 }
 
+.chat-agent-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+}
+
+.chat-agent-card__identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.chat-agent-card__emoji {
+  flex: 0 0 auto;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.chat-agent-card__copy {
+  min-width: 0;
+}
+
+.chat-agent-card__name {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--text-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-agent-card__meta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-agent-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.chat-agent-card__toggle {
+  width: 34px;
+  min-width: 34px;
+  padding: 0;
+}
+
+.chat-agent-card__toggle svg {
+  width: 14px;
+  height: 14px;
+  transform: rotate(180deg);
+}
+
 /* Chat thread - scrollable middle section, transparent */
 .chat-thread {
   flex: 1 1 0; /* Grow, shrink, and use 0 base for proper scrolling */
@@ -593,6 +662,14 @@
   border: 1px solid var(--border);
 }
 
+.chat-controls__compact-toggle svg {
+  transition: transform 160ms ease-out;
+}
+
+.chat-controls__compact-toggle:not(.active) svg {
+  transform: rotate(180deg);
+}
+
 /* Light theme thinking indicator override */
 :root[data-theme="light"] .chat-controls__thinking {
   background: rgba(255, 255, 255, 0.9);
@@ -600,6 +677,16 @@
 }
 
 @media (max-width: 640px) {
+  .chat-agent-card {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .chat-agent-card__actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
   .chat-session {
     min-width: 140px;
   }

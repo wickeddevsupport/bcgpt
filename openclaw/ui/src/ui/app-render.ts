@@ -636,6 +636,7 @@ export function renderApp(state: AppViewState) {
     agentName: agent?.name ?? agent?.identity?.name ?? selectedAgentIdentity?.name ?? null,
     agentEmoji: agent?.identity?.emoji ?? selectedAgentIdentity?.emoji ?? null,
     agentTheme: agent?.identity?.theme ?? null,
+    headerCollapsed: state.chatHeaderCollapsed,
     onViewMemory: agentId
       ? () => {
           state.agentsSelectedId = agentId;
@@ -643,6 +644,9 @@ export function renderApp(state: AppViewState) {
           state.setTab("agents");
         }
       : undefined,
+    onToggleHeaderCollapsed: () => {
+      state.chatHeaderCollapsed = !state.chatHeaderCollapsed;
+    },
   };
 
   // Workflows tab uses a dedicated assistant flow (`pmos.workflow.assist` / `pmos.workflow.confirm`)
@@ -830,8 +834,8 @@ export function renderApp(state: AppViewState) {
       <main class="content ${isChat ? "content--chat" : ""} ${isDashboard ? "content--dashboard" : ""}">
         ${showContentHeader
           ? html`
-              <section class="content-header ${showGlobalContentHeader ? "" : "content-header--compact"}">
-                <div>
+              <section class="content-header ${showGlobalContentHeader ? "" : "content-header--compact"} ${isChat ? "content-header--chat" : ""} ${isChat && state.chatHeaderCollapsed ? "content-header--chat-collapsed" : ""}">
+                <div class="content-header__intro">
                   ${showGlobalContentHeader ? html`<div class="page-title">${titleForTab(state.tab)}</div>` : nothing}
                   ${showGlobalContentHeader ? html`<div class="page-sub">${subtitleForTab(state.tab)}</div>` : nothing}
                 </div>

@@ -299,6 +299,7 @@ export class OpenClawApp extends LitElement {
   @state() chatTraceLimit = 8;
   @state() chatCreateWorkflowBusy = false;
   @state() chatCreateWorkflowError: string | null = null;
+  @state() chatHeaderCollapsed = false;
   // Sidebar state for tool output viewing
   @state() sidebarOpen = false;
   @state() sidebarContent: string | null = null;

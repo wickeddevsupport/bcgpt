@@ -231,4 +231,41 @@ describe("chat view", () => {
     createBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(onCreate).toHaveBeenCalledTimes(1);
   });
+
+  it("renders a compact agent header when expanded", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          agentId: "research-agent",
+          agentName: "Research Agent",
+          agentEmoji: "🔎",
+          agentTheme: "AI Agent",
+        }),
+      ),
+      container,
+    );
+
+    const card = container.querySelector(".chat-agent-card");
+    expect(card?.textContent).toContain("Research Agent");
+    expect(card?.textContent).toContain("AI Agent");
+  });
+
+  it("hides the agent header when collapsed", () => {
+    const container = document.createElement("div");
+    const onToggleHeaderCollapsed = vi.fn();
+    render(
+      renderChat(
+        createProps({
+          agentId: "research-agent",
+          agentName: "Research Agent",
+          headerCollapsed: true,
+          onToggleHeaderCollapsed,
+        }),
+      ),
+      container,
+    );
+
+    expect(container.querySelector(".chat-agent-card")).toBeNull();
+  });
 });

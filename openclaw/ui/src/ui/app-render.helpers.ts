@@ -386,6 +386,9 @@ export function renderChatControls(state: AppViewState) {
       <circle cx="12" cy="12" r="3"></circle>
     </svg>
   `;
+  const headerToggleTitle = state.chatHeaderCollapsed
+    ? "Expand chat header"
+    : "Collapse chat header";
 
   // Resolve main key for building agent session keys
   const sessionDefaults =
@@ -637,6 +640,16 @@ export function renderChatControls(state: AppViewState) {
         title=${disableFocusToggle ? "Disabled during onboarding" : "Toggle focus mode (hide sidebar + page header)"}
       >
         ${focusIcon}
+      </button>
+      <button
+        class="btn btn--sm btn--icon ${state.chatHeaderCollapsed ? "" : "active"} chat-controls__compact-toggle"
+        @click=${() => {
+          state.chatHeaderCollapsed = !state.chatHeaderCollapsed;
+        }}
+        aria-pressed=${String(!state.chatHeaderCollapsed)}
+        title=${headerToggleTitle}
+      >
+        ${icons.arrowDown}
       </button>
     </div>
   `;

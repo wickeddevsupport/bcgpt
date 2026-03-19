@@ -115,6 +115,7 @@ export type AppViewState = {
   chatTraceLimit: number;
   chatCreateWorkflowBusy: boolean;
   chatCreateWorkflowError: string | null;
+  chatHeaderCollapsed?: boolean;
   nodesLoading: boolean;
   nodes: Array<Record<string, unknown>>;
   chatNewMessagesBelow: boolean;

@@ -56,6 +56,7 @@ export type ChatProps = {
   agentName?: string | null;
   agentEmoji?: string | null;
   agentTheme?: string | null;
+  headerCollapsed?: boolean;
   // Image attachments
   attachments?: ChatAttachment[];
   onAttachmentsChange?: (attachments: ChatAttachment[]) => void;
@@ -77,6 +78,7 @@ export type ChatProps = {
   onSplitRatioChange?: (ratio: number) => void;
   onChatScroll?: (event: Event) => void;
   onViewMemory?: () => void;
+  onToggleHeaderCollapsed?: () => void;
 };
 
 const COMPACTION_TOAST_DURATION_MS = 5000;
@@ -268,6 +270,7 @@ export function renderChat(props: ChatProps) {
     name: props.assistantName,
     avatar: props.assistantAvatar ?? props.assistantAvatarUrl ?? null,
   };
+  const agentHeaderCollapsed = props.headerCollapsed === true;
 
   const hasAttachments = (props.attachments?.length ?? 0) > 0;
   const composePlaceholder = props.connected
@@ -342,20 +345,45 @@ export function renderChat(props: ChatProps) {
       ${props.error ? html`<div class="callout danger">${props.error}</div>` : nothing}
 
       ${
-        props.agentId && props.agentName
+        props.agentId && props.agentName && !agentHeaderCollapsed
           ? html`
-            <div class="chat-agent-header" style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border-color, #333); margin-bottom: 0;">
-              <div style="font-size: 28px;">${props.agentEmoji || '🤖'}</div>
-              <div style="flex: 1;">
-                <div style="font-weight: 600; font-size: 16px;">${props.agentName}</div>
-                <div class="muted" style="font-size: 13px;">${props.agentTheme || 'AI Agent'}</div>
+              <div class="chat-agent-card">
+                <div class="chat-agent-card__identity">
+                  <div class="chat-agent-card__emoji">${props.agentEmoji || "🤖"}</div>
+                  <div class="chat-agent-card__copy">
+                    <div class="chat-agent-card__name">${props.agentName}</div>
+                    <div class="chat-agent-card__meta">${props.agentTheme || "AI Agent"}</div>
+                  </div>
+                </div>
+                <div class="chat-agent-card__actions">
+                  ${
+                    props.onViewMemory
+                      ? html`
+                          <button class="btn btn--sm btn--secondary" @click=${props.onViewMemory}>
+                            Memory
+                          </button>
+                        `
+                      : nothing
+                  }
+                  <a href="${pathForTab("agents")}" class="btn btn--sm btn--secondary">Settings</a>
+                  ${
+                    props.onToggleHeaderCollapsed
+                      ? html`
+                          <button
+                            class="btn btn--sm btn--secondary chat-agent-card__toggle"
+                            type="button"
+                            @click=${props.onToggleHeaderCollapsed}
+                            aria-label="Collapse agent header"
+                            title="Collapse agent header"
+                          >
+                            ${icons.arrowDown}
+                          </button>
+                        `
+                      : nothing
+                  }
+                </div>
               </div>
-              <div style="display:flex;gap:6px;">
-                ${props.onViewMemory ? html`<button class="btn btn--sm btn--secondary" @click=${props.onViewMemory}>Memory</button>` : nothing}
-                <a href="${pathForTab('agents')}" class="btn btn--sm btn--secondary">Settings</a>
-              </div>
-            </div>
-          `
+            `
           : nothing
       }
 
