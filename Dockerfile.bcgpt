@@ -8,12 +8,15 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ git ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-RUN git clone --quiet https://github.com/wickeddevsupport/bcgpt.git . && \
-    git config core.fileMode false && \
-    git fetch --depth=1 origin main && \
-    git reset --hard origin/main && \
-    ls -la /app/flow-config.js /app/flow-tools.js /app/activepieces-client.js && \
-    echo "✓ Config files present"
+COPY package.json package-lock.json ./
+COPY *.js ./
+COPY *.html ./
+COPY *.json ./
+COPY mcp/ ./mcp/
+COPY flow-server/ ./flow-server/
+
+RUN ls -la /app/flow-config.js /app/flow-tools.js /app/activepieces-client.js /app/mcp/basecamp-request.js && \
+    echo "✓ App files present"
 
 # Save the app files before npm install potentially removes them
 RUN cp flow-tools.js flow-tools.js.bak && \
