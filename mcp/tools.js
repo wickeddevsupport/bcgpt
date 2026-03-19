@@ -32,6 +32,95 @@ function isFlowToolsEnabled() {
   return String(process.env.ENABLE_FLOW_TOOLS || "false").toLowerCase() === "true";
 }
 
+function resolveToolProfile() {
+  const raw = String(process.env.BCGPT_MCP_TOOL_PROFILE || "focused").trim().toLowerCase();
+  return raw === "full" ? "full" : "focused";
+}
+
+function shouldExposeEndpointTools() {
+  return String(process.env.BCGPT_EXPOSE_ENDPOINT_TOOLS || "false").toLowerCase() === "true";
+}
+
+const FOCUSED_TOOL_NAMES = new Set([
+  "startbcgpt",
+  "whoami",
+  "list_accounts",
+  "list_projects",
+  "find_project",
+  "get_project",
+  "daily_report",
+  "workspace_todo_snapshot",
+  "list_todos_due",
+  "search_todos",
+  "assignment_report",
+  "get_person_assignments",
+  "list_assigned_to_me",
+  "report_todos_assigned_person",
+  "report_todos_overdue",
+  "report_schedules_upcoming",
+  "smart_action",
+  "audit_person",
+  "summarize_person",
+  "summarize_project",
+  "summarize_todo",
+  "summarize_card",
+  "summarize_message",
+  "summarize_document",
+  "summarize_upload",
+  "search_people",
+  "search_projects",
+  "search_cards",
+  "search_entities",
+  "search_recordings",
+  "resolve_entity_from_url",
+  "list_person_projects",
+  "list_person_activity",
+  "list_todolists",
+  "list_todos_for_project",
+  "list_todos_for_list",
+  "get_todo",
+  "create_todo",
+  "update_todo_details",
+  "complete_todo",
+  "uncomplete_todo",
+  "list_card_tables",
+  "list_card_table_columns",
+  "list_card_table_cards",
+  "get_card",
+  "create_card",
+  "update_card",
+  "list_message_boards",
+  "list_messages",
+  "get_message",
+  "create_message",
+  "update_message",
+  "list_project_people",
+  "list_people",
+  "get_person",
+  "get_my_profile",
+  "list_all_people",
+  "list_documents",
+  "get_document",
+  "list_uploads",
+  "get_upload",
+  "list_schedule_entries",
+  "get_schedule_entry",
+  "create_schedule_entry",
+  "update_schedule_entry",
+  "list_comments",
+  "get_comment",
+  "create_comment",
+  "update_comment",
+  "list_campfires",
+  "get_campfire",
+  "list_campfire_lines",
+  "get_campfire_line",
+  "create_campfire_line",
+  "get_project_structure",
+  "basecamp_request",
+  "basecamp_raw",
+]);
+
 export function getTools() {
   const tools = [
     tool("startbcgpt", "Show connection status, current user (name/email), plus re-auth and logout links.", {
@@ -71,11 +160,13 @@ export function getTools() {
       },
       additionalProperties: false
     }),
-    tool("list_todos_due", "Across projects: list open todos due on date; optionally include overdue.", {
+    tool("list_todos_due", "List open todos due on a date across the workspace or within one project. Supports today/tomorrow/ISO dates and optional overdue inclusion.", {
       type: "object",
       properties: {
         date: { type: "string", description: "YYYY-MM-DD (defaults today)" },
-        include_overdue: { type: "boolean" }
+        days: { type: "integer", description: "Optional range size in days starting at date." },
+        include_overdue: { type: "boolean" },
+        project: { type: "string", description: "Optional project name to scope the results." }
       },
       additionalProperties: false
     }),
@@ -103,16 +194,11 @@ export function getTools() {
       additionalProperties: false
     }),
     tool("smart_action", [
-      "Natural language router for Basecamp — use this as your FIRST TOOL for almost any Basecamp query.",
-      "Pass any plain-English query and it automatically dispatches to the right tool(s).",
-      "Handles: listing all projects, project summaries, project context (brand/docs/cards/todos),",
-      "todo queries (assigned to me, due today, overdue, by person, by project), person queries",
-      "(activity, assignments, membership), card/kanban search, campfire/team chat, upcoming schedule,",
-      "daily reports, automation/workflow queries, search (recordings, entities, index).",
-      "Examples: 'show my projects', 'what todos are due today', 'summarize project Acme',",
-      "'find cards about login', 'who is working on X', 'show campfire for Acme',",
-      "'upcoming events this week', 'list automations', 'search for branding docs'.",
-      "For CREATE operations (create todo, send message, etc.) use the specific tools directly.",
+      "Natural language router for Basecamp when the request is ambiguous, search-like, summary-oriented, or driven by a pasted Basecamp URL.",
+      "Prefer direct tools for deterministic reads such as list_todolists, list_todos_for_project, list_assigned_to_me, list_schedule_entries, list_project_people, list_messages, list_documents, list_card_tables, list_todos_due, and report_todos_overdue.",
+      "Use smart_action when you do not know the exact tool, when the request spans multiple Basecamp resources, or when you need narrative synthesis instead of a single exact listing.",
+      "Examples: 'summarize project Acme', 'find cards about login', 'who is working on X', 'show campfire for Acme', 'inspect this Basecamp URL', 'search for branding docs'.",
+      "For CREATE or UPDATE operations, prefer the specific tools directly.",
     ].join(" "), {
       type: "object",
       properties: {
@@ -766,6 +852,12 @@ export function getTools() {
       additionalProperties: false
     }),
     tool("get_my_profile", "Get current authenticated user's profile.", noProps()),
+    tool("list_people", "Alias of list_project_people for backward compatibility. List all people on a project.", {
+      type: "object",
+      properties: { project: { type: "string" } },
+      required: ["project"],
+      additionalProperties: false
+    }),
     tool("list_project_people", "List all people on a project.", {
       type: "object",
       properties: { project: { type: "string" } },
@@ -1618,26 +1710,36 @@ export function getTools() {
       additionalProperties: false
     }),
 
-    tool("basecamp_request", "Raw Basecamp API call. Provide full URL or a /path.", {
+    tool("basecamp_request", "Raw Basecamp API call. Preferred power-user escape hatch for endpoints that are not exposed as named tools. Provide a /path or url plus optional query parameters.", {
       type: "object",
       properties: {
         path: { type: "string" },
+        url: { type: "string", nullable: true, description: "Alias for path." },
         method: { type: "string", nullable: true },
+        query: {
+          type: ["object", "string"],
+          nullable: true,
+          description: "Optional query params as an object or raw query string.",
+        },
         body: { type: "object", nullable: true },
         paginate: { type: "boolean", nullable: true }
       },
-      required: ["path"],
       additionalProperties: false
     }),
     tool("basecamp_raw", "Alias of basecamp_request for backward compatibility.", {
       type: "object",
       properties: {
         path: { type: "string" },
+        url: { type: "string", nullable: true, description: "Alias for path." },
         method: { type: "string", nullable: true },
+        query: {
+          type: ["object", "string"],
+          nullable: true,
+          description: "Optional query params as an object or raw query string.",
+        },
         body: { type: "object", nullable: true },
         paginate: { type: "boolean", nullable: true }
       },
-      required: ["path"],
       additionalProperties: false
     }),
 
@@ -1696,9 +1798,12 @@ export function getTools() {
     })
   ];
 
-  // Append auto-generated endpoint tools (api_* wrappers)
-  for (const endpoint of ENDPOINT_TOOLS || []) {
-    tools.push(tool(endpoint.name, endpoint.description, sanitizeSchema(endpoint.inputSchema)));
+  // Auto-generated endpoint wrappers are intentionally hidden by default because they flood
+  // the catalog and make tool selection much less reliable for everyday Basecamp requests.
+  if (shouldExposeEndpointTools()) {
+    for (const endpoint of ENDPOINT_TOOLS || []) {
+      tools.push(tool(endpoint.name, endpoint.description, sanitizeSchema(endpoint.inputSchema)));
+    }
   }
 
   // Append flow tools (flow_* for Activepieces integration) only when explicitly enabled.
@@ -1708,5 +1813,9 @@ export function getTools() {
     }
   }
 
-  return tools;
+  if (resolveToolProfile() === "full") {
+    return tools;
+  }
+
+  return tools.filter((entry) => FOCUSED_TOOL_NAMES.has(entry.name));
 }
