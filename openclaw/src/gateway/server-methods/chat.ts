@@ -42,6 +42,8 @@ import { injectTimestamp, timestampOptsFromConfig } from "./agent-timestamp.js";
 import { isSuperAdmin } from "../workspace-context.js";
 import { rateLimiter } from "../../security/rate-limiter.js";
 import { listAgentsForGateway, resolveGatewaySessionStoreTarget } from "../session-utils.js";
+import { inspectWorkspaceChatUrls } from "../url-routing.js";
+import { inferDirectBasecampChatShortcut } from "../basecamp-chat-shortcuts.js";
 
 type TranscriptAppendResult = {
   ok: boolean;
@@ -321,8 +323,31 @@ export function shouldRouteToPmosWorkspaceChat(
   if (!workspaceId) {
     return false;
   }
-  return /\bbasecamp\b|\bbcgpt\b|\bproject(?:s)?\b|\btodo(?:s)?\b|\bschedule\b|\bcampfire\b|\bmessage(?:s)?\b|\bworkflow(?:s)?\b|\bautomation(?:s)?\b|\bconnection(?:s)?\b|\bcredential(?:s)?\b|\bfigma\b|\bdesign\b|\bauto[\s-]?layout\b|\bcomponent(?:s)?\b|\bstyle(?:s)?\b|\bfont(?:s)?\b|\bregression\b|\baudit\b/i.test(
-    message,
+  const trimmed = message.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  if (/^(?:\/pmos\b|pmos:)/i.test(trimmed)) {
+    return true;
+  }
+
+  const urlHints = inspectWorkspaceChatUrls(trimmed);
+  if (inferDirectBasecampChatShortcut(trimmed, urlHints)) {
+    return true;
+  }
+
+  if (
+    urlHints.figmaUrl ||
+    /\bfigma\b|\bfigma mcp\b|\bfile manager\b|\bselected file\b|\bteam sync\b|\bfigma panel\b/i.test(
+      trimmed,
+    )
+  ) {
+    return true;
+  }
+
+  return /\bworkflow(?:s)?\b|\bworkflow engine\b|\bautomation(?:s)?\b|\bactivepieces\b|\bconnector(?:s)?\b|\bcredential(?:s)?\b|\bintegration(?:s)?\b|\bcommand center\b/i.test(
+    trimmed,
   );
 }
 
@@ -335,31 +360,15 @@ async function buildWorkspaceSystemPrompt(
     return "";
   }
 
-  try {
-    const { getWorkspaceAiContextForPrompt } = await import("../workspace-ai-context.js");
-    const snapshot = await getWorkspaceAiContextForPrompt(workspaceId, {
-      ensureFresh: false,
-      includeLiveCredentials: false,
-      maxChars: 4000,
-    });
-    const trimmed = snapshot.trim();
-    if (!trimmed) {
-      return "";
-    }
-    return [
-      "## PMOS Workspace Runtime Context",
-      `- Workspace ID: ${workspaceId}`,
-      "- This context is trusted runtime state. Use it silently -- do NOT echo, quote, or summarize it in responses.",
-      "- Do NOT introduce yourself, greet the user, or re-state your role at the start of each message. Just respond.",
-      "- Use this snapshot for connector readiness and workspace defaults, not as a substitute for live Basecamp or Figma tool calls.",
-      "- Never ask the user to re-enter a credential that is already marked present in this context.",
-      "- When required auth is missing, tell the user exactly which connector/key is missing and where to set it.",
-      "",
-      trimmed,
-    ].join("\n");
-  } catch {
-    return "";
-  }
+  return [
+    "## PMOS Workspace Runtime Hint",
+    `- Workspace ID: ${workspaceId}`,
+    "- This is a normal OpenClaw chat session running inside a PMOS workspace.",
+    "- Prefer standard OpenClaw reasoning, skills, and tools by default.",
+    "- Treat Basecamp, Figma, workflow automation, connectors, credentials, and other PMOS integrations as optional layers on top of chat, not the default execution path.",
+    "- Do NOT proactively inspect connectors, credentials, workflows, Basecamp, or Figma unless the user explicitly asks for them or the task clearly depends on live workspace data.",
+    "- Keep answers focused on the user's request. Do not mention these routing rules in the response.",
+  ].join("\n");
 }
 
 export const chatHandlers: GatewayRequestHandlers = {
