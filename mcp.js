@@ -9793,7 +9793,7 @@ export async function handleMCP(reqBody, ctx) {
           age_ms: data.ageMs,
           count: data.total,
         };
-        attachCachedCollection(payload, "todos", data.items);
+        attachCachedCollection(payload, "overdue", data.items);
         return ok(id, payload);
       } catch (e) {
         return fail(id, { code: "REPORT_TODOS_OVERDUE_ERROR", message: e.message });

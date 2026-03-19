@@ -2158,11 +2158,13 @@ function renderDirectBasecampShortcutReply(
     }
     case "overdue": {
       const todayIso = shortcut.anchorDate;
-      const items = parseTodoItems(
-        result,
-        shortcut.toolName === "report_todos_overdue" ? "overdue" : "todos",
-        new Map<string, string>(),
-      ).filter((todo) => classifyTodoDueBucket(todo.dueOn, todayIso) === "past");
+      const primaryKey = shortcut.toolName === "report_todos_overdue" ? "overdue" : "todos";
+      let items = parseTodoItems(result, primaryKey, new Map<string, string>());
+      // Fallback: older MCP versions may use "todos" key even for overdue reports
+      if (items.length === 0 && primaryKey !== "todos") {
+        items = parseTodoItems(result, "todos", new Map<string, string>());
+      }
+      items = items.filter((todo) => classifyTodoDueBucket(todo.dueOn, todayIso) === "past");
       return renderTodoDigest({
         title: shortcut.projectName
           ? `${shortcut.projectName} overdue Basecamp todos`
