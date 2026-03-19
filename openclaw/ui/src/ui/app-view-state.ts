@@ -398,12 +398,14 @@ export type AppViewState = {
   createModalOpen: boolean;
   createModalMode: "create" | "edit";
   createModalEditAgentId: string | null;
-  createModalStep: 1 | 2 | 3;
+  createModalStep: 0 | 1 | 2 | 3;
   createModalLoading: boolean;
   createModalError: string | null;
   createModalFormData: CreateAgentFormData;
   availableModels: string[];
   availableSkills: string[];
+  catalogDivision: string;
+  catalogSearch: string;
   agentActivityById: Record<string, AgentActivitySummary>;
   sessionsLoading: boolean;
   sessionsResult: SessionsListResult | null;

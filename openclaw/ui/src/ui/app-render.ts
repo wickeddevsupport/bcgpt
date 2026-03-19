@@ -78,8 +78,10 @@ const debouncedLoadUsage = (state: UsageState) => {
 import {
   DEFAULT_CREATE_AGENT_FORM,
   renderAgents,
+  type AgentMode,
   type CreateAgentFormData,
 } from "./views/agents.ts";
+import type { ModelTier } from "./views/agents-catalog.ts";
 import { renderAdmin } from "./views/admin.ts";
 import { renderAutomations } from "./views/automations.ts";
 import { renderDashboard } from "./views/dashboard.ts";
@@ -284,6 +286,21 @@ function findConfigAgentEntry(
   return entry && typeof entry === "object" && !Array.isArray(entry)
     ? (entry as Record<string, unknown>)
     : null;
+}
+
+function resolveModelTier(tier: ModelTier, availableModels: string[]): string {
+  if (availableModels.length === 0) return "";
+  const fast = availableModels.find((m) => /mini|small|flash|haiku|nano/i.test(m));
+  const reasoning = availableModels.find((m) => /opus|o1|o3|pro|ultra|large/i.test(m));
+  const balanced = availableModels.find((m) =>
+    /gpt-4|sonnet|gemini|claude/i.test(m) && !/mini|flash|haiku/i.test(m),
+  );
+  switch (tier) {
+    case "fast": return fast ?? availableModels[0] ?? "";
+    case "reasoning": return reasoning ?? balanced ?? availableModels[0] ?? "";
+    case "balanced": return balanced ?? availableModels[0] ?? "";
+    default: return "";
+  }
 }
 
 function extractAgentModelRef(value: unknown): string {
@@ -2013,23 +2030,85 @@ export function renderApp(state: AppViewState) {
                   state.pmosAuthUser?.workspaceId?.trim() &&
                     state.pmosAuthUser?.role !== "super_admin",
                 ),
+                catalogDivision: state.catalogDivision ?? "all",
+                catalogSearch: state.catalogSearch ?? "",
+                onCatalogDivisionChange: (division) => {
+                  state.catalogDivision = division;
+                },
+                onCatalogSearchChange: (query) => {
+                  state.catalogSearch = query;
+                },
+                onSelectArchetype: (archetype) => {
+                  const wsId = state.pmosAuthUser?.workspaceId?.trim() ?? "";
+                  const isWorkspaceScopedUser =
+                    Boolean(wsId) && state.pmosAuthUser?.role !== "super_admin";
+                  const agentId = toAgentId(archetype.name);
+                  const profileMap: Record<string, AgentMode> = {
+                    full: "autonomous",
+                    messaging: "interactive",
+                    coding: "hybrid",
+                  };
+                  state.createModalFormData = {
+                    ...buildDefaultCreateAgentForm(state, agentId),
+                    name: archetype.name,
+                    id: agentId,
+                    purpose: archetype.shortDescription,
+                    emoji: archetype.emoji,
+                    theme: archetype.theme,
+                    mode: profileMap[archetype.toolsProfile] ?? "hybrid",
+                    model: resolveModelTier(archetype.modelTier, state.availableModels),
+                    skills: archetype.recommendedSkills.filter(
+                      (s) =>
+                        state.availableSkills.length === 0 ||
+                        state.availableSkills.includes(s),
+                    ),
+                    personality: "professional",
+                    autonomousTasks: [],
+                    archetypeId: archetype.id,
+                    soulContent: archetype.soulContent,
+                    workspace: isWorkspaceScopedUser
+                      ? toWorkspaceScopedAgentWorkspacePath(wsId, agentId)
+                      : DEFAULT_AGENT_WORKSPACE_PATH,
+                  };
+                  state.createModalStep = 1;
+                },
+                onStartFromScratch: () => {
+                  state.createModalFormData = {
+                    ...buildDefaultCreateAgentForm(state, "assistant"),
+                    archetypeId: "",
+                    soulContent: "",
+                  };
+                  state.createModalStep = 1;
+                },
                 onCreateModalOpen: async () => {
                   await loadSkills(state);
                   state.availableSkills = resolveAvailableSkillNames(state);
                   state.createModalOpen = true;
                   state.createModalMode = "create";
                   state.createModalEditAgentId = null;
-                  state.createModalStep = 1;
+                  state.createModalStep = 0;
                   state.createModalError = null;
-                  state.createModalFormData = buildDefaultCreateAgentForm(state, "assistant");
+                  state.catalogDivision = "all";
+                  state.catalogSearch = "";
+                  state.createModalFormData = {
+                    ...buildDefaultCreateAgentForm(state, "assistant"),
+                    archetypeId: "",
+                    soulContent: "",
+                  };
                 },
                 onCreateModalCancel: () => {
                   state.createModalOpen = false;
                   state.createModalMode = "create";
                   state.createModalEditAgentId = null;
-                  state.createModalStep = 1;
+                  state.createModalStep = 0;
                   state.createModalError = null;
-                  state.createModalFormData = buildDefaultCreateAgentForm(state, "assistant");
+                  state.catalogDivision = "all";
+                  state.catalogSearch = "";
+                  state.createModalFormData = {
+                    ...buildDefaultCreateAgentForm(state, "assistant"),
+                    archetypeId: "",
+                    soulContent: "",
+                  };
                 },
                 onCreateModalStepChange: (nextStep) => {
                   state.createModalStep = nextStep;
@@ -2136,6 +2215,20 @@ export function renderApp(state: AppViewState) {
                       });
                       if (createResult && typeof createResult === "object" && !(createResult as { ok?: boolean }).ok) {
                         throw new Error((createResult as { error?: string }).error ?? "Failed to create agent");
+                      }
+                    }
+
+                    // Write SOUL.md if archetype was selected (best-effort)
+                    const soulContent = form.soulContent?.trim();
+                    if (soulContent && !isEditMode) {
+                      try {
+                        await state.client!.request("agents.files.set", {
+                          agentId: candidateId,
+                          name: "SOUL.md",
+                          content: soulContent,
+                        });
+                      } catch {
+                        // Best-effort: agent created but SOUL.md write failed
                       }
                     }
 

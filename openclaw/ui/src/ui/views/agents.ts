@@ -1,4 +1,5 @@
 import { html, nothing } from "lit";
+import { AGENT_ARCHETYPES, DIVISION_META, renderCatalogBrowser } from "./agents-catalog.ts";
 import type {
   AgentFileEntry,
   AgentsFilesListResult,
@@ -42,11 +43,13 @@ export type CreateAgentFormData = {
   skills: string[];
   personality: AgentPersonality;
   autonomousTasks: string[];
+  archetypeId: string;
+  soulContent: string;
 };
 
 export type CreateAgentModalProps = {
   open: boolean;
-  step: 1 | 2 | 3;
+  step: 0 | 1 | 2 | 3;
   formData: CreateAgentFormData;
   loading: boolean;
   error: string | null;
@@ -55,7 +58,7 @@ export type CreateAgentModalProps = {
   availableSkills: string[];
   onCancel: () => void;
   onSubmit: () => void;
-  onStepChange: (step: 1 | 2 | 3) => void;
+  onStepChange: (step: 0 | 1 | 2 | 3) => void;
   onFieldChange: <K extends keyof CreateAgentFormData>(field: K, value: CreateAgentFormData[K]) => void;
 };
 
@@ -115,6 +118,8 @@ export const DEFAULT_CREATE_AGENT_FORM: CreateAgentFormData = {
   skills: [],
   personality: "professional",
   autonomousTasks: [],
+  archetypeId: "",
+  soulContent: "",
 };
 
 export type AgentsPanel = "overview" | "files" | "tools" | "skills" | "channels" | "cron";
@@ -131,7 +136,7 @@ export type AgentsProps = {
   createModalOpen: boolean;
   createModalMode: CreateAgentModalMode;
   createModalEditAgentId: string | null;
-  createModalStep: 1 | 2 | 3;
+  createModalStep: 0 | 1 | 2 | 3;
   createModalLoading: boolean;
   createModalError: string | null;
   createModalFormData: CreateAgentFormData;
@@ -139,9 +144,16 @@ export type AgentsProps = {
   configuredProviders: string[];  // Providers with API keys in BYOK store
   availableSkills: string[];
   workspaceLocked?: boolean;
+  // Catalog browser state
+  catalogDivision: string;
+  catalogSearch: string;
   onCreateModalOpen: () => void;
   onCreateModalCancel: () => void;
-  onCreateModalStepChange: (step: 1 | 2 | 3) => void;
+  onCreateModalStepChange: (step: 0 | 1 | 2 | 3) => void;
+  onSelectArchetype: (archetype: import("./agents-catalog.ts").AgentArchetype) => void;
+  onStartFromScratch: () => void;
+  onCatalogDivisionChange: (division: string) => void;
+  onCatalogSearchChange: (query: string) => void;
   onCreateModalSubmit: () => void;
   onCreateModalFieldChange: <K extends keyof CreateAgentFormData>(
     field: K,
@@ -2183,8 +2195,9 @@ function renderCreateAgentModal(props: AgentsProps) {
   const canAdvanceStep1 = Boolean(form.name.trim());
   const canSubmit = Boolean(form.name.trim()) && (hasConfiguredModels || !form.model.trim());
 
-  const steps: Array<{ value: 1 | 2 | 3; label: string; sub: string }> = [
-    { value: 1, label: "Identity", sub: "Name, ID, workspace" },
+  const steps: Array<{ value: 0 | 1 | 2 | 3; label: string; sub: string }> = [
+    ...(isEditMode ? [] : [{ value: 0 as const, label: "Catalog", sub: "Pick an archetype" }]),
+    { value: 1, label: "Customize", sub: "Name, identity, persona" },
     { value: 2, label: "Runtime", sub: "Mode, model, skills" },
     { value: 3, label: "Review", sub: "Preview + create" },
   ];
@@ -2216,18 +2229,18 @@ function renderCreateAgentModal(props: AgentsProps) {
   }
   const jsonPreview = JSON.stringify(previewAgent, null, 2);
 
+  const minStep = isEditMode ? 1 : 0;
   const goNext = () => {
-    if (step === 1 && !canAdvanceStep1) {
-      return;
-    }
+    if (step === 0) return; // catalog step advances via archetype selection
+    if (step === 1 && !canAdvanceStep1) return;
     if (step < 3) {
-      props.onCreateModalStepChange((step + 1) as 2 | 3);
+      props.onCreateModalStepChange((step + 1) as 1 | 2 | 3);
     }
   };
 
   const goBack = () => {
-    if (step > 1) {
-      props.onCreateModalStepChange((step - 1) as 1 | 2);
+    if (step > minStep) {
+      props.onCreateModalStepChange((step - 1) as 0 | 1 | 2);
     }
   };
 
@@ -2281,8 +2294,28 @@ function renderCreateAgentModal(props: AgentsProps) {
           ? html`<div class="callout danger" style="margin-top: 12px;">${createModalError}</div>`
           : nothing}
 
+        ${step === 0
+          ? renderCatalogBrowser({
+              archetypes: AGENT_ARCHETYPES,
+              divisions: DIVISION_META,
+              selectedDivision: (props.catalogDivision ?? "all") as import("./agents-catalog.ts").AgentArchetypeDivision | "all",
+              searchQuery: props.catalogSearch ?? "",
+              onDivisionChange: (d) => props.onCatalogDivisionChange(d),
+              onSearchChange: (q) => props.onCatalogSearchChange(q),
+              onSelectArchetype: (a) => props.onSelectArchetype(a),
+              onStartFromScratch: () => props.onStartFromScratch(),
+            })
+          : nothing}
+
         ${step === 1
           ? html`
+              ${form.archetypeId
+                ? html`<div class="callout" style="margin-top: 14px;">
+                    Based on: <strong>${AGENT_ARCHETYPES.find((a) => a.id === form.archetypeId)?.name ?? form.archetypeId}</strong>
+                    ${AGENT_ARCHETYPES.find((a) => a.id === form.archetypeId)?.emoji ?? ""}
+                    -- persona will be written to SOUL.md
+                  </div>`
+                : nothing}
               <section class="card" style="margin-top: 14px;">
                 <div class="card-title">Identity And Routing</div>
                 <div class="card-sub">Core identity and workspace fields written into config.</div>
@@ -2387,6 +2420,15 @@ function renderCreateAgentModal(props: AgentsProps) {
                   </label>
                 </div>
               </section>
+              ${form.soulContent
+                ? html`
+                  <section class="card" style="margin-top: 14px;">
+                    <div class="card-title">Agent Persona (SOUL.md)</div>
+                    <div class="card-sub">This persona will guide the agent's behavior, tone, and expertise.</div>
+                    <div class="soul-preview" style="margin-top: 10px;">${form.soulContent.length > 1200 ? form.soulContent.slice(0, 1200) + "\n..." : form.soulContent}</div>
+                  </section>
+                `
+                : nothing}
             `
           : nothing}
 

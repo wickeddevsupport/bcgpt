@@ -592,7 +592,7 @@ export class OpenClawApp extends LitElement {
   @state() createModalOpen = false;
   @state() createModalMode: "create" | "edit" = "create";
   @state() createModalEditAgentId: string | null = null;
-  @state() createModalStep: 1 | 2 | 3 = 1;
+  @state() createModalStep: 0 | 1 | 2 | 3 = 0;
   @state() createModalLoading = false;
   @state() createModalError: string | null = null;
   @state() createModalFormData: import("./views/agents.js").CreateAgentFormData = {
@@ -607,9 +607,13 @@ export class OpenClawApp extends LitElement {
     skills: [],
     personality: "professional",
     autonomousTasks: [],
+    archetypeId: "",
+    soulContent: "",
   };
   @state() availableModels: string[] = [];
   @state() availableSkills: string[] = [];
+  @state() catalogDivision = "all";
+  @state() catalogSearch = "";
   @state() agentActivityById: Record<string, import("./views/agents.js").AgentActivitySummary> = {};
 
   @state() sessionsLoading = false;
