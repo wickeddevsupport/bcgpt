@@ -67,10 +67,17 @@ import {
   logOperation,
   saveSnapshot,
 } from "./db.js";
+import { normalizeBasecampRequestPath } from "./mcp/basecamp-request.js";
 import { getTools } from "./mcp/tools.js";
 import { ENDPOINT_TOOL_MAP } from "./mcp/endpoint-tools.js";
 import { handleFlowTool } from "./index.js";
 import { getOrRefreshBasecampWorkspaceSnapshot } from "./basecamp-workspace-sync.js";
+import {
+  buildAssignedPeopleSummary,
+  compactAssignmentTodo,
+  normalizeTodoAssigneeIds,
+  scanAssignedTodosFromRows,
+} from "./mcp/basecamp-assignment-utils.js";
 
 const FLOW_TOOLS_ENABLED = String(process.env.ENABLE_FLOW_TOOLS || "false").toLowerCase() === "true";
 
@@ -888,11 +895,31 @@ async function mapLimit(items, limit, fn) {
 // ---------- Date helpers ----------
 function isoDate(d) {
   if (!d) return null;
-  const s = String(d);
+  const s = String(d).trim();
+  const lower = s.toLowerCase();
+  if (lower === "today") return new Date().toISOString().slice(0, 10);
+  if (lower === "tomorrow") {
+    const value = new Date();
+    value.setDate(value.getDate() + 1);
+    return value.toISOString().slice(0, 10);
+  }
+  if (lower === "yesterday") {
+    const value = new Date();
+    value.setDate(value.getDate() - 1);
+    return value.toISOString().slice(0, 10);
+  }
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
   const t = new Date(s);
   if (!Number.isNaN(t.getTime())) return t.toISOString().slice(0, 10);
   return null;
+}
+
+function addDaysToIsoDate(value, days) {
+  const base = isoDate(value);
+  if (!base) return null;
+  const date = new Date(`${base}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + Number(days || 0));
+  return date.toISOString().slice(0, 10);
 }
 
 function todoText(t) {
@@ -906,32 +933,6 @@ function compactProjectSummary(project) {
     name: project.name ?? null,
     status: project.status ?? null,
     app_url: project.app_url ?? project.url ?? null
-  };
-}
-
-function compactAssignmentTodo(todo) {
-  if (!todo) return null;
-  const title = todo.title || todo.content || todoText(todo);
-  const completed = Boolean(todo.completed || todo.completed_at);
-  const bucket = todo.bucket || todo.project || null;
-  const project = bucket
-    ? { id: bucket.id ?? null, name: bucket.name ?? null }
-    : null;
-  const assigneeIds = Array.isArray(todo.assignee_ids)
-    ? todo.assignee_ids
-    : Array.isArray(todo.assignees)
-      ? todo.assignees.map(a => a?.id).filter(Boolean)
-      : (todo.assignee_id != null ? [todo.assignee_id] : null);
-
-  return {
-    id: todo.id ?? todo.todo_id ?? todo.recording_id ?? null,
-    title: title || null,
-    status: todo.status ?? (completed ? "completed" : "open"),
-    completed,
-    due_on: todo.due_on ?? null,
-    project,
-    assignee_ids: assigneeIds,
-    app_url: todo.app_url ?? todo.url ?? null
   };
 }
 
@@ -1678,6 +1679,11 @@ async function listAllOpenTodos(ctx, { archivedProjects = false, maxProjects = 0
   });
 
   return cacheSet(cacheKey, perProject.flat());
+}
+
+async function scanAssignedTodosByPerson(ctx, personId, options = {}) {
+  const rows = await listAllOpenTodos(ctx, options);
+  return scanAssignedTodosFromRows(rows, personId);
 }
 
 // ---------- Search within a project ----------
@@ -4561,11 +4567,20 @@ async function updateSubscription(ctx, projectId, recordingId, body) {
 
 // ========== REPORTS ==========
 async function reportTodosAssigned(ctx) {
-  return apiAll(ctx, `/reports/todos/assigned.json`);
+  const rows = await listAllOpenTodos(ctx);
+  if (!rows.length) return [];
+
+  let people = [];
+  try {
+    people = (await listAllPeople(ctx, { deepScan: false })) || [];
+  } catch {
+    // Best effort: return ids/counts even if the people directory is temporarily unavailable.
+  }
+  return buildAssignedPeopleSummary(rows, people.map(normalizePerson));
 }
 
 async function reportTodosAssignedPerson(ctx, personId) {
-  return apiAll(ctx, `/reports/todos/assigned/${personId}.json`);
+  return scanAssignedTodosByPerson(ctx, personId);
 }
 
 async function reportTodosOverdue(ctx) {
@@ -4879,11 +4894,18 @@ export async function handleMCP(reqBody, ctx) {
       return fail(id, { code: "UNKNOWN_METHOD", message: "Unknown MCP method" });
     }
 
-    const { name, arguments: args = {} } = params || {};
+    const rawName = typeof params?.name === "string" ? params.name.trim() : "";
+    const name = rawName === "list_people" ? "list_project_people" : rawName;
+    const { arguments: args = {} } = params || {};
     if (!name) return fail(id, { code: "BAD_REQUEST", message: "Missing tool name" });
 
     // Debug logging
-    console.log(`[MCP] Tool called: ${name}`, { args, authenticated: !!TOKEN?.access_token, accountId });
+    console.log(`[MCP] Tool called: ${name}`, {
+      rawName,
+      args,
+      authenticated: !!TOKEN?.access_token,
+      accountId
+    });
 
     // GATEWAY ROUTING: Route pmos_* and flow_* tools to appropriate services
     if (shouldRoute(name)) {
@@ -5255,63 +5277,83 @@ export async function handleMCP(reqBody, ctx) {
         const date = isoDate(args.date) || new Date().toISOString().slice(0, 10);
         const days = Number(args.days || 0);
         const includeOverdue = !!args.include_overdue;
+        const endDate = days > 0 ? addDaysToIsoDate(date, days) || date : date;
+        const matchesTargetRange = (dueOn) =>
+          Boolean(dueOn) && dueOn >= date && dueOn <= endDate;
+        const shouldIncludeTodo = (dueOn) =>
+          Boolean(dueOn) && (matchesTargetRange(dueOn) || (includeOverdue && dueOn < date));
 
-        let endDate = date;
-        if (days > 0) {
-          // Calculate end date if range specified
-          const endDateObj = new Date(date);
-          endDateObj.setDate(endDateObj.getDate() + days);
-          endDate = endDateObj.toISOString().split('T')[0];
+        let todos = [];
+        let projectPayload = null;
+
+        if (args.project) {
+          const p = await projectByName(ctx, args.project);
+          projectPayload = { id: p.id, name: p.name };
+          const groups = await listTodosForProject(ctx, p.id);
+          for (const group of groups || []) {
+            for (const todo of group.todos || []) {
+              const completed = Boolean(todo.completed || todo.completed_at);
+              if (completed) continue;
+              const dueOn = isoDate(todo.due_on || todo.due_at);
+              if (!shouldIncludeTodo(dueOn)) continue;
+              todos.push({
+                id: todo.id ?? null,
+                title: todoText(todo) || null,
+                status: todo.status ?? "open",
+                completed: false,
+                due_on: dueOn,
+                overdue: Boolean(dueOn && dueOn < date),
+                project: { id: p.id, name: p.name },
+                todolist: {
+                  id: group.todolistId ?? null,
+                  name: group.todolist ?? null
+                },
+                assignee_ids: Array.isArray(todo.assignee_ids) ? todo.assignee_ids : [],
+                app_url: todo.app_url ?? todo.url ?? null
+              });
+            }
+          }
+        } else {
+          const rows = await listAllOpenTodos(ctx);
+          todos = rows
+            .filter((row) => shouldIncludeTodo(row.due_on))
+            .map((row) => ({
+              id: row.todoId ?? null,
+              title: row.content || null,
+              status: "open",
+              completed: false,
+              due_on: row.due_on ?? null,
+              overdue: Boolean(row.due_on && row.due_on < date),
+              project: row.projectId || row.project
+                ? { id: row.projectId ?? null, name: row.project ?? null }
+                : null,
+              todolist: row.todolistId || row.todolist
+                ? { id: row.todolistId ?? null, name: row.todolist ?? null }
+                : null,
+              assignee_ids: Array.isArray(row.raw?.assignee_ids) ? row.raw.assignee_ids : [],
+              app_url: row.url ?? row.raw?.app_url ?? row.raw?.url ?? null
+            }));
         }
 
-        // INTELLIGENT CHAINING: Use TimelineExecutor for intelligent filtering
-        // Automatically filters by date range, enriches with person/project details
-        const p = await projectByName(ctx, args.project || "[current]");
-        const groups = await listTodosForProject(ctx, p.id);
-        const result = await intelligent.executeTimeline(ctx, p.id, date, endDate, groups);
-
-        // Format results with overdue indicator
-        const formattedTodos = result.todos.map(group => ({
-          ...group,
-          todos: (group.todos || []).map(t => ({
-            ...t,
-            overdue: !!(t.due_on && t.due_on < date)
-          }))
-        }));
+        todos.sort(
+          (a, b) =>
+            (a.overdue === b.overdue ? 0 : a.overdue ? -1 : 1) ||
+            String(a.due_on || "9999-99-99").localeCompare(String(b.due_on || "9999-99-99")) ||
+            String(a.project?.name || "").localeCompare(String(b.project?.name || "")) ||
+            String(a.title || "").localeCompare(String(b.title || ""))
+        );
 
         const payload = {
-          project: p.name,
           date_range: { start: date, end: endDate },
-          count: result.count,
-          metrics: result._metadata
+          include_overdue: includeOverdue,
+          count: todos.length
         };
-        attachCachedCollection(payload, "todos", formattedTodos);
+        if (projectPayload) payload.project = projectPayload;
+        attachCachedCollection(payload, "todos", todos);
         return ok(id, payload);
       } catch (e) {
         console.error(`[list_todos_due] Error:`, e.message);
-        // Fallback to original implementation
-        try {
-          const date = isoDate(args.date) || new Date().toISOString().slice(0, 10);
-          const includeOverdue = !!args.include_overdue;
-
-          const rows = await listAllOpenTodos(ctx);
-          const todos = rows
-            .filter((r) => r.due_on === date || (includeOverdue && r.due_on && r.due_on < date))
-            .map((r) => ({ ...r, overdue: !!(r.due_on && r.due_on < date) }));
-
-          todos.sort(
-            (a, b) =>
-              (a.overdue === b.overdue ? 0 : a.overdue ? -1 : 1) ||
-              (a.due_on || "9999-99-99").localeCompare(b.due_on || "9999-99-99") ||
-              (a.project || "").localeCompare(b.project || "")
-          );
-
-          const payload = { date, count: todos.length, fallback: true };
-          attachCachedCollection(payload, "todos", todos);
-          return ok(id, payload);
-        } catch (fbErr) {
-          return fail(id, { code: "LIST_TODOS_DUE_ERROR", message: fbErr.message });
-        }
+        return fail(id, { code: "LIST_TODOS_DUE_ERROR", message: e.message });
       }
     }
 
@@ -5546,48 +5588,47 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "list_assigned_to_me") {
       try {
         const profile = await getMyProfile(ctx);
-        const ctx_intel = new RequestContext(ctx, `assigned to me`);
-        await ctx_intel.preloadEssentials({ loadPeople: true, loadProjects: true });
-
+        const profileId = Number(profile.id);
         let todos = [];
+        let projectPayload = null;
         if (args.project) {
           const p = await projectByName(ctx, args.project);
+          projectPayload = { id: p.id, name: p.name };
           const groups = await listTodosForProject(ctx, p.id);
-          todos = groups.flatMap(g => g.todos || []);
+          todos = groups.flatMap((group) =>
+            (group.todos || []).map((todo) => ({
+              ...todo,
+              project: { id: p.id, name: p.name },
+              todolist: {
+                id: group.todolistId ?? null,
+                name: group.todolist ?? null,
+              },
+            })),
+          );
         } else {
-          const rows = await listAllOpenTodos(ctx);
-          todos = rows.map(r => r.raw).filter(Boolean);
+          todos = await reportTodosAssignedPerson(ctx, profileId);
         }
 
-        const assigned = todos.filter(t => Array.isArray(t.assignee_ids) && t.assignee_ids.includes(profile.id));
-        const enricher = intelligent.createEnricher(ctx_intel);
-        const enriched = await enricher.formatTodoResults(assigned);
+        const assigned = todos.filter((todo) => normalizeTodoAssigneeIds(todo).includes(profileId));
 
         return ok(id, {
           person: { id: profile.id, name: profile.name, email: profile.email },
-          project: args.project ? { name: args.project } : null,
-          metrics: ctx_intel.getMetrics(),
-          ...buildListPayload("todos", enriched)
+          project: projectPayload,
+          source: args.project ? "project_scan" : "workspace_scan",
+          ...buildListPayload("todos", assigned)
         });
       } catch (e) {
         console.error(`[list_assigned_to_me] Error:`, e.message);
         // Fallback: global scan across all open todos
         try {
           const profile = await getMyProfile(ctx);
-          const ctx_intel = new RequestContext(ctx, `assigned to me fallback`);
-          await ctx_intel.preloadEssentials({ loadPeople: true, loadProjects: true });
-
-          const rows = await listAllOpenTodos(ctx);
-          const todos = rows.map(r => r.raw).filter(Boolean);
-          const assigned = todos.filter(t => Array.isArray(t.assignee_ids) && t.assignee_ids.includes(profile.id));
-          const enricher = intelligent.createEnricher(ctx_intel);
-          const enriched = await enricher.formatTodoResults(assigned);
+          const assigned = await reportTodosAssignedPerson(ctx, Number(profile.id));
 
           return ok(id, {
             person: { id: profile.id, name: profile.name, email: profile.email },
             fallback: true,
-            metrics: ctx_intel.getMetrics(),
-            ...buildListPayload("todos", enriched)
+            source: "workspace_scan_fallback",
+            ...buildListPayload("todos", assigned)
           });
         } catch (fbErr) {
           return fail(id, { code: "LIST_ASSIGNED_TO_ME_ERROR", message: fbErr.message });
@@ -6227,12 +6268,70 @@ export async function handleMCP(reqBody, ctx) {
         }
 
         const quickAssignedIntent =
-          /\bassigned to me\b/i.test(lower) || /\bmy todos\b/i.test(lower);
+          /\bassigned to me\b/i.test(lower) ||
+          /\bmy todos\b/i.test(lower) ||
+          /\bmy tasks\b/i.test(lower) ||
+          /\bwhat do i need to do\b/i.test(lower);
         if (quickAssignedIntent) {
+          const quickTargetDate =
+            /\btomorrow\b/i.test(lower)
+              ? addDaysToIsoDate(new Date().toISOString().slice(0, 10), 1)
+              : /\btoday\b/i.test(lower)
+                ? new Date().toISOString().slice(0, 10)
+                : null;
           const result = await callTool("list_assigned_to_me", {
             project: args.project || undefined,
           });
+          const assignedTodos = Array.isArray(result?.todos)
+            ? result.todos
+            : Array.isArray(result?.result?.todos)
+              ? result.result.todos
+              : [];
+          if (/\boverdue|past due|late\b/i.test(lower) || quickTargetDate) {
+            const filtered = assignedTodos.filter((todo) => {
+              const dueOn = isoDate(todo?.due_on || todo?.dueOn);
+              if (!dueOn) return false;
+              if (/\boverdue|past due|late\b/i.test(lower)) return dueOn < new Date().toISOString().slice(0, 10);
+              return dueOn === quickTargetDate;
+            });
+            return ok(id, {
+              query,
+              action: "list_assigned_to_me_filtered",
+              confidence: 0.97,
+              fast_path: true,
+              date: quickTargetDate,
+              result: {
+                ...result,
+                count: filtered.length,
+                todos: filtered
+              }
+            });
+          }
           return ok(id, { query, action: "list_assigned_to_me", confidence: 0.95, fast_path: true, result });
+        }
+
+        if (/\boverdue|past due|late\b/i.test(lower) && /\b(todo|task)s?\b/i.test(lower)) {
+          const result = await callTool("report_todos_overdue", {});
+          return ok(id, { query, action: "report_todos_overdue", confidence: 0.94, fast_path: true, result });
+        }
+
+        if ((/\btoday\b/i.test(lower) || /\btomorrow\b/i.test(lower)) && /\b(todo|task)s?\b/i.test(lower)) {
+          const targetDate = /\btomorrow\b/i.test(lower)
+            ? addDaysToIsoDate(new Date().toISOString().slice(0, 10), 1)
+            : new Date().toISOString().slice(0, 10);
+          const result = await callTool("list_todos_due", {
+            date: targetDate,
+            include_overdue: /\boverdue|past due|late\b/i.test(lower),
+            project: args.project || undefined,
+          });
+          return ok(id, {
+            query,
+            action: "list_todos_due",
+            confidence: 0.94,
+            fast_path: true,
+            date: targetDate,
+            result
+          });
         }
 
         const quickProjectSummaryIntent =
@@ -9541,7 +9640,7 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "report_todos_assigned") {
       try {
         const data = await reportTodosAssigned(ctx);
-        return ok(id, { people: data, count: Array.isArray(data) ? data.length : 0 });
+        return ok(id, { source: "workspace_scan", people: data, count: Array.isArray(data) ? data.length : 0 });
       } catch (e) {
         return fail(id, { code: "REPORT_TODOS_ASSIGNED_ERROR", message: e.message });
       }
@@ -9550,6 +9649,7 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "report_todos_assigned_person") {
       try {
         let personId = Number(args.person_id);
+        let personSummary = null;
         if (!Number.isFinite(personId)) {
           const personQuery = firstDefined(args.person, args.assignee, args.name, args.email);
           if (personQuery) {
@@ -9561,6 +9661,7 @@ export async function handleMCP(reqBody, ctx) {
               return fail(id, { code: "PERSON_NOT_FOUND", message: "No matching person found.", matches: resolved.matches || [] });
             }
             personId = Number(resolved.person.id);
+            personSummary = normalizePerson(resolved.person);
           }
         }
         if (!Number.isFinite(personId)) {
@@ -9573,7 +9674,15 @@ export async function handleMCP(reqBody, ctx) {
         const todos = Array.isArray(data)
           ? (compact ? data.map(compactAssignmentTodo).filter(Boolean) : data)
           : [];
-        const payload = { person_id: personId };
+        const payload = { person_id: personId, source: "workspace_scan" };
+        if (!personSummary) {
+          try {
+            personSummary = normalizePerson(await getPerson(ctx, personId));
+          } catch {
+            personSummary = null;
+          }
+        }
+        if (personSummary) payload.person = personSummary;
         attachCachedCollection(payload, "todos", todos, { inlineLimit, chunkSize: inlineLimit, autoExpand });
         return ok(id, payload);
       } catch (e) {
@@ -10524,16 +10633,23 @@ export async function handleMCP(reqBody, ctx) {
 
     // Raw
     if (name === "basecamp_request" || name === "basecamp_raw") {
+      const rawPath = firstDefined(args.path, args.url, args.endpoint, args.resource);
+      if (!rawPath) {
+        return fail(id, { code: "BAD_REQUEST", message: "Missing path or url." });
+      }
       const method = args.method || "GET";
       const httpMethod = String(method || "GET").toUpperCase();
       const paginate = args.paginate !== false && httpMethod === "GET";
+      const normalizedPath = normalizeBasecampRequestPath(rawPath, { query: args.query });
       try {
-        const data = paginate ? await apiAll(ctx, args.path) : await api(ctx, args.path, { method, body: args.body });
+        const data = paginate
+          ? await apiAll(ctx, normalizedPath)
+          : await api(ctx, normalizedPath, { method, body: args.body });
         return ok(id, data);
       } catch (e) {
         // Auto-recover common card table path mistakes for GETs.
         if (httpMethod === "GET" && isApiError(e, 404)) {
-          const path = String(args.path || "");
+          const path = String(normalizedPath || "");
           const tableMatch = path.match(/^\/buckets\/(\d+)\/card_tables\/(\d+)\.json$/);
           const cardsMatch = path.match(/^\/buckets\/(\d+)\/card_tables\/(\d+)\/cards\.json$/);
 
@@ -10611,9 +10727,3 @@ export async function handleMCP(reqBody, ctx) {
     return fail(id, { code: "INTERNAL_ERROR", message: e?.message || String(e) });
   }
 }
-
-
-
-
-
-

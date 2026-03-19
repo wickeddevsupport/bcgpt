@@ -13,6 +13,11 @@ import {
   normalizeFigmaMcpToolName,
   probeWorkspaceFigmaMcpServiceStatus,
 } from "../figma-mcp-service.js";
+import {
+  inferDirectBasecampChatShortcut,
+  type DirectBasecampChatShortcut,
+} from "../basecamp-chat-shortcuts.js";
+import type { ChatToolDefinition } from "../workflow-ai.js";
 import { inspectWorkspaceChatUrls } from "../url-routing.js";
 import { emitAgentEvent, registerAgentRunContext } from "../../infra/agent-events.js";
 import fs from "node:fs/promises";
@@ -332,6 +337,9 @@ export const __test = {
   shouldDeferFigmaPatAudit,
   normalizeFigmaMcpToolName,
   normalizeFigmaMcpToolListResult,
+  detectChatIntents,
+  filterToolDefinitionsByIntents,
+  inferPreferredBasecampNamedTool,
 };
 
 /**
@@ -1343,7 +1351,7 @@ type ChatIntent = "basecamp" | "workflow" | "figma" | "general";
 
 function detectChatIntents(
   message: string,
-  urlHints: { basecampUrl?: string; figmaUrl?: string },
+  urlHints: { basecampUrl?: string | null; figmaUrl?: string | null },
 ): Set<ChatIntent> {
   if (isGreetingOnlyMessage(message)) {
     return new Set<ChatIntent>(["general"]);
@@ -1354,7 +1362,9 @@ function detectChatIntents(
 
   if (
     urlHints.basecampUrl ||
-    /\bbasecamp\b|\bbcgpt\b|\bproject(?:s)?\b|\btodo(?:s)?\b|\bschedule\b|\bcampfire\b|\bmessage(?:s)?\b|\bkanban\b|\bcard(?:s)?\b|\bpeople\b|\bperson\b|\bassignment(?:s)?\b/i.test(msg)
+    /\bbasecamp\b|\bbcgpt\b|\bproject(?:s)?\b|\btodo(?:s)?\b|\bschedule\b|\bcampfire\b|\bmessage(?:s)?\b|\bkanban\b|\bcard(?:s)?\b|\bpeople\b|\bperson\b|\bassignment(?:s)?\b|\bbucket(?:s)?\b|\brecording(?:s)?\b|\/buckets\/\d+|\/projects\/\d+/i.test(
+      msg,
+    )
   ) {
     intents.add("basecamp");
   }
@@ -1379,9 +1389,14 @@ function detectChatIntents(
   return intents;
 }
 
-const BASECAMP_TOOL_NAMES = new Set([
-  "bcgpt_smart_action", "bcgpt_list_projects", "bcgpt_list_tools",
-  "bcgpt_mcp_call", "bcgpt_basecamp_raw",
+const BASECAMP_CORE_TOOL_NAMES = new Set([
+  "bcgpt_smart_action", "bcgpt_list_projects", "bcgpt_mcp_call",
+]);
+const BASECAMP_DISCOVERY_TOOL_NAMES = new Set([
+  "bcgpt_list_tools",
+]);
+const BASECAMP_RAW_TOOL_NAMES = new Set([
+  "bcgpt_basecamp_raw",
 ]);
 const WORKFLOW_TOOL_NAMES = new Set([
   "pmos_ops_list_credentials", "pmos_ops_list_workflows", "pmos_ops_list_node_types",
@@ -1395,6 +1410,72 @@ const GENERAL_TOOL_NAMES = new Set([
   "pmos_parallel_subtasks", "web_search", "web_fetch",
 ]);
 
+function addToolNames(target: Set<string>, source: Set<string>): void {
+  source.forEach((name) => target.add(name));
+}
+
+function shouldExposeBasecampDiscoveryTools(message: string): boolean {
+  return /\b(list|show|what|which|available)\b[\s\w-]{0,16}\btools?\b|\btool catalog\b|\btool schema\b|\bcapabilit(?:y|ies)\b|\bwhich bcgpt tool\b/i.test(
+    message,
+  );
+}
+
+function shouldExposeBasecampRawTool(
+  message: string,
+  urlHints: { basecampUrl?: string | null; basecampCardPath?: string | null },
+): boolean {
+  return (
+    Boolean(urlHints.basecampCardPath) ||
+    /\b(raw|api|endpoint(?:s)?|json|curl|payload|request body|response body)\b|(?:^|\s)(get|post|put|patch|delete)\s+\/\S+|\/buckets\/\d+\/\S+/i.test(
+      message,
+    )
+  );
+}
+
+function filterToolDefinitionsByIntents(
+  tools: ChatToolDefinition[],
+  intents: Set<ChatIntent>,
+  options: {
+    disableBasecampTools?: boolean;
+    latestUserMessage?: string;
+    urlHints?: { basecampUrl?: string | null; basecampCardPath?: string | null };
+  } = {},
+): ChatToolDefinition[] {
+  const disableBasecampTools = options.disableBasecampTools === true;
+  const allowed = new Set<string>();
+  addToolNames(allowed, GENERAL_TOOL_NAMES);
+
+  const effectiveIntents = new Set(intents);
+  if (disableBasecampTools) {
+    effectiveIntents.delete("basecamp");
+  }
+
+  if (effectiveIntents.has("basecamp")) {
+    addToolNames(allowed, BASECAMP_CORE_TOOL_NAMES);
+    if (shouldExposeBasecampDiscoveryTools(options.latestUserMessage ?? "")) {
+      addToolNames(allowed, BASECAMP_DISCOVERY_TOOL_NAMES);
+    }
+    if (shouldExposeBasecampRawTool(options.latestUserMessage ?? "", options.urlHints ?? {})) {
+      addToolNames(allowed, BASECAMP_RAW_TOOL_NAMES);
+    }
+  }
+  if (effectiveIntents.has("workflow")) {
+    addToolNames(allowed, WORKFLOW_TOOL_NAMES);
+  }
+  if (effectiveIntents.has("figma")) {
+    addToolNames(allowed, FIGMA_TOOL_NAMES);
+  }
+
+  if (allowed.size === 0) {
+    return tools;
+  }
+
+  return tools.filter((tool) => {
+    const name = tool?.type === "function" ? tool.function?.name ?? "" : "";
+    return !name || allowed.has(name);
+  });
+}
+
 type BasecampNamedToolHint = {
   tool: string;
   reason: string;
@@ -1406,6 +1487,18 @@ function normalizeBcgptNamedToolName(tool: string): string {
 
 function inferPreferredBasecampNamedTool(message: string): BasecampNamedToolHint | null {
   const lower = message.toLowerCase();
+  if (/\b(overdue|past due|late)\b/.test(lower) && /\b(todo|task)s?\b/.test(lower) && !/\b(my|mine|assigned to me)\b/.test(lower)) {
+    return {
+      tool: "report_todos_overdue",
+      reason: "the user wants the exact overdue todo queue rather than a broad Basecamp summary",
+    };
+  }
+  if (/\b(today|tomorrow|\d{4}-\d{2}-\d{2})\b/.test(lower) && /\b(todo|task)s?\b/.test(lower) && !/\b(my|mine|assigned to me)\b/.test(lower)) {
+    return {
+      tool: "list_todos_due",
+      reason: "the user is asking for an exact due-date todo list",
+    };
+  }
   if (/\b(todo lists?|todolists?)\b/.test(lower) && /\b(open|count|counts|how many)\b/.test(lower)) {
     return {
       tool: "list_todos_for_project",
@@ -1438,7 +1531,7 @@ function inferPreferredBasecampNamedTool(message: string): BasecampNamedToolHint
   }
   if (/\bpeople\b|\bteam\b|\bwho is\b|\bwho's\b/.test(lower)) {
     return {
-      tool: "list_people",
+      tool: "list_project_people",
       reason: "the user wants exact roster or people data",
     };
   }
@@ -1488,15 +1581,19 @@ function parseTodoItems(
     const project = isJsonObject(raw.project) ? raw.project : null;
     const projectId =
       numberStringOrNull(project?.id) ??
+      numberStringOrNull(raw.projectId) ??
+      numberStringOrNull(raw.project_id) ??
       parseProjectIdFromAppUrl(appUrl);
     const projectName =
       stringOrNull(project?.name) ??
+      stringOrNull(raw.projectName) ??
+      stringOrNull(raw.project_name) ??
       (projectId ? projectNameById.get(projectId) ?? null : null);
     items.push({
-      id: numberStringOrNull(raw.id),
+      id: numberStringOrNull(raw.id) ?? numberStringOrNull(raw.todoId) ?? numberStringOrNull(raw.todo_id),
       title,
       status: stringOrNull(raw.status),
-      dueOn: stringOrNull(raw.due_on),
+      dueOn: stringOrNull(raw.due_on) ?? stringOrNull(raw.dueOn),
       projectId,
       projectName,
       appUrl,
@@ -1778,6 +1875,403 @@ function mapWorkspaceSnapshotProjectCards(items: unknown): PmosProjectCard[] {
       };
     })
     .filter((item) => item.id && item.name);
+}
+
+function formatTodoDueLabel(todo: PmosProjectTodoItem, todayIso: string): string {
+  if (!todo.dueOn) return "no due date";
+  if (todo.dueOn < todayIso) return `overdue ${todo.dueOn}`;
+  if (todo.dueOn === todayIso) return "due today";
+  return `due ${todo.dueOn}`;
+}
+
+function todoProjectLabelForReply(todo: PmosProjectTodoItem): string {
+  return todo.projectName || (todo.projectId ? `Project ${todo.projectId}` : "Unknown project");
+}
+
+function formatTodoBullet(todo: PmosProjectTodoItem, todayIso: string): string {
+  return `- ${todoProjectLabelForReply(todo)}: ${todo.title} (${formatTodoDueLabel(todo, todayIso)})`;
+}
+
+function renderTodoDigest(params: {
+  title: string;
+  items: PmosProjectTodoItem[];
+  emptyMessage: string;
+  nextStep: string;
+  todayIso: string;
+  limit?: number;
+}): string {
+  const sorted = sortTodoItems(params.items, params.todayIso);
+  const lines = [`${params.title}: ${sorted.length}.`, ""];
+  if (!sorted.length) {
+    lines.push(params.emptyMessage);
+  } else {
+    lines.push(...sorted.slice(0, params.limit ?? 8).map((todo) => formatTodoBullet(todo, params.todayIso)));
+  }
+  lines.push("", `Next step: ${params.nextStep}`);
+  return lines.join("\n");
+}
+
+function renderAssignedTodoReply(
+  shortcut: Extract<DirectBasecampChatShortcut, { kind: "assigned" }>,
+  items: PmosProjectTodoItem[],
+): string {
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const overdue = items.filter((todo) => classifyTodoDueBucket(todo.dueOn, todayIso) === "past");
+  const dueToday = items.filter((todo) => classifyTodoDueBucket(todo.dueOn, todayIso) === "today");
+  const future = items.filter((todo) => classifyTodoDueBucket(todo.dueOn, todayIso) === "future");
+  const noDueDate = items.filter((todo) => classifyTodoDueBucket(todo.dueOn, todayIso) === "none");
+
+  if (shortcut.filter === "overdue") {
+    return renderTodoDigest({
+      title: "Your overdue Basecamp todos",
+      items: overdue,
+      emptyMessage: "Nothing assigned to you is overdue right now.",
+      nextStep: "Open the first overdue item and either finish it or move the due date today.",
+      todayIso,
+    });
+  }
+
+  if (shortcut.filter === "date" && shortcut.filterDate) {
+    const matching = items.filter((todo) => todo.dueOn === shortcut.filterDate);
+    const label = shortcut.filterLabel ?? shortcut.filterDate;
+    return renderTodoDigest({
+      title: `Your Basecamp todos for ${label}`,
+      items: matching,
+      emptyMessage: `You do not have any assigned todos due ${label}.`,
+      nextStep: `Open the first item due ${label} and confirm it is still realistic.`,
+      todayIso,
+    });
+  }
+
+  const priority = [...sortTodoItems(overdue, todayIso), ...sortTodoItems(dueToday, todayIso)]
+    .concat(sortTodoItems(future, todayIso))
+    .concat(sortTodoItems(noDueDate, todayIso))
+    .slice(0, 8);
+
+  const lines = [`Your Basecamp queue at a glance: ${items.length} open assigned todos.`, ""];
+  lines.push(`- Overdue: ${overdue.length}`);
+  lines.push(`- Due today: ${dueToday.length}`);
+  lines.push(`- Upcoming: ${future.length}`);
+  lines.push(`- No due date: ${noDueDate.length}`);
+  if (priority.length) {
+    lines.push("", "Start with:");
+    lines.push(...priority.map((todo) => formatTodoBullet(todo, todayIso)));
+  }
+  lines.push(
+    "",
+    "Next step: Open the first overdue item, then clear today's due list before pulling future work forward.",
+  );
+  return lines.join("\n");
+}
+
+function parseTodoListRows(result: unknown): {
+  projectName: string | null;
+  rows: Array<{ name: string; openCount: number | null }>;
+} {
+  const payload = isJsonObject(result) ? result : null;
+  const root = isJsonObject(payload?.result) ? payload.result : payload;
+  const rows = Array.isArray(root?.todolists)
+    ? root.todolists
+        .filter((item): item is Record<string, unknown> => isJsonObject(item))
+        .map((item) => ({
+          name: stringOrNull(item.name) ?? stringOrNull(item.title) ?? "",
+          openCount:
+            parseCompletedRatio(stringOrNull(item.completed_ratio))?.open ??
+            (typeof item.todos_count === "number" ? item.todos_count : null),
+        }))
+        .filter((item) => item.name)
+    : [];
+  return {
+    projectName: stringOrNull(isJsonObject(root?.project) ? root.project.name : null),
+    rows,
+  };
+}
+
+function renderTodoListReply(result: unknown): string {
+  const parsed = parseTodoListRows(result);
+  const projectName = parsed.projectName ?? "This project";
+  const lines = [`${projectName} has ${parsed.rows.length} todo list${parsed.rows.length === 1 ? "" : "s"}.`, ""];
+  if (!parsed.rows.length) {
+    lines.push("No todo lists were returned for this project.");
+  } else {
+    lines.push(
+      ...parsed.rows
+        .slice(0, 12)
+        .map((row) => `- ${row.name}${typeof row.openCount === "number" ? `: ${row.openCount} open` : ""}`),
+    );
+  }
+  lines.push("", "Next step: Open the list with the highest open count and clear the first stuck item.");
+  return lines.join("\n");
+}
+
+function renderProjectTodoGroupsReply(result: unknown): string {
+  const payload = isJsonObject(result) ? result : null;
+  const root = isJsonObject(payload?.result) ? payload.result : payload;
+  const projectName = stringOrNull(isJsonObject(root?.project) ? root.project.name : null) ?? "This project";
+  const groups = Array.isArray(root?.groups)
+    ? root.groups
+        .filter((item): item is Record<string, unknown> => isJsonObject(item))
+        .map((item) => ({
+          name: stringOrNull(item.todolist) ?? stringOrNull(item.name) ?? "",
+          openCount:
+            typeof item.todos_count === "number"
+              ? item.todos_count
+              : typeof item.count === "number"
+                ? item.count
+                : 0,
+        }))
+        .filter((item) => item.name)
+    : [];
+  const totalOpen = groups.reduce((sum, group) => sum + group.openCount, 0);
+  const lines = [`${projectName} has ${totalOpen} open todo${totalOpen === 1 ? "" : "s"} across ${groups.length} list${groups.length === 1 ? "" : "s"}.`, ""];
+  if (!groups.length) {
+    lines.push("No open todo groups were returned for this project.");
+  } else {
+    lines.push(...groups.slice(0, 12).map((group) => `- ${group.name}: ${group.openCount} open`));
+  }
+  lines.push("", "Next step: Open the busiest list first and clear the oldest blocked item.");
+  return lines.join("\n");
+}
+
+function renderProjectPeopleReply(result: unknown): string {
+  const payload = isJsonObject(result) ? result : null;
+  const root = isJsonObject(payload?.result) ? payload.result : payload;
+  const projectName = stringOrNull(isJsonObject(root?.project) ? root.project.name : null) ?? "This project";
+  const people = Array.isArray(root?.people)
+    ? root.people
+        .filter((item): item is Record<string, unknown> => isJsonObject(item))
+        .map((item) => ({
+          name: stringOrNull(item.name) ?? "(unknown)",
+          email: stringOrNull(item.email) ?? stringOrNull(item.email_address),
+        }))
+    : [];
+  const lines = [`${projectName} team (${people.length}):`, ""];
+  if (!people.length) {
+    lines.push("No project people were returned.");
+  } else {
+    lines.push(
+      ...people
+        .slice(0, 16)
+        .map((person) => `- ${person.name}${person.email ? ` - ${person.email}` : ""}`),
+    );
+  }
+  lines.push("", "Next step: Tell me which teammate you want to inspect and I'll pull their tasks or recent activity.");
+  return lines.join("\n");
+}
+
+function renderScheduleReply(result: unknown): string {
+  const payload = isJsonObject(result) ? result : null;
+  const root = isJsonObject(payload?.result) ? payload.result : payload;
+  const projectName = stringOrNull(isJsonObject(root?.project) ? root.project.name : null) ?? "This project";
+  const entries = Array.isArray(root?.schedule_entries)
+    ? root.schedule_entries
+        .filter((item): item is Record<string, unknown> => isJsonObject(item))
+        .map((item) => ({
+          title: stringOrNull(item.title) ?? "(untitled)",
+          startsAt: stringOrNull(item.starts_at) ?? stringOrNull(item.startsAt),
+          appUrl: stringOrNull(item.app_url) ?? stringOrNull(item.appUrl),
+        }))
+        .sort((left, right) => (left.startsAt ?? "9999").localeCompare(right.startsAt ?? "9999"))
+    : [];
+  const lines = [`${projectName} upcoming schedule (${entries.length}):`, ""];
+  if (!entries.length) {
+    lines.push("No schedule entries were returned.");
+  } else {
+    lines.push(
+      ...entries
+        .slice(0, 10)
+        .map((entry) => `- ${entry.title}${entry.startsAt ? ` - ${entry.startsAt}` : ""}`),
+    );
+  }
+  lines.push("", "Next step: Open the next event and confirm the owner, date, and any prep work.");
+  return lines.join("\n");
+}
+
+function renderProjectListReply(result: unknown): string {
+  const projects = parseProjectList(result);
+  const lines = [`You have ${projects.length} Basecamp project${projects.length === 1 ? "" : "s"} available.`, ""];
+  if (!projects.length) {
+    lines.push("No live Basecamp projects were returned.");
+  } else {
+    lines.push(...projects.slice(0, 12).map((project) => `- ${project.name} (${project.status})`));
+  }
+  lines.push("", "Next step: Tell me which project you want to inspect and I'll drill into its tasks, people, messages, or schedule.");
+  return lines.join("\n");
+}
+
+function renderWorkspaceSnapshotReply(result: unknown): string {
+  const payload = isJsonObject(result) ? result : null;
+  const root = isJsonObject(payload?.result) ? payload.result : payload;
+  const totals = isJsonObject(root?.totals) ? root.totals : null;
+  const projects = mapWorkspaceSnapshotProjectCards(root?.projects);
+  const urgentTodos = mapWorkspaceSnapshotTodoItems(root?.urgentTodos);
+  const dueTodayTodos = mapWorkspaceSnapshotTodoItems(root?.dueTodayTodos);
+  const lines = [
+    `Basecamp workspace pulse: ${typeof totals?.openTodos === "number" ? totals.openTodos : 0} open todos across ${typeof totals?.projectCount === "number" ? totals.projectCount : projects.length} projects.`,
+    "",
+    `- Assigned to you: ${typeof totals?.assignedTodos === "number" ? totals.assignedTodos : 0}`,
+    `- Overdue: ${typeof totals?.overdueTodos === "number" ? totals.overdueTodos : urgentTodos.length}`,
+    `- Due today: ${typeof totals?.dueTodayTodos === "number" ? totals.dueTodayTodos : dueTodayTodos.length}`,
+  ];
+  if (projects.length) {
+    lines.push("", "Needs attention:");
+    lines.push(
+      ...projects
+        .slice(0, 5)
+        .map(
+          (project) =>
+            `- ${project.name}: ${project.overdueTodos} overdue, ${project.dueTodayTodos} due today, ${project.openTodos} open`,
+        ),
+    );
+  }
+  const priority = [...urgentTodos, ...dueTodayTodos].slice(0, 6);
+  if (priority.length) {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    lines.push("", "Priority items:");
+    lines.push(...priority.map((todo) => formatTodoBullet(todo, todayIso)));
+  }
+  lines.push("", "Next step: Start with the first at-risk project and clear its oldest overdue item.");
+  return lines.join("\n");
+}
+
+function renderDirectBasecampShortcutReply(
+  shortcut: DirectBasecampChatShortcut,
+  result: unknown,
+  latestUserMessage: string,
+): string {
+  switch (shortcut.kind) {
+    case "assigned": {
+      const items = parseTodoItems(result, "todos", new Map<string, string>());
+      return renderAssignedTodoReply(shortcut, items);
+    }
+    case "due_date": {
+      const items = parseTodoItems(result, "todos", new Map<string, string>());
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const label = shortcut.filterLabel ?? shortcut.filterDate;
+      return renderTodoDigest({
+        title: `Basecamp todos for ${label}`,
+        items,
+        emptyMessage: `No todos are due ${label}.`,
+        nextStep: `Open the first item due ${label} and confirm the owner and status.`,
+        todayIso,
+      });
+    }
+    case "overdue": {
+      const todayIso = shortcut.anchorDate;
+      const items = parseTodoItems(
+        result,
+        shortcut.toolName === "report_todos_overdue" ? "overdue" : "todos",
+        new Map<string, string>(),
+      ).filter((todo) => classifyTodoDueBucket(todo.dueOn, todayIso) === "past");
+      return renderTodoDigest({
+        title: shortcut.projectName
+          ? `${shortcut.projectName} overdue Basecamp todos`
+          : "Overdue Basecamp todos",
+        items,
+        emptyMessage: shortcut.projectName
+          ? `Nothing is overdue in ${shortcut.projectName} right now.`
+          : "Nothing is overdue in Basecamp right now.",
+        nextStep: "Open the oldest overdue item first and either finish it or move the date.",
+        todayIso,
+      });
+    }
+    case "project_list":
+      return renderProjectListReply(result);
+    case "project_todolists":
+      return renderTodoListReply(result);
+    case "project_todos":
+      return renderProjectTodoGroupsReply(result);
+    case "project_people":
+      return renderProjectPeopleReply(result);
+    case "project_schedule":
+      return renderScheduleReply(result);
+    case "workspace_snapshot":
+      return renderWorkspaceSnapshotReply(result);
+    case "inspect_url":
+    case "project_summary": {
+      const summary = summarizeBcgptSmartActionResult(
+        latestUserMessage,
+        "projectName" in shortcut ? shortcut.projectName ?? null : null,
+        result,
+      );
+      return `${summary}\n\nNext step: Tell me if you want the raw item details, comments, or related tasks next.`;
+    }
+  }
+
+  return summarizeBcgptDirectToolResult("smart_action", result);
+}
+
+async function maybeHandleDirectBasecampShortcut(params: {
+  workspaceId: string;
+  latestUserMessage: string;
+  shortcut: DirectBasecampChatShortcut;
+}): Promise<string | null> {
+  const { bcgptUrl, apiKey } = await resolveWorkspaceBcgptAccess({
+    workspaceId: params.workspaceId,
+    allowGlobalSecrets: true,
+  });
+  if (!apiKey) {
+    return "Basecamp integration is not configured for this workspace.\n\nNext step: Open Integrations and save the workspace Basecamp connection key.";
+  }
+
+  const primary = await callBcgptTool({
+    bcgptUrl,
+    apiKey,
+    toolName: params.shortcut.toolName,
+    toolArgs: params.shortcut.toolArgs,
+    timeoutMs: 45_000,
+  });
+  if (primary.ok) {
+    return renderDirectBasecampShortcutReply(
+      params.shortcut,
+      primary.result,
+      params.latestUserMessage,
+    );
+  }
+
+  if (params.shortcut.toolName === "smart_action") {
+    return null;
+  }
+
+  const fallbackToolArgs: Record<string, unknown> = {
+    query: params.latestUserMessage,
+  };
+  if ("projectName" in params.shortcut && params.shortcut.projectName) {
+    fallbackToolArgs.project = params.shortcut.projectName;
+  }
+  const fallback = await callBcgptTool({
+    bcgptUrl,
+    apiKey,
+    toolName: "smart_action",
+    toolArgs: fallbackToolArgs,
+    timeoutMs: 45_000,
+  });
+  if (!fallback.ok) {
+    return null;
+  }
+
+  const smartShortcut: DirectBasecampChatShortcut =
+    "projectName" in params.shortcut && params.shortcut.projectName
+      ? {
+          kind: "project_summary",
+          toolName: "smart_action",
+          toolArgs: {
+            query: params.latestUserMessage,
+            project: params.shortcut.projectName,
+          },
+          projectName: params.shortcut.projectName,
+        }
+      : {
+          kind: "inspect_url",
+          toolName: "smart_action",
+          toolArgs: { query: params.latestUserMessage },
+        };
+
+  return renderDirectBasecampShortcutReply(
+    smartShortcut,
+    fallback.result,
+    params.latestUserMessage,
+  );
 }
 
 export const pmosHandlers: GatewayRequestHandlers = {
@@ -3504,18 +3998,13 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         .reverse()
         .find((message) => message.role === "user")?.content ?? "";
       const pastedUrlHints = inspectWorkspaceChatUrls(latestUserMessage);
+      const intents = detectChatIntents(latestUserMessage, pastedUrlHints);
       const disableBasecampTools = isGreetingOnlyMessage(latestUserMessage);
-      const agentTools = disableBasecampTools
-        ? tools.filter(
-            (tool) =>
-              tool.type !== "function" ||
-              (tool.function.name !== "bcgpt_smart_action" &&
-                tool.function.name !== "bcgpt_list_projects" &&
-                tool.function.name !== "bcgpt_list_tools" &&
-                tool.function.name !== "bcgpt_mcp_call" &&
-                tool.function.name !== "bcgpt_basecamp_raw"),
-          )
-        : tools;
+      const agentTools = filterToolDefinitionsByIntents(tools, intents, {
+        disableBasecampTools,
+        latestUserMessage,
+        urlHints: pastedUrlHints,
+      });
 
       pushProgress("Thinking...");
       const result = await callWorkspaceModelAgentLoop(
@@ -4004,6 +4493,50 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           ? "- Consider `figma_get_context` first to anchor design analysis to the active workspace file before auditing or comparing results."
           : null,
       ].filter((line): line is string => Boolean(line));
+      const directBasecampShortcut =
+        intents.has("basecamp") &&
+        !intents.has("workflow") &&
+        !intents.has("figma") &&
+        !isGreetingOnlyMessage(latestUserMessage)
+          ? inferDirectBasecampChatShortcut(latestUserMessage, pastedUrlHints)
+          : null;
+
+      if (directBasecampShortcut) {
+        if (liveStreamEnabled) {
+          emitThinking("Handling this as a direct Basecamp request with the exact MCP tool before invoking the general model.");
+        }
+        const directBasecampReply = await maybeHandleDirectBasecampShortcut({
+          workspaceId,
+          latestUserMessage,
+          shortcut: directBasecampShortcut,
+        });
+        if (directBasecampReply) {
+          if (liveStreamEnabled) {
+            await emitTextChunk(directBasecampReply);
+            emitAgentEvent({
+              runId: liveRunId,
+              stream: "lifecycle",
+              sessionKey: liveSessionKey,
+              data: {
+                phase: "end",
+                startedAt: liveStartedAt,
+                endedAt: Date.now(),
+              },
+            });
+          }
+          respond(
+            true,
+            {
+              ok: true,
+              message: directBasecampReply,
+              providerUsed: "basecamp-direct",
+              liveStreamed: liveStreamEnabled,
+            },
+            undefined,
+          );
+          return;
+        }
+      }
 
       // Build agent-aware preamble: custom agents get their identity injected
       const agentIdentity = agentConfig?.identity as
@@ -4091,7 +4624,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         ...(intents.has("basecamp") ? [
         "### Project management questions",
         "- Use workspace context for connector readiness and defaults only; do not answer Basecamp questions from memory when live tools are available.",
-        "- For live Basecamp data, use `bcgpt_list_projects` when the user wants the raw project list, use `bcgpt_mcp_call` for exact named MCP tools like `list_todolists`, `list_todos_for_project`, `list_messages`, `list_people`, `list_schedule_entries`, `list_card_tables`, or `list_documents`, and use `bcgpt_smart_action` when the task is ambiguous, search-oriented, or summary-oriented.",
+        "- For live Basecamp data, use `bcgpt_list_projects` when the user wants the raw project list, use `bcgpt_mcp_call` for exact named MCP tools like `list_todolists`, `list_todos_for_project`, `list_todos_due`, `report_todos_overdue`, `list_messages`, `list_project_people`, `list_schedule_entries`, `list_card_tables`, or `list_documents`, and use `bcgpt_smart_action` when the task is ambiguous, search-oriented, or summary-oriented.",
         "- If the user pastes a Basecamp URL, treat it as the exact resource to inspect and pass the URL through `bcgpt_smart_action.query` first because it knows how to anchor exact linked resources.",
         "- If the right named Basecamp MCP tool is unclear, call `bcgpt_list_tools` and then `bcgpt_mcp_call` instead of defaulting to `smart_action`.",
         "- If `bcgpt_smart_action` cannot resolve an exact Basecamp resource, use `bcgpt_basecamp_raw` for direct API lookup instead of repeating the same smart_action query.",
@@ -4196,7 +4729,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           function: {
             name: "bcgpt_mcp_call",
             description:
-              "Call an exact named Basecamp MCP tool through the bcgpt server. Prefer this for deterministic reads like todo lists, todos, messages, people, schedules, documents, or card tables.",
+              "Call an exact named Basecamp MCP tool through the bcgpt server. Prefer this for deterministic reads like todo lists, due-date queues, overdue queues, todos, messages, project people, schedules, documents, or card tables.",
             parameters: {
               type: "object",
               required: ["tool"],
@@ -4204,7 +4737,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               properties: {
                 tool: {
                   type: "string",
-                  description: "Exact Basecamp MCP tool name, such as list_todolists or list_todos_for_project.",
+                  description: "Exact Basecamp MCP tool name, such as list_todolists, list_todos_for_project, list_todos_due, report_todos_overdue, or list_project_people.",
                 },
                 arguments: {
                   type: "object",
@@ -5143,14 +5676,12 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         }
       };
 
-      const allowedToolNames = new Set<string>();
-      GENERAL_TOOL_NAMES.forEach((n) => allowedToolNames.add(n));
-      if (intents.has("basecamp")) BASECAMP_TOOL_NAMES.forEach((n) => allowedToolNames.add(n));
-      if (intents.has("workflow")) WORKFLOW_TOOL_NAMES.forEach((n) => allowedToolNames.add(n));
-      if (intents.has("figma")) FIGMA_TOOL_NAMES.forEach((n) => allowedToolNames.add(n));
-      const agentTools = tools.filter(
-        (tool) => tool.type !== "function" || allowedToolNames.has(tool.function.name),
-      );
+      const disableBasecampTools = isGreetingOnlyMessage(latestUserMessage);
+      const agentTools = filterToolDefinitionsByIntents(tools, intents, {
+        disableBasecampTools,
+        latestUserMessage,
+        urlHints: pastedUrlHints,
+      });
 
       const result = await callWorkspaceModelAgentLoop(
         workspaceId,
