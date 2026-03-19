@@ -5139,22 +5139,33 @@ export async function handleMCP(reqBody, ctx) {
       try {
         const p = await projectByName(ctx, args.project);
         const dock = await getDock(ctx, p.id);
+        const includeDetails = args.include_details === true;
+        const includeDisabled = args.include_disabled === true;
         
-        // Return structured dock info with all available links
-        const dockInfo = (dock || []).map(d => ({
-          id: d.id,
-          title: d.title,
-          name: d.name,
-          enabled: d.enabled,
-          position: d.position,
-          url: d.url,
-          app_url: d.app_url,
-        }));
+        const dockTools = (dock || []).filter((entry) => {
+          if (!entry) return false;
+          return includeDisabled ? true : entry.enabled !== false;
+        });
+        const dockInfo = includeDetails
+          ? dockTools
+          : dockTools.map((d) => ({
+              id: d.id,
+              title: d.title,
+              name: d.name,
+              enabled: d.enabled,
+              position: d.position,
+              url: d.url,
+              app_url: d.app_url,
+            }));
         
         return ok(id, {
           project: { id: p.id, name: p.name },
           dock: dockInfo,
-          description: "Dock contains links to all features. Use the 'url' field to construct API calls. Follow links from each resource to get comments_url, todos_url, etc."
+          include_details: includeDetails,
+          include_disabled: includeDisabled,
+          description: includeDetails
+            ? "Detailed dock payload for PMOS/Basecamp sync. Use each dock tool object directly when you need exact feature metadata or follow-on API links."
+            : "Compact dock summary for diagnostics. Set include_details=true when PMOS needs the full dock payload for deep sync or exact tool metadata."
         });
       } catch (e) {
         return fail(id, { code: "GET_STRUCTURE_ERROR", message: e.message });

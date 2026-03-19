@@ -1720,9 +1720,13 @@ export function getTools() {
       additionalProperties: false
     }),
 
-    tool("get_project_structure", "Inspect a project's dock and available API endpoints (for diagnostics).", {
+    tool("get_project_structure", "Inspect a project's dock and available API endpoints. Set include_details to true when PMOS needs the full dock payload for deep sync or detailed diagnostics.", {
       type: "object",
-      properties: { project: { type: "string" } },
+      properties: {
+        project: { type: "string" },
+        include_details: { type: "boolean", description: "Return full raw dock tool objects instead of the compact dock summary." },
+        include_disabled: { type: "boolean", description: "Include disabled dock tools in the response." }
+      },
       required: ["project"],
       additionalProperties: false
     }),

@@ -15,6 +15,7 @@
 | [COOLIFY_HOST_OWNERSHIP_GUARDRAILS.md](COOLIFY_HOST_OWNERSHIP_GUARDRAILS.md) | production host/deploy safety |
 | [DEPLOYMENT_AUTO_UPDATE.md](DEPLOYMENT_AUTO_UPDATE.md) | automation around image/build update flow |
 | [PRODUCT_VISION.md](PRODUCT_VISION.md) | product direction, not runtime truth |
+| [BASECAMP_PMOS_PARITY_CHECKLIST.md](BASECAMP_PMOS_PARITY_CHECKLIST.md) | Basecamp capability parity checklist and PMOS UX/data backlog |
 
 ## What To Treat As Current Truth
 
