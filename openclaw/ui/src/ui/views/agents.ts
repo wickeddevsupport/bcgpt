@@ -1,5 +1,10 @@
 import { html, nothing } from "lit";
-import { AGENT_ARCHETYPES, DIVISION_META, renderCatalogBrowser } from "./agents-catalog.ts";
+import {
+  AGENT_ARCHETYPES,
+  DIVISION_META,
+  getArchetypeById,
+  renderCatalogBrowser,
+} from "./agents-catalog.ts";
 import type {
   AgentFileEntry,
   AgentsFilesListResult,
@@ -147,10 +152,15 @@ export type AgentsProps = {
   // Catalog browser state
   catalogDivision: string;
   catalogSearch: string;
+  catalogPreviewArchetypeId: string | null;
+  catalogPreviewSoulContent: string;
+  catalogPreviewLoading: boolean;
+  catalogPreviewError: string | null;
   onCreateModalOpen: () => void;
   onCreateModalCancel: () => void;
   onCreateModalStepChange: (step: 0 | 1 | 2 | 3) => void;
   onSelectArchetype: (archetype: import("./agents-catalog.ts").AgentArchetype) => void;
+  onPreviewArchetype: (archetype: import("./agents-catalog.ts").AgentArchetype | null) => void;
   onStartFromScratch: () => void;
   onCatalogDivisionChange: (division: string) => void;
   onCatalogSearchChange: (query: string) => void;
@@ -2166,6 +2176,7 @@ function renderCreateAgentModal(props: AgentsProps) {
   const emojiValue = form.emoji.trim();
   const emojiIsPreset = AGENT_EMOJI_OPTIONS.some((option) => option.value === emojiValue);
   const emojiSelectValue = emojiIsPreset ? emojiValue : "__custom__";
+  const selectedArchetype = getArchetypeById(form.archetypeId);
 
   const modeOptions: Array<{ value: AgentMode; label: string; description: string }> = [
     { value: "interactive", label: "Interactive", description: "Optimized for direct chat usage." },
@@ -2300,9 +2311,14 @@ function renderCreateAgentModal(props: AgentsProps) {
               divisions: DIVISION_META,
               selectedDivision: (props.catalogDivision ?? "all") as import("./agents-catalog.ts").AgentArchetypeDivision | "all",
               searchQuery: props.catalogSearch ?? "",
+              previewArchetypeId: props.catalogPreviewArchetypeId,
+              previewSoulContent: props.catalogPreviewSoulContent,
+              previewLoading: props.catalogPreviewLoading,
+              previewError: props.catalogPreviewError,
               onDivisionChange: (d) => props.onCatalogDivisionChange(d),
               onSearchChange: (q) => props.onCatalogSearchChange(q),
               onSelectArchetype: (a) => props.onSelectArchetype(a),
+              onPreviewArchetype: (a) => props.onPreviewArchetype(a),
               onStartFromScratch: () => props.onStartFromScratch(),
             })
           : nothing}
@@ -2311,8 +2327,8 @@ function renderCreateAgentModal(props: AgentsProps) {
           ? html`
               ${form.archetypeId
                 ? html`<div class="callout" style="margin-top: 14px;">
-                    Based on: <strong>${AGENT_ARCHETYPES.find((a) => a.id === form.archetypeId)?.name ?? form.archetypeId}</strong>
-                    ${AGENT_ARCHETYPES.find((a) => a.id === form.archetypeId)?.emoji ?? ""}
+                    Based on: <strong>${selectedArchetype?.name ?? form.archetypeId}</strong>
+                    ${selectedArchetype?.emoji ?? ""}
                     -- persona will be written to SOUL.md
                   </div>`
                 : nothing}

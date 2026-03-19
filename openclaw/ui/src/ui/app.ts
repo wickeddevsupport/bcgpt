@@ -614,6 +614,10 @@ export class OpenClawApp extends LitElement {
   @state() availableSkills: string[] = [];
   @state() catalogDivision = "all";
   @state() catalogSearch = "";
+  @state() catalogPreviewArchetypeId: string | null = null;
+  @state() catalogPreviewSoulContent = "";
+  @state() catalogPreviewLoading = false;
+  @state() catalogPreviewError: string | null = null;
   @state() agentActivityById: Record<string, import("./views/agents.js").AgentActivitySummary> = {};
 
   @state() sessionsLoading = false;

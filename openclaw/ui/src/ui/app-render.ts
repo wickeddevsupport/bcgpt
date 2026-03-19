@@ -81,7 +81,12 @@ import {
   type AgentMode,
   type CreateAgentFormData,
 } from "./views/agents.ts";
-import type { ModelTier } from "./views/agents-catalog.ts";
+import {
+  buildFallbackSoul,
+  loadArchetypeSoul,
+  type AgentArchetype,
+  type ModelTier,
+} from "./views/agents-catalog.ts";
 import { renderAdmin } from "./views/admin.ts";
 import { renderAutomations } from "./views/automations.ts";
 import { renderDashboard } from "./views/dashboard.ts";
@@ -300,6 +305,22 @@ function resolveModelTier(tier: ModelTier, availableModels: string[]): string {
     case "reasoning": return reasoning ?? balanced ?? availableModels[0] ?? "";
     case "balanced": return balanced ?? availableModels[0] ?? "";
     default: return "";
+  }
+}
+
+async function resolveArchetypeSoulContent(
+  archetype: AgentArchetype,
+): Promise<{ content: string; warning: string | null }> {
+  try {
+    return {
+      content: await loadArchetypeSoul(archetype),
+      warning: null,
+    };
+  } catch {
+    return {
+      content: buildFallbackSoul(archetype),
+      warning: "Loaded the built-in persona summary because the full upstream profile was unavailable.",
+    };
   }
 }
 
@@ -2032,13 +2053,17 @@ export function renderApp(state: AppViewState) {
                 ),
                 catalogDivision: state.catalogDivision ?? "all",
                 catalogSearch: state.catalogSearch ?? "",
+                catalogPreviewArchetypeId: state.catalogPreviewArchetypeId,
+                catalogPreviewSoulContent: state.catalogPreviewSoulContent,
+                catalogPreviewLoading: state.catalogPreviewLoading,
+                catalogPreviewError: state.catalogPreviewError,
                 onCatalogDivisionChange: (division) => {
                   state.catalogDivision = division;
                 },
                 onCatalogSearchChange: (query) => {
                   state.catalogSearch = query;
                 },
-                onSelectArchetype: (archetype) => {
+                onSelectArchetype: async (archetype) => {
                   const wsId = state.pmosAuthUser?.workspaceId?.trim() ?? "";
                   const isWorkspaceScopedUser =
                     Boolean(wsId) && state.pmosAuthUser?.role !== "super_admin";
@@ -2048,6 +2073,13 @@ export function renderApp(state: AppViewState) {
                     messaging: "interactive",
                     coding: "hybrid",
                   };
+                  state.createModalLoading = true;
+                  state.createModalError = null;
+                  const { content, warning } = await resolveArchetypeSoulContent(archetype);
+                  state.catalogPreviewArchetypeId = archetype.id;
+                  state.catalogPreviewSoulContent = content;
+                  state.catalogPreviewLoading = false;
+                  state.catalogPreviewError = warning;
                   state.createModalFormData = {
                     ...buildDefaultCreateAgentForm(state, agentId),
                     name: archetype.name,
@@ -2065,12 +2097,34 @@ export function renderApp(state: AppViewState) {
                     personality: "professional",
                     autonomousTasks: [],
                     archetypeId: archetype.id,
-                    soulContent: archetype.soulContent,
+                    soulContent: content,
                     workspace: isWorkspaceScopedUser
                       ? toWorkspaceScopedAgentWorkspacePath(wsId, agentId)
                       : DEFAULT_AGENT_WORKSPACE_PATH,
                   };
                   state.createModalStep = 1;
+                  state.createModalLoading = false;
+                },
+                onPreviewArchetype: async (archetype) => {
+                  if (!archetype) {
+                    state.catalogPreviewArchetypeId = null;
+                    state.catalogPreviewSoulContent = "";
+                    state.catalogPreviewLoading = false;
+                    state.catalogPreviewError = null;
+                    return;
+                  }
+                  const previewId = archetype.id;
+                  state.catalogPreviewArchetypeId = previewId;
+                  state.catalogPreviewSoulContent = "";
+                  state.catalogPreviewLoading = true;
+                  state.catalogPreviewError = null;
+                  const { content, warning } = await resolveArchetypeSoulContent(archetype);
+                  if (state.catalogPreviewArchetypeId !== previewId) {
+                    return;
+                  }
+                  state.catalogPreviewSoulContent = content;
+                  state.catalogPreviewLoading = false;
+                  state.catalogPreviewError = warning;
                 },
                 onStartFromScratch: () => {
                   state.createModalFormData = {
@@ -2078,6 +2132,10 @@ export function renderApp(state: AppViewState) {
                     archetypeId: "",
                     soulContent: "",
                   };
+                  state.catalogPreviewArchetypeId = null;
+                  state.catalogPreviewSoulContent = "";
+                  state.catalogPreviewLoading = false;
+                  state.catalogPreviewError = null;
                   state.createModalStep = 1;
                 },
                 onCreateModalOpen: async () => {
@@ -2090,6 +2148,10 @@ export function renderApp(state: AppViewState) {
                   state.createModalError = null;
                   state.catalogDivision = "all";
                   state.catalogSearch = "";
+                  state.catalogPreviewArchetypeId = null;
+                  state.catalogPreviewSoulContent = "";
+                  state.catalogPreviewLoading = false;
+                  state.catalogPreviewError = null;
                   state.createModalFormData = {
                     ...buildDefaultCreateAgentForm(state, "assistant"),
                     archetypeId: "",
@@ -2104,6 +2166,10 @@ export function renderApp(state: AppViewState) {
                   state.createModalError = null;
                   state.catalogDivision = "all";
                   state.catalogSearch = "";
+                  state.catalogPreviewArchetypeId = null;
+                  state.catalogPreviewSoulContent = "";
+                  state.catalogPreviewLoading = false;
+                  state.catalogPreviewError = null;
                   state.createModalFormData = {
                     ...buildDefaultCreateAgentForm(state, "assistant"),
                     archetypeId: "",
@@ -2270,7 +2336,11 @@ export function renderApp(state: AppViewState) {
                     state.createModalOpen = false;
                     state.createModalMode = "create";
                     state.createModalEditAgentId = null;
-                    state.createModalStep = 1;
+                    state.createModalStep = 0;
+                    state.catalogPreviewArchetypeId = null;
+                    state.catalogPreviewSoulContent = "";
+                    state.catalogPreviewLoading = false;
+                    state.catalogPreviewError = null;
                   } catch (error) {
                     state.createModalError =
                       error instanceof Error ? error.message : String(error);
@@ -2365,6 +2435,10 @@ export function renderApp(state: AppViewState) {
                     state.createModalEditAgentId = agentId;
                     state.createModalStep = 1;
                     state.createModalError = null;
+                    state.catalogPreviewArchetypeId = null;
+                    state.catalogPreviewSoulContent = "";
+                    state.catalogPreviewLoading = false;
+                    state.catalogPreviewError = null;
                     state.createModalOpen = true;
                   } catch (error) {
                     state.agentsError = error instanceof Error ? error.message : String(error);

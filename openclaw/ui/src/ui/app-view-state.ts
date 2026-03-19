@@ -406,6 +406,10 @@ export type AppViewState = {
   availableSkills: string[];
   catalogDivision: string;
   catalogSearch: string;
+  catalogPreviewArchetypeId: string | null;
+  catalogPreviewSoulContent: string;
+  catalogPreviewLoading: boolean;
+  catalogPreviewError: string | null;
   agentActivityById: Record<string, AgentActivitySummary>;
   sessionsLoading: boolean;
   sessionsResult: SessionsListResult | null;
