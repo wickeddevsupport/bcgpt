@@ -6,6 +6,8 @@ export type PmosProjectDetailTab =
   | "messages"
   | "people"
   | "schedule"
+  | "campfire"
+  | "files"
   | "card_tables";
 
 export type PmosProjectSectionResult = {
@@ -24,11 +26,24 @@ export type PmosProjectTodoItem = {
   appUrl: string | null;
 };
 
+export type PmosProjectDockCapability = {
+  id: string | null;
+  name: string | null;
+  title: string | null;
+  enabled: boolean;
+  position: number | null;
+  url: string | null;
+  appUrl: string | null;
+};
+
 export type PmosProjectCard = {
   id: string;
   name: string;
   status: string;
   appUrl: string | null;
+  description: string | null;
+  updatedAt: string | null;
+  dockCapabilities: PmosProjectDockCapability[];
   todoLists: number;
   openTodos: number;
   assignedTodos: number;
@@ -76,6 +91,47 @@ export type PmosProjectsSnapshot = {
   stale?: boolean;
   staleReason?: string | null;
   cacheAgeMs?: number;
+};
+
+export type PmosEntityReference = {
+  type: string;
+  id: string | null;
+  projectId: string | null;
+  url: string | null;
+  label?: string | null;
+};
+
+export type PmosEntityComment = {
+  id: string | null;
+  author: string | null;
+  createdAt: string | null;
+  content: string | null;
+  appUrl: string | null;
+};
+
+export type PmosEntityEvent = {
+  id: string | null;
+  action: string | null;
+  createdAt: string | null;
+  actor: string | null;
+  summary: string | null;
+};
+
+export type PmosEntityDetail = {
+  reference: PmosEntityReference;
+  project: { id: string | null; name: string | null; appUrl: string | null } | null;
+  title: string;
+  status: string | null;
+  appUrl: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  creator: string | null;
+  assignee: string | null;
+  summary: string | null;
+  raw: unknown;
+  comments: PmosEntityComment[];
+  events: PmosEntityEvent[];
+  subscription: unknown;
 };
 
 export type PmosProjectsState = {
@@ -163,4 +219,16 @@ export async function fetchProjectSection(
     "pmos.project.fetch",
     { projectName, section },
   ).then((r) => r.data);
+}
+
+export async function fetchProjectEntityDetail(
+  client: GatewayBrowserClient,
+  reference: PmosEntityReference,
+): Promise<PmosEntityDetail> {
+  return await client.request<PmosEntityDetail>("pmos.entity.detail", {
+    type: reference.type,
+    id: reference.id,
+    projectId: reference.projectId,
+    url: reference.url,
+  });
 }

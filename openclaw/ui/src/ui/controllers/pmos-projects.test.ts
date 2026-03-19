@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   loadPmosProjectsSnapshot,
   type PmosProjectsSnapshot,
@@ -31,6 +31,9 @@ function createSnapshot(): PmosProjectsSnapshot {
         name: "Ops",
         status: "active",
         appUrl: null,
+        description: null,
+        updatedAt: null,
+        dockCapabilities: [],
         todoLists: 1,
         openTodos: 3,
         assignedTodos: 1,
@@ -64,24 +67,16 @@ function createState(): PmosProjectsState {
 }
 
 describe("pmos-projects", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("keeps the last successful snapshot when refresh times out", async () => {
+  it("keeps the last successful snapshot when refresh fails", async () => {
     const state = createState();
     state.pmosProjectsSnapshot = createSnapshot();
     state.client = {
-      request: vi.fn(() => new Promise(() => {})),
+      request: vi.fn(async () => {
+        throw new Error("gateway unavailable");
+      }),
     } as any;
 
-    const loadPromise = loadPmosProjectsSnapshot(state);
-    await vi.advanceTimersByTimeAsync(18_001);
-    await loadPromise;
+    await loadPmosProjectsSnapshot(state);
 
     expect(state.pmosProjectsLoading).toBe(false);
     expect(state.pmosProjectsError).toContain("Showing the last successful snapshot");

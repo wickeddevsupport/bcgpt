@@ -44,6 +44,9 @@ function createProps(overrides: Partial<CommandCenterProps> = {}): CommandCenter
     selectedProject: null,
     projectDetailTab: "overview",
     projectSectionData: {},
+    selectedEntityDetail: null,
+    selectedEntityLoading: false,
+    selectedEntityError: null,
     commandCenterTab: "overview" as const,
     onCommandCenterTabChange: vi.fn(),
     onRefresh: vi.fn(),
@@ -56,6 +59,8 @@ function createProps(overrides: Partial<CommandCenterProps> = {}): CommandCenter
     onSelectProject: vi.fn(),
     onProjectDetailTabChange: vi.fn(),
     onLoadProjectSection: vi.fn(),
+    onOpenItemDetail: vi.fn(),
+    onCloseItemDetail: vi.fn(),
     ...overrides,
   };
 }
@@ -111,5 +116,55 @@ describe("command-center view", () => {
     expect(container.textContent).not.toContain(
       "Add your Basecamp token in Integrations to enable project cards and AI project actions.",
     );
+  });
+
+  it("renders the entity detail panel when a Basecamp item is selected", () => {
+    const container = document.createElement("div");
+    render(
+      renderCommandCenter(
+        createProps({
+          selectedProject: {
+            id: "1",
+            name: "Project One",
+            status: "active",
+            appUrl: null,
+            description: "Test project",
+            updatedAt: null,
+            dockCapabilities: [],
+            todoLists: 1,
+            openTodos: 2,
+            assignedTodos: 1,
+            overdueTodos: 0,
+            dueTodayTodos: 0,
+            futureTodos: 1,
+            noDueDateTodos: 0,
+            nextDueOn: null,
+            health: "on_track",
+            previewTodos: [],
+          },
+          selectedEntityDetail: {
+            reference: { type: "todo", id: "99", projectId: "1", url: null, label: "Write docs" },
+            project: { id: "1", name: "Project One", appUrl: null },
+            title: "Write docs",
+            status: "active",
+            appUrl: null,
+            createdAt: null,
+            updatedAt: null,
+            creator: "Rohit",
+            assignee: "Rohit",
+            summary: "Draft the docs",
+            raw: {},
+            comments: [],
+            events: [],
+            subscription: null,
+          },
+        }),
+      ),
+      container,
+    );
+
+    expect(container.textContent).toContain("Item Detail");
+    expect(container.textContent).toContain("Write docs");
+    expect(container.textContent).toContain("Draft the docs");
   });
 });

@@ -541,11 +541,24 @@ type PmosProjectTodoItem = {
   appUrl: string | null;
 };
 
+type PmosProjectDockCapability = {
+  id: string | null;
+  name: string | null;
+  title: string | null;
+  enabled: boolean;
+  position: number | null;
+  url: string | null;
+  appUrl: string | null;
+};
+
 type PmosProjectCard = {
   id: string;
   name: string;
   status: string;
   appUrl: string | null;
+  description: string | null;
+  updatedAt: string | null;
+  dockCapabilities: PmosProjectDockCapability[];
   todoLists: number;
   openTodos: number;
   assignedTodos: number;
@@ -1836,6 +1849,21 @@ function mapWorkspaceSnapshotProjectCards(items: unknown): PmosProjectCard[] {
         name: projectName,
         status: stringOrNull(item.status) ?? "active",
         appUrl: stringOrNull(item.appUrl) ?? stringOrNull(item.app_url),
+        description: stringOrNull(item.description),
+        updatedAt: stringOrNull(item.updatedAt) ?? stringOrNull(item.updated_at),
+        dockCapabilities: Array.isArray(item.dock_capabilities)
+          ? item.dock_capabilities
+              .filter((entry): entry is Record<string, unknown> => isJsonObject(entry))
+              .map((entry) => ({
+                id: numberStringOrNull(entry.id),
+                name: stringOrNull(entry.name),
+                title: stringOrNull(entry.title),
+                enabled: entry.enabled !== false,
+                position: typeof entry.position === "number" ? entry.position : null,
+                url: stringOrNull(entry.url),
+                appUrl: stringOrNull(entry.app_url) ?? stringOrNull(entry.appUrl),
+              }))
+          : [],
         todoLists: typeof item.todoListsCount === "number"
           ? item.todoListsCount
           : typeof item.todoLists === "number"
@@ -1875,6 +1903,57 @@ function mapWorkspaceSnapshotProjectCards(items: unknown): PmosProjectCard[] {
       };
     })
     .filter((item) => item.id && item.name);
+}
+
+function mergeWorkspaceSnapshotProjectCards(
+  summaryCards: PmosProjectCard[],
+  detailCards: PmosProjectCard[],
+): PmosProjectCard[] {
+  if (!detailCards.length) return summaryCards;
+  const summaryById = new Map(summaryCards.map((card) => [card.id, card]));
+  const merged = detailCards.map((detail) => {
+    const summary = summaryById.get(detail.id);
+    if (!summary) return detail;
+    return {
+      ...summary,
+      ...detail,
+      todoLists: summary.todoLists,
+      openTodos: summary.openTodos,
+      assignedTodos: summary.assignedTodos,
+      overdueTodos: summary.overdueTodos,
+      dueTodayTodos: summary.dueTodayTodos,
+      futureTodos: summary.futureTodos,
+      noDueDateTodos: summary.noDueDateTodos,
+      nextDueOn: summary.nextDueOn,
+      health: summary.health,
+      previewTodos: summary.previewTodos,
+      description: detail.description ?? summary.description,
+      updatedAt: detail.updatedAt ?? summary.updatedAt,
+      dockCapabilities: detail.dockCapabilities.length ? detail.dockCapabilities : summary.dockCapabilities,
+    };
+  });
+  summaryCards.forEach((summary) => {
+    if (!merged.some((card) => card.id === summary.id)) merged.push(summary);
+  });
+  return merged;
+}
+
+function pickEntitySummary(detail: Record<string, unknown>) {
+  return stringOrNull(detail.title)
+    ?? stringOrNull(detail.name)
+    ?? stringOrNull(detail.subject)
+    ?? stringOrNull(detail.content)
+    ?? stringOrNull(detail.description)
+    ?? "(untitled)";
+}
+
+function pickEntitySnippet(detail: Record<string, unknown>) {
+  return stringOrNull(detail.content)
+    ?? stringOrNull(detail.description)
+    ?? stringOrNull(detail.excerpt)
+    ?? stringOrNull(detail.summary)
+    ?? stringOrNull(detail.content_preview)
+    ?? stringOrNull(detail.contentPreview);
 }
 
 function formatTodoDueLabel(todo: PmosProjectTodoItem, todayIso: string): string {
@@ -5990,7 +6069,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       }
 
       const errors: string[] = [];
-      const [start, workspaceSnapshotResult] = await Promise.all([
+      const [start, pmosWorkspaceSyncResult] = await Promise.all([
         fetchJson(`${bcgptUrl}/action/startbcgpt`, {
           method: "POST",
           timeoutMs: 4_000,
@@ -6003,14 +6082,29 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         callBcgptTool({
           bcgptUrl,
           apiKey: bcgptApiKey,
-          toolName: "workspace_todo_snapshot",
+          toolName: "pmos_workspace_sync",
           toolArgs: {
             preview_limit: 24,
             project_preview_limit: 4,
+            include_project_details: true,
+            include_project_docks: true,
+            include_disabled_tools: true,
           },
           timeoutMs: 180_000,
         }),
       ]);
+      const workspaceSnapshotResult = pmosWorkspaceSyncResult.ok
+        ? pmosWorkspaceSyncResult
+        : await callBcgptTool({
+            bcgptUrl,
+            apiKey: bcgptApiKey,
+            toolName: "workspace_todo_snapshot",
+            toolArgs: {
+              preview_limit: 24,
+              project_preview_limit: 4,
+            },
+            timeoutMs: 180_000,
+          });
 
       const startPayload = isJsonObject(start.json) ? start.json : {};
       if (!start.ok && start.error) {
@@ -6028,9 +6122,22 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       };
 
       if (workspaceSnapshotResult.ok && isJsonObject(workspaceSnapshotResult.result)) {
-        const snapshotPayload = workspaceSnapshotResult.result as Record<string, unknown>;
+        const rawSnapshotPayload = workspaceSnapshotResult.result as Record<string, unknown>;
+        const snapshotPayload = isJsonObject(rawSnapshotPayload.result)
+          ? (rawSnapshotPayload.result as Record<string, unknown>)
+          : rawSnapshotPayload;
+        const workspaceMeta = isJsonObject(snapshotPayload.workspace) ? snapshotPayload.workspace : null;
         const totalsRaw = isJsonObject(snapshotPayload.totals) ? snapshotPayload.totals : null;
-        const mappedProjects = mapWorkspaceSnapshotProjectCards(snapshotPayload.projects);
+        const mappedSummaryProjects = mapWorkspaceSnapshotProjectCards(snapshotPayload.projects);
+        const mappedDetailProjects = mapWorkspaceSnapshotProjectCards(
+          snapshotPayload.project_details ?? snapshotPayload.projectDetails,
+        );
+        const mappedProjects = mergeWorkspaceSnapshotProjectCards(mappedSummaryProjects, mappedDetailProjects);
+        const assignedItems = snapshotPayload.assignedTodos ?? snapshotPayload.assigned_todos;
+        const overdueItems = snapshotPayload.urgentTodos ?? snapshotPayload.overdueTodos ?? snapshotPayload.overdue_todos;
+        const dueTodayItems = snapshotPayload.dueTodayTodos ?? snapshotPayload.due_today_todos;
+        const futureItems = snapshotPayload.futureTodos ?? snapshotPayload.future_todos;
+        const noDueDateItems = snapshotPayload.noDueDateTodos ?? snapshotPayload.no_due_date_todos;
         if (totalsRaw) {
           const mappedSnapshot = {
             workspaceId,
@@ -6050,11 +6157,11 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               noDueDateTodos: typeof totalsRaw.noDueDateTodos === "number" ? totalsRaw.noDueDateTodos : 0,
             },
             projects: mappedProjects,
-            assignedTodos: mapWorkspaceSnapshotTodoItems(snapshotPayload.assignedTodos),
-            urgentTodos: mapWorkspaceSnapshotTodoItems(snapshotPayload.urgentTodos),
-            dueTodayTodos: mapWorkspaceSnapshotTodoItems(snapshotPayload.dueTodayTodos),
-            futureTodos: mapWorkspaceSnapshotTodoItems(snapshotPayload.futureTodos),
-            noDueDateTodos: mapWorkspaceSnapshotTodoItems(snapshotPayload.noDueDateTodos),
+            assignedTodos: mapWorkspaceSnapshotTodoItems(assignedItems),
+            urgentTodos: mapWorkspaceSnapshotTodoItems(overdueItems),
+            dueTodayTodos: mapWorkspaceSnapshotTodoItems(dueTodayItems),
+            futureTodos: mapWorkspaceSnapshotTodoItems(futureItems),
+            noDueDateTodos: mapWorkspaceSnapshotTodoItems(noDueDateItems),
             errors: [
               ...errors,
               ...((Array.isArray(snapshotPayload.errors)
@@ -6064,11 +6171,17 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             refreshedAtMs:
               typeof snapshotPayload.fetchedAt === "number"
                 ? snapshotPayload.fetchedAt * 1000
+                : typeof workspaceMeta?.fetchedAt === "number"
+                  ? workspaceMeta.fetchedAt * 1000
                 : Date.now(),
             stale: snapshotPayload.stale === true,
             staleReason:
               stringOrNull(
-                isJsonObject(snapshotPayload.syncState) ? snapshotPayload.syncState.lastError : null,
+                isJsonObject(snapshotPayload.syncState)
+                  ? snapshotPayload.syncState.lastError
+                  : isJsonObject(workspaceMeta?.syncState)
+                    ? workspaceMeta.syncState.lastError
+                    : null,
               ) ?? null,
             cacheAgeMs: typeof snapshotPayload.ageMs === "number" ? snapshotPayload.ageMs : 0,
           };
@@ -6708,9 +6821,57 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         const payload = isJsonObject(raw) ? raw : {};
         return isJsonObject(payload.result) ? payload.result : payload;
       };
+      const getItems = (root: Record<string, unknown>, ...keys: string[]): unknown[] => {
+        for (const key of keys) {
+          const value = root[key];
+          if (Array.isArray(value)) return value;
+        }
+        return [];
+      };
+      const loadProjectSync = async (toolArgs: Record<string, unknown>) =>
+        callBcgptTool({
+          bcgptUrl,
+          apiKey,
+          toolName: "pmos_project_sync",
+          toolArgs: {
+            project: projectName,
+            include_details: true,
+            include_disabled_tools: true,
+            include_todos: false,
+            include_people: false,
+            include_cards: false,
+            include_messages: false,
+            include_documents: false,
+            include_schedule: false,
+            include_campfires: false,
+            ...toolArgs,
+          },
+          timeoutMs: 45_000,
+        });
 
       switch (section) {
         case "todos": {
+          const syncRes = await loadProjectSync({ include_todos: true });
+          if (syncRes.ok) {
+            const root = getRoot(syncRes.result);
+            const groups = getItems(root, "todo_groups");
+            const data = groups.filter(isJsonObject).map((g) => ({
+              name: stringOrNull(g.todolist) ?? stringOrNull(g.name) ?? "Untitled",
+              todosCount: Array.isArray(g.todos) ? g.todos.length : (typeof g.todos_count === "number" ? g.todos_count : 0),
+              todos: (Array.isArray(g.todos) ? g.todos : []).filter(isJsonObject).map((t) => ({
+                id: numberStringOrNull(t.id) ?? numberStringOrNull(t.todoId) ?? numberStringOrNull(t.todo_id),
+                title: stringOrNull(t.title) ?? stringOrNull(t.content) ?? "",
+                status: stringOrNull(t.status) ?? "active",
+                dueOn: stringOrNull(t.due_on) ?? stringOrNull(t.dueOn),
+                appUrl: stringOrNull(t.app_url) ?? stringOrNull(t.appUrl),
+                assignee: isJsonObject(t.assignee) ? stringOrNull(t.assignee.name) : stringOrNull(t.assignee),
+                completedAt: stringOrNull(t.completed_at),
+                creator: isJsonObject(t.creator) ? stringOrNull(t.creator.name) : null,
+              })),
+            }));
+            respond(true, { ok: true, section, projectName, data });
+            return;
+          }
           const res = await callBcgptTool({ bcgptUrl, apiKey, toolName: "list_todos_for_project", toolArgs: { project: projectName, compact: false }, timeoutMs: 30_000 });
           if (!res.ok) { respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, res.error ?? "Failed to fetch todos")); return; }
           const root = getRoot(res.result);
@@ -6733,6 +6894,21 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           return;
         }
         case "messages": {
+          const syncRes = await loadProjectSync({ include_messages: true });
+          if (syncRes.ok) {
+            const root = getRoot(syncRes.result);
+            const msgs = getItems(root, "messages");
+            const data = msgs.filter(isJsonObject).map((m) => ({
+              id: numberStringOrNull(m.id),
+              title: stringOrNull(m.title) ?? stringOrNull(m.subject) ?? "(no title)",
+              author: isJsonObject(m.creator) ? stringOrNull(m.creator.name) : stringOrNull(m.author),
+              createdAt: stringOrNull(m.created_at) ?? stringOrNull(m.createdAt),
+              excerpt: stringOrNull(m.excerpt) ?? stringOrNull(m.content_excerpt) ?? stringOrNull(m.content),
+              appUrl: stringOrNull(m.app_url) ?? stringOrNull(m.appUrl),
+            }));
+            respond(true, { ok: true, section, projectName, data });
+            return;
+          }
           const res = await callBcgptTool({ bcgptUrl, apiKey, toolName: "list_messages", toolArgs: { project: projectName }, timeoutMs: 30_000 });
           if (!res.ok) { respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, res.error ?? "Failed to fetch messages")); return; }
           const root = getRoot(res.result);
@@ -6749,6 +6925,22 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           return;
         }
         case "schedule": {
+          const syncRes = await loadProjectSync({ include_schedule: true });
+          if (syncRes.ok) {
+            const root = getRoot(syncRes.result);
+            const entries = getItems(root, "schedule_entries");
+            const data = entries.filter(isJsonObject).map((e) => ({
+              id: numberStringOrNull(e.id),
+              title: stringOrNull(e.title) ?? stringOrNull(e.summary) ?? "(no title)",
+              startsAt: stringOrNull(e.starts_at) ?? stringOrNull(e.startsAt),
+              endsAt: stringOrNull(e.ends_at) ?? stringOrNull(e.endsAt),
+              allDay: e.all_day === true || e.allDay === true,
+              summary: stringOrNull(e.summary) ?? stringOrNull(e.description),
+              appUrl: stringOrNull(e.app_url) ?? stringOrNull(e.appUrl),
+            }));
+            respond(true, { ok: true, section, projectName, data });
+            return;
+          }
           const res = await callBcgptTool({ bcgptUrl, apiKey, toolName: "list_schedule_entries", toolArgs: { project: projectName }, timeoutMs: 30_000 });
           if (!res.ok) { respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, res.error ?? "Failed to fetch schedule")); return; }
           const root = getRoot(res.result);
@@ -6765,7 +6957,137 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           respond(true, { ok: true, section, projectName, data });
           return;
         }
+        case "campfire": {
+          const syncRes = await loadProjectSync({ include_campfires: true, campfire_lines_limit: 80 });
+          if (syncRes.ok) {
+            const root = getRoot(syncRes.result);
+            const campfires = getItems(root, "campfires");
+            const lines = getItems(root, "campfire_lines");
+            const data = {
+              chats: campfires.filter(isJsonObject).map((chat) => ({
+                id: numberStringOrNull(chat.id),
+                title: stringOrNull(chat.title) ?? stringOrNull(chat.name) ?? "Campfire",
+                appUrl: stringOrNull(chat.app_url) ?? stringOrNull(chat.appUrl),
+              })),
+              lines: lines.filter(isJsonObject).map((line) => ({
+                id: numberStringOrNull(line.id),
+                content: stringOrNull(line.content) ?? stringOrNull(line.summary) ?? "",
+                createdAt: stringOrNull(line.created_at) ?? stringOrNull(line.createdAt),
+                author: isJsonObject(line.creator) ? stringOrNull(line.creator.name) : stringOrNull(line.author),
+                appUrl: stringOrNull(line.app_url) ?? stringOrNull(line.appUrl),
+              })),
+            };
+            respond(true, { ok: true, section, projectName, data });
+            return;
+          }
+          const chatsRes = await callBcgptTool({
+            bcgptUrl,
+            apiKey,
+            toolName: "list_campfires",
+            toolArgs: { project: projectName },
+            timeoutMs: 30_000,
+          });
+          if (!chatsRes.ok) {
+            respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, chatsRes.error ?? "Failed to fetch campfire"));
+            return;
+          }
+          const chatsRoot = getRoot(chatsRes.result);
+          const chats = Array.isArray(chatsRoot.campfires) ? chatsRoot.campfires.filter(isJsonObject) : [];
+          const firstChatId = chats.length > 0 ? numberStringOrNull(chats[0].id) : null;
+          const linesRes = firstChatId
+            ? await callBcgptTool({
+                bcgptUrl,
+                apiKey,
+                toolName: "list_campfire_lines",
+                toolArgs: { project: projectName, campfire_id: firstChatId, limit: 80 },
+                timeoutMs: 30_000,
+              })
+            : null;
+          const linesRoot = linesRes?.ok ? getRoot(linesRes.result) : {};
+          const lines = Array.isArray(linesRoot.lines) ? linesRoot.lines.filter(isJsonObject) : [];
+          respond(true, {
+            ok: true,
+            section,
+            projectName,
+            data: {
+              chats: chats.map((chat) => ({
+                id: numberStringOrNull(chat.id),
+                title: stringOrNull(chat.title) ?? stringOrNull(chat.name) ?? "Campfire",
+                appUrl: stringOrNull(chat.app_url) ?? stringOrNull(chat.appUrl),
+              })),
+              lines: lines.map((line) => ({
+                id: numberStringOrNull(line.id),
+                content: stringOrNull(line.content) ?? stringOrNull(line.summary) ?? "",
+                createdAt: stringOrNull(line.created_at) ?? stringOrNull(line.createdAt),
+                author: isJsonObject(line.creator) ? stringOrNull(line.creator.name) : stringOrNull(line.author),
+                appUrl: stringOrNull(line.app_url) ?? stringOrNull(line.appUrl),
+              })),
+            },
+          });
+          return;
+        }
+        case "files": {
+          const syncRes = await loadProjectSync({ include_documents: true });
+          if (syncRes.ok) {
+            const root = getRoot(syncRes.result);
+            const documents = getItems(root, "documents");
+            const uploads = getItems(root, "uploads");
+            const data = [...documents, ...uploads]
+              .filter(isJsonObject)
+              .map((item) => ({
+                id: numberStringOrNull(item.id),
+                title: stringOrNull(item.title) ?? stringOrNull(item.filename) ?? "(untitled)",
+                kind: stringOrNull(item.kind) ?? stringOrNull(item.content_type) ?? (stringOrNull(item.filename) ? "upload" : "document"),
+                createdAt: stringOrNull(item.created_at) ?? stringOrNull(item.createdAt),
+                creator: isJsonObject(item.creator) ? stringOrNull(item.creator.name) : stringOrNull(item.creator),
+                excerpt: stringOrNull(item.contentPreview) ?? stringOrNull(item.description),
+                appUrl: stringOrNull(item.app_url) ?? stringOrNull(item.appUrl),
+              }));
+            respond(true, { ok: true, section, projectName, data });
+            return;
+          }
+          const res = await callBcgptTool({ bcgptUrl, apiKey, toolName: "list_documents", toolArgs: { project: projectName }, timeoutMs: 30_000 });
+          if (!res.ok) { respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, res.error ?? "Failed to fetch files")); return; }
+          const root = getRoot(res.result);
+          const documents = Array.isArray(root.documents) ? root.documents : Array.isArray(root) ? root as unknown[] : [];
+          const data = documents.filter(isJsonObject).map((item) => ({
+            id: numberStringOrNull(item.id),
+            title: stringOrNull(item.title) ?? "(untitled)",
+            kind: stringOrNull(item.kind) ?? "document",
+            createdAt: stringOrNull(item.created_at) ?? stringOrNull(item.createdAt),
+            creator: isJsonObject(item.creator) ? stringOrNull(item.creator.name) : stringOrNull(item.creator),
+            excerpt: stringOrNull(item.description),
+            appUrl: stringOrNull(item.app_url) ?? stringOrNull(item.appUrl),
+          }));
+          respond(true, { ok: true, section, projectName, data });
+          return;
+        }
         case "card_tables": {
+          const syncRes = await loadProjectSync({ include_cards: true, max_cards_per_column: 12 });
+          if (syncRes.ok) {
+            const root = getRoot(syncRes.result);
+            const tables = getItems(root, "card_boards");
+            const data = tables.filter(isJsonObject).map((t) => ({
+              id: numberStringOrNull(t.id),
+              name: stringOrNull(t.title) ?? stringOrNull(t.name) ?? "Untitled",
+              appUrl: stringOrNull(t.app_url) ?? stringOrNull(t.appUrl),
+              columns: (Array.isArray(t.columns) ? t.columns : []).filter(isJsonObject).map((c) => ({
+                id: numberStringOrNull(c.id),
+                name: stringOrNull(c.title) ?? stringOrNull(c.name) ?? "Untitled column",
+                cardsCount: typeof c.cards_count === "number" ? c.cards_count : (Array.isArray(c.cards) ? c.cards.length : 0),
+                cards: (Array.isArray(c.cards) ? c.cards : []).filter(isJsonObject).map((card) => ({
+                  id: numberStringOrNull(card.id),
+                  title: stringOrNull(card.title) ?? "(untitled)",
+                  dueOn: stringOrNull(card.due_on) ?? stringOrNull(card.dueOn),
+                  assignee: isJsonObject(card.assignee) ? stringOrNull(card.assignee.name) : stringOrNull(card.assignee),
+                  status: stringOrNull(card.status),
+                  appUrl: stringOrNull(card.app_url) ?? stringOrNull(card.appUrl),
+                })),
+              })),
+            }));
+            respond(true, { ok: true, section, projectName, data });
+            return;
+          }
           const res = await callBcgptTool({ bcgptUrl, apiKey, toolName: "list_card_tables", toolArgs: { project: projectName, include_columns: true }, timeoutMs: 30_000 });
           if (!res.ok) { respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, res.error ?? "Failed to fetch card tables")); return; }
           const root = getRoot(res.result);
@@ -6792,6 +7114,20 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           return;
         }
         case "people": {
+          const syncRes = await loadProjectSync({ include_people: true });
+          if (syncRes.ok) {
+            const root = getRoot(syncRes.result);
+            const people = getItems(root, "people");
+            const data = people.filter(isJsonObject).map((p) => ({
+              id: numberStringOrNull(p.id),
+              name: stringOrNull(p.name) ?? "(unknown)",
+              email: stringOrNull(p.email) ?? stringOrNull(p.email_address),
+              role: stringOrNull(p.title) ?? stringOrNull(p.role),
+              avatarUrl: stringOrNull(p.avatar_url) ?? stringOrNull(p.avatarUrl),
+            }));
+            respond(true, { ok: true, section, projectName, data });
+            return;
+          }
           const res = await callBcgptTool({ bcgptUrl, apiKey, toolName: "list_project_people", toolArgs: { project: projectName }, timeoutMs: 30_000 });
           if (!res.ok) { respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, res.error ?? "Failed to fetch people")); return; }
           const root = getRoot(res.result);
@@ -6810,6 +7146,108 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, `Unknown section: ${section}`));
           return;
       }
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.entity.detail": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const p = isJsonObject(params) ? params : {};
+      const { bcgptUrl, apiKey } = await resolveWorkspaceBcgptAccess({
+        workspaceId,
+        allowGlobalSecrets: true,
+      });
+      if (!apiKey) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, "Basecamp integration is not configured for this workspace."));
+        return;
+      }
+
+      const toolArgs: Record<string, unknown> = {
+        include_comments: true,
+        include_events: true,
+        include_subscription: true,
+      };
+      const url = stringOrNull(p.url);
+      const type = stringOrNull(p.type);
+      const id = numberStringOrNull(p.id);
+      const projectId = numberStringOrNull(p.projectId) ?? numberStringOrNull(p.project_id) ?? numberStringOrNull(p.bucket_id);
+
+      if (url) {
+        toolArgs.url = url;
+      } else {
+        if (type) toolArgs.type = type;
+        if (id) toolArgs.id = Number(id);
+        if (projectId) {
+          toolArgs.project_id = Number(projectId);
+          toolArgs.bucket_id = Number(projectId);
+        }
+      }
+
+      const result = await callBcgptTool({
+        bcgptUrl,
+        apiKey,
+        toolName: "pmos_entity_detail",
+        toolArgs,
+        timeoutMs: 45_000,
+      });
+      if (!result.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error ?? "Failed to fetch item details"));
+        return;
+      }
+
+      const root = isJsonObject(result.result)
+        ? (isJsonObject(result.result.result) ? result.result.result : result.result)
+        : {};
+      const entity = isJsonObject(root.entity) ? root.entity : {};
+      const detail = isJsonObject(root.detail) ? root.detail : {};
+      const project = isJsonObject(root.project) ? root.project : null;
+      const comments = Array.isArray(root.comments) ? root.comments.filter(isJsonObject) : [];
+      const events = Array.isArray(root.events) ? root.events.filter(isJsonObject) : [];
+      const creator = isJsonObject(detail.creator) ? stringOrNull(detail.creator.name) : stringOrNull(detail.creator);
+      const assignee = isJsonObject(detail.assignee) ? stringOrNull(detail.assignee.name) : stringOrNull(detail.assignee);
+
+      respond(true, {
+        reference: {
+          type: stringOrNull(entity.type) ?? type ?? "item",
+          id: numberStringOrNull(entity.id) ?? id,
+          projectId: numberStringOrNull(entity.project_id) ?? numberStringOrNull(entity.bucket_id) ?? projectId,
+          url: stringOrNull(entity.url) ?? url,
+        },
+        project: project
+          ? {
+              id: numberStringOrNull(project.id),
+              name: stringOrNull(project.name),
+              appUrl: stringOrNull(project.app_url) ?? stringOrNull(project.appUrl),
+            }
+          : null,
+        title: pickEntitySummary(detail),
+        status: stringOrNull(detail.status),
+        appUrl: stringOrNull(detail.app_url) ?? stringOrNull(detail.appUrl),
+        createdAt: stringOrNull(detail.created_at) ?? stringOrNull(detail.createdAt),
+        updatedAt: stringOrNull(detail.updated_at) ?? stringOrNull(detail.updatedAt),
+        creator,
+        assignee,
+        summary: pickEntitySnippet(detail),
+        raw: detail,
+        comments: comments.map((comment) => ({
+          id: numberStringOrNull(comment.id),
+          author: isJsonObject(comment.creator) ? stringOrNull(comment.creator.name) : stringOrNull(comment.author),
+          createdAt: stringOrNull(comment.created_at) ?? stringOrNull(comment.createdAt),
+          content: stringOrNull(comment.content) ?? stringOrNull(comment.body) ?? stringOrNull(comment.summary),
+          appUrl: stringOrNull(comment.app_url) ?? stringOrNull(comment.appUrl),
+        })),
+        events: events.map((event) => ({
+          id: numberStringOrNull(event.id),
+          action: stringOrNull(event.action) ?? stringOrNull(event.event_name) ?? stringOrNull(event.type),
+          createdAt: stringOrNull(event.created_at) ?? stringOrNull(event.createdAt),
+          actor: isJsonObject(event.creator) ? stringOrNull(event.creator.name) : stringOrNull(event.actor),
+          summary: stringOrNull(event.summary) ?? stringOrNull(event.description) ?? stringOrNull(event.content),
+        })),
+        subscription: root.subscription ?? null,
+      }, undefined);
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }

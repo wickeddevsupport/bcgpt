@@ -1231,6 +1231,9 @@ export function renderApp(state: AppViewState) {
                 selectedProject: state.pmosSelectedProject ?? null,
                 projectDetailTab: state.pmosProjectDetailTab ?? "overview",
                 projectSectionData: state.pmosProjectSectionData ?? {},
+                selectedEntityDetail: state.pmosSelectedEntityDetail ?? null,
+                selectedEntityLoading: state.pmosSelectedEntityLoading,
+                selectedEntityError: state.pmosSelectedEntityError,
                 onRefresh: () => state.handlePmosProjectsLoad(),
                 onOpenIntegrations: () => state.setTab("integrations"),
                 onOpenWorkflows: () => state.setTab("automations"),
@@ -1247,6 +1250,8 @@ export function renderApp(state: AppViewState) {
                 onProjectDetailTabChange: (tab) => state.handleProjectDetailTabChange(tab),
                 onLoadProjectSection: (projectName, section) =>
                   state.handleLoadProjectSection(projectName, section),
+                onOpenItemDetail: (reference) => state.handleOpenProjectEntity(reference),
+                onCloseItemDetail: () => state.handleCloseProjectEntity(),
               })
             : nothing
         }

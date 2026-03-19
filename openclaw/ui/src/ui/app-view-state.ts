@@ -61,6 +61,8 @@ import type {
   PmosCommandPlanStep,
 } from "./controllers/pmos-command-center.ts";
 import type {
+  PmosEntityDetail,
+  PmosEntityReference,
   PmosProjectCard,
   PmosProjectDetailTab,
   PmosProjectSectionResult,
@@ -274,6 +276,10 @@ export type AppViewState = {
   pmosSelectedProject: PmosProjectCard | null;
   pmosProjectDetailTab: PmosProjectDetailTab;
   pmosProjectSectionData: Record<string, PmosProjectSectionResult>;
+  pmosSelectedEntityRef: PmosEntityReference | null;
+  pmosSelectedEntityDetail: PmosEntityDetail | null;
+  pmosSelectedEntityLoading: boolean;
+  pmosSelectedEntityError: string | null;
   pmosScreenContext: string | null;
   dashboardTab: "home" | "agents" | "workflows" | "system";
 
@@ -603,6 +609,8 @@ export type AppViewState = {
   handleSelectProject: (project: PmosProjectCard | null) => void;
   handleProjectDetailTabChange: (tab: PmosProjectDetailTab) => void;
   handleLoadProjectSection: (projectName: string, section: PmosProjectDetailTab) => Promise<void>;
+  handleOpenProjectEntity: (reference: PmosEntityReference) => Promise<void>;
+  handleCloseProjectEntity: () => void;
   handlePmosCommandPlan: () => Promise<void>;
   handlePmosCommandExecute: () => Promise<void>;
   handlePmosCommandApprove: (approvalId: string) => Promise<void>;

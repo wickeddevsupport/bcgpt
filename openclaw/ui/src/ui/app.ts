@@ -141,10 +141,13 @@ import {
   type PmosCommandPlanStep,
 } from "./controllers/pmos-command-center.ts";
 import {
+  fetchProjectEntityDetail,
   fetchProjectSection,
   loadPmosProjectsSnapshot,
   type PmosProjectCard,
   type PmosProjectDetailTab,
+  type PmosEntityDetail,
+  type PmosEntityReference,
   type PmosProjectSectionResult,
   type PmosProjectsSnapshot,
   type PmosProjectTodoItem,
@@ -164,6 +167,9 @@ function buildProjectScreenContext(project: PmosProjectCard, tab: PmosProjectDet
     noDueDateTodos: project.noDueDateTodos,
     todoLists: project.todoLists,
     nextDueOn: project.nextDueOn,
+    description: project.description,
+    updatedAt: project.updatedAt,
+    dockCapabilities: (project.dockCapabilities ?? []).map((dock) => dock.title ?? dock.name).filter(Boolean),
     activeTab: tab,
     appUrl: project.appUrl,
     tabData: null as unknown,
@@ -195,6 +201,17 @@ function buildProjectScreenContext(project: PmosProjectCard, tab: PmosProjectDet
         title: e.title, startsAt: e.startsAt, endsAt: e.endsAt, allDay: e.allDay,
         isPast: !!(e.startsAt && e.startsAt < today),
       }));
+    } else if (tab === "campfire") {
+      type CampfireData = { chats?: Array<{ title: string | null }>; lines?: Array<{ author: string | null; createdAt: string | null; content: string | null }> };
+      const campfire = data as CampfireData;
+      projectJson.tabData = {
+        chats: (campfire.chats ?? []).slice(0, 3).map((chat) => ({ title: chat.title })),
+        lines: (campfire.lines ?? []).slice(0, 12).map((line) => ({
+          author: line.author,
+          createdAt: line.createdAt,
+          content: line.content?.slice(0, 180) ?? null,
+        })),
+      };
     } else if (tab === "card_tables") {
       type Table = { name: string; columns: Array<{ name: string; cardsCount: number; cards: Array<{ title: string; dueOn: string | null; assignee: string | null }> }> };
       const tables = data as Table[];
@@ -239,7 +256,11 @@ function buildProjectsListScreenContext(snapshot: PmosProjectsSnapshot | null, s
   if (!snapshot) return JSON.stringify({ view: "command-center", tab: "projects", status: "loading" });
   const allCards = snapshot.projects ?? [];
   const q = (search || "").trim().toLowerCase();
-  const cards = q ? allCards.filter((p: PmosProjectCard) => p.name.toLowerCase().includes(q)) : allCards;
+  const cards = q
+    ? allCards.filter((p: PmosProjectCard) =>
+        p.name.toLowerCase().includes(q) || (p.description ?? "").toLowerCase().includes(q),
+      )
+    : allCards;
   return JSON.stringify({
     view: "command-center",
     tab: "projects",
@@ -248,6 +269,7 @@ function buildProjectsListScreenContext(snapshot: PmosProjectsSnapshot | null, s
     projects: cards.slice(0, 10).map((p: PmosProjectCard) => ({
       name: p.name, health: p.health, openTodos: p.openTodos, overdueTodos: p.overdueTodos,
       assignedTodos: p.assignedTodos, dueTodayTodos: p.dueTodayTodos,
+      capabilities: p.dockCapabilities?.slice(0, 5).map((dock) => dock.title ?? dock.name).filter(Boolean),
     })),
   });
 }
@@ -527,6 +549,10 @@ export class OpenClawApp extends LitElement {
   @state() pmosSelectedProject: PmosProjectCard | null = null;
   @state() pmosProjectDetailTab: PmosProjectDetailTab = "overview";
   @state() pmosProjectSectionData: Record<string, PmosProjectSectionResult> = {};
+  @state() pmosSelectedEntityRef: PmosEntityReference | null = null;
+  @state() pmosSelectedEntityDetail: PmosEntityDetail | null = null;
+  @state() pmosSelectedEntityLoading = false;
+  @state() pmosSelectedEntityError: string | null = null;
   @state() pmosScreenContext: string | null = null;
   @state() dashboardTab: "home" | "agents" | "workflows" | "system" = "home";
 
@@ -2019,6 +2045,10 @@ export class OpenClawApp extends LitElement {
   handleSelectProject(project: PmosProjectCard | null) {
     this.pmosSelectedProject = project;
     this.pmosProjectDetailTab = "overview";
+    this.pmosSelectedEntityRef = null;
+    this.pmosSelectedEntityDetail = null;
+    this.pmosSelectedEntityLoading = false;
+    this.pmosSelectedEntityError = null;
     if (project) {
       this.pmosScreenContext = buildProjectScreenContext(project, "overview", null);
     } else {
@@ -2031,6 +2061,10 @@ export class OpenClawApp extends LitElement {
 
   handleProjectDetailTabChange(tab: PmosProjectDetailTab) {
     this.pmosProjectDetailTab = tab;
+    this.pmosSelectedEntityRef = null;
+    this.pmosSelectedEntityDetail = null;
+    this.pmosSelectedEntityLoading = false;
+    this.pmosSelectedEntityError = null;
     const project = this.pmosSelectedProject;
     if (!project) { this.pmosScreenContext = null; return; }
     if (tab === "overview") {
@@ -2068,6 +2102,43 @@ export class OpenClawApp extends LitElement {
         [key]: { loading: false, error: message, data: null },
       };
     }
+  }
+
+  async handleOpenProjectEntity(reference: PmosEntityReference) {
+    if (!this.client) return;
+    this.pmosSelectedEntityRef = reference;
+    this.pmosSelectedEntityLoading = true;
+    this.pmosSelectedEntityError = null;
+    try {
+      const detail = await fetchProjectEntityDetail(this.client, reference);
+      if (
+        this.pmosSelectedEntityRef?.type !== reference.type ||
+        this.pmosSelectedEntityRef?.id !== reference.id ||
+        this.pmosSelectedEntityRef?.url !== reference.url
+      ) {
+        return;
+      }
+      this.pmosSelectedEntityDetail = {
+        ...detail,
+        reference: {
+          ...detail.reference,
+          label: reference.label ?? detail.reference.label,
+        },
+      };
+      this.pmosSelectedEntityLoading = false;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.pmosSelectedEntityDetail = null;
+      this.pmosSelectedEntityLoading = false;
+      this.pmosSelectedEntityError = message;
+    }
+  }
+
+  handleCloseProjectEntity() {
+    this.pmosSelectedEntityRef = null;
+    this.pmosSelectedEntityDetail = null;
+    this.pmosSelectedEntityLoading = false;
+    this.pmosSelectedEntityError = null;
   }
 
   handlePmosCommandClearHistory() {
