@@ -4585,12 +4585,34 @@ async function reportTodosAssignedPerson(ctx, personId) {
 }
 
 async function reportTodosOverdue(ctx) {
-  const rows = await listAllOpenTodos(ctx);
-  const todayIso = new Date().toISOString().slice(0, 10);
-  return scanOverdueTodosFromRows(rows, todayIso).map((todo) => ({
-    ...compactAssignmentTodo(todo),
-    overdue: true,
-  }));
+  const snapshot = await getOrRefreshBasecampWorkspaceSnapshot({
+    userKey: ctx.userKey,
+    accountId: ctx.accountId,
+    waitForFresh: false,
+    reason: "mcp:report_todos_overdue",
+    previewLimit: 200,
+  });
+  const items = Array.isArray(snapshot?.urgentTodos)
+    ? snapshot.urgentTodos.map((todo) => ({
+        id: todo.todoId ?? null,
+        title: todo.title ?? null,
+        status: "open",
+        completed: false,
+        due_on: todo.dueOn ?? null,
+        overdue: true,
+        project: todo.projectId || todo.projectName
+          ? { id: todo.projectId ?? null, name: todo.projectName ?? null }
+          : null,
+        assignee_ids: Array.isArray(todo.assigneeIds) ? todo.assigneeIds : null,
+        app_url: todo.appUrl ?? null,
+      }))
+    : [];
+  return {
+    items,
+    total: Number(snapshot?.totals?.overdueTodos ?? items.length),
+    stale: snapshot?.stale === true,
+    ageMs: Number(snapshot?.ageMs ?? 0),
+  };
 }
 
 async function reportSchedulesUpcoming(ctx, query) {
@@ -9699,7 +9721,14 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "report_todos_overdue") {
       try {
         const data = await reportTodosOverdue(ctx);
-        return ok(id, { source: "workspace_scan", ...buildListPayload("overdue", data) });
+        const payload = {
+          source: "workspace_snapshot",
+          stale: data.stale,
+          age_ms: data.ageMs,
+          count: data.total,
+        };
+        attachCachedCollection(payload, "todos", data.items);
+        return ok(id, payload);
       } catch (e) {
         return fail(id, { code: "REPORT_TODOS_OVERDUE_ERROR", message: e.message });
       }
