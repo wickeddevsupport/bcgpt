@@ -690,6 +690,8 @@ export async function getOrRefreshBasecampWorkspaceSnapshot({
   accountId = null,
   maxAgeMs = DEFAULT_SYNC_MAX_AGE_MS,
   waitForFresh = false,
+  forceRefresh = false,
+  allowStaleOnError = true,
   reason = "read",
   previewLimit = DEFAULT_GLOBAL_PREVIEW_LIMIT,
   projectPreviewLimit = DEFAULT_PROJECT_PREVIEW_LIMIT,
@@ -701,30 +703,48 @@ export async function getOrRefreshBasecampWorkspaceSnapshot({
   const fetchedAtMs = snapshot?.fetchedAt ? Number(snapshot.fetchedAt) * 1000 : 0;
   const ageMs = fetchedAtMs > 0 ? Math.max(0, nowMs() - fetchedAtMs) : Number.POSITIVE_INFINITY;
   const isFresh = Boolean(snapshot) && ageMs <= maxAgeMs;
+  const shouldRefresh = forceRefresh || !isFresh;
 
-  if (isFresh && snapshot) {
+  if (!shouldRefresh && snapshot) {
     return {
       ...snapshot,
       syncState,
       stale: false,
       ageMs,
+      servedFrom: "snapshot_cache",
     };
   }
 
-  if (!snapshot || waitForFresh) {
-    const fresh = await runBasecampWorkspaceSync({
-      userKey: ctx.userKey,
-      accountId: ctx.accountId,
-      reason,
-      previewLimit,
-      projectPreviewLimit,
-      maxProjects,
-    });
-    return {
-      ...fresh,
-      stale: false,
-      ageMs: 0,
-    };
+  if (!snapshot || waitForFresh || forceRefresh) {
+    try {
+      const fresh = await runBasecampWorkspaceSync({
+        userKey: ctx.userKey,
+        accountId: ctx.accountId,
+        reason,
+        previewLimit,
+        projectPreviewLimit,
+        maxProjects,
+      });
+      return {
+        ...fresh,
+        stale: false,
+        ageMs: 0,
+        servedFrom: "live_refresh",
+      };
+    } catch (error) {
+      if (snapshot && allowStaleOnError) {
+        const refreshError = error instanceof Error ? error.message : String(error);
+        return {
+          ...snapshot,
+          syncState: error?.syncState || syncState,
+          stale: true,
+          ageMs,
+          servedFrom: "stale_snapshot_fallback",
+          refreshError,
+        };
+      }
+      throw error;
+    }
   }
 
   runBasecampWorkspaceSync({
@@ -741,6 +761,7 @@ export async function getOrRefreshBasecampWorkspaceSnapshot({
     syncState,
     stale: true,
     ageMs,
+    servedFrom: "stale_snapshot_background_refresh",
   };
 }
 

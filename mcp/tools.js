@@ -50,6 +50,9 @@ const FOCUSED_TOOL_NAMES = new Set([
   "get_project",
   "daily_report",
   "workspace_todo_snapshot",
+  "pmos_workspace_sync",
+  "pmos_project_sync",
+  "pmos_entity_detail",
   "list_todos_due",
   "search_todos",
   "assignment_report",
@@ -157,7 +160,60 @@ export function getTools() {
         date: { type: "string", description: "YYYY-MM-DD (defaults today)" },
         preview_limit: { type: "integer", description: "Max items to return per global bucket (default 20)." },
         project_preview_limit: { type: "integer", description: "Max preview todos per project card (default 4)." },
-        max_projects: { type: "integer", description: "Optional cap for open-todo scanning." }
+        max_projects: { type: "integer", description: "Optional cap for open-todo scanning." },
+        max_age_ms: { type: "integer", description: "Maximum accepted snapshot age before a live refresh is required. Use 0 for realtime." },
+        force_refresh: { type: "boolean", description: "Always refresh from Basecamp before returning results." },
+        allow_stale_on_error: { type: "boolean", description: "If live refresh fails, return the last cached snapshot with stale metadata instead of failing." }
+      },
+      additionalProperties: false
+    }),
+    tool("pmos_workspace_sync", "PMOS workspace sync payload for a Basecamp command center. Returns live workspace totals, project cards, personal work buckets, and optional project detail hydration without compacting the core PMOS collections.", {
+      type: "object",
+      properties: {
+        preview_limit: { type: "integer", description: "Max items to return per personal work bucket (default 20)." },
+        project_preview_limit: { type: "integer", description: "Max preview todos per project card (default 4)." },
+        max_projects: { type: "integer", description: "Optional cap for active project scanning." },
+        max_age_ms: { type: "integer", description: "Maximum accepted snapshot age before a live refresh is required. Use 0 for realtime." },
+        force_refresh: { type: "boolean", description: "Always refresh from Basecamp before returning the PMOS workspace payload." },
+        allow_stale_on_error: { type: "boolean", description: "If live refresh fails, return the last cached workspace snapshot with explicit stale metadata." },
+        include_project_details: { type: "boolean", description: "Hydrate detailed project objects for the selected workspace projects." },
+        include_project_docks: { type: "boolean", description: "Include full dock payloads for hydrated projects." },
+        include_disabled_tools: { type: "boolean", description: "When project docks are included, also include disabled Basecamp dock tools." }
+      },
+      additionalProperties: false
+    }),
+    tool("pmos_project_sync", "PMOS project cockpit payload. Hydrates one Basecamp project with full dock metadata plus todos, people, cards, messages, schedule, documents, and campfires for on-demand PMOS views.", {
+      type: "object",
+      properties: {
+        project: { type: "string", description: "Project name." },
+        include_details: { type: "boolean", description: "Return full dock metadata and richer board payloads." },
+        include_disabled_tools: { type: "boolean", description: "Include disabled dock tools in the dock payload." },
+        include_todos: { type: "boolean" },
+        include_people: { type: "boolean" },
+        include_cards: { type: "boolean" },
+        include_messages: { type: "boolean" },
+        include_documents: { type: "boolean" },
+        include_schedule: { type: "boolean" },
+        include_campfires: { type: "boolean" },
+        max_cards_per_column: { type: "integer", description: "Cap cards per board column when hydrating boards." },
+        message_limit: { type: "integer", description: "Cap messages returned for the project." },
+        document_limit: { type: "integer", description: "Cap documents returned for the project." },
+        schedule_limit: { type: "integer", description: "Cap schedule entries returned for the project." },
+        campfire_lines_limit: { type: "integer", description: "Optional number of recent lines to fetch for the first project campfire." }
+      },
+      required: ["project"],
+      additionalProperties: false
+    }),
+    tool("pmos_entity_detail", "PMOS detail drawer payload for a single Basecamp entity. Accepts either a Basecamp URL or a project/type/id tuple and can hydrate comments, events, and subscriptions when supported.", {
+      type: "object",
+      properties: {
+        url: { type: "string", nullable: true, description: "Basecamp URL to resolve." },
+        project: { type: "string", nullable: true, description: "Project name when resolving by type/id instead of URL." },
+        type: { type: "string", nullable: true, description: "Entity type such as todo, card, message, document, upload, schedule_entry, person, project, card_table, or campfire." },
+        id: { type: ["integer", "string"], nullable: true, description: "Entity id for the selected type." },
+        include_comments: { type: "boolean", description: "Include comments when the entity supports them." },
+        include_events: { type: "boolean", description: "Include recording events when the entity supports them." },
+        include_subscription: { type: "boolean", description: "Include subscription status when the entity supports it." }
       },
       additionalProperties: false
     }),

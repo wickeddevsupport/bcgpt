@@ -4804,22 +4804,46 @@ async function reportTodosAssigned(ctx) {
   return buildAssignedPeopleSummary(rows, people.map(normalizePerson));
 }
 
+const DEFAULT_REALTIME_SNAPSHOT_MAX_AGE_MS = Number(process.env.BASECAMP_REALTIME_SNAPSHOT_MAX_AGE_MS || 0);
+
+function resolveRealtimeSnapshotReadOptions(overrides = {}) {
+  const maxAgeMs = Number.isFinite(Number(overrides.maxAgeMs))
+    ? Number(overrides.maxAgeMs)
+    : DEFAULT_REALTIME_SNAPSHOT_MAX_AGE_MS;
+  const forceRefresh =
+    overrides.forceRefresh === true ||
+    (overrides.forceRefresh == null && maxAgeMs <= 0);
+  return {
+    maxAgeMs,
+    forceRefresh,
+    allowStaleOnError: overrides.allowStaleOnError !== false,
+  };
+}
+
 async function reportTodosAssignedPerson(ctx, personId) {
   const targetId = Number(personId);
   if (Number.isFinite(targetId)) {
     try {
       const profile = await getMyProfile(ctx);
       if (Number(profile?.id) === targetId) {
+        const readOptions = resolveRealtimeSnapshotReadOptions();
         const snapshot = await getOrRefreshBasecampWorkspaceSnapshot({
           userKey: ctx.userKey,
           accountId: ctx.accountId,
-          waitForFresh: false,
+          maxAgeMs: readOptions.maxAgeMs,
+          waitForFresh: true,
+          forceRefresh: readOptions.forceRefresh,
+          allowStaleOnError: readOptions.allowStaleOnError,
           reason: "mcp:report_todos_assigned_person",
           previewLimit: 200,
         });
         const assigned = scanAssignedTodosFromSnapshot(snapshot?.assignedTodos, targetId);
         assigned._source = "workspace_snapshot";
         assigned._snapshotTotal = Number(snapshot?.totals?.assignedTodos ?? assigned.length);
+        assigned._snapshotStale = snapshot?.stale === true;
+        assigned._snapshotAgeMs = Number(snapshot?.ageMs ?? 0);
+        assigned._servedFrom = snapshot?.servedFrom ?? null;
+        assigned._refreshError = typeof snapshot?.refreshError === "string" ? snapshot.refreshError : null;
         return assigned;
       }
     } catch {
@@ -4832,10 +4856,14 @@ async function reportTodosAssignedPerson(ctx, personId) {
 }
 
 async function reportTodosOverdue(ctx) {
+  const readOptions = resolveRealtimeSnapshotReadOptions();
   const snapshot = await getOrRefreshBasecampWorkspaceSnapshot({
     userKey: ctx.userKey,
     accountId: ctx.accountId,
-    waitForFresh: false,
+    maxAgeMs: readOptions.maxAgeMs,
+    waitForFresh: true,
+    forceRefresh: readOptions.forceRefresh,
+    allowStaleOnError: readOptions.allowStaleOnError,
     reason: "mcp:report_todos_overdue",
     previewLimit: 200,
   });
@@ -4859,16 +4887,22 @@ async function reportTodosOverdue(ctx) {
     total: Number(snapshot?.totals?.overdueTodos ?? items.length),
     stale: snapshot?.stale === true,
     ageMs: Number(snapshot?.ageMs ?? 0),
+    servedFrom: snapshot?.servedFrom ?? null,
+    refreshError: typeof snapshot?.refreshError === "string" ? snapshot.refreshError : null,
   };
 }
 
 async function getCurrentUserAssignedSnapshot(ctx, reason = "mcp:list_assigned_to_me") {
   const profile = await getMyProfile(ctx);
   const profileId = Number(profile.id);
+  const readOptions = resolveRealtimeSnapshotReadOptions();
   const snapshot = await getOrRefreshBasecampWorkspaceSnapshot({
     userKey: ctx.userKey,
     accountId: ctx.accountId,
-    waitForFresh: false,
+    maxAgeMs: readOptions.maxAgeMs,
+    waitForFresh: true,
+    forceRefresh: readOptions.forceRefresh,
+    allowStaleOnError: readOptions.allowStaleOnError,
     reason,
     previewLimit: 200,
   });
@@ -4877,6 +4911,10 @@ async function getCurrentUserAssignedSnapshot(ctx, reason = "mcp:list_assigned_t
     profile,
     assigned,
     totalCount: Number(snapshot?.totals?.assignedTodos ?? assigned.length),
+    stale: snapshot?.stale === true,
+    ageMs: Number(snapshot?.ageMs ?? 0),
+    servedFrom: snapshot?.servedFrom ?? null,
+    refreshError: typeof snapshot?.refreshError === "string" ? snapshot.refreshError : null,
   };
 }
 
@@ -5560,11 +5598,19 @@ export async function handleMCP(reqBody, ctx) {
         const previewLimit = Number(args.preview_limit || process.env.BASECAMP_WORKSPACE_SNAPSHOT_PREVIEW_LIMIT || 20);
         const projectPreviewLimit = Number(args.project_preview_limit || process.env.BASECAMP_WORKSPACE_PROJECT_PREVIEW_LIMIT || 4);
         const maxProjects = Number(args.max_projects || 0);
+        const maxAgeMs = Number.isFinite(Number(args.max_age_ms))
+          ? Number(args.max_age_ms)
+          : Number(process.env.BASECAMP_WORKSPACE_SYNC_READ_MAX_AGE_MS || 0);
+        const forceRefresh = args.force_refresh === true || (args.force_refresh !== false && maxAgeMs <= 0);
+        const allowStaleOnError = args.allow_stale_on_error !== false;
         const [snapshot, resourceCounts] = await Promise.all([
           getOrRefreshBasecampWorkspaceSnapshot({
             userKey: ctx.userKey,
             accountId: ctx.accountId,
             waitForFresh: true,
+            maxAgeMs,
+            forceRefresh,
+            allowStaleOnError,
             reason: "mcp:workspace_todo_snapshot",
             previewLimit: Number.isFinite(previewLimit) && previewLimit > 0 ? previewLimit : 20,
             projectPreviewLimit:
@@ -5584,6 +5630,11 @@ export async function handleMCP(reqBody, ctx) {
         const previewLimit = Number(args.preview_limit || process.env.BASECAMP_WORKSPACE_SNAPSHOT_PREVIEW_LIMIT || 20);
         const projectPreviewLimit = Number(args.project_preview_limit || process.env.BASECAMP_WORKSPACE_PROJECT_PREVIEW_LIMIT || 4);
         const maxProjects = Number(args.max_projects || 0);
+        const maxAgeMs = Number.isFinite(Number(args.max_age_ms))
+          ? Number(args.max_age_ms)
+          : Number(process.env.BASECAMP_WORKSPACE_SYNC_READ_MAX_AGE_MS || 0);
+        const forceRefresh = args.force_refresh === true || (args.force_refresh !== false && maxAgeMs <= 0);
+        const allowStaleOnError = args.allow_stale_on_error !== false;
         const includeProjectDetails = args.include_project_details === true;
         const includeProjectDocks = args.include_project_docks === true;
         const includeDisabledTools = args.include_disabled_tools === true;
@@ -5593,6 +5644,9 @@ export async function handleMCP(reqBody, ctx) {
             userKey: ctx.userKey,
             accountId: ctx.accountId,
             waitForFresh: true,
+            maxAgeMs,
+            forceRefresh,
+            allowStaleOnError,
             reason: "mcp:pmos_workspace_sync",
             previewLimit: Number.isFinite(previewLimit) && previewLimit > 0 ? previewLimit : 20,
             projectPreviewLimit: Number.isFinite(projectPreviewLimit) && projectPreviewLimit > 0 ? projectPreviewLimit : 4,
@@ -5608,6 +5662,10 @@ export async function handleMCP(reqBody, ctx) {
             fetchedAt: snapshot?.fetchedAt || null,
             identity: snapshot?.identity || null,
             syncState: snapshot?.syncState || null,
+            stale: snapshot?.stale === true,
+            ageMs: Number(snapshot?.ageMs ?? 0),
+            servedFrom: snapshot?.servedFrom ?? null,
+            refreshError: typeof snapshot?.refreshError === "string" ? snapshot.refreshError : null,
           },
           totals: snapshot?.totals || {},
           resourceCounts,
@@ -6146,6 +6204,7 @@ export async function handleMCP(reqBody, ctx) {
         let projectPayload = null;
         let source = "workspace_snapshot";
         let totalCount = null;
+        let snapshotMeta = null;
         if (args.project) {
           profile = await getMyProfile(ctx);
           const profileId = Number(profile.id);
@@ -6169,6 +6228,7 @@ export async function handleMCP(reqBody, ctx) {
           profile = snapshotAssigned.profile;
           todos = snapshotAssigned.assigned;
           totalCount = snapshotAssigned.totalCount;
+          snapshotMeta = snapshotAssigned;
         }
 
         const payload = {
@@ -6180,6 +6240,14 @@ export async function handleMCP(reqBody, ctx) {
         };
         if (Number.isFinite(totalCount)) {
           payload.count = totalCount;
+        }
+        if (snapshotMeta) {
+          payload.stale = snapshotMeta.stale;
+          payload.age_ms = snapshotMeta.ageMs;
+          payload.served_from = snapshotMeta.servedFrom;
+          if (snapshotMeta.refreshError) {
+            payload.refresh_error = snapshotMeta.refreshError;
+          }
         }
         return ok(id, payload);
       } catch (e) {
@@ -10288,6 +10356,14 @@ export async function handleMCP(reqBody, ctx) {
             ? Number(data._snapshotTotal)
             : todos.length;
         const payload = { person_id: personId, source, count: totalCount };
+        if (Array.isArray(data) && source === "workspace_snapshot") {
+          payload.stale = data._snapshotStale === true;
+          payload.age_ms = Number(data._snapshotAgeMs ?? 0);
+          payload.served_from = typeof data._servedFrom === "string" ? data._servedFrom : null;
+          if (typeof data._refreshError === "string" && data._refreshError) {
+            payload.refresh_error = data._refreshError;
+          }
+        }
         if (!personSummary) {
           try {
             personSummary = normalizePerson(await getPerson(ctx, personId));

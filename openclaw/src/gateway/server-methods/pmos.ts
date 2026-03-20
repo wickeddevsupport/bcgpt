@@ -6232,6 +6232,9 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           apiKey: bcgptApiKey,
           toolName: "pmos_workspace_sync",
           toolArgs: {
+            max_age_ms: 0,
+            force_refresh: true,
+            allow_stale_on_error: true,
             preview_limit: 24,
             project_preview_limit: 4,
             include_project_details: true,
@@ -6248,6 +6251,9 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             apiKey: bcgptApiKey,
             toolName: "workspace_todo_snapshot",
             toolArgs: {
+              max_age_ms: 0,
+              force_refresh: true,
+              allow_stale_on_error: true,
               preview_limit: 24,
               project_preview_limit: 4,
             },

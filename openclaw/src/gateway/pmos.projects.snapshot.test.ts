@@ -67,6 +67,7 @@ describe("pmos.projects.snapshot", () => {
       },
     });
 
+    let workspaceSnapshotArgs: Record<string, unknown> | null = null;
     const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/action/startbcgpt")) {
@@ -80,9 +81,10 @@ describe("pmos.projects.snapshot", () => {
 
       if (url.endsWith("/mcp")) {
         const body = JSON.parse(String(init?.body ?? "{}")) as {
-          params?: { name?: string };
+          params?: { name?: string; arguments?: Record<string, unknown> };
         };
         if (body.params?.name === "workspace_todo_snapshot") {
+          workspaceSnapshotArgs = body.params.arguments ?? null;
           return jsonResponse({
             jsonrpc: "2.0",
             id: "1",
@@ -193,6 +195,11 @@ describe("pmos.projects.snapshot", () => {
     expect(payload.assignedTodos[0]?.title).toBe("Assigned item");
     expect(payload.assignedTodos[0]?.appUrl).toContain("/todos/1001");
     expect(payload.urgentTodos[0]?.title).toBe("Past due item");
+    expect(workspaceSnapshotArgs).toMatchObject({
+      max_age_ms: 0,
+      force_refresh: true,
+      allow_stale_on_error: true,
+    });
   });
 
   it("builds project cards, totals, and urgency from BCGPT tools", async () => {

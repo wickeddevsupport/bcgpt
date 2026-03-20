@@ -52,6 +52,9 @@ test("default tool catalog stays focused on common Basecamp operations", () => {
       assert.equal(projectStructure?.inputSchema?.properties?.include_disabled?.type, "boolean");
       assert.equal(pmosWorkspaceSync?.inputSchema?.properties?.include_project_details?.type, "boolean");
       assert.equal(pmosWorkspaceSync?.inputSchema?.properties?.include_project_docks?.type, "boolean");
+      assert.equal(pmosWorkspaceSync?.inputSchema?.properties?.max_age_ms?.type, "integer");
+      assert.equal(pmosWorkspaceSync?.inputSchema?.properties?.force_refresh?.type, "boolean");
+      assert.equal(pmosWorkspaceSync?.inputSchema?.properties?.allow_stale_on_error?.type, "boolean");
       assert.equal(pmosProjectSync?.inputSchema?.properties?.project?.type, "string");
       assert.equal(pmosProjectSync?.inputSchema?.properties?.include_cards?.type, "boolean");
       assert.equal(pmosEntityDetail?.inputSchema?.properties?.include_comments?.type, "boolean");
