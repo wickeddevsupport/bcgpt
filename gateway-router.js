@@ -7,6 +7,18 @@ import fetch from 'node-fetch';
 
 const PMOS_URL = process.env.PMOS_URL || 'http://localhost:10001';
 const FLOW_URL = process.env.FLOW_URL || 'https://flow.wickedlab.io';
+const PMOS_ROUTED_TOOL_NAMES = new Set([
+  'pmos_web_search',
+]);
+
+function isPmosRemoteTool(toolName) {
+  if (typeof toolName !== 'string') return false;
+  return (
+    toolName.startsWith('pmos_ops_') ||
+    toolName.startsWith('pmos_n8n_') ||
+    PMOS_ROUTED_TOOL_NAMES.has(toolName)
+  );
+}
 
 /**
  * Forward MCP tool call to another service
@@ -60,8 +72,11 @@ async function forwardToolCall(targetUrl, toolName, args, ctx = {}) {
  * Returns null if tool should be handled by BCGPT
  */
 export async function routeToolCall(toolName, args, ctx = {}) {
-  // PMOS tools (intelligence layer)
-  if (toolName.startsWith('pmos_')) {
+  // Only PMOS workflow/ops tools should be forwarded.
+  // Basecamp-oriented PMOS tools such as pmos_workspace_sync,
+  // pmos_project_sync, and pmos_entity_detail are implemented
+  // locally in BCGPT and must not be hijacked here.
+  if (isPmosRemoteTool(toolName)) {
     console.log(`[Gateway] Routing ${toolName} to PMOS`);
     return await forwardToolCall(PMOS_URL, toolName, args, ctx);
   }
@@ -75,7 +90,7 @@ export async function routeToolCall(toolName, args, ctx = {}) {
  * Check if a tool should be routed to another service
  */
 export function shouldRoute(toolName) {
-  return toolName.startsWith('pmos_');
+  return isPmosRemoteTool(toolName);
 }
 
 export default { routeToolCall, shouldRoute };
