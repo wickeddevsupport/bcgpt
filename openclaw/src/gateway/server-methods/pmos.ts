@@ -1361,6 +1361,28 @@ function isGreetingOnlyMessage(message: string): boolean {
 
 // ── Intent-based tool/context filtering ──────────────────────────────────────
 type ChatIntent = "basecamp" | "workflow" | "figma" | "general";
+type WorkspaceChatUrlHints = ReturnType<typeof inspectWorkspaceChatUrls>;
+type PmosChatExecutionMode =
+  | "general"
+  | "basecamp_lookup"
+  | "basecamp_manager"
+  | "workflow"
+  | "figma"
+  | "cross_system";
+
+export type PmosChatExecutionPlan = {
+  mode: PmosChatExecutionMode;
+  intents: ChatIntent[];
+  needsLiveData: boolean;
+  includeWorkspaceMemory: boolean;
+  includeCredentials: boolean;
+  includeScreenContext: boolean;
+  includeUrlHints: boolean;
+  responseStyle: "concise" | "project_manager" | "workflow_operator" | "design_analyst" | "orchestrator";
+  plannerSummary: string;
+  thinkingNote: string;
+  guidance: string[];
+};
 
 function detectChatIntents(
   message: string,
@@ -1400,6 +1422,239 @@ function detectChatIntents(
   }
 
   return intents;
+}
+
+function isWorkspaceOpsRequest(message: string): boolean {
+  return /\bworkspace\b|\bconnector(?:s)?\b|\bintegration(?:s)?\b|\bcredential(?:s)?\b|\bcommand center\b|\bwhat can you access\b|\bwhat do you know about this workspace\b/i.test(
+    message,
+  );
+}
+
+function isBasecampManagerRequest(message: string): boolean {
+  return /\b(assigned to me|my todos|my tasks|overdue|due today|due tomorrow|today|tomorrow|blocked|at risk|priority|priorities|focus on|what should i do|what should i focus on|what needs attention|status update|project pulse|project health|what changed)\b/i.test(
+    message,
+  );
+}
+
+function buildPmosPlannerGuidance(params: {
+  mode: PmosChatExecutionMode;
+  latestUserMessage: string;
+  intents: Set<ChatIntent>;
+  urlHints: WorkspaceChatUrlHints;
+  pastedUrlCount: number;
+  shouldPreferProjectList: boolean;
+  preferredBasecampNamedTool: BasecampNamedToolHint | null;
+  shouldPreferFigmaMcpDiscovery: boolean;
+  shouldPreferExplicitFigmaFileRouting: boolean;
+}): string[] {
+  const guidance: string[] = [
+    "- Start with the user's actual goal, not the workspace configuration.",
+    "- Pull only the context needed to answer or act. Avoid broad setup chatter.",
+    "- Do not mention hidden routing, prompt, or tool-selection logic in the user-facing reply.",
+  ];
+
+  if (params.pastedUrlCount >= 2) {
+    guidance.push(
+      "- Multiple explicit resources were supplied. Treat this as a narrow cross-resource job and consider parallel subtasks only if the probes are truly independent.",
+    );
+  }
+
+  if (params.urlHints.basecampUrl) {
+    guidance.push(
+      `- A Basecamp URL was pasted: ${params.urlHints.basecampUrl}. Treat it as the exact resource to inspect.`,
+    );
+  }
+
+  if (params.urlHints.figmaUrl) {
+    guidance.push(
+      `- A Figma URL was pasted: ${params.urlHints.figmaUrl}. Anchor to that exact file instead of the selected panel file.`,
+    );
+  }
+
+  switch (params.mode) {
+    case "basecamp_lookup":
+      guidance.push(
+        "- Use deterministic Basecamp tools for exact reads whenever possible.",
+      );
+      if (params.shouldPreferProjectList) {
+        guidance.push("- Prefer `bcgpt_list_projects` first because the user appears to want exact project names or a raw list.");
+      } else if (params.preferredBasecampNamedTool) {
+        guidance.push(
+          `- Prefer \`bcgpt_mcp_call\` with \`${params.preferredBasecampNamedTool.tool}\` first because ${params.preferredBasecampNamedTool.reason}.`,
+        );
+      } else {
+        guidance.push(
+          "- If the right named Basecamp MCP tool is unclear, call `bcgpt_list_tools` once and then `bcgpt_mcp_call`. Use `bcgpt_smart_action` only for ambiguous or URL-driven requests.",
+        );
+      }
+      break;
+    case "basecamp_manager":
+      guidance.push(
+        "- Think like a world-class project manager: identify what matters now, what is blocked, what is overdue, and the next best action.",
+      );
+      guidance.push(
+        "- Do not just dump queues. Triage, prioritize, and explain why the top items matter.",
+      );
+      if (params.preferredBasecampNamedTool) {
+        guidance.push(
+          `- Start with \`bcgpt_mcp_call\` using \`${params.preferredBasecampNamedTool.tool}\` when it gives the cleanest queue.`,
+        );
+      }
+      break;
+    case "workflow":
+      guidance.push(
+        "- Check connected credentials only when the task truly involves automations or workflow changes.",
+      );
+      guidance.push(
+        "- When creating or updating workflows, act directly through the workflow tools instead of emitting import JSON for the user.",
+      );
+      break;
+    case "figma":
+      guidance.push(
+        "- Prefer the live Figma MCP surface for context-first reads such as design context, metadata, screenshots, variables, or annotations.",
+      );
+      if (params.shouldPreferFigmaMcpDiscovery) {
+        guidance.push(
+          "- Discover the exact Figma MCP capability first with `figma_mcp_list_tools`, then call the matching MCP tool.",
+        );
+      }
+      if (params.shouldPreferExplicitFigmaFileRouting) {
+        guidance.push(
+          "- Stay anchored to the explicit Figma file URL rather than the selected workspace file.",
+        );
+      }
+      break;
+    case "cross_system":
+      guidance.push(
+        "- This request spans multiple systems. Plan the smallest viable chain and do not stop after the first tool result if synthesis or follow-up actions are still needed.",
+      );
+      break;
+    case "general":
+      guidance.push(
+        "- Answer like native OpenClaw first. Do not inspect Basecamp, Figma, workflows, connectors, or credentials unless the task clearly requires live workspace data.",
+      );
+      break;
+  }
+
+  if (params.intents.has("basecamp")) {
+    guidance.push(
+      "- Never answer Basecamp-specific questions from stale memory when live tools are available.",
+    );
+  }
+
+  return guidance;
+}
+
+export function buildPmosChatExecutionPlan(params: {
+  latestUserMessage: string;
+  urlHints: WorkspaceChatUrlHints;
+  pastedUrlCount: number;
+  hasScreenContext: boolean;
+}): PmosChatExecutionPlan {
+  const latestUserMessage = params.latestUserMessage.trim();
+  const intents = detectChatIntents(latestUserMessage, params.urlHints);
+  const specialistIntents = [...intents].filter((intent) => intent !== "general");
+  const hasMixedWorkspaceUrls = Boolean(params.urlHints.basecampUrl && params.urlHints.figmaUrl);
+  const shouldPreferProjectList =
+    intents.has("basecamp") &&
+    !params.urlHints.basecampUrl &&
+    /\b(list|show|what|which|give|display|name)\b[\s\w-]{0,40}\bprojects?\b|\bprojects?\b[\s\w-]{0,30}\b(names?|ids?|list)\b/i.test(
+      latestUserMessage,
+    );
+  const preferredBasecampNamedTool =
+    intents.has("basecamp") && !shouldPreferProjectList && !params.urlHints.basecampUrl
+      ? inferPreferredBasecampNamedTool(latestUserMessage)
+      : null;
+  const shouldPreferFigmaMcpDiscovery =
+    intents.has("figma") && isFigmaDeepContextRequest(latestUserMessage);
+  const shouldPreferExplicitFigmaFileRouting =
+    Boolean(params.urlHints.figmaUrl) && !hasMixedWorkspaceUrls;
+  const workflowWithBasecampTarget =
+    intents.has("workflow") &&
+    intents.has("basecamp") &&
+    !intents.has("figma") &&
+    !params.urlHints.basecampUrl &&
+    specialistIntents.length === 2;
+
+  let mode: PmosChatExecutionMode = "general";
+  if (hasMixedWorkspaceUrls || (specialistIntents.length > 1 && !workflowWithBasecampTarget)) {
+    mode = "cross_system";
+  } else if (intents.has("workflow")) {
+    mode = "workflow";
+  } else if (intents.has("figma")) {
+    mode = "figma";
+  } else if (intents.has("basecamp")) {
+    mode = isBasecampManagerRequest(latestUserMessage) ? "basecamp_manager" : "basecamp_lookup";
+  }
+
+  const includeWorkspaceMemory =
+    isWorkspaceOpsRequest(latestUserMessage) ||
+    /(\bworkspace\b|\bcommand center\b|\bavailable tools\b|\bwhat can you access\b)/i.test(
+      latestUserMessage,
+    );
+  const includeCredentials = mode === "workflow" || (mode === "cross_system" && intents.has("workflow"));
+  const includeScreenContext =
+    params.hasScreenContext &&
+    (mode === "figma" ||
+      mode === "cross_system" ||
+      /\b(this screen|current screen|selected|here|this view|current panel)\b/i.test(
+        latestUserMessage,
+      ));
+  const includeUrlHints = params.pastedUrlCount > 0;
+  const needsLiveData =
+    specialistIntents.length > 0 || includeWorkspaceMemory || includeCredentials || includeUrlHints;
+
+  const responseStyle =
+    mode === "basecamp_manager"
+      ? "project_manager"
+      : mode === "workflow"
+        ? "workflow_operator"
+        : mode === "figma"
+          ? "design_analyst"
+          : mode === "cross_system"
+            ? "orchestrator"
+            : "concise";
+
+  const plannerSummaryMap: Record<PmosChatExecutionMode, string> = {
+    general: "Native chat turn. Keep context minimal and only escalate into workspace tools if the request truly needs live data.",
+    basecamp_lookup: "Deterministic Basecamp lookup. Use exact tools and keep the reply focused on the requested project-management object or queue.",
+    basecamp_manager: "Project-manager briefing. Pull the necessary Basecamp data, triage it, and answer like a strong operator rather than a raw reporter.",
+    workflow: "Workflow operator turn. Inspect only the automation/credential context needed to complete the requested workflow task.",
+    figma: "Design-context turn. Anchor to the relevant Figma file and use the smallest matching MCP capability surface.",
+    cross_system: "Cross-system orchestration turn. Plan the narrowest multi-tool sequence before gathering live data.",
+  };
+  const thinkingNoteMap: Record<PmosChatExecutionMode, string> = {
+    general: "Focusing on the user's request and keeping context tight.",
+    basecamp_lookup: "Pulling only the exact Basecamp data needed for this lookup.",
+    basecamp_manager: "Building a focused project-manager brief from live Basecamp data.",
+    workflow: "Checking only the workflow connections and actions relevant to this request.",
+    figma: "Anchoring to the right design context before inspecting the file.",
+    cross_system: "Planning the smallest cross-system probe before gathering live data.",
+  };
+
+  return {
+    mode,
+    intents: [...intents],
+    needsLiveData,
+    includeWorkspaceMemory,
+    includeCredentials,
+    includeScreenContext,
+    includeUrlHints,
+    responseStyle,
+    plannerSummary: plannerSummaryMap[mode],
+    thinkingNote: thinkingNoteMap[mode],
+    guidance: buildPmosPlannerGuidance({
+      mode,
+      latestUserMessage,
+      intents,
+      urlHints: params.urlHints,
+      pastedUrlCount: params.pastedUrlCount,
+      shouldPreferProjectList,
+      preferredBasecampNamedTool,
+      shouldPreferFigmaMcpDiscovery,
+      shouldPreferExplicitFigmaFileRouting,
+    }),
+  };
 }
 
 const BASECAMP_CORE_TOOL_NAMES = new Set([
@@ -4561,7 +4816,6 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             startedAt: liveStartedAt,
           },
         });
-        emitThinking("Reviewing workspace context, recent conversation, and available connectors.");
       }
 
       const { callWorkspaceModelAgentLoop } = await import("../workflow-ai.js");
@@ -4601,80 +4855,35 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         }
       };
 
-      const [workspaceAiContext, availableCredentials] = await Promise.all([
-        withTimeout(
-          getWorkspaceAiContextForPrompt(workspaceId, { ensureFresh: false, maxChars: 6000 }).catch(() => ""),
-          4000,
-          "",
-        ),
-        withTimeout(
-          fetchWorkspaceCredentials(workspaceId).catch(() => []),
-          5000,
-          [] as Awaited<ReturnType<typeof fetchWorkspaceCredentials>>,
-        ),
-      ]);
-
-      const credentialContext = buildCredentialContext(availableCredentials);
       const latestUserMessage = [...messages]
         .reverse()
         .find((message) => message.role === "user")?.content ?? "";
       const pastedUrlCount = countDistinctAbsoluteUrls(latestUserMessage);
       const pastedUrlHints = inspectWorkspaceChatUrls(latestUserMessage);
+      const plan = buildPmosChatExecutionPlan({
+        latestUserMessage,
+        urlHints: pastedUrlHints,
+        pastedUrlCount,
+        hasScreenContext: Boolean(p?.screenContext?.trim()),
+      });
+      if (liveStreamEnabled) {
+        emitThinking(plan.thinkingNote);
+      }
       const hasMixedWorkspaceUrls = Boolean(
         pastedUrlHints.figmaUrl && pastedUrlHints.basecampUrl,
       );
-      const intents = detectChatIntents(latestUserMessage, pastedUrlHints);
-      const shouldPreferBasecamp = intents.has("basecamp");
-      const shouldPreferProjectList =
-        shouldPreferBasecamp &&
-        !pastedUrlHints.basecampUrl &&
-        /\b(list|show|what|which|give|display|name)\b[\s\w-]{0,40}\bprojects?\b|\bprojects?\b[\s\w-]{0,30}\b(names?|ids?|list)\b/i.test(
-          latestUserMessage,
-        );
-      const preferredBasecampNamedTool =
-        shouldPreferBasecamp && !shouldPreferProjectList && !pastedUrlHints.basecampUrl
-          ? inferPreferredBasecampNamedTool(latestUserMessage)
-          : null;
-      const shouldPreferFigmaContext = intents.has("figma");
-      const shouldPreferFigmaMcpDiscovery =
-        shouldPreferFigmaContext && isFigmaDeepContextRequest(latestUserMessage);
-      const shouldPreferExplicitFigmaFileRouting =
-        Boolean(pastedUrlHints.figmaUrl) && !hasMixedWorkspaceUrls;
+      const intents = new Set<ChatIntent>(plan.intents);
       const runtimeUrlHints = [
         pastedUrlHints.basecampUrl
           ? `- Pasted Basecamp URL detected for this request: ${pastedUrlHints.basecampUrl}. Treat that URL as the exact resource to inspect.${pastedUrlHints.basecampBucketId ? ` Bucket ID: ${pastedUrlHints.basecampBucketId}.` : ""}${pastedUrlHints.basecampCardId ? ` Card ID: ${pastedUrlHints.basecampCardId}.` : ""}${pastedUrlHints.basecampRecordingId ? ` Recording/comment thread ID: ${pastedUrlHints.basecampRecordingId}.` : ""}${pastedUrlHints.basecampCardPath ? ` If you need direct card data, \`bcgpt_basecamp_raw\` can use path \`${pastedUrlHints.basecampCardPath}\`.` : ""}`
           : null,
         pastedUrlHints.figmaUrl
-          ? `- Pasted Figma URL detected for this request: ${pastedUrlHints.figmaUrl}. Anchor to that exact file, do not default to the selected Figma panel file if it is different, and prefer live Figma MCP discovery first: call \`figma_mcp_list_tools\`, then \`figma_mcp_call\` with the exact capability needed for comments, annotations, screenshots, structure, variables, or node context. Fall back to \`figma_pat_audit_file\` only if MCP auth/capability is unavailable or the user explicitly wants a structural audit.`
+          ? `- Pasted Figma URL detected for this request: ${pastedUrlHints.figmaUrl}. Anchor to that exact file instead of the selected workspace file.`
           : null,
       ].filter((line): line is string => Boolean(line));
-      const requestRoutingHints = [
-        hasMixedWorkspaceUrls
-          ? "- Both a Figma URL and a Basecamp URL were supplied. Treat this as a cross-tool task: inspect both resources, reconcile them, and do not stop after the first successful tool call."
-          : null,
-        pastedUrlCount >= 2
-          ? "- This request includes multiple explicit URLs/resources. Consider `pmos_parallel_subtasks` when separate probes can run independently, then aggregate the results into one answer."
-          : null,
-        shouldPreferExplicitFigmaFileRouting
-          ? "- Anchor to the explicit Figma file URL and use live Figma MCP capabilities first. For deeper inspection, list tools, choose the exact MCP capability the task needs, and only fall back to `figma_pat_audit_file` if MCP cannot reach that file or the user explicitly wants a structural audit."
-          : null,
-        shouldPreferFigmaMcpDiscovery
-          ? "- This Figma request asks for deeper context such as comments, annotations, feedback, variables, screenshots, metadata, or exact node/file understanding. Prefer `figma_mcp_list_tools`, then `figma_mcp_call` with the specific MCP capability that matches that need instead of defaulting to `figma_pat_audit_file`."
-          : null,
-        shouldPreferProjectList
-          ? "- Prefer `bcgpt_list_projects` first because the user appears to want exact project names or a raw project list."
-          : null,
-        preferredBasecampNamedTool
-          ? `- Prefer \`bcgpt_mcp_call\` first with tool \`${preferredBasecampNamedTool.tool}\` because ${preferredBasecampNamedTool.reason}. Use \`bcgpt_list_tools\` first only if you need to confirm the exact tool schema.`
-          : null,
-        shouldPreferBasecamp && !shouldPreferProjectList && !preferredBasecampNamedTool && !pastedUrlHints.basecampUrl
-          ? "- This Basecamp request is broader or ambiguous. Use `bcgpt_smart_action` for the first lookup, or `bcgpt_list_tools` followed by `bcgpt_mcp_call` if you need an exact named MCP tool."
-          : null,
-        shouldPreferFigmaContext && !shouldPreferExplicitFigmaFileRouting
-          ? "- Consider `figma_get_context` first to anchor design analysis to the active workspace file before auditing or comparing results."
-          : null,
-      ].filter((line): line is string => Boolean(line));
+      const requestRoutingHints = plan.guidance;
       const directBasecampShortcut =
+        plan.mode !== "cross_system" &&
         intents.has("basecamp") &&
         !intents.has("workflow") &&
         !intents.has("figma") &&
@@ -4719,6 +4928,31 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         }
       }
 
+      const [workspaceAiContext, availableCredentials] = await Promise.all([
+        plan.includeWorkspaceMemory
+          ? withTimeout(
+              getWorkspaceAiContextForPrompt(workspaceId, {
+                ensureFresh: false,
+                maxChars: 2500,
+              }).catch(() => ""),
+              3500,
+              "",
+            )
+          : Promise.resolve(""),
+        plan.includeCredentials
+          ? withTimeout(
+              fetchWorkspaceCredentials(workspaceId).catch(() => []),
+              4500,
+              [] as Awaited<ReturnType<typeof fetchWorkspaceCredentials>>,
+            )
+          : Promise.resolve([] as Awaited<ReturnType<typeof fetchWorkspaceCredentials>>),
+      ]);
+
+      const credentialContext =
+        plan.includeCredentials && availableCredentials.length > 0
+          ? buildCredentialContext(availableCredentials)
+          : "";
+
       // Build agent-aware preamble: custom agents get their identity injected
       const agentIdentity = agentConfig?.identity as
         | { name?: string; emoji?: string; theme?: string }
@@ -4728,145 +4962,59 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
           ? [
               `You are "${agentIdentity.name}"${agentIdentity.emoji ? ` ${agentIdentity.emoji}` : ""}, a custom AI agent in workspace ${workspaceId}.`,
               ...(agentIdentity.theme ? [`Your personality/focus: ${agentIdentity.theme}.`] : []),
-              "Think like a general AI orchestrator first, and use specialist tools when the request needs live workspace state or external actions.",
+              "Think clearly, stay concise, and use specialist tools only when the task truly needs live workspace state or external actions.",
             ].join(" ")
-          : `You are the OpenClaw workspace operator for workspace ${workspaceId}. Think like a general AI orchestrator first, and use specialist tools when the request needs live workspace state or external actions.`;
+          : `You are the OpenClaw workspace operator for workspace ${workspaceId}. Think clearly, stay concise, and use specialist tools only when the task truly needs live workspace state or external actions.`;
+
+      const compactToolFamilyLines = [
+        intents.has("basecamp")
+          ? "- Basecamp: `bcgpt_list_projects`, `bcgpt_mcp_call`, `bcgpt_smart_action`, `bcgpt_list_tools`, `bcgpt_basecamp_raw`."
+          : null,
+        intents.has("workflow")
+          ? "- Workflows: `pmos_ops_list_credentials`, `pmos_ops_list_workflows`, `pmos_ops_get_workflow`, `pmos_ops_create_workflow`, `pmos_ops_update_workflow`, `pmos_ops_execute_workflow`."
+          : null,
+        intents.has("figma")
+          ? "- Figma: `figma_get_context`, `figma_mcp_list_tools`, `figma_mcp_call`, `figma_pat_audit_file`."
+          : null,
+        "- General: `pmos_parallel_subtasks`, `web_search`, `web_fetch`.",
+      ].filter((line): line is string => Boolean(line));
 
       const systemPrompt = [
         agentPreamble,
         "",
-        "## What is OpenClaw / BCgpt",
-        "OpenClaw combines Basecamp project management with an embedded Activepieces workflow engine and BCgpt AI layer.",
-        "- **Basecamp layer**: Projects, todos, messages, people, schedules, card tables -- all accessible via BCgpt tools.",
-        "- **Workflow engine layer (Activepieces)**: Visual workflow builder embedded in the platform -- you can CREATE and EDIT flows directly.",
-        "- **BCgpt API**: An intelligent Basecamp integration layer with a smart router (`smart_action`) and full MCP tool set.",
+        "## Execution Brief",
+        `- Mode: ${plan.mode}`,
+        `- Response style: ${plan.responseStyle}`,
+        `- Plan: ${plan.plannerSummary}`,
+        `- Live data required: ${plan.needsLiveData ? "yes" : "no"}`,
+        `- Context slices loaded: ${[
+          plan.includeWorkspaceMemory ? "workspace_memory" : null,
+          plan.includeCredentials ? "credentials" : null,
+          plan.includeScreenContext && p?.screenContext?.trim() ? "screen_context" : null,
+          plan.includeUrlHints ? "url_hints" : null,
+        ]
+          .filter(Boolean)
+          .join(", ") || "none"}`,
         "",
-        "## Operating Mode",
-        "- Default to broad orchestration. Do not assume the request is only about Basecamp, Figma, or workflows just because those tools exist.",
-        "- Enter specialist mode when the request clearly depends on live workspace data, explicit pasted URLs, or a tool-backed action.",
-        "- Use the smallest useful chain of tools, but do not stop after a preparatory or specialist lookup if the user still needs analysis, synthesis, or a cross-system action.",
-        "- When one specialist tool returns useful context, continue with other tools when that context unlocks the real task.",
-        ...(intents.has("basecamp") ? [
-        "",
-        "## BCgpt API Reference",
-        "BCgpt exposes Basecamp data via MCP (Model Context Protocol) and an OpenAPI compatibility layer:",
-        "- `POST /mcp` -- MCP JSON-RPC endpoint. Auth: `x-bcgpt-api-key` header.",
-        "- `POST /mcp` with `tools/list` -- discover the full Basecamp MCP catalog for this workspace before choosing an exact tool.",
-        "- `POST /mcp` with `tools/call` -- invoke an exact named Basecamp MCP tool with structured arguments.",
-        "- `POST /action/:operation` -- OpenAPI wrapper for individual tools.",
-        "- Named Basecamp MCP tools are best for deterministic reads like todo lists, project todos, people, messages, schedules, card tables, documents, and other exact resources.",
-        "- `search_basecamp({query})` -- Cross-resource local search across todos, messages, schedule entries, cards, documents, and people. Fast results from the synced local snapshot. Use this when the user is looking for something across multiple resource types.",
-        "- `smart_action({query})` -- Natural-language router. Best for ambiguous requests, pasted Basecamp URLs, broader searches, and summary or audit style questions when the exact tool is not obvious.",
-        "- `basecamp_raw({method, path, body})` -- Raw Basecamp API access for anything not covered by named tools.",
-        ] : []),
-        "",
-        "## How to Think and Respond",
-        "",
-        "### Analyze, don't dump",
+        "## Operating Rules",
+        "- Keep answers precise and useful. Do not start by narrating workspace scans, connector checks, or setup reviews unless the user asked for that.",
         "- Never output raw lists of IDs, raw JSON payloads, or unannotated tool results at the user.",
-        "- When you retrieve data (credentials, workflows, todos, projects), INTERPRET it: what matters for this user's question?",
-        "- Example: Instead of listing 50 node types, say 'You have Slack, GitHub, and Basecamp nodes connected -- I'll use those.'",
+        "- Use live specialist tools only when the request needs them.",
+        "- Use the smallest useful chain of tools, but continue reasoning after a tool call when the user still needs interpretation, prioritization, or next steps.",
+        "- Always give a concrete next step when it helps the user move forward.",
         "",
-        "### Be proactive, not lazy",
-        "- Don't ask the user for information you can discover with a tool call.",
-        ...(intents.has("basecamp") ? [
-        "- For Basecamp/project-management requests, use `bcgpt_list_projects` for exact project lists, `bcgpt_mcp_call` for deterministic named MCP tools, and `bcgpt_smart_action` only when the request is ambiguous, search-like, or needs broad narrative synthesis.",
-        "- If you are not sure which Basecamp MCP tool exists, call `bcgpt_list_tools` once, then choose the exact tool with `bcgpt_mcp_call`.",
-        "- Never call Basecamp tools for greetings, session-start acknowledgements, or other non-Basecamp chit-chat.",
-        ] : []),
-        ...(intents.has("workflow") ? [
-        "- Always call `pmos_ops_list_credentials` before building any workflow so you know what's actually connected.",
-        ] : []),
-        "- If the user asks about a project or person, call the appropriate tool to find the answer rather than guessing.",
-        "- If a specialist tool only gives setup context, continue to the actual analysis or action instead of stopping there.",
+        "## Domain Guidance",
+        ...requestRoutingHints,
         "",
-        "### Parallel orchestration",
-        "- For 2 or more independent URLs, resources, or analysis slices, you may call `pmos_parallel_subtasks` to spawn temporary parallel subagents.",
-        "- Give each subagent one narrow job, then aggregate the returned findings yourself.",
-        "- Use parallel subagents to speed up deep audits, cross-system comparisons, or map-reduce style analysis.",
-        "- Do not stop at the returned subagent summary; continue reasoning and call more tools if the combined evidence still has gaps.",
-        "",
-        "### Always provide next steps",
-        "Every response should tell the user what to do next. Examples:",
-        "- 'Activate the workflow by clicking the toggle in the top right of the workflow editor.'",
-        "- 'Copy the webhook URL from the Webhook Trigger node and paste it into Basecamp project settings â†' Webhooks.'",
-        "- 'Check your Slack credential is pointing to the #alerts channel.'",
-        "- 'Open the Executions tab to verify the workflow ran correctly.'",
-        "",
-        ...(intents.has("workflow") ? [
-        "### Workflow creation rules",
-        "- When asked to CREATE a workflow: call `pmos_ops_create_workflow` immediately -- never output JSON for the user to import.",
-        "- When asked to EDIT/UPDATE/FIX a workflow: call `pmos_ops_update_workflow` on the existing workflow ID.",
-        "- Always call `pmos_ops_list_credentials` first so credential IDs are correct in node parameters.",
-        "- For Basecamp steps: always use the compat Basecamp node type `n8n-nodes-basecamp.basecamp`, always include credentials, use `findByName` to resolve project names.",
-        "- Position nodes left-to-right: trigger at [250, 300], each next node at x+250.",
-        "- Build complete, runnable workflows -- no manual rewiring needed.",
-        "",
-        ] : []),
-        ...(intents.has("basecamp") ? [
-        "### Project management questions",
-        "- Use workspace context for connector readiness and defaults only; do not answer Basecamp questions from memory when live tools are available.",
-        "- For live Basecamp data, use `bcgpt_list_projects` when the user wants the raw project list, use `bcgpt_mcp_call` for exact named MCP tools like `list_todolists`, `list_todos_for_project`, `list_todos_due`, `report_todos_overdue`, `list_messages`, `list_project_people`, `list_schedule_entries`, `list_card_tables`, or `list_documents`, and use `bcgpt_smart_action` when the task is ambiguous, search-oriented, or summary-oriented.",
-        "- If the user pastes a Basecamp URL, treat it as the exact resource to inspect and pass the URL through `bcgpt_smart_action.query` first because it knows how to anchor exact linked resources.",
-        "- If the right named Basecamp MCP tool is unclear, call `bcgpt_list_tools` and then `bcgpt_mcp_call` instead of defaulting to `smart_action`.",
-        "- If `bcgpt_smart_action` cannot resolve an exact Basecamp resource, use `bcgpt_basecamp_raw` for direct API lookup instead of repeating the same smart_action query.",
-        "- Summarize results meaningfully: 'There are 7 open todos in Project X -- 3 are overdue. The most recent message was from Alice yesterday about the deploy.'",
-        "",
-        ] : []),
-        ...(intents.has("figma") ? [
-        "### Figma questions",
-        "- Start with `figma_get_context` when the active workspace file matters, but let the model choose the actual sequence from the request instead of forcing a fixed first tool.",
-        "- Workspace chat exposes official Figma MCP plus PAT-backed fallback only. The embedded Figma panel is for syncing selected-file context and PAT handoff, not a separate AI tool system.",
-        "- Use official `figma_*` tools for document/design tasks: comments, annotations, node metadata, design context, components, styles, variables, fonts, auto-layout, screenshots, structure, and design audits.",
-        "- For deep Figma understanding, prefer the full live MCP surface: call `figma_mcp_list_tools`, inspect what is available, then use `figma_mcp_call` for the exact capability you need.",
-        "- The official Figma MCP docs emphasize context-first tools such as `get_design_context`, `get_metadata`, `get_screenshot`, and `get_variable_defs`. Prefer those kinds of tools when the task is understanding a file, comments, annotations, or implementation detail.",
-        "- True Figma annotations come from the PMOS Figma plugin bridge, not the comments API. If `get_annotations` reports that a plugin bridge sync is required, do not silently substitute file comments.",
-        "- If the user asks about comments, annotations, review feedback, pinned notes, or exact node/file context, do not default to `figma_pat_audit_file`. Discover the relevant MCP capability first and use it.",
-        "- Treat `figma_pat_audit_file` as a fallback for structural audits or when official Figma MCP auth/capability is unavailable, not as the default answer path for deeper Figma requests.",
-        "- If the user pastes a Figma file URL, extract the file key from that URL and pass it to whichever Figma tool needs it. Do not default to the selected file when an explicit Figma URL is present.",
-        "- If official Figma MCP returns auth required, 405, or unavailable, then call `figma_pat_audit_file` on the target file and continue reasoning from that fallback instead of stopping.",
-        "- Do NOT use `web_fetch` for private Figma API access in workspace chat; it cannot inject the workspace PAT.",
-        "",
-        ] : []),
-        "## Available Tools",
-        ...(intents.has("basecamp") ? [
-        "**Basecamp MCP Tools:**",
-        "- `bcgpt_list_projects` -- fetch live Basecamp projects with names, IDs, and status",
-        "- `bcgpt_list_tools` -- inspect the full Basecamp MCP tool catalog when you need an exact named capability",
-        "- `bcgpt_mcp_call` -- call an exact named Basecamp MCP tool with structured arguments",
-        "- `bcgpt_smart_action` -- run natural-language Basecamp queries through the bcgpt MCP router when the task is ambiguous or URL-driven",
-        "- `bcgpt_basecamp_raw` -- make a direct Basecamp API request through bcgpt when an exact resource lookup is needed",
-        "",
-        ] : []),
-        ...(intents.has("workflow") ? [
-        "**Workflow Engine Tools:**",
-        "- `pmos_ops_list_credentials` -- see which services are connected (Basecamp, Slack, GitHub, etc.)",
-        "- `pmos_ops_list_workflows` -- list existing workflow-engine flows with names and IDs",
-        "- `pmos_ops_create_workflow` -- CREATE a new workflow-engine flow right now",
-        "- `pmos_ops_update_workflow` -- UPDATE an existing workflow (by ID)",
-        "- `pmos_ops_get_workflow` -- get full definition of a specific workflow by ID",
-        "- `pmos_ops_execute_workflow` -- test-run a workflow by ID",
-        "- `pmos_ops_list_node_types` -- list available trigger and action node types",
-        "",
-        ] : []),
-        "**General Tools:**",
-        "- `pmos_parallel_subtasks` -- run multiple temporary parallel subagents on independent probes, then aggregate their findings back into the main loop",
-        "- `web_search` -- search the web for current information",
-        "- `web_fetch` -- fetch the content of a URL",
-        ...(intents.has("figma") ? [
-        "",
-        "**Figma Tools:**",
-        "- `figma_get_context` -- read the selected file/team context from the Figma panel so you can reason about workspace state",
-        "- `figma_mcp_list_tools` -- inspect the full live Figma MCP capability surface exposed through the PMOS-owned Figma MCP service before choosing a Figma operation",
-        "- `figma_mcp_call` -- call any discovered Figma MCP capability through the PMOS-owned Figma MCP service, especially context-first tools like `get_design_context`, `get_metadata`, `get_screenshot`, `get_variable_defs`, comments, annotations, nodes, and deeper file context",
-        "- `figma_pat_audit_file` -- run a Figma REST audit with the workspace PAT only as a structural fallback when MCP auth or capability is unavailable, or when the task is explicitly an audit",
-        ] : []),
+        "## Tool Families In Play",
+        ...compactToolFamilyLines,
         "",
         ...(runtimeUrlHints.length ? ["## Request-Specific URL Routing", ...runtimeUrlHints, ""] : []),
-        ...(requestRoutingHints.length ? ["## Request-Specific Tool Guidance", ...requestRoutingHints, ""] : []),
         ...(credentialContext ? [credentialContext, ""] : []),
         ...(workspaceAiContext ? ["## Workspace Memory", workspaceAiContext] : []),
-        ...(p?.screenContext?.trim() ? ["", "## Current Screen Context", p.screenContext.trim()] : []),
+        ...(plan.includeScreenContext && p?.screenContext?.trim()
+          ? ["", "## Current Screen Context", p.screenContext.trim()]
+          : []),
       ].join("\n");
 
       // â"€â"€ Tool definitions (OpenAI function-calling format) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
