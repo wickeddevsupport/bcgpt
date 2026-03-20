@@ -134,6 +134,31 @@ export type PmosEntityDetail = {
   subscription: unknown;
 };
 
+export type PmosCreateTodoInput = {
+  projectName: string;
+  title: string;
+  description?: string | null;
+  todolist?: string | null;
+  dueOn?: string | null;
+};
+
+export type PmosTodoMutationInput = {
+  projectName: string;
+  todoId: string;
+};
+
+export type PmosCreateCommentInput = {
+  projectName: string;
+  reference: PmosEntityReference;
+  content: string;
+};
+
+export type PmosMutationResult = {
+  ok: boolean;
+  message: string;
+  detail?: unknown;
+};
+
 export type PmosProjectsState = {
   connected: boolean;
   client: GatewayBrowserClient | null;
@@ -230,5 +255,52 @@ export async function fetchProjectEntityDetail(
     id: reference.id,
     projectId: reference.projectId,
     url: reference.url,
+  });
+}
+
+export async function createProjectTodo(
+  client: GatewayBrowserClient,
+  input: PmosCreateTodoInput,
+): Promise<PmosMutationResult> {
+  return await client.request<PmosMutationResult>("pmos.todo.create", {
+    projectName: input.projectName,
+    title: input.title,
+    description: input.description ?? null,
+    todolist: input.todolist ?? null,
+    dueOn: input.dueOn ?? null,
+  });
+}
+
+export async function completeProjectTodo(
+  client: GatewayBrowserClient,
+  input: PmosTodoMutationInput,
+): Promise<PmosMutationResult> {
+  return await client.request<PmosMutationResult>("pmos.todo.complete", {
+    projectName: input.projectName,
+    todoId: input.todoId,
+  });
+}
+
+export async function reopenProjectTodo(
+  client: GatewayBrowserClient,
+  input: PmosTodoMutationInput,
+): Promise<PmosMutationResult> {
+  return await client.request<PmosMutationResult>("pmos.todo.uncomplete", {
+    projectName: input.projectName,
+    todoId: input.todoId,
+  });
+}
+
+export async function createProjectComment(
+  client: GatewayBrowserClient,
+  input: PmosCreateCommentInput,
+): Promise<PmosMutationResult> {
+  return await client.request<PmosMutationResult>("pmos.comment.create", {
+    projectName: input.projectName,
+    type: input.reference.type,
+    id: input.reference.id,
+    projectId: input.reference.projectId,
+    url: input.reference.url,
+    content: input.content,
   });
 }

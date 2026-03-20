@@ -7305,6 +7305,239 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     }
   },
 
+  "pmos.todo.create": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const payload = isJsonObject(params) ? params : {};
+      const projectName = stringOrNull(payload.projectName) ?? stringOrNull(payload.project) ?? "";
+      const title = stringOrNull(payload.title) ?? stringOrNull(payload.task) ?? stringOrNull(payload.content) ?? "";
+      const description = stringOrNull(payload.description);
+      const todolist = stringOrNull(payload.todolist);
+      const dueOn = stringOrNull(payload.dueOn) ?? stringOrNull(payload.due_on);
+
+      if (!projectName.trim()) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "projectName is required."));
+        return;
+      }
+      if (!title.trim()) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "title is required."));
+        return;
+      }
+
+      const { bcgptUrl, apiKey } = await resolveWorkspaceBcgptAccess({
+        workspaceId,
+        allowGlobalSecrets: true,
+      });
+      if (!apiKey) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, "Basecamp integration is not configured for this workspace."));
+        return;
+      }
+
+      const result = await callBcgptTool({
+        bcgptUrl,
+        apiKey,
+        toolName: "create_todo",
+        toolArgs: {
+          project: projectName,
+          task: title,
+          description: description ?? undefined,
+          todolist: todolist ?? undefined,
+          due_on: dueOn ?? undefined,
+        },
+        timeoutMs: 45_000,
+      });
+      if (!result.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error ?? "Failed to create todo"));
+        return;
+      }
+
+      const root = isJsonObject(result.result) ? result.result : {};
+      const todo = isJsonObject(root.todo) ? root.todo : null;
+      respond(true, {
+        ok: true,
+        message: stringOrNull(root.message) ?? "Todo created.",
+        detail: todo
+          ? {
+              id: numberStringOrNull(todo.id),
+              title: stringOrNull(todo.title) ?? stringOrNull(todo.content),
+              appUrl: stringOrNull(todo.app_url) ?? stringOrNull(todo.appUrl),
+              dueOn: stringOrNull(todo.due_on) ?? stringOrNull(todo.dueOn),
+            }
+          : null,
+      }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.todo.complete": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const payload = isJsonObject(params) ? params : {};
+      const projectName = stringOrNull(payload.projectName) ?? stringOrNull(payload.project) ?? "";
+      const todoId = numberStringOrNull(payload.todoId) ?? numberStringOrNull(payload.todo_id);
+      if (!projectName.trim() || !todoId) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "projectName and todoId are required."));
+        return;
+      }
+
+      const { bcgptUrl, apiKey } = await resolveWorkspaceBcgptAccess({
+        workspaceId,
+        allowGlobalSecrets: true,
+      });
+      if (!apiKey) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, "Basecamp integration is not configured for this workspace."));
+        return;
+      }
+
+      const result = await callBcgptTool({
+        bcgptUrl,
+        apiKey,
+        toolName: "complete_todo",
+        toolArgs: {
+          project: projectName,
+          todo_id: Number(todoId),
+        },
+        timeoutMs: 30_000,
+      });
+      if (!result.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error ?? "Failed to complete todo"));
+        return;
+      }
+
+      const root = isJsonObject(result.result) ? result.result : {};
+      respond(true, {
+        ok: true,
+        message: stringOrNull(root.message) ?? "Todo completed.",
+        detail: {
+          todoId,
+          status: "completed",
+        },
+      }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.todo.uncomplete": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const payload = isJsonObject(params) ? params : {};
+      const projectName = stringOrNull(payload.projectName) ?? stringOrNull(payload.project) ?? "";
+      const todoId = numberStringOrNull(payload.todoId) ?? numberStringOrNull(payload.todo_id);
+      if (!projectName.trim() || !todoId) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "projectName and todoId are required."));
+        return;
+      }
+
+      const { bcgptUrl, apiKey } = await resolveWorkspaceBcgptAccess({
+        workspaceId,
+        allowGlobalSecrets: true,
+      });
+      if (!apiKey) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, "Basecamp integration is not configured for this workspace."));
+        return;
+      }
+
+      const result = await callBcgptTool({
+        bcgptUrl,
+        apiKey,
+        toolName: "uncomplete_todo",
+        toolArgs: {
+          project: projectName,
+          todo_id: Number(todoId),
+        },
+        timeoutMs: 30_000,
+      });
+      if (!result.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error ?? "Failed to reopen todo"));
+        return;
+      }
+
+      const root = isJsonObject(result.result) ? result.result : {};
+      respond(true, {
+        ok: true,
+        message: stringOrNull(root.message) ?? "Todo reopened.",
+        detail: {
+          todoId,
+          status: "active",
+        },
+      }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
+  "pmos.comment.create": async ({ params, respond, client }) => {
+    try {
+      if (!client) throw new Error("client context required");
+      const workspaceId = requireWorkspaceId(client);
+      const payload = isJsonObject(params) ? params : {};
+      const projectName = stringOrNull(payload.projectName) ?? stringOrNull(payload.project) ?? "";
+      const content = stringOrNull(payload.content) ?? stringOrNull(payload.body) ?? "";
+      const id = numberStringOrNull(payload.id) ?? numberStringOrNull(payload.recording_id);
+      const url = stringOrNull(payload.url);
+
+      if (!projectName.trim()) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "projectName is required."));
+        return;
+      }
+      if (!content.trim()) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "content is required."));
+        return;
+      }
+      if (!id && !url) {
+        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "An item id or url is required."));
+        return;
+      }
+
+      const { bcgptUrl, apiKey } = await resolveWorkspaceBcgptAccess({
+        workspaceId,
+        allowGlobalSecrets: true,
+      });
+      if (!apiKey) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, "Basecamp integration is not configured for this workspace."));
+        return;
+      }
+
+      const result = await callBcgptTool({
+        bcgptUrl,
+        apiKey,
+        toolName: "create_comment",
+        toolArgs: {
+          project: projectName,
+          recording_id: id ?? url,
+          url: url ?? undefined,
+          content,
+        },
+        timeoutMs: 45_000,
+      });
+      if (!result.ok) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error ?? "Failed to create comment"));
+        return;
+      }
+
+      const root = isJsonObject(result.result) ? result.result : {};
+      const comment = isJsonObject(root.comment) ? root.comment : null;
+      respond(true, {
+        ok: true,
+        message: stringOrNull(root.message) ?? "Comment created.",
+        detail: comment
+          ? {
+              id: numberStringOrNull(comment.id),
+              appUrl: stringOrNull(comment.app_url) ?? stringOrNull(comment.appUrl),
+              createdAt: stringOrNull(comment.created_at) ?? stringOrNull(comment.createdAt),
+            }
+          : null,
+      }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+
   "pmos.entity.detail": async ({ params, respond, client }) => {
     try {
       if (!client) throw new Error("client context required");

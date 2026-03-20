@@ -29,6 +29,16 @@ export type CommandCenterProps = {
   selectedEntityDetail: PmosEntityDetail | null;
   selectedEntityLoading: boolean;
   selectedEntityError: string | null;
+  actionBusy: boolean;
+  actionError: string | null;
+  actionMessage: string | null;
+  todoDraft: {
+    title: string;
+    description: string;
+    list: string;
+    dueOn: string;
+  };
+  entityCommentDraft: string;
   onRefresh: () => void;
   onOpenIntegrations: () => void;
   onOpenWorkflows: () => void;
@@ -42,6 +52,11 @@ export type CommandCenterProps = {
   onLoadProjectSection: (projectName: string, section: PmosProjectDetailTab) => void;
   onOpenItemDetail: (reference: PmosEntityReference) => void;
   onCloseItemDetail: () => void;
+  onTodoDraftChange: (field: "title" | "description" | "list" | "dueOn", value: string) => void;
+  onCreateTodo: () => void;
+  onToggleTodo: (todoId: string, completed: boolean) => void;
+  onEntityCommentDraftChange: (value: string) => void;
+  onCreateEntityComment: () => void;
 };
 
 function healthChipClass(health: PmosProjectCard["health"]) {
@@ -596,6 +611,11 @@ function renderProjectDetailHeader(props: CommandCenterProps) {
         ? html`<a class="btn btn--sm" href=${project.appUrl} target="_blank" rel="noreferrer">Open in Basecamp</a>`
         : nothing}
     </div>
+    ${props.actionError
+      ? html`<div class="callout danger project-action-notice">${props.actionError}</div>`
+      : props.actionMessage
+        ? html`<div class="callout project-action-notice">${props.actionMessage}</div>`
+        : nothing}
   `;
 }
 
@@ -619,6 +639,7 @@ function renderProjectDetailTabs(props: CommandCenterProps) {
 function renderOverviewTab(props: CommandCenterProps, project: PmosProjectCard) {
   return html`
     <div class="project-section-content">
+      ${renderTodoComposer(props, project, "Project quick add")}
       ${project.description
         ? html`<div class="project-overview-summary">${project.description}</div>`
         : nothing}
@@ -700,11 +721,12 @@ type NormalizedTodo = { id: string | null; title: string; status: string | null;
 type NormalizedTodoGroup = { name: string; todosCount: number; todos: NormalizedTodo[] };
 
 function renderTodosSection(props: CommandCenterProps, project: PmosProjectCard, data: unknown) {
-  if (!Array.isArray(data) || data.length === 0) return html`<div class="muted">No todos found.</div>`;
-  const groups = data as NormalizedTodoGroup[];
+  const groups = Array.isArray(data) ? (data as NormalizedTodoGroup[]) : [];
   const totalOpen = groups.reduce((sum, g) => sum + g.todos.filter((t) => t.status !== "completed").length, 0);
   return html`
     <div class="project-section-list">
+      ${renderTodoComposer(props, project, "Add a todo")}
+      ${groups.length === 0 ? html`<div class="muted">No todos found.</div>` : nothing}
       <div class="project-section-summary muted" style="font-size:12px; margin-bottom:8px;">${totalOpen} open across ${groups.length} list${groups.length !== 1 ? "s" : ""}</div>
       ${groups.map((group) => {
         const open = group.todos.filter((t) => t.status !== "completed");
@@ -736,6 +758,17 @@ function renderTodosSection(props: CommandCenterProps, project: PmosProjectCard,
                         </button>
                       `
                     : nothing}
+                  ${todo.id
+                    ? html`
+                        <button
+                          class="btn btn--xs btn--primary"
+                          ?disabled=${props.actionBusy}
+                          @click=${() => props.onToggleTodo(todo.id!, false)}
+                        >
+                          ${props.actionBusy ? "Working..." : "Complete"}
+                        </button>
+                      `
+                    : nothing}
                   ${todo.assignee ? html`<span class="chip chip--tiny">${todo.assignee}</span>` : nothing}
                   ${todo.dueOn ? html`<span class="muted mono" style="font-size:11px;">${todo.dueOn}</span>` : nothing}
                   ${todo.appUrl ? html`<a class="btn btn--xs" href=${todo.appUrl} target="_blank" rel="noreferrer">Open</a>` : nothing}
@@ -748,6 +781,19 @@ function renderTodosSection(props: CommandCenterProps, project: PmosProjectCard,
                 ${done.map((todo) => html`
                   <div class="project-section-item" style="opacity:0.55; text-decoration:line-through;">
                     <div class="project-section-item__title">${todo.title}</div>
+                    ${todo.id
+                      ? html`
+                          <div class="project-section-item__meta">
+                            <button
+                              class="btn btn--xs"
+                              ?disabled=${props.actionBusy}
+                              @click=${() => props.onToggleTodo(todo.id!, true)}
+                            >
+                              ${props.actionBusy ? "Working..." : "Reopen"}
+                            </button>
+                          </div>
+                        `
+                      : nothing}
                   </div>
                 `)}
               </details>
@@ -756,6 +802,62 @@ function renderTodosSection(props: CommandCenterProps, project: PmosProjectCard,
           </div>
         `;
       })}
+    </div>
+  `;
+}
+
+function renderTodoComposer(props: CommandCenterProps, project: PmosProjectCard, title: string) {
+  return html`
+    <div class="project-action-card">
+      <div class="project-action-card__header">
+        <div>
+          <div class="project-action-card__title">${title}</div>
+          <div class="card-sub">Create work directly from the cockpit and keep PMOS in sync.</div>
+        </div>
+        <button class="btn btn--xs" @click=${() => props.onPrefillChat(`Create the next best todo in "${project.name}" and explain why.`)}>
+          Ask AI
+        </button>
+      </div>
+      <div class="project-action-grid">
+        <label class="project-field">
+          <span>Title</span>
+          <input
+            .value=${props.todoDraft.title}
+            @input=${(event: Event) => props.onTodoDraftChange("title", (event.target as HTMLInputElement).value)}
+            placeholder="What needs to happen?"
+          />
+        </label>
+        <label class="project-field">
+          <span>List</span>
+          <input
+            .value=${props.todoDraft.list}
+            @input=${(event: Event) => props.onTodoDraftChange("list", (event.target as HTMLInputElement).value)}
+            placeholder="Optional todolist name"
+          />
+        </label>
+        <label class="project-field">
+          <span>Due date</span>
+          <input
+            type="date"
+            .value=${props.todoDraft.dueOn}
+            @input=${(event: Event) => props.onTodoDraftChange("dueOn", (event.target as HTMLInputElement).value)}
+          />
+        </label>
+      </div>
+      <label class="project-field">
+        <span>Description</span>
+        <textarea
+          rows="3"
+          .value=${props.todoDraft.description}
+          @input=${(event: Event) => props.onTodoDraftChange("description", (event.target as HTMLTextAreaElement).value)}
+          placeholder="Optional context, acceptance criteria, or notes"
+        ></textarea>
+      </label>
+      <div class="project-action-card__actions">
+        <button class="btn btn--sm btn--primary" ?disabled=${props.actionBusy} @click=${() => props.onCreateTodo()}>
+          ${props.actionBusy ? "Saving..." : "Create todo"}
+        </button>
+      </div>
     </div>
   `;
 }
@@ -1178,6 +1280,17 @@ function renderEntityDetailCard(props: CommandCenterProps) {
                   </div>
                   <div class="row" style="gap:8px; flex-wrap:wrap;">
                     ${detail.appUrl ? html`<a class="btn btn--sm" href=${detail.appUrl} target="_blank" rel="noreferrer">Open in Basecamp</a>` : nothing}
+                    ${detail.reference.type === "todo" && detail.reference.id
+                      ? html`
+                          <button
+                            class="btn btn--sm"
+                            ?disabled=${props.actionBusy}
+                            @click=${() => props.onToggleTodo(detail.reference.id!, detail.status === "completed")}
+                          >
+                            ${detail.status === "completed" ? "Reopen todo" : "Complete todo"}
+                          </button>
+                        `
+                      : nothing}
                     <button
                       class="btn btn--sm btn--primary"
                       @click=${() =>
@@ -1188,6 +1301,37 @@ function renderEntityDetailCard(props: CommandCenterProps) {
                       Ask AI
                     </button>
                   </div>
+                  ${(detail.reference.id || detail.reference.url) && detail.reference.type !== "person"
+                    ? html`
+                        <div class="project-action-card">
+                          <div class="project-action-card__header">
+                            <div>
+                              <div class="project-action-card__title">Add comment</div>
+                              <div class="card-sub">Comment directly here without leaving the cockpit.</div>
+                            </div>
+                          </div>
+                          <label class="project-field">
+                            <span>Comment</span>
+                            <textarea
+                              rows="4"
+                              .value=${props.entityCommentDraft}
+                              @input=${(event: Event) =>
+                                props.onEntityCommentDraftChange((event.target as HTMLTextAreaElement).value)}
+                              placeholder="Write an update, note, or reply"
+                            ></textarea>
+                          </label>
+                          <div class="project-action-card__actions">
+                            <button
+                              class="btn btn--sm btn--primary"
+                              ?disabled=${props.actionBusy}
+                              @click=${() => props.onCreateEntityComment()}
+                            >
+                              ${props.actionBusy ? "Posting..." : "Post comment"}
+                            </button>
+                          </div>
+                        </div>
+                      `
+                    : nothing}
                   ${detail.comments.length > 0
                     ? html`
                         <div class="project-entity-detail__list">

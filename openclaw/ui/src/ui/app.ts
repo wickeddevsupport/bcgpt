@@ -141,13 +141,18 @@ import {
   type PmosCommandPlanStep,
 } from "./controllers/pmos-command-center.ts";
 import {
+  completeProjectTodo,
+  createProjectComment,
+  createProjectTodo,
   fetchProjectEntityDetail,
   fetchProjectSection,
   loadPmosProjectsSnapshot,
+  reopenProjectTodo,
   type PmosProjectCard,
   type PmosProjectDetailTab,
   type PmosEntityDetail,
   type PmosEntityReference,
+  type PmosMutationResult,
   type PmosProjectSectionResult,
   type PmosProjectsSnapshot,
   type PmosProjectTodoItem,
@@ -553,6 +558,14 @@ export class OpenClawApp extends LitElement {
   @state() pmosSelectedEntityDetail: PmosEntityDetail | null = null;
   @state() pmosSelectedEntityLoading = false;
   @state() pmosSelectedEntityError: string | null = null;
+  @state() pmosProjectActionBusy = false;
+  @state() pmosProjectActionError: string | null = null;
+  @state() pmosProjectActionMessage: string | null = null;
+  @state() pmosTodoDraftTitle = "";
+  @state() pmosTodoDraftDescription = "";
+  @state() pmosTodoDraftList = "";
+  @state() pmosTodoDraftDueOn = "";
+  @state() pmosEntityCommentDraft = "";
   @state() pmosScreenContext: string | null = null;
   @state() dashboardTab: "home" | "agents" | "workflows" | "system" = "home";
 
@@ -2021,6 +2034,19 @@ export class OpenClawApp extends LitElement {
 
   async handlePmosProjectsLoad() {
     await loadPmosProjectsSnapshot(this as unknown as Parameters<typeof loadPmosProjectsSnapshot>[0]);
+    if (this.pmosSelectedProject && this.pmosProjectsSnapshot) {
+      const refreshedProject = this.pmosProjectsSnapshot.projects.find(
+        (project) =>
+          project.id === this.pmosSelectedProject?.id ||
+          project.name === this.pmosSelectedProject?.name,
+      );
+      if (refreshedProject) {
+        this.pmosSelectedProject = refreshedProject;
+        if (this.pmosProjectDetailTab === "overview") {
+          this.pmosScreenContext = buildProjectScreenContext(refreshedProject, "overview", null);
+        }
+      }
+    }
     // Auto-inject screen context after snapshot loads
     if (!this.pmosSelectedProject && this.pmosProjectsSnapshot) {
       this.pmosScreenContext = this.pmosCommandCenterTab === "projects"
@@ -2049,6 +2075,13 @@ export class OpenClawApp extends LitElement {
     this.pmosSelectedEntityDetail = null;
     this.pmosSelectedEntityLoading = false;
     this.pmosSelectedEntityError = null;
+    this.pmosProjectActionError = null;
+    this.pmosProjectActionMessage = null;
+    this.pmosTodoDraftTitle = "";
+    this.pmosTodoDraftDescription = "";
+    this.pmosTodoDraftList = "";
+    this.pmosTodoDraftDueOn = "";
+    this.pmosEntityCommentDraft = "";
     if (project) {
       this.pmosScreenContext = buildProjectScreenContext(project, "overview", null);
     } else {
@@ -2065,6 +2098,8 @@ export class OpenClawApp extends LitElement {
     this.pmosSelectedEntityDetail = null;
     this.pmosSelectedEntityLoading = false;
     this.pmosSelectedEntityError = null;
+    this.pmosProjectActionError = null;
+    this.pmosProjectActionMessage = null;
     const project = this.pmosSelectedProject;
     if (!project) { this.pmosScreenContext = null; return; }
     if (tab === "overview") {
@@ -2109,6 +2144,9 @@ export class OpenClawApp extends LitElement {
     this.pmosSelectedEntityRef = reference;
     this.pmosSelectedEntityLoading = true;
     this.pmosSelectedEntityError = null;
+    this.pmosProjectActionError = null;
+    this.pmosProjectActionMessage = null;
+    this.pmosEntityCommentDraft = "";
     try {
       const detail = await fetchProjectEntityDetail(this.client, reference);
       if (
@@ -2139,6 +2177,159 @@ export class OpenClawApp extends LitElement {
     this.pmosSelectedEntityDetail = null;
     this.pmosSelectedEntityLoading = false;
     this.pmosSelectedEntityError = null;
+    this.pmosProjectActionError = null;
+    this.pmosProjectActionMessage = null;
+    this.pmosEntityCommentDraft = "";
+  }
+
+  handlePmosTodoDraftChange(field: "title" | "description" | "list" | "dueOn", value: string) {
+    if (field === "title") this.pmosTodoDraftTitle = value;
+    else if (field === "description") this.pmosTodoDraftDescription = value;
+    else if (field === "list") this.pmosTodoDraftList = value;
+    else this.pmosTodoDraftDueOn = value;
+  }
+
+  handlePmosEntityCommentDraftChange(value: string) {
+    this.pmosEntityCommentDraft = value;
+  }
+
+  private async refreshPmosProjectSurfaces(options: {
+    section?: PmosProjectDetailTab | null;
+    reopenEntity?: boolean;
+  } = {}) {
+    const project = this.pmosSelectedProject;
+    if (!this.client || !project) return;
+
+    const section = options.section ?? this.pmosProjectDetailTab;
+    if (section && section !== "overview") {
+      const key = `${project.id}:${section}`;
+      this.pmosProjectSectionData = {
+        ...this.pmosProjectSectionData,
+        [key]: { loading: true, error: null, data: this.pmosProjectSectionData[key]?.data ?? null },
+      };
+      try {
+        const data = await fetchProjectSection(this.client, project.name, section);
+        this.pmosProjectSectionData = {
+          ...this.pmosProjectSectionData,
+          [key]: { loading: false, error: null, data },
+        };
+        if (this.pmosSelectedProject && this.pmosProjectDetailTab === section) {
+          this.pmosScreenContext = buildProjectScreenContext(this.pmosSelectedProject, section, data);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.pmosProjectSectionData = {
+          ...this.pmosProjectSectionData,
+          [key]: { loading: false, error: message, data: this.pmosProjectSectionData[key]?.data ?? null },
+        };
+      }
+    }
+
+    await loadPmosProjectsSnapshot(this as unknown as Parameters<typeof loadPmosProjectsSnapshot>[0]);
+    if (this.pmosSelectedProject && this.pmosProjectsSnapshot) {
+      const refreshedProject = this.pmosProjectsSnapshot.projects.find(
+        (candidate) =>
+          candidate.id === this.pmosSelectedProject?.id ||
+          candidate.name === this.pmosSelectedProject?.name,
+      );
+      if (refreshedProject) {
+        this.pmosSelectedProject = refreshedProject;
+        if (this.pmosProjectDetailTab === "overview") {
+          this.pmosScreenContext = buildProjectScreenContext(refreshedProject, "overview", null);
+        }
+      }
+    }
+
+    if (options.reopenEntity && this.pmosSelectedEntityRef) {
+      await this.handleOpenProjectEntity(this.pmosSelectedEntityRef);
+    }
+  }
+
+  private async runPmosMutation(
+    operation: () => Promise<PmosMutationResult>,
+    options: { refreshSection?: PmosProjectDetailTab | null; reopenEntity?: boolean } = {},
+  ): Promise<PmosMutationResult | null> {
+    this.pmosProjectActionBusy = true;
+    this.pmosProjectActionError = null;
+    this.pmosProjectActionMessage = null;
+    try {
+      const result = await operation();
+      this.pmosProjectActionMessage = result.message;
+      await this.refreshPmosProjectSurfaces({
+        section: options.refreshSection ?? this.pmosProjectDetailTab,
+        reopenEntity: options.reopenEntity ?? false,
+      });
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.pmosProjectActionError = message;
+      return null;
+    } finally {
+      this.pmosProjectActionBusy = false;
+    }
+  }
+
+  async handleCreateProjectTodo() {
+    if (!this.client || !this.pmosSelectedProject) return;
+    const title = this.pmosTodoDraftTitle.trim();
+    if (!title) {
+      this.pmosProjectActionError = "Todo title is required.";
+      return;
+    }
+    const result = await this.runPmosMutation(
+      () =>
+        createProjectTodo(this.client!, {
+          projectName: this.pmosSelectedProject!.name,
+          title,
+          description: this.pmosTodoDraftDescription.trim() || null,
+          todolist: this.pmosTodoDraftList.trim() || null,
+          dueOn: this.pmosTodoDraftDueOn || null,
+        }),
+      { refreshSection: "todos" },
+    );
+    if (!result) return;
+    this.pmosProjectDetailTab = "todos";
+    this.pmosTodoDraftTitle = "";
+    this.pmosTodoDraftDescription = "";
+    this.pmosTodoDraftList = "";
+    this.pmosTodoDraftDueOn = "";
+  }
+
+  async handleToggleProjectTodo(todoId: string, completed: boolean) {
+    if (!this.client || !this.pmosSelectedProject || !todoId) return;
+    await this.runPmosMutation(
+      () =>
+        completed
+          ? reopenProjectTodo(this.client!, {
+              projectName: this.pmosSelectedProject!.name,
+              todoId,
+            })
+          : completeProjectTodo(this.client!, {
+              projectName: this.pmosSelectedProject!.name,
+              todoId,
+            }),
+      { refreshSection: "todos", reopenEntity: true },
+    );
+  }
+
+  async handleCreateProjectComment() {
+    if (!this.client || !this.pmosSelectedProject || !this.pmosSelectedEntityRef) return;
+    const content = this.pmosEntityCommentDraft.trim();
+    if (!content) {
+      this.pmosProjectActionError = "Comment text is required.";
+      return;
+    }
+    const result = await this.runPmosMutation(
+      () =>
+        createProjectComment(this.client!, {
+          projectName: this.pmosSelectedProject!.name,
+          reference: this.pmosSelectedEntityRef!,
+          content,
+        }),
+      { refreshSection: this.pmosProjectDetailTab, reopenEntity: true },
+    );
+    if (!result) return;
+    this.pmosEntityCommentDraft = "";
   }
 
   handlePmosCommandClearHistory() {

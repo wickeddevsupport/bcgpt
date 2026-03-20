@@ -47,6 +47,16 @@ function createProps(overrides: Partial<CommandCenterProps> = {}): CommandCenter
     selectedEntityDetail: null,
     selectedEntityLoading: false,
     selectedEntityError: null,
+    actionBusy: false,
+    actionError: null,
+    actionMessage: null,
+    todoDraft: {
+      title: "",
+      description: "",
+      list: "",
+      dueOn: "",
+    },
+    entityCommentDraft: "",
     commandCenterTab: "overview" as const,
     onCommandCenterTabChange: vi.fn(),
     onRefresh: vi.fn(),
@@ -61,6 +71,11 @@ function createProps(overrides: Partial<CommandCenterProps> = {}): CommandCenter
     onLoadProjectSection: vi.fn(),
     onOpenItemDetail: vi.fn(),
     onCloseItemDetail: vi.fn(),
+    onTodoDraftChange: vi.fn(),
+    onCreateTodo: vi.fn(),
+    onToggleTodo: vi.fn(),
+    onEntityCommentDraftChange: vi.fn(),
+    onCreateEntityComment: vi.fn(),
     ...overrides,
   };
 }
@@ -166,5 +181,96 @@ describe("command-center view", () => {
     expect(container.textContent).toContain("Item Detail");
     expect(container.textContent).toContain("Write docs");
     expect(container.textContent).toContain("Draft the docs");
+  });
+
+  it("shows the quick-add todo composer in project detail", () => {
+    const container = document.createElement("div");
+    render(
+      renderCommandCenter(
+        createProps({
+          selectedProject: {
+            id: "1",
+            name: "Project One",
+            status: "active",
+            appUrl: null,
+            description: "Test project",
+            updatedAt: null,
+            dockCapabilities: [],
+            todoLists: 1,
+            openTodos: 2,
+            assignedTodos: 1,
+            overdueTodos: 0,
+            dueTodayTodos: 0,
+            futureTodos: 1,
+            noDueDateTodos: 0,
+            nextDueOn: null,
+            health: "on_track",
+            previewTodos: [],
+          },
+        }),
+      ),
+      container,
+    );
+
+    expect(container.textContent).toContain("Project quick add");
+    expect(container.textContent).toContain("Create todo");
+  });
+
+  it("renders todo action controls in the todos tab", () => {
+    const container = document.createElement("div");
+    render(
+      renderCommandCenter(
+        createProps({
+          selectedProject: {
+            id: "1",
+            name: "Project One",
+            status: "active",
+            appUrl: null,
+            description: "Test project",
+            updatedAt: null,
+            dockCapabilities: [],
+            todoLists: 1,
+            openTodos: 2,
+            assignedTodos: 1,
+            overdueTodos: 0,
+            dueTodayTodos: 0,
+            futureTodos: 1,
+            noDueDateTodos: 0,
+            nextDueOn: null,
+            health: "on_track",
+            previewTodos: [],
+          },
+          projectDetailTab: "todos",
+          projectSectionData: {
+            "1:todos": {
+              loading: false,
+              error: null,
+              data: [
+                {
+                  name: "Main List",
+                  todosCount: 1,
+                  todos: [
+                    {
+                      id: "42",
+                      title: "Ship launch checklist",
+                      status: "active",
+                      dueOn: "2026-03-21",
+                      appUrl: null,
+                      assignee: "Rohit",
+                      completedAt: null,
+                      creator: "Rohit",
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        }),
+      ),
+      container,
+    );
+
+    expect(container.textContent).toContain("Add a todo");
+    expect(container.textContent).toContain("Complete");
   });
 });

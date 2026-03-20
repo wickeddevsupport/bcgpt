@@ -1234,6 +1234,16 @@ export function renderApp(state: AppViewState) {
                 selectedEntityDetail: state.pmosSelectedEntityDetail ?? null,
                 selectedEntityLoading: state.pmosSelectedEntityLoading,
                 selectedEntityError: state.pmosSelectedEntityError,
+                actionBusy: state.pmosProjectActionBusy,
+                actionError: state.pmosProjectActionError,
+                actionMessage: state.pmosProjectActionMessage,
+                todoDraft: {
+                  title: state.pmosTodoDraftTitle,
+                  description: state.pmosTodoDraftDescription,
+                  list: state.pmosTodoDraftList,
+                  dueOn: state.pmosTodoDraftDueOn,
+                },
+                entityCommentDraft: state.pmosEntityCommentDraft,
                 onRefresh: () => state.handlePmosProjectsLoad(),
                 onOpenIntegrations: () => state.setTab("integrations"),
                 onOpenWorkflows: () => state.setTab("automations"),
@@ -1252,6 +1262,11 @@ export function renderApp(state: AppViewState) {
                   state.handleLoadProjectSection(projectName, section),
                 onOpenItemDetail: (reference) => state.handleOpenProjectEntity(reference),
                 onCloseItemDetail: () => state.handleCloseProjectEntity(),
+                onTodoDraftChange: (field, value) => state.handlePmosTodoDraftChange(field, value),
+                onCreateTodo: () => void state.handleCreateProjectTodo(),
+                onToggleTodo: (todoId, completed) => void state.handleToggleProjectTodo(todoId, completed),
+                onEntityCommentDraftChange: (value) => state.handlePmosEntityCommentDraftChange(value),
+                onCreateEntityComment: () => void state.handleCreateProjectComment(),
               })
             : nothing
         }
