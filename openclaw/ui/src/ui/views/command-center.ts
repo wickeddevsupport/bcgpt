@@ -89,8 +89,13 @@ function todoProjectLabel(todo: PmosProjectTodoItem) {
   return todo.projectName || (todo.projectId ? `Project ${todo.projectId}` : "Unknown project");
 }
 
+function compactItems<T>(items: readonly (T | null | undefined)[] | null | undefined): T[] {
+  if (!Array.isArray(items)) return [];
+  return items.filter((item): item is T => item !== null && item !== undefined);
+}
+
 function dockCapabilityLabel(project: PmosProjectCard, limit = 5) {
-  return (project.dockCapabilities ?? [])
+  return compactItems(project.dockCapabilities)
     .map((dock) => dock.title || dock.name)
     .filter((label): label is string => Boolean(label))
     .slice(0, limit);
@@ -111,7 +116,7 @@ function quickPromptForProject(project: PmosProjectCard): string {
 }
 
 function sortTodosLatestFirst(items: PmosProjectTodoItem[]): PmosProjectTodoItem[] {
-  return [...items].sort((a, b) => {
+  return compactItems(items).sort((a, b) => {
     const idA = a.id ? parseInt(a.id, 10) : 0;
     const idB = b.id ? parseInt(b.id, 10) : 0;
     if (idA !== idB) return idB - idA;
@@ -123,11 +128,12 @@ function sortTodosLatestFirst(items: PmosProjectTodoItem[]): PmosProjectTodoItem
 }
 
 function renderTodoList(props: CommandCenterProps, title: string, items: PmosProjectTodoItem[], empty: string) {
+  const safeItems = compactItems(items);
   return html`
     <div class="project-priority-card">
       <div class="project-priority-card__title">${title}</div>
       <div class="project-priority-list">
-        ${items.slice(0, 20).map(
+        ${safeItems.slice(0, 20).map(
           (todo) => html`
             <div class="project-priority-item">
                 <div class="project-priority-item__row">
@@ -156,7 +162,7 @@ function renderTodoList(props: CommandCenterProps, title: string, items: PmosPro
             </div>
           `,
         )}
-        ${items.length === 0 ? html`<div class="muted">${empty}</div>` : nothing}
+        ${safeItems.length === 0 ? html`<div class="muted">${empty}</div>` : nothing}
       </div>
     </div>
   `;
@@ -353,7 +359,7 @@ function renderProjectRadar(props: CommandCenterProps, cards: PmosProjectCard[])
 function renderProjectCards(props: CommandCenterProps, cards: PmosProjectCard[]) {
   return html`
     <div class="project-cards-grid">
-      ${cards.map(
+      ${compactItems(cards).map(
         (project) => html`
           <article class="project-card ${project.overdueTodos > 0 ? "project-card--danger" : project.dueTodayTodos > 0 ? "project-card--attention" : ""}">
             <div class="project-card__eyebrow">Project cockpit</div>
@@ -401,10 +407,10 @@ function renderProjectCards(props: CommandCenterProps, cards: PmosProjectCard[])
               <span>Next due / Lists</span>
               <span class="mono">${project.nextDueOn ?? "n/a"} · ${project.todoLists}</span>
             </div>
-            ${(project.previewTodos ?? []).length > 0
+            ${compactItems(project.previewTodos).length > 0
               ? html`
                   <div class="project-card__todo-list">
-                    ${(project.previewTodos ?? []).map(
+                    ${compactItems(project.previewTodos).map(
                       (todo) => html`
                         <div class="project-card__todo-item">
                           <div class="project-card__todo-row">
@@ -455,7 +461,7 @@ const HEALTH_ORDER: PmosProjectCard["health"][] = ["at_risk", "attention", "on_t
 function renderStatusBoard(props: CommandCenterProps, cards: PmosProjectCard[]) {
   const groups = new Map<PmosProjectCard["health"], PmosProjectCard[]>();
   for (const h of HEALTH_ORDER) groups.set(h, []);
-  for (const card of cards) {
+  for (const card of compactItems(cards)) {
     const bucket = groups.get(card.health) ?? groups.get("on_track")!;
     bucket.push(card);
   }
@@ -668,6 +674,7 @@ function renderProjectDetailTabs(props: CommandCenterProps) {
 }
 
 function renderOverviewTab(props: CommandCenterProps, project: PmosProjectCard) {
+  const previewTodos = compactItems(project.previewTodos);
   return html`
     <div class="project-section-content project-section-content--stack">
       <section class="project-paper project-paper--primary">
@@ -702,10 +709,10 @@ function renderOverviewTab(props: CommandCenterProps, project: PmosProjectCard) 
             <div class="card-sub">The next visible todo slice for this project.</div>
           </div>
         </div>
-        ${(project.previewTodos ?? []).length > 0
+        ${previewTodos.length > 0
           ? html`
               <div class="project-section-list">
-                ${(project.previewTodos ?? []).map(
+                ${previewTodos.map(
                   (todo) => html`
                     <div class="project-section-item">
                       <div class="project-section-item__title">${todo.title}</div>
@@ -733,16 +740,17 @@ type NormalizedTodo = { id: string | null; title: string; status: string | null;
 type NormalizedTodoGroup = { name: string; todosCount: number; todos: NormalizedTodo[] };
 
 function renderTodosSection(props: CommandCenterProps, project: PmosProjectCard, data: unknown) {
-  const groups = Array.isArray(data) ? (data as NormalizedTodoGroup[]) : [];
-  const totalOpen = groups.reduce((sum, g) => sum + g.todos.filter((t) => t.status !== "completed").length, 0);
+  const groups = compactItems(Array.isArray(data) ? (data as NormalizedTodoGroup[]) : []);
+  const totalOpen = groups.reduce((sum, g) => sum + compactItems(g.todos).filter((t) => t.status !== "completed").length, 0);
   return html`
     <div class="project-section-list">
       ${renderTodoComposer(props, project, "Add a todo")}
       ${groups.length === 0 ? html`<div class="muted">No todos found.</div>` : nothing}
       <div class="project-section-summary muted" style="font-size:12px; margin-bottom:8px;">${totalOpen} open across ${groups.length} list${groups.length !== 1 ? "s" : ""}</div>
       ${groups.map((group) => {
-        const open = group.todos.filter((t) => t.status !== "completed");
-        const done = group.todos.filter((t) => t.status === "completed");
+        const todos = compactItems(group.todos);
+        const open = todos.filter((t) => t.status !== "completed");
+        const done = todos.filter((t) => t.status === "completed");
         return html`
           <div class="project-section-group">
             <div class="project-section-group__header">
@@ -878,7 +886,7 @@ type NormalizedMessage = { id: string | null; title: string; author: string | nu
 
 function renderMessagesSection(props: CommandCenterProps, project: PmosProjectCard, data: unknown) {
   if (!Array.isArray(data) || data.length === 0) return html`<div class="muted">No messages found.</div>`;
-  const messages = data as NormalizedMessage[];
+  const messages = compactItems(data as NormalizedMessage[]);
   return html`
     <div class="project-section-list">
       <div class="project-section-summary muted" style="font-size:12px; margin-bottom:8px;">${messages.length} message${messages.length !== 1 ? "s" : ""}</div>
@@ -918,7 +926,7 @@ type NormalizedEntry = { id: string | null; title: string; startsAt: string | nu
 
 function renderScheduleSection(props: CommandCenterProps, project: PmosProjectCard, data: unknown) {
   if (!Array.isArray(data) || data.length === 0) return html`<div class="muted">No schedule entries found.</div>`;
-  const entries = data as NormalizedEntry[];
+  const entries = compactItems(data as NormalizedEntry[]);
   return html`
     <div class="project-section-list">
       <div class="project-section-summary muted" style="font-size:12px; margin-bottom:8px;">${entries.length} event${entries.length !== 1 ? "s" : ""}</div>
@@ -975,8 +983,8 @@ type NormalizedCampfireData = {
 function renderCampfireSection(props: CommandCenterProps, project: PmosProjectCard, data: unknown) {
   if (!data || typeof data !== "object") return html`<div class="muted">No campfire activity found.</div>`;
   const campfire = data as NormalizedCampfireData;
-  const chats = Array.isArray(campfire.chats) ? campfire.chats : [];
-  const lines = Array.isArray(campfire.lines) ? campfire.lines : [];
+  const chats = compactItems(Array.isArray(campfire.chats) ? campfire.chats : []);
+  const lines = compactItems(Array.isArray(campfire.lines) ? campfire.lines : []);
   if (!chats.length && !lines.length) return html`<div class="muted">No campfire activity found.</div>`;
   return html`
     <div class="project-section-list">
@@ -1035,7 +1043,7 @@ function renderCampfireSection(props: CommandCenterProps, project: PmosProjectCa
 
 function renderFilesSection(props: CommandCenterProps, project: PmosProjectCard, data: unknown) {
   if (!Array.isArray(data) || data.length === 0) return html`<div class="muted">No files found.</div>`;
-  const files = data as NormalizedFileItem[];
+  const files = compactItems(data as NormalizedFileItem[]);
   return html`
     <div class="project-section-list">
       <div class="project-section-summary muted" style="font-size:12px; margin-bottom:8px;">${files.length} file${files.length !== 1 ? "s" : ""}</div>
@@ -1078,7 +1086,7 @@ type NormalizedTable = { id: string | null; name: string; appUrl: string | null;
 
 function renderCardTablesSection(props: CommandCenterProps, project: PmosProjectCard, data: unknown) {
   if (!Array.isArray(data) || data.length === 0) return html`<div class="muted">No card tables found.</div>`;
-  const tables = data as NormalizedTable[];
+  const tables = compactItems(data as NormalizedTable[]);
   return html`
     <div class="project-section-list">
       ${tables.map((table) => html`
@@ -1087,12 +1095,12 @@ function renderCardTablesSection(props: CommandCenterProps, project: PmosProject
             ${table.name}
             ${table.appUrl ? html`<a class="btn btn--xs" href=${table.appUrl} target="_blank" rel="noreferrer" style="margin-left:6px;">Open board</a>` : nothing}
           </div>
-          ${(table.columns ?? []).map((col) => html`
+          ${compactItems(table.columns).map((col) => html`
             <div class="project-section-item" style="padding-left:8px;">
               <div class="project-section-item__title" style="font-size:13px; font-weight:600;">${col.name} <span class="chip chip--tiny">${col.cardsCount}</span></div>
               ${col.cards.length > 0 ? html`
                 <div style="margin-top:4px;">
-                  ${col.cards.map((card) => html`
+                  ${compactItems(col.cards).map((card) => html`
                     <div class="project-section-item" style="padding-left:8px; border-left:2px solid var(--color-border, #333);">
                       <div class="project-section-item__title" style="font-size:12px;">${card.title}</div>
                       <div class="project-section-item__meta">
@@ -1123,7 +1131,7 @@ function renderCardTablesSection(props: CommandCenterProps, project: PmosProject
               ` : nothing}
             </div>
           `)}
-          ${(table.columns ?? []).length === 0 ? html`<div class="muted" style="font-size:12px; padding:4px 0;">No columns</div>` : nothing}
+          ${compactItems(table.columns).length === 0 ? html`<div class="muted" style="font-size:12px; padding:4px 0;">No columns</div>` : nothing}
         </div>
       `)}
     </div>
@@ -1134,7 +1142,7 @@ type NormalizedPerson = { id: string | null; name: string; email: string | null;
 
 function renderPeopleSection(props: CommandCenterProps, project: PmosProjectCard, data: unknown) {
   if (!Array.isArray(data) || data.length === 0) return html`<div class="muted">No people found.</div>`;
-  const people = data as NormalizedPerson[];
+  const people = compactItems(data as NormalizedPerson[]);
   return html`
     <div class="project-section-list">
       <div class="project-section-summary muted" style="font-size:12px; margin-bottom:8px;">${people.length} team member${people.length !== 1 ? "s" : ""}</div>
@@ -1491,7 +1499,7 @@ export function renderCommandCenter(props: CommandCenterProps) {
   const dueTodayTodos = sortTodosLatestFirst(snapshot?.dueTodayTodos ?? []);
   const futureTodos = sortTodosLatestFirst(snapshot?.futureTodos ?? []);
   const noDueDateTodos = sortTodosLatestFirst(snapshot?.noDueDateTodos ?? []);
-  const allCards = snapshot?.projects ?? [];
+  const allCards = compactItems(snapshot?.projects);
   const projectSearch = (props.projectSearch ?? "").trim().toLowerCase();
   const cards = projectSearch
     ? allCards.filter(
