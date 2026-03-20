@@ -1269,9 +1269,8 @@ function renderEntityDetailCard(props: CommandCenterProps) {
 
   const detail = props.selectedEntityDetail;
   return html`
-    <div class="project-detail-dialog-shell" @click=${() => props.onCloseItemDetail()}>
-      <div class="project-detail-dialog-backdrop"></div>
-      <div class="card project-entity-detail project-detail-dialog" role="dialog" aria-modal="true" @click=${(event: Event) => event.stopPropagation()}>
+    <section class="project-paper project-paper--detail">
+      <div class="project-entity-detail">
         <div class="project-entity-detail__header">
           <div>
             <div class="card-title">Item Detail</div>
@@ -1289,110 +1288,110 @@ function renderEntityDetailCard(props: CommandCenterProps) {
             : detail
               ? html`
                   <div class="project-entity-detail__body">
-                  <div class="project-entity-detail__title">${detail.title}</div>
-                  <div class="project-entity-detail__chips">
-                    <span class="chip chip--tiny">${detail.reference.type}</span>
-                    ${detail.status ? html`<span class="chip chip--tiny">${detail.status}</span>` : nothing}
-                    ${detail.project?.name ? html`<span class="chip chip--tiny">${detail.project.name}</span>` : nothing}
-                    ${detail.creator ? html`<span class="chip chip--tiny">By ${detail.creator}</span>` : nothing}
-                    ${detail.assignee ? html`<span class="chip chip--tiny">Assigned ${detail.assignee}</span>` : nothing}
-                  </div>
-                  ${detail.summary ? html`<div class="project-entity-detail__summary">${detail.summary}</div>` : nothing}
-                  <div class="project-entity-detail__meta">
-                    ${detail.createdAt ? html`<span>Created ${detail.createdAt.replace("T", " ").slice(0, 16)}</span>` : nothing}
-                    ${detail.updatedAt ? html`<span>Updated ${detail.updatedAt.replace("T", " ").slice(0, 16)}</span>` : nothing}
-                  </div>
-                  <div class="row" style="gap:8px; flex-wrap:wrap;">
-                    ${detail.appUrl ? html`<a class="btn btn--sm" href=${detail.appUrl} target="_blank" rel="noreferrer">Open in Basecamp</a>` : nothing}
-                    ${detail.reference.type === "todo" && detail.reference.id
+                    <div class="project-entity-detail__title">${detail.title}</div>
+                    <div class="project-entity-detail__chips">
+                      <span class="chip chip--tiny">${detail.reference.type}</span>
+                      ${detail.status ? html`<span class="chip chip--tiny">${detail.status}</span>` : nothing}
+                      ${detail.project?.name ? html`<span class="chip chip--tiny">${detail.project.name}</span>` : nothing}
+                      ${detail.creator ? html`<span class="chip chip--tiny">By ${detail.creator}</span>` : nothing}
+                      ${detail.assignee ? html`<span class="chip chip--tiny">Assigned ${detail.assignee}</span>` : nothing}
+                    </div>
+                    ${detail.summary ? html`<div class="project-entity-detail__summary">${detail.summary}</div>` : nothing}
+                    <div class="project-entity-detail__meta">
+                      ${detail.createdAt ? html`<span>Created ${detail.createdAt.replace("T", " ").slice(0, 16)}</span>` : nothing}
+                      ${detail.updatedAt ? html`<span>Updated ${detail.updatedAt.replace("T", " ").slice(0, 16)}</span>` : nothing}
+                    </div>
+                    <div class="row" style="gap:8px; flex-wrap:wrap;">
+                      ${detail.appUrl ? html`<a class="btn btn--sm" href=${detail.appUrl} target="_blank" rel="noreferrer">Open in Basecamp</a>` : nothing}
+                      ${detail.reference.type === "todo" && detail.reference.id
+                        ? html`
+                            <button
+                              class="btn btn--sm"
+                              ?disabled=${props.actionBusy}
+                              @click=${() => props.onToggleTodo(detail.reference.id!, detail.status === "completed")}
+                            >
+                              ${detail.status === "completed" ? "Reopen todo" : "Complete todo"}
+                            </button>
+                          `
+                        : nothing}
+                      <button
+                        class="btn btn--sm btn--primary"
+                        @click=${() =>
+                          props.onPrefillChat(
+                            `Explain this Basecamp ${detail.reference.type}: "${detail.title}". Include purpose, status, risks, and next actions.`,
+                          )}
+                      >
+                        Ask AI
+                      </button>
+                    </div>
+                    ${(detail.reference.id || detail.reference.url) && detail.reference.type !== "person"
                       ? html`
-                          <button
-                            class="btn btn--sm"
-                            ?disabled=${props.actionBusy}
-                            @click=${() => props.onToggleTodo(detail.reference.id!, detail.status === "completed")}
-                          >
-                            ${detail.status === "completed" ? "Reopen todo" : "Complete todo"}
-                          </button>
+                          <div class="project-action-card">
+                            <div class="project-action-card__header">
+                              <div>
+                                <div class="project-action-card__title">Add comment</div>
+                                <div class="card-sub">Comment directly here without leaving the cockpit.</div>
+                              </div>
+                            </div>
+                            <label class="project-field">
+                              <span>Comment</span>
+                              <textarea
+                                rows="4"
+                                .value=${props.entityCommentDraft}
+                                @input=${(event: Event) =>
+                                  props.onEntityCommentDraftChange((event.target as HTMLTextAreaElement).value)}
+                                placeholder="Write an update, note, or reply"
+                              ></textarea>
+                            </label>
+                            <div class="project-action-card__actions">
+                              <button
+                                class="btn btn--sm btn--primary"
+                                ?disabled=${props.actionBusy}
+                                @click=${() => props.onCreateEntityComment()}
+                              >
+                                ${props.actionBusy ? "Posting..." : "Post comment"}
+                              </button>
+                            </div>
+                          </div>
                         `
                       : nothing}
-                    <button
-                      class="btn btn--sm btn--primary"
-                      @click=${() =>
-                        props.onPrefillChat(
-                          `Explain this Basecamp ${detail.reference.type}: "${detail.title}". Include purpose, status, risks, and next actions.`,
-                        )}
-                    >
-                      Ask AI
-                    </button>
-                  </div>
-                  ${(detail.reference.id || detail.reference.url) && detail.reference.type !== "person"
-                    ? html`
-                        <div class="project-action-card">
-                          <div class="project-action-card__header">
-                            <div>
-                              <div class="project-action-card__title">Add comment</div>
-                              <div class="card-sub">Comment directly here without leaving the cockpit.</div>
-                            </div>
-                          </div>
-                          <label class="project-field">
-                            <span>Comment</span>
-                            <textarea
-                              rows="4"
-                              .value=${props.entityCommentDraft}
-                              @input=${(event: Event) =>
-                                props.onEntityCommentDraftChange((event.target as HTMLTextAreaElement).value)}
-                              placeholder="Write an update, note, or reply"
-                            ></textarea>
-                          </label>
-                          <div class="project-action-card__actions">
-                            <button
-                              class="btn btn--sm btn--primary"
-                              ?disabled=${props.actionBusy}
-                              @click=${() => props.onCreateEntityComment()}
-                            >
-                              ${props.actionBusy ? "Posting..." : "Post comment"}
-                            </button>
-                          </div>
-                        </div>
-                      `
-                    : nothing}
-                  ${detail.comments.length > 0
-                    ? html`
-                        <div class="project-entity-detail__list">
-                          <div class="project-entity-detail__list-title">Comments</div>
-                          ${detail.comments.slice(0, 6).map((comment) => html`
-                            <div class="project-entity-detail__list-item">
-                              <div class="project-entity-detail__list-head">
-                                <strong>${comment.author ?? "Unknown"}</strong>
-                                ${comment.createdAt ? html`<span class="muted">${comment.createdAt.slice(0, 16).replace("T", " ")}</span>` : nothing}
+                    ${detail.comments.length > 0
+                      ? html`
+                          <div class="project-entity-detail__list">
+                            <div class="project-entity-detail__list-title">Comments</div>
+                            ${detail.comments.slice(0, 6).map((comment) => html`
+                              <div class="project-entity-detail__list-item">
+                                <div class="project-entity-detail__list-head">
+                                  <strong>${comment.author ?? "Unknown"}</strong>
+                                  ${comment.createdAt ? html`<span class="muted">${comment.createdAt.slice(0, 16).replace("T", " ")}</span>` : nothing}
+                                </div>
+                                <div class="muted">${comment.content ?? "(no comment text)"}</div>
                               </div>
-                              <div class="muted">${comment.content ?? "(no comment text)"}</div>
-                            </div>
-                          `)}
-                        </div>
-                      `
-                    : nothing}
-                  ${detail.events.length > 0
-                    ? html`
-                        <div class="project-entity-detail__list">
-                          <div class="project-entity-detail__list-title">Activity</div>
-                          ${detail.events.slice(0, 6).map((event) => html`
-                            <div class="project-entity-detail__list-item">
-                              <div class="project-entity-detail__list-head">
-                                <strong>${event.action ?? "event"}</strong>
-                                ${event.createdAt ? html`<span class="muted">${event.createdAt.slice(0, 16).replace("T", " ")}</span>` : nothing}
+                            `)}
+                          </div>
+                        `
+                      : nothing}
+                    ${detail.events.length > 0
+                      ? html`
+                          <div class="project-entity-detail__list">
+                            <div class="project-entity-detail__list-title">Activity</div>
+                            ${detail.events.slice(0, 6).map((event) => html`
+                              <div class="project-entity-detail__list-item">
+                                <div class="project-entity-detail__list-head">
+                                  <strong>${event.action ?? "event"}</strong>
+                                  ${event.createdAt ? html`<span class="muted">${event.createdAt.slice(0, 16).replace("T", " ")}</span>` : nothing}
+                                </div>
+                                <div class="muted">${event.actor ?? "Unknown"}${event.summary ? ` · ${event.summary}` : ""}</div>
                               </div>
-                              <div class="muted">${event.actor ?? "Unknown"}${event.summary ? ` · ${event.summary}` : ""}</div>
-                            </div>
-                          `)}
-                        </div>
-                      `
-                    : nothing}
+                            `)}
+                          </div>
+                        `
+                      : nothing}
                   </div>
                 `
               : nothing}
       </div>
-    </div>
+    </section>
   `;
 }
 
@@ -1408,6 +1407,7 @@ function renderProjectDetail(props: CommandCenterProps) {
           ${renderProjectDetailTabs(props)}
           <div class="project-detail-body">
             ${tab === "overview" ? renderOverviewTab(props, project) : renderSectionTab(props, tab)}
+            ${renderEntityDetailCard(props)}
           </div>
         </div>
       </div>
@@ -1431,7 +1431,6 @@ function renderProjectDetail(props: CommandCenterProps) {
         </div>
       </aside>
     </section>
-    ${renderEntityDetailCard(props)}
   `;
 }
 

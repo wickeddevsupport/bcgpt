@@ -1501,7 +1501,7 @@ export async function replaceBasecampWorkspaceSnapshot(userKey, accountId, {
         INSERT INTO basecamp_document_snapshots (
           user_key, account_id, document_id, project_id, project_name, vault_id, title,
           content_preview, created_at, updated_at, creator_id, creator_name, app_url, fetched_at, source_updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
       `, [
         key, acct, String(doc.documentId), doc.projectId == null ? null : String(doc.projectId),
         doc.projectName ?? null, doc.vaultId == null ? null : String(doc.vaultId),
