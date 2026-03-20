@@ -3058,15 +3058,18 @@
   display: grid;
   gap: 16px;
   min-width: 0;
+  z-index: 2;
+  position: relative;
 }
 
 .projects-side {
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
+  overflow: visible;
   position: sticky;
   top: 84px;
   align-self: start;
+  z-index: 1;
 }
 
 .projects-side--chat {

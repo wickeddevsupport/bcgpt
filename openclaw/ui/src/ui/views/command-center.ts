@@ -1240,14 +1240,20 @@ function renderSectionTab(props: CommandCenterProps, section: PmosProjectDetailT
     `;
   }
 
-  const content =
-    section === "todos" ? renderTodosSection(props, project, sectionData.data)
-    : section === "messages" ? renderMessagesSection(props, project, sectionData.data)
-    : section === "schedule" ? renderScheduleSection(props, project, sectionData.data)
-    : section === "campfire" ? renderCampfireSection(props, project, sectionData.data)
-    : section === "files" ? renderFilesSection(props, project, sectionData.data)
-    : section === "card_tables" ? renderCardTablesSection(props, project, sectionData.data)
-    : renderPeopleSection(props, project, sectionData.data);
+  let content;
+  try {
+    content =
+      section === "todos" ? renderTodosSection(props, project, sectionData.data)
+      : section === "messages" ? renderMessagesSection(props, project, sectionData.data)
+      : section === "schedule" ? renderScheduleSection(props, project, sectionData.data)
+      : section === "campfire" ? renderCampfireSection(props, project, sectionData.data)
+      : section === "files" ? renderFilesSection(props, project, sectionData.data)
+      : section === "card_tables" ? renderCardTablesSection(props, project, sectionData.data)
+      : renderPeopleSection(props, project, sectionData.data);
+  } catch (err) {
+    console.error(`[CommandCenter] renderSection(${section}) crashed:`, err);
+    content = html`<div class="callout danger">Failed to render ${section}. Check the browser console.</div>`;
+  }
 
   const aiPrompt = askAiPromptForSection(section, project.name, sectionData.data);
 
@@ -1471,7 +1477,19 @@ function renderViewModeSwitcher(props: CommandCenterProps) {
 export function renderCommandCenter(props: CommandCenterProps) {
   // Show project detail view when a project is selected
   if (props.selectedProject) {
-    return renderProjectDetail(props);
+    try {
+      return renderProjectDetail(props);
+    } catch (err) {
+      console.error("[CommandCenter] renderProjectDetail crashed:", err);
+      return html`
+        <div class="card" style="padding: 24px;">
+          <div class="callout danger">Project detail view failed to render. Check the browser console for details.</div>
+          <button class="btn btn--sm" style="margin-top: 12px;" @click=${() => props.onSelectProject(null)}>
+            &larr; Back to Projects
+          </button>
+        </div>
+      `;
+    }
   }
 
   const snapshot = props.snapshot;

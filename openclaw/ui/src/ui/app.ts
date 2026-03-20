@@ -227,6 +227,12 @@ function buildProjectScreenContext(project: PmosProjectCard, tab: PmosProjectDet
           cards: c.cards?.slice(0, 5).map((card) => ({ title: card.title, dueOn: card.dueOn, assignee: card.assignee })) ?? [],
         })),
       }));
+    } else if (tab === "files") {
+      type FileItem = { title: string; kind: string | null; createdAt: string | null; creator: string | null };
+      const files = data as FileItem[];
+      projectJson.tabData = files.slice(0, 15).map((f) => ({
+        title: f.title, kind: f.kind, createdAt: f.createdAt?.slice(0, 10) ?? null, creator: f.creator,
+      }));
     } else if (tab === "people") {
       type Person = { name: string; role: string | null; email: string | null };
       const people = data as Person[];
@@ -2032,8 +2038,11 @@ export class OpenClawApp extends LitElement {
     );
   }
 
-  async handlePmosProjectsLoad() {
-    await loadPmosProjectsSnapshot(this as unknown as Parameters<typeof loadPmosProjectsSnapshot>[0]);
+  async handlePmosProjectsLoad(options?: { fresh?: boolean }) {
+    await loadPmosProjectsSnapshot(
+      this as unknown as Parameters<typeof loadPmosProjectsSnapshot>[0],
+      options,
+    );
     if (this.pmosSelectedProject && this.pmosProjectsSnapshot) {
       const refreshedProject = this.pmosProjectsSnapshot.projects.find(
         (project) =>
