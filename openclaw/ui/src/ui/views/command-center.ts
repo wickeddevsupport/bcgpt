@@ -599,17 +599,48 @@ const DETAIL_TABS: { key: PmosProjectDetailTab; label: string }[] = [
 function renderProjectDetailHeader(props: CommandCenterProps) {
   const project = props.selectedProject!;
   return html`
-    <div class="project-detail-header">
-      <button class="btn btn--sm" @click=${() => props.onSelectProject(null)}>
-        &larr; All Projects
-      </button>
-      <div class="project-detail-title">
-        <span>${project.name}</span>
+    <div class="project-cockpit-hero">
+      <div class="project-cockpit-hero__topbar">
+        <button class="btn btn--sm" @click=${() => props.onSelectProject(null)}>
+          &larr; All Projects
+        </button>
+        <span class="project-cockpit-hero__eyebrow">Basecamp project cockpit</span>
+      </div>
+      <div class="project-cockpit-hero__header">
+        <div class="project-cockpit-hero__identity">
+          <div class="project-cockpit-hero__title">${project.name}</div>
+          <div class="project-cockpit-hero__summary">
+            ${project.description ?? "Operate this project directly from PMOS with manual control on the left and AI orchestration on the right."}
+          </div>
+        </div>
         <span class="chip ${healthChipClass(project.health)}">${healthLabel(project.health)}</span>
       </div>
-      ${project.appUrl
-        ? html`<a class="btn btn--sm" href=${project.appUrl} target="_blank" rel="noreferrer">Open in Basecamp</a>`
-        : nothing}
+      <div class="project-cockpit-hero__metrics">
+        <div class="project-cockpit-hero__metric">
+          <span>Open work</span>
+          <strong>${project.openTodos}</strong>
+        </div>
+        <div class="project-cockpit-hero__metric">
+          <span>Assigned</span>
+          <strong>${project.assignedTodos}</strong>
+        </div>
+        <div class="project-cockpit-hero__metric">
+          <span>Needs attention</span>
+          <strong>${project.overdueTodos + project.dueTodayTodos}</strong>
+        </div>
+        <div class="project-cockpit-hero__metric">
+          <span>Next due</span>
+          <strong class="mono">${project.nextDueOn ?? "n/a"}</strong>
+        </div>
+      </div>
+      <div class="project-cockpit-hero__actions">
+        <button class="btn btn--sm btn--primary" @click=${() => props.onPrefillChat(quickPromptForProject(project))}>
+          Manager Brief
+        </button>
+        ${project.appUrl
+          ? html`<a class="btn btn--sm" href=${project.appUrl} target="_blank" rel="noreferrer">Open in Basecamp</a>`
+          : nothing}
+      </div>
     </div>
     ${props.actionError
       ? html`<div class="callout danger project-action-notice">${props.actionError}</div>`
@@ -621,7 +652,7 @@ function renderProjectDetailHeader(props: CommandCenterProps) {
 
 function renderProjectDetailTabs(props: CommandCenterProps) {
   return html`
-    <div class="agent-tabs project-detail-tabs">
+    <div class="agent-tabs project-detail-tabs project-detail-tabs--paper">
       ${DETAIL_TABS.map(
         (tab) => html`
           <button
@@ -638,60 +669,41 @@ function renderProjectDetailTabs(props: CommandCenterProps) {
 
 function renderOverviewTab(props: CommandCenterProps, project: PmosProjectCard) {
   return html`
-    <div class="project-section-content">
-      ${renderTodoComposer(props, project, "Project quick add")}
-      ${project.description
-        ? html`<div class="project-overview-summary">${project.description}</div>`
-        : nothing}
-      ${dockCapabilityLabel(project, 8).length > 0
-        ? html`
-            <div class="project-overview-capabilities">
-              ${dockCapabilityLabel(project, 8).map((label) => html`<span class="chip chip--tiny">${label}</span>`)}
-            </div>
-          `
-        : nothing}
-      <div class="project-overview-metrics">
-        <div class="project-card__metrics" style="margin-bottom: 16px;">
-          <div class="project-card__metric">
-            <span class="muted">Open</span>
-            <strong>${project.openTodos}</strong>
-          </div>
-          <div class="project-card__metric">
-            <span class="muted">Assigned</span>
-            <strong>${project.assignedTodos}</strong>
-          </div>
-          <div class="project-card__metric">
-            <span class="muted">Overdue</span>
-            <strong class="${project.overdueTodos > 0 ? "warn" : ""}">${project.overdueTodos}</strong>
-          </div>
-          <div class="project-card__metric">
-            <span class="muted">Due today</span>
-            <strong>${project.dueTodayTodos}</strong>
-          </div>
-          <div class="project-card__metric">
-            <span class="muted">Future</span>
-            <strong>${project.futureTodos}</strong>
-          </div>
-          <div class="project-card__metric">
-            <span class="muted">No date</span>
-            <strong>${project.noDueDateTodos}</strong>
-          </div>
-          <div class="project-card__metric">
-            <span class="muted">Todo lists</span>
-            <strong>${project.todoLists}</strong>
-          </div>
-          <div class="project-card__metric">
-            <span class="muted">Next due</span>
-            <strong class="mono">${project.nextDueOn ?? "n/a"}</strong>
-          </div>
-          <div class="project-card__metric">
-            <span class="muted">Updated</span>
-            <strong class="mono">${project.updatedAt ? project.updatedAt.slice(0, 10) : "n/a"}</strong>
+    <div class="project-section-content project-section-content--stack">
+      <section class="project-paper project-paper--primary">
+        ${renderTodoComposer(props, project, "Project quick add")}
+      </section>
+      <section class="project-paper">
+        ${project.description
+          ? html`<div class="project-overview-summary">${project.description}</div>`
+          : nothing}
+        ${dockCapabilityLabel(project, 8).length > 0
+          ? html`
+              <div class="project-overview-capabilities">
+                ${dockCapabilityLabel(project, 8).map((label) => html`<span class="chip chip--tiny">${label}</span>`)}
+              </div>
+            `
+          : nothing}
+        <div class="project-cockpit-metrics-grid">
+          <div class="project-card__metric"><span class="muted">Open</span><strong>${project.openTodos}</strong></div>
+          <div class="project-card__metric"><span class="muted">Assigned</span><strong>${project.assignedTodos}</strong></div>
+          <div class="project-card__metric"><span class="muted">Overdue</span><strong class="${project.overdueTodos > 0 ? "warn" : ""}">${project.overdueTodos}</strong></div>
+          <div class="project-card__metric"><span class="muted">Due today</span><strong>${project.dueTodayTodos}</strong></div>
+          <div class="project-card__metric"><span class="muted">Future</span><strong>${project.futureTodos}</strong></div>
+          <div class="project-card__metric"><span class="muted">No date</span><strong>${project.noDueDateTodos}</strong></div>
+          <div class="project-card__metric"><span class="muted">Todo lists</span><strong>${project.todoLists}</strong></div>
+          <div class="project-card__metric"><span class="muted">Updated</span><strong class="mono">${project.updatedAt ? project.updatedAt.slice(0, 10) : "n/a"}</strong></div>
+        </div>
+      </section>
+      <section class="project-paper">
+        <div class="project-paper__header">
+          <div>
+            <div class="card-title">Upcoming work</div>
+            <div class="card-sub">The next visible todo slice for this project.</div>
           </div>
         </div>
         ${(project.previewTodos ?? []).length > 0
           ? html`
-              <div style="margin-bottom: 8px; font-weight: 500; font-size: 14px;">Upcoming todos</div>
               <div class="project-section-list">
                 ${(project.previewTodos ?? []).map(
                   (todo) => html`
@@ -711,8 +723,8 @@ function renderOverviewTab(props: CommandCenterProps, project: PmosProjectCard) 
                 )}
               </div>
             `
-          : html`<div class="muted">No preview todos available. Click Todos tab to load all.</div>`}
-      </div>
+          : html`<div class="muted">No preview todos available. Click Todos to load the full workspace surface.</div>`}
+      </section>
     </div>
   `;
 }
@@ -1232,12 +1244,22 @@ function renderSectionTab(props: CommandCenterProps, section: PmosProjectDetailT
   const aiPrompt = askAiPromptForSection(section, project.name, sectionData.data);
 
   return html`
-    <div class="project-section-content">
-      <div class="row" style="gap: 8px; margin-bottom: 12px;">
-        <button class="btn btn--sm" @click=${() => props.onLoadProjectSection(project.name, section)}>Refresh</button>
-        <button class="btn btn--sm btn--primary" @click=${() => props.onPrefillChat(aiPrompt)}>Ask AI</button>
-      </div>
-      ${content}
+    <div class="project-section-content project-section-content--stack">
+      <section class="project-paper project-paper--toolbar">
+        <div class="project-paper__header">
+          <div>
+            <div class="card-title">${DETAIL_TABS.find((t) => t.key === section)?.label ?? section}</div>
+            <div class="card-sub">Manual controls on the left, AI operator on the right.</div>
+          </div>
+          <div class="row" style="gap: 8px; margin-bottom: 0;">
+            <button class="btn btn--sm" @click=${() => props.onLoadProjectSection(project.name, section)}>Refresh</button>
+            <button class="btn btn--sm btn--primary" @click=${() => props.onPrefillChat(aiPrompt)}>Ask AI</button>
+          </div>
+        </div>
+      </section>
+      <section class="project-paper">
+        ${content}
+      </section>
     </div>
   `;
 }
@@ -1247,24 +1269,26 @@ function renderEntityDetailCard(props: CommandCenterProps) {
 
   const detail = props.selectedEntityDetail;
   return html`
-    <div class="card project-entity-detail">
-      <div class="project-entity-detail__header">
-        <div>
-          <div class="card-title">Item Detail</div>
-          <div class="card-sub">
-            ${detail?.reference.label ?? detail?.reference.type ?? "Basecamp item"}
+    <div class="project-detail-dialog-shell" @click=${() => props.onCloseItemDetail()}>
+      <div class="project-detail-dialog-backdrop"></div>
+      <div class="card project-entity-detail project-detail-dialog" role="dialog" aria-modal="true" @click=${(event: Event) => event.stopPropagation()}>
+        <div class="project-entity-detail__header">
+          <div>
+            <div class="card-title">Item Detail</div>
+            <div class="card-sub">
+              ${detail?.reference.label ?? detail?.reference.type ?? "Basecamp item"}
+            </div>
           </div>
+          <button class="btn btn--xs" @click=${() => props.onCloseItemDetail()}>Close</button>
         </div>
-        <button class="btn btn--xs" @click=${() => props.onCloseItemDetail()}>Close</button>
-      </div>
 
-      ${props.selectedEntityLoading
-        ? html`<div class="muted">Loading item details...</div>`
-        : props.selectedEntityError
-          ? html`<div class="callout danger">${props.selectedEntityError}</div>`
-          : detail
-            ? html`
-                <div class="project-entity-detail__body">
+        ${props.selectedEntityLoading
+          ? html`<div class="muted">Loading item details...</div>`
+          : props.selectedEntityError
+            ? html`<div class="callout danger">${props.selectedEntityError}</div>`
+            : detail
+              ? html`
+                  <div class="project-entity-detail__body">
                   <div class="project-entity-detail__title">${detail.title}</div>
                   <div class="project-entity-detail__chips">
                     <span class="chip chip--tiny">${detail.reference.type}</span>
@@ -1364,9 +1388,10 @@ function renderEntityDetailCard(props: CommandCenterProps) {
                         </div>
                       `
                     : nothing}
-                </div>
-              `
-            : nothing}
+                  </div>
+                `
+              : nothing}
+      </div>
     </div>
   `;
 }
@@ -1376,9 +1401,9 @@ function renderProjectDetail(props: CommandCenterProps) {
   const tab = props.projectDetailTab;
 
   return html`
-    <section class="projects-layout">
-      <div class="projects-main">
-        <div class="card project-detail">
+    <section class="projects-layout project-cockpit-layout">
+      <div class="projects-main project-cockpit-main">
+        <div class="card project-detail project-detail--paper">
           ${renderProjectDetailHeader(props)}
           ${renderProjectDetailTabs(props)}
           <div class="project-detail-body">
@@ -1386,25 +1411,27 @@ function renderProjectDetail(props: CommandCenterProps) {
           </div>
         </div>
       </div>
-      <div class="projects-side">
-        ${renderEntityDetailCard(props)}
-        <div class="card projects-chat-card">
-          <div class="ai-context-bar">
-            <span class="ai-context-dot"></span>
-            <span class="ai-context-label">AI sees: ${project.name} / ${DETAIL_TABS.find((t) => t.key === tab)?.label ?? tab}</span>
+      <aside class="projects-side projects-side--chat">
+        <div class="card projects-chat-card projects-chat-card--sticky">
+          <div class="projects-chat-card__header">
+            <div class="ai-context-bar">
+              <span class="ai-context-dot"></span>
+              <span class="ai-context-label">AI sees: ${project.name} / ${DETAIL_TABS.find((t) => t.key === tab)?.label ?? tab}</span>
+            </div>
+            <div class="row projects-chat-shortcuts">
+              <button class="btn btn--xs" @click=${() => props.onPrefillChat(`What are the most urgent todos in "${project.name}"?`)}>Urgent</button>
+              <button class="btn btn--xs" @click=${() => props.onPrefillChat(`Summarize the current state of "${project.name}" and suggest next steps.`)}>Summary</button>
+              <button class="btn btn--xs" @click=${() => props.onPrefillChat(`What's blocking progress in "${project.name}"?`)}>Blockers</button>
+              <button class="btn btn--xs" @click=${() => props.onPrefillChat(`Create a status update for "${project.name}" for stakeholders.`)}>Status Update</button>
+            </div>
           </div>
-          <div class="row projects-chat-shortcuts">
-            <button class="btn btn--xs" @click=${() => props.onPrefillChat(`What are the most urgent todos in "${project.name}"?`)}>Urgent</button>
-            <button class="btn btn--xs" @click=${() => props.onPrefillChat(`Summarize the current state of "${project.name}" and suggest next steps.`)}>Summary</button>
-            <button class="btn btn--xs" @click=${() => props.onPrefillChat(`What's blocking progress in "${project.name}"?`)}>Blockers</button>
-            <button class="btn btn--xs" @click=${() => props.onPrefillChat(`Create a status update for "${project.name}" for stakeholders.`)}>Status Update</button>
-          </div>
-          <div class="projects-chat-host">
+          <div class="projects-chat-host projects-chat-host--sticky">
             ${renderChat(props.chatProps)}
           </div>
         </div>
-      </div>
+      </aside>
     </section>
+    ${renderEntityDetailCard(props)}
   `;
 }
 
