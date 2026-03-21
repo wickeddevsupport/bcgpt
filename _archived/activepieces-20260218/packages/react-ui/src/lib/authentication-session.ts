@@ -9,6 +9,7 @@ import {
 
 import { ApStorage } from './ap-browser-storage';
 import { authenticationApi } from './authentication-api';
+import { toUiPath } from './base-path';
 const tokenKey = 'token';
 const projectIdKey = 'projectId';
 export const authenticationSession = {
@@ -111,7 +112,7 @@ export const authenticationSession = {
   },
   logOut() {
     this.clearSession();
-    window.location.href = '/sign-in';
+    window.location.href = toUiPath('/sign-in');
   },
 };
 

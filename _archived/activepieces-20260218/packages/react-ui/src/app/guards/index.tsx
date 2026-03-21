@@ -18,6 +18,7 @@ import { RedirectPage } from '@/app/routes/redirect';
 import { AppsPage } from '@/app/routes/apps';
 import { AppsPublisherPage } from '@/app/routes/apps/publisher';
 import { ProjectSettingsPage } from '@/app/routes/settings';
+import { UI_BASE_PATH } from '@/lib/base-path';
 import { useEmbedding } from '@/components/embed-provider';
 import { VerifyEmail } from '@/features/authentication/components/verify-email';
 import { AcceptInvitation } from '@/features/members/component/accept-invitation';
@@ -597,7 +598,9 @@ const routes = [
 ];
 
 export const memoryRouter = createMemoryRouter(routes);
-const browserRouter = createBrowserRouter(routes);
+const browserRouter = createBrowserRouter(routes, {
+  basename: UI_BASE_PATH,
+});
 
 const ApRouter = () => {
   const { embedState } = useEmbedding();

@@ -3,13 +3,14 @@ import path from 'path';
 
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 import checker from 'vite-plugin-checker';
-import tailwindcss from '@tailwindcss/vite';
 import customHtmlPlugin from './vite-plugins/html-plugin';
 
 export default defineConfig(({ command, mode }) => {
   const isDev = command === 'serve' || mode === 'development';
+  const uiBasePath = process.env.AP_UI_BASE_PATH?.trim() || '/';
 
   const AP_TITLE = isDev ? 'Wicked Flow' : '${AP_APP_TITLE}';
 
@@ -19,6 +20,7 @@ export default defineConfig(({ command, mode }) => {
 
   return {
     root: __dirname,
+    base: uiBasePath,
     cacheDir: '../../node_modules/.vite/packages/react-ui',
     server: {
       // allowedHosts: ['your_exposed_localhost'],
