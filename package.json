@@ -4,6 +4,10 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
+    "test": "npm run test:smoke",
+    "test:node": "node --test tests/*.test.mjs",
+    "test:smoke": "npm run license:guard && npm run test:node",
+    "ci:smoke": "npm run test:smoke",
     "license:guard": "node scripts/check-no-ee-imports.mjs",
     "test:basecamp:regression": "node scripts/basecamp-test-project-regression.mjs",
     "test:basecamp:smart-target": "node --test tests/basecamp-smart-action-target.test.mjs"
