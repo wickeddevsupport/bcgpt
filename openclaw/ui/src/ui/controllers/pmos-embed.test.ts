@@ -19,8 +19,11 @@ describe("buildOpsUiEmbedUrl", () => {
     expect(buildOpsUiConnectionsUrl("/control")).toBe("/control/ops-ui/connections");
   });
 
-  it("preserves the workspace project id on embed urls", () => {
-    expect(buildOpsUiEmbedUrl("", null, "proj-123")).toBe("/ops-ui/flows?projectId=proj-123");
+  it("uses project-scoped routes when a workspace project id exists", () => {
+    expect(buildOpsUiEmbedUrl("", null, "proj-123")).toBe("/ops-ui/projects/proj-123/flows");
+    expect(buildOpsUiEmbedUrl("/control", "wf-123", "proj-123")).toBe(
+      "/control/ops-ui/projects/proj-123/flows/wf-123",
+    );
     expect(buildOpsUiConnectionsUrl("/control", "proj-123")).toBe(
       "/control/ops-ui/projects/proj-123/connections?limit=10",
     );

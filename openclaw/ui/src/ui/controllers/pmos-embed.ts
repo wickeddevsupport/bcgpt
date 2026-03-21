@@ -16,10 +16,17 @@ export function buildOpsUiEmbedUrl(
 ): string {
   const base = normalizeBasePath(basePath ?? "");
   const trimmedFlowId = typeof flowId === "string" ? flowId.trim() : "";
-  if (trimmedFlowId) {
-    return appendProjectId(`${base}/ops-ui/flows/${encodeURIComponent(trimmedFlowId)}`, projectId);
+  const trimmedProjectId = typeof projectId === "string" ? projectId.trim() : "";
+  if (trimmedProjectId) {
+    if (trimmedFlowId) {
+      return `${base}/ops-ui/projects/${encodeURIComponent(trimmedProjectId)}/flows/${encodeURIComponent(trimmedFlowId)}`;
+    }
+    return `${base}/ops-ui/projects/${encodeURIComponent(trimmedProjectId)}/flows`;
   }
-  return appendProjectId(`${base}/ops-ui/flows`, projectId);
+  if (trimmedFlowId) {
+    return `${base}/ops-ui/flows/${encodeURIComponent(trimmedFlowId)}`;
+  }
+  return `${base}/ops-ui/flows`;
 }
 
 export function buildOpsUiConnectionsUrl(basePath: string, projectId?: string | null): string {
