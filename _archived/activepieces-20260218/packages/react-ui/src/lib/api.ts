@@ -14,7 +14,7 @@ import { ApErrorParams, ErrorCode, isNil } from '@activepieces/shared';
 export const API_BASE_URL =
   import.meta.env.MODE === 'cloud'
     ? 'https://cloud.activepieces.com'
-    : window.location.origin;
+    : `${window.location.origin}${import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')}`;
 export const API_URL = `${API_BASE_URL}/api`;
 
 const disallowedRoutes = [

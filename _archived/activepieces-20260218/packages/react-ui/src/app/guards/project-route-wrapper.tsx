@@ -8,6 +8,7 @@ import {
   FROM_QUERY_PARAM,
   useDefaultRedirectPath,
 } from '@/lib/navigation-utils';
+import { toUiPath } from '@/lib/base-path';
 import { isNil } from '@activepieces/shared';
 
 import { authenticationSession } from '../../lib/authentication-session';
@@ -21,7 +22,7 @@ export const TokenCheckerWrapper: React.FC<{ children: React.ReactNode }> = ({
   }>();
 
   if (isNil(projectIdFromParams)) {
-    return <Navigate to="/sign-in" replace />;
+    return <Navigate to={toUiPath('/sign-in')} replace />;
   }
   const hasAccessToProject =
     projectCollectionUtils.useHasAccessToProject(projectIdFromParams);
@@ -33,7 +34,7 @@ export const TokenCheckerWrapper: React.FC<{ children: React.ReactNode }> = ({
       ),
       duration: 10000,
     });
-    return <Navigate to="/" replace />;
+    return <Navigate to={toUiPath('/')} replace />;
   }
 
   authenticationSession.switchToProject(projectIdFromParams);
@@ -56,7 +57,7 @@ const RedirectToCurrentProjectRoute: React.FC<
   if (isNil(currentProjectId)) {
     return (
       <Navigate
-        to={`/sign-in?${new URLSearchParams({ from }).toString()}`}
+        to={toUiPath(`/sign-in?${new URLSearchParams({ from }).toString()}`)}
         replace
       />
     );
@@ -73,7 +74,7 @@ const RedirectToCurrentProjectRoute: React.FC<
   }`;
   return (
     <Navigate
-      to={`/projects/${currentProjectId}${pathWithParamsAndSearchParams}`}
+      to={toUiPath(`/projects/${currentProjectId}${pathWithParamsAndSearchParams}`)}
       replace
     />
   );

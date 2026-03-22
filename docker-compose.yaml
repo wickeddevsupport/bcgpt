@@ -5,6 +5,8 @@ services:
     build:
       context: ./_archived/activepieces-20260218
       dockerfile: Dockerfile
+      args:
+        AP_UI_BASE_PATH: "/ops-ui/"
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=coolify"
@@ -37,7 +39,7 @@ services:
       AP_SELF_SERVE_SIGN_UP_ENABLED: "${AP_SELF_SERVE_SIGN_UP_ENABLED:-true}"
       AP_APP_TITLE: "${AP_APP_TITLE:-Wicked Flow}"
       AP_FAVICON_URL: "${AP_FAVICON_URL:-https://flow.wickedlab.io/branding/wicked-flow-icon.svg}"
-      AP_DEV_PIECES: "${AP_DEV_PIECES:-basecamp}"
+      AP_DEV_PIECES: "${AP_DEV_PIECES:-basecamp,manual-trigger,webhook,http,schedule}"
     volumes:
       - activepieces-data:/var/data/activepieces
     expose:

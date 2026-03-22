@@ -63,6 +63,8 @@ WORKDIR /usr/src/app
 
 # Optional token for Nx Cloud remote cache in CI builds.
 ARG NX_CLOUD_ACCESS_TOKEN
+ARG AP_UI_BASE_PATH=/
+ENV AP_UI_BASE_PATH=${AP_UI_BASE_PATH}
 
 # Copy only dependency files first for better layer caching
 COPY .npmrc package.json bun.lock ./
@@ -88,8 +90,12 @@ RUN NX_CLOUD_ACCESS_TOKEN=${NX_CLOUD_ACCESS_TOKEN} npx nx build server-api --con
 RUN NX_CLOUD_ACCESS_TOKEN=${NX_CLOUD_ACCESS_TOKEN} npx nx build pieces-framework
 RUN NX_CLOUD_ACCESS_TOKEN=${NX_CLOUD_ACCESS_TOKEN} npx nx build pieces-common
 
-# Build custom pieces so they can be loaded via AP_DEV_PIECES at runtime
+# Build custom/dev pieces that the embedded workflow editor depends on at runtime.
 RUN NX_CLOUD_ACCESS_TOKEN=${NX_CLOUD_ACCESS_TOKEN} npx nx build pieces-basecamp
+RUN NX_CLOUD_ACCESS_TOKEN=${NX_CLOUD_ACCESS_TOKEN} npx nx build pieces-manual-trigger
+RUN NX_CLOUD_ACCESS_TOKEN=${NX_CLOUD_ACCESS_TOKEN} npx nx build pieces-webhook
+RUN NX_CLOUD_ACCESS_TOKEN=${NX_CLOUD_ACCESS_TOKEN} npx nx build pieces-http
+RUN NX_CLOUD_ACCESS_TOKEN=${NX_CLOUD_ACCESS_TOKEN} npx nx build pieces-schedule
 
 # Build react-ui frontend
 RUN NX_CLOUD_ACCESS_TOKEN=${NX_CLOUD_ACCESS_TOKEN} npx nx build react-ui --configuration production
@@ -154,10 +160,14 @@ RUN rm -rf node_modules/@activepieces/pieces-framework \
     cp -r dist/packages/pieces/community/common/* node_modules/@activepieces/pieces-common/ && \
     cp -r dist/packages/shared/* node_modules/@activepieces/shared/
 
-# Make custom pieces available at a stable path and default AP_DEV_PIECES
+# Make embedded-editor pieces available at a stable path and default AP_DEV_PIECES.
 RUN mkdir -p /usr/src/app/custom-pieces && \
-    cp -r /usr/src/app/dist/packages/pieces/community/basecamp /usr/src/app/custom-pieces/basecamp
-ENV AP_DEV_PIECES="basecamp"
+    cp -r /usr/src/app/dist/packages/pieces/community/basecamp /usr/src/app/custom-pieces/basecamp && \
+    cp -r /usr/src/app/dist/packages/pieces/community/manual-trigger /usr/src/app/custom-pieces/manual-trigger && \
+    cp -r /usr/src/app/dist/packages/pieces/community/webhook /usr/src/app/custom-pieces/webhook && \
+    cp -r /usr/src/app/dist/packages/pieces/community/http /usr/src/app/custom-pieces/http && \
+    cp -r /usr/src/app/dist/packages/pieces/community/schedule /usr/src/app/custom-pieces/schedule
+ENV AP_DEV_PIECES="basecamp,manual-trigger,webhook,http,schedule"
 
 # Copy frontend files to Nginx document root
 COPY --from=build /usr/src/app/dist/packages/react-ui /usr/share/nginx/html/
