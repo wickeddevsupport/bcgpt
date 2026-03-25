@@ -87,6 +87,8 @@ const FOCUSED_TOOL_NAMES = new Set([
   "update_todo_details",
   "complete_todo",
   "uncomplete_todo",
+  "trash_todo",
+  "move_todo",
   "list_card_tables",
   "list_card_table_columns",
   "list_card_table_cards",
@@ -111,6 +113,7 @@ const FOCUSED_TOOL_NAMES = new Set([
   "get_schedule_entry",
   "create_schedule_entry",
   "update_schedule_entry",
+  "trash_schedule_entry",
   "list_comments",
   "get_comment",
   "create_comment",
@@ -163,6 +166,7 @@ export function getTools() {
         max_projects: { type: "integer", description: "Optional cap for open-todo scanning." },
         max_age_ms: { type: "integer", description: "Maximum accepted snapshot age before a live refresh is required. Use 0 for realtime." },
         force_refresh: { type: "boolean", description: "Always refresh from Basecamp before returning results." },
+        wait_for_fresh: { type: "boolean", description: "Wait for a live refresh before returning when the snapshot is stale. Defaults to true for explicit realtime reads and false for fast cached reads." },
         allow_stale_on_error: { type: "boolean", description: "If live refresh fails, return the last cached snapshot with stale metadata instead of failing." }
       },
       additionalProperties: false
@@ -175,6 +179,7 @@ export function getTools() {
         max_projects: { type: "integer", description: "Optional cap for active project scanning." },
         max_age_ms: { type: "integer", description: "Maximum accepted snapshot age before a live refresh is required. Use 0 for realtime." },
         force_refresh: { type: "boolean", description: "Always refresh from Basecamp before returning the PMOS workspace payload." },
+        wait_for_fresh: { type: "boolean", description: "Wait for a live refresh before returning when the snapshot is stale. Defaults to true for explicit realtime reads and false for fast cached reads." },
         allow_stale_on_error: { type: "boolean", description: "If live refresh fails, return the last cached workspace snapshot with explicit stale metadata." },
         include_project_details: { type: "boolean", description: "Hydrate detailed project objects for the selected workspace projects." },
         include_project_docks: { type: "boolean", description: "Include full dock payloads for hydrated projects." },
@@ -586,6 +591,22 @@ export function getTools() {
       required: ["project", "task"],
       additionalProperties: false
     }),
+    tool("trash_todo", "Move a to-do to trash (delete it). The todo_id is the numeric ID of the todo. Trashed todos can be recovered by an admin from the Basecamp trash.", {
+      type: "object",
+      properties: { project: { type: "string" }, todo_id: { type: "integer" } },
+      required: ["project", "todo_id"],
+      additionalProperties: false
+    }),
+    tool("move_todo", "Move a to-do from one todolist to another within the same project. Creates a copy in the target list preserving all fields, then trashes the original.", {
+      type: "object",
+      properties: {
+        project: { type: "string" },
+        todo_id: { type: "integer" },
+        target_todolist_id: { type: "integer" }
+      },
+      required: ["project", "todo_id", "target_todolist_id"],
+      additionalProperties: false
+    }),
 
     tool("list_card_tables", "List card tables (kanban boards) for a project.", {
       type: "object",
@@ -991,7 +1012,7 @@ export function getTools() {
       required: ["type"],
       additionalProperties: false
     }),
-    tool("trash_recording", "Move a recording to trash.", {
+    tool("trash_recording", "Move any Basecamp recording to trash — works for todos, messages, comments, documents, uploads, cards, and schedule entries. The recording_id is the numeric ID of the item. Prefer the focused trash_todo or trash_schedule_entry tools for those specific types.", {
       type: "object",
       properties: { project: { type: "string" }, recording_id: { type: "integer" } },
       required: ["project", "recording_id"],
@@ -1698,6 +1719,12 @@ export function getTools() {
       type: "object",
       properties: { project: { type: "string" }, entry_id: { type: "integer" }, body: { type: "object", additionalProperties: true } },
       required: ["project", "entry_id", "body"],
+      additionalProperties: false
+    }),
+    tool("trash_schedule_entry", "Move a schedule entry to trash (delete it). The entry_id is the numeric ID of the schedule entry.", {
+      type: "object",
+      properties: { project: { type: "string" }, entry_id: { type: "integer" } },
+      required: ["project", "entry_id"],
       additionalProperties: false
     }),
 

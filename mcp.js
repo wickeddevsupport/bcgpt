@@ -5602,12 +5602,13 @@ export async function handleMCP(reqBody, ctx) {
           ? Number(args.max_age_ms)
           : Number(process.env.BASECAMP_WORKSPACE_SYNC_READ_MAX_AGE_MS || 0);
         const forceRefresh = args.force_refresh === true || (args.force_refresh !== false && maxAgeMs <= 0);
+        const waitForFresh = args.wait_for_fresh === true || (args.wait_for_fresh !== false && forceRefresh);
         const allowStaleOnError = args.allow_stale_on_error !== false;
         const [snapshot, resourceCounts] = await Promise.all([
           getOrRefreshBasecampWorkspaceSnapshot({
             userKey: ctx.userKey,
             accountId: ctx.accountId,
-            waitForFresh: true,
+            waitForFresh,
             maxAgeMs,
             forceRefresh,
             allowStaleOnError,
@@ -5634,6 +5635,7 @@ export async function handleMCP(reqBody, ctx) {
           ? Number(args.max_age_ms)
           : Number(process.env.BASECAMP_WORKSPACE_SYNC_READ_MAX_AGE_MS || 0);
         const forceRefresh = args.force_refresh === true || (args.force_refresh !== false && maxAgeMs <= 0);
+        const waitForFresh = args.wait_for_fresh === true || (args.wait_for_fresh !== false && forceRefresh);
         const allowStaleOnError = args.allow_stale_on_error !== false;
         const includeProjectDetails = args.include_project_details === true;
         const includeProjectDocks = args.include_project_docks === true;
@@ -5643,7 +5645,7 @@ export async function handleMCP(reqBody, ctx) {
           getOrRefreshBasecampWorkspaceSnapshot({
             userKey: ctx.userKey,
             accountId: ctx.accountId,
-            waitForFresh: true,
+            waitForFresh,
             maxAgeMs,
             forceRefresh,
             allowStaleOnError,
@@ -6414,6 +6416,57 @@ export async function handleMCP(reqBody, ctx) {
         return ok(id, { project: { id: p.id, name: p.name }, ...result });
       } catch (e) {
         return fail(id, { code: "REPOSITION_TODO_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "trash_todo") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await trashRecording(ctx, p.id, Number(args.todo_id));
+        return ok(id, { project: { id: p.id, name: p.name }, ...result, todo_id: Number(args.todo_id) });
+      } catch (e) {
+        return fail(id, { code: "TRASH_TODO_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "move_todo") {
+      // Basecamp has no native move-todo API. Strategy: read todo, create in target list, trash original.
+      try {
+        const p = await projectByName(ctx, args.project);
+        const projectId = p.id;
+        const todoId = Number(args.todo_id);
+        const targetTodolistId = Number(args.target_todolist_id);
+
+        // 1. Read the original todo to get all fields
+        const original = await api(ctx, `/buckets/${projectId}/todos/${todoId}.json`);
+        if (!original) throw new Error(`Todo ${todoId} not found in project ${p.name}`);
+
+        // 2. Create a copy in the target todolist
+        const createBody = {
+          content: original.content || original.title || "",
+          description: original.description || null,
+          assignee_ids: Array.isArray(original.assignee_ids) ? original.assignee_ids : [],
+          due_on: original.due_on || null,
+          starts_on: original.starts_on || null,
+          notify: typeof original.notify === "boolean" ? original.notify : false,
+        };
+        const created = await api(ctx, `/buckets/${projectId}/todolists/${targetTodolistId}/todos.json`, {
+          method: "POST",
+          body: createBody,
+        });
+
+        // 3. Trash the original
+        await trashRecording(ctx, projectId, todoId);
+
+        return ok(id, {
+          project: { id: projectId, name: p.name },
+          message: `Moved todo to todolist ${targetTodolistId}`,
+          new_todo_id: created?.id,
+          original_todo_id: todoId,
+          trashed_original: true,
+        });
+      } catch (e) {
+        return fail(id, { code: "MOVE_TODO_ERROR", message: e.message });
       }
     }
 
@@ -11031,6 +11084,16 @@ export async function handleMCP(reqBody, ctx) {
         const known = toolFailResult(id, e);
         if (known) return known;
         return fail(id, { code: "UPDATE_SCHEDULE_ENTRY_ERROR", message: e.message });
+      }
+    }
+
+    if (name === "trash_schedule_entry") {
+      try {
+        const p = await projectByName(ctx, args.project);
+        const result = await trashRecording(ctx, p.id, Number(args.entry_id));
+        return ok(id, { project: { id: p.id, name: p.name }, ...result, entry_id: Number(args.entry_id) });
+      } catch (e) {
+        return fail(id, { code: "TRASH_SCHEDULE_ENTRY_ERROR", message: e.message });
       }
     }
 
