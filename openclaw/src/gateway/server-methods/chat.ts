@@ -327,42 +327,15 @@ export function shouldRouteToPmosWorkspaceChat(
     return false;
   }
 
-  if (/^(?:\/pmos\b|pmos:)/i.test(trimmed)) {
-    return true;
+  // Slash commands (except /pmos) go through the regular pi-coding-agent path
+  // so that built-in commands like /help, /list, /clear still work.
+  if (trimmed.startsWith("/") && !/^(?:\/pmos\b|pmos:)/i.test(trimmed)) {
+    return false;
   }
 
-  const urlHints = inspectWorkspaceChatUrls(trimmed);
-  const basecampExplicit =
-    Boolean(urlHints.basecampUrl) ||
-    /\bbasecamp\b|\bbcgpt\b|\bcampfire\b|\bmessage\s+board\b|\bhill\s*chart\b/i.test(trimmed) ||
-    /\b(?:what do i need to do today|what should i focus on today|what should i do today)\b/i.test(
-      trimmed,
-    ) ||
-    /\b(?:my|assigned to me|what am i responsible for|what is due|what's due)\b[\s\w-]{0,30}\b(?:todo|todos|task|tasks|schedule|projects?)\b/i.test(
-      trimmed,
-    ) ||
-    /\b(?:overdue|due today|due tomorrow|today|tomorrow)\b[\s\w-]{0,20}\b(?:todo|todos|task|tasks|schedule)\b/i.test(
-      trimmed,
-    ) ||
-    /\b(?:show|list|find|get|open|check|review|summarize)\b[\s\w-]{0,40}\b(?:todo|todos|task|tasks|schedule|campfire|projects?|message board|card)\b/i.test(
-      trimmed,
-    );
-  if (basecampExplicit) {
-    return true;
-  }
-
-  if (
-    urlHints.figmaUrl ||
-    /\bfigma\b|\bfigma mcp\b|\bfile manager\b|\bselected file\b|\bteam sync\b|\bfigma panel\b/i.test(
-      trimmed,
-    )
-  ) {
-    return true;
-  }
-
-  return /\bworkflow(?:s)?\b|\bworkflow engine\b|\bautomation(?:s)?\b|\bactivepieces\b|\bconnector(?:s)?\b|\bcredential(?:s)?\b|\bintegration(?:s)?\b|\bcommand center\b/i.test(
-    trimmed,
-  );
+  // All workspace messages go through pmos.chat.send which has full conversation
+  // history, workspace tools (Basecamp/Figma/workflow), and screen context.
+  return true;
 }
 
 async function buildWorkspaceSystemPrompt(

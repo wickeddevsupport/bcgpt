@@ -1593,13 +1593,9 @@ export function buildPmosChatExecutionPlan(params: {
       latestUserMessage,
     );
   const includeCredentials = mode === "workflow" || (mode === "cross_system" && intents.has("workflow"));
-  const includeScreenContext =
-    params.hasScreenContext &&
-    (mode === "figma" ||
-      mode === "cross_system" ||
-      /\b(this screen|current screen|selected|here|this view|current panel)\b/i.test(
-        latestUserMessage,
-      ));
+  // Always include screen context when it's present — the user has a project or tab
+  // open and the AI should always be aware of it, regardless of message content.
+  const includeScreenContext = params.hasScreenContext;
   const includeUrlHints = params.pastedUrlCount > 0;
   const needsLiveData =
     specialistIntents.length > 0 || includeWorkspaceMemory || includeCredentials || includeUrlHints;
