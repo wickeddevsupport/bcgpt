@@ -715,20 +715,43 @@ export const chatHandlers: GatewayRequestHandlers = {
                 }
               | undefined;
 
+            // Read recent history BEFORE the user message was appended so we
+            // can give pmos.chat.send conversation context for follow-up questions.
+            const priorMessages = readSessionMessages(sessionId, latestStorePath, latestEntry?.sessionFile)
+              .slice(-16)
+              .filter((m): m is { role: "user" | "assistant"; content: unknown } =>
+                m.role === "user" || m.role === "assistant",
+              )
+              .map((m) => ({
+                role: m.role as "user" | "assistant",
+                content: Array.isArray(m.content)
+                  ? (m.content as Array<{ type?: string; text?: string }>)
+                      .map((c) => (typeof c?.text === "string" ? c.text : ""))
+                      .join("")
+                  : typeof m.content === "string"
+                    ? m.content
+                    : "",
+              }))
+              .filter((m) => m.content.trim());
+            const messagesWithHistory = [
+              ...priorMessages,
+              { role: "user" as const, content: parsedMessage },
+            ];
+
             await pmosHandlers["pmos.chat.send"]({
               req: {
                 id: clientRunId,
                 type: "req",
                 method: "pmos.chat.send",
                 params: {
-                  messages: [{ role: "user", content: parsedMessage }],
+                  messages: messagesWithHistory,
                   sessionKey: rawSessionKey,
                   runId: clientRunId,
                   ...(p.screenContext ? { screenContext: p.screenContext } : {}),
                 },
               },
               params: {
-                messages: [{ role: "user", content: parsedMessage }],
+                messages: messagesWithHistory,
                 sessionKey: rawSessionKey,
                 runId: clientRunId,
                 ...(p.screenContext ? { screenContext: p.screenContext } : {}),
