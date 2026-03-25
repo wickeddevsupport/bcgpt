@@ -715,10 +715,10 @@ export const chatHandlers: GatewayRequestHandlers = {
                 }
               | undefined;
 
-            // Read recent history BEFORE the user message was appended so we
-            // can give pmos.chat.send conversation context for follow-up questions.
-            const priorMessages = readSessionMessages(sessionId, latestStorePath, latestEntry?.sessionFile)
-              .slice(-16)
+            // Pass full session history to pmos.chat.send so it has the same
+            // conversational context as the regular chat path. Cap at 40 messages
+            // (~20 pairs) to stay within the model context window budget.
+            const allPriorMessages = readSessionMessages(sessionId, latestStorePath, latestEntry?.sessionFile)
               .filter((m): m is { role: "user" | "assistant"; content: unknown } =>
                 m.role === "user" || m.role === "assistant",
               )
@@ -733,6 +733,10 @@ export const chatHandlers: GatewayRequestHandlers = {
                     : "",
               }))
               .filter((m) => m.content.trim());
+            // Trim from oldest if over 40 messages to protect context window
+            const priorMessages = allPriorMessages.length > 40
+              ? allPriorMessages.slice(-40)
+              : allPriorMessages;
             const messagesWithHistory = [
               ...priorMessages,
               { role: "user" as const, content: parsedMessage },
