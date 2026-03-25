@@ -196,7 +196,7 @@ function sanitizeWorkspaceConfigResponse(
   };
 }
 
-const PMOS_SHARED_PROVIDER_ALLOWLIST = new Set(["local-ollama", "ollama", "kilo"]);
+const PMOS_SHARED_PROVIDER_ALLOWLIST = new Set(["local-ollama", "ollama", "kilo", "ollama-cloud"]);
 
 function deepCloneJson<T>(value: T): T {
   return value && typeof value === "object" ? (JSON.parse(JSON.stringify(value)) as T) : value;
@@ -6168,10 +6168,12 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
 
   // â"€â"€ Connections: Real n8n credential list â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
-  "pmos.projects.snapshot": async ({ respond, client }) => {
+  "pmos.projects.snapshot": async ({ respond, client, params }) => {
     try {
       if (!client) throw new Error("client context required");
       const workspaceId = requireWorkspaceId(client);
+      const p = isJsonObject(params) ? params : null;
+      const fresh = p?.fresh === true;
 
       const { bcgptUrl, apiKey: bcgptApiKey } = await resolveWorkspaceBcgptAccess({
         workspaceId,
@@ -6217,7 +6219,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       }
 
       const errors: string[] = [];
-      const [start, pmosWorkspaceSyncResult] = await Promise.all([
+      const [start, workspaceSnapshotResult] = await Promise.all([
         fetchJson(`${bcgptUrl}/action/startbcgpt`, {
           method: "POST",
           timeoutMs: 4_000,
@@ -6230,35 +6232,18 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         callBcgptTool({
           bcgptUrl,
           apiKey: bcgptApiKey,
-          toolName: "pmos_workspace_sync",
+          toolName: "workspace_todo_snapshot",
           toolArgs: {
-            max_age_ms: 0,
-            force_refresh: true,
+            max_age_ms: fresh ? 0 : 900_000,
+            force_refresh: fresh,
+            wait_for_fresh: fresh,
             allow_stale_on_error: true,
-            preview_limit: 24,
-            project_preview_limit: 4,
-            include_project_details: true,
-            include_project_docks: true,
-            include_disabled_tools: true,
+            preview_limit: 12,
+            project_preview_limit: 3,
           },
-          timeoutMs: 180_000,
+          timeoutMs: fresh ? 180_000 : 20_000,
         }),
       ]);
-      const workspaceSnapshotResult = pmosWorkspaceSyncResult.ok
-        ? pmosWorkspaceSyncResult
-        : await callBcgptTool({
-            bcgptUrl,
-            apiKey: bcgptApiKey,
-            toolName: "workspace_todo_snapshot",
-            toolArgs: {
-              max_age_ms: 0,
-              force_refresh: true,
-              allow_stale_on_error: true,
-              preview_limit: 24,
-              project_preview_limit: 4,
-            },
-            timeoutMs: 180_000,
-          });
 
       const startPayload = isJsonObject(start.json) ? start.json : {};
       if (!start.ok && start.error) {
