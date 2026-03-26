@@ -636,7 +636,7 @@ export function renderChat(props: ChatProps) {
             <button
               class="btn"
               type="button"
-              title="Attach image"
+              title="Attach file (images, PDFs, Office docs, code)"
               ?disabled=${!props.connected}
               @click=${() => {
                 const input = document.querySelector<HTMLInputElement>(".chat-file-input");

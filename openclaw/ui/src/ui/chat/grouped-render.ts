@@ -18,15 +18,19 @@ type ImageBlock = {
   alt?: string;
 };
 
+type VideoEmbed = { src: string; title: string };
+
 const YT_PATTERNS = [
   /https?:\/\/(?:www\.)?youtube\.com\/watch\?(?:[^#\s"')]*&)?v=([a-zA-Z0-9_-]{11})/g,
   /https?:\/\/youtu\.be\/([a-zA-Z0-9_-]{11})/g,
   /https?:\/\/(?:www\.)?youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/g,
 ];
+const VIMEO_PATTERN = /https?:\/\/(?:www\.)?vimeo\.com\/(\d+)/g;
 
-function extractYouTubeIds(text: string): string[] {
-  const ids: string[] = [];
+function extractVideoEmbeds(text: string): VideoEmbed[] {
+  const embeds: VideoEmbed[] = [];
   const seen = new Set<string>();
+
   for (const pattern of YT_PATTERNS) {
     pattern.lastIndex = 0;
     let match;
@@ -34,19 +38,36 @@ function extractYouTubeIds(text: string): string[] {
       const id = match[1];
       if (id && !seen.has(id)) {
         seen.add(id);
-        ids.push(id);
+        embeds.push({
+          src: `https://www.youtube.com/embed/${id}?rel=0&modestbranding=1`,
+          title: "YouTube video",
+        });
       }
     }
   }
-  return ids;
+
+  VIMEO_PATTERN.lastIndex = 0;
+  let match;
+  while ((match = VIMEO_PATTERN.exec(text)) !== null) {
+    const id = match[1];
+    if (id && !seen.has(`vimeo:${id}`)) {
+      seen.add(`vimeo:${id}`);
+      embeds.push({
+        src: `https://player.vimeo.com/video/${id}`,
+        title: "Vimeo video",
+      });
+    }
+  }
+
+  return embeds;
 }
 
-function renderYouTubeEmbed(videoId: string) {
+function renderVideoEmbed(embed: VideoEmbed) {
   return html`
     <div class="chat-video-embed">
       <iframe
-        src="https://www.youtube.com/embed/${videoId}?rel=0&modestbranding=1"
-        title="YouTube video"
+        src="${embed.src}"
+        title="${embed.title}"
         frameborder="0"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
         allowfullscreen
@@ -341,9 +362,9 @@ function renderGroupedMessage(
   const reasoningMarkdown = extractedThinking ? formatReasoningMarkdown(extractedThinking) : null;
   const markdown = markdownBase;
   const canCopyMarkdown = role === "assistant" && Boolean(markdown?.trim());
-  // Only embed YouTube for final (non-streaming) assistant messages
-  const youtubeIds = !opts.isStreaming && role === "assistant" && markdown
-    ? extractYouTubeIds(markdown)
+  // Only embed videos for final (non-streaming) assistant messages
+  const videoEmbeds = !opts.isStreaming && role === "assistant" && markdown
+    ? extractVideoEmbeds(markdown)
     : [];
 
   if (!markdown && hasToolCards && isToolResult) {
@@ -362,7 +383,7 @@ function renderGroupedMessage(
     toolCards?: typeof toolCards;
     canCopy?: boolean;
     bubbleClass?: string;
-    youtubeIds?: string[];
+    videoEmbeds?: VideoEmbed[];
   }) => {
     const normalizedRole = normalizeRoleForGrouping(role);
     const bubbleClasses = [
@@ -396,7 +417,7 @@ function renderGroupedMessage(
             )}</div>`
           : nothing}
         ${(content.toolCards ?? []).map((card) => renderToolCardSidebar(card, onOpenSidebar))}
-        ${(content.youtubeIds ?? []).map((id) => renderYouTubeEmbed(id))}
+        ${(content.videoEmbeds ?? []).map((embed) => renderVideoEmbed(embed))}
       </div>
     `;
   };
@@ -412,7 +433,7 @@ function renderGroupedMessage(
         images,
         toolCards,
         canCopy: canCopyMarkdown,
-        youtubeIds,
+        videoEmbeds,
       })}
     `;
   }
@@ -423,6 +444,6 @@ function renderGroupedMessage(
     images,
     toolCards,
     canCopy: canCopyMarkdown,
-    youtubeIds,
+    videoEmbeds,
   });
 }
