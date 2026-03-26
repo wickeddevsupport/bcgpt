@@ -52,7 +52,7 @@ function toJsonRecordArray(value: unknown): JsonRecord[] {
   return value.filter((entry): entry is JsonRecord => isJsonRecord(entry));
 }
 
-const SHARED_MODEL_PROVIDER_ALLOWLIST = new Set(["local-ollama", "ollama"]);
+const SHARED_MODEL_PROVIDER_ALLOWLIST = new Set(["local-ollama", "ollama", "github-copilot"]);
 
 function getPath(obj: unknown, path: string[]): unknown {
   let cur: unknown = obj;

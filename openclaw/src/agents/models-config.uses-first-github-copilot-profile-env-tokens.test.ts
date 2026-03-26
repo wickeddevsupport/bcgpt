@@ -145,7 +145,18 @@ describe("models-config", () => {
               "github-copilot": {
                 baseUrl: "https://copilot.local",
                 api: "openai-responses",
-                models: [],
+                models: [
+                  {
+                    id: "gpt-4.1",
+                    name: "GPT-4.1",
+                    api: "openai-responses",
+                    reasoning: false,
+                    input: ["text", "image"],
+                    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                    contextWindow: 128000,
+                    maxTokens: 8192,
+                  },
+                ],
               },
             },
           },
@@ -154,10 +165,12 @@ describe("models-config", () => {
         const agentDir = resolveOpenClawAgentDir();
         const raw = await fs.readFile(path.join(agentDir, "models.json"), "utf8");
         const parsed = JSON.parse(raw) as {
-          providers: Record<string, { baseUrl?: string }>;
+          providers: Record<string, { baseUrl?: string; api?: string; models?: unknown[] }>;
         };
 
         expect(parsed.providers["github-copilot"]?.baseUrl).toBe("https://copilot.local");
+        expect(parsed.providers["github-copilot"]?.api).toBeUndefined();
+        expect(parsed.providers["github-copilot"]?.models).toEqual([]);
       } finally {
         process.env.COPILOT_GITHUB_TOKEN = previous;
       }

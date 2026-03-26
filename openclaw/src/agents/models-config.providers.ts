@@ -305,6 +305,19 @@ export function normalizeProviders(params: {
       };
     }
 
+    // GitHub Copilot must keep pi-ai's built-in model definitions so the
+    // provider-specific IDE headers remain attached to requests.
+    if (normalizedKey === "github-copilot" && Array.isArray(normalizedProvider.models)) {
+      if (normalizedProvider.models.length > 0 || normalizedProvider.api) {
+        mutated = true;
+      }
+      const { api: _ignoredApi, ...providerWithoutApi } = normalizedProvider;
+      normalizedProvider = {
+        ...providerWithoutApi,
+        models: [],
+      };
+    }
+
     // If a provider defines models, pi's ModelRegistry requires apiKey to be set.
     // Fill it from the environment or auth profiles when possible.
     const hasModels =

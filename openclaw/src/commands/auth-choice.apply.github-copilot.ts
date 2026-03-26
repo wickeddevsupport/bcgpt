@@ -41,7 +41,7 @@ export async function applyAuthChoiceGitHubCopilot(
   });
 
   if (params.setDefaultModel) {
-    const model = "github-copilot/gpt-4o";
+    const model = "github-copilot/gpt-4.1";
     nextConfig = {
       ...nextConfig,
       agents: {

@@ -84,4 +84,33 @@ describe("loadModelCatalog", () => {
     expect(result).toEqual([{ id: "gpt-4.1", name: "GPT-4.1", provider: "openai" }]);
     expect(warnSpy).toHaveBeenCalledTimes(1);
   });
+
+  it("filters github-copilot down to the shared zero-premium models", async () => {
+    __setModelCatalogImportForTest(
+      async () =>
+        ({
+          AuthStorage: class {},
+          ModelRegistry: class {
+            getAll() {
+              return [
+                { id: "gpt-4.1", name: "GPT-4.1", provider: "github-copilot" },
+                { id: "gpt-4o", name: "GPT-4o", provider: "github-copilot" },
+                { id: "gpt-5-mini", name: "GPT-5 mini", provider: "github-copilot" },
+                { id: "gpt-5.2", name: "GPT-5.2", provider: "github-copilot" },
+                { id: "o3", name: "o3", provider: "github-copilot" },
+                { id: "gpt-4.1", name: "GPT-4.1", provider: "openai" },
+              ];
+            }
+          },
+        }) as unknown as PiSdkModule,
+    );
+
+    const result = await loadModelCatalog({ config: {} as OpenClawConfig });
+    expect(result).toEqual([
+      { id: "gpt-4.1", name: "GPT-4.1", provider: "github-copilot" },
+      { id: "gpt-4o", name: "GPT-4o", provider: "github-copilot" },
+      { id: "gpt-5-mini", name: "GPT-5 mini", provider: "github-copilot" },
+      { id: "gpt-4.1", name: "GPT-4.1", provider: "openai" },
+    ]);
+  });
 });

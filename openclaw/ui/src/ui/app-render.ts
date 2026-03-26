@@ -681,8 +681,6 @@ onAbort: () => void state.handleAbortChat(),
     attachments: [],
     onAttachmentsChange: undefined,
     onSend: () => void state.handleWorkflowChatSend(),
-    onCreateWorkflow: undefined,
-    createWorkflowBusy: false,
     onAbort: undefined,
     onQueueRemove: () => undefined,
     onNewSession: () => {

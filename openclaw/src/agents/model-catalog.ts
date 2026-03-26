@@ -1,4 +1,5 @@
 import { type OpenClawConfig, loadConfig } from "../config/config.js";
+import { isDefaultCopilotModelId } from "../providers/github-copilot-models.js";
 import { resolveOpenClawAgentDir } from "./agent-paths.js";
 import { ensureOpenClawModelsJson } from "./models-config.js";
 
@@ -83,6 +84,9 @@ export async function loadModelCatalog(params?: {
         }
         const provider = String(entry?.provider ?? "").trim();
         if (!provider) {
+          continue;
+        }
+        if (provider.toLowerCase() === "github-copilot" && !isDefaultCopilotModelId(id)) {
           continue;
         }
         const name = String(entry?.name ?? id).trim() || id;

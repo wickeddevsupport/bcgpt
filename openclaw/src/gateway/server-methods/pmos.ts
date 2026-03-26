@@ -196,7 +196,13 @@ function sanitizeWorkspaceConfigResponse(
   };
 }
 
-const PMOS_SHARED_PROVIDER_ALLOWLIST = new Set(["local-ollama", "ollama", "kilo", "ollama-cloud"]);
+const PMOS_SHARED_PROVIDER_ALLOWLIST = new Set([
+  "local-ollama",
+  "ollama",
+  "kilo",
+  "ollama-cloud",
+  "github-copilot",
+]);
 
 function deepCloneJson<T>(value: T): T {
   return value && typeof value === "object" ? (JSON.parse(JSON.stringify(value)) as T) : value;

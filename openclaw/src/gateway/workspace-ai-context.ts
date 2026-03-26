@@ -520,7 +520,7 @@ function describeAgentSection(input: {
 
 function describeCredentialSection(credentials: WorkspaceAiCredential[]): string {
   if (!credentials.length) {
-    return ["## Active Flow Connections", "- no active Flow connections discovered"].join("\n");
+    return ["## Connected Apps", "- no connected apps discovered for this workspace"].join("\n");
   }
 
   const sorted = credentials
@@ -531,9 +531,9 @@ function describeCredentialSection(credentials: WorkspaceAiCredential[]): string
   if (sorted.length > top.length) {
     lines.push(`- ... plus ${sorted.length - top.length} more`);
   }
-  lines.push("- Treat this list as the current connected apps inventory for workflow planning.");
-  lines.push("- Do not ask the user to reconnect an app already listed here unless an action explicitly fails.");
-  return ["## Active Flow Connections", ...lines].join("\n");
+  lines.push("- Treat this list as the current workspace app inventory.");
+  lines.push("- Do not ask the user to reconnect an app already listed here unless a live action explicitly fails.");
+  return ["## Connected Apps", ...lines].join("\n");
 }
 
 function describeWorkspaceConfigSection(input: {
@@ -551,77 +551,18 @@ function describeWorkspaceConfigSection(input: {
   ].join("\n");
 }
 
-function describeWorkflowEngineSection(connectors: WorkspaceConnectors | null, credentials: WorkspaceAiCredential[]): string {
-  const raw = isRecord(connectors) ? connectors : {};
-  const ops = isRecord(raw.ops) ? raw.ops : {};
-  const opsUrl = asNonEmptyString(ops.url);
-  const opsApiKeySet = Boolean(asNonEmptyString(ops.apiKey));
-  const workflowConnected = Boolean(opsUrl || opsApiKeySet);
-
-  const lines: string[] = ["## Workflow Engine Integration (Activepieces)"];
-
-  if (!workflowConnected) {
-    lines.push("- status: NOT CONFIGURED — no workflow-engine connector set for this workspace");
-    lines.push("- To connect: go to Integrations and save your workflow engine settings.");
-    lines.push("- PMOS workspace users are auto-provisioned to Activepieces on login and password updates.");
-    lines.push("- Once connected, use pmos_ops_* tools to create and manage automation workflows");
-    return lines.join("\n");
-  }
-
-  lines.push("- status: CONNECTED — workflow engine is available");
-  if (opsUrl) lines.push(`- url: ${opsUrl}`);
-
-  const credCount = credentials.length;
-  if (credCount > 0) {
-    const credNames = credentials.slice(0, 12).map((c) => `${c.name} (${c.type})`);
-    lines.push(
-      `- active connections: ${credCount} — ${credNames.join(", ")}${credCount > 12 ? ", ..." : ""}`,
-    );
-  } else {
-    lines.push("- active connections: none yet — call pmos_ops_list_credentials for live list");
-  }
-
-  lines.push("");
-  lines.push("### Workflow Tools (pmos_ops_*)");
-  lines.push("- **pmos_ops_list_workflows** — list all workflows");
-  lines.push("- **pmos_ops_get_workflow(workflow_id)** — get full workflow JSON");
-  lines.push("- **pmos_ops_create_workflow(name, nodes, connections)** — create a new workflow");
-  lines.push("- **pmos_ops_execute_workflow(workflow_id)** — test-run a workflow");
-  lines.push("- **pmos_ops_list_credentials** — list configured services (Slack, GitHub, etc.)");
-  lines.push("- **pmos_ops_list_node_types** — list available trigger/action node types");
-  lines.push("");
-  lines.push("### Creating Workflows via Chat");
-  lines.push("1. Call pmos_ops_list_credentials to see what services are connected");
-  lines.push("2. Ask for any required info not already available");
-  lines.push("3. Generate valid workflow JSON (use exact node type names)");
-  lines.push("4. Call pmos_ops_create_workflow with name/nodes/connections");
-  lines.push("5. Call pmos_ops_execute_workflow to test, then report the result");
-  lines.push("");
-  lines.push("### Common Node Types");
-  lines.push(
-    "Triggers: scheduleTrigger, webhook, manualTrigger | " +
-      "HTTP/Code: httpRequest, code, set | " +
-      "Logic: if, switch, merge | " +
-      "Services: slack, github, gmail, googleSheets",
-  );
-
-  return lines.join("\n");
-}
-
 function describeProjectManagerSection(): string {
   return [
-    "## AI Project Manager Role",
-    "Role: AI Project Manager — access to Basecamp and workflow automation for this workspace.",
+    "## AI Project Assistant Role",
+    "Role: AI Project Assistant — workspace-scoped help for Basecamp, Figma, and project context.",
     "",
     "**Basecamp**: Prefer exact named MCP tools for deterministic reads, `smart_action` for ambiguous analysis, and specific tools for creation. View projects/todos/schedules/people live.",
-    "**Automation**: Use pmos_ops_* tools to list, create, and execute workflows through conversation.",
     "**Web Search**: Use pmos_web_search for documentation, current events, or external research.",
     "",
     "Operating principles:",
     "- Always use tools to get live data — never fabricate project names, IDs, or counts",
-    "- Proactively suggest automations based on Basecamp patterns (overdue todos → Slack alert, etc.)",
     "- Keep responses concise and skip preamble — go straight to the answer or action",
-    "- When creating workflows: check credentials → gather info → create → test → report",
+    "- Use the connected-app inventory and connector status to decide which workspace tools are actually available",
   ].join("\n");
 }
 
@@ -629,8 +570,6 @@ function describeCapabilitySection(): string {
   return [
     "## PMOS Surface and Capabilities",
     "- Chat panel: ask, run tasks, and automate actions with workspace-scoped agents.",
-    "- Workflows panel: create, update, activate, and execute Activepieces workflows.",
-    "- Connections panel: inspect and manage available workflow credentials.",
     "- Integrations panel: configure model providers, connector settings, and Basecamp/BCGPT access.",
     "- Figma panel: sync active design context from the embedded Figma panel and run design-system audits.",
     "- Projects panel: summarize Basecamp project state and urgent work via BCGPT tools.",
@@ -653,11 +592,9 @@ function describeAssistantPolicySection(): string {
     "- Treat this snapshot and the live node catalog as authoritative.",
     "- Do not ask the user to paste keys that are already marked as present.",
     "- Treat Basecamp/BCGPT connector state here as the default workspace memory baseline.",
-    "- Prefer workspace-scoped workflow credentials and connector bindings over global assumptions.",
     "- If required connector or key is missing, report exactly what is missing and where to configure it.",
     "- When answering questions about Basecamp data, first verify connector+credential readiness from this snapshot.",
     "- Use credential presence metadata only (never reveal secret values).",
-    "- Prefer deterministic, executable workflows with explicit branching/merge nodes when complexity requires it.",
     "- Use workspace-scoped credentials and avoid cross-workspace assumptions.",
     "",
     "## Basecamp-Specific Policy",
@@ -787,8 +724,6 @@ export function buildWorkspaceAiContextMarkdown(input: WorkspaceAiContextInput):
     }),
     "",
     describeCredentialSection(input.credentials),
-    "",
-    describeWorkflowEngineSection(input.connectors, input.credentials),
     "",
     describeProjectManagerSection(),
     "",

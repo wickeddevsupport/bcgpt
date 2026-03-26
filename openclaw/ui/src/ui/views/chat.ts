@@ -74,8 +74,6 @@ export type ChatProps = {
   onToggleFocusMode: () => void;
   onDraftChange: (next: string) => void;
   onSend: () => void;
-  onCreateWorkflow?: () => void;
-  createWorkflowBusy?: boolean;
   onAbort?: () => void;
   onQueueRemove: (id: string) => void;
   onNewSession: () => void;
