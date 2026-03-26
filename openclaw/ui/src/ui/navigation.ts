@@ -9,7 +9,7 @@ export const TAB_GROUPS = [
   // Core Wicked OS workspace surface.
   {
     label: "Wicked OS",
-    tabs: ["dashboard", "automations", "connections", "integrations", "figma", "command-center"],
+    tabs: ["dashboard", "integrations", "figma", "command-center"],
   },
   // Agent management.
   {

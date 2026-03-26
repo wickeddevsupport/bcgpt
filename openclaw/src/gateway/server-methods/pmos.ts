@@ -1405,12 +1405,6 @@ function detectChatIntents(
   }
 
   if (
-    /\bworkflow(?:s)?\b|\bautomati(?:on|e|ons|ed|ing)\b|\bactivepieces\b|\bn8n\b|\bcredential(?:s)?\b/i.test(msg)
-  ) {
-    intents.add("workflow");
-  }
-
-  if (
     urlHints.figmaUrl ||
     /\bfigma\b|\bauto[\s-]?layout\b|\bdesign\s+(?:file|system|token|audit|review|asset|spec)\b|\bcomponent\s+(?:library|set)\b/i.test(msg)
   ) {
@@ -1425,7 +1419,7 @@ function detectChatIntents(
 }
 
 function isWorkspaceOpsRequest(message: string): boolean {
-  return /\bworkspace\b|\bconnector(?:s)?\b|\bintegration(?:s)?\b|\bcredential(?:s)?\b|\bcommand center\b|\bwhat can you access\b|\bwhat do you know about this workspace\b/i.test(
+  return /\bworkspace\b|\bcommand center\b|\bwhat can you access\b|\bwhat do you know about this workspace\b/i.test(
     message,
   );
 }

@@ -316,85 +316,6 @@ export function renderDashboard(props: DashboardProps) {
       `;
     }
 
-    if (tab === "workflows") {
-      return html`
-        <section class="grid grid-cols-2">
-          <div class="card">
-            <div class="card-title">Automation Live</div>
-            <div class="card-sub">Recent run activity with direct drill-down.</div>
-            <div class="chip-row" style="margin-top: 12px;">
-              <span class="chip chip-ok">Succeeded: ${runBuckets.succeeded}</span>
-              <span class="chip chip-danger">Failed: ${runBuckets.failed}</span>
-              <span class="chip chip-warn">Running: ${runBuckets.running}</span>
-              ${runs.length > 0
-                ? html`<span class="chip">Success rate: ${Math.round(((runBuckets.succeeded) / Math.max(runBuckets.succeeded + runBuckets.failed, 1)) * 100)}%</span>`
-                : nothing}
-            </div>
-            ${props.runsError ? html`<div class="callout danger" style="margin-top: 12px;">${props.runsError}</div>` : nothing}
-            ${runBuckets.failed > 0
-              ? html`<div class="callout warn" style="margin-top: 12px; font-size: 13px;">${runBuckets.failed} failed run${runBuckets.failed !== 1 ? "s" : ""} need attention.</div>`
-              : nothing}
-            ${runs.length
-              ? html`
-                  <div class="list" style="margin-top: 12px;">
-                    ${runs.slice(0, 8).map((run) => {
-                      const status = String(run.status ?? "UNKNOWN");
-                      const bucket = runStatusBucket(status);
-                      const toneClass = bucket === "failed" ? "chip chip-danger" : bucket === "succeeded" ? "chip chip-ok" : bucket === "running" ? "chip chip-warn" : "chip";
-                      const flowName = run.flowId ? flows.find((f) => f.id === run.flowId)?.displayName ?? `flow ${String(run.flowId).slice(0, 8)}` : "flow n/a";
-                      return html`
-                        <div class="list-item">
-                          <div class="list-main">
-                            <div class="list-title">${flowName}</div>
-                            <div class="list-sub mono">${String(run.id ?? "").slice(0, 8)}</div>
-                          </div>
-                          <div class="list-meta">
-                            <span class=${toneClass}>${status}</span>
-                            <span>${relativeFromAny(run.created)}</span>
-                          </div>
-                        </div>
-                      `;
-                    })}
-                  </div>
-                `
-              : html`<div class="muted" style="margin-top: 12px;">No run events yet.</div>`}
-            <div class="row" style="margin-top: 12px;">
-              <button class="btn" @click=${() => props.onRefreshDashboard()} ?disabled=${refreshBusy || !props.connected}>
-                ${refreshBusy ? "Refreshing..." : "Refresh all"}
-              </button>
-              <button class="btn btn--secondary" @click=${() => props.onNavigateTab("automations")}>Open workflows</button>
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="card-title">Portfolio Pulse</div>
-            <div class="card-sub">Cross-automation health and delivery pressure.</div>
-            <div class="stat-grid" style="margin-top: 16px;">
-              <div class="stat">
-                <div class="stat-label">Flows</div>
-                <div class="stat-value">${flows.length}</div>
-                <div class="muted">${enabledFlows} enabled</div>
-              </div>
-              <div class="stat">
-                <div class="stat-label">Recent Runs</div>
-                <div class="stat-value">${runs.length}</div>
-                <div class="muted">${runBuckets.failed > 0 ? `${runBuckets.failed} failed` : "All passing"}</div>
-              </div>
-              <div class="stat">
-                <div class="stat-label">Pulse</div>
-                <div class="stat-value ${pulse.tone === "ok" ? "ok" : "warn"}">${pulse.label}</div>
-                <div class="muted">${props.opsProvisioned ? "Workflows ready" : "Provisioning..."}</div>
-              </div>
-            </div>
-            <div class="row" style="margin-top: 14px;">
-              <button class="btn" @click=${() => props.onNavigateTab("automations")}>Workflows</button>
-              <button class="btn btn--secondary" @click=${() => props.onNavigateTab("chat")}>Chat</button>
-            </div>
-          </div>
-        </section>
-      `;
-    }
-
     // "system" tab
     return html`
       <section class="grid grid-cols-2">
@@ -561,7 +482,6 @@ export function renderDashboard(props: DashboardProps) {
   const DASH_TABS: { key: "home" | "agents" | "workflows" | "system"; label: string }[] = [
     { key: "home", label: "Home" },
     { key: "agents", label: "Agents" },
-    { key: "workflows", label: "Workflows" },
     { key: "system", label: "System" },
   ];
 
