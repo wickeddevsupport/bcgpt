@@ -1,0 +1,11 @@
+{
+  "id": "pmos-workspace-tools",
+  "name": "PMOS Workspace Tools",
+  "description": "Basecamp and Figma tools for PMOS workspace agents. Exposes bcgpt MCP and Figma MCP via standard OpenClaw plugin tools so any chat session with a workspace can access live project data.",
+  "version": "1.0.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
