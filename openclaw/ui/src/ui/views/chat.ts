@@ -219,6 +219,61 @@ function handlePaste(e: ClipboardEvent, props: ChatProps) {
   }
 }
 
+function handleDrop(e: DragEvent, props: ChatProps) {
+  e.preventDefault();
+  const files = e.dataTransfer?.files;
+  if (!files || !props.onAttachmentsChange) {
+    return;
+  }
+  const current = props.attachments ?? [];
+  const additions: ChatAttachment[] = [];
+  let pending = 0;
+  for (const file of files) {
+    if (!file.type.startsWith("image/")) {
+      continue;
+    }
+    pending++;
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      additions.push({
+        id: generateAttachmentId(),
+        dataUrl: reader.result as string,
+        mimeType: file.type,
+      });
+      pending--;
+      if (pending === 0) {
+        props.onAttachmentsChange?.([...current, ...additions]);
+      }
+    });
+    reader.readAsDataURL(file);
+  }
+}
+
+function handleFileSelect(e: Event, props: ChatProps) {
+  const input = e.target as HTMLInputElement;
+  const files = input.files;
+  if (!files || !props.onAttachmentsChange) {
+    return;
+  }
+  const current = props.attachments ?? [];
+  for (const file of files) {
+    if (!file.type.startsWith("image/")) {
+      continue;
+    }
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      const newAttachment: ChatAttachment = {
+        id: generateAttachmentId(),
+        dataUrl: reader.result as string,
+        mimeType: file.type,
+      };
+      props.onAttachmentsChange?.([...current, newAttachment]);
+    });
+    reader.readAsDataURL(file);
+  }
+  input.value = "";
+}
+
 function renderAttachmentPreview(props: ChatProps) {
   const attachments = props.attachments ?? [];
   if (attachments.length === 0) {
@@ -339,7 +394,11 @@ export function renderChat(props: ChatProps) {
   `;
 
   return html`
-    <section class="card chat">
+    <section
+      class="card chat"
+      @drop=${(e: DragEvent) => handleDrop(e, props)}
+      @dragover=${(e: DragEvent) => e.preventDefault()}
+    >
       ${props.disabledReason ? html`<div class="callout">${props.disabledReason}</div>` : nothing}
 
       ${props.error ? html`<div class="callout danger">${props.error}</div>` : nothing}
@@ -496,6 +555,14 @@ export function renderChat(props: ChatProps) {
           </div>
         </div>
         ${renderAttachmentPreview(props)}
+        <input
+          type="file"
+          accept="image/*"
+          multiple
+          class="chat-file-input"
+          style="display:none"
+          @change=${(e: Event) => handleFileSelect(e, props)}
+        />
         <div class="chat-compose__row" style="flex-direction: column;">
           <label class="field chat-compose__field" style="width: 100%;">
             <span>Message</span>
@@ -532,6 +599,18 @@ export function renderChat(props: ChatProps) {
             ></textarea>
           </label>
           <div class="chat-compose__actions">
+            <button
+              class="btn"
+              type="button"
+              title="Attach image"
+              ?disabled=${!props.connected}
+              @click=${() => {
+                const input = document.querySelector<HTMLInputElement>(".chat-file-input");
+                input?.click();
+              }}
+            >
+              ${icons.paperclip}
+            </button>
             <button
               class="btn"
               ?disabled=${!props.connected || (!canAbort && props.sending)}

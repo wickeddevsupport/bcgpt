@@ -170,12 +170,17 @@ export type PmosProjectsState = {
 
 async function requestProjectsSnapshot(
   client: GatewayBrowserClient,
+  options?: { fresh?: boolean },
 ): Promise<PmosProjectsSnapshot> {
-  // No client-side timeout — server-side tool timeouts (12-15s each) handle it.
-  return await client.request<PmosProjectsSnapshot>("pmos.projects.snapshot", {});
+  return await client.request<PmosProjectsSnapshot>("pmos.projects.snapshot", {
+    fresh: options?.fresh === true,
+  });
 }
 
-export async function loadPmosProjectsSnapshot(state: PmosProjectsState) {
+export async function loadPmosProjectsSnapshot(
+  state: PmosProjectsState,
+  options?: { fresh?: boolean },
+) {
   if (!state.client || !state.connected) {
     // Keep previous snapshot visible (stale data is better than empty)
     state.pmosProjectsLoading = false;
@@ -199,7 +204,7 @@ export async function loadPmosProjectsSnapshot(state: PmosProjectsState) {
     };
   }
   try {
-    const snapshot = await requestProjectsSnapshot(state.client);
+    const snapshot = await requestProjectsSnapshot(state.client, options);
     if (state.pmosProjectsLoadSequence !== loadSequence) {
       return;
     }

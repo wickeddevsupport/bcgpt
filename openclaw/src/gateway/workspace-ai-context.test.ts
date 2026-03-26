@@ -71,6 +71,9 @@ describe("workspace-ai-context", () => {
     expect(refreshed.markdown).toContain("Use `bcgpt_mcp_call` for deterministic named MCP tools");
     expect(refreshed.markdown).toContain("Use `bcgpt_list_projects` for exact project lists or project picking");
     expect(refreshed.markdown).toContain("prefer `bcgpt_mcp_call` over `bcgpt_smart_action`");
+    expect(refreshed.markdown).toContain("list_project_people");
+    expect(refreshed.markdown).toContain("list_todos_due");
+    expect(refreshed.markdown).toContain("report_todos_overdue");
     expect(refreshed.markdown).not.toContain("sk-openrouter-very-secret");
     expect(refreshed.markdown).not.toContain("bcgpt-ultra-secret");
     expect(refreshed.markdown).not.toContain("ops-ultra-secret");

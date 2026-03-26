@@ -196,8 +196,84 @@ describe("pmos.projects.snapshot", () => {
     expect(payload.assignedTodos[0]?.appUrl).toContain("/todos/1001");
     expect(payload.urgentTodos[0]?.title).toBe("Past due item");
     expect(workspaceSnapshotArgs).toMatchObject({
+      max_age_ms: 900000,
+      force_refresh: false,
+      wait_for_fresh: false,
+      allow_stale_on_error: true,
+    });
+  });
+
+  it("forces a live refresh when an explicit fresh snapshot is requested", async () => {
+    readWorkspaceConnectorsMock.mockResolvedValue({
+      bcgpt: {
+        url: "https://bcgpt.example.test",
+        apiKey: "workspace-key",
+      },
+    });
+
+    let workspaceSnapshotArgs: Record<string, unknown> | null = null;
+    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/action/startbcgpt")) {
+        return jsonResponse({
+          connected: true,
+          selected_account_id: 5282924,
+          user: { name: "Rohit", email: "rohit@wickedwebsites.us" },
+          accounts: [{ id: 5282924 }],
+        });
+      }
+
+      if (url.endsWith("/mcp")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          params?: { name?: string; arguments?: Record<string, unknown> };
+        };
+        if (body.params?.name === "workspace_todo_snapshot") {
+          workspaceSnapshotArgs = body.params.arguments ?? null;
+          return jsonResponse({
+            jsonrpc: "2.0",
+            id: "1",
+            result: {
+              fetchedAt: 1773316800,
+              totals: {
+                projectCount: 1,
+                syncedProjects: 1,
+                openTodos: 1,
+                assignedTodos: 0,
+                overdueTodos: 0,
+                dueTodayTodos: 0,
+                futureTodos: 0,
+                noDueDateTodos: 1,
+              },
+              projects: [],
+              assignedTodos: [],
+              urgentTodos: [],
+              dueTodayTodos: [],
+              futureTodos: [],
+              noDueDateTodos: [],
+            },
+          });
+        }
+        return jsonResponse({ error: "unexpected tool" }, 404);
+      }
+
+      return jsonResponse({ error: "not found" }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const respond = vi.fn();
+    await pmosHandlers["pmos.projects.snapshot"]({
+      params: { fresh: true },
+      respond,
+      client: {
+        pmosWorkspaceId: "ws-projects",
+        pmosRole: "workspace_admin",
+      } as any,
+    } as any);
+
+    expect(workspaceSnapshotArgs).toMatchObject({
       max_age_ms: 0,
       force_refresh: true,
+      wait_for_fresh: true,
       allow_stale_on_error: true,
     });
   });

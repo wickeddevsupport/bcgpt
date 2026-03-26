@@ -226,8 +226,8 @@ export async function refreshActiveTab(host: SettingsHost) {
     await (host as unknown as OpenClawApp).handlePmosAdminLoad();
   }
   if (host.tab === "command-center") {
+    await (host as unknown as OpenClawApp).handlePmosIntegrationsLoad();
     await Promise.all([
-      (host as unknown as OpenClawApp).handlePmosIntegrationsLoad(),
       (host as unknown as OpenClawApp).handlePmosApFlowsLoad(),
       (host as unknown as OpenClawApp).handlePmosApRunsLoad(),
       (host as unknown as OpenClawApp).handlePmosProjectsLoad(),
