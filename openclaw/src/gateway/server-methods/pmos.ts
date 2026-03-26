@@ -3293,24 +3293,17 @@ export const pmosHandlers: GatewayRequestHandlers = {
         : {};
 
       const identityEmail =
-        (readTrimmed(activepiecesUser.email) ?? readTrimmed(opsUser.email) ?? "").toLowerCase();
-      const identityPassword = readTrimmed(activepiecesUser.password) ?? readTrimmed(opsUser.password) ?? "";
-      const activepiecesUrl =
-        readTrimmed(activepiecesConnector.url) ??
+        (readTrimmed(opsUser.email) ?? readTrimmed(activepiecesUser.email) ?? "").toLowerCase();
+      const identityPassword = readTrimmed(opsUser.password) ?? readTrimmed(activepiecesUser.password) ?? "";
+      const flowUrl =
         readTrimmed(opsConnector.url) ??
+        readTrimmed(activepiecesConnector.url) ??
         "https://flow.wickedlab.io";
 
       if (identityEmail && identityPassword) {
         const mirrored = deepMergeJson(next, {
           ops: {
-            url: activepiecesUrl,
-            user: {
-              email: identityEmail,
-              password: identityPassword,
-            },
-          },
-          activepieces: {
-            url: activepiecesUrl,
+            url: flowUrl,
             user: {
               email: identityEmail,
               password: identityPassword,
@@ -3326,7 +3319,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
       if (identityEmail && identityPassword) {
         const { ensureActivepiecesCredentialParity } = await import("../pmos-auth-http.js");
         await ensureActivepiecesCredentialParity({
-          baseUrl: activepiecesUrl,
+          baseUrl: flowUrl,
           email: identityEmail,
           password: identityPassword,
           previousPassword: previousIdentityPassword || null,

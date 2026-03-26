@@ -64,6 +64,25 @@ export async function patchWorkspaceConfig(
   return next;
 }
 
+function stripCrossWorkspaceInheritedConfig(globalCfg: JsonObject): JsonObject {
+  const next: JsonObject = { ...globalCfg };
+
+  // Workspace-owned channel/account state must not bleed in from the global
+  // config, otherwise workspace users inherit another tenant's Discord/session
+  // routing and credentials.
+  delete next.channels;
+  delete next.env;
+  delete next.bindings;
+
+  const session = isJsonObject(next.session) ? ({ ...next.session } as JsonObject) : null;
+  if (session && Object.prototype.hasOwnProperty.call(session, "identityLinks")) {
+    delete session.identityLinks;
+    next.session = session;
+  }
+
+  return next;
+}
+
 /**
  * Filter agents.list in the merged effective config to only include agents that
  * belong to the given workspaceId (i.e. entries with no workspaceId or with
@@ -99,7 +118,7 @@ function filterAgentsForWorkspace(mergedCfg: JsonObject, workspaceId: string): J
 
 export async function loadEffectiveWorkspaceConfig(workspaceId: string): Promise<JsonObject> {
   const globalCfg = loadConfig() as unknown;
-  const globalObject = isJsonObject(globalCfg) ? globalCfg : {};
+  const globalObject = isJsonObject(globalCfg) ? stripCrossWorkspaceInheritedConfig(globalCfg) : {};
   const workspaceCfg = (await readWorkspaceConfig(workspaceId)) ?? {};
   const merged = deepMerge(globalObject, workspaceCfg);
   const mergedObject = isJsonObject(merged) ? merged : globalObject;

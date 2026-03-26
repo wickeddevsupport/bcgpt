@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import type { CliDeps } from "../cli/deps.js";
 import { resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { loadConfig } from "../config/config.js";
@@ -13,6 +14,7 @@ import { enqueueSystemEvent } from "../infra/system-events.js";
 import { getChildLogger } from "../logging.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 import { defaultRuntime } from "../runtime.js";
+import { workspaceConfigPath } from "./workspace-config.js";
 
 export type GatewayCronState = {
   cron: CronService;
@@ -28,6 +30,66 @@ export function buildGatewayCronService(params: {
   const cronLogger = getChildLogger({ module: "cron" });
   const storePath = resolveCronStorePath(params.cfg.cron?.store);
   const cronEnabled = process.env.OPENCLAW_SKIP_CRON !== "1" && params.cfg.cron?.enabled !== false;
+
+  const readWorkspaceConfigSync = (
+    workspaceId?: string,
+  ): Record<string, unknown> | null => {
+    const wsId = workspaceId?.trim();
+    if (!wsId) {
+      return null;
+    }
+    try {
+      const raw = fs.readFileSync(workspaceConfigPath(wsId), "utf-8");
+      const parsed = JSON.parse(raw) as unknown;
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const resolveWorkspaceCronAgentSync = (params: {
+    requestedAgentId?: string | null;
+    workspaceId?: string;
+  }) => {
+    const runtimeConfig = loadConfig();
+    const workspaceCfg = readWorkspaceConfigSync(params.workspaceId);
+    const cfgForAgentResolution = workspaceCfg
+      ? ({
+          agents: workspaceCfg.agents,
+          session: workspaceCfg.session,
+        } as ReturnType<typeof loadConfig>)
+      : runtimeConfig;
+    const normalizedRequested =
+      typeof params.requestedAgentId === "string" && params.requestedAgentId.trim()
+        ? normalizeAgentId(params.requestedAgentId)
+        : undefined;
+    const hasRequestedAgent =
+      normalizedRequested !== undefined &&
+      Array.isArray((cfgForAgentResolution.agents?.list as Array<{ id?: string }> | undefined)) &&
+      (cfgForAgentResolution.agents?.list as Array<{ id?: string }>).some(
+        (entry) =>
+          entry && typeof entry.id === "string" && normalizeAgentId(entry.id) === normalizedRequested,
+      );
+    const agentId = hasRequestedAgent
+      ? normalizedRequested
+      : resolveDefaultAgentId(cfgForAgentResolution);
+    return {
+      agentId,
+      cfg: workspaceCfg
+        ? ({
+            ...runtimeConfig,
+            session:
+              workspaceCfg.session &&
+              typeof workspaceCfg.session === "object" &&
+              !Array.isArray(workspaceCfg.session)
+                ? { ...runtimeConfig.session, ...workspaceCfg.session }
+                : runtimeConfig.session,
+          } as ReturnType<typeof loadConfig>)
+        : runtimeConfig,
+    };
+  };
 
   const resolveCronAgent = (requested?: string | null) => {
     const runtimeConfig = loadConfig();
@@ -59,7 +121,10 @@ export function buildGatewayCronService(params: {
     resolveSessionStorePath,
     sessionStorePath,
     enqueueSystemEvent: (text, opts) => {
-      const { agentId, cfg: runtimeConfig } = resolveCronAgent(opts?.agentId);
+      const { agentId, cfg: runtimeConfig } = resolveWorkspaceCronAgentSync({
+        requestedAgentId: opts?.agentId,
+        workspaceId: opts?.workspaceId,
+      });
       const sessionKey = resolveAgentMainSessionKey({
         cfg: runtimeConfig,
         agentId,
@@ -76,7 +141,26 @@ export function buildGatewayCronService(params: {
       });
     },
     runIsolatedAgentJob: async ({ job, message }) => {
-      const { agentId, cfg: runtimeConfig } = resolveCronAgent(job.agentId);
+      let runtimeConfig = loadConfig();
+      if (typeof job.workspaceId === "string" && job.workspaceId.trim()) {
+        try {
+          const { loadEffectiveWorkspaceConfig } = await import("./workspace-config.js");
+          const effective = await loadEffectiveWorkspaceConfig(job.workspaceId);
+          runtimeConfig = effective as ReturnType<typeof loadConfig>;
+        } catch {
+          runtimeConfig = loadConfig();
+        }
+      }
+      const normalized =
+        typeof job.agentId === "string" && job.agentId.trim() ? normalizeAgentId(job.agentId) : undefined;
+      const hasAgent =
+        normalized !== undefined &&
+        Array.isArray(runtimeConfig.agents?.list) &&
+        runtimeConfig.agents.list.some(
+          (entry) =>
+            entry && typeof entry.id === "string" && normalizeAgentId(entry.id) === normalized,
+        );
+      const agentId = hasAgent ? normalized : resolveDefaultAgentId(runtimeConfig);
       return await runCronIsolatedAgentTurn({
         cfg: runtimeConfig,
         deps: params.deps,

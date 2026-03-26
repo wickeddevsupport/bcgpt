@@ -92,6 +92,48 @@ describe("pmos config access + connector merge", () => {
     }
   });
 
+  it("keeps flow credentials under ops without recreating activepieces mirror entries", async () => {
+    const workspaceId = `pmos-ops-only-${Date.now()}`;
+    const respond = vi.fn();
+    await pmosHandlers["pmos.connectors.workspace.set"]({
+      params: {
+        connectors: {
+          ops: {
+            url: "https://flow.example.test",
+            user: {
+              email: "rohit@example.test",
+              password: "secret-pass",
+            },
+          },
+        },
+      },
+      respond,
+      client: { pmosRole: "workspace_admin", pmosWorkspaceId: workspaceId } as any,
+    } as any);
+    expect(respond.mock.calls[0]?.[0]).toBe(true);
+
+    const saved = await readWorkspaceConnectors(workspaceId);
+    expect(saved?.ops).toMatchObject({
+      url: "https://flow.example.test",
+      user: {
+        email: "rohit@example.test",
+        password: "secret-pass",
+      },
+    });
+    expect(saved?.activepieces).toBeUndefined();
+
+    try {
+      const fs = await import("node:fs/promises");
+      const path = await import("node:path");
+      await fs.rm(path.dirname(workspaceConnectorsPath(workspaceId)), {
+        recursive: true,
+        force: true,
+      });
+    } catch {
+      // ignore cleanup errors in test env
+    }
+  });
+
   it("redacts workspace config secrets in responses and restores them on set", async () => {
     const workspaceId = `pmos-ws-config-${Date.now()}`;
     const secret = "sk-test-local-secret";

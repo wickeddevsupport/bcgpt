@@ -21,6 +21,8 @@ import {
   isSuperAdmin,
   requireWorkspaceOwnership,
 } from "../workspace-context.js";
+import { loadEffectiveWorkspaceConfig } from "../workspace-config.js";
+import { resolveDefaultAgentId } from "../../agents/agent-scope.js";
 
 export const cronHandlers: GatewayRequestHandlers = {
   wake: ({ params, respond, context }) => {
@@ -60,7 +62,7 @@ export const cronHandlers: GatewayRequestHandlers = {
     });
     
     // Apply workspace filtering for PMOS multi-tenant isolation
-    if (client && !isSuperAdmin(client)) {
+    if (client?.pmosWorkspaceId && !isSuperAdmin(client)) {
       const filteredJobs = filterByWorkspace(jobs, client);
       respond(true, { jobs: filteredJobs }, undefined);
       return;
@@ -68,7 +70,7 @@ export const cronHandlers: GatewayRequestHandlers = {
     
     respond(true, { jobs }, undefined);
   },
-  "cron.status": async ({ params, respond, context }) => {
+  "cron.status": async ({ params, respond, context, client }) => {
     if (!validateCronStatusParams(params)) {
       respond(
         false,
@@ -81,6 +83,27 @@ export const cronHandlers: GatewayRequestHandlers = {
       return;
     }
     const status = await context.cron.status();
+    if (client?.pmosWorkspaceId && !isSuperAdmin(client)) {
+      const jobs = filterByWorkspace(await context.cron.list({ includeDisabled: true }), client);
+      const enabledJobs = jobs.filter((job) => job.enabled);
+      const nextWakeAtMs = enabledJobs.reduce<number | null>((soonest, job) => {
+        const next = typeof job.state?.nextRunAtMs === "number" ? job.state.nextRunAtMs : null;
+        if (next === null) {
+          return soonest;
+        }
+        return soonest === null ? next : Math.min(soonest, next);
+      }, null);
+      respond(
+        true,
+        {
+          ...status,
+          jobs: jobs.length,
+          nextWakeAtMs,
+        },
+        undefined,
+      );
+      return;
+    }
     respond(true, status, undefined);
   },
   "cron.add": async ({ params, respond, context, client }) => {
@@ -110,6 +133,18 @@ export const cronHandlers: GatewayRequestHandlers = {
     // Add workspaceId for multi-tenant isolation
     if (client?.pmosWorkspaceId) {
       (jobCreate as CronJobCreate & { workspaceId?: string }).workspaceId = client.pmosWorkspaceId;
+      if (!jobCreate.agentId?.trim()) {
+        try {
+          const workspaceCfg = await loadEffectiveWorkspaceConfig(client.pmosWorkspaceId);
+          const workspaceAgentId = resolveDefaultAgentId(workspaceCfg as never);
+          if (workspaceAgentId?.trim()) {
+            jobCreate.agentId = workspaceAgentId;
+          }
+        } catch {
+          // Fall back to the cron runtime resolver if the workspace config
+          // cannot be loaded right now.
+        }
+      }
     }
     
     const job = await context.cron.add(jobCreate);
@@ -148,7 +183,7 @@ export const cronHandlers: GatewayRequestHandlers = {
     }
     
     // Check workspace ownership for non-super-admin users
-    if (client && !isSuperAdmin(client)) {
+    if (client?.pmosWorkspaceId && !isSuperAdmin(client)) {
       const jobs = await context.cron.list({ includeDisabled: true });
       const job = jobs.find((j) => j.id === jobId);
       if (!job) {
@@ -210,7 +245,7 @@ export const cronHandlers: GatewayRequestHandlers = {
     }
     
     // Check workspace ownership for non-super-admin users
-    if (client && !isSuperAdmin(client)) {
+    if (client?.pmosWorkspaceId && !isSuperAdmin(client)) {
       const jobs = await context.cron.list({ includeDisabled: true });
       const job = jobs.find((j) => j.id === jobId);
       if (!job) {
@@ -260,7 +295,7 @@ export const cronHandlers: GatewayRequestHandlers = {
     }
     
     // Check workspace ownership for non-super-admin users
-    if (client && !isSuperAdmin(client)) {
+    if (client?.pmosWorkspaceId && !isSuperAdmin(client)) {
       const jobs = await context.cron.list({ includeDisabled: true });
       const job = jobs.find((j) => j.id === jobId);
       if (!job) {
@@ -310,7 +345,7 @@ export const cronHandlers: GatewayRequestHandlers = {
     }
     
     // Check workspace ownership for non-super-admin users
-    if (client && !isSuperAdmin(client)) {
+    if (client?.pmosWorkspaceId && !isSuperAdmin(client)) {
       const jobs = await context.cron.list({ includeDisabled: true });
       const job = jobs.find((j) => j.id === jobId);
       if (!job) {

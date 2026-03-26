@@ -297,7 +297,7 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
   const bcgptSharedKeyAvailable = !bcgptApiKeySet && Boolean(process.env.BCGPT_API_KEY?.trim());
 
   const extraConnectorKeys = Object.keys(raw)
-    .filter((key) => key !== "ops" && key !== "bcgpt" && key !== "figma")
+    .filter((key) => key !== "ops" && key !== "bcgpt" && key !== "figma" && key !== "activepieces")
     .sort((a, b) => a.localeCompare(b));
 
   const extraLines = extraConnectorKeys.map((key) => {
