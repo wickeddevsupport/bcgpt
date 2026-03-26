@@ -477,6 +477,8 @@ export function renderChat(props: ChatProps) {
               showReasoning,
               assistantName: props.assistantName,
               assistantAvatar: assistantIdentity.avatar,
+              contextWindow:
+                activeSession?.contextTokens ?? props.sessions?.defaults?.contextTokens ?? null,
             });
           }
 

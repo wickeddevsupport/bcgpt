@@ -268,4 +268,54 @@ describe("chat view", () => {
 
     expect(container.querySelector(".chat-agent-card")).toBeNull();
   });
+
+  it("renders assistant message meta from usage, cost, model, and context window", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          messages: [
+            {
+              role: "assistant",
+              model: "anthropic/claude-3.5-sonnet",
+              timestamp: Date.now(),
+              content: [{ type: "text", text: "Here is the answer." }],
+              usage: {
+                input: 1200,
+                output: 320,
+                cacheRead: 500,
+                cacheWrite: 250,
+              },
+              cost: {
+                total: 0.0123,
+              },
+            },
+          ],
+          sessions: {
+            ts: 0,
+            path: "",
+            count: 1,
+            defaults: { model: null, contextTokens: null },
+            sessions: [
+              {
+                key: "main",
+                kind: "direct",
+                updatedAt: Date.now(),
+                contextTokens: 2000,
+              },
+            ],
+          },
+        }),
+      ),
+      container,
+    );
+
+    expect(container.querySelector(".msg-meta")?.textContent).toContain("↑1.2k");
+    expect(container.querySelector(".msg-meta")?.textContent).toContain("↓320");
+    expect(container.querySelector(".msg-meta")?.textContent).toContain("R500");
+    expect(container.querySelector(".msg-meta")?.textContent).toContain("W250");
+    expect(container.querySelector(".msg-meta")?.textContent).toContain("$0.0123");
+    expect(container.querySelector(".msg-meta")?.textContent).toContain("60% ctx");
+    expect(container.querySelector(".msg-meta__model")?.textContent).toContain("claude-3.5-sonnet");
+  });
 });
