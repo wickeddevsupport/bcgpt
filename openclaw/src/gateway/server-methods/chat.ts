@@ -339,64 +339,15 @@ async function buildWorkspaceSystemPrompt(
     return "";
   }
 
-  // Read connector state so the agent knows what integrations are live.
-  let basecampConnected = false;
-  let figmaConnected = false;
-  let figmaFileName: string | null = null;
-  try {
-    const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
-    const connectors = await readWorkspaceConnectors(workspaceId);
-    basecampConnected = Boolean(connectors?.bcgpt?.apiKey?.trim());
-    const figmaIdentity = connectors?.figma?.identity as Record<string, unknown> | undefined;
-    figmaConnected = figmaIdentity?.connected === true;
-    figmaFileName =
-      typeof figmaIdentity?.selectedFileName === "string"
-        ? figmaIdentity.selectedFileName.trim() || null
-        : null;
-  } catch {
-    // Best-effort; proceed without connector state.
-  }
-
-  const bcStatus = basecampConnected
-    ? "connected"
-    : "not configured (user must connect in Integrations tab)";
-  const figStatus = figmaConnected
-    ? `connected${figmaFileName ? ` — selected file: ${figmaFileName}` : ""}`
-    : "not configured (user must connect in Integrations tab)";
-
-  const lines: string[] = [
-    "## PMOS Workspace Context",
-    `- Workspace ID: ${workspaceId}`,
-    `- Basecamp: ${bcStatus}`,
-    `- Figma: ${figStatus}`,
-    "",
-    "## Workspace Tools Available",
-    "You have access to the following workspace-specific tools. Use them when the user asks about",
-    "Basecamp projects, todos, messages, schedule entries, card tables, or Figma files and components.",
-    "",
-    "**Basecamp (bcgpt MCP)** — always pass workspaceId from this context:",
-    "- bcgpt_mcp_call(workspaceId, tool, arguments) — call any named Basecamp MCP tool.",
-    "  Common tool names: list_projects, list_todos_for_project, list_todolists, create_todo,",
-    "  complete_todo, uncomplete_todo, trash_todo, move_todo, update_todo_details,",
-    "  list_messages, create_message, list_schedule_entries, create_schedule_entry,",
-    "  update_schedule_entry, trash_schedule_entry, list_card_tables, list_project_people,",
-    "  list_todos_due, report_todos_overdue.",
-    "- bcgpt_smart_action(workspaceId, query, project?) — natural language Basecamp action.",
-    "",
-    "**Figma** — always pass workspaceId from this context:",
-    "- figma_mcp_list_tools(workspaceId) — discover available Figma MCP tool names.",
-    "- figma_mcp_call(workspaceId, tool, arguments?) — call a Figma MCP tool (file context auto-injected).",
-    "- figma_pat_audit_file(workspaceId, file_key?, focus?, depth?) — REST audit of the selected Figma file.",
-    "",
-    "## Instructions",
-    "- For any Basecamp request: call bcgpt_mcp_call with the appropriate tool name. If unsure, use bcgpt_smart_action.",
-    "- For any Figma request: call figma_mcp_call. If MCP fails, fall back to figma_pat_audit_file.",
-    "- Always pass workspaceId exactly as shown above when calling workspace tools.",
-    "- Do not mention routing rules or internal tool names in your response to the user.",
-    "- Keep answers focused on the user's request.",
-  ];
-
-  return lines.join("\n");
+  return [
+    `PMOS workspace ID: ${workspaceId}`,
+    "For Basecamp requests use bcgpt_mcp_call(workspaceId, tool, arguments) — pass the workspace ID above.",
+    "Common tools: list_projects, list_todos_for_project, list_todolists, create_todo, complete_todo,",
+    "uncomplete_todo, trash_todo, move_todo, update_todo_details, list_messages, create_message,",
+    "list_schedule_entries, create_schedule_entry, trash_schedule_entry, list_card_tables, list_project_people.",
+    "For natural language Basecamp queries use bcgpt_smart_action(workspaceId, query, project?).",
+    "For Figma requests use figma_mcp_call(workspaceId, tool) or figma_pat_audit_file(workspaceId).",
+  ].join(" ");
 }
 
 export const chatHandlers: GatewayRequestHandlers = {
