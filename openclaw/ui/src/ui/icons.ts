@@ -199,6 +199,21 @@ export const icons = {
       />
     </svg>
   `,
+  mic: html`
+    <svg viewBox="0 0 24 24">
+      <rect x="9" y="2" width="6" height="11" rx="3" />
+      <path d="M19 10a7 7 0 0 1-14 0" />
+      <line x1="12" x2="12" y1="19" y2="22" />
+      <line x1="8" x2="16" y1="22" y2="22" />
+    </svg>
+  `,
+  volume2: html`
+    <svg viewBox="0 0 24 24">
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+      <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+    </svg>
+  `,
   globe: html`
     <svg viewBox="0 0 24 24">
       <circle cx="12" cy="12" r="10" />

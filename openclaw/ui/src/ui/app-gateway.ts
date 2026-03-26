@@ -7,6 +7,7 @@ import type { Tab } from "./navigation.ts";
 import type { UiSettings } from "./storage.ts";
 import type { AgentsListResult, PresenceEntry, HealthSnapshot, StatusSummary } from "./types.ts";
 import { CHAT_SESSIONS_ACTIVE_MINUTES, flushChatQueueForEvent } from "./app-chat.ts";
+import { speakText } from "./app-voice.ts";
 import {
   applySettings,
   loadCron,
@@ -504,6 +505,23 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
         scheduleChatScroll(
           host as unknown as Parameters<typeof scheduleChatScroll>[0],
         );
+        // Speak the last assistant message if TTS is enabled
+        const msgs = Array.isArray(host.chatMessages) ? host.chatMessages : [];
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          const m = msgs[i] as Record<string, unknown> | null;
+          if (!m || m.role !== "assistant") continue;
+          const content = m.content;
+          const text = Array.isArray(content)
+            ? (content as Record<string, unknown>[])
+                .filter((b) => b?.type === "text")
+                .map((b) => String(b.text ?? ""))
+                .join(" ")
+            : typeof content === "string"
+              ? content
+              : "";
+          speakText(text);
+          break;
+        }
       });
     } else if (state === "error" || state === "aborted") {
       scheduleChatScroll(

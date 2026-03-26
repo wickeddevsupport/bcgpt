@@ -5,6 +5,7 @@ import type { MessageGroup } from "../types/chat-types.ts";
 import { stripThinkingTags } from "../format.ts";
 import { toSanitizedMarkdownHtml, toStreamingHtml } from "../markdown.ts";
 import { renderCopyAsMarkdownButton } from "./copy-as-markdown.ts";
+import { isTtsSupported, speakText } from "../app-voice.ts";
 import {
   extractTextCached,
   extractThinkingCached,
@@ -402,6 +403,12 @@ function renderGroupedMessage(
     return html`
       <div class="${bubbleClasses}">
         ${content.canCopy && content.markdown ? renderCopyAsMarkdownButton(content.markdown) : nothing}
+        ${content.canCopy && content.markdown && isTtsSupported()
+          ? html`<button class="chat-copy-btn chat-speak-btn" type="button" title="Read aloud" aria-label="Read aloud"
+              @click=${() => speakText(content.markdown!, { requireEnabled: false })}>
+              <span class="chat-copy-btn__icon" aria-hidden="true">${html`<svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>`}</span>
+            </button>`
+          : nothing}
         ${content.images?.length ? renderMessageImages(content.images) : nothing}
         ${content.reasoning
           ? html`<div class="chat-thinking">

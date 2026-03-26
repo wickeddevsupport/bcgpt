@@ -11,6 +11,12 @@ import {
 } from "../chat/grouped-render.ts";
 import { normalizeMessage, normalizeRoleForGrouping } from "../chat/message-normalizer.ts";
 import { icons } from "../icons.ts";
+import {
+  isSpeechInputSupported,
+  isTtsSupported,
+  toggleVoiceInput,
+  toggleTtsEnabled,
+} from "../app-voice.ts";
 import { renderMarkdownSidebar } from "./markdown-sidebar.ts";
 import { pathForTab } from "../navigation.ts";
 import "../components/resizable-divider.ts";
@@ -698,6 +704,25 @@ export function renderChat(props: ChatProps) {
             >
               ${icons.paperclip}
             </button>
+            ${isSpeechInputSupported() ? html`
+              <button
+                class="btn chat-mic-btn"
+                type="button"
+                title="Voice input"
+                aria-pressed="false"
+                ?disabled=${!props.connected}
+                @click=${() => toggleVoiceInput(props.draft, props.onDraftChange)}
+              >${icons.mic}</button>
+            ` : nothing}
+            ${isTtsSupported() ? html`
+              <button
+                class="btn chat-tts-btn"
+                type="button"
+                title="Read responses aloud"
+                aria-pressed="false"
+                @click=${() => toggleTtsEnabled()}
+              >${icons.volume2}</button>
+            ` : nothing}
             <button
               class="btn"
               ?disabled=${!props.connected || (!canAbort && props.sending)}
