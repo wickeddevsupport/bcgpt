@@ -1,6 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import path from "node:path";
 import type { AnyAgentTool } from "./common.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import { loadConfig } from "../../config/config.js";
 import { callGateway } from "../../gateway/call.js";
 import { isSubagentSessionKey, resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
@@ -29,6 +30,7 @@ function resolveSandboxSessionToolsVisibility(cfg: ReturnType<typeof loadConfig>
 
 export function createSessionsListTool(opts?: {
   agentSessionKey?: string;
+  config?: OpenClawConfig;
   sandboxed?: boolean;
 }): AnyAgentTool {
   return {
@@ -38,7 +40,7 @@ export function createSessionsListTool(opts?: {
     parameters: SessionsListToolSchema,
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;
-      const cfg = loadConfig();
+      const cfg = opts?.config ?? loadConfig();
       const { mainKey, alias } = resolveMainSessionAlias(cfg);
       const visibility = resolveSandboxSessionToolsVisibility(cfg);
       const requesterInternalKey =

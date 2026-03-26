@@ -670,4 +670,47 @@ describe("sessions tools", () => {
       message: "announce now",
     });
   });
+
+  it("sessions_send prefers the provided workspace config for cross-agent access", async () => {
+    callGatewayMock.mockReset();
+    callGatewayMock.mockImplementation(async (opts: unknown) => {
+      const request = opts as { method?: string };
+      if (request.method === "agent") {
+        return { runId: "run-workspace", acceptedAt: 3000 };
+      }
+      return {};
+    });
+
+    const tool = createOpenClawTools({
+      agentSessionKey: "agent:assistant:main",
+      agentChannel: "discord",
+      config: {
+        session: {
+          mainKey: "main",
+          scope: "per-sender",
+        },
+        tools: {
+          agentToAgent: {
+            enabled: true,
+            allow: ["assistant", "designer"],
+          },
+        },
+      },
+    }).find((candidate) => candidate.name === "sessions_send");
+    expect(tool).toBeDefined();
+    if (!tool) {
+      throw new Error("missing sessions_send tool");
+    }
+
+    const result = await tool.execute("call8", {
+      sessionKey: "agent:designer:main",
+      message: "ping",
+      timeoutSeconds: 0,
+    });
+
+    expect(result.details).toMatchObject({
+      status: "accepted",
+      runId: "run-workspace",
+    });
+  });
 });

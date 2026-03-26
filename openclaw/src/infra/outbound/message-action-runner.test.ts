@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChannelPlugin } from "../../channels/plugins/types.js";
 import type { OpenClawConfig } from "../../config/config.js";
+import { discordPlugin } from "../../../extensions/discord/src/channel.js";
 import { slackPlugin } from "../../../extensions/slack/src/channel.js";
 import { telegramPlugin } from "../../../extensions/telegram/src/channel.js";
 import { whatsappPlugin } from "../../../extensions/whatsapp/src/channel.js";
@@ -41,15 +42,22 @@ const whatsappConfig = {
 describe("runMessageAction context isolation", () => {
   beforeEach(async () => {
     const { createPluginRuntime } = await import("../../plugins/runtime/index.js");
+    const { setDiscordRuntime } = await import("../../../extensions/discord/src/runtime.js");
     const { setSlackRuntime } = await import("../../../extensions/slack/src/runtime.js");
     const { setTelegramRuntime } = await import("../../../extensions/telegram/src/runtime.js");
     const { setWhatsAppRuntime } = await import("../../../extensions/whatsapp/src/runtime.js");
     const runtime = createPluginRuntime();
+    setDiscordRuntime(runtime);
     setSlackRuntime(runtime);
     setTelegramRuntime(runtime);
     setWhatsAppRuntime(runtime);
     setActivePluginRegistry(
       createTestRegistry([
+        {
+          pluginId: "discord",
+          source: "test",
+          plugin: discordPlugin,
+        },
         {
           pluginId: "slack",
           source: "test",
@@ -279,6 +287,32 @@ describe("runMessageAction context isolation", () => {
 
     expect(result.kind).toBe("send");
     expect(result.channel).toBe("slack");
+  });
+
+  it("treats a misplaced Discord channel id as the target when tool context identifies the provider", async () => {
+    const result = await runMessageAction({
+      cfg: {
+        channels: {
+          discord: {
+            token: "discord-test",
+          },
+        },
+      } as OpenClawConfig,
+      action: "send",
+      params: {
+        channel: "1486838211945824388",
+        message: "hi",
+      },
+      toolContext: {
+        currentChannelId: "1486838211945824388",
+        currentChannelProvider: "discord",
+      },
+      dryRun: true,
+    });
+
+    expect(result.kind).toBe("send");
+    expect(result.channel).toBe("discord");
+    expect(result.to).toBe("channel:1486838211945824388");
   });
 
   it("blocks cross-provider sends by default", async () => {

@@ -165,4 +165,51 @@ describe("agents_list", () => {
     const research = agents?.find((agent) => agent.id === "research");
     expect(research?.configured).toBe(false);
   });
+
+  it("prefers the provided workspace config over global config", async () => {
+    configOverride = {
+      session: {
+        mainKey: "main",
+        scope: "per-sender",
+      },
+      agents: {
+        list: [{ id: "main" }],
+      },
+    };
+
+    const tool = createOpenClawTools({
+      agentSessionKey: "agent:assistant:main",
+      config: {
+        session: {
+          mainKey: "main",
+          scope: "per-sender",
+        },
+        agents: {
+          list: [
+            {
+              id: "assistant",
+              subagents: {
+                allowAgents: ["designer"],
+              },
+            },
+            {
+              id: "designer",
+              name: "Designer",
+            },
+          ],
+        },
+      },
+    }).find((candidate) => candidate.name === "agents_list");
+    if (!tool) {
+      throw new Error("missing agents_list tool");
+    }
+
+    const result = await tool.execute("call5", {});
+    expect(result.details).toMatchObject({
+      requester: "assistant",
+      allowAny: false,
+    });
+    const agents = (result.details as { agents?: Array<{ id: string }> }).agents;
+    expect(agents?.map((agent) => agent.id)).toEqual(["assistant", "designer"]);
+  });
 });

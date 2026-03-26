@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import type { GatewayMessageChannel } from "../../utils/message-channel.js";
 import type { AnyAgentTool } from "./common.js";
 import { formatThinkingLevels, normalizeThinkLevel } from "../../auto-reply/thinking.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import { loadConfig } from "../../config/config.js";
 import { callGateway } from "../../gateway/call.js";
 import {
@@ -75,6 +76,7 @@ export function createSessionsSpawnTool(opts?: {
   agentGroupChannel?: string | null;
   agentGroupSpace?: string | null;
   sandboxed?: boolean;
+  config?: OpenClawConfig;
   /** Explicit agent ID override for cron/hook sessions where session key parsing may not work. */
   requesterAgentIdOverride?: string;
 }): AnyAgentTool {
@@ -116,7 +118,7 @@ export function createSessionsSpawnTool(opts?: {
       let modelWarning: string | undefined;
       let modelApplied = false;
 
-      const cfg = loadConfig();
+      const cfg = opts?.config ?? loadConfig();
       const { mainKey, alias } = resolveMainSessionAlias(cfg);
       const requesterSessionKey = opts?.agentSessionKey;
       if (typeof requesterSessionKey === "string" && isSubagentSessionKey(requesterSessionKey)) {

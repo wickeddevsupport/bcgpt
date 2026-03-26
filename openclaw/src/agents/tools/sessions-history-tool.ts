@@ -1,5 +1,6 @@
 import { Type } from "@sinclair/typebox";
 import type { AnyAgentTool } from "./common.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import { loadConfig } from "../../config/config.js";
 import { callGateway } from "../../gateway/call.js";
 import { capArrayByJsonBytes } from "../../gateway/session-utils.fs.js";
@@ -173,6 +174,7 @@ async function isSpawnedSessionAllowed(params: {
 
 export function createSessionsHistoryTool(opts?: {
   agentSessionKey?: string;
+  config?: OpenClawConfig;
   sandboxed?: boolean;
 }): AnyAgentTool {
   return {
@@ -185,7 +187,7 @@ export function createSessionsHistoryTool(opts?: {
       const sessionKeyParam = readStringParam(params, "sessionKey", {
         required: true,
       });
-      const cfg = loadConfig();
+      const cfg = opts?.config ?? loadConfig();
       const { mainKey, alias } = resolveMainSessionAlias(cfg);
       const visibility = resolveSandboxSessionToolsVisibility(cfg);
       const requesterInternalKey =

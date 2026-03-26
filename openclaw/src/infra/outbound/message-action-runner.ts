@@ -1037,10 +1037,23 @@ export async function runMessageAction(
     }
   }
   const explicitChannel = typeof params.channel === "string" ? params.channel.trim() : "";
-  if (!explicitChannel) {
-    const inferredChannel = normalizeMessageChannel(input.toolContext?.currentChannelProvider);
-    if (inferredChannel && isDeliverableMessageChannel(inferredChannel)) {
-      params.channel = inferredChannel;
+  const normalizedExplicitChannel = normalizeMessageChannel(explicitChannel);
+  const inferredChannelFromContext = normalizeMessageChannel(input.toolContext?.currentChannelProvider);
+  if (
+    explicitChannel &&
+    (!normalizedExplicitChannel || !isDeliverableMessageChannel(normalizedExplicitChannel)) &&
+    actionRequiresTarget(action) &&
+    !actionHasTarget(action, params) &&
+    inferredChannelFromContext &&
+    isDeliverableMessageChannel(inferredChannelFromContext)
+  ) {
+    params.target = explicitChannel;
+    delete params.channel;
+  }
+  const channelHintAfterCoercion = typeof params.channel === "string" ? params.channel.trim() : "";
+  if (!channelHintAfterCoercion) {
+    if (inferredChannelFromContext && isDeliverableMessageChannel(inferredChannelFromContext)) {
+      params.channel = inferredChannelFromContext;
     }
   }
 
