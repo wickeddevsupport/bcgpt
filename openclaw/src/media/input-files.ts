@@ -5,13 +5,15 @@ type CanvasModule = typeof import("@napi-rs/canvas");
 type PdfJsModule = typeof import("pdfjs-dist/legacy/build/pdf.mjs");
 type MammothModule = typeof import("mammoth");
 type XlsxModule = typeof import("xlsx");
-type SharpModule = typeof import("sharp");
+// sharp uses `export = fn` (CJS), so dynamic import returns { default: sharpFn, ...statics }.
+// We capture only the callable function to avoid the type mismatch.
+type SharpFn = (input?: Buffer | string | Uint8Array) => import("sharp").Sharp;
 
 let canvasModulePromise: Promise<CanvasModule> | null = null;
 let pdfJsModulePromise: Promise<PdfJsModule> | null = null;
 let mammothModulePromise: Promise<MammothModule> | null = null;
 let xlsxModulePromise: Promise<XlsxModule> | null = null;
-let sharpModulePromise: Promise<SharpModule> | null = null;
+let sharpModulePromise: Promise<SharpFn> | null = null;
 
 // Lazy-load optional deps so non-document paths don't require native installs.
 async function loadMammothModule(): Promise<MammothModule> {
@@ -34,14 +36,21 @@ async function loadXlsxModule(): Promise<XlsxModule> {
   return xlsxModulePromise;
 }
 
-async function loadSharpModule(): Promise<SharpModule> {
+async function loadSharpModule(): Promise<SharpFn> {
   if (!sharpModulePromise) {
-    sharpModulePromise = import("sharp").catch((err) => {
-      sharpModulePromise = null;
-      throw new Error(`sharp is required for image conversion: ${String(err)}`);
-    });
+    sharpModulePromise = (import("sharp") as Promise<unknown>)
+      .then((m) => {
+        // CJS interop: runtime may give { default: fn } or the fn directly
+        const mod = m as { default?: SharpFn } & SharpFn;
+        return (typeof mod.default === "function" ? mod.default : mod) as SharpFn;
+      })
+      .catch((err) => {
+        sharpModulePromise = null;
+        throw new Error(`sharp is required for image conversion: ${String(err)}`);
+      });
   }
-  return sharpModulePromise;
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  return sharpModulePromise!;
 }
 
 async function loadCanvasModule(): Promise<CanvasModule> {
@@ -434,10 +443,12 @@ export async function extractOfficeContent(
   filename: string,
   maxChars = 500_000,
 ): Promise<{ text: string }> {
-  const { parseOfficeAsync } = await import("officeparser").catch((err) => {
-    throw new Error(`officeparser is required for Office extraction: ${String(err)}`);
-  });
-  const text = await (parseOfficeAsync as (input: Buffer | string) => Promise<string>)(buffer);
+  type OfficeParseMod = { parseOfficeAsync: (input: Buffer | string) => Promise<string> };
+  const { parseOfficeAsync } = await (import("officeparser") as Promise<unknown>)
+    .catch((err) => {
+      throw new Error(`officeparser is required for Office extraction: ${String(err)}`);
+    }) as OfficeParseMod;
+  const text = await parseOfficeAsync(buffer);
   return { text: clampText(text, maxChars) };
 }
 
@@ -446,6 +457,6 @@ export async function extractOfficeContent(
  * so vision APIs can process them.
  */
 export async function convertImageToJpeg(buffer: Buffer): Promise<Buffer> {
-  const sharp = await loadSharpModule();
-  return sharp.default(buffer).jpeg({ quality: 90 }).toBuffer();
+  const sharpFn = await loadSharpModule();
+  return sharpFn(buffer).jpeg({ quality: 90 }).toBuffer();
 }
