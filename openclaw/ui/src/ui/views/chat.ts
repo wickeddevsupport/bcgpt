@@ -242,25 +242,29 @@ function handlePaste(e: ClipboardEvent, props: ChatProps) {
     return;
   }
 
-  const attachableItems: DataTransferItem[] = [];
+  // Only intercept file-kind items (images, PDFs, etc).
+  // text/plain and text/html have kind="string" — let them through normally.
+  const fileItems: File[] = [];
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
+    if (item.kind !== "file") {
+      continue;
+    }
     if (isSupportedMime(item.type)) {
-      attachableItems.push(item);
+      const file = item.getAsFile();
+      if (file) {
+        fileItems.push(file);
+      }
     }
   }
 
-  if (attachableItems.length === 0) {
+  if (fileItems.length === 0) {
     return;
   }
 
   e.preventDefault();
 
-  for (const item of attachableItems) {
-    const file = item.getAsFile();
-    if (!file) {
-      continue;
-    }
+  for (const file of fileItems) {
     readFileAsAttachment(file, (att) => {
       const current = props.attachments ?? [];
       props.onAttachmentsChange?.([...current, att]);

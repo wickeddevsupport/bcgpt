@@ -119,10 +119,18 @@ function startChatRecoveryPoll(host: ChatHost, runId: string) {
     }
     if (Date.now() - startedAt > 120_000) {
       // Run still not reconciled after 2 minutes -- clear the active run indicator
-      // so the UI doesn't appear permanently stuck.
+      // and show an error so the user knows to retry.
       host.chatRunId = null;
       host.chatStream = null;
       host.chatStreamStartedAt = null;
+      host.chatMessages = [
+        ...(Array.isArray(host.chatMessages) ? host.chatMessages : []),
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "The response was interrupted (server timeout or restart). Please try again." }],
+          timestamp: Date.now(),
+        },
+      ];
       clearChatRecoveryPoll(host);
       return;
     }
