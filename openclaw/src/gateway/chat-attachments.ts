@@ -1,4 +1,12 @@
 import { detectMime } from "../media/mime.js";
+import {
+  extractFileContentFromSource,
+  DEFAULT_INPUT_FILE_MAX_BYTES,
+  DEFAULT_INPUT_FILE_MAX_CHARS,
+  DEFAULT_INPUT_PDF_MAX_PAGES,
+  DEFAULT_INPUT_PDF_MAX_PIXELS,
+  DEFAULT_INPUT_PDF_MIN_TEXT_CHARS,
+} from "../media/input-files.js";
 
 export type ChatAttachment = {
   type?: string;
@@ -54,10 +62,80 @@ function isImageMime(mime?: string): boolean {
   return typeof mime === "string" && mime.startsWith("image/");
 }
 
+const FILE_LIMITS = {
+  allowUrl: false,
+  allowedMimes: new Set([
+    "application/pdf",
+    "text/plain",
+    "text/markdown",
+    "text/html",
+    "text/csv",
+    "application/json",
+    "text/javascript",
+    "text/typescript",
+    "text/x-python",
+    "text/x-java",
+    "text/x-c",
+    "text/x-c++",
+    "text/x-go",
+    "text/x-ruby",
+    "text/x-rust",
+    "text/x-sh",
+    "text/x-sql",
+    "text/xml",
+    "application/xml",
+    "text/yaml",
+    "application/x-yaml",
+  ]),
+  maxBytes: DEFAULT_INPUT_FILE_MAX_BYTES,
+  maxChars: DEFAULT_INPUT_FILE_MAX_CHARS,
+  maxRedirects: 0,
+  timeoutMs: 0,
+  pdf: {
+    maxPages: DEFAULT_INPUT_PDF_MAX_PAGES,
+    maxPixels: DEFAULT_INPUT_PDF_MAX_PIXELS,
+    minTextChars: DEFAULT_INPUT_PDF_MIN_TEXT_CHARS,
+  },
+};
+
+function isFileMime(mime: string): boolean {
+  return (
+    mime === "application/pdf" ||
+    mime.startsWith("text/") ||
+    mime === "application/json" ||
+    mime === "application/xml" ||
+    mime === "application/x-yaml" ||
+    mime.includes("script") ||
+    mime.includes("python") ||
+    mime.includes("java") ||
+    mime.includes("ruby") ||
+    mime.includes("sql")
+  );
+}
+
+function mimeFromExtension(filename?: string): string | undefined {
+  if (!filename || !filename.includes(".")) return undefined;
+  const ext = filename.split(".").pop()!.toLowerCase();
+  if (ext === "pdf") return "application/pdf";
+  if (ext === "json") return "application/json";
+  if (ext === "xml") return "application/xml";
+  if (ext === "yaml" || ext === "yml") return "text/yaml";
+  const textExts = new Set([
+    "txt", "md", "markdown", "html", "htm", "css",
+    "js", "jsx", "ts", "tsx", "py", "rb", "go",
+    "java", "c", "cpp", "h", "cs", "php", "swift",
+    "kt", "rs", "sh", "bash", "zsh", "sql", "toml",
+    "ini", "env", "config", "csv",
+  ]);
+  if (textExts.has(ext)) return "text/plain";
+  return undefined;
+}
+
 /**
- * Parse attachments and extract images as structured content blocks.
- * Returns the message text and an array of image content blocks
- * compatible with Claude API's image format.
+ * Parse attachments and extract images and file text content.
+ * - Images → structured image content blocks passed to the model vision input
+ * - PDFs → text extracted (+ page images if text-sparse) prepended to the message
+ * - Text/code files → content prepended to the message as code blocks
  */
 export async function parseMessageWithAttachments(
   message: string,
@@ -71,6 +149,7 @@ export async function parseMessageWithAttachments(
   }
 
   const images: ChatImageContent[] = [];
+  const fileTextParts: string[] = [];
 
   for (const [idx, att] of attachments.entries()) {
     if (!att) {
@@ -84,7 +163,6 @@ export async function parseMessageWithAttachments(
       throw new Error(`attachment ${label}: content must be base64 string`);
     }
 
-    let sizeBytes = 0;
     let b64 = content.trim();
     // Strip data URL prefix if present (e.g., "data:image/jpeg;base64,...")
     const dataUrlMatch = /^data:[^;]+;base64,(.*)$/.exec(b64);
@@ -95,6 +173,7 @@ export async function parseMessageWithAttachments(
     if (b64.length % 4 !== 0 || /[^A-Za-z0-9+/=]/.test(b64)) {
       throw new Error(`attachment ${label}: invalid base64 content`);
     }
+    let sizeBytes = 0;
     try {
       sizeBytes = Buffer.from(b64, "base64").byteLength;
     } catch {
@@ -105,7 +184,45 @@ export async function parseMessageWithAttachments(
     }
 
     const providedMime = normalizeMime(mime);
+    const extMime = mimeFromExtension(att.fileName);
     const sniffedMime = normalizeMime(await sniffMimeFromBase64(b64));
+    // Prefer sniffed > provided > extension-inferred
+    const resolvedMime = sniffedMime ?? providedMime ?? extMime ?? "";
+
+    // Route PDFs and text/code files through the file extractor
+    // Use extension-inferred MIME as fallback for code files with unknown browser MIME
+    const fileRouteMime = isFileMime(resolvedMime)
+      ? resolvedMime
+      : extMime && isFileMime(extMime)
+        ? extMime
+        : providedMime && isFileMime(providedMime)
+          ? providedMime
+          : null;
+
+    if (fileRouteMime) {
+      const limits = {
+        ...FILE_LIMITS,
+        allowedMimes: new Set([...FILE_LIMITS.allowedMimes, fileRouteMime]),
+      };
+      try {
+        const extracted = await extractFileContentFromSource({
+          source: { type: "base64", data: b64, mediaType: fileRouteMime, filename: label },
+          limits,
+        });
+        if (extracted.text) {
+          const ext = label.includes(".") ? label.split(".").pop()! : "";
+          fileTextParts.push(`--- File: ${label} ---\n\`\`\`${ext}\n${extracted.text}\n\`\`\``);
+        }
+        if (extracted.images) {
+          images.push(...extracted.images);
+        }
+      } catch (err) {
+        log?.warn(`attachment ${label}: file extraction failed — ${String(err)}`);
+      }
+      continue;
+    }
+
+    // Image handling
     if (sniffedMime && !isImageMime(sniffedMime)) {
       log?.warn(`attachment ${label}: detected non-image (${sniffedMime}), dropping`);
       continue;
@@ -127,7 +244,12 @@ export async function parseMessageWithAttachments(
     });
   }
 
-  return { message, images };
+  const updatedMessage =
+    fileTextParts.length > 0
+      ? [message, ...fileTextParts].filter(Boolean).join("\n\n")
+      : message;
+
+  return { message: updatedMessage, images };
 }
 
 /**

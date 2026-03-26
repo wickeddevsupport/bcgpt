@@ -174,8 +174,48 @@ function resolveChatStatus(props: ChatProps): {
   };
 }
 
+const CHAT_ATTACHMENT_ACCEPT = [
+  "image/*",
+  "application/pdf",
+  "text/plain",
+  "text/markdown",
+  "text/html",
+  "text/csv",
+  "application/json",
+  // Code files by extension (browsers may not know MIME for these)
+  ".ts,.tsx,.js,.jsx,.py,.rb,.go,.java,.c,.cpp,.h,.cs,.php,.swift,.kt,.rs",
+  ".sh,.bash,.zsh,.sql,.yaml,.yml,.xml,.toml,.ini,.env,.config",
+  ".md,.markdown",
+].join(",");
+
+function isSupportedMime(mimeType: string): boolean {
+  // Allow unknown / generic binary — gateway decides via file extension
+  if (!mimeType || mimeType === "application/octet-stream") return true;
+  return (
+    mimeType.startsWith("image/") ||
+    mimeType === "application/pdf" ||
+    mimeType.startsWith("text/") ||
+    mimeType === "application/json" ||
+    mimeType === "application/xml" ||
+    mimeType === "application/x-yaml"
+  );
+}
+
 function generateAttachmentId(): string {
   return `att-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function readFileAsAttachment(file: File, onDone: (att: ChatAttachment) => void) {
+  const reader = new FileReader();
+  reader.addEventListener("load", () => {
+    onDone({
+      id: generateAttachmentId(),
+      dataUrl: reader.result as string,
+      mimeType: file.type || "application/octet-stream",
+      fileName: file.name,
+    });
+  });
+  reader.readAsDataURL(file);
 }
 
 function handlePaste(e: ClipboardEvent, props: ChatProps) {
@@ -184,38 +224,29 @@ function handlePaste(e: ClipboardEvent, props: ChatProps) {
     return;
   }
 
-  const imageItems: DataTransferItem[] = [];
+  const attachableItems: DataTransferItem[] = [];
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
-    if (item.type.startsWith("image/")) {
-      imageItems.push(item);
+    if (isSupportedMime(item.type)) {
+      attachableItems.push(item);
     }
   }
 
-  if (imageItems.length === 0) {
+  if (attachableItems.length === 0) {
     return;
   }
 
   e.preventDefault();
 
-  for (const item of imageItems) {
+  for (const item of attachableItems) {
     const file = item.getAsFile();
     if (!file) {
       continue;
     }
-
-    const reader = new FileReader();
-    reader.addEventListener("load", () => {
-      const dataUrl = reader.result as string;
-      const newAttachment: ChatAttachment = {
-        id: generateAttachmentId(),
-        dataUrl,
-        mimeType: file.type,
-      };
+    readFileAsAttachment(file, (att) => {
       const current = props.attachments ?? [];
-      props.onAttachmentsChange?.([...current, newAttachment]);
+      props.onAttachmentsChange?.([...current, att]);
     });
-    reader.readAsDataURL(file);
   }
 }
 
@@ -229,23 +260,17 @@ function handleDrop(e: DragEvent, props: ChatProps) {
   const additions: ChatAttachment[] = [];
   let pending = 0;
   for (const file of files) {
-    if (!file.type.startsWith("image/")) {
+    if (!isSupportedMime(file.type)) {
       continue;
     }
     pending++;
-    const reader = new FileReader();
-    reader.addEventListener("load", () => {
-      additions.push({
-        id: generateAttachmentId(),
-        dataUrl: reader.result as string,
-        mimeType: file.type,
-      });
+    readFileAsAttachment(file, (att) => {
+      additions.push(att);
       pending--;
       if (pending === 0) {
         props.onAttachmentsChange?.([...current, ...additions]);
       }
     });
-    reader.readAsDataURL(file);
   }
 }
 
@@ -257,19 +282,9 @@ function handleFileSelect(e: Event, props: ChatProps) {
   }
   const current = props.attachments ?? [];
   for (const file of files) {
-    if (!file.type.startsWith("image/")) {
-      continue;
-    }
-    const reader = new FileReader();
-    reader.addEventListener("load", () => {
-      const newAttachment: ChatAttachment = {
-        id: generateAttachmentId(),
-        dataUrl: reader.result as string,
-        mimeType: file.type,
-      };
-      props.onAttachmentsChange?.([...current, newAttachment]);
+    readFileAsAttachment(file, (att) => {
+      props.onAttachmentsChange?.([...current, att]);
     });
-    reader.readAsDataURL(file);
   }
   input.value = "";
 }
@@ -285,11 +300,12 @@ function renderAttachmentPreview(props: ChatProps) {
       ${attachments.map(
         (att) => html`
           <div class="chat-attachment">
-            <img
-              src=${att.dataUrl}
-              alt="Attachment preview"
-              class="chat-attachment__img"
-            />
+            ${att.mimeType.startsWith("image/")
+              ? html`<img src=${att.dataUrl} alt="Attachment preview" class="chat-attachment__img" />`
+              : html`<div class="chat-attachment__file-label" title=${att.fileName ?? att.mimeType}>
+                  ${icons.paperclip}
+                  <span>${att.fileName ?? att.mimeType}</span>
+                </div>`}
             <button
               class="chat-attachment__remove"
               type="button"
@@ -330,8 +346,8 @@ export function renderChat(props: ChatProps) {
   const hasAttachments = (props.attachments?.length ?? 0) > 0;
   const composePlaceholder = props.connected
     ? hasAttachments
-      ? "Add a message or paste more images..."
-      : "Message (↩ to send, Shift+↩ for line breaks, paste images)"
+      ? "Add a message or attach more files..."
+      : "Message (↩ to send, Shift+↩ for newline — drag or paste images/PDFs/code)"
     : "Connect to the gateway to start chatting…";
 
   const splitRatio = props.splitRatio ?? 0.6;
@@ -557,7 +573,7 @@ export function renderChat(props: ChatProps) {
         ${renderAttachmentPreview(props)}
         <input
           type="file"
-          accept="image/*"
+          accept=${CHAT_ATTACHMENT_ACCEPT}
           multiple
           class="chat-file-input"
           style="display:none"

@@ -404,13 +404,17 @@ export async function sendChatMessage(
   if (msg) {
     contentBlocks.push({ type: "text", text: msg });
   }
-  // Add image previews to the message for display
+  // Add attachment previews to the pending message for display
   if (hasAttachments) {
     for (const att of attachments) {
-      contentBlocks.push({
-        type: "image",
-        source: { type: "base64", media_type: att.mimeType, data: att.dataUrl },
-      });
+      if (att.mimeType.startsWith("image/")) {
+        contentBlocks.push({
+          type: "image",
+          source: { type: "base64", media_type: att.mimeType, data: att.dataUrl },
+        });
+      } else {
+        contentBlocks.push({ type: "text", text: `📎 ${att.fileName ?? att.mimeType}` });
+      }
     }
   }
 
@@ -444,8 +448,8 @@ export async function sendChatMessage(
             return null;
           }
           return {
-            type: "image",
             mimeType: parsed.mimeType,
+            fileName: att.fileName,
             content: parsed.content,
           };
         })
