@@ -18,6 +18,44 @@ type ImageBlock = {
   alt?: string;
 };
 
+const YT_PATTERNS = [
+  /https?:\/\/(?:www\.)?youtube\.com\/watch\?(?:[^#\s"')]*&)?v=([a-zA-Z0-9_-]{11})/g,
+  /https?:\/\/youtu\.be\/([a-zA-Z0-9_-]{11})/g,
+  /https?:\/\/(?:www\.)?youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/g,
+];
+
+function extractYouTubeIds(text: string): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const pattern of YT_PATTERNS) {
+    pattern.lastIndex = 0;
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const id = match[1];
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        ids.push(id);
+      }
+    }
+  }
+  return ids;
+}
+
+function renderYouTubeEmbed(videoId: string) {
+  return html`
+    <div class="chat-video-embed">
+      <iframe
+        src="https://www.youtube.com/embed/${videoId}?rel=0&modestbranding=1"
+        title="YouTube video"
+        frameborder="0"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        allowfullscreen
+        loading="lazy"
+      ></iframe>
+    </div>
+  `;
+}
+
 function extractImages(message: unknown): ImageBlock[] {
   if (!message || typeof message !== "object") return [];
   const m = message as Record<string, unknown>;
@@ -303,6 +341,10 @@ function renderGroupedMessage(
   const reasoningMarkdown = extractedThinking ? formatReasoningMarkdown(extractedThinking) : null;
   const markdown = markdownBase;
   const canCopyMarkdown = role === "assistant" && Boolean(markdown?.trim());
+  // Only embed YouTube for final (non-streaming) assistant messages
+  const youtubeIds = !opts.isStreaming && role === "assistant" && markdown
+    ? extractYouTubeIds(markdown)
+    : [];
 
   if (!markdown && hasToolCards && isToolResult) {
     return html`${toolCards.map((card) => renderToolCardSidebar(card, onOpenSidebar))}`;
@@ -320,6 +362,7 @@ function renderGroupedMessage(
     toolCards?: typeof toolCards;
     canCopy?: boolean;
     bubbleClass?: string;
+    youtubeIds?: string[];
   }) => {
     const normalizedRole = normalizeRoleForGrouping(role);
     const bubbleClasses = [
@@ -353,6 +396,7 @@ function renderGroupedMessage(
             )}</div>`
           : nothing}
         ${(content.toolCards ?? []).map((card) => renderToolCardSidebar(card, onOpenSidebar))}
+        ${(content.youtubeIds ?? []).map((id) => renderYouTubeEmbed(id))}
       </div>
     `;
   };
@@ -368,6 +412,7 @@ function renderGroupedMessage(
         images,
         toolCards,
         canCopy: canCopyMarkdown,
+        youtubeIds,
       })}
     `;
   }
@@ -378,5 +423,6 @@ function renderGroupedMessage(
     images,
     toolCards,
     canCopy: canCopyMarkdown,
+    youtubeIds,
   });
 }

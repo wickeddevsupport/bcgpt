@@ -140,3 +140,38 @@
   border-top: 1px solid var(--border);
   margin: 1em 0;
 }
+
+/* Inline images from markdown */
+.chat-text :where(img) {
+  max-width: 100%;
+  max-height: 480px;
+  height: auto;
+  border-radius: var(--radius-sm, 6px);
+  display: block;
+  margin: 0.5em 0;
+  cursor: zoom-in;
+}
+
+.chat-text :where(img:hover) {
+  opacity: 0.92;
+}
+
+/* YouTube / video embed */
+.chat-video-embed {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  margin-top: 10px;
+  border-radius: var(--radius-sm, 6px);
+  overflow: hidden;
+  background: #000;
+  aspect-ratio: 16 / 9;
+}
+
+.chat-video-embed iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}

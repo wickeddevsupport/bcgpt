@@ -21,6 +21,7 @@ const allowedTags = [
   "h4",
   "hr",
   "i",
+  "img",
   "li",
   "ol",
   "p",
@@ -35,7 +36,7 @@ const allowedTags = [
   "ul",
 ];
 
-const allowedAttrs = ["class", "href", "rel", "target", "title", "start"];
+const allowedAttrs = ["alt", "class", "height", "href", "loading", "rel", "src", "target", "title", "start", "width"];
 
 let hooksInstalled = false;
 const MARKDOWN_CHAR_LIMIT = 140_000;
@@ -72,15 +73,24 @@ function installHooks() {
   hooksInstalled = true;
 
   DOMPurify.addHook("afterSanitizeAttributes", (node) => {
-    if (!(node instanceof HTMLAnchorElement)) {
-      return;
+    if (node instanceof HTMLAnchorElement) {
+      const href = node.getAttribute("href");
+      if (!href) {
+        return;
+      }
+      node.setAttribute("rel", "noreferrer noopener");
+      node.setAttribute("target", "_blank");
     }
-    const href = node.getAttribute("href");
-    if (!href) {
-      return;
+
+    if (node instanceof HTMLImageElement) {
+      const src = node.getAttribute("src");
+      // Only allow https:// and data:image/ — block all other schemes
+      if (!src || (!src.startsWith("https://") && !src.startsWith("data:image/"))) {
+        node.remove();
+        return;
+      }
+      node.setAttribute("loading", "lazy");
     }
-    node.setAttribute("rel", "noreferrer noopener");
-    node.setAttribute("target", "_blank");
   });
 }
 
