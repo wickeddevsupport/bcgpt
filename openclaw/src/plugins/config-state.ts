@@ -18,6 +18,7 @@ export const BUNDLED_ENABLED_BY_DEFAULT = new Set<string>([
   "wicked-ops",
   "phone-control",
   "talk-voice",
+  "pmos-workspace-tools",
 ]);
 
 const FORCE_DISABLED_PLUGIN_IDS = new Set<string>([
