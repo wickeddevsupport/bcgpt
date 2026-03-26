@@ -87,12 +87,12 @@ const FILE_LIMITS = {
     "text/yaml",
     "application/x-yaml",
   ]),
-  maxBytes: DEFAULT_INPUT_FILE_MAX_BYTES,
-  maxChars: DEFAULT_INPUT_FILE_MAX_CHARS,
+  maxBytes: 20 * 1024 * 1024, // 20 MB
+  maxChars: 500_000, // ~500K chars extracted text
   maxRedirects: 0,
   timeoutMs: 0,
   pdf: {
-    maxPages: DEFAULT_INPUT_PDF_MAX_PAGES,
+    maxPages: 50, // up to 50 pages
     maxPixels: DEFAULT_INPUT_PDF_MAX_PIXELS,
     minTextChars: DEFAULT_INPUT_PDF_MIN_TEXT_CHARS,
   },
