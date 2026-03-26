@@ -1,8 +1,10 @@
 import { detectMime } from "../media/mime.js";
 import {
   extractFileContentFromSource,
-  DEFAULT_INPUT_FILE_MAX_BYTES,
-  DEFAULT_INPUT_FILE_MAX_CHARS,
+  extractDocxContent,
+  extractXlsxContent,
+  extractOfficeContent,
+  convertImageToJpeg,
   DEFAULT_INPUT_PDF_MAX_PAGES,
   DEFAULT_INPUT_PDF_MAX_PIXELS,
   DEFAULT_INPUT_PDF_MIN_TEXT_CHARS,
@@ -58,41 +60,62 @@ async function sniffMimeFromBase64(base64: string): Promise<string | undefined> 
   }
 }
 
+// Web-safe image formats the vision API accepts natively
+const NATIVE_IMAGE_MIMES = new Set([
+  "image/jpeg", "image/png", "image/gif", "image/webp",
+]);
+
+// Image formats we convert to JPEG before sending (HEIC, BMP, TIFF, etc.)
+const CONVERTIBLE_IMAGE_MIMES = new Set([
+  "image/heic", "image/heif", "image/bmp", "image/tiff",
+  "image/x-bmp", "image/x-tiff",
+]);
+
 function isImageMime(mime?: string): boolean {
   return typeof mime === "string" && mime.startsWith("image/");
 }
+
+function isNativeImageMime(mime: string): boolean {
+  return NATIVE_IMAGE_MIMES.has(mime);
+}
+
+function isConvertibleImageMime(mime: string): boolean {
+  return CONVERTIBLE_IMAGE_MIMES.has(mime);
+}
+
+// MIME types for Office documents — handled by dedicated extractors
+const OFFICE_DOCX_MIMES = new Set([
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/msword",
+]);
+const OFFICE_XLSX_MIMES = new Set([
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+  "application/vnd.oasis.opendocument.spreadsheet",
+]);
+const OFFICE_PPTX_MIMES = new Set([
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.oasis.opendocument.presentation",
+]);
 
 const FILE_LIMITS = {
   allowUrl: false,
   allowedMimes: new Set([
     "application/pdf",
-    "text/plain",
-    "text/markdown",
-    "text/html",
-    "text/csv",
-    "application/json",
-    "text/javascript",
-    "text/typescript",
-    "text/x-python",
-    "text/x-java",
-    "text/x-c",
-    "text/x-c++",
-    "text/x-go",
-    "text/x-ruby",
-    "text/x-rust",
-    "text/x-sh",
-    "text/x-sql",
-    "text/xml",
-    "application/xml",
-    "text/yaml",
-    "application/x-yaml",
+    "text/plain", "text/markdown", "text/html", "text/csv",
+    "application/json", "text/javascript", "text/typescript",
+    "text/x-python", "text/x-java", "text/x-c", "text/x-c++",
+    "text/x-go", "text/x-ruby", "text/x-rust", "text/x-sh",
+    "text/x-sql", "text/xml", "application/xml",
+    "text/yaml", "application/x-yaml",
   ]),
-  maxBytes: 20 * 1024 * 1024, // 20 MB
-  maxChars: 500_000, // ~500K chars extracted text
+  maxBytes: 20 * 1024 * 1024,
+  maxChars: 500_000,
   maxRedirects: 0,
   timeoutMs: 0,
   pdf: {
-    maxPages: 50, // up to 50 pages
+    maxPages: 50,
     maxPixels: DEFAULT_INPUT_PDF_MAX_PIXELS,
     minTextChars: DEFAULT_INPUT_PDF_MIN_TEXT_CHARS,
   },
@@ -105,6 +128,9 @@ function isFileMime(mime: string): boolean {
     mime === "application/json" ||
     mime === "application/xml" ||
     mime === "application/x-yaml" ||
+    OFFICE_DOCX_MIMES.has(mime) ||
+    OFFICE_XLSX_MIMES.has(mime) ||
+    OFFICE_PPTX_MIMES.has(mime) ||
     mime.includes("script") ||
     mime.includes("python") ||
     mime.includes("java") ||
@@ -120,6 +146,15 @@ function mimeFromExtension(filename?: string): string | undefined {
   if (ext === "json") return "application/json";
   if (ext === "xml") return "application/xml";
   if (ext === "yaml" || ext === "yml") return "text/yaml";
+  if (ext === "docx" || ext === "doc")
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (ext === "xlsx" || ext === "xls" || ext === "ods")
+    return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  if (ext === "pptx" || ext === "ppt" || ext === "odp")
+    return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+  if (ext === "heic" || ext === "heif") return "image/heic";
+  if (ext === "bmp") return "image/bmp";
+  if (ext === "tiff" || ext === "tif") return "image/tiff";
   const textExts = new Set([
     "txt", "md", "markdown", "html", "htm", "css",
     "js", "jsx", "ts", "tsx", "py", "rb", "go",
@@ -183,14 +218,66 @@ export async function parseMessageWithAttachments(
       throw new Error(`attachment ${label}: exceeds size limit (${sizeBytes} > ${maxBytes} bytes)`);
     }
 
+    const buffer = Buffer.from(b64, "base64");
     const providedMime = normalizeMime(mime);
     const extMime = mimeFromExtension(att.fileName);
     const sniffedMime = normalizeMime(await sniffMimeFromBase64(b64));
     // Prefer sniffed > provided > extension-inferred
     const resolvedMime = sniffedMime ?? providedMime ?? extMime ?? "";
+    const ext = label.includes(".") ? label.split(".").pop()!.toLowerCase() : "";
 
-    // Route PDFs and text/code files through the file extractor
-    // Use extension-inferred MIME as fallback for code files with unknown browser MIME
+    // ── DOCX (Word) ──────────────────────────────────────────────────────────
+    const docxMime = OFFICE_DOCX_MIMES.has(resolvedMime)
+      ? resolvedMime
+      : extMime && OFFICE_DOCX_MIMES.has(extMime)
+        ? extMime
+        : null;
+    if (docxMime) {
+      try {
+        const extracted = await extractDocxContent(buffer);
+        if (extracted.text)
+          fileTextParts.push(`--- File: ${label} ---\n\`\`\`\n${extracted.text}\n\`\`\``);
+      } catch (err) {
+        log?.warn(`attachment ${label}: DOCX extraction failed — ${String(err)}`);
+      }
+      continue;
+    }
+
+    // ── XLSX (Excel / ODS) ───────────────────────────────────────────────────
+    const xlsxMime = OFFICE_XLSX_MIMES.has(resolvedMime)
+      ? resolvedMime
+      : extMime && OFFICE_XLSX_MIMES.has(extMime)
+        ? extMime
+        : null;
+    if (xlsxMime) {
+      try {
+        const extracted = await extractXlsxContent(buffer);
+        if (extracted.text)
+          fileTextParts.push(`--- File: ${label} ---\n\`\`\`csv\n${extracted.text}\n\`\`\``);
+      } catch (err) {
+        log?.warn(`attachment ${label}: XLSX extraction failed — ${String(err)}`);
+      }
+      continue;
+    }
+
+    // ── PPTX (PowerPoint / ODP) ──────────────────────────────────────────────
+    const pptxMime = OFFICE_PPTX_MIMES.has(resolvedMime)
+      ? resolvedMime
+      : extMime && OFFICE_PPTX_MIMES.has(extMime)
+        ? extMime
+        : null;
+    if (pptxMime) {
+      try {
+        const extracted = await extractOfficeContent(buffer, label);
+        if (extracted.text)
+          fileTextParts.push(`--- File: ${label} ---\n\`\`\`\n${extracted.text}\n\`\`\``);
+      } catch (err) {
+        log?.warn(`attachment ${label}: PPTX extraction failed — ${String(err)}`);
+      }
+      continue;
+    }
+
+    // ── PDF / text / code ────────────────────────────────────────────────────
     const fileRouteMime = isFileMime(resolvedMime)
       ? resolvedMime
       : extMime && isFileMime(extMime)
@@ -198,7 +285,6 @@ export async function parseMessageWithAttachments(
         : providedMime && isFileMime(providedMime)
           ? providedMime
           : null;
-
     if (fileRouteMime) {
       const limits = {
         ...FILE_LIMITS,
@@ -209,20 +295,28 @@ export async function parseMessageWithAttachments(
           source: { type: "base64", data: b64, mediaType: fileRouteMime, filename: label },
           limits,
         });
-        if (extracted.text) {
-          const ext = label.includes(".") ? label.split(".").pop()! : "";
+        if (extracted.text)
           fileTextParts.push(`--- File: ${label} ---\n\`\`\`${ext}\n${extracted.text}\n\`\`\``);
-        }
-        if (extracted.images) {
-          images.push(...extracted.images);
-        }
+        if (extracted.images) images.push(...extracted.images);
       } catch (err) {
         log?.warn(`attachment ${label}: file extraction failed — ${String(err)}`);
       }
       continue;
     }
 
-    // Image handling
+    // ── Convertible images (HEIC, BMP, TIFF → JPEG) ──────────────────────────
+    const effectiveImageMime = resolvedMime || providedMime || "";
+    if (isConvertibleImageMime(effectiveImageMime) || (extMime && isConvertibleImageMime(extMime))) {
+      try {
+        const jpegBuffer = await convertImageToJpeg(buffer);
+        images.push({ type: "image", data: jpegBuffer.toString("base64"), mimeType: "image/jpeg" });
+      } catch (err) {
+        log?.warn(`attachment ${label}: image conversion failed — ${String(err)}`);
+      }
+      continue;
+    }
+
+    // ── Native web images (JPEG, PNG, GIF, WebP) ────────────────────────────
     if (sniffedMime && !isImageMime(sniffedMime)) {
       log?.warn(`attachment ${label}: detected non-image (${sniffedMime}), dropping`);
       continue;
@@ -232,16 +326,9 @@ export async function parseMessageWithAttachments(
       continue;
     }
     if (sniffedMime && providedMime && sniffedMime !== providedMime) {
-      log?.warn(
-        `attachment ${label}: mime mismatch (${providedMime} -> ${sniffedMime}), using sniffed`,
-      );
+      log?.warn(`attachment ${label}: mime mismatch (${providedMime} -> ${sniffedMime}), using sniffed`);
     }
-
-    images.push({
-      type: "image",
-      data: b64,
-      mimeType: sniffedMime ?? providedMime ?? mime,
-    });
+    images.push({ type: "image", data: b64, mimeType: sniffedMime ?? providedMime ?? mime });
   }
 
   const updatedMessage =

@@ -175,30 +175,48 @@ function resolveChatStatus(props: ChatProps): {
 }
 
 const CHAT_ATTACHMENT_ACCEPT = [
+  // Images (all, including HEIC/BMP/TIFF which get converted server-side)
   "image/*",
+  // Documents
   "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.oasis.opendocument.text",
+  "application/vnd.oasis.opendocument.spreadsheet",
+  "application/vnd.oasis.opendocument.presentation",
+  // Text / data
   "text/plain",
   "text/markdown",
   "text/html",
   "text/csv",
   "application/json",
-  // Code files by extension (browsers may not know MIME for these)
+  // Code files by extension (browsers may not have MIME registered for these)
   ".ts,.tsx,.js,.jsx,.py,.rb,.go,.java,.c,.cpp,.h,.cs,.php,.swift,.kt,.rs",
   ".sh,.bash,.zsh,.sql,.yaml,.yml,.xml,.toml,.ini,.env,.config",
   ".md,.markdown",
+  // Office by extension
+  ".docx,.doc,.xlsx,.xls,.ods,.pptx,.ppt,.odp",
+  // HEIC/BMP/TIFF by extension
+  ".heic,.heif,.bmp,.tiff,.tif",
 ].join(",");
 
 function isSupportedMime(mimeType: string): boolean {
   // Allow unknown / generic binary — gateway decides via file extension
   if (!mimeType || mimeType === "application/octet-stream") return true;
-  return (
-    mimeType.startsWith("image/") ||
-    mimeType === "application/pdf" ||
-    mimeType.startsWith("text/") ||
-    mimeType === "application/json" ||
-    mimeType === "application/xml" ||
-    mimeType === "application/x-yaml"
-  );
+  if (mimeType.startsWith("image/")) return true;
+  if (mimeType.startsWith("text/")) return true;
+  if (mimeType === "application/pdf") return true;
+  if (mimeType === "application/json" || mimeType === "application/xml") return true;
+  // Office documents
+  if (mimeType.startsWith("application/vnd.openxmlformats-officedocument")) return true;
+  if (mimeType.startsWith("application/vnd.oasis.opendocument")) return true;
+  if (mimeType === "application/msword" || mimeType === "application/vnd.ms-excel" ||
+      mimeType === "application/vnd.ms-powerpoint") return true;
+  return false;
 }
 
 function generateAttachmentId(): string {

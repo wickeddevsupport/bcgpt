@@ -3,11 +3,47 @@ import { logWarn } from "../logger.js";
 
 type CanvasModule = typeof import("@napi-rs/canvas");
 type PdfJsModule = typeof import("pdfjs-dist/legacy/build/pdf.mjs");
+type MammothModule = typeof import("mammoth");
+type XlsxModule = typeof import("xlsx");
+type SharpModule = typeof import("sharp");
 
 let canvasModulePromise: Promise<CanvasModule> | null = null;
 let pdfJsModulePromise: Promise<PdfJsModule> | null = null;
+let mammothModulePromise: Promise<MammothModule> | null = null;
+let xlsxModulePromise: Promise<XlsxModule> | null = null;
+let sharpModulePromise: Promise<SharpModule> | null = null;
 
-// Lazy-load optional PDF/image deps so non-PDF paths don't require native installs.
+// Lazy-load optional deps so non-document paths don't require native installs.
+async function loadMammothModule(): Promise<MammothModule> {
+  if (!mammothModulePromise) {
+    mammothModulePromise = import("mammoth").catch((err) => {
+      mammothModulePromise = null;
+      throw new Error(`mammoth is required for DOCX extraction: ${String(err)}`);
+    });
+  }
+  return mammothModulePromise;
+}
+
+async function loadXlsxModule(): Promise<XlsxModule> {
+  if (!xlsxModulePromise) {
+    xlsxModulePromise = import("xlsx").catch((err) => {
+      xlsxModulePromise = null;
+      throw new Error(`xlsx is required for spreadsheet extraction: ${String(err)}`);
+    });
+  }
+  return xlsxModulePromise;
+}
+
+async function loadSharpModule(): Promise<SharpModule> {
+  if (!sharpModulePromise) {
+    sharpModulePromise = import("sharp").catch((err) => {
+      sharpModulePromise = null;
+      throw new Error(`sharp is required for image conversion: ${String(err)}`);
+    });
+  }
+  return sharpModulePromise;
+}
+
 async function loadCanvasModule(): Promise<CanvasModule> {
   if (!canvasModulePromise) {
     canvasModulePromise = import("@napi-rs/canvas").catch((err) => {
@@ -353,4 +389,63 @@ export async function extractFileContentFromSource(params: {
 
   const text = clampText(decodeTextContent(buffer, charset), limits.maxChars);
   return { filename, text };
+}
+
+/**
+ * Extract text from a DOCX Word document using mammoth.
+ */
+export async function extractDocxContent(
+  buffer: Buffer,
+  maxChars = 500_000,
+): Promise<{ text: string }> {
+  const mammoth = await loadMammothModule();
+  const result = await mammoth.extractRawText({ buffer });
+  return { text: clampText(result.value, maxChars) };
+}
+
+/**
+ * Extract text from an XLSX/XLS/ODS spreadsheet using SheetJS.
+ * Each sheet is rendered as a CSV block.
+ */
+export async function extractXlsxContent(
+  buffer: Buffer,
+  maxChars = 500_000,
+): Promise<{ text: string }> {
+  const XLSX = await loadXlsxModule();
+  const workbook = XLSX.read(buffer, { type: "buffer" });
+  const parts: string[] = [];
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) continue;
+    const csv = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
+    if (csv.trim()) {
+      parts.push(`=== Sheet: ${sheetName} ===\n${csv}`);
+    }
+  }
+  return { text: clampText(parts.join("\n\n"), maxChars) };
+}
+
+/**
+ * Extract text from a PPTX/DOCX/ODT/ODP/ODS using officeparser.
+ * Returns the raw text content of all slides/pages.
+ */
+export async function extractOfficeContent(
+  buffer: Buffer,
+  filename: string,
+  maxChars = 500_000,
+): Promise<{ text: string }> {
+  const { parseOfficeAsync } = await import("officeparser").catch((err) => {
+    throw new Error(`officeparser is required for Office extraction: ${String(err)}`);
+  });
+  const text = await (parseOfficeAsync as (input: Buffer | string) => Promise<string>)(buffer);
+  return { text: clampText(text, maxChars) };
+}
+
+/**
+ * Convert HEIC, BMP, TIFF or other non-web-safe images to JPEG
+ * so vision APIs can process them.
+ */
+export async function convertImageToJpeg(buffer: Buffer): Promise<Buffer> {
+  const sharp = await loadSharpModule();
+  return sharp.default(buffer).jpeg({ quality: 90 }).toBuffer();
 }
