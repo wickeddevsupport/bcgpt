@@ -391,13 +391,24 @@ export async function adminResetPmosUserPassword(params: {
     pruneExpiredSessions(store);
 
     const actor = store.users.find((entry) => entry.id === actorUserId);
-    if (!actor || actor.role !== "super_admin") {
-      return { ok: false, status: 403, error: "super_admin role required." };
+    if (!actor) {
+      return { ok: false, status: 401, error: "Authentication required." };
     }
 
     const target = store.users.find((entry) => entry.email === targetEmail);
     if (!target) {
       return { ok: false, status: 404, error: "Target user not found." };
+    }
+
+    const canResetAnyWorkspace = actor.role === "super_admin";
+    const canResetOwnWorkspace =
+      actor.role === "workspace_admin" && actor.workspaceId && actor.workspaceId === target.workspaceId;
+    if (!canResetAnyWorkspace && !canResetOwnWorkspace) {
+      return {
+        ok: false,
+        status: 403,
+        error: "workspace_admin or super_admin role required for this workspace.",
+      };
     }
 
     const nextSalt = createPasswordSalt();

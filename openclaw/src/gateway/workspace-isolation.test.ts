@@ -7,6 +7,8 @@ import {
   filterByWorkspace,
   addWorkspaceId,
   isSuperAdmin,
+  isWorkspaceAdmin,
+  canManageWorkspaceAsAdmin,
   getEffectiveWorkspaceId,
 } from "./workspace-context.js";
 import type { GatewayClient } from "./server-methods/types.js";
@@ -189,6 +191,30 @@ describe("isSuperAdmin", () => {
   });
 });
 
+describe("isWorkspaceAdmin", () => {
+  it("returns true for workspace_admin role", () => {
+    expect(isWorkspaceAdmin(clientA)).toBe(true);
+  });
+
+  it("returns true for super_admin role", () => {
+    expect(isWorkspaceAdmin(superAdmin)).toBe(true);
+  });
+});
+
+describe("canManageWorkspaceAsAdmin", () => {
+  it("allows workspace_admin to manage their own workspace", () => {
+    expect(canManageWorkspaceAsAdmin(clientA, WS_A)).toBe(true);
+  });
+
+  it("blocks workspace_admin from managing a different workspace", () => {
+    expect(canManageWorkspaceAsAdmin(clientA, WS_B)).toBe(false);
+  });
+
+  it("allows super_admin to manage any workspace", () => {
+    expect(canManageWorkspaceAsAdmin(superAdmin, WS_B)).toBe(true);
+  });
+});
+
 /* ------------------------------------------------------------------ */
 /*  getEffectiveWorkspaceId                                           */
 /* ------------------------------------------------------------------ */
@@ -244,6 +270,13 @@ describe("cross-workspace isolation", () => {
     expect(() =>
       requireWorkspaceOwnership(clientA, devAgent.workspaceId, "agent"),
     ).toThrow("Access denied");
+  });
+
+  it("Super admin can modify any workspace-owned resource", () => {
+    const devAgent = agents.find((a) => a.id === "dev-agent")!;
+    expect(() =>
+      requireWorkspaceOwnership(superAdmin, devAgent.workspaceId, "agent"),
+    ).not.toThrow();
   });
 
   it("User B cannot modify User A's agent", () => {

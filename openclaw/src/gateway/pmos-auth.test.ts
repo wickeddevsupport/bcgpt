@@ -172,4 +172,81 @@ describe("pmos auth bootstrap roles", () => {
     });
     expect(newLogin.ok).toBe(true);
   });
+
+  it("allows workspace_admin to reset another user in the same workspace only", async () => {
+    const owner = await signupPmosUser({
+      name: "Owner",
+      email: "owner@example.com",
+      password: "Passw0rd!",
+    });
+    expect(owner.ok).toBe(true);
+    if (!owner.ok) {
+      throw new Error(owner.error);
+    }
+
+    const workspaceAdmin = await signupPmosUser({
+      name: "Workspace Admin",
+      email: "admin@example.com",
+      password: "Passw0rd!",
+    });
+    expect(workspaceAdmin.ok).toBe(true);
+    if (!workspaceAdmin.ok) {
+      throw new Error(workspaceAdmin.error);
+    }
+
+    const teammate = await signupPmosUser({
+      name: "Teammate",
+      email: "teammate@example.com",
+      password: "Passw0rd!",
+    });
+    expect(teammate.ok).toBe(true);
+    if (!teammate.ok) {
+      throw new Error(teammate.error);
+    }
+
+    const outsider = await signupPmosUser({
+      name: "Outsider",
+      email: "outsider@example.com",
+      password: "Passw0rd!",
+    });
+    expect(outsider.ok).toBe(true);
+    if (!outsider.ok) {
+      throw new Error(outsider.error);
+    }
+
+    const storePath = path.join(tempDir, "pmos-auth.json");
+    const store = JSON.parse(await fs.readFile(storePath, "utf-8")) as {
+      users: Array<{ email: string; workspaceId: string }>;
+    };
+    const adminRow = store.users.find((entry) => entry.email === "admin@example.com");
+    const teammateRow = store.users.find((entry) => entry.email === "teammate@example.com");
+    expect(adminRow).toBeTruthy();
+    expect(teammateRow).toBeTruthy();
+    if (!adminRow || !teammateRow) {
+      throw new Error("Expected seeded PMOS users to exist.");
+    }
+    teammateRow.workspaceId = adminRow.workspaceId;
+    await fs.writeFile(storePath, JSON.stringify(store, null, 2), "utf-8");
+
+    const sameWorkspaceReset = await adminResetPmosUserPassword({
+      actorUserId: workspaceAdmin.user.id,
+      targetEmail: "teammate@example.com",
+      newPassword: "Teammat3N3wPass!",
+    });
+    expect(sameWorkspaceReset.ok).toBe(true);
+    if (!sameWorkspaceReset.ok) {
+      throw new Error(sameWorkspaceReset.error);
+    }
+
+    const crossWorkspaceReset = await adminResetPmosUserPassword({
+      actorUserId: workspaceAdmin.user.id,
+      targetEmail: "outsider@example.com",
+      newPassword: "Outsid3rN3wPass!",
+    });
+    expect(crossWorkspaceReset.ok).toBe(false);
+    expect(crossWorkspaceReset).toMatchObject({
+      status: 403,
+      error: "workspace_admin or super_admin role required for this workspace.",
+    });
+  });
 });

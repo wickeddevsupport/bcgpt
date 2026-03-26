@@ -3,7 +3,12 @@ import { loadConfig, writeConfigFile, type OpenClawConfig } from "../../config/c
 import { redactConfigObject, restoreRedactedValues } from "../../config/redact-snapshot.js";
 import { ErrorCodes, errorShape } from "../protocol/index.js";
 import { formatForLog } from "../ws-log.js";
-import { filterByWorkspace, requireWorkspaceId, isSuperAdmin } from "../workspace-context.js";
+import {
+  canManageWorkspaceAsAdmin,
+  filterByWorkspace,
+  requireWorkspaceId,
+  isSuperAdmin,
+} from "../workspace-context.js";
 import { buildFigmaRestAuditReport, parseFigmaFileKey } from "../figma-rest-audit.js";
 import {
   buildWorkspaceFigmaMcpFailurePayload,
@@ -3081,7 +3086,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
       if (!client) throw new Error("client context required");
       const target =
         typeof params?.workspaceId === "string" ? params.workspaceId.trim() : undefined;
-      if (target && !isSuperAdmin(client)) {
+      if (target && !canManageWorkspaceAsAdmin(client, target)) {
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "access denied"));
         return;
       }
@@ -3123,7 +3128,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
       if (!client) throw new Error("client context required");
       const p = params as Record<string, unknown> | undefined;
       const target = typeof p?.workspaceId === "string" ? p.workspaceId.trim() : undefined;
-      if (target && !isSuperAdmin(client)) {
+      if (target && !canManageWorkspaceAsAdmin(client, target)) {
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "access denied"));
         return;
       }
@@ -3186,7 +3191,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
     try {
       if (!client) throw new Error("client context required");
       const target = typeof params?.workspaceId === "string" ? params.workspaceId.trim() : undefined;
-      if (target && !isSuperAdmin(client)) {
+      if (target && !canManageWorkspaceAsAdmin(client, target)) {
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "access denied"));
         return;
       }
@@ -3214,7 +3219,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
     try {
       if (!client) throw new Error("client context required");
       const target = typeof params?.workspaceId === "string" ? params.workspaceId.trim() : undefined;
-      if (target && !isSuperAdmin(client)) {
+      if (target && !canManageWorkspaceAsAdmin(client, target)) {
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "access denied"));
         return;
       }
@@ -3370,7 +3375,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
       if (!client) throw new Error("client context required");
       const target = typeof params?.workspaceId === "string" ? params.workspaceId.trim() : undefined;
       // super_admin may request other workspace; non-super admins may only read their own
-      if (target && !isSuperAdmin(client)) {
+      if (target && !canManageWorkspaceAsAdmin(client, target)) {
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "access denied"));
         return;
       }

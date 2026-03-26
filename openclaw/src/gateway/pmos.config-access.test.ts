@@ -92,6 +92,53 @@ describe("pmos config access + connector merge", () => {
     }
   });
 
+  it("allows workspace_admin to explicitly target their own workspace config", async () => {
+    const workspaceId = `pmos-own-target-${Date.now()}`;
+    const respondSet = vi.fn();
+    await pmosHandlers["pmos.config.workspace.set"]({
+      params: {
+        workspaceId,
+        patch: {
+          agents: {
+            defaults: {
+              model: {
+                primary: "github-copilot/gpt-4.1",
+              },
+            },
+          },
+        },
+        replace: true,
+      },
+      respond: respondSet,
+      client: { pmosRole: "workspace_admin", pmosWorkspaceId: workspaceId } as any,
+    } as any);
+    expect(respondSet.mock.calls[0]?.[0]).toBe(true);
+
+    const respondGet = vi.fn();
+    await pmosHandlers["pmos.config.workspace.get"]({
+      params: { workspaceId },
+      respond: respondGet,
+      client: { pmosRole: "workspace_admin", pmosWorkspaceId: workspaceId } as any,
+    } as any);
+    expect(respondGet.mock.calls[0]?.[0]).toBe(true);
+    const payload = respondGet.mock.calls[0]?.[1] as Record<string, any>;
+    expect(payload?.workspaceId).toBe(workspaceId);
+    expect(payload?.workspaceConfig?.agents?.defaults?.model?.primary).toBe(
+      "github-copilot/gpt-4.1",
+    );
+  });
+
+  it("blocks workspace_admin from explicitly targeting another workspace config", async () => {
+    const respond = vi.fn();
+    await pmosHandlers["pmos.config.workspace.get"]({
+      params: { workspaceId: "ws-b" },
+      respond,
+      client: { pmosRole: "workspace_admin", pmosWorkspaceId: "ws-a" } as any,
+    } as any);
+    expect(respond.mock.calls[0]?.[0]).toBe(false);
+    expect(String(respond.mock.calls[0]?.[2]?.message ?? "")).toContain("access denied");
+  });
+
   it("keeps flow credentials under ops without recreating activepieces mirror entries", async () => {
     const workspaceId = `pmos-ops-only-${Date.now()}`;
     const respond = vi.fn();

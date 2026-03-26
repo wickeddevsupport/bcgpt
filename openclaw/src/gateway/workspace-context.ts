@@ -29,6 +29,9 @@ export function requireWorkspaceId(client: GatewayClient): string {
  * Check if workspace ID matches (for ownership validation)
  */
 export function isWorkspaceOwned(client: GatewayClient, resourceWorkspaceId?: string): boolean {
+  if (isSuperAdmin(client)) {
+    return true;
+  }
   if (!resourceWorkspaceId) {
     return false;
   }
@@ -83,6 +86,38 @@ export function addWorkspaceId<T extends Record<string, unknown>>(
  */
 export function isSuperAdmin(client: GatewayClient): boolean {
   return client.pmosRole === "super_admin";
+}
+
+/**
+ * Check if client is an admin within PMOS.
+ */
+export function isWorkspaceAdmin(client: GatewayClient): boolean {
+  return client.pmosRole === "workspace_admin" || isSuperAdmin(client);
+}
+
+/**
+ * Check whether an admin may manage the requested workspace.
+ * - super_admin may manage any workspace
+ * - workspace_admin may only manage their own workspace
+ */
+export function canManageWorkspaceAsAdmin(
+  client: GatewayClient,
+  targetWorkspaceId?: string,
+): boolean {
+  if (isSuperAdmin(client)) {
+    return true;
+  }
+  if (client.pmosRole !== "workspace_admin") {
+    return false;
+  }
+  const clientWorkspaceId = getWorkspaceId(client);
+  if (!clientWorkspaceId) {
+    return false;
+  }
+  if (!targetWorkspaceId) {
+    return true;
+  }
+  return clientWorkspaceId === targetWorkspaceId;
 }
 
 /**

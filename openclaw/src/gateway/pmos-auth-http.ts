@@ -2156,8 +2156,11 @@ export async function handlePmosAuthHttpRequest(params: {
       sendJson(res, 401, { ok: false, error: "Authentication required." });
       return true;
     }
-    if (session.user.role !== "super_admin") {
-      sendJson(res, 403, { ok: false, error: "super_admin role required." });
+    if (session.user.role !== "super_admin" && session.user.role !== "workspace_admin") {
+      sendJson(res, 403, {
+        ok: false,
+        error: "workspace_admin or super_admin role required for this workspace.",
+      });
       return true;
     }
     const email = typeof parsed.email === "string" ? parsed.email : "";

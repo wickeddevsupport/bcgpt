@@ -1350,8 +1350,11 @@ export class OpenClawApp extends LitElement {
   async handlePmosAdminResetUserPassword() {
     this.pmosAdminResetError = null;
     this.pmosAdminResetSavedOk = false;
-    if (this.pmosAuthUser?.role !== "super_admin") {
-      this.pmosAdminResetError = "super_admin role required.";
+    if (
+      this.pmosAuthUser?.role !== "super_admin" &&
+      this.pmosAuthUser?.role !== "workspace_admin"
+    ) {
+      this.pmosAdminResetError = "workspace_admin or super_admin role required.";
       return;
     }
     const email = this.pmosAdminResetTargetEmail.trim().toLowerCase();
