@@ -118,6 +118,39 @@ function renderCompactionIndicator(status: CompactionIndicatorStatus | null | un
   return nothing;
 }
 
+function resolveActiveTool(toolMessages: unknown[]): string | null {
+  // Walk backwards to find the most recent tool that has a call but no result yet
+  for (let i = toolMessages.length - 1; i >= 0; i--) {
+    const msg = toolMessages[i];
+    if (!msg || typeof msg !== "object") continue;
+    const content = (msg as Record<string, unknown>).content;
+    if (!Array.isArray(content)) continue;
+    let toolName: string | null = null;
+    let hasResult = false;
+    for (const block of content) {
+      if (!block || typeof block !== "object") continue;
+      const b = block as Record<string, unknown>;
+      if (b.type === "toolcall" && typeof b.name === "string") toolName = b.name;
+      if (b.type === "toolresult") hasResult = true;
+    }
+    if (toolName && !hasResult) return toolName;
+  }
+  return null;
+}
+
+function resolveThinkingSnippet(stream: string): string | null {
+  // If the model has finished thinking, don't extract a snippet
+  if (stream.includes("</thinking>")) return null;
+  const start = stream.lastIndexOf("<thinking>");
+  if (start === -1) return null;
+  const content = stream.slice(start + "<thinking>".length).trim();
+  if (!content) return null;
+  const lines = content.split(/\n/).map((l) => l.trim()).filter(Boolean);
+  const lastLine = lines[lines.length - 1];
+  if (!lastLine) return null;
+  return lastLine.length > 80 ? `${lastLine.slice(0, 77)}...` : lastLine;
+}
+
 function resolveChatStatus(props: ChatProps): {
   label: string;
   detail: string;
@@ -144,6 +177,22 @@ function resolveChatStatus(props: ChatProps): {
   }
 
   if (props.stream !== null) {
+    const activeTool = resolveActiveTool(props.toolMessages);
+    if (activeTool) {
+      return {
+        label: "Working",
+        detail: `Calling ${activeTool.replace(/_/g, " ")}...`,
+        tone: "busy",
+      };
+    }
+    const thinkingSnippet = resolveThinkingSnippet(props.stream);
+    if (thinkingSnippet) {
+      return {
+        label: "Thinking",
+        detail: thinkingSnippet,
+        tone: "busy",
+      };
+    }
     return {
       label: "Working",
       detail: "Streaming the current response.",
