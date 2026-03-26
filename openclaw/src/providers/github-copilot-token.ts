@@ -108,9 +108,9 @@ export async function resolveCopilotApiToken(params: {
     headers: {
       Accept: "application/json",
       Authorization: `Bearer ${params.githubToken}`,
-      "Editor-Version": "vscode/1.96.2",
-      "Editor-Plugin-Version": "copilot-chat/0.26.7",
-      "User-Agent": "GitHubCopilotChat/0.26.7",
+      "Editor-Version": "vscode/1.107.0",
+      "Editor-Plugin-Version": "copilot-chat/0.35.0",
+      "User-Agent": "GitHubCopilotChat/0.35.0",
       "Copilot-Integration-Id": "vscode-chat",
     },
   });

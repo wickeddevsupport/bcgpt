@@ -3,21 +3,19 @@ import type { ModelDefinitionConfig } from "../config/types.js";
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 const DEFAULT_MAX_TOKENS = 8192;
 
-// Copilot model ids vary by plan/org and can change.
-// We keep this list intentionally broad; if a model isn't available Copilot will
-// return an error and users can remove it from their config.
-const DEFAULT_MODEL_IDS = [
-  "gpt-4o",
-  "gpt-4.1",
-  "gpt-4.1-mini",
-  "gpt-4.1-nano",
-  "o1",
-  "o1-mini",
-  "o3-mini",
-] as const;
+// Only expose zero-premium-request models (0x multiplier on paid Copilot plans).
+// GPT-4.1, GPT-4o, and GPT-5 mini are free/unlimited. All other models (gpt-4.1-mini,
+// gpt-4.1-nano, Claude, Gemini, etc.) consume premium quota and are excluded.
+const DEFAULT_MODEL_IDS = ["gpt-4.1", "gpt-4o", "gpt-5-mini"] as const;
+
+const DEFAULT_MODEL_ID_SET = new Set(DEFAULT_MODEL_IDS.map((modelId) => modelId.toLowerCase()));
 
 export function getDefaultCopilotModelIds(): string[] {
   return [...DEFAULT_MODEL_IDS];
+}
+
+export function isDefaultCopilotModelId(modelId: string): boolean {
+  return DEFAULT_MODEL_ID_SET.has(modelId.trim().toLowerCase());
 }
 
 export function buildCopilotModelDefinition(modelId: string): ModelDefinitionConfig {
