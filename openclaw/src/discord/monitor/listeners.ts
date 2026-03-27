@@ -10,7 +10,6 @@ import { danger } from "../../globals.js";
 import { formatDurationSeconds } from "../../infra/format-time/format-duration.ts";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
-import { resolveAgentRoute } from "../../routing/resolve-route.js";
 import {
   normalizeDiscordSlug,
   resolveDiscordChannelConfigWithFallback,
@@ -20,6 +19,7 @@ import {
 import { formatDiscordReactionEmoji, formatDiscordUserTag } from "./format.js";
 import { resolveDiscordChannelInfo } from "./message-utils.js";
 import { setPresence } from "./presence-cache.js";
+import { resolveDiscordWorkspaceRoute } from "./workspace-routing.js";
 
 type LoadedConfig = ReturnType<typeof import("../../config/config.js").loadConfig>;
 type RuntimeEnv = import("../../runtime.js").RuntimeEnv;
@@ -192,14 +192,6 @@ async function handleDiscordReactionEvent(params: {
       return;
     }
 
-    const guildInfo = resolveDiscordGuildEntry({
-      guild: data.guild ?? undefined,
-      guildEntries,
-    });
-    if (guildEntries && Object.keys(guildEntries).length > 0 && !guildInfo) {
-      return;
-    }
-
     const channel = await client.fetchChannel(data.channel_id);
     if (!channel) {
       return;
@@ -223,6 +215,27 @@ async function handleDiscordReactionEvent(params: {
         const parentInfo = await resolveDiscordChannelInfo(client, parentId);
         parentName = parentInfo?.name;
         parentSlug = parentName ? normalizeDiscordSlug(parentName) : "";
+      }
+    }
+    const routing = await resolveDiscordWorkspaceRoute({
+      cfg: params.cfg,
+      channel: "discord",
+      accountId: params.accountId,
+      guildId: data.guild_id ?? undefined,
+      peer: { kind: "channel", id: data.channel_id },
+      parentPeer: parentId ? { kind: "channel", id: parentId } : undefined,
+    });
+    const cfg = routing.cfg;
+    const guildInfo = resolveDiscordGuildEntry({
+      guild: data.guild ?? undefined,
+      guildEntries:
+        cfg.channels?.discord?.guilds && typeof cfg.channels.discord.guilds === "object"
+          ? (cfg.channels.discord.guilds as typeof guildEntries)
+          : guildEntries,
+    });
+    if ((guildEntries && Object.keys(guildEntries).length > 0) || cfg.channels?.discord?.guilds) {
+      if (!guildInfo) {
+        return;
       }
     }
     const channelConfig = resolveDiscordChannelConfigWithFallback({
@@ -271,14 +284,7 @@ async function handleDiscordReactionEvent(params: {
     const authorLabel = message?.author ? formatDiscordUserTag(message.author) : undefined;
     const baseText = `Discord reaction ${action}: ${emojiLabel} by ${actorLabel} on ${guildSlug} ${channelLabel} msg ${data.message_id}`;
     const text = authorLabel ? `${baseText} from ${authorLabel}` : baseText;
-    const route = resolveAgentRoute({
-      cfg: params.cfg,
-      channel: "discord",
-      accountId: params.accountId,
-      guildId: data.guild_id ?? undefined,
-      peer: { kind: "channel", id: data.channel_id },
-      parentPeer: parentId ? { kind: "channel", id: parentId } : undefined,
-    });
+    const route = routing.route;
     enqueueSystemEvent(text, {
       sessionKey: route.sessionKey,
       contextKey: `discord:reaction:${action}:${data.message_id}:${user.id}:${emojiLabel}`,

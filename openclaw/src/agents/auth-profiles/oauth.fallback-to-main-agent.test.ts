@@ -170,4 +170,95 @@ describe("resolveApiKeyForProfile fallback to main agent", () => {
       }),
     ).rejects.toThrow(/OAuth token refresh failed/);
   });
+
+  it("prefers workspace assistant OAuth credentials over the global main agent", async () => {
+    const profileId = "anthropic:claude-cli";
+    const now = Date.now();
+    const expiredTime = now - 60 * 60 * 1000;
+    const freshTime = now + 60 * 60 * 1000;
+    const workspaceAssistantDir = path.join(
+      tmpDir,
+      "workspaces",
+      "ws-1",
+      "agents",
+      "assistant",
+      "agent",
+    );
+    const workspaceWorkerDir = path.join(
+      tmpDir,
+      "workspaces",
+      "ws-1",
+      "agents",
+      "growth-hacker",
+      "agent",
+    );
+    await fs.mkdir(workspaceAssistantDir, { recursive: true });
+    await fs.mkdir(workspaceWorkerDir, { recursive: true });
+
+    const expiredStore: AuthProfileStore = {
+      version: 1,
+      profiles: {
+        [profileId]: {
+          type: "oauth",
+          provider: "anthropic",
+          access: "expired-access-token",
+          refresh: "expired-refresh-token",
+          expires: expiredTime,
+        },
+      },
+    };
+    await fs.writeFile(
+      path.join(workspaceWorkerDir, "auth-profiles.json"),
+      JSON.stringify(expiredStore),
+    );
+
+    const workspaceStore: AuthProfileStore = {
+      version: 1,
+      profiles: {
+        [profileId]: {
+          type: "oauth",
+          provider: "anthropic",
+          access: "workspace-fresh-token",
+          refresh: "workspace-refresh-token",
+          expires: freshTime,
+        },
+      },
+    };
+    await fs.writeFile(
+      path.join(workspaceAssistantDir, "auth-profiles.json"),
+      JSON.stringify(workspaceStore),
+    );
+
+    const globalStore: AuthProfileStore = {
+      version: 1,
+      profiles: {
+        [profileId]: {
+          type: "oauth",
+          provider: "anthropic",
+          access: "global-fresh-token",
+          refresh: "global-refresh-token",
+          expires: freshTime,
+        },
+      },
+    };
+    await fs.writeFile(path.join(mainAgentDir, "auth-profiles.json"), JSON.stringify(globalStore));
+
+    const fetchSpy = vi.fn(async () => {
+      return new Response(JSON.stringify({ error: "invalid_grant" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const loadedStore = ensureAuthProfileStore(workspaceWorkerDir);
+    const result = await resolveApiKeyForProfile({
+      store: loadedStore,
+      profileId,
+      agentDir: workspaceWorkerDir,
+    });
+
+    expect(result?.apiKey).toBe("workspace-fresh-token");
+    expect(result?.provider).toBe("anthropic");
+  });
 });

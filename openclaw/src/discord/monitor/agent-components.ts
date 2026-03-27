@@ -16,7 +16,6 @@ import {
   readChannelAllowFromStore,
   upsertChannelPairingRequest,
 } from "../../pairing/pairing-store.js";
-import { resolveAgentRoute } from "../../routing/resolve-route.js";
 import {
   type DiscordGuildEntryResolved,
   normalizeDiscordAllowList,
@@ -27,6 +26,7 @@ import {
   resolveDiscordUserAllowed,
 } from "./allow-list.js";
 import { formatDiscordUserTag } from "./format.js";
+import { resolveDiscordWorkspaceRoute } from "./workspace-routing.js";
 
 const AGENT_BUTTON_KEY = "agent";
 const AGENT_SELECT_KEY = "agentsel";
@@ -248,12 +248,6 @@ export class AgentComponentButton extends Button {
 
     // P2 FIX: Check user allowlist before processing component interaction
     // This prevents unauthorized users from injecting system events
-    const guild = interaction.guild;
-    const guildInfo = resolveDiscordGuildEntry({
-      guild: guild ?? undefined,
-      guildEntries: this.ctx.guildEntries,
-    });
-
     // Resolve channel info for thread detection and allowlist inheritance
     const channel = interaction.channel;
     const channelName = channel && "name" in channel ? (channel.name as string) : undefined;
@@ -279,6 +273,26 @@ export class AgentComponentButton extends Button {
         }
       }
     }
+    const routing = await resolveDiscordWorkspaceRoute({
+      cfg: this.ctx.cfg,
+      channel: "discord",
+      accountId: this.ctx.accountId,
+      guildId: rawGuildId,
+      peer: {
+        kind: isDirectMessage ? "direct" : "channel",
+        id: isDirectMessage ? userId : channelId,
+      },
+      parentPeer: parentId ? { kind: "channel", id: parentId } : undefined,
+    });
+    const effectiveGuildEntries =
+      routing.cfg.channels?.discord?.guilds && typeof routing.cfg.channels.discord.guilds === "object"
+        ? (routing.cfg.channels.discord.guilds as Record<string, DiscordGuildEntryResolved>)
+        : this.ctx.guildEntries;
+    const guild = interaction.guild;
+    const guildInfo = resolveDiscordGuildEntry({
+      guild: guild ?? undefined,
+      guildEntries: effectiveGuildEntries,
+    });
 
     // Only check guild allowlists if this is a guild interaction
     if (rawGuildId) {
@@ -317,17 +331,7 @@ export class AgentComponentButton extends Button {
     }
 
     // Resolve route with full context (guildId, proper peer kind, parentPeer)
-    const route = resolveAgentRoute({
-      cfg: this.ctx.cfg,
-      channel: "discord",
-      accountId: this.ctx.accountId,
-      guildId: rawGuildId,
-      peer: {
-        kind: isDirectMessage ? "direct" : "channel",
-        id: isDirectMessage ? userId : channelId,
-      },
-      parentPeer: parentId ? { kind: "channel", id: parentId } : undefined,
-    });
+    const route = routing.route;
 
     const eventText = `[Discord component: ${componentId} clicked by ${username} (${userId})]`;
 
@@ -413,12 +417,6 @@ export class AgentSelectMenu extends StringSelectMenu {
     }
 
     // Check user allowlist before processing component interaction
-    const guild = interaction.guild;
-    const guildInfo = resolveDiscordGuildEntry({
-      guild: guild ?? undefined,
-      guildEntries: this.ctx.guildEntries,
-    });
-
     // Resolve channel info for thread detection and allowlist inheritance
     const channel = interaction.channel;
     const channelName = channel && "name" in channel ? (channel.name as string) : undefined;
@@ -441,6 +439,26 @@ export class AgentSelectMenu extends StringSelectMenu {
         }
       }
     }
+    const routing = await resolveDiscordWorkspaceRoute({
+      cfg: this.ctx.cfg,
+      channel: "discord",
+      accountId: this.ctx.accountId,
+      guildId: rawGuildId,
+      peer: {
+        kind: isDirectMessage ? "direct" : "channel",
+        id: isDirectMessage ? userId : channelId,
+      },
+      parentPeer: parentId ? { kind: "channel", id: parentId } : undefined,
+    });
+    const effectiveGuildEntries =
+      routing.cfg.channels?.discord?.guilds && typeof routing.cfg.channels.discord.guilds === "object"
+        ? (routing.cfg.channels.discord.guilds as Record<string, DiscordGuildEntryResolved>)
+        : this.ctx.guildEntries;
+    const guild = interaction.guild;
+    const guildInfo = resolveDiscordGuildEntry({
+      guild: guild ?? undefined,
+      guildEntries: effectiveGuildEntries,
+    });
 
     // Only check guild allowlists if this is a guild interaction
     if (rawGuildId) {
@@ -483,17 +501,7 @@ export class AgentSelectMenu extends StringSelectMenu {
     const valuesText = values.length > 0 ? ` (selected: ${values.join(", ")})` : "";
 
     // Resolve route with full context (guildId, proper peer kind, parentPeer)
-    const route = resolveAgentRoute({
-      cfg: this.ctx.cfg,
-      channel: "discord",
-      accountId: this.ctx.accountId,
-      guildId: rawGuildId,
-      peer: {
-        kind: isDirectMessage ? "direct" : "channel",
-        id: isDirectMessage ? userId : channelId,
-      },
-      parentPeer: parentId ? { kind: "channel", id: parentId } : undefined,
-    });
+    const route = routing.route;
 
     const eventText = `[Discord select menu: ${componentId} interacted by ${username} (${userId})${valuesText}]`;
 

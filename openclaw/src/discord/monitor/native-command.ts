@@ -39,7 +39,6 @@ import {
   readChannelAllowFromStore,
   upsertChannelPairingRequest,
 } from "../../pairing/pairing-store.js";
-import { resolveAgentRoute } from "../../routing/resolve-route.js";
 import { buildUntrustedChannelMetadata } from "../../security/channel-metadata.js";
 import { loadWebMedia } from "../../web/media.js";
 import { chunkDiscordTextWithMode } from "../chunk.js";
@@ -56,6 +55,7 @@ import {
 import { resolveDiscordChannelInfo } from "./message-utils.js";
 import { resolveDiscordSenderIdentity } from "./sender-identity.js";
 import { resolveDiscordThreadParentInfo } from "./threading.js";
+import { resolveDiscordWorkspaceRoute } from "./workspace-routing.js";
 
 type DiscordConfig = NonNullable<OpenClawConfig["channels"]>["discord"];
 
@@ -503,12 +503,14 @@ async function dispatchDiscordCommandInteraction(params: {
     prompt,
     command,
     commandArgs,
-    cfg,
-    discordConfig,
+    cfg: initialCfg,
+    discordConfig: initialDiscordConfig,
     accountId,
     sessionPrefix,
     preferFollowUp,
   } = params;
+  let cfg = initialCfg;
+  let discordConfig = initialDiscordConfig;
   const respond = async (content: string, options?: { ephemeral?: boolean }) => {
     const payload = {
       content,
@@ -577,6 +579,19 @@ async function dispatchDiscordCommandInteraction(params: {
     threadParentName = parentInfo.name;
     threadParentSlug = threadParentName ? normalizeDiscordSlug(threadParentName) : "";
   }
+  const routing = await resolveDiscordWorkspaceRoute({
+    cfg,
+    channel: "discord",
+    accountId,
+    guildId: interaction.guild?.id ?? undefined,
+    peer: {
+      kind: isDirectMessage ? "direct" : isGroupDm ? "group" : "channel",
+      id: isDirectMessage ? user.id : rawChannelId || "unknown",
+    },
+    parentPeer: threadParentId ? { kind: "channel", id: threadParentId } : undefined,
+  });
+  cfg = routing.cfg;
+  discordConfig = cfg.channels?.discord ?? discordConfig;
   const channelConfig = interaction.guild
     ? resolveDiscordChannelConfigWithFallback({
         guildInfo,
@@ -730,17 +745,7 @@ async function dispatchDiscordCommandInteraction(params: {
   const isGuild = Boolean(interaction.guild);
   const channelId = rawChannelId || "unknown";
   const interactionId = interaction.rawData.id;
-  const route = resolveAgentRoute({
-    cfg,
-    channel: "discord",
-    accountId,
-    guildId: interaction.guild?.id ?? undefined,
-    peer: {
-      kind: isDirectMessage ? "direct" : isGroupDm ? "group" : "channel",
-      id: isDirectMessage ? user.id : channelId,
-    },
-    parentPeer: threadParentId ? { kind: "channel", id: threadParentId } : undefined,
-  });
+  const route = routing.route;
   const conversationLabel = isDirectMessage ? (user.globalName ?? user.username) : channelId;
   const ownerAllowFrom = resolveDiscordOwnerAllowFrom({
     channelConfig,

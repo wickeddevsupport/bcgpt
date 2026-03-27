@@ -6,7 +6,13 @@ import { resolveOAuthPath } from "../../config/paths.js";
 import { loadJsonFile, saveJsonFile } from "../../infra/json-file.js";
 import { AUTH_STORE_LOCK_OPTIONS, AUTH_STORE_VERSION, log } from "./constants.js";
 import { syncExternalCliCredentials } from "./external-cli-sync.js";
-import { ensureAuthStoreFile, resolveAuthStorePath, resolveLegacyAuthStorePath } from "./paths.js";
+import {
+  ensureAuthStoreFile,
+  isWorkspaceScopedAgentDir,
+  resolveAuthStorePath,
+  resolveLegacyAuthStorePath,
+  resolveWorkspacePrimaryAgentDir,
+} from "./paths.js";
 
 type LegacyAuthStore = Record<string, AuthProfileCredential>;
 
@@ -268,16 +274,35 @@ function loadAuthProfileStoreForAgent(
     return asStore;
   }
 
-  // Fallback: inherit auth-profiles from main agent if subagent has none
+  const workspacePrimaryAgentDir = resolveWorkspacePrimaryAgentDir(agentDir);
+  // Workspace-scoped agents inherit from their own workspace assistant.
+  if (agentDir && workspacePrimaryAgentDir && workspacePrimaryAgentDir !== agentDir) {
+    const primaryAuthPath = resolveAuthStorePath(workspacePrimaryAgentDir);
+    const primaryRaw = loadJsonFile(primaryAuthPath);
+    const primaryStore = coerceAuthStore(primaryRaw);
+    if (primaryStore && Object.keys(primaryStore.profiles).length > 0) {
+      saveJsonFile(authPath, primaryStore);
+      log.info("inherited auth-profiles from workspace primary agent", {
+        agentDir,
+        sourceAgentDir: workspacePrimaryAgentDir,
+      });
+      return primaryStore;
+    }
+  }
+
+  // Legacy/global secondary agents may still inherit from the main agent if they
+  // are not workspace-scoped.
   if (agentDir) {
-    const mainAuthPath = resolveAuthStorePath(); // without agentDir = main
-    const mainRaw = loadJsonFile(mainAuthPath);
-    const mainStore = coerceAuthStore(mainRaw);
-    if (mainStore && Object.keys(mainStore.profiles).length > 0) {
-      // Clone main store to subagent directory for auth inheritance
-      saveJsonFile(authPath, mainStore);
-      log.info("inherited auth-profiles from main agent", { agentDir });
-      return mainStore;
+    if (!isWorkspaceScopedAgentDir(agentDir)) {
+      const mainAuthPath = resolveAuthStorePath(); // without agentDir = main
+      const mainRaw = loadJsonFile(mainAuthPath);
+      const mainStore = coerceAuthStore(mainRaw);
+      if (mainStore && Object.keys(mainStore.profiles).length > 0) {
+        // Clone main store to subagent directory for auth inheritance
+        saveJsonFile(authPath, mainStore);
+        log.info("inherited auth-profiles from main agent", { agentDir });
+        return mainStore;
+      }
     }
   }
 
@@ -357,6 +382,15 @@ export function ensureAuthProfileStore(
   const mainAuthPath = resolveAuthStorePath();
   if (!agentDir || authPath === mainAuthPath) {
     return store;
+  }
+
+  const workspacePrimaryAgentDir = resolveWorkspacePrimaryAgentDir(agentDir);
+  if (workspacePrimaryAgentDir) {
+    if (workspacePrimaryAgentDir === agentDir) {
+      return store;
+    }
+    const primaryStore = loadAuthProfileStoreForAgent(workspacePrimaryAgentDir, options);
+    return mergeAuthProfileStores(primaryStore, store);
   }
 
   const mainStore = loadAuthProfileStoreForAgent(undefined, options);

@@ -122,4 +122,78 @@ describe("ensureAuthProfileStore", () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("keeps workspace agents inside their workspace auth boundary", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-auth-workspace-"));
+    const previousAgentDir = process.env.OPENCLAW_AGENT_DIR;
+    const previousPiAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+      const mainDir = path.join(root, "agents", "main", "agent");
+      const workspaceAssistantDir = path.join(root, "workspaces", "ws-1", "agents", "assistant", "agent");
+      const workspaceAgentDir = path.join(root, "workspaces", "ws-1", "agents", "growth-hacker", "agent");
+      fs.mkdirSync(mainDir, { recursive: true });
+      fs.mkdirSync(workspaceAssistantDir, { recursive: true });
+      fs.mkdirSync(workspaceAgentDir, { recursive: true });
+
+      process.env.OPENCLAW_AGENT_DIR = mainDir;
+      process.env.PI_CODING_AGENT_DIR = mainDir;
+
+      fs.writeFileSync(
+        path.join(mainDir, "auth-profiles.json"),
+        `${JSON.stringify(
+          {
+            version: AUTH_STORE_VERSION,
+            profiles: {
+              "openai:default": {
+                type: "api_key",
+                provider: "openai",
+                key: "global-main-key",
+              },
+            },
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+      fs.writeFileSync(
+        path.join(workspaceAssistantDir, "auth-profiles.json"),
+        `${JSON.stringify(
+          {
+            version: AUTH_STORE_VERSION,
+            profiles: {
+              "anthropic:default": {
+                type: "api_key",
+                provider: "anthropic",
+                key: "workspace-key",
+              },
+            },
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+
+      const store = ensureAuthProfileStore(workspaceAgentDir);
+      expect(store.profiles["anthropic:default"]).toMatchObject({
+        type: "api_key",
+        provider: "anthropic",
+        key: "workspace-key",
+      });
+      expect(store.profiles["openai:default"]).toBeUndefined();
+    } finally {
+      if (previousAgentDir === undefined) {
+        delete process.env.OPENCLAW_AGENT_DIR;
+      } else {
+        process.env.OPENCLAW_AGENT_DIR = previousAgentDir;
+      }
+      if (previousPiAgentDir === undefined) {
+        delete process.env.PI_CODING_AGENT_DIR;
+      } else {
+        process.env.PI_CODING_AGENT_DIR = previousPiAgentDir;
+      }
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

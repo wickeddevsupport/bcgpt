@@ -11,7 +11,12 @@ import { refreshQwenPortalCredentials } from "../../providers/qwen-portal-oauth.
 import { refreshChutesTokens } from "../chutes-oauth.js";
 import { AUTH_STORE_LOCK_OPTIONS, log } from "./constants.js";
 import { formatAuthDoctorHint } from "./doctor.js";
-import { ensureAuthStoreFile, resolveAuthStorePath } from "./paths.js";
+import {
+  ensureAuthStoreFile,
+  isWorkspaceScopedAgentDir,
+  resolveAuthStorePath,
+  resolveWorkspacePrimaryAgentDir,
+} from "./paths.js";
 import { suggestOAuthProfileIdForLegacyDefault } from "./repair.js";
 import { ensureAuthProfileStore, saveAuthProfileStore } from "./store.js";
 
@@ -243,28 +248,61 @@ export async function resolveApiKeyForProfile(params: {
       }
     }
 
-    // Fallback: if this is a secondary agent, try using the main agent's credentials
-    if (params.agentDir) {
+    const workspacePrimaryAgentDir = resolveWorkspacePrimaryAgentDir(params.agentDir);
+    if (
+      params.agentDir &&
+      workspacePrimaryAgentDir &&
+      workspacePrimaryAgentDir !== params.agentDir
+    ) {
       try {
-        const mainStore = ensureAuthProfileStore(undefined); // main agent (no agentDir)
-        const mainCred = mainStore.profiles[profileId];
-        if (mainCred?.type === "oauth" && Date.now() < mainCred.expires) {
-          // Main agent has fresh credentials - copy them to this agent and use them
-          refreshedStore.profiles[profileId] = { ...mainCred };
+        const workspaceStore = ensureAuthProfileStore(workspacePrimaryAgentDir);
+        const workspaceCred = workspaceStore.profiles[profileId];
+        if (workspaceCred?.type === "oauth" && Date.now() < workspaceCred.expires) {
+          refreshedStore.profiles[profileId] = { ...workspaceCred };
           saveAuthProfileStore(refreshedStore, params.agentDir);
-          log.info("inherited fresh OAuth credentials from main agent", {
+          log.info("inherited fresh OAuth credentials from workspace primary agent", {
             profileId,
             agentDir: params.agentDir,
-            expires: new Date(mainCred.expires).toISOString(),
+            sourceAgentDir: workspacePrimaryAgentDir,
+            expires: new Date(workspaceCred.expires).toISOString(),
           });
           return {
-            apiKey: buildOAuthApiKey(mainCred.provider, mainCred),
-            provider: mainCred.provider,
-            email: mainCred.email,
+            apiKey: buildOAuthApiKey(workspaceCred.provider, workspaceCred),
+            provider: workspaceCred.provider,
+            email: workspaceCred.email,
           };
         }
       } catch {
-        // keep original error if main agent fallback also fails
+        // keep original error if workspace fallback also fails
+      }
+    }
+
+    // Fallback: if this is a legacy secondary agent, try using the global main
+    // agent's credentials. Workspace-scoped agents must stay within their
+    // workspace boundary.
+    if (params.agentDir) {
+      if (!isWorkspaceScopedAgentDir(params.agentDir)) {
+        try {
+          const mainStore = ensureAuthProfileStore(undefined); // main agent (no agentDir)
+          const mainCred = mainStore.profiles[profileId];
+          if (mainCred?.type === "oauth" && Date.now() < mainCred.expires) {
+            // Main agent has fresh credentials - copy them to this agent and use them
+            refreshedStore.profiles[profileId] = { ...mainCred };
+            saveAuthProfileStore(refreshedStore, params.agentDir);
+            log.info("inherited fresh OAuth credentials from main agent", {
+              profileId,
+              agentDir: params.agentDir,
+              expires: new Date(mainCred.expires).toISOString(),
+            });
+            return {
+              apiKey: buildOAuthApiKey(mainCred.provider, mainCred),
+              provider: mainCred.provider,
+              email: mainCred.email,
+            };
+          }
+        } catch {
+          // keep original error if main agent fallback also fails
+        }
       }
     }
 

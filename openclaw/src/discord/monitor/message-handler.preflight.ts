@@ -17,7 +17,6 @@ import { formatAllowlistMatchMeta } from "../../channels/allowlist-match.js";
 import { resolveControlCommandGate } from "../../channels/command-gating.js";
 import { logInboundDrop } from "../../channels/logging.js";
 import { resolveMentionGatingWithBypass } from "../../channels/mention-gating.js";
-import { loadConfig } from "../../config/config.js";
 import { logVerbose, shouldLogVerbose } from "../../globals.js";
 import { recordChannelActivity } from "../../infra/channel-activity.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
@@ -27,7 +26,6 @@ import {
   readChannelAllowFromStore,
   upsertChannelPairingRequest,
 } from "../../pairing/pairing-store.js";
-import { resolveAgentRoute } from "../../routing/resolve-route.js";
 import { fetchPluralKitMessageInfo } from "../pluralkit.js";
 import { sendMessageDiscord } from "../send.js";
 import {
@@ -51,6 +49,7 @@ import { resolveDiscordChannelInfo, resolveDiscordMessageText } from "./message-
 import { resolveDiscordSenderIdentity, resolveDiscordWebhookId } from "./sender-identity.js";
 import { resolveDiscordSystemEvent } from "./system-events.js";
 import { resolveDiscordThreadChannel, resolveDiscordThreadParentInfo } from "./threading.js";
+import { resolveDiscordWorkspaceRoute } from "./workspace-routing.js";
 
 export type {
   DiscordMessagePreflightContext,
@@ -114,7 +113,61 @@ export async function preflightDiscordMessage(
     return null;
   }
 
-  const dmPolicy = params.discordConfig?.dm?.policy ?? "pairing";
+  const botId = params.botUserId;
+  const baseText = resolveDiscordMessageText(message, {
+    includeForwarded: false,
+  });
+  const messageText = resolveDiscordMessageText(message, {
+    includeForwarded: true,
+  });
+  recordChannelActivity({
+    channel: "discord",
+    accountId: params.accountId,
+    direction: "inbound",
+  });
+
+  // Resolve thread parent early for binding inheritance
+  const channelName =
+    channelInfo?.name ??
+    ((isGuildMessage || isGroupDm) && message.channel && "name" in message.channel
+      ? message.channel.name
+      : undefined);
+  const earlyThreadChannel = resolveDiscordThreadChannel({
+    isGuildMessage,
+    message,
+    channelInfo,
+  });
+  let earlyThreadParentId: string | undefined;
+  let earlyThreadParentName: string | undefined;
+  let earlyThreadParentType: ChannelType | undefined;
+  if (earlyThreadChannel) {
+    const parentInfo = await resolveDiscordThreadParentInfo({
+      client: params.client,
+      threadChannel: earlyThreadChannel,
+      channelInfo,
+    });
+    earlyThreadParentId = parentInfo.id;
+    earlyThreadParentName = parentInfo.name;
+    earlyThreadParentType = parentInfo.type;
+  }
+
+  const routing = await resolveDiscordWorkspaceRoute({
+    cfg: params.cfg,
+    channel: "discord",
+    accountId: params.accountId,
+    guildId: params.data.guild_id ?? undefined,
+    peer: {
+      kind: isDirectMessage ? "direct" : isGroupDm ? "group" : "channel",
+      id: isDirectMessage ? author.id : message.channelId,
+    },
+    // Pass parent peer for thread binding inheritance
+    parentPeer: earlyThreadParentId ? { kind: "channel", id: earlyThreadParentId } : undefined,
+  });
+  const cfg = routing.cfg;
+  const discordConfig = cfg.channels?.discord ?? params.discordConfig;
+  const route = routing.route;
+
+  const dmPolicy = discordConfig?.dm?.policy ?? "pairing";
   let commandAuthorized = true;
   if (isDirectMessage) {
     if (dmPolicy === "disabled") {
@@ -122,8 +175,11 @@ export async function preflightDiscordMessage(
       return null;
     }
     if (dmPolicy !== "open") {
+      const configuredAllowFrom = Array.isArray(discordConfig?.dm?.allowFrom)
+        ? (discordConfig.dm.allowFrom as Array<string | number>)
+        : (params.allowFrom ?? []);
       const storeAllowFrom = await readChannelAllowFromStore("discord").catch(() => []);
-      const effectiveAllowFrom = [...(params.allowFrom ?? []), ...storeAllowFrom];
+      const effectiveAllowFrom = [...configuredAllowFrom, ...storeAllowFrom];
       const allowList = normalizeDiscordAllowList(effectiveAllowFrom, ["discord:", "user:", "pk:"]);
       const allowMatch = allowList
         ? resolveDiscordAllowListMatch({
@@ -181,58 +237,7 @@ export async function preflightDiscordMessage(
     }
   }
 
-  const botId = params.botUserId;
-  const baseText = resolveDiscordMessageText(message, {
-    includeForwarded: false,
-  });
-  const messageText = resolveDiscordMessageText(message, {
-    includeForwarded: true,
-  });
-  recordChannelActivity({
-    channel: "discord",
-    accountId: params.accountId,
-    direction: "inbound",
-  });
-
-  // Resolve thread parent early for binding inheritance
-  const channelName =
-    channelInfo?.name ??
-    ((isGuildMessage || isGroupDm) && message.channel && "name" in message.channel
-      ? message.channel.name
-      : undefined);
-  const earlyThreadChannel = resolveDiscordThreadChannel({
-    isGuildMessage,
-    message,
-    channelInfo,
-  });
-  let earlyThreadParentId: string | undefined;
-  let earlyThreadParentName: string | undefined;
-  let earlyThreadParentType: ChannelType | undefined;
-  if (earlyThreadChannel) {
-    const parentInfo = await resolveDiscordThreadParentInfo({
-      client: params.client,
-      threadChannel: earlyThreadChannel,
-      channelInfo,
-    });
-    earlyThreadParentId = parentInfo.id;
-    earlyThreadParentName = parentInfo.name;
-    earlyThreadParentType = parentInfo.type;
-  }
-
-  // Fresh config for bindings lookup; other routing inputs are payload-derived.
-  const route = resolveAgentRoute({
-    cfg: loadConfig(),
-    channel: "discord",
-    accountId: params.accountId,
-    guildId: params.data.guild_id ?? undefined,
-    peer: {
-      kind: isDirectMessage ? "direct" : isGroupDm ? "group" : "channel",
-      id: isDirectMessage ? author.id : message.channelId,
-    },
-    // Pass parent peer for thread binding inheritance
-    parentPeer: earlyThreadParentId ? { kind: "channel", id: earlyThreadParentId } : undefined,
-  });
-  const mentionRegexes = buildMentionRegexes(params.cfg, route.agentId);
+  const mentionRegexes = buildMentionRegexes(cfg, route.agentId);
   const explicitlyMentioned = Boolean(
     botId && message.mentionedUsers?.some((user: User) => user.id === botId),
   );
@@ -523,8 +528,8 @@ export async function preflightDiscordMessage(
   }
 
   return {
-    cfg: params.cfg,
-    discordConfig: params.discordConfig,
+    cfg,
+    discordConfig,
     accountId: params.accountId,
     token: params.token,
     runtime: params.runtime,
