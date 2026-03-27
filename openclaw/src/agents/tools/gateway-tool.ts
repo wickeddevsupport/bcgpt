@@ -1,6 +1,12 @@
 import { Type } from "@sinclair/typebox";
 import type { OpenClawConfig } from "../../config/config.js";
+import { parseConfigJson5 } from "../../config/config.js";
 import { loadConfig, resolveConfigSnapshotHash } from "../../config/io.js";
+import { applyMergePatch } from "../../config/merge-patch.js";
+import {
+  redactConfigObject,
+  restoreRedactedValues,
+} from "../../config/redact-snapshot.js";
 import { loadSessionStore, resolveStorePath } from "../../config/sessions.js";
 import {
   formatDoctorNonInteractiveHint,
@@ -8,6 +14,8 @@ import {
   writeRestartSentinel,
 } from "../../infra/restart-sentinel.js";
 import { scheduleGatewaySigusr1Restart } from "../../infra/restart.js";
+import { readWorkspaceConfig, workspaceConfigPath, writeWorkspaceConfig } from "../../gateway/workspace-config.js";
+import { resolveAgentConfig, resolveSessionAgentId } from "../agent-scope.js";
 import { stringEnum } from "../schema/typebox.js";
 import { type AnyAgentTool, jsonResult, readStringParam } from "./common.js";
 import { callGatewayTool } from "./gateway.js";
@@ -25,6 +33,111 @@ function resolveBaseHashFromSnapshot(snapshot: unknown): string | undefined {
     raw: typeof rawValue === "string" ? rawValue : undefined,
   });
   return hash ?? undefined;
+}
+
+function resolveWorkspaceIdFromToolOptions(opts?: {
+  agentSessionKey?: string;
+  config?: OpenClawConfig;
+}): string | undefined {
+  const cfg = opts?.config;
+  if (!cfg) {
+    return undefined;
+  }
+  const agentId = opts?.agentSessionKey
+    ? resolveSessionAgentId({ sessionKey: opts.agentSessionKey, config: cfg })
+    : undefined;
+  if (!agentId) {
+    return undefined;
+  }
+  const workspaceId = resolveAgentConfig(cfg, agentId)?.workspaceId?.trim();
+  return workspaceId || undefined;
+}
+
+async function readWorkspaceScopedConfigSnapshot(workspaceId: string) {
+  const existing = await readWorkspaceConfig(workspaceId);
+  const config =
+    existing && typeof existing === "object" && !Array.isArray(existing)
+      ? (existing as Record<string, unknown>)
+      : {};
+  const raw = JSON.stringify(config, null, 2);
+  return {
+    path: workspaceConfigPath(workspaceId),
+    config,
+    raw,
+    hash: resolveConfigSnapshotHash({ raw }) ?? undefined,
+  };
+}
+
+async function buildWorkspaceScopedConfigResponse(workspaceId: string) {
+  const snapshot = await readWorkspaceScopedConfigSnapshot(workspaceId);
+  const redactedConfig = redactConfigObject(snapshot.config);
+  const redactedRaw =
+    redactedConfig && typeof redactedConfig === "object"
+      ? JSON.stringify(redactedConfig, null, 2)
+      : snapshot.raw;
+  return {
+    path: snapshot.path,
+    config: redactedConfig,
+    raw: redactedRaw,
+    valid: true,
+    issues: [],
+    hash: snapshot.hash,
+  };
+}
+
+function requireMatchingBaseHash(params: { provided?: string; actual?: string }) {
+  const provided = params.provided?.trim();
+  const actual = params.actual?.trim();
+  if (!provided || !actual) {
+    return;
+  }
+  if (provided !== actual) {
+    throw new Error("config changed on disk; reload before applying edits");
+  }
+}
+
+async function applyWorkspaceConfigReplace(workspaceId: string, raw: string, baseHash?: string) {
+  const parsedRes = parseConfigJson5(raw);
+  if (!parsedRes.ok) {
+    throw new Error(parsedRes.error);
+  }
+  if (!parsedRes.parsed || typeof parsedRes.parsed !== "object" || Array.isArray(parsedRes.parsed)) {
+    throw new Error("config.apply raw must be an object");
+  }
+  const snapshot = await readWorkspaceScopedConfigSnapshot(workspaceId);
+  requireMatchingBaseHash({ provided: baseHash, actual: snapshot.hash });
+  const restored = restoreRedactedValues(
+    parsedRes.parsed,
+    snapshot.config,
+  ) as Record<string, unknown>;
+  await writeWorkspaceConfig(workspaceId, restored);
+  return {
+    ok: true,
+    ...(await buildWorkspaceScopedConfigResponse(workspaceId)),
+    restart: { scheduled: false, reason: "workspace-config-no-gateway-restart" },
+  };
+}
+
+async function applyWorkspaceConfigPatch(workspaceId: string, raw: string, baseHash?: string) {
+  const parsedRes = parseConfigJson5(raw);
+  if (!parsedRes.ok) {
+    throw new Error(parsedRes.error);
+  }
+  if (!parsedRes.parsed || typeof parsedRes.parsed !== "object" || Array.isArray(parsedRes.parsed)) {
+    throw new Error("config.patch raw must be an object");
+  }
+  const snapshot = await readWorkspaceScopedConfigSnapshot(workspaceId);
+  requireMatchingBaseHash({ provided: baseHash, actual: snapshot.hash });
+  const merged = applyMergePatch(snapshot.config, parsedRes.parsed);
+  const restored = restoreRedactedValues(merged, snapshot.config);
+  if (!restored || typeof restored !== "object" || Array.isArray(restored)) {
+    throw new Error("config.patch raw must be an object");
+  }
+  await writeWorkspaceConfig(workspaceId, restored as Record<string, unknown>);
+  return {
+    ok: true,
+    ...(await buildWorkspaceScopedConfigResponse(workspaceId)),
+  };
 }
 
 const GATEWAY_ACTIONS = [
@@ -75,7 +188,8 @@ export function createGatewayTool(opts?: {
       const params = args as Record<string, unknown>;
       const action = readStringParam(params, "action", { required: true });
       if (action === "restart") {
-        if (opts?.config?.commands?.restart !== true) {
+        const workspaceId = resolveWorkspaceIdFromToolOptions(opts);
+        if (opts?.config?.commands?.restart !== true && !workspaceId) {
           throw new Error("Gateway restart is disabled. Set commands.restart=true to enable.");
         }
         const sessionKey =
@@ -163,8 +277,13 @@ export function createGatewayTool(opts?: {
           ? Math.max(1, Math.floor(params.timeoutMs))
           : undefined;
       const gatewayOpts = { gatewayUrl, gatewayToken, timeoutMs };
+      const workspaceId = resolveWorkspaceIdFromToolOptions(opts);
 
       if (action === "config.get") {
+        if (workspaceId) {
+          const result = await buildWorkspaceScopedConfigResponse(workspaceId);
+          return jsonResult({ ok: true, result });
+        }
         const result = await callGatewayTool("config.get", gatewayOpts, {});
         return jsonResult({ ok: true, result });
       }
@@ -175,6 +294,10 @@ export function createGatewayTool(opts?: {
       if (action === "config.apply") {
         const raw = readStringParam(params, "raw", { required: true });
         let baseHash = readStringParam(params, "baseHash");
+        if (workspaceId) {
+          const result = await applyWorkspaceConfigReplace(workspaceId, raw, baseHash);
+          return jsonResult({ ok: true, result });
+        }
         if (!baseHash) {
           const snapshot = await callGatewayTool("config.get", gatewayOpts, {});
           baseHash = resolveBaseHashFromSnapshot(snapshot);
@@ -201,6 +324,10 @@ export function createGatewayTool(opts?: {
       if (action === "config.patch") {
         const raw = readStringParam(params, "raw", { required: true });
         let baseHash = readStringParam(params, "baseHash");
+        if (workspaceId) {
+          const result = await applyWorkspaceConfigPatch(workspaceId, raw, baseHash);
+          return jsonResult({ ok: true, result });
+        }
         if (!baseHash) {
           const snapshot = await callGatewayTool("config.get", gatewayOpts, {});
           baseHash = resolveBaseHashFromSnapshot(snapshot);

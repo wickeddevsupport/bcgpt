@@ -101,6 +101,147 @@ describe("gateway tool", () => {
     );
   });
 
+  it("applies workspace config locally for workspace-scoped agents", async () => {
+    const { callGatewayTool } = await import("./tools/gateway.js");
+    vi.mocked(callGatewayTool).mockClear();
+
+    const previousStateDir = process.env.OPENCLAW_STATE_DIR;
+    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-ws-config-"));
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+
+    try {
+      const tool = createOpenClawTools({
+        agentSessionKey: "agent:assistant:webchat:session:abc",
+        config: {
+          agents: {
+            list: [{ id: "assistant", workspaceId: "ws-rohit", default: true }],
+          },
+        },
+      }).find((candidate) => candidate.name === "gateway");
+      expect(tool).toBeDefined();
+      if (!tool) {
+        throw new Error("missing gateway tool");
+      }
+
+      const applyResult = await tool.execute("call-ws-apply", {
+        action: "config.apply",
+        raw: JSON.stringify({
+          agents: {
+            defaults: {
+              model: {
+                primary: "github-copilot/gpt-4.1",
+              },
+            },
+          },
+          models: {
+            providers: {
+              local: {
+                apiKey: "secret-local-key",
+              },
+            },
+          },
+        }),
+      });
+
+      expect(applyResult.details).toMatchObject({
+        ok: true,
+        result: {
+          ok: true,
+          restart: {
+            scheduled: false,
+            reason: "workspace-config-no-gateway-restart",
+          },
+        },
+      });
+      expect(vi.mocked(callGatewayTool)).not.toHaveBeenCalled();
+
+      const getResult = await tool.execute("call-ws-get", {
+        action: "config.get",
+      });
+      expect(getResult.details).toMatchObject({
+        ok: true,
+        result: {
+          path: expect.stringContaining(path.join("workspaces", "ws-rohit", "config.json")),
+          config: {
+            models: {
+              providers: {
+                local: {
+                  apiKey: "__OPENCLAW_REDACTED__",
+                },
+              },
+            },
+          },
+        },
+      });
+
+      const savedPath = (applyResult.details as { result?: { path?: string } }).result?.path;
+      expect(typeof savedPath).toBe("string");
+      const savedRaw = await fs.readFile(
+        String(savedPath),
+        "utf-8",
+      );
+      const saved = JSON.parse(savedRaw) as {
+        models?: { providers?: { local?: { apiKey?: string } } };
+      };
+      expect(saved.models?.providers?.local?.apiKey).toBe("secret-local-key");
+    } finally {
+      if (previousStateDir === undefined) {
+        delete process.env.OPENCLAW_STATE_DIR;
+      } else {
+        process.env.OPENCLAW_STATE_DIR = previousStateDir;
+      }
+    }
+  });
+
+  it("allows workspace-scoped agents to request gateway restart", async () => {
+    vi.useFakeTimers();
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => true);
+    const previousStateDir = process.env.OPENCLAW_STATE_DIR;
+    const previousProfile = process.env.OPENCLAW_PROFILE;
+    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-test-"));
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+    process.env.OPENCLAW_PROFILE = "isolated";
+
+    try {
+      const tool = createOpenClawTools({
+        agentSessionKey: "agent:assistant:webchat:session:abc",
+        config: {
+          commands: { restart: false },
+          agents: {
+            list: [{ id: "assistant", workspaceId: "ws-rohit", default: true }],
+          },
+        },
+      }).find((candidate) => candidate.name === "gateway");
+      expect(tool).toBeDefined();
+      if (!tool) {
+        throw new Error("missing gateway tool");
+      }
+
+      const result = await tool.execute("call-ws-restart", {
+        action: "restart",
+        delayMs: 0,
+      });
+      expect(result.details).toMatchObject({
+        ok: true,
+        pid: process.pid,
+        signal: "SIGUSR1",
+      });
+    } finally {
+      kill.mockRestore();
+      vi.useRealTimers();
+      if (previousStateDir === undefined) {
+        delete process.env.OPENCLAW_STATE_DIR;
+      } else {
+        process.env.OPENCLAW_STATE_DIR = previousStateDir;
+      }
+      if (previousProfile === undefined) {
+        delete process.env.OPENCLAW_PROFILE;
+      } else {
+        process.env.OPENCLAW_PROFILE = previousProfile;
+      }
+    }
+  });
+
   it("passes config.patch through gateway call", async () => {
     const { callGatewayTool } = await import("./tools/gateway.js");
     const tool = createOpenClawTools({
