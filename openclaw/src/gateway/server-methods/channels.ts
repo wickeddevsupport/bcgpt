@@ -1,6 +1,6 @@
 import type { ChannelAccountSnapshot, ChannelPlugin } from "../../channels/plugins/types.js";
 import type { OpenClawConfig } from "../../config/config.js";
-import type { GatewayRequestContext, GatewayRequestHandlers } from "./types.js";
+import type { GatewayClient, GatewayRequestContext, GatewayRequestHandlers } from "./types.js";
 import { buildChannelUiCatalog } from "../../channels/plugins/catalog.js";
 import { resolveChannelDefaultAccountId } from "../../channels/plugins/helpers.js";
 import {
@@ -22,6 +22,7 @@ import {
   validateChannelsStatusParams,
 } from "../protocol/index.js";
 import { formatForLog } from "../ws-log.js";
+import { isSuperAdmin } from "../workspace-context.js";
 
 type ChannelLogoutPayload = {
   channel: ChannelId;
@@ -29,6 +30,30 @@ type ChannelLogoutPayload = {
   cleared: boolean;
   [key: string]: unknown;
 };
+
+async function loadChannelsConfigForClient(
+  client?: GatewayClient,
+): Promise<OpenClawConfig> {
+  let cfg = loadConfig();
+  if (!client || isSuperAdmin(client)) {
+    return cfg;
+  }
+  const workspaceId =
+    typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  if (!workspaceId) {
+    return cfg;
+  }
+  try {
+    const { loadEffectiveWorkspaceConfig } = await import("../workspace-config.js");
+    const effectiveCfg = await loadEffectiveWorkspaceConfig(workspaceId);
+    if (effectiveCfg && typeof effectiveCfg === "object") {
+      cfg = effectiveCfg as OpenClawConfig;
+    }
+  } catch {
+    // Fall back to the global config if the workspace overlay cannot be loaded.
+  }
+  return cfg;
+}
 
 export async function logoutChannelAccount(params: {
   channelId: ChannelId;
@@ -67,7 +92,7 @@ export async function logoutChannelAccount(params: {
 }
 
 export const channelsHandlers: GatewayRequestHandlers = {
-  "channels.status": async ({ params, respond, context }) => {
+  "channels.status": async ({ params, respond, context, client }) => {
     if (!validateChannelsStatusParams(params)) {
       respond(
         false,
@@ -82,7 +107,7 @@ export const channelsHandlers: GatewayRequestHandlers = {
     const probe = (params as { probe?: boolean }).probe === true;
     const timeoutMsRaw = (params as { timeoutMs?: unknown }).timeoutMs;
     const timeoutMs = typeof timeoutMsRaw === "number" ? Math.max(1000, timeoutMsRaw) : 10_000;
-    const cfg = loadConfig();
+    const cfg = await loadChannelsConfigForClient(client);
     const runtime = context.getRuntimeSnapshot();
     const plugins = listChannelPlugins();
     const pluginMap = new Map<ChannelId, ChannelPlugin>(
@@ -234,7 +259,7 @@ export const channelsHandlers: GatewayRequestHandlers = {
 
     respond(true, payload, undefined);
   },
-  "channels.logout": async ({ params, respond, context }) => {
+  "channels.logout": async ({ params, respond, context, client }) => {
     if (!validateChannelsLogoutParams(params)) {
       respond(
         false,
@@ -267,20 +292,26 @@ export const channelsHandlers: GatewayRequestHandlers = {
     }
     const accountIdRaw = (params as { accountId?: unknown }).accountId;
     const accountId = typeof accountIdRaw === "string" ? accountIdRaw.trim() : undefined;
-    const snapshot = await readConfigFileSnapshot();
-    if (!snapshot.valid) {
-      respond(
-        false,
-        undefined,
-        errorShape(ErrorCodes.INVALID_REQUEST, "config invalid; fix it before logging out"),
-      );
-      return;
-    }
     try {
+      let cfg: OpenClawConfig;
+      if (!client || isSuperAdmin(client)) {
+        const snapshot = await readConfigFileSnapshot();
+        if (!snapshot.valid) {
+          respond(
+            false,
+            undefined,
+            errorShape(ErrorCodes.INVALID_REQUEST, "config invalid; fix it before logging out"),
+          );
+          return;
+        }
+        cfg = (snapshot.config ?? {}) as OpenClawConfig;
+      } else {
+        cfg = await loadChannelsConfigForClient(client);
+      }
       const payload = await logoutChannelAccount({
         channelId,
         accountId,
-        cfg: snapshot.config ?? {},
+        cfg,
         context,
         plugin,
       });

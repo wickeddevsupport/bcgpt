@@ -74,7 +74,7 @@ export async function agentCommand(
     throw new Error("Pass --to <E.164>, --session-id, or --agent to choose a session");
   }
 
-  const cfg = loadConfig();
+  const cfg = opts.cfg ?? loadConfig();
   const agentIdOverrideRaw = opts.agentId?.trim();
   const agentIdOverride = agentIdOverrideRaw ? normalizeAgentId(agentIdOverrideRaw) : undefined;
   if (agentIdOverride) {

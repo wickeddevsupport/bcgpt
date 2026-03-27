@@ -90,6 +90,31 @@ describe("agentCommand", () => {
     });
   });
 
+  it("uses an explicit config override for workspace-scoped runs", async () => {
+    await withTempHome(async (home) => {
+      const globalStore = path.join(home, "global-sessions.json");
+      const workspaceStore = path.join(home, "workspace-sessions.json");
+      mockConfig(home, globalStore, undefined, undefined, [{ id: "main", default: true }]);
+
+      const workspaceCfg: OpenClawConfig = {
+        agents: {
+          defaults: {
+            workspace: path.join(home, "workspace"),
+          },
+          list: [{ id: "ops", default: true }],
+        },
+        session: { store: workspaceStore, mainKey: "main" },
+      };
+
+      await agentCommand({ message: "hi", agentId: "ops", cfg: workspaceCfg }, runtime);
+
+      expect(fs.existsSync(workspaceStore)).toBe(true);
+      expect(fs.existsSync(globalStore)).toBe(false);
+      const callArgs = vi.mocked(runEmbeddedPiAgent).mock.calls.at(-1)?.[0];
+      expect(callArgs?.agentId).toBe("ops");
+    });
+  });
+
   it("persists thinking and verbose overrides", async () => {
     await withTempHome(async (home) => {
       const store = path.join(home, "sessions.json");

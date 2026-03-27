@@ -1,17 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GatewayRequestContext } from "./types.js";
 import { agentHandlers } from "./agent.js";
 
 const mocks = vi.hoisted(() => ({
-  loadSessionEntry: vi.fn(),
+  loadSessionEntryForConfig: vi.fn(),
   updateSessionStore: vi.fn(),
   agentCommand: vi.fn(),
   registerAgentRunContext: vi.fn(),
   loadConfigReturn: {} as Record<string, unknown>,
+  loadEffectiveWorkspaceConfig: vi.fn(),
+  listAgentIds: vi.fn(() => ["main"]),
 }));
 
 vi.mock("../session-utils.js", () => ({
-  loadSessionEntry: mocks.loadSessionEntry,
+  loadSessionEntryForConfig: mocks.loadSessionEntryForConfig,
 }));
 
 vi.mock("../../config/sessions.js", async () => {
@@ -21,9 +23,13 @@ vi.mock("../../config/sessions.js", async () => {
   return {
     ...actual,
     updateSessionStore: mocks.updateSessionStore,
-    resolveAgentIdFromSessionKey: () => "main",
-    resolveExplicitAgentSessionKey: () => undefined,
-    resolveAgentMainSessionKey: () => "agent:main:main",
+    resolveAgentIdFromSessionKey: (key?: string) => {
+      const trimmed = typeof key === "string" ? key.trim() : "";
+      return trimmed.split(":")[1] || "main";
+    },
+    resolveExplicitAgentSessionKey: ({ agentId }: { agentId?: string }) =>
+      agentId ? `agent:${agentId}:main` : undefined,
+    resolveAgentMainSessionKey: ({ agentId }: { agentId: string }) => `agent:${agentId}:main`,
   };
 });
 
@@ -35,9 +41,15 @@ vi.mock("../../config/config.js", () => ({
   loadConfig: () => mocks.loadConfigReturn,
 }));
 
-vi.mock("../../agents/agent-scope.js", () => ({
-  listAgentIds: () => ["main"],
-}));
+vi.mock("../../agents/agent-scope.js", async () => {
+  const actual = await vi.importActual<typeof import("../../agents/agent-scope.js")>(
+    "../../agents/agent-scope.js",
+  );
+  return {
+    ...actual,
+    listAgentIds: mocks.listAgentIds,
+  };
+});
 
 vi.mock("../../infra/agent-events.js", () => ({
   registerAgentRunContext: mocks.registerAgentRunContext,
@@ -58,6 +70,10 @@ vi.mock("../../utils/delivery-context.js", async () => {
   };
 });
 
+vi.mock("../workspace-config.js", () => ({
+  loadEffectiveWorkspaceConfig: mocks.loadEffectiveWorkspaceConfig,
+}));
+
 const makeContext = (): GatewayRequestContext =>
   ({
     dedupe: new Map(),
@@ -65,12 +81,23 @@ const makeContext = (): GatewayRequestContext =>
     logGateway: { info: vi.fn(), error: vi.fn() },
   }) as unknown as GatewayRequestContext;
 
+beforeEach(() => {
+  mocks.loadSessionEntryForConfig.mockReset();
+  mocks.updateSessionStore.mockReset();
+  mocks.agentCommand.mockReset();
+  mocks.registerAgentRunContext.mockReset();
+  mocks.loadEffectiveWorkspaceConfig.mockReset();
+  mocks.loadConfigReturn = {};
+  mocks.listAgentIds.mockReset();
+  mocks.listAgentIds.mockReturnValue(["main"]);
+});
+
 describe("gateway agent handler", () => {
   it("preserves cliSessionIds from existing session entry", async () => {
     const existingCliSessionIds = { "claude-cli": "abc-123-def" };
     const existingClaudeCliSessionId = "abc-123-def";
 
-    mocks.loadSessionEntry.mockReturnValue({
+    mocks.loadSessionEntryForConfig.mockReturnValue({
       cfg: {},
       storePath: "/tmp/sessions.json",
       entry: {
@@ -128,7 +155,7 @@ describe("gateway agent handler", () => {
       },
     };
 
-    mocks.loadSessionEntry.mockReturnValue({
+    mocks.loadSessionEntryForConfig.mockReturnValue({
       cfg: mocks.loadConfigReturn,
       storePath: "/tmp/sessions.json",
       entry: {
@@ -169,7 +196,7 @@ describe("gateway agent handler", () => {
   });
 
   it("handles missing cliSessionIds gracefully", async () => {
-    mocks.loadSessionEntry.mockReturnValue({
+    mocks.loadSessionEntryForConfig.mockReturnValue({
       cfg: {},
       storePath: "/tmp/sessions.json",
       entry: {
@@ -212,5 +239,100 @@ describe("gateway agent handler", () => {
     // Should be undefined, not cause an error
     expect(capturedEntry?.cliSessionIds).toBeUndefined();
     expect(capturedEntry?.claudeCliSessionId).toBeUndefined();
+  });
+
+  it("uses workspace-effective config for workspace agent runs", async () => {
+    const workspaceCfg = {
+      agents: {
+        list: [{ id: "ops", default: true, workspaceId: "ws-1" }],
+      },
+      session: {
+        mainKey: "main",
+      },
+    };
+    mocks.loadConfigReturn = {
+      agents: {
+        list: [{ id: "main", default: true }],
+      },
+      session: {
+        mainKey: "main",
+      },
+    };
+    mocks.listAgentIds.mockImplementation((cfg?: { agents?: { list?: Array<{ id?: string }> } }) =>
+      (cfg?.agents?.list ?? []).map((entry) => entry.id ?? "").filter(Boolean),
+    );
+    mocks.loadEffectiveWorkspaceConfig.mockResolvedValue(workspaceCfg);
+    mocks.loadSessionEntryForConfig.mockReturnValue({
+      cfg: workspaceCfg,
+      storePath: "/tmp/ws-sessions.json",
+      entry: {
+        sessionId: "workspace-session-id",
+        updatedAt: Date.now(),
+      },
+      canonicalKey: "agent:ops:main",
+    });
+    mocks.updateSessionStore.mockResolvedValue(undefined);
+    mocks.agentCommand.mockResolvedValue({
+      payloads: [{ text: "ok" }],
+      meta: { durationMs: 100 },
+    });
+
+    const respond = vi.fn();
+    await agentHandlers.agent({
+      params: {
+        message: "hello from workspace",
+        agentId: "ops",
+        sessionKey: "agent:ops:main",
+        idempotencyKey: "workspace-agent-run",
+      },
+      respond,
+      context: makeContext(),
+      req: { type: "req", id: "ws-1", method: "agent" },
+      client: { pmosRole: "workspace_admin", pmosWorkspaceId: "ws-1" } as any,
+      isWebchatConnect: () => false,
+    });
+
+    await vi.waitFor(() => expect(mocks.agentCommand).toHaveBeenCalled());
+
+    expect(mocks.loadEffectiveWorkspaceConfig).toHaveBeenCalledWith("ws-1");
+    expect(mocks.loadSessionEntryForConfig).toHaveBeenCalledWith(
+      workspaceCfg,
+      "agent:ops:main",
+    );
+    expect(mocks.agentCommand.mock.calls[0][0].cfg).toBe(workspaceCfg);
+  });
+
+  it("resolves agent.identity.get against workspace-effective defaults", async () => {
+    const workspaceCfg = {
+      agents: {
+        list: [{ id: "ops", default: true, workspaceId: "ws-1" }],
+      },
+      session: {
+        mainKey: "main",
+      },
+    };
+    mocks.loadConfigReturn = {
+      agents: {
+        list: [{ id: "main", default: true }],
+      },
+    };
+    mocks.loadEffectiveWorkspaceConfig.mockResolvedValue(workspaceCfg);
+
+    const respond = vi.fn();
+    await agentHandlers["agent.identity.get"]({
+      params: {},
+      respond,
+      context: makeContext(),
+      req: { type: "req", id: "identity-1", method: "agent.identity.get" },
+      client: { pmosRole: "workspace_admin", pmosWorkspaceId: "ws-1" } as any,
+      isWebchatConnect: () => false,
+    });
+
+    expect(mocks.loadEffectiveWorkspaceConfig).toHaveBeenCalledWith("ws-1");
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({ agentId: "ops" }),
+      undefined,
+    );
   });
 });

@@ -22,6 +22,23 @@ import {
   type AgentWorkflow,
   type OrchestrationPattern,
 } from '../agent-orchestrator.js';
+import { isSuperAdmin } from "../workspace-context.js";
+
+function normalizeTemplateAgentId(value: string): string {
+  return (
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "-")
+      .replace(/[^a-z0-9_-]/g, "")
+      .replace(/-+/g, "-")
+      .replace(/^-+|-+$/g, "") || "agent"
+  );
+}
+
+function resolveWorkspaceScopedTemplatePath(workspaceId: string, agentId: string): string {
+  return `~/.openclaw/workspaces/${workspaceId.trim()}/${normalizeTemplateAgentId(agentId)}`;
+}
 
 // Input schemas
 const ParallelExecutionSchema = z.object({
@@ -334,17 +351,24 @@ export async function handleTemplateCreate(
   // Persist agent to config
   try {
     const { loadConfig, writeConfigFile } = await import('../../config/config.js');
-    const { addWorkspaceId } = await import('../workspace-context.js');
     
     const cfg = loadConfig();
     const agents = cfg.agents?.list || [];
+    const workspaceId =
+      client && !isSuperAdmin(client) && typeof client.pmosWorkspaceId === "string"
+        ? client.pmosWorkspaceId.trim()
+        : "";
+    const agentId = normalizeTemplateAgentId(
+      template.config?.id || `agent-${crypto.randomUUID()}`,
+    );
     
     // Create new agent entry from template
     const newAgent = {
       ...template.config,
-      id: template.config?.id || `agent-${crypto.randomUUID()}`,
+      id: agentId,
       name: template.name,
-      workspaceId: client.pmosWorkspaceId ? addWorkspaceId(template.config?.id || '', client) : undefined,
+      ...(workspaceId ? { workspaceId } : {}),
+      ...(workspaceId ? { workspace: resolveWorkspaceScopedTemplatePath(workspaceId, agentId) } : {}),
     };
     
     // Add to config

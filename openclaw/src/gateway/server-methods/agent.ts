@@ -37,10 +37,36 @@ import {
   validateAgentParams,
   validateAgentWaitParams,
 } from "../protocol/index.js";
-import { loadSessionEntry } from "../session-utils.js";
+import { loadSessionEntryForConfig } from "../session-utils.js";
 import { formatForLog } from "../ws-log.js";
+import { isSuperAdmin } from "../workspace-context.js";
 import { waitForAgentJob } from "./agent-job.js";
 import { injectTimestamp, timestampOptsFromConfig } from "./agent-timestamp.js";
+import type { GatewayClient } from "./types.js";
+
+async function loadAgentConfigForClient(
+  client: GatewayClient | null,
+): Promise<ReturnType<typeof loadConfig>> {
+  let cfg = loadConfig();
+  if (!client || isSuperAdmin(client)) {
+    return cfg;
+  }
+  const workspaceId =
+    typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  if (!workspaceId) {
+    return cfg;
+  }
+  try {
+    const { loadEffectiveWorkspaceConfig } = await import("../workspace-config.js");
+    const effectiveCfg = await loadEffectiveWorkspaceConfig(workspaceId);
+    if (effectiveCfg && typeof effectiveCfg === "object") {
+      cfg = effectiveCfg as typeof cfg;
+    }
+  } catch {
+    // Fall back to global config if effective workspace config cannot be loaded.
+  }
+  return cfg;
+}
 
 export const agentHandlers: GatewayRequestHandlers = {
   agent: async ({ params, respond, context, client }) => {
@@ -86,7 +112,7 @@ export const agentHandlers: GatewayRequestHandlers = {
       label?: string;
       spawnedBy?: string;
     };
-    const cfg = loadConfig();
+    const cfg = await loadAgentConfigForClient(client);
     const idem = request.idempotencyKey;
     const groupIdRaw = typeof request.groupId === "string" ? request.groupId.trim() : "";
     const groupChannelRaw =
@@ -212,8 +238,13 @@ export const agentHandlers: GatewayRequestHandlers = {
     let cfgForAgent: ReturnType<typeof loadConfig> | undefined;
 
     if (requestedSessionKey) {
-      const { cfg, storePath, entry, canonicalKey } = loadSessionEntry(requestedSessionKey);
-      cfgForAgent = cfg;
+      const {
+        cfg: sessionCfg,
+        storePath,
+        entry,
+        canonicalKey,
+      } = loadSessionEntryForConfig(cfg, requestedSessionKey);
+      cfgForAgent = sessionCfg;
       const now = Date.now();
       const sessionId = entry?.sessionId ?? randomUUID();
       const labelValue = request.label?.trim() || entry?.label;
@@ -223,7 +254,7 @@ export const agentHandlers: GatewayRequestHandlers = {
         | undefined;
       if (spawnedByValue && (!resolvedGroupId || !resolvedGroupChannel || !resolvedGroupSpace)) {
         try {
-          const parentEntry = loadSessionEntry(spawnedByValue)?.entry;
+          const parentEntry = loadSessionEntryForConfig(sessionCfg, spawnedByValue)?.entry;
           inheritedGroup = {
             groupId: parentEntry?.groupId,
             groupChannel: parentEntry?.groupChannel,
@@ -263,7 +294,7 @@ export const agentHandlers: GatewayRequestHandlers = {
       };
       sessionEntry = nextEntry;
       const sendPolicy = resolveSendPolicy({
-        cfg,
+        cfg: sessionCfg,
         entry,
         sessionKey: requestedSessionKey,
         channel: entry?.channel,
@@ -280,7 +311,7 @@ export const agentHandlers: GatewayRequestHandlers = {
       resolvedSessionId = sessionId;
       const canonicalSessionKey = canonicalKey;
       const agentId = resolveAgentIdFromSessionKey(canonicalSessionKey);
-      const mainSessionKey = resolveAgentMainSessionKey({ cfg, agentId });
+      const mainSessionKey = resolveAgentMainSessionKey({ cfg: sessionCfg, agentId });
       if (storePath) {
         await updateSessionStore(storePath, (store) => {
           store[canonicalSessionKey] = nextEntry;
@@ -392,6 +423,7 @@ export const agentHandlers: GatewayRequestHandlers = {
         runId,
         lane: request.lane,
         extraSystemPrompt: request.extraSystemPrompt,
+        cfg,
       },
       defaultRuntime,
       context.deps,
@@ -431,7 +463,7 @@ export const agentHandlers: GatewayRequestHandlers = {
         });
       });
   },
-  "agent.identity.get": ({ params, respond }) => {
+  "agent.identity.get": async ({ params, respond, client }) => {
     if (!validateAgentIdentityParams(params)) {
       respond(
         false,
@@ -464,7 +496,7 @@ export const agentHandlers: GatewayRequestHandlers = {
       }
       agentId = resolved;
     }
-    const cfg = loadConfig();
+    const cfg = await loadAgentConfigForClient(client);
     const identity = resolveAssistantIdentity({ cfg, agentId });
     const avatarValue =
       resolveAssistantAvatarUrl({

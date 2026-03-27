@@ -1,5 +1,6 @@
 import type { ClientToolDefinition } from "../../agents/pi-embedded-runner/run/params.js";
 import type { ChannelOutboundTargetMode } from "../../channels/plugins/types.js";
+import type { OpenClawConfig } from "../../config/config.js";
 
 /** Image content block for Claude API multimodal messages. */
 export type ImageContent = {
@@ -28,6 +29,8 @@ export type AgentRunContext = {
 
 export type AgentCommandOpts = {
   message: string;
+  /** Effective config override for workspace-scoped gateway execution. */
+  cfg?: OpenClawConfig;
   /** Optional image attachments for multimodal messages. */
   images?: ImageContent[];
   /** Optional client-provided tools (OpenResponses hosted tools). */

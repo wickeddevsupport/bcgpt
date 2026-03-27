@@ -63,7 +63,7 @@ type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
 
 const DEVICE_SIGNATURE_SKEW_MS = 10 * 60 * 1000;
 
-function buildWorkspaceSessionDefaultsSnapshot(params: {
+export function buildWorkspaceSessionDefaultsSnapshot(params: {
   agentConfig: unknown;
   sessionConfig?: unknown;
   workspaceId: string;
@@ -901,7 +901,7 @@ export function attachGatewayWsMessageHandler(params: {
             const workspaceId = pmosSession.user.workspaceId;
             const workspaceCfg = await loadEffectiveWorkspaceConfig(workspaceId);
             snapshot.sessionDefaults = buildWorkspaceSessionDefaultsSnapshot({
-              agentConfig: loadConfig(),
+              agentConfig: workspaceCfg,
               sessionConfig: workspaceCfg,
               workspaceId,
             });

@@ -1,4 +1,4 @@
-import type { GatewayRequestContext, GatewayRequestHandlers } from "./types.js";
+import type { GatewayClient, GatewayRequestContext, GatewayRequestHandlers } from "./types.js";
 import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { getChannelPlugin, normalizeChannelId } from "../../channels/plugins/index.js";
 import { DEFAULT_CHAT_CHANNEL } from "../../channels/registry.js";
@@ -20,6 +20,7 @@ import {
   validateSendParams,
 } from "../protocol/index.js";
 import { formatForLog } from "../ws-log.js";
+import { isSuperAdmin } from "../workspace-context.js";
 
 type InflightResult = {
   ok: boolean;
@@ -42,8 +43,32 @@ const getInflightMap = (context: GatewayRequestContext) => {
   return inflight;
 };
 
+async function loadSendConfigForClient(
+  client?: GatewayClient | null,
+): Promise<ReturnType<typeof loadConfig>> {
+  let cfg = loadConfig();
+  if (!client || isSuperAdmin(client)) {
+    return cfg;
+  }
+  const workspaceId =
+    typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  if (!workspaceId) {
+    return cfg;
+  }
+  try {
+    const { loadEffectiveWorkspaceConfig } = await import("../workspace-config.js");
+    const effectiveCfg = await loadEffectiveWorkspaceConfig(workspaceId);
+    if (effectiveCfg && typeof effectiveCfg === "object") {
+      cfg = effectiveCfg as typeof cfg;
+    }
+  } catch {
+    // Fall back to the global config if the workspace overlay cannot be loaded.
+  }
+  return cfg;
+}
+
 export const sendHandlers: GatewayRequestHandlers = {
-  send: async ({ params, respond, context }) => {
+  send: async ({ params, respond, context, client }) => {
     const p = params;
     if (!validateSendParams(p)) {
       respond(
@@ -115,7 +140,7 @@ export const sendHandlers: GatewayRequestHandlers = {
 
     const work = (async (): Promise<InflightResult> => {
       try {
-        const cfg = loadConfig();
+        const cfg = await loadSendConfigForClient(client);
         const resolved = resolveOutboundTarget({
           channel: outboundChannel,
           to,
@@ -240,7 +265,7 @@ export const sendHandlers: GatewayRequestHandlers = {
       inflightMap.delete(dedupeKey);
     }
   },
-  poll: async ({ params, respond, context }) => {
+  poll: async ({ params, respond, context, client }) => {
     const p = params;
     if (!validatePollParams(p)) {
       respond(
@@ -304,7 +329,7 @@ export const sendHandlers: GatewayRequestHandlers = {
         );
         return;
       }
-      const cfg = loadConfig();
+      const cfg = await loadSendConfigForClient(client);
       const resolved = resolveOutboundTarget({
         channel: channel,
         to,
