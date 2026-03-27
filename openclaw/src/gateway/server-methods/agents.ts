@@ -53,7 +53,11 @@ import {
 } from "../workspace-context.js";
 import { auditLogger } from "../../security/audit-logger.js";
 import { rateLimiter } from "../../security/rate-limiter.js";
-import { readWorkspaceConfig, writeWorkspaceConfig } from "../workspace-config.js";
+import {
+  applyWorkspaceAgentCollaborationDefaults,
+  readWorkspaceConfig,
+  writeWorkspaceConfig,
+} from "../workspace-config.js";
 
 const BOOTSTRAP_FILE_NAMES = [
   DEFAULT_AGENTS_FILENAME,
@@ -255,7 +259,11 @@ async function persistAgentsConfigForClient(
   const workspaceId =
     typeof client?.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
   if (workspaceId && !isSuperAdmin(client as never)) {
-    await writeWorkspaceConfig(workspaceId, cfg as unknown as Record<string, unknown>);
+    const nextCfg = applyWorkspaceAgentCollaborationDefaults(
+      (cfg as unknown as Record<string, unknown>) ?? {},
+      workspaceId,
+    );
+    await writeWorkspaceConfig(workspaceId, nextCfg);
     return;
   }
   await writeConfigFile(cfg);

@@ -38,6 +38,7 @@ import {
 import { isSuperAdmin, filterByWorkspace } from "../workspace-context.js";
 import { auditLogger } from "../../security/audit-logger.js";
 import type { GatewayClient } from "./types.js";
+import { applyWorkspaceAgentCollaborationDefaults } from "../workspace-config.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -368,6 +369,13 @@ function requireConfigBaseHash(
   return true;
 }
 
+function normalizeWorkspaceSavedConfig(
+  workspaceId: string,
+  config: Record<string, unknown>,
+): Record<string, unknown> {
+  return applyWorkspaceAgentCollaborationDefaults(config, workspaceId) as Record<string, unknown>;
+}
+
 export const configHandlers: GatewayRequestHandlers = {
   "config.get": async ({ params, respond, client }) => {
     if (!validateConfigGetParams(params)) {
@@ -509,7 +517,10 @@ export const configHandlers: GatewayRequestHandlers = {
         return;
       }
       const { writeWorkspaceConfig } = await import("../workspace-config.js");
-      await writeWorkspaceConfig(scoped.workspaceId, restoredScoped);
+      await writeWorkspaceConfig(
+        scoped.workspaceId,
+        normalizeWorkspaceSavedConfig(scoped.workspaceId, restoredScoped),
+      );
       const nextSnapshot = await readWorkspaceConfigSnapshot(scoped.workspaceId);
       respond(
         true,
@@ -642,7 +653,10 @@ export const configHandlers: GatewayRequestHandlers = {
         return;
       }
       const { writeWorkspaceConfig } = await import("../workspace-config.js");
-      await writeWorkspaceConfig(scoped.workspaceId, restoredMerge);
+      await writeWorkspaceConfig(
+        scoped.workspaceId,
+        normalizeWorkspaceSavedConfig(scoped.workspaceId, restoredMerge),
+      );
       const nextSnapshot = await readWorkspaceConfigSnapshot(scoped.workspaceId);
       respond(
         true,
@@ -815,7 +829,10 @@ export const configHandlers: GatewayRequestHandlers = {
           snapshot.config,
         ) as Record<string, unknown>;
         const { writeWorkspaceConfig } = await import("../workspace-config.js");
-        await writeWorkspaceConfig(scoped.workspaceId, restoredScoped);
+        await writeWorkspaceConfig(
+          scoped.workspaceId,
+          normalizeWorkspaceSavedConfig(scoped.workspaceId, restoredScoped),
+        );
       } catch (err) {
         respond(
           false,

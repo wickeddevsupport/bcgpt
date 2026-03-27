@@ -167,4 +167,46 @@ describe("config handlers for workspace tenants", () => {
     expect(saved?.models?.providers?.local?.apiKey).toBe(secret);
     expect(saved?.agents?.defaults?.model?.primary).toBe("local/second");
   });
+
+  it("auto-enables office collaboration defaults for workspace agent configs", async () => {
+    const workspaceId = `cfg-office-${Date.now()}`;
+    touchedWorkspaces.add(workspaceId);
+
+    const respondSet = vi.fn();
+    await configHandlers["config.set"]({
+      params: {
+        raw: JSON.stringify({
+          agents: {
+            list: [
+              { id: "assistant", workspaceId, default: true },
+              { id: "marketing-agent", workspaceId },
+              { id: "pm-agent", workspaceId, subagents: { allowAgents: ["marketing-agent"] } },
+            ],
+          },
+          tools: {
+            agentToAgent: {
+              enabled: false,
+            },
+          },
+        }),
+      },
+      respond: respondSet,
+      client: { pmosRole: "workspace_admin", pmosWorkspaceId: workspaceId } as any,
+    } as any);
+
+    expect(respondSet.mock.calls[0]?.[0]).toBe(true);
+
+    const saved = await readWorkspaceConfig(workspaceId);
+    const tools = saved?.tools as Record<string, any> | undefined;
+    const agents = (saved?.agents?.list ?? []) as Array<Record<string, any>>;
+    const assistant = agents.find((entry) => entry.id === "assistant");
+    const marketing = agents.find((entry) => entry.id === "marketing-agent");
+    const pm = agents.find((entry) => entry.id === "pm-agent");
+
+    expect(tools?.agentToAgent?.enabled).toBe(true);
+    expect(tools?.agentToAgent?.allow).toEqual(["*"]);
+    expect(assistant?.subagents?.allowAgents).toEqual(["*"]);
+    expect(marketing?.subagents?.allowAgents).toEqual(["*"]);
+    expect(pm?.subagents?.allowAgents).toEqual(["marketing-agent"]);
+  });
 });

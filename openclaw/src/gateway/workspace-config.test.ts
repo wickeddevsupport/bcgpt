@@ -207,4 +207,40 @@ describe("workspace-config isolation", () => {
     );
     expect(agents.find((entry) => entry.id === "rajan-only")).toBeUndefined();
   });
+
+  it("enables full-mesh agent collaboration defaults inside a workspace office", async () => {
+    mockGlobalConfig = {
+      tools: {
+        agentToAgent: {
+          enabled: false,
+        },
+      },
+      agents: {
+        list: [
+          { id: "assistant", default: true, workspaceId },
+          { id: "marketing-agent", workspaceId },
+          { id: "pm-agent", workspaceId, subagents: { allowAgents: ["marketing-agent"] } },
+        ],
+      },
+    };
+
+    const { loadEffectiveWorkspaceConfig } = await import("./workspace-config.js");
+    const effective = await loadEffectiveWorkspaceConfig(workspaceId);
+    const tools = effective.tools as Record<string, unknown> | undefined;
+    const a2a = tools?.agentToAgent as Record<string, unknown> | undefined;
+    const agents = ((effective.agents as Record<string, unknown> | undefined)?.list ?? []) as Array<
+      Record<string, unknown>
+    >;
+    const assistant = agents.find((entry) => entry.id === "assistant");
+    const marketing = agents.find((entry) => entry.id === "marketing-agent");
+    const pm = agents.find((entry) => entry.id === "pm-agent");
+
+    expect(a2a?.enabled).toBe(true);
+    expect(a2a?.allow).toEqual(["*"]);
+    expect((assistant?.subagents as Record<string, unknown> | undefined)?.allowAgents).toEqual(["*"]);
+    expect((marketing?.subagents as Record<string, unknown> | undefined)?.allowAgents).toEqual(["*"]);
+    expect((pm?.subagents as Record<string, unknown> | undefined)?.allowAgents).toEqual([
+      "marketing-agent",
+    ]);
+  });
 });

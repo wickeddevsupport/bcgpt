@@ -37,6 +37,51 @@ vi.mock("../../config/config.js", () => ({
 vi.mock("../workspace-config.js", () => ({
   readWorkspaceConfig: mocks.readWorkspaceConfig,
   writeWorkspaceConfig: mocks.writeWorkspaceConfig,
+  applyWorkspaceAgentCollaborationDefaults: (cfg: Record<string, unknown>, workspaceId: string) => {
+    const wsId = String(workspaceId ?? "").trim();
+    const next = { ...cfg };
+    const tools =
+      next.tools && typeof next.tools === "object"
+        ? ({ ...(next.tools as Record<string, unknown>) } as Record<string, unknown>)
+        : {};
+    const existingA2A =
+      tools.agentToAgent && typeof tools.agentToAgent === "object"
+        ? ({ ...(tools.agentToAgent as Record<string, unknown>) } as Record<string, unknown>)
+        : {};
+    const allow = Array.isArray(existingA2A.allow)
+      ? existingA2A.allow.map((value) => String(value).trim()).filter(Boolean)
+      : [];
+    tools.agentToAgent =
+      existingA2A.enabled === true && allow.length > 0
+        ? existingA2A
+        : { ...existingA2A, enabled: true, allow: ["*"] };
+    const agents =
+      next.agents && typeof next.agents === "object"
+        ? ({ ...(next.agents as Record<string, unknown>) } as Record<string, unknown>)
+        : {};
+    const list = Array.isArray(agents.list) ? agents.list : [];
+    agents.list = list.map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return entry;
+      }
+      const row = { ...(entry as Record<string, unknown>) };
+      if (String(row.workspaceId ?? "").trim() !== wsId) {
+        return row;
+      }
+      const subagents =
+        row.subagents && typeof row.subagents === "object"
+          ? ({ ...(row.subagents as Record<string, unknown>) } as Record<string, unknown>)
+          : {};
+      const allowAgents = Array.isArray(subagents.allowAgents)
+        ? subagents.allowAgents.map((value) => String(value).trim()).filter(Boolean)
+        : [];
+      if (allowAgents.length === 0) {
+        subagents.allowAgents = ["*"];
+      }
+      return { ...row, subagents };
+    });
+    return { ...next, tools, agents };
+  },
 }));
 
 vi.mock("../../commands/agents.config.js", () => ({
@@ -284,6 +329,76 @@ describe("agents.create", () => {
     expect(mocks.fsMkdir).toHaveBeenCalledWith(
       "/resolved/~/.openclaw/workspaces/ws-123/agents/ws-agent/sessions",
       { recursive: true },
+    );
+  });
+
+  it("writes workspace collaboration defaults for newly created workspace agents", async () => {
+    mocks.readWorkspaceConfig.mockResolvedValue({
+      agents: {
+        list: [{ id: "assistant", workspaceId: "ws-123", default: true }],
+      },
+    });
+    mocks.applyAgentConfig.mockImplementation((cfg, opts) => {
+      const next = { ...((cfg as Record<string, unknown>) ?? {}) };
+      const agents =
+        next.agents && typeof next.agents === "object"
+          ? ({ ...(next.agents as Record<string, unknown>) } as Record<string, unknown>)
+          : {};
+      const list = Array.isArray(agents.list) ? [...agents.list] : [];
+      const agentId = String((opts as Record<string, unknown>).agentId ?? "").trim();
+      const index = list.findIndex(
+        (entry) =>
+          entry &&
+          typeof entry === "object" &&
+          String((entry as Record<string, unknown>).id ?? "").trim() === agentId,
+      );
+      const entry =
+        index >= 0 && list[index] && typeof list[index] === "object"
+          ? { ...(list[index] as Record<string, unknown>) }
+          : { id: agentId };
+      Object.assign(entry, opts);
+      if (index >= 0) {
+        list[index] = entry;
+      } else {
+        list.push(entry);
+      }
+      return { ...next, agents: { ...agents, list } };
+    });
+
+    const { promise } = makeCall(
+      "agents.create",
+      { name: "Marketing Agent", workspace: "/ignored/by/workspace-user" },
+      {
+        client: {
+          pmosWorkspaceId: "ws-123",
+          pmosRole: "workspace_admin",
+        },
+      },
+    );
+    await promise;
+
+    expect(mocks.writeWorkspaceConfig).toHaveBeenCalledWith(
+      "ws-123",
+      expect.objectContaining({
+        tools: expect.objectContaining({
+          agentToAgent: expect.objectContaining({
+            enabled: true,
+            allow: ["*"],
+          }),
+        }),
+        agents: expect.objectContaining({
+          list: expect.arrayContaining([
+            expect.objectContaining({
+              id: "assistant",
+              subagents: expect.objectContaining({ allowAgents: ["*"] }),
+            }),
+            expect.objectContaining({
+              id: "marketing-agent",
+              subagents: expect.objectContaining({ allowAgents: ["*"] }),
+            }),
+          ]),
+        }),
+      }),
     );
   });
 });

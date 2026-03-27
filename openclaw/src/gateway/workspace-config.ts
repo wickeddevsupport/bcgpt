@@ -250,6 +250,81 @@ function applyWorkspaceScopedPaths(mergedCfg: JsonObject, workspaceId: string): 
   };
 }
 
+export function applyWorkspaceAgentCollaborationDefaults(
+  config: JsonObject,
+  workspaceId: string,
+): JsonObject {
+  const wsId = workspaceId.trim();
+  if (!wsId) {
+    return config;
+  }
+
+  const agents = isJsonObject(config.agents) ? ({ ...config.agents } as JsonObject) : null;
+  const list = agents && Array.isArray(agents.list) ? agents.list : null;
+  if (!list) {
+    return config;
+  }
+
+  let mutated = false;
+  const nextList = list.map((entry) => {
+    if (!isJsonObject(entry)) {
+      return entry;
+    }
+    const entryWorkspaceId =
+      typeof entry.workspaceId === "string" ? entry.workspaceId.trim() : "";
+    if (entryWorkspaceId !== wsId) {
+      return entry;
+    }
+    const subagents = isJsonObject(entry.subagents)
+      ? ({ ...entry.subagents } as JsonObject)
+      : {};
+    const allowAgents = Array.isArray(subagents.allowAgents)
+      ? subagents.allowAgents.map((value) => String(value).trim()).filter(Boolean)
+      : [];
+    if (allowAgents.length > 0) {
+      return entry;
+    }
+    mutated = true;
+    return {
+      ...entry,
+      subagents: {
+        ...subagents,
+        allowAgents: ["*"],
+      },
+    };
+  });
+
+  const tools = isJsonObject(config.tools) ? ({ ...config.tools } as JsonObject) : {};
+  const toolAgentToAgent = isJsonObject(tools.agentToAgent)
+    ? ({ ...tools.agentToAgent } as JsonObject)
+    : null;
+  const agentToAgentEnabled = toolAgentToAgent?.enabled;
+  const agentToAgentAllow = Array.isArray(toolAgentToAgent?.allow)
+    ? toolAgentToAgent.allow.map((value) => String(value).trim()).filter(Boolean)
+    : [];
+  if (agentToAgentEnabled !== true || agentToAgentAllow.length === 0) {
+    mutated = true;
+    tools.agentToAgent = {
+      ...(toolAgentToAgent ?? {}),
+      enabled: true,
+      allow: ["*"],
+    };
+  }
+
+  if (!mutated) {
+    return config;
+  }
+
+  return {
+    ...config,
+    tools,
+    agents: {
+      ...agents,
+      list: nextList,
+    },
+  };
+}
+
 export async function loadEffectiveWorkspaceConfig(workspaceId: string): Promise<JsonObject> {
   const globalCfg = loadConfig() as unknown;
   const globalObject = isJsonObject(globalCfg) ? stripCrossWorkspaceInheritedConfig(globalCfg) : {};
@@ -259,5 +334,6 @@ export async function loadEffectiveWorkspaceConfig(workspaceId: string): Promise
   const mergedAgents = mergeWorkspaceAgentLists(globalObject, workspaceCfg, mergedObject, workspaceId);
   const scopedPaths = applyWorkspaceScopedPaths(mergedAgents, workspaceId);
   // Strip any agents from other workspaces that may have leaked into global config
-  return filterAgentsForWorkspace(scopedPaths, workspaceId);
+  const filtered = filterAgentsForWorkspace(scopedPaths, workspaceId);
+  return applyWorkspaceAgentCollaborationDefaults(filtered, workspaceId);
 }
