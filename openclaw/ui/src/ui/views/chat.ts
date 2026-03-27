@@ -34,6 +34,7 @@ export type ChatProps = {
   showThinking: boolean;
   loading: boolean;
   sending: boolean;
+  activeRunId?: string | null;
   canAbort?: boolean;
   compactionStatus?: CompactionIndicatorStatus | null;
   messages: unknown[];
@@ -200,6 +201,17 @@ function resolveChatStatus(props: ChatProps): {
     return {
       label: "Working",
       detail: "Streaming the current response.",
+      tone: "busy",
+    };
+  }
+
+  if (props.activeRunId) {
+    return {
+      label: "Working",
+      detail:
+        props.queue.length > 0
+          ? `Finishing the current response before sending ${props.queue.length} queued ${props.queue.length === 1 ? "message" : "messages"}.`
+          : "Finishing the current response and syncing history.",
       tone: "busy",
     };
   }

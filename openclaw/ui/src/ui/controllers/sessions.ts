@@ -129,7 +129,15 @@ function syncActiveRunState(state: SessionsState, res: SessionsListResult): void
     state.chatRunId = null;
     return;
   }
-  state.chatRunId = typeof currentSession.activeRunId === "string" ? currentSession.activeRunId : null;
+  const remoteActiveRunId =
+    typeof currentSession.activeRunId === "string" ? currentSession.activeRunId : null;
+  if (remoteActiveRunId) {
+    state.chatRunId = remoteActiveRunId;
+    return;
+  }
+  if (!state.chatRunId) {
+    state.chatRunId = null;
+  }
 }
 
 export async function loadSessions(

@@ -115,6 +115,7 @@ function startChatRecoveryPoll(host: ChatHost, runId: string) {
       clearChatRecoveryPoll(host);
       const scrollHost = host as unknown as Parameters<typeof scheduleChatScroll>[0];
       scheduleChatScroll(scrollHost, true);
+      void flushChatQueue(host);
       return;
     }
     if (Date.now() - startedAt > 120_000) {
@@ -132,6 +133,7 @@ function startChatRecoveryPoll(host: ChatHost, runId: string) {
         },
       ];
       clearChatRecoveryPoll(host);
+      void flushChatQueue(host);
       return;
     }
     host.chatHistoryRecoveryTimer = window.setTimeout(tick, 2500);

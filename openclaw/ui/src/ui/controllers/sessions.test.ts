@@ -98,4 +98,17 @@ describe("syncWorkspaceSessionSelection", () => {
 
     expect(state.chatRunId).toBeNull();
   });
+
+  it("preserves the local chatRunId while the active session row has not caught up yet", async () => {
+    const request = async () =>
+      createResult(["agent:assistant:main", "agent:designer:main"]);
+    const state = createState({
+      client: { request } as unknown as SessionsState["client"],
+      chatRunId: "run-local",
+    });
+
+    await loadSessions(state);
+
+    expect(state.chatRunId).toBe("run-local");
+  });
 });

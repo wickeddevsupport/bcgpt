@@ -21,6 +21,7 @@ function createProps(overrides: Partial<ChatProps> = {}): ChatProps {
     showThinking: false,
     loading: false,
     sending: false,
+    activeRunId: null,
     canAbort: false,
     compactionStatus: null,
     messages: [],
@@ -73,6 +74,25 @@ describe("chat view", () => {
     const badge = container.querySelector(".chat-status-badge--busy");
     expect(badge?.textContent).toContain("Working");
     expect(container.textContent).toContain("Streaming the current response.");
+  });
+
+  it("shows a working badge while finalizing a completed run", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          activeRunId: "run-123",
+          queue: [{ id: "q1", text: "next message", createdAt: Date.now() }],
+        }),
+      ),
+      container,
+    );
+
+    const badge = container.querySelector(".chat-status-badge--busy");
+    expect(badge?.textContent).toContain("Working");
+    expect(container.textContent).toContain(
+      "Finishing the current response before sending 1 queued message.",
+    );
   });
 
   it("shows a working badge from server session state after refresh", () => {

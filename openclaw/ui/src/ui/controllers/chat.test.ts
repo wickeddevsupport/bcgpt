@@ -99,7 +99,7 @@ describe("handleChatEvent", () => {
     expect(state.chatStreamStartedAt).toBe(123);
   });
 
-  it("processes final from own run and clears state", () => {
+  it("keeps own run active until history reconciliation completes", () => {
     const state = createState({
       sessionKey: "main",
       chatRunId: "run-1",
@@ -112,9 +112,9 @@ describe("handleChatEvent", () => {
       state: "final",
     };
     expect(handleChatEvent(state, payload)).toBe("final");
-    expect(state.chatRunId).toBe(null);
+    expect(state.chatRunId).toBe("run-1");
     expect(state.chatStream).toBe(null);
-    expect(state.chatStreamStartedAt).toBe(null);
+    expect(state.chatStreamStartedAt).toBe(100);
   });
 
   it("shows reasoning-only deltas in the live stream", () => {
@@ -158,6 +158,85 @@ describe("handleChatEvent", () => {
     await loadChatHistory(state);
     expect(state.chatMessages).toHaveLength(1);
     expect((state.chatMessages[0] as { role?: string }).role).toBe("user");
+  });
+
+  it("reconciles a finalized run once history includes the assistant reply", async () => {
+    const state = createState({
+      sessionKey: "main",
+      chatRunId: "run-1",
+      chatStreamStartedAt: 100,
+      client: {
+        request: vi.fn().mockResolvedValue({
+          messages: [
+            {
+              role: "assistant",
+              content: [{ type: "text", text: "All set" }],
+              timestamp: 200,
+            },
+          ],
+          thinkingLevel: "off",
+        }),
+      } as unknown as ChatState["client"],
+    });
+
+    await loadChatHistory(state);
+
+    expect(state.chatRunId).toBeNull();
+    expect(state.chatStreamStartedAt).toBeNull();
+    expect((state.chatMessages[0] as { role?: string }).role).toBe("assistant");
+  });
+
+  it("ignores stale history responses that resolve after a newer refresh", async () => {
+    let resolveFirst: ((value: { messages: unknown[]; thinkingLevel: string }) => void) | null = null;
+    let resolveSecond: ((value: { messages: unknown[]; thinkingLevel: string }) => void) | null = null;
+    const request = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ messages: unknown[]; thinkingLevel: string }>((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ messages: unknown[]; thinkingLevel: string }>((resolve) => {
+            resolveSecond = resolve;
+          }),
+      );
+    const state = createState({
+      sessionKey: "main",
+      client: { request } as unknown as ChatState["client"],
+    });
+
+    const firstLoad = loadChatHistory(state);
+    const secondLoad = loadChatHistory(state);
+
+    resolveSecond?.({
+      messages: [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "newer response" }],
+          timestamp: 20,
+        },
+      ],
+      thinkingLevel: "off",
+    });
+    await secondLoad;
+
+    resolveFirst?.({
+      messages: [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "older response" }],
+          timestamp: 10,
+        },
+      ],
+      thinkingLevel: "off",
+    });
+    await firstLoad;
+
+    expect(JSON.stringify(state.chatMessages)).toContain("newer response");
+    expect(JSON.stringify(state.chatMessages)).not.toContain("older response");
   });
 
   it("repairs a missing workspace session during history load instead of falling back", async () => {

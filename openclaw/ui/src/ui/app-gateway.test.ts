@@ -106,11 +106,13 @@ vi.mock("./controllers/pmos-trace.ts", () => ({
 }));
 
 const { connectGateway, handleGatewayEvent } = await import("./app-gateway.ts");
-const { handleChatEvent } = await import("./controllers/chat.ts");
+const { handleChatEvent, loadChatHistory } = await import("./controllers/chat.ts");
+const { flushChatQueueForEvent } = await import("./app-chat.ts");
 
 describe("connectGateway", () => {
   beforeEach(() => {
     gatewayClientInstances.length = 0;
+    vi.clearAllMocks();
   });
 
   it("ignores close callbacks from stale gateway clients", () => {
@@ -226,5 +228,62 @@ describe("connectGateway", () => {
     queuedFrame?.(0);
     expect(vi.mocked(handleChatEvent)).toHaveBeenCalledTimes(2);
     vi.stubGlobal("requestAnimationFrame", originalRaf);
+  });
+
+  it("waits for history reconciliation before flushing the queued next message", async () => {
+    vi.mocked(handleChatEvent).mockImplementation((state: unknown) => {
+      (state as { chatStream: string | null }).chatStream = null;
+      return "final";
+    });
+    vi.mocked(loadChatHistory).mockImplementation(async (state: unknown) => {
+      (state as { chatRunId: string | null }).chatRunId = null;
+    });
+
+    const host = {
+      settings: { gatewayUrl: "wss://example.test", token: "", lastActiveSessionKey: "main" },
+      password: "",
+      client: null,
+      connected: true,
+      hello: null,
+      lastError: null,
+      onboarding: false,
+      eventLogBuffer: [],
+      eventLog: [],
+      tab: "dashboard",
+      presenceEntries: [],
+      presenceError: null,
+      presenceStatus: null,
+      agentsLoading: false,
+      agentsList: null,
+      agentsError: null,
+      debugHealth: null,
+      assistantName: "",
+      assistantAvatar: null,
+      assistantAgentId: null,
+      sessionKey: "main",
+      chatRunId: "run-1",
+      chatQueue: [{ id: "q1", text: "queued", createdAt: Date.now() }],
+      refreshSessionsAfterChat: new Set<string>(),
+      pmosTraceEvents: [],
+      execApprovalQueue: [],
+      execApprovalError: null,
+      chatMessages: [],
+    } as any;
+
+    handleGatewayEvent(host, {
+      type: "event",
+      event: "chat",
+      payload: {
+        runId: "run-1",
+        sessionKey: "main",
+        state: "final",
+      },
+    });
+
+    expect(vi.mocked(flushChatQueueForEvent)).not.toHaveBeenCalled();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(vi.mocked(loadChatHistory)).toHaveBeenCalled();
+    expect(vi.mocked(flushChatQueueForEvent)).toHaveBeenCalledTimes(1);
   });
 });

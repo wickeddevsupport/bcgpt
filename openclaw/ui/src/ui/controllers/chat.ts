@@ -26,6 +26,8 @@ export type ChatState = {
   pmosScreenContext?: string | null;
 };
 
+const chatHistoryLoadVersion = new WeakMap<object, number>();
+
 function normalizeBasePath(value: string | null | undefined): string {
   const trimmed = String(value ?? "").trim();
   if (!trimmed || trimmed === "/") {
@@ -82,6 +84,7 @@ function reconcileRunWithHistory(state: ChatState, historyMessages: unknown[]): 
   state.chatRunId = null;
   state.chatStream = null;
   state.chatStreamStartedAt = null;
+  state.chatSending = false;
   return true;
 }
 
@@ -200,6 +203,38 @@ function clearPendingMarkersForRun(messages: unknown[], runId: string) {
   return changed ? next : messages;
 }
 
+function beginChatHistoryLoad(state: ChatState): number {
+  const host = state as object;
+  const nextVersion = (chatHistoryLoadVersion.get(host) ?? 0) + 1;
+  chatHistoryLoadVersion.set(host, nextVersion);
+  return nextVersion;
+}
+
+function isLatestChatHistoryLoad(state: ChatState, version: number): boolean {
+  return (chatHistoryLoadVersion.get(state as object) ?? 0) === version;
+}
+
+function applyChatHistoryResult(
+  state: ChatState,
+  version: number,
+  res: { messages?: unknown[]; thinkingLevel?: string | null },
+): boolean {
+  if (!isLatestChatHistoryLoad(state, version)) {
+    return false;
+  }
+  const historyMessages = Array.isArray(res.messages) ? res.messages : [];
+  const previousMessages = Array.isArray(state.chatMessages) ? state.chatMessages : [];
+  const recovered = reconcileRunWithHistory(state, historyMessages);
+  state.chatMessages = mergePendingMessages({
+    history: historyMessages,
+    previous: previousMessages,
+    activeRunId: recovered ? null : state.chatRunId,
+  });
+  state.chatThinkingLevel = res.thinkingLevel ?? null;
+  state.lastError = null;
+  return true;
+}
+
 async function resolveChatReadinessError(state: ChatState): Promise<string | null> {
   if (!state.client || !state.connected) {
     return "Connect to Wicked OS first, then try again.";
@@ -306,7 +341,7 @@ async function refreshWorkspaceSessionKey(state: ChatState): Promise<string | nu
 }
 
 export async function loadChatHistory(state: ChatState) {
-  const previousMessages = Array.isArray(state.chatMessages) ? state.chatMessages : [];
+  const version = beginChatHistoryLoad(state);
   state.chatLoading = true;
   state.lastError = null;
   try {
@@ -320,14 +355,7 @@ export async function loadChatHistory(state: ChatState) {
             },
           )
         : await loadChatHistoryViaHttp(state);
-    const historyMessages = Array.isArray(res.messages) ? res.messages : [];
-    const recovered = reconcileRunWithHistory(state, historyMessages);
-    state.chatMessages = mergePendingMessages({
-      history: historyMessages,
-      previous: previousMessages,
-      activeRunId: recovered ? null : state.chatRunId,
-    });
-    state.chatThinkingLevel = res.thinkingLevel ?? null;
+    applyChatHistoryResult(state, version, res);
   } catch (err) {
     const errorMessage = String(err);
     const canRepairMissingSession =
@@ -344,15 +372,7 @@ export async function loadChatHistory(state: ChatState) {
           sessionKey: state.sessionKey,
           limit: 200,
         });
-        const historyMessages = Array.isArray(repaired.messages) ? repaired.messages : [];
-        const recovered = reconcileRunWithHistory(state, historyMessages);
-        state.chatMessages = mergePendingMessages({
-          history: historyMessages,
-          previous: previousMessages,
-          activeRunId: recovered ? null : state.chatRunId,
-        });
-        state.chatThinkingLevel = repaired.thinkingLevel ?? null;
-        state.lastError = null;
+        applyChatHistoryResult(state, version, repaired);
         return;
       } catch {
         // Fall through to the existing fallback paths.
@@ -361,23 +381,19 @@ export async function loadChatHistory(state: ChatState) {
     if (state.client && state.connected) {
       try {
         const fallback = await loadChatHistoryViaHttp(state);
-        const historyMessages = Array.isArray(fallback.messages) ? fallback.messages : [];
-        const recovered = reconcileRunWithHistory(state, historyMessages);
-        state.chatMessages = mergePendingMessages({
-          history: historyMessages,
-          previous: previousMessages,
-          activeRunId: recovered ? null : state.chatRunId,
-        });
-        state.chatThinkingLevel = fallback.thinkingLevel ?? null;
-        state.lastError = null;
+        applyChatHistoryResult(state, version, fallback);
         return;
       } catch {
         // Fall through to the original gateway error.
       }
     }
-    state.lastError = String(err);
+    if (isLatestChatHistoryLoad(state, version)) {
+      state.lastError = String(err);
+    }
   } finally {
-    state.chatLoading = false;
+    if (isLatestChatHistoryLoad(state, version)) {
+      state.chatLoading = false;
+    }
   }
 }
 
@@ -580,18 +596,19 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
   } else if (payload.state === "final") {
     state.chatMessages = clearPendingMarkersForRun(state.chatMessages, payload.runId);
     state.chatStream = null;
-    state.chatRunId = null;
-    state.chatStreamStartedAt = null;
+    state.chatSending = false;
   } else if (payload.state === "aborted") {
     state.chatMessages = clearPendingMarkersForRun(state.chatMessages, payload.runId);
     state.chatStream = null;
     state.chatRunId = null;
     state.chatStreamStartedAt = null;
+    state.chatSending = false;
   } else if (payload.state === "error") {
     state.chatMessages = clearPendingMarkersForRun(state.chatMessages, payload.runId);
     state.chatStream = null;
     state.chatRunId = null;
     state.chatStreamStartedAt = null;
+    state.chatSending = false;
     state.lastError = payload.errorMessage ?? "chat error";
   }
   return payload.state;

@@ -525,7 +525,9 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
     if ((state === "final" || state === "error" || state === "aborted") && !foreignFinalWhileBusy) {
       resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
       relatedSessionRefreshSeen.delete(host);
-      void flushChatQueueForEvent(host as unknown as Parameters<typeof flushChatQueueForEvent>[0]);
+      if (state === "error" || state === "aborted") {
+        void flushChatQueueForEvent(host as unknown as Parameters<typeof flushChatQueueForEvent>[0]);
+      }
       const runId = payload?.runId;
       if (runId && host.refreshSessionsAfterChat.has(runId)) {
         host.refreshSessionsAfterChat.delete(runId);
@@ -538,6 +540,9 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
     }
     if (state === "final") {
       void loadChatHistory(host as unknown as OpenClawApp).then(() => {
+        if (!host.chatRunId && !foreignFinalWhileBusy) {
+          void flushChatQueueForEvent(host as unknown as Parameters<typeof flushChatQueueForEvent>[0]);
+        }
         scheduleChatScroll(
           host as unknown as Parameters<typeof scheduleChatScroll>[0],
         );
