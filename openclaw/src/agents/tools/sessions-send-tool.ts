@@ -5,6 +5,7 @@ import type { OpenClawConfig } from "../../config/config.js";
 import { loadConfig } from "../../config/config.js";
 import { callGateway } from "../../gateway/call.js";
 import {
+  buildAgentMainSessionKey,
   isSubagentSessionKey,
   normalizeAgentId,
   resolveAgentIdFromSessionKey,
@@ -72,6 +73,10 @@ export function createSessionsSendTool(opts?: {
       const sessionKeyParam = readStringParam(params, "sessionKey");
       const labelParam = readStringParam(params, "label")?.trim() || undefined;
       const labelAgentIdParam = readStringParam(params, "agentId")?.trim() || undefined;
+      const requesterAgentId = resolveAgentIdFromSessionKey(requesterInternalKey);
+      const requestedAgentId = labelAgentIdParam
+        ? normalizeAgentId(labelAgentIdParam)
+        : undefined;
       if (sessionKeyParam && labelParam) {
         return jsonResult({
           runId: crypto.randomUUID(),
@@ -90,14 +95,38 @@ export function createSessionsSendTool(opts?: {
       };
 
       let sessionKey = sessionKeyParam;
+      if (!sessionKey && !labelParam && requestedAgentId) {
+        if (
+          restrictToSpawned &&
+          requesterAgentId &&
+          requestedAgentId !== requesterAgentId
+        ) {
+          return jsonResult({
+            runId: crypto.randomUUID(),
+            status: "forbidden",
+            error: "Sandboxed sessions_send direct agent routing is limited to this agent",
+          });
+        }
+        if (requesterAgentId && requestedAgentId !== requesterAgentId) {
+          if (!a2aPolicy.enabled) {
+            return jsonResult({
+              runId: crypto.randomUUID(),
+              status: "forbidden",
+              error:
+                "Agent-to-agent messaging is disabled. Set tools.agentToAgent.enabled=true to allow cross-agent sends.",
+            });
+          }
+          if (!a2aPolicy.isAllowed(requesterAgentId, requestedAgentId)) {
+            return jsonResult({
+              runId: crypto.randomUUID(),
+              status: "forbidden",
+              error: "Agent-to-agent messaging denied by tools.agentToAgent.allow.",
+            });
+          }
+        }
+        sessionKey = buildAgentMainSessionKey({ agentId: requestedAgentId, mainKey });
+      }
       if (!sessionKey && labelParam) {
-        const requesterAgentId = requesterInternalKey
-          ? resolveAgentIdFromSessionKey(requesterInternalKey)
-          : undefined;
-        const requestedAgentId = labelAgentIdParam
-          ? normalizeAgentId(labelAgentIdParam)
-          : undefined;
-
         if (
           restrictToSpawned &&
           requestedAgentId &&
@@ -143,6 +172,9 @@ export function createSessionsSendTool(opts?: {
           });
           resolvedKey = typeof resolved?.key === "string" ? resolved.key.trim() : "";
         } catch (err) {
+          if (requestedAgentId) {
+            resolvedKey = buildAgentMainSessionKey({ agentId: requestedAgentId, mainKey });
+          } else {
           const msg = err instanceof Error ? err.message : String(err);
           if (restrictToSpawned) {
             return jsonResult({
@@ -156,9 +188,13 @@ export function createSessionsSendTool(opts?: {
             status: "error",
             error: msg || `No session found with label: ${labelParam}`,
           });
+          }
         }
 
         if (!resolvedKey) {
+          if (requestedAgentId) {
+            resolvedKey = buildAgentMainSessionKey({ agentId: requestedAgentId, mainKey });
+          } else {
           if (restrictToSpawned) {
             return jsonResult({
               runId: crypto.randomUUID(),
@@ -171,6 +207,7 @@ export function createSessionsSendTool(opts?: {
             status: "error",
             error: `No session found with label: ${labelParam}`,
           });
+          }
         }
         sessionKey = resolvedKey;
       }
@@ -179,7 +216,7 @@ export function createSessionsSendTool(opts?: {
         return jsonResult({
           runId: crypto.randomUUID(),
           status: "error",
-          error: "Either sessionKey or label is required",
+          error: "Provide sessionKey, label, or agentId",
         });
       }
       const resolvedSession = await resolveSessionReference({
@@ -226,7 +263,6 @@ export function createSessionsSendTool(opts?: {
       const announceTimeoutMs = timeoutSeconds === 0 ? 30_000 : timeoutMs;
       const idempotencyKey = crypto.randomUUID();
       let runId: string = idempotencyKey;
-      const requesterAgentId = resolveAgentIdFromSessionKey(requesterInternalKey);
       const targetAgentId = resolveAgentIdFromSessionKey(resolvedKey);
       const isCrossAgent = requesterAgentId !== targetAgentId;
       if (isCrossAgent) {
