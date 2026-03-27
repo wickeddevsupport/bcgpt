@@ -26,6 +26,8 @@ const SESSION_KEY = 'pmos_shell_session_id';
 let shellToken = localStorage.getItem(TOKEN_KEY) || '';
 let bcgptApiKey = localStorage.getItem(BCGPT_KEY) || '';
 let sessionId = localStorage.getItem(SESSION_KEY) || `ui-${Date.now().toString(36)}`;
+let isChatSending = false;
+let activeChatAbortController = null;
 localStorage.setItem(SESSION_KEY, sessionId);
 
 function writeOutput(payload) {
@@ -67,19 +69,42 @@ function authHeaders(base = {}) {
 }
 
 async function requestJson(url, options = {}) {
-  const response = await fetch(url, {
-    ...options,
-    headers: authHeaders(options.headers || {})
-  });
+  const {
+    timeoutMs = 20000,
+    signal,
+    ...restOptions
+  } = options;
 
-  let payload;
-  try {
-    payload = await response.json();
-  } catch {
-    payload = { error: 'Invalid JSON response' };
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
+
+  let mergedSignal = timeoutController.signal;
+  if (signal) {
+    if (signal.aborted) {
+      clearTimeout(timeoutId);
+      throw new DOMException('Aborted', 'AbortError');
+    }
+    signal.addEventListener('abort', () => timeoutController.abort(), { once: true });
   }
 
-  return { response, payload };
+  try {
+    const response = await fetch(url, {
+      ...restOptions,
+      signal: mergedSignal,
+      headers: authHeaders(restOptions.headers || {})
+    });
+
+    let payload;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = { error: 'Invalid JSON response' };
+    }
+
+    return { response, payload };
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function setExternalStatus(valueNode, hintNode, integration) {
@@ -243,14 +268,29 @@ async function approveOperation(operationId) {
   await fetchDashboard();
 }
 
+function setChatSendingState(sending) {
+  isChatSending = sending;
+  const sendButton = document.getElementById('sendChatBtn');
+  if (sendButton) {
+    sendButton.disabled = sending;
+    sendButton.textContent = sending ? 'Working…' : 'Send';
+  }
+  chatInput.disabled = sending;
+}
+
+function refreshPanelsInBackground() {
+  Promise.allSettled([fetchOperations(), fetchDashboard()]).catch(() => {});
+}
+
 async function sendChat() {
   const message = chatInput.value.trim();
-  if (!message) {
+  if (!message || isChatSending) {
     return;
   }
 
   appendChat('user', message);
   chatInput.value = '';
+  setChatSendingState(true);
 
   const body = {
     message,
@@ -262,21 +302,35 @@ async function sendChat() {
     body.project_id = projectId;
   }
 
-  const { response, payload } = await requestJson('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
+  activeChatAbortController = new AbortController();
 
-  writeOutput(payload);
-  if (response.ok || response.status === 202) {
-    appendChat('assistant', payload.assistant_message || 'Done.');
-  } else {
-    appendChat('system', payload.error || 'Chat request failed.');
+  try {
+    const { response, payload } = await requestJson('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: activeChatAbortController.signal,
+      timeoutMs: 30000
+    });
+
+    writeOutput(payload);
+    if (response.ok || response.status === 202) {
+      appendChat('assistant', payload.assistant_message || 'Done.');
+    } else {
+      appendChat('system', payload.error || 'Chat request failed.');
+    }
+  } catch (error) {
+    const isAbort = error?.name === 'AbortError';
+    const messageText = isAbort
+      ? 'Chat request timed out. You can send the next message now.'
+      : `Chat request failed: ${error.message || 'unknown error'}`;
+    writeOutput({ ok: false, error: messageText });
+    appendChat('system', messageText);
+  } finally {
+    activeChatAbortController = null;
+    setChatSendingState(false);
+    refreshPanelsInBackground();
   }
-
-  await fetchOperations();
-  await fetchDashboard();
 }
 
 document.querySelectorAll('.quick-command').forEach((button) => {
@@ -365,11 +419,13 @@ document.getElementById('chatForm').addEventListener('submit', async (event) => 
 async function init() {
   try {
     updateTokenUI();
+    setChatSendingState(false);
     await fetchDashboard();
     await fetchOperations();
     writeOutput({ ok: true, message: 'PMOS shell ready' });
   } catch (error) {
     writeOutput({ ok: false, error: error.message });
+    setChatSendingState(false);
   }
 }
 
