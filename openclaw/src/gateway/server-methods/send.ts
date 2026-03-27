@@ -61,8 +61,10 @@ async function loadSendConfigForClient(
     if (effectiveCfg && typeof effectiveCfg === "object") {
       cfg = effectiveCfg as typeof cfg;
     }
-  } catch {
-    // Fall back to the global config if the workspace overlay cannot be loaded.
+  } catch (err) {
+    throw new Error(
+      `failed to load workspace-scoped send config for ${workspaceId}: ${formatForLog(err)}`,
+    );
   }
   return cfg;
 }

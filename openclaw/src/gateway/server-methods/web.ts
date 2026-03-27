@@ -32,8 +32,10 @@ async function loadWebConfigForClient(client?: {
   try {
     const { loadEffectiveWorkspaceConfig } = await import("../workspace-config.js");
     cfg = (await loadEffectiveWorkspaceConfig(workspaceId)) as OpenClawConfig;
-  } catch {
-    // Fall back to the global config if the workspace overlay cannot be loaded.
+  } catch (err) {
+    throw new Error(
+      `failed to load workspace-scoped web config for ${workspaceId}: ${formatForLog(err)}`,
+    );
   }
   return cfg;
 }

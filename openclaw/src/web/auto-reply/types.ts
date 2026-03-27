@@ -1,5 +1,6 @@
 import type { monitorWebInbox } from "../inbound.js";
 import type { ReconnectPolicy } from "../reconnect.js";
+import type { OpenClawConfig } from "../../config/config.js";
 
 export type WebInboundMsg = Parameters<typeof monitorWebInbox>[0]["onMessage"] extends (
   msg: infer M,
@@ -24,6 +25,8 @@ export type WebChannelStatus = {
 };
 
 export type WebMonitorTuning = {
+  /** Effective config for the active workspace/account. */
+  config?: OpenClawConfig;
   reconnect?: Partial<ReconnectPolicy>;
   heartbeatSeconds?: number;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;

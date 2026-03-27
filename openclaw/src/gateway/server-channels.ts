@@ -33,6 +33,20 @@ function normalizeScopeKey(scopeKey?: string): string {
   return trimmed ? trimmed : GLOBAL_SCOPE_KEY;
 }
 
+function resolveScopedConfig(
+  loadConfig: () => OpenClawConfig,
+  opts?: ChannelScopeOptions,
+): OpenClawConfig {
+  const scopeKey = normalizeScopeKey(opts?.scopeKey);
+  if (scopeKey !== GLOBAL_SCOPE_KEY) {
+    if (opts?.cfg) {
+      return opts.cfg;
+    }
+    throw new Error(`workspace-scoped channel runtime requires cfg for ${scopeKey}`);
+  }
+  return opts?.cfg ?? loadConfig();
+}
+
 function toScopedAccountKey(scopeKey: string, accountId: string): string {
   return `${scopeKey}::${accountId}`;
 }
@@ -129,7 +143,7 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
       return;
     }
     const scopeKey = normalizeScopeKey(opts?.scopeKey);
-    const cfg = opts?.cfg ?? loadConfig();
+    const cfg = resolveScopedConfig(loadConfig, opts);
     resetDirectoryCache({ channel: channelId, accountId });
     const store = getStore(channelId);
     const accountIds = accountId ? [accountId] : plugin.config.listAccountIds(cfg);
@@ -212,7 +226,7 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
   const stopChannel = async (channelId: ChannelId, accountId?: string, opts?: ChannelScopeOptions) => {
     const plugin = getChannelPlugin(channelId);
     const scopeKey = normalizeScopeKey(opts?.scopeKey);
-    const cfg = opts?.cfg ?? loadConfig();
+    const cfg = resolveScopedConfig(loadConfig, opts);
     const store = getStore(channelId);
     const knownIds = new Set<string>([
       ...(plugin ? plugin.config.listAccountIds(cfg) : []),
@@ -277,7 +291,7 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
       return;
     }
     const scopeKey = normalizeScopeKey(opts?.scopeKey);
-    const cfg = opts?.cfg ?? loadConfig();
+    const cfg = resolveScopedConfig(loadConfig, opts);
     const resolvedId =
       accountId ??
       resolveChannelDefaultAccountId({
@@ -298,7 +312,7 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
 
   const getRuntimeSnapshot = (opts?: ChannelScopeOptions): ChannelRuntimeSnapshot => {
     const scopeKey = normalizeScopeKey(opts?.scopeKey);
-    const cfg = opts?.cfg ?? loadConfig();
+    const cfg = resolveScopedConfig(loadConfig, opts);
     const channels: ChannelRuntimeSnapshot["channels"] = {};
     const channelAccounts: ChannelRuntimeSnapshot["channelAccounts"] = {};
     for (const plugin of listChannelPlugins()) {

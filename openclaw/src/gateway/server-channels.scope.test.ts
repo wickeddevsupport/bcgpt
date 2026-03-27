@@ -80,8 +80,42 @@ describe("channel manager runtime scopes", () => {
       cfg: workspaceCfg,
     });
 
-    expect(workspaceSnapshot.channelAccounts.discord?.shared?.running).toBe(true);
     expect(workspaceSnapshot.channelAccounts.discord?.shared?.connected).toBe(true);
-    expect(globalSnapshot.channelAccounts.discord?.shared?.running).not.toBe(true);
+    expect(globalSnapshot.channelAccounts.discord?.shared?.connected).not.toBe(true);
+  });
+
+  it("does not allow workspace runtime calls to fall back to global config", async () => {
+    const manager = createChannelManager({
+      loadConfig: () =>
+        ({
+          channels: {
+            discord: {
+              accounts: {
+                shared: { enabled: true },
+              },
+            },
+          },
+        }) as never,
+      channelLogs: {
+        discord: {
+          error: vi.fn(),
+        },
+      } as never,
+      channelRuntimeEnvs: {
+        discord: {},
+      } as never,
+    });
+
+    await expect(
+      manager.startChannel("discord" as never, "shared", {
+        scopeKey: "workspace:rohit",
+      }),
+    ).rejects.toThrow(/workspace-scoped channel runtime requires cfg/i);
+
+    expect(() =>
+      manager.getRuntimeSnapshot({
+        scopeKey: "workspace:rohit",
+      }),
+    ).toThrow(/workspace-scoped channel runtime requires cfg/i);
   });
 });

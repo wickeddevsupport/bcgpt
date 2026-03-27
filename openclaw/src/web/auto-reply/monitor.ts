@@ -62,7 +62,7 @@ export async function monitorWebChannel(
   };
   emitStatus();
 
-  const baseCfg = loadConfig();
+  const baseCfg = tuning.config ?? loadConfig();
   const account = resolveWhatsAppAccount({
     cfg: baseCfg,
     accountId: tuning.accountId,

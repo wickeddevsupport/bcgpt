@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GatewayRequestContext } from "./types.js";
 import { sendHandlers } from "./send.js";
 
@@ -30,6 +30,12 @@ vi.mock("../../infra/outbound/deliver.js", () => ({
   deliverOutboundPayloads: mocks.deliverOutboundPayloads,
 }));
 
+vi.mock("../workspace-config.js", () => ({
+  loadEffectiveWorkspaceConfig: vi.fn(async () => {
+    throw new Error("workspace config unavailable");
+  }),
+}));
+
 vi.mock("../../config/sessions.js", async () => {
   const actual = await vi.importActual<typeof import("../../config/sessions.js")>(
     "../../config/sessions.js",
@@ -47,6 +53,10 @@ const makeContext = (): GatewayRequestContext =>
   }) as unknown as GatewayRequestContext;
 
 describe("gateway send mirroring", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("does not mirror when delivery returns no results", async () => {
     mocks.deliverOutboundPayloads.mockResolvedValue([]);
 
@@ -189,6 +199,44 @@ describe("gateway send mirroring", () => {
           sessionKey: "agent:main:slack:channel:resolved",
           agentId: "main",
         }),
+      }),
+    );
+  });
+
+  it("fails closed for workspace clients when the workspace config cannot be loaded", async () => {
+    const respond = vi.fn();
+    await sendHandlers.send({
+      params: {
+        to: "channel:C1",
+        message: "hi",
+        channel: "slack",
+        idempotencyKey: "idem-workspace-fail-closed",
+      },
+      respond,
+      context: makeContext(),
+      req: { type: "req", id: "1", method: "send" },
+      client: {
+        pmosWorkspaceId: "workspace-rohit",
+        pmosRole: "workspace_admin",
+      } as never,
+      isWebchatConnect: () => false,
+    });
+
+    expect(mocks.deliverOutboundPayloads).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({
+        code: "UNAVAILABLE",
+        message: expect.stringContaining(
+          "failed to load workspace-scoped send config for workspace-rohit",
+        ),
+      }),
+      expect.objectContaining({
+        channel: "slack",
+        error: expect.stringContaining(
+          "failed to load workspace-scoped send config for workspace-rohit",
+        ),
       }),
     );
   });

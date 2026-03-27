@@ -161,6 +161,44 @@ describe("web auto-reply", () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
     await run;
   });
+
+  it("uses the provided workspace config instead of reloading global config", async () => {
+    setLoadConfigMock(() => {
+      throw new Error("should not load global config");
+    });
+
+    const listenerFactory = vi.fn(async () => ({
+      close: vi.fn(),
+      onClose: Promise.resolve(),
+    }));
+    const runtime = {
+      log: vi.fn(),
+      error: vi.fn(),
+      exit: vi.fn(),
+    };
+
+    await monitorWebChannel(
+      false,
+      listenerFactory,
+      false,
+      async () => ({ text: "ok" }),
+      runtime as never,
+      undefined,
+      {
+        config: {
+          channels: {
+            whatsapp: {
+              allowFrom: ["*"],
+            },
+          },
+          messages: {},
+        } as never,
+      },
+    );
+
+    expect(listenerFactory).toHaveBeenCalledTimes(1);
+  });
+
   it("forces reconnect when watchdog closes without onClose", async () => {
     vi.useFakeTimers();
     const sleep = vi.fn(async () => {});
