@@ -49,6 +49,9 @@ export function buildGatewayCronService(params: {
     }
   };
 
+  const workspaceSessionStorePath = (workspaceId: string) =>
+    `~/.openclaw/workspaces/${workspaceId}/agents/{agentId}/sessions/sessions.json`;
+
   const resolveWorkspaceCronAgentSync = (params: {
     requestedAgentId?: string | null;
     workspaceId?: string;
@@ -75,19 +78,24 @@ export function buildGatewayCronService(params: {
     const agentId = hasRequestedAgent
       ? normalizedRequested
       : resolveDefaultAgentId(cfgForAgentResolution);
+    const mergedSession =
+      workspaceCfg && workspaceCfg.session && typeof workspaceCfg.session === "object" && !Array.isArray(workspaceCfg.session)
+        ? { ...runtimeConfig.session, ...workspaceCfg.session }
+        : { ...runtimeConfig.session };
+    if (
+      params.workspaceId?.trim() &&
+      (!mergedSession.store ||
+        typeof mergedSession.store !== "string" ||
+        !mergedSession.store.includes(`/workspaces/${params.workspaceId.trim()}/`))
+    ) {
+      mergedSession.store = workspaceSessionStorePath(params.workspaceId.trim());
+    }
     return {
       agentId,
-      cfg: workspaceCfg
-        ? ({
-            ...runtimeConfig,
-            session:
-              workspaceCfg.session &&
-              typeof workspaceCfg.session === "object" &&
-              !Array.isArray(workspaceCfg.session)
-                ? { ...runtimeConfig.session, ...workspaceCfg.session }
-                : runtimeConfig.session,
-          } as ReturnType<typeof loadConfig>)
-        : runtimeConfig,
+      cfg: {
+        ...runtimeConfig,
+        session: mergedSession,
+      } as ReturnType<typeof loadConfig>,
     };
   };
 
@@ -107,10 +115,19 @@ export function buildGatewayCronService(params: {
   };
 
   const defaultAgentId = resolveDefaultAgentId(params.cfg);
-  const resolveSessionStorePath = (agentId?: string) =>
-    resolveStorePath(params.cfg.session?.store, {
-      agentId: agentId ?? defaultAgentId,
+  const resolveSessionStorePath = (agentId?: string, workspaceId?: string) => {
+    const resolvedAgentId = agentId ?? defaultAgentId;
+    if (workspaceId?.trim()) {
+      const { cfg } = resolveWorkspaceCronAgentSync({
+        requestedAgentId: resolvedAgentId,
+        workspaceId,
+      });
+      return resolveStorePath(cfg.session?.store, { agentId: resolvedAgentId });
+    }
+    return resolveStorePath(params.cfg.session?.store, {
+      agentId: resolvedAgentId,
     });
+  };
   const sessionStorePath = resolveSessionStorePath(defaultAgentId);
 
   const cron = new CronService({
@@ -133,9 +150,27 @@ export function buildGatewayCronService(params: {
     },
     requestHeartbeatNow,
     runHeartbeatOnce: async (opts) => {
-      const runtimeConfig = loadConfig();
+      let runtimeConfig = loadConfig();
+      if (opts?.workspaceId?.trim()) {
+        try {
+          const { loadEffectiveWorkspaceConfig } = await import("./workspace-config.js");
+          runtimeConfig = (await loadEffectiveWorkspaceConfig(
+            opts.workspaceId.trim(),
+          )) as ReturnType<typeof loadConfig>;
+        } catch {
+          runtimeConfig = resolveWorkspaceCronAgentSync({
+            requestedAgentId: opts?.agentId,
+            workspaceId: opts?.workspaceId,
+          }).cfg;
+        }
+      }
+      const { agentId } = resolveWorkspaceCronAgentSync({
+        requestedAgentId: opts?.agentId,
+        workspaceId: opts?.workspaceId,
+      });
       return await runHeartbeatOnce({
         cfg: runtimeConfig,
+        agentId,
         reason: opts?.reason,
         deps: { ...params.deps, runtime: defaultRuntime },
       });

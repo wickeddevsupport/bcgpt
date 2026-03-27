@@ -1,5 +1,6 @@
 import os from "node:os";
 import path from "node:path";
+import type { OpenClawConfig } from "../config.js";
 import type { SessionEntry } from "./types.js";
 import { expandHomePrefix, resolveRequiredHomeDir } from "../../infra/home-dir.js";
 import { DEFAULT_AGENT_ID, normalizeAgentId } from "../../routing/session-key.js";
@@ -30,6 +31,13 @@ export function resolveSessionTranscriptsDirForAgent(
   return resolveAgentSessionsDir(agentId, env, homedir);
 }
 
+export function resolveSessionTranscriptsDirForConfig(
+  cfg: OpenClawConfig,
+  agentId?: string,
+): string {
+  return path.dirname(resolveStorePath(cfg.session?.store, { agentId }));
+}
+
 export function resolveDefaultSessionStorePath(agentId?: string): string {
   return path.join(resolveAgentSessionsDir(agentId), "sessions.json");
 }
@@ -48,6 +56,23 @@ export function resolveSessionTranscriptPath(
   const fileName =
     safeTopicId !== undefined ? `${sessionId}-topic-${safeTopicId}.jsonl` : `${sessionId}.jsonl`;
   return path.join(resolveAgentSessionsDir(agentId), fileName);
+}
+
+export function resolveSessionTranscriptPathForConfig(
+  cfg: OpenClawConfig,
+  sessionId: string,
+  agentId?: string,
+  topicId?: string | number,
+): string {
+  const safeTopicId =
+    typeof topicId === "string"
+      ? encodeURIComponent(topicId)
+      : typeof topicId === "number"
+        ? String(topicId)
+        : undefined;
+  const fileName =
+    safeTopicId !== undefined ? `${sessionId}-topic-${safeTopicId}.jsonl` : `${sessionId}.jsonl`;
+  return path.join(resolveSessionTranscriptsDirForConfig(cfg, agentId), fileName);
 }
 
 export function resolveSessionFilePath(

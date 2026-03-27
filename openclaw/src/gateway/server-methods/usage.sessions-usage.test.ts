@@ -23,8 +23,8 @@ vi.mock("../session-utils.js", async () => {
 });
 
 vi.mock("../../infra/session-cost-usage.js", async () => {
-  const actual = await vi.importActual<typeof import("../../infra/session-cost-usage.js")>(
-    "../../infra/session-cost-usage.js",
+const actual = await vi.importActual<typeof import("../../infra/session-cost-usage.js")>(
+      "../../infra/session-cost-usage.js",
   );
   return {
     ...actual,
@@ -66,6 +66,17 @@ vi.mock("../../infra/session-cost-usage.js", async () => {
     })),
   };
 });
+
+vi.mock("../workspace-config.js", () => ({
+  loadEffectiveWorkspaceConfig: vi.fn(async () => ({
+    agents: {
+      list: [{ id: "assistant", workspaceId: "ws-rohit", default: true }],
+    },
+    session: {
+      store: "~/.openclaw/workspaces/ws-rohit/agents/{agentId}/sessions/sessions.json",
+    },
+  })),
+}));
 
 import { discoverAllSessions } from "../../infra/session-cost-usage.js";
 import { loadCombinedSessionStoreForGateway } from "../session-utils.js";
@@ -142,5 +153,29 @@ describe("sessions.usage", () => {
     const result = respond.mock.calls[0]?.[1] as unknown as { sessions: Array<{ key: string }> };
     expect(result.sessions).toHaveLength(1);
     expect(result.sessions[0]?.key).toBe(storeKey);
+  });
+
+  it("uses workspace-effective config for PMOS session discovery", async () => {
+    const respond = vi.fn();
+
+    await usageHandlers["sessions.usage"]({
+      respond,
+      client: {
+        pmosWorkspaceId: "ws-rohit",
+      },
+      params: {
+        startDate: "2026-02-01",
+        endDate: "2026-02-02",
+        limit: 10,
+      },
+    } as unknown as Parameters<(typeof usageHandlers)["sessions.usage"]>[0]);
+
+    expect(vi.mocked(discoverAllSessions)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(discoverAllSessions).mock.calls[0]?.[0]?.agentId).toBe("assistant");
+    expect(vi.mocked(discoverAllSessions).mock.calls[0]?.[0]?.config).toMatchObject({
+      session: {
+        store: "~/.openclaw/workspaces/ws-rohit/agents/{agentId}/sessions/sessions.json",
+      },
+    });
   });
 });

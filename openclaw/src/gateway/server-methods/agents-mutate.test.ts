@@ -6,6 +6,8 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   loadConfigReturn: {} as Record<string, unknown>,
+  readWorkspaceConfig: vi.fn(async () => ({})),
+  writeWorkspaceConfig: vi.fn(async () => {}),
   listAgentEntries: vi.fn(() => [] as Array<{ agentId: string }>),
   findAgentEntryIndex: vi.fn(() => -1),
   applyAgentConfig: vi.fn((_cfg: unknown, _opts: unknown) => ({})),
@@ -30,6 +32,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../config/config.js", () => ({
   loadConfig: () => mocks.loadConfigReturn,
   writeConfigFile: mocks.writeConfigFile,
+}));
+
+vi.mock("../workspace-config.js", () => ({
+  readWorkspaceConfig: mocks.readWorkspaceConfig,
+  writeWorkspaceConfig: mocks.writeWorkspaceConfig,
 }));
 
 vi.mock("../../commands/agents.config.js", () => ({
@@ -57,6 +64,7 @@ vi.mock("../../agents/workspace.js", async () => {
 
 vi.mock("../../config/sessions/paths.js", () => ({
   resolveSessionTranscriptsDirForAgent: mocks.resolveSessionTranscriptsDirForAgent,
+  resolveSessionTranscriptsDirForConfig: mocks.resolveSessionTranscriptsDirForAgent,
 }));
 
 vi.mock("../../browser/trash.js", () => ({
@@ -121,6 +129,7 @@ describe("agents.create", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.loadConfigReturn = {};
+    mocks.readWorkspaceConfig.mockResolvedValue({});
     mocks.findAgentEntryIndex.mockReturnValue(-1);
     mocks.applyAgentConfig.mockImplementation((_cfg, _opts) => ({}));
   });
@@ -270,6 +279,12 @@ describe("agents.create", () => {
         agentDir: "/resolved/~/.openclaw/workspaces/ws-123/agents/ws-agent/agent",
       }),
     );
+    expect(mocks.writeWorkspaceConfig).toHaveBeenCalled();
+    expect(mocks.writeConfigFile).not.toHaveBeenCalled();
+    expect(mocks.fsMkdir).toHaveBeenCalledWith(
+      "/resolved/~/.openclaw/workspaces/ws-123/agents/ws-agent/sessions",
+      { recursive: true },
+    );
   });
 });
 
@@ -277,6 +292,7 @@ describe("agents.update", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.loadConfigReturn = {};
+    mocks.readWorkspaceConfig.mockResolvedValue({});
     mocks.findAgentEntryIndex.mockReturnValue(0);
     // agent entry used by update/delete handlers
     mocks.listAgentEntries.mockReturnValue([{ id: "test-agent", workspaceId: undefined } as any]);
@@ -335,6 +351,7 @@ describe("agents.delete", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.loadConfigReturn = {};
+    mocks.readWorkspaceConfig.mockResolvedValue({});
     mocks.findAgentEntryIndex.mockReturnValue(0);
     // agent entry used by update/delete handlers
     mocks.listAgentEntries.mockReturnValue([{ id: "test-agent", workspaceId: undefined } as any]);

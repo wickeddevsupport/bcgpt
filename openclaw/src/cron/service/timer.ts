@@ -283,7 +283,7 @@ export async function onTimer(state: CronServiceState) {
         for (const job of state.store.jobs) {
           const agentId =
             typeof job.agentId === "string" && job.agentId.trim() ? job.agentId : defaultAgentId;
-          storePaths.add(state.deps.resolveSessionStorePath(agentId));
+          storePaths.add(state.deps.resolveSessionStorePath(agentId, job.workspaceId));
         }
       } else {
         storePaths.add(state.deps.resolveSessionStorePath(defaultAgentId));
@@ -425,7 +425,11 @@ async function executeJobCore(
 
       let heartbeatResult: HeartbeatRunResult;
       for (;;) {
-        heartbeatResult = await state.deps.runHeartbeatOnce({ reason });
+        heartbeatResult = await state.deps.runHeartbeatOnce({
+          reason,
+          agentId: job.agentId,
+          workspaceId: job.workspaceId,
+        });
         if (
           heartbeatResult.status !== "skipped" ||
           heartbeatResult.reason !== "requests-in-flight"

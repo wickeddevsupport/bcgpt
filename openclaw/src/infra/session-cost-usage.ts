@@ -7,6 +7,7 @@ import type { SessionEntry } from "../config/sessions/types.js";
 import { normalizeUsage } from "../agents/usage.js";
 import {
   resolveSessionFilePath,
+  resolveSessionTranscriptsDirForConfig,
   resolveSessionTranscriptsDirForAgent,
 } from "../config/sessions/paths.js";
 import { countToolResults, extractToolCallNames } from "../utils/transcript-tools.js";
@@ -393,7 +394,9 @@ export async function loadCostUsageSummary(params?: {
   const dailyMap = new Map<string, CostUsageTotals>();
   const totals = emptyTotals();
 
-  const sessionsDir = resolveSessionTranscriptsDirForAgent(params?.agentId);
+  const sessionsDir = params?.config
+    ? resolveSessionTranscriptsDirForConfig(params.config, params.agentId)
+    : resolveSessionTranscriptsDirForAgent(params?.agentId);
   const entries = await fs.promises.readdir(sessionsDir, { withFileTypes: true }).catch(() => []);
   const files = (
     await Promise.all(
@@ -473,8 +476,11 @@ export async function discoverAllSessions(params?: {
   agentId?: string;
   startMs?: number;
   endMs?: number;
+  config?: OpenClawConfig;
 }): Promise<DiscoveredSession[]> {
-  const sessionsDir = resolveSessionTranscriptsDirForAgent(params?.agentId);
+  const sessionsDir = params?.config
+    ? resolveSessionTranscriptsDirForConfig(params.config, params.agentId)
+    : resolveSessionTranscriptsDirForAgent(params?.agentId);
   const entries = await fs.promises.readdir(sessionsDir, { withFileTypes: true }).catch(() => []);
 
   const discovered: DiscoveredSession[] = [];

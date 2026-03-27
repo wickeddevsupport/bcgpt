@@ -32,12 +32,16 @@ export type CronServiceDeps = {
   /** Default agent id for jobs without an agent id. */
   defaultAgentId?: string;
   /** Resolve session store path for a given agent id. */
-  resolveSessionStorePath?: (agentId?: string) => string;
+  resolveSessionStorePath?: (agentId?: string, workspaceId?: string) => string;
   /** Path to the session store (sessions.json) for reaper use. */
   sessionStorePath?: string;
   enqueueSystemEvent: (text: string, opts?: { agentId?: string; workspaceId?: string }) => void;
   requestHeartbeatNow: (opts?: { reason?: string }) => void;
-  runHeartbeatOnce?: (opts?: { reason?: string }) => Promise<HeartbeatRunResult>;
+  runHeartbeatOnce?: (opts?: {
+    reason?: string;
+    agentId?: string;
+    workspaceId?: string;
+  }) => Promise<HeartbeatRunResult>;
   runIsolatedAgentJob: (params: { job: CronJob; message: string }) => Promise<{
     status: "ok" | "error" | "skipped";
     summary?: string;

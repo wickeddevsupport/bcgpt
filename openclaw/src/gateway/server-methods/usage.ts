@@ -12,7 +12,7 @@ import type {
 } from "../../infra/session-cost-usage.js";
 import type { GatewayRequestHandlers } from "./types.js";
 import { loadConfig } from "../../config/config.js";
-import { resolveSessionFilePath } from "../../config/sessions/paths.js";
+import { resolveSessionTranscriptPathForConfig } from "../../config/sessions/paths.js";
 import { loadProviderUsageSummary } from "../../infra/provider-usage.js";
 import {
   loadCostUsageSummary,
@@ -31,7 +31,7 @@ import {
 import {
   listAgentsForGateway,
   loadCombinedSessionStoreForGateway,
-  loadSessionEntry,
+  loadSessionEntryForConfig,
 } from "../session-utils.js";
 import { isSuperAdmin } from "../workspace-context.js";
 import type { GatewayClient } from "./types.js";
@@ -47,6 +47,59 @@ type CostUsageCacheEntry = {
 };
 
 const costUsageCache = new Map<string, CostUsageCacheEntry>();
+
+async function loadUsageConfigForClient(client?: GatewayClient): Promise<ReturnType<typeof loadConfig>> {
+  let cfg = loadConfig();
+  if (!client || isSuperAdmin(client)) {
+    return cfg;
+  }
+  const workspaceId =
+    typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  if (!workspaceId) {
+    return cfg;
+  }
+  try {
+    const { loadEffectiveWorkspaceConfig } = await import("../workspace-config.js");
+    const effectiveCfg = await loadEffectiveWorkspaceConfig(workspaceId);
+    if (effectiveCfg && typeof effectiveCfg === "object") {
+      cfg = effectiveCfg as typeof cfg;
+    }
+  } catch {
+    // Fall back to global config if workspace-effective config is unavailable.
+  }
+  return cfg;
+}
+
+function resolveUsageCacheScope(config: ReturnType<typeof loadConfig>): string {
+  const sessionStore =
+    typeof config.session?.store === "string" && config.session.store.trim()
+      ? config.session.store.trim()
+      : "";
+  if (sessionStore) {
+    return `session:${sessionStore}`;
+  }
+  const agents = listAgentsForGateway(config).agents;
+  if (agents.length === 0) {
+    return "global";
+  }
+  return agents
+    .map((agent) => `${agent.workspaceId ?? "global"}:${normalizeAgentId(agent.id)}`)
+    .sort()
+    .join("|");
+}
+
+function resolveUsageSessionFile(
+  config: ReturnType<typeof loadConfig>,
+  sessionId: string,
+  entry?: SessionEntry,
+  agentId?: string,
+): string {
+  const explicit = entry?.sessionFile?.trim();
+  if (explicit) {
+    return explicit;
+  }
+  return resolveSessionTranscriptPathForConfig(config, sessionId, agentId);
+}
 
 /**
  * Parse a date string (YYYY-MM-DD) to start of day timestamp in UTC.
@@ -133,6 +186,7 @@ async function discoverAllSessionsForUsage(params: {
         agentId: agent.id,
         startMs: params.startMs,
         endMs: params.endMs,
+        config: params.config,
       });
       return sessions.map((session) => ({ ...session, agentId: agent.id }));
     }),
@@ -209,7 +263,7 @@ async function loadCostUsageSummaryCached(params: {
   endMs: number;
   config: ReturnType<typeof loadConfig>;
 }): Promise<CostUsageSummary> {
-  const cacheKey = `${params.startMs}-${params.endMs}`;
+  const cacheKey = `${resolveUsageCacheScope(params.config)}-${params.startMs}-${params.endMs}`;
   const now = Date.now();
   const cached = costUsageCache.get(cacheKey);
   if (cached?.summary && cached.updatedAt && now - cached.updatedAt < COST_USAGE_CACHE_TTL_MS) {
@@ -326,8 +380,8 @@ export const usageHandlers: GatewayRequestHandlers = {
     const summary = await loadProviderUsageSummary();
     respond(true, summary, undefined);
   },
-  "usage.cost": async ({ respond, params }) => {
-    const config = loadConfig();
+  "usage.cost": async ({ respond, params, client }) => {
+    const config = await loadUsageConfigForClient(client);
     const { startMs, endMs } = parseDateRange({
       startDate: params?.startDate,
       endDate: params?.endDate,
@@ -350,7 +404,7 @@ export const usageHandlers: GatewayRequestHandlers = {
     }
 
     const p = params;
-    const config = loadConfig();
+    const config = await loadUsageConfigForClient(client);
     const workspaceAgentIds = resolveUsageWorkspaceAgentIds(config, client);
     const { startMs, endMs } = parseDateRange({
       startDate: p.startDate,
@@ -438,9 +492,7 @@ export const usageHandlers: GatewayRequestHandlers = {
       const sessionId = storeEntry?.sessionId ?? keyRest;
 
       // Resolve the session file path
-      const sessionFile = resolveSessionFilePath(sessionId, storeEntry, {
-        agentId: agentIdFromKey,
-      });
+      const sessionFile = resolveUsageSessionFile(config, sessionId, storeEntry, agentIdFromKey);
 
       try {
         const stats = fs.statSync(sessionFile);
@@ -863,7 +915,7 @@ export const usageHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const config = loadConfig();
+    const config = await loadUsageConfigForClient(client);
     const workspaceAgentIds = resolveUsageWorkspaceAgentIds(config, client);
     if (!canAccessUsageSessionKey(config, key, workspaceAgentIds)) {
       respond(
@@ -873,15 +925,14 @@ export const usageHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    const { entry } = loadSessionEntry(key);
+    const { entry } = loadSessionEntryForConfig(config, key);
 
     // For discovered sessions (not in store), try using key as sessionId directly
     const parsed = parseAgentSessionKey(key);
     const agentId = parsed?.agentId;
     const rawSessionId = parsed?.rest ?? key;
     const sessionId = entry?.sessionId ?? rawSessionId;
-    const sessionFile =
-      entry?.sessionFile ?? resolveSessionFilePath(rawSessionId, entry, { agentId });
+    const sessionFile = resolveUsageSessionFile(config, rawSessionId, entry, agentId);
 
     const timeseries = await loadSessionUsageTimeSeries({
       sessionId,
@@ -914,21 +965,20 @@ export const usageHandlers: GatewayRequestHandlers = {
         ? Math.min(params.limit, 1000)
         : 200;
 
-    const config = loadConfig();
+    const config = await loadUsageConfigForClient(client);
     const workspaceAgentIds = resolveUsageWorkspaceAgentIds(config, client);
     if (!canAccessUsageSessionKey(config, key, workspaceAgentIds)) {
       respond(true, { logs: [] }, undefined);
       return;
     }
-    const { entry } = loadSessionEntry(key);
+    const { entry } = loadSessionEntryForConfig(config, key);
 
     // For discovered sessions (not in store), try using key as sessionId directly
     const parsed = parseAgentSessionKey(key);
     const agentId = parsed?.agentId;
     const rawSessionId = parsed?.rest ?? key;
     const sessionId = entry?.sessionId ?? rawSessionId;
-    const sessionFile =
-      entry?.sessionFile ?? resolveSessionFilePath(rawSessionId, entry, { agentId });
+    const sessionFile = resolveUsageSessionFile(config, rawSessionId, entry, agentId);
 
     const { loadSessionLogs } = await import("../../infra/session-cost-usage.js");
     const logs = await loadSessionLogs({

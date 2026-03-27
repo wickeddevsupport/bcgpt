@@ -25,8 +25,11 @@ import {
   listAgentEntries,
   pruneAgentConfig,
 } from "../../commands/agents.config.js";
-import { loadConfig, writeConfigFile } from "../../config/config.js";
-import { resolveSessionTranscriptsDirForAgent } from "../../config/sessions/paths.js";
+import { loadConfig, type OpenClawConfig, writeConfigFile } from "../../config/config.js";
+import {
+  resolveSessionTranscriptsDirForAgent,
+  resolveSessionTranscriptsDirForConfig,
+} from "../../config/sessions/paths.js";
 import { DEFAULT_AGENT_ID, normalizeAgentId } from "../../routing/session-key.js";
 import { resolveUserPath } from "../../utils.js";
 import {
@@ -50,6 +53,7 @@ import {
 } from "../workspace-context.js";
 import { auditLogger } from "../../security/audit-logger.js";
 import { rateLimiter } from "../../security/rate-limiter.js";
+import { readWorkspaceConfig, writeWorkspaceConfig } from "../workspace-config.js";
 
 const BOOTSTRAP_FILE_NAMES = [
   DEFAULT_AGENTS_FILENAME,
@@ -93,6 +97,18 @@ function resolveWorkspaceScopedAgentDir(
     return null;
   }
   return `~/.openclaw/workspaces/${workspaceId}/agents/${agentId}/agent`;
+}
+
+function resolveWorkspaceScopedSessionsDir(
+  client: { pmosWorkspaceId?: string | null } | undefined,
+  agentId: string,
+): string | null {
+  const workspaceId =
+    typeof client?.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  if (!workspaceId) {
+    return null;
+  }
+  return `~/.openclaw/workspaces/${workspaceId}/agents/${agentId}/sessions`;
 }
 
 async function statFile(filePath: string): Promise<FileMeta | null> {
@@ -221,6 +237,30 @@ async function loadAgentsConfigForClient(
   return cfg;
 }
 
+async function loadPersistedAgentsConfigForClient(
+  client: { pmosWorkspaceId?: string | null } | undefined,
+): Promise<OpenClawConfig> {
+  const workspaceId =
+    typeof client?.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  if (workspaceId && !isSuperAdmin(client as never)) {
+    return (((await readWorkspaceConfig(workspaceId)) ?? {}) as OpenClawConfig) ?? {};
+  }
+  return loadConfig();
+}
+
+async function persistAgentsConfigForClient(
+  client: { pmosWorkspaceId?: string | null } | undefined,
+  cfg: OpenClawConfig,
+): Promise<void> {
+  const workspaceId =
+    typeof client?.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  if (workspaceId && !isSuperAdmin(client as never)) {
+    await writeWorkspaceConfig(workspaceId, cfg as unknown as Record<string, unknown>);
+    return;
+  }
+  await writeConfigFile(cfg);
+}
+
 export const agentsHandlers: GatewayRequestHandlers = {
   "agents.list": async ({ params, respond, client }) => {
     if (!validateAgentsListParams(params)) {
@@ -279,7 +319,8 @@ export const agentsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const cfg = loadConfig();
+    const effectiveCfg = await loadAgentsConfigForClient(client);
+    const persistedCfg = await loadPersistedAgentsConfigForClient(client);
     const rawName = String(params.name ?? "").trim();
     const agentId = normalizeAgentId(rawName);
     if (agentId === DEFAULT_AGENT_ID) {
@@ -292,7 +333,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
     }
 
     // Check for existing agent with same ID in the same workspace
-    const existingAgents = listAgentEntries(cfg);
+    const existingAgents = listAgentEntries(effectiveCfg);
     if (client && !isSuperAdmin(client)) {
       const workspaceFiltered = filterByWorkspace(existingAgents, client);
       if (workspaceFiltered.some((a) => a.id === agentId)) {
@@ -327,7 +368,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
       ? params.skills.map((s: unknown) => String(s).trim()).filter(Boolean)
       : undefined;
 
-    let nextConfig = applyAgentConfig(cfg, {
+    let nextConfig = applyAgentConfig(persistedCfg, {
       agentId,
       name: rawName,
       workspace: workspaceDir,
@@ -358,11 +399,17 @@ export const agentsHandlers: GatewayRequestHandlers = {
 
     // Ensure workspace & transcripts exist BEFORE writing config so a failure
     // here does not leave a broken config entry behind.
-    const skipBootstrap = Boolean(nextConfig.agents?.defaults?.skipBootstrap);
+    const skipBootstrap = Boolean(effectiveCfg.agents?.defaults?.skipBootstrap);
     await ensureAgentWorkspace({ dir: workspaceDir, ensureBootstrapFiles: !skipBootstrap });
-    await fs.mkdir(resolveSessionTranscriptsDirForAgent(agentId), { recursive: true });
+    const workspaceSessionsDir = resolveWorkspaceScopedSessionsDir(client, agentId);
+    await fs.mkdir(
+      workspaceSessionsDir
+        ? resolveUserPath(workspaceSessionsDir)
+        : resolveSessionTranscriptsDirForConfig(nextConfig, agentId),
+      { recursive: true },
+    );
 
-    await writeConfigFile(nextConfig);
+    await persistAgentsConfigForClient(client, nextConfig);
 
     // Always write Name to IDENTITY.md; optionally include emoji/avatar/theme.
     const safeName = sanitizeIdentityLine(rawName);
@@ -410,9 +457,10 @@ export const agentsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const cfg = loadConfig();
+    const effectiveCfg = await loadAgentsConfigForClient(client);
+    const persistedCfg = await loadPersistedAgentsConfigForClient(client);
     const agentId = normalizeAgentId(String(params.agentId ?? ""));
-    const agentEntries = listAgentEntries(cfg);
+    const agentEntries = listAgentEntries(effectiveCfg);
     const agentEntry = agentEntries.find((a) => normalizeAgentId(a.id) === agentId);
     
     if (!agentEntry) {
@@ -456,7 +504,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
       ? params.skills.map((s: unknown) => String(s).trim()).filter(Boolean)
       : undefined;
 
-    let nextConfig = applyAgentConfig(cfg, {
+    let nextConfig = applyAgentConfig(persistedCfg, {
       agentId,
       ...(typeof params.name === "string" && params.name.trim()
         ? { name: params.name.trim() }
@@ -494,10 +542,10 @@ export const agentsHandlers: GatewayRequestHandlers = {
       });
     }
 
-    await writeConfigFile(nextConfig);
+    await persistAgentsConfigForClient(client, nextConfig);
 
     if (workspaceDir) {
-      const skipBootstrap = Boolean(nextConfig.agents?.defaults?.skipBootstrap);
+      const skipBootstrap = Boolean(effectiveCfg.agents?.defaults?.skipBootstrap);
       await ensureAgentWorkspace({ dir: workspaceDir, ensureBootstrapFiles: !skipBootstrap });
     }
 
@@ -541,7 +589,8 @@ export const agentsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const cfg = loadConfig();
+    const effectiveCfg = await loadAgentsConfigForClient(client);
+    const persistedCfg = await loadPersistedAgentsConfigForClient(client);
     const agentId = normalizeAgentId(String(params.agentId ?? ""));
     if (agentId === DEFAULT_AGENT_ID) {
       respond(
@@ -552,7 +601,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
       return;
     }
     
-    const agentEntries = listAgentEntries(cfg);
+    const agentEntries = listAgentEntries(effectiveCfg);
     const agentEntry = agentEntries.find((a) => normalizeAgentId(a.id) === agentId);
     
     if (!agentEntry) {
@@ -579,12 +628,15 @@ export const agentsHandlers: GatewayRequestHandlers = {
     }
 
     const deleteFiles = typeof params.deleteFiles === "boolean" ? params.deleteFiles : true;
-    const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
-    const agentDir = resolveAgentDir(cfg, agentId);
-    const sessionsDir = resolveSessionTranscriptsDirForAgent(agentId);
+    const workspaceDir = resolveAgentWorkspaceDir(effectiveCfg, agentId);
+    const agentDir = resolveAgentDir(effectiveCfg, agentId);
+    const workspaceSessionsDir = resolveWorkspaceScopedSessionsDir(client, agentId);
+    const sessionsDir = workspaceSessionsDir
+      ? resolveUserPath(workspaceSessionsDir)
+      : resolveSessionTranscriptsDirForConfig(effectiveCfg, agentId);
 
-    const result = pruneAgentConfig(cfg, agentId);
-    await writeConfigFile(result.config);
+    const result = pruneAgentConfig(persistedCfg, agentId);
+    await persistAgentsConfigForClient(client, result.config as OpenClawConfig);
 
     if (deleteFiles) {
       await Promise.all([

@@ -122,4 +122,43 @@ describe("workspace-config isolation", () => {
     ).toBe("workspace-env-token");
     expect(Array.isArray(effective.bindings)).toBe(true);
   });
+
+  it("materializes workspace-scoped session, cron, and agent paths for inherited agents", async () => {
+    mockGlobalConfig = {
+      agents: {
+        defaults: {
+          workspace: "~/.openclaw/workspace-main",
+        },
+        list: [
+          { id: "assistant", default: true },
+          { id: "rajan-only", workspaceId: "other-workspace" },
+        ],
+      },
+      session: {
+        store: "~/.openclaw/agents/{agentId}/sessions/sessions.json",
+      },
+      cron: {
+        store: "~/.openclaw/cron/jobs.json",
+      },
+    };
+
+    const { loadEffectiveWorkspaceConfig } = await import("./workspace-config.js");
+    const effective = await loadEffectiveWorkspaceConfig(workspaceId);
+    const agents = ((effective.agents as Record<string, unknown> | undefined)?.list ?? []) as Array<
+      Record<string, unknown>
+    >;
+    const defaults = (effective.agents as Record<string, unknown> | undefined)
+      ?.defaults as Record<string, unknown> | undefined;
+    const session = effective.session as Record<string, unknown> | undefined;
+    const cron = effective.cron as Record<string, unknown> | undefined;
+
+    expect(agents).toHaveLength(1);
+    expect(agents[0]?.id).toBe("assistant");
+    expect(agents[0]?.workspaceId).toBe(workspaceId);
+    expect(defaults?.workspace).toBe(`~/.openclaw/workspaces/${workspaceId}/assistant`);
+    expect(session?.store).toBe(
+      `~/.openclaw/workspaces/${workspaceId}/agents/{agentId}/sessions/sessions.json`,
+    );
+    expect(cron?.store).toBe(`~/.openclaw/workspaces/${workspaceId}/cron/jobs.json`);
+  });
 });
