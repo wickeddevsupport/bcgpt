@@ -14,6 +14,7 @@ import { enqueueSystemEvent } from "../infra/system-events.js";
 import { getChildLogger } from "../logging.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 import { defaultRuntime } from "../runtime.js";
+import { resolveCronRuntimeStorePath, syncCronRuntimeStoreFromSourcesSync } from "./cron-runtime-store.js";
 import { workspaceConfigPath } from "./workspace-config.js";
 
 export type GatewayCronState = {
@@ -28,7 +29,13 @@ export function buildGatewayCronService(params: {
   broadcast: (event: string, payload: unknown, opts?: { dropIfSlow?: boolean }) => void;
 }): GatewayCronState {
   const cronLogger = getChildLogger({ module: "cron" });
-  const storePath = resolveCronStorePath(params.cfg.cron?.store);
+  const sourceStorePath = resolveCronStorePath(params.cfg.cron?.store);
+  try {
+    syncCronRuntimeStoreFromSourcesSync({ globalStorePath: sourceStorePath });
+  } catch (err) {
+    cronLogger.warn({ err: String(err), sourceStorePath }, "cron: failed to sync runtime store");
+  }
+  const storePath = resolveCronRuntimeStorePath(sourceStorePath);
   const cronEnabled = process.env.OPENCLAW_SKIP_CRON !== "1" && params.cfg.cron?.enabled !== false;
 
   const readWorkspaceConfigSync = (

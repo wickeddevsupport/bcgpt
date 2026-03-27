@@ -24,6 +24,8 @@ import {
 } from "../workspace-context.js";
 import { loadEffectiveWorkspaceConfig } from "../workspace-config.js";
 import { resolveDefaultAgentId } from "../../agents/agent-scope.js";
+import { loadConfig } from "../../config/config.js";
+import { syncCronSourceStoresFromRuntimeJobsSync } from "../cron-runtime-store.js";
 
 async function syncWorkspaceCronShadowStore(
   context: Parameters<GatewayRequestHandlers["cron.add"]>[0]["context"],
@@ -41,6 +43,18 @@ async function syncWorkspaceCronShadowStore(
     jobs,
   });
   return storePath;
+}
+
+async function syncCronSourceStores(
+  context: Parameters<GatewayRequestHandlers["cron.add"]>[0]["context"],
+  workspaceIds: string[] = [],
+) {
+  const jobs = await context.cron.list({ includeDisabled: true });
+  return syncCronSourceStoresFromRuntimeJobsSync({
+    jobs,
+    globalStorePath: resolveCronStorePath(loadConfig().cron?.store),
+    workspaceIds,
+  });
 }
 
 export const cronHandlers: GatewayRequestHandlers = {
@@ -169,6 +183,9 @@ export const cronHandlers: GatewayRequestHandlers = {
     const job = await context.cron.add(jobCreate);
     if (client?.pmosWorkspaceId && !isSuperAdmin(client)) {
       await syncWorkspaceCronShadowStore(context, client.pmosWorkspaceId);
+      await syncCronSourceStores(context, [client.pmosWorkspaceId]);
+    } else {
+      await syncCronSourceStores(context);
     }
     respond(true, job, undefined);
   },
@@ -243,6 +260,9 @@ export const cronHandlers: GatewayRequestHandlers = {
     const job = await context.cron.update(jobId, patch);
     if (client?.pmosWorkspaceId && !isSuperAdmin(client)) {
       await syncWorkspaceCronShadowStore(context, client.pmosWorkspaceId);
+      await syncCronSourceStores(context, [client.pmosWorkspaceId]);
+    } else {
+      await syncCronSourceStores(context);
     }
     respond(true, job, undefined);
   },
@@ -296,6 +316,9 @@ export const cronHandlers: GatewayRequestHandlers = {
     const result = await context.cron.remove(jobId);
     if (client?.pmosWorkspaceId && !isSuperAdmin(client)) {
       await syncWorkspaceCronShadowStore(context, client.pmosWorkspaceId);
+      await syncCronSourceStores(context, [client.pmosWorkspaceId]);
+    } else {
+      await syncCronSourceStores(context);
     }
     respond(true, result, undefined);
   },
