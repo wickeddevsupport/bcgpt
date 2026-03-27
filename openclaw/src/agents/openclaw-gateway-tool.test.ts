@@ -193,6 +193,85 @@ describe("gateway tool", () => {
     }
   });
 
+  it("refreshes the live workspace tool config after local config.apply", async () => {
+    const previousStateDir = process.env.OPENCLAW_STATE_DIR;
+    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-ws-office-"));
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+
+    try {
+      const sharedConfig = {
+        agents: {
+          list: [{ id: "assistant", workspaceId: "ws-rohit", default: true }],
+        },
+      };
+      const tools = createOpenClawTools({
+        agentSessionKey: "agent:assistant:webchat:session:abc",
+        config: sharedConfig,
+      });
+      const gatewayTool = tools.find((candidate) => candidate.name === "gateway");
+      const agentsListTool = tools.find((candidate) => candidate.name === "agents_list");
+      expect(gatewayTool).toBeDefined();
+      expect(agentsListTool).toBeDefined();
+      if (!gatewayTool || !agentsListTool) {
+        throw new Error("missing workspace tools");
+      }
+
+      await gatewayTool.execute("call-ws-office-apply", {
+        action: "config.apply",
+        raw: JSON.stringify({
+          tools: {
+            agentToAgent: {
+              enabled: false,
+            },
+          },
+          agents: {
+            list: [
+              { id: "assistant", workspaceId: "ws-rohit", default: true },
+              { id: "marketing-agent", workspaceId: "ws-rohit" },
+            ],
+          },
+        }),
+      });
+
+      const agentListResult = await agentsListTool.execute("call-ws-office-list", {});
+      expect(agentListResult.details).toMatchObject({
+        requester: "assistant",
+        allowAny: true,
+        agents: expect.arrayContaining([
+          expect.objectContaining({ id: "assistant", configured: true }),
+          expect.objectContaining({ id: "marketing-agent", configured: true }),
+        ]),
+      });
+
+      expect(sharedConfig).toMatchObject({
+        tools: {
+          agentToAgent: {
+            enabled: true,
+            allow: ["*"],
+          },
+        },
+        agents: {
+          list: expect.arrayContaining([
+            expect.objectContaining({
+              id: "assistant",
+              subagents: { allowAgents: ["*"] },
+            }),
+            expect.objectContaining({
+              id: "marketing-agent",
+              subagents: { allowAgents: ["*"] },
+            }),
+          ]),
+        },
+      });
+    } finally {
+      if (previousStateDir === undefined) {
+        delete process.env.OPENCLAW_STATE_DIR;
+      } else {
+        process.env.OPENCLAW_STATE_DIR = previousStateDir;
+      }
+    }
+  });
+
   it("allows workspace-scoped agents to request gateway restart", async () => {
     vi.useFakeTimers();
     const kill = vi.spyOn(process, "kill").mockImplementation(() => true);

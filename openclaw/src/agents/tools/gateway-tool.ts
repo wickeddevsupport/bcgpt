@@ -14,7 +14,12 @@ import {
   writeRestartSentinel,
 } from "../../infra/restart-sentinel.js";
 import { scheduleGatewaySigusr1Restart } from "../../infra/restart.js";
-import { readWorkspaceConfig, workspaceConfigPath, writeWorkspaceConfig } from "../../gateway/workspace-config.js";
+import {
+  applyWorkspaceAgentCollaborationDefaults,
+  readWorkspaceConfig,
+  workspaceConfigPath,
+  writeWorkspaceConfig,
+} from "../../gateway/workspace-config.js";
 import { resolveAgentConfig, resolveSessionAgentId } from "../agent-scope.js";
 import { stringEnum } from "../schema/typebox.js";
 import { type AnyAgentTool, jsonResult, readStringParam } from "./common.js";
@@ -85,6 +90,30 @@ async function buildWorkspaceScopedConfigResponse(workspaceId: string) {
   };
 }
 
+function normalizeWorkspaceScopedConfig(
+  workspaceId: string,
+  config: Record<string, unknown>,
+): Record<string, unknown> {
+  return applyWorkspaceAgentCollaborationDefaults(config, workspaceId) as Record<string, unknown>;
+}
+
+function syncConfigObjectInPlace(
+  target: OpenClawConfig | undefined,
+  next: Record<string, unknown>,
+): void {
+  if (!target || typeof target !== "object") {
+    return;
+  }
+  const merged = applyMergePatch(target as Record<string, unknown>, next);
+  if (!merged || typeof merged !== "object" || Array.isArray(merged)) {
+    return;
+  }
+  for (const key of Object.keys(target as Record<string, unknown>)) {
+    delete (target as Record<string, unknown>)[key];
+  }
+  Object.assign(target as Record<string, unknown>, merged as Record<string, unknown>);
+}
+
 function requireMatchingBaseHash(params: { provided?: string; actual?: string }) {
   const provided = params.provided?.trim();
   const actual = params.actual?.trim();
@@ -96,7 +125,12 @@ function requireMatchingBaseHash(params: { provided?: string; actual?: string })
   }
 }
 
-async function applyWorkspaceConfigReplace(workspaceId: string, raw: string, baseHash?: string) {
+async function applyWorkspaceConfigReplace(
+  workspaceId: string,
+  raw: string,
+  baseHash?: string,
+  targetConfig?: OpenClawConfig,
+) {
   const parsedRes = parseConfigJson5(raw);
   if (!parsedRes.ok) {
     throw new Error(parsedRes.error);
@@ -110,7 +144,9 @@ async function applyWorkspaceConfigReplace(workspaceId: string, raw: string, bas
     parsedRes.parsed,
     snapshot.config,
   ) as Record<string, unknown>;
-  await writeWorkspaceConfig(workspaceId, restored);
+  const normalized = normalizeWorkspaceScopedConfig(workspaceId, restored);
+  await writeWorkspaceConfig(workspaceId, normalized);
+  syncConfigObjectInPlace(targetConfig, normalized);
   return {
     ok: true,
     ...(await buildWorkspaceScopedConfigResponse(workspaceId)),
@@ -118,7 +154,12 @@ async function applyWorkspaceConfigReplace(workspaceId: string, raw: string, bas
   };
 }
 
-async function applyWorkspaceConfigPatch(workspaceId: string, raw: string, baseHash?: string) {
+async function applyWorkspaceConfigPatch(
+  workspaceId: string,
+  raw: string,
+  baseHash?: string,
+  targetConfig?: OpenClawConfig,
+) {
   const parsedRes = parseConfigJson5(raw);
   if (!parsedRes.ok) {
     throw new Error(parsedRes.error);
@@ -133,7 +174,12 @@ async function applyWorkspaceConfigPatch(workspaceId: string, raw: string, baseH
   if (!restored || typeof restored !== "object" || Array.isArray(restored)) {
     throw new Error("config.patch raw must be an object");
   }
-  await writeWorkspaceConfig(workspaceId, restored as Record<string, unknown>);
+  const normalized = normalizeWorkspaceScopedConfig(
+    workspaceId,
+    restored as Record<string, unknown>,
+  );
+  await writeWorkspaceConfig(workspaceId, normalized);
+  syncConfigObjectInPlace(targetConfig, normalized);
   return {
     ok: true,
     ...(await buildWorkspaceScopedConfigResponse(workspaceId)),
@@ -295,7 +341,12 @@ export function createGatewayTool(opts?: {
         const raw = readStringParam(params, "raw", { required: true });
         let baseHash = readStringParam(params, "baseHash");
         if (workspaceId) {
-          const result = await applyWorkspaceConfigReplace(workspaceId, raw, baseHash);
+          const result = await applyWorkspaceConfigReplace(
+            workspaceId,
+            raw,
+            baseHash,
+            opts?.config,
+          );
           return jsonResult({ ok: true, result });
         }
         if (!baseHash) {
@@ -325,7 +376,12 @@ export function createGatewayTool(opts?: {
         const raw = readStringParam(params, "raw", { required: true });
         let baseHash = readStringParam(params, "baseHash");
         if (workspaceId) {
-          const result = await applyWorkspaceConfigPatch(workspaceId, raw, baseHash);
+          const result = await applyWorkspaceConfigPatch(
+            workspaceId,
+            raw,
+            baseHash,
+            opts?.config,
+          );
           return jsonResult({ ok: true, result });
         }
         if (!baseHash) {
