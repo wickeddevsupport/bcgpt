@@ -2001,8 +2001,16 @@ export async function handlePmosAuthHttpRequest(params: {
         return true;
       }
       res.statusCode = 302;
-      res.setHeader("Location", started.authorizationUrl);
-      res.end();
+      sendHtml(
+        res,
+        501,
+        buildFigmaMcpPopupHtml({
+          origin: resolveRequestOrigin(req),
+          ok: false,
+          message:
+            "Official Figma MCP OAuth redirect is not available for PMOS. Use the workspace Figma panel sync instead.",
+        }),
+      );
       return true;
     } catch (err) {
       sendHtml(

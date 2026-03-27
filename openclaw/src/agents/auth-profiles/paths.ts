@@ -38,7 +38,7 @@ export function resolveWorkspacePrimaryAgentDir(
   if (!workspaceId) {
     return null;
   }
-  const resolved = path.normalize(resolveUserPath(agentDir));
+  const resolved = path.normalize(resolveUserPath(agentDir ?? resolveOpenClawAgentDir()));
   const marker = `${path.sep}workspaces${path.sep}${workspaceId}${path.sep}`;
   const markerIndex = resolved.lastIndexOf(marker);
   if (markerIndex === -1) {

@@ -107,7 +107,7 @@ type CompatGraphNode = {
   displayName: string;
   role: "trigger" | "action";
   rawType: string;
-  pieceHint?: string;
+  pieceHint: string | undefined;
   parameters: JsonObject;
   credentials: JsonObject | null;
 };
@@ -334,7 +334,7 @@ function sanitizeStepName(raw: string, fallbackPrefix: string, index: number): s
 
 function isNonEmptyObject(value: unknown): value is JsonObject {
   const obj = toObject(value);
-  return Boolean(obj) && Object.keys(obj).length > 0;
+  return obj !== null && Object.keys(obj).length > 0;
 }
 
 function hasCompatGraphDefinition(
@@ -372,7 +372,7 @@ function parseCompatGraphNodes(rawNodes: unknown): CompatGraphNode[] {
         credentials: toObject(obj.credentials),
       } satisfies CompatGraphNode;
     })
-    .filter((row): row is CompatGraphNode => Boolean(row));
+    .filter((row): row is CompatGraphNode => row !== null);
 
   if (parsed.length === 0) {
     return [];
