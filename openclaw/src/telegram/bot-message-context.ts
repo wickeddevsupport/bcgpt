@@ -26,8 +26,8 @@ import { logInboundDrop } from "../channels/logging.js";
 import { resolveMentionGatingWithBypass } from "../channels/mention-gating.js";
 import { recordInboundSession } from "../channels/session.js";
 import { formatCliCommand } from "../cli/command-format.js";
-import { loadConfig } from "../config/config.js";
 import { readSessionUpdatedAt, resolveStorePath } from "../config/sessions.js";
+import { resolveWorkspaceRoute } from "../gateway/workspace-routing.js";
 import { logVerbose, shouldLogVerbose } from "../globals.js";
 import { recordChannelActivity } from "../infra/channel-activity.js";
 import { upsertChannelPairingRequest } from "../pairing/pairing-store.js";
@@ -164,9 +164,8 @@ export const buildTelegramMessageContext = async ({
   const { groupConfig, topicConfig } = resolveTelegramGroupConfig(chatId, resolvedThreadId);
   const peerId = isGroup ? buildTelegramGroupPeerId(chatId, resolvedThreadId) : String(chatId);
   const parentPeer = buildTelegramParentPeer({ isGroup, resolvedThreadId, chatId });
-  // Fresh config for bindings lookup; other routing inputs are payload-derived.
-  const route = resolveAgentRoute({
-    cfg: loadConfig(),
+  const routing = await resolveWorkspaceRoute({
+    cfg,
     channel: "telegram",
     accountId: account.accountId,
     peer: {
@@ -175,6 +174,8 @@ export const buildTelegramMessageContext = async ({
     },
     parentPeer,
   });
+  const effectiveCfg = routing.cfg;
+  const route = routing.route;
   const baseSessionKey = route.sessionKey;
   // DMs: use raw messageThreadId for thread sessions (not forum topic ids)
   const dmThreadId = threadSpec.scope === "dm" ? threadSpec.id : undefined;
@@ -183,7 +184,7 @@ export const buildTelegramMessageContext = async ({
       ? resolveThreadSessionKeys({ baseSessionKey, threadId: String(dmThreadId) })
       : null;
   const sessionKey = threadKeys?.sessionKey ?? baseSessionKey;
-  const mentionRegexes = buildMentionRegexes(cfg, route.agentId);
+  const mentionRegexes = buildMentionRegexes(effectiveCfg, route.agentId);
   const effectiveDmAllow = normalizeAllowFromWithStore({ allowFrom, storeAllowFrom });
   const groupAllowOverride = firstDefined(topicConfig?.allowFrom, groupConfig?.allowFrom);
   const effectiveGroupAllow = normalizeAllowFromWithStore({
@@ -329,8 +330,8 @@ export const buildTelegramMessageContext = async ({
     senderId,
     senderUsername,
   });
-  const useAccessGroups = cfg.commands?.useAccessGroups !== false;
-  const hasControlCommandInMessage = hasControlCommand(msg.text ?? msg.caption ?? "", cfg, {
+  const useAccessGroups = effectiveCfg.commands?.useAccessGroups !== false;
+  const hasControlCommandInMessage = hasControlCommand(msg.text ?? msg.caption ?? "", effectiveCfg, {
     botUsername,
   });
   const commandGate = resolveControlCommandGate({
@@ -360,7 +361,7 @@ export const buildTelegramMessageContext = async ({
   // Check if sticker has a cached description - if so, use it instead of sending the image
   const cachedStickerDescription = allMedia[0]?.stickerMetadata?.cachedDescription;
   const stickerSupportsVision = msg.sticker
-    ? await resolveStickerVisionSupport({ cfg, agentId: route.agentId })
+    ? await resolveStickerVisionSupport({ cfg: effectiveCfg, agentId: route.agentId })
     : false;
   const stickerCacheHit = Boolean(cachedStickerDescription) && !stickerSupportsVision;
   if (stickerCacheHit) {
@@ -461,8 +462,8 @@ export const buildTelegramMessageContext = async ({
   }
 
   // ACK reactions
-  const ackReaction = resolveAckReaction(cfg, route.agentId);
-  const removeAckAfterReply = cfg.messages?.removeAckAfterReply ?? false;
+  const ackReaction = resolveAckReaction(effectiveCfg, route.agentId);
+  const removeAckAfterReply = effectiveCfg.messages?.removeAckAfterReply ?? false;
   const shouldAckReaction = () =>
     Boolean(
       ackReaction &&
@@ -521,10 +522,10 @@ export const buildTelegramMessageContext = async ({
   const conversationLabel = isGroup
     ? (groupLabel ?? `group:${chatId}`)
     : buildSenderLabel(msg, senderId || chatId);
-  const storePath = resolveStorePath(cfg.session?.store, {
+  const storePath = resolveStorePath(effectiveCfg.session?.store, {
     agentId: route.agentId,
   });
-  const envelopeOptions = resolveEnvelopeFormatOptions(cfg);
+  const envelopeOptions = resolveEnvelopeFormatOptions(effectiveCfg);
   const previousTimestamp = readSessionUpdatedAt({
     storePath,
     sessionKey: sessionKey,

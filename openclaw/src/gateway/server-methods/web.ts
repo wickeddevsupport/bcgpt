@@ -1,4 +1,5 @@
 import type { GatewayRequestHandlers } from "./types.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import { listChannelPlugins } from "../../channels/plugins/index.js";
 import {
   ErrorCodes,
@@ -16,8 +17,38 @@ const resolveWebLoginProvider = () =>
     (plugin.gatewayMethods ?? []).some((method) => WEB_LOGIN_METHODS.has(method)),
   ) ?? null;
 
+async function loadWebConfigForClient(client?: {
+  pmosWorkspaceId?: string;
+  pmosRole?: string;
+} | null): Promise<OpenClawConfig> {
+  const { loadConfig } = await import("../../config/config.js");
+  let cfg = loadConfig();
+  const workspaceId =
+    typeof client?.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  const isSuperAdmin = client?.pmosRole === "super_admin";
+  if (!workspaceId || isSuperAdmin) {
+    return cfg;
+  }
+  try {
+    const { loadEffectiveWorkspaceConfig } = await import("../workspace-config.js");
+    cfg = (await loadEffectiveWorkspaceConfig(workspaceId)) as OpenClawConfig;
+  } catch {
+    // Fall back to the global config if the workspace overlay cannot be loaded.
+  }
+  return cfg;
+}
+
+function resolveWebRuntimeScopeKey(client?: { pmosWorkspaceId?: string; pmosRole?: string } | null): string | undefined {
+  const workspaceId =
+    typeof client?.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  if (!workspaceId || client?.pmosRole === "super_admin") {
+    return undefined;
+  }
+  return `workspace:${workspaceId}`;
+}
+
 export const webHandlers: GatewayRequestHandlers = {
-  "web.login.start": async ({ params, respond, context }) => {
+  "web.login.start": async ({ params, respond, context, client }) => {
     if (!validateWebLoginStartParams(params)) {
       respond(
         false,
@@ -43,7 +74,11 @@ export const webHandlers: GatewayRequestHandlers = {
         );
         return;
       }
-      await context.stopChannel(provider.id, accountId);
+      const cfg = await loadWebConfigForClient(client);
+      await context.stopChannel(provider.id, accountId, {
+        scopeKey: resolveWebRuntimeScopeKey(client),
+        cfg,
+      });
       if (!provider.gateway?.loginWithQrStart) {
         respond(
           false,
@@ -69,7 +104,7 @@ export const webHandlers: GatewayRequestHandlers = {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, formatForLog(err)));
     }
   },
-  "web.login.wait": async ({ params, respond, context }) => {
+  "web.login.wait": async ({ params, respond, context, client }) => {
     if (!validateWebLoginWaitParams(params)) {
       respond(
         false,
@@ -114,7 +149,11 @@ export const webHandlers: GatewayRequestHandlers = {
         accountId,
       });
       if (result.connected) {
-        await context.startChannel(provider.id, accountId);
+        const cfg = await loadWebConfigForClient(client);
+        await context.startChannel(provider.id, accountId, {
+          scopeKey: resolveWebRuntimeScopeKey(client),
+          cfg,
+        });
       }
       respond(true, result, undefined);
     } catch (err) {

@@ -79,19 +79,25 @@ export type GatewayRequestContext = {
   wizardSessions: Map<string, WizardSession>;
   findRunningWizard: () => string | null;
   purgeWizardSession: (id: string) => void;
-  getRuntimeSnapshot: () => ChannelRuntimeSnapshot;
+  getRuntimeSnapshot: (opts?: {
+    scopeKey?: string;
+    cfg?: import("../../config/config.js").OpenClawConfig;
+  }) => ChannelRuntimeSnapshot;
   startChannel: (
     channel: import("../../channels/plugins/types.js").ChannelId,
     accountId?: string,
+    opts?: { scopeKey?: string; cfg?: import("../../config/config.js").OpenClawConfig },
   ) => Promise<void>;
   stopChannel: (
     channel: import("../../channels/plugins/types.js").ChannelId,
     accountId?: string,
+    opts?: { scopeKey?: string; cfg?: import("../../config/config.js").OpenClawConfig },
   ) => Promise<void>;
   markChannelLoggedOut: (
     channelId: import("../../channels/plugins/types.js").ChannelId,
     cleared: boolean,
     accountId?: string,
+    opts?: { scopeKey?: string; cfg?: import("../../config/config.js").OpenClawConfig },
   ) => void;
   wizardRunner: (
     opts: import("../../commands/onboard-types.js").OnboardOptions,

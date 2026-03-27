@@ -21,6 +21,22 @@ type ChannelRuntimeStore = {
   runtimes: Map<string, ChannelAccountSnapshot>;
 };
 
+type ChannelScopeOptions = {
+  scopeKey?: string;
+  cfg?: OpenClawConfig;
+};
+
+const GLOBAL_SCOPE_KEY = "__global__";
+
+function normalizeScopeKey(scopeKey?: string): string {
+  const trimmed = scopeKey?.trim();
+  return trimmed ? trimmed : GLOBAL_SCOPE_KEY;
+}
+
+function toScopedAccountKey(scopeKey: string, accountId: string): string {
+  return `${scopeKey}::${accountId}`;
+}
+
 function createRuntimeStore(): ChannelRuntimeStore {
   return {
     aborts: new Map(),
@@ -53,11 +69,16 @@ type ChannelManagerOptions = {
 };
 
 export type ChannelManager = {
-  getRuntimeSnapshot: () => ChannelRuntimeSnapshot;
+  getRuntimeSnapshot: (opts?: ChannelScopeOptions) => ChannelRuntimeSnapshot;
   startChannels: () => Promise<void>;
-  startChannel: (channel: ChannelId, accountId?: string) => Promise<void>;
-  stopChannel: (channel: ChannelId, accountId?: string) => Promise<void>;
-  markChannelLoggedOut: (channelId: ChannelId, cleared: boolean, accountId?: string) => void;
+  startChannel: (channel: ChannelId, accountId?: string, opts?: ChannelScopeOptions) => Promise<void>;
+  stopChannel: (channel: ChannelId, accountId?: string, opts?: ChannelScopeOptions) => Promise<void>;
+  markChannelLoggedOut: (
+    channelId: ChannelId,
+    cleared: boolean,
+    accountId?: string,
+    opts?: ChannelScopeOptions,
+  ) => void;
 };
 
 // Channel docking: lifecycle hooks (`plugin.gateway`) flow through this manager.
@@ -76,30 +97,39 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
     return next;
   };
 
-  const getRuntime = (channelId: ChannelId, accountId: string): ChannelAccountSnapshot => {
+  const getRuntime = (
+    channelId: ChannelId,
+    accountId: string,
+    scopeKey = GLOBAL_SCOPE_KEY,
+  ): ChannelAccountSnapshot => {
     const store = getStore(channelId);
-    return store.runtimes.get(accountId) ?? cloneDefaultRuntime(channelId, accountId);
+    return (
+      store.runtimes.get(toScopedAccountKey(scopeKey, accountId)) ??
+      cloneDefaultRuntime(channelId, accountId)
+    );
   };
 
   const setRuntime = (
     channelId: ChannelId,
     accountId: string,
     patch: ChannelAccountSnapshot,
+    scopeKey = GLOBAL_SCOPE_KEY,
   ): ChannelAccountSnapshot => {
     const store = getStore(channelId);
-    const current = getRuntime(channelId, accountId);
+    const current = getRuntime(channelId, accountId, scopeKey);
     const next = { ...current, ...patch, accountId };
-    store.runtimes.set(accountId, next);
+    store.runtimes.set(toScopedAccountKey(scopeKey, accountId), next);
     return next;
   };
 
-  const startChannel = async (channelId: ChannelId, accountId?: string) => {
+  const startChannel = async (channelId: ChannelId, accountId?: string, opts?: ChannelScopeOptions) => {
     const plugin = getChannelPlugin(channelId);
     const startAccount = plugin?.gateway?.startAccount;
     if (!startAccount) {
       return;
     }
-    const cfg = loadConfig();
+    const scopeKey = normalizeScopeKey(opts?.scopeKey);
+    const cfg = opts?.cfg ?? loadConfig();
     resetDirectoryCache({ channel: channelId, accountId });
     const store = getStore(channelId);
     const accountIds = accountId ? [accountId] : plugin.config.listAccountIds(cfg);
@@ -109,7 +139,8 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
 
     await Promise.all(
       accountIds.map(async (id) => {
-        if (store.tasks.has(id)) {
+        const scopedAccountKey = toScopedAccountKey(scopeKey, id);
+        if (store.tasks.has(scopedAccountKey)) {
           return;
         }
         const account = plugin.config.resolveAccount(cfg, id);
@@ -121,7 +152,7 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
             accountId: id,
             running: false,
             lastError: plugin.config.disabledReason?.(account, cfg) ?? "disabled",
-          });
+          }, scopeKey);
           return;
         }
 
@@ -134,18 +165,18 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
             accountId: id,
             running: false,
             lastError: plugin.config.unconfiguredReason?.(account, cfg) ?? "not configured",
-          });
+          }, scopeKey);
           return;
         }
 
         const abort = new AbortController();
-        store.aborts.set(id, abort);
+        store.aborts.set(scopedAccountKey, abort);
         setRuntime(channelId, id, {
           accountId: id,
           running: true,
           lastStartAt: Date.now(),
           lastError: null,
-        });
+        }, scopeKey);
 
         const log = channelLogs[channelId];
         const task = startAccount({
@@ -155,36 +186,35 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
           runtime: channelRuntimeEnvs[channelId],
           abortSignal: abort.signal,
           log,
-          getStatus: () => getRuntime(channelId, id),
-          setStatus: (next) => setRuntime(channelId, id, next),
+          getStatus: () => getRuntime(channelId, id, scopeKey),
+          setStatus: (next) => setRuntime(channelId, id, next, scopeKey),
         });
         const tracked = Promise.resolve(task)
           .catch((err) => {
             const message = formatErrorMessage(err);
-            setRuntime(channelId, id, { accountId: id, lastError: message });
+            setRuntime(channelId, id, { accountId: id, lastError: message }, scopeKey);
             log.error?.(`[${id}] channel exited: ${message}`);
           })
           .finally(() => {
-            store.aborts.delete(id);
-            store.tasks.delete(id);
+            store.aborts.delete(scopedAccountKey);
+            store.tasks.delete(scopedAccountKey);
             setRuntime(channelId, id, {
               accountId: id,
               running: false,
               lastStopAt: Date.now(),
-            });
+            }, scopeKey);
           });
-        store.tasks.set(id, tracked);
+        store.tasks.set(scopedAccountKey, tracked);
       }),
     );
   };
 
-  const stopChannel = async (channelId: ChannelId, accountId?: string) => {
+  const stopChannel = async (channelId: ChannelId, accountId?: string, opts?: ChannelScopeOptions) => {
     const plugin = getChannelPlugin(channelId);
-    const cfg = loadConfig();
+    const scopeKey = normalizeScopeKey(opts?.scopeKey);
+    const cfg = opts?.cfg ?? loadConfig();
     const store = getStore(channelId);
     const knownIds = new Set<string>([
-      ...store.aborts.keys(),
-      ...store.tasks.keys(),
       ...(plugin ? plugin.config.listAccountIds(cfg) : []),
     ]);
     if (accountId) {
@@ -194,8 +224,9 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
 
     await Promise.all(
       Array.from(knownIds.values()).map(async (id) => {
-        const abort = store.aborts.get(id);
-        const task = store.tasks.get(id);
+        const scopedAccountKey = toScopedAccountKey(scopeKey, id);
+        const abort = store.aborts.get(scopedAccountKey);
+        const task = store.tasks.get(scopedAccountKey);
         if (!abort && !task && !plugin?.gateway?.stopAccount) {
           return;
         }
@@ -209,8 +240,8 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
             runtime: channelRuntimeEnvs[channelId],
             abortSignal: abort?.signal ?? new AbortController().signal,
             log: channelLogs[channelId],
-            getStatus: () => getRuntime(channelId, id),
-            setStatus: (next) => setRuntime(channelId, id, next),
+            getStatus: () => getRuntime(channelId, id, scopeKey),
+            setStatus: (next) => setRuntime(channelId, id, next, scopeKey),
           });
         }
         try {
@@ -218,13 +249,13 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
         } catch {
           // ignore
         }
-        store.aborts.delete(id);
-        store.tasks.delete(id);
+        store.aborts.delete(scopedAccountKey);
+        store.tasks.delete(scopedAccountKey);
         setRuntime(channelId, id, {
           accountId: id,
           running: false,
           lastStopAt: Date.now(),
-        });
+        }, scopeKey);
       }),
     );
   };
@@ -235,19 +266,25 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
     }
   };
 
-  const markChannelLoggedOut = (channelId: ChannelId, cleared: boolean, accountId?: string) => {
+  const markChannelLoggedOut = (
+    channelId: ChannelId,
+    cleared: boolean,
+    accountId?: string,
+    opts?: ChannelScopeOptions,
+  ) => {
     const plugin = getChannelPlugin(channelId);
     if (!plugin) {
       return;
     }
-    const cfg = loadConfig();
+    const scopeKey = normalizeScopeKey(opts?.scopeKey);
+    const cfg = opts?.cfg ?? loadConfig();
     const resolvedId =
       accountId ??
       resolveChannelDefaultAccountId({
         plugin,
         cfg,
       });
-    const current = getRuntime(channelId, resolvedId);
+    const current = getRuntime(channelId, resolvedId, scopeKey);
     const next: ChannelAccountSnapshot = {
       accountId: resolvedId,
       running: false,
@@ -256,11 +293,12 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
     if (typeof current.connected === "boolean") {
       next.connected = false;
     }
-    setRuntime(channelId, resolvedId, next);
+    setRuntime(channelId, resolvedId, next, scopeKey);
   };
 
-  const getRuntimeSnapshot = (): ChannelRuntimeSnapshot => {
-    const cfg = loadConfig();
+  const getRuntimeSnapshot = (opts?: ChannelScopeOptions): ChannelRuntimeSnapshot => {
+    const scopeKey = normalizeScopeKey(opts?.scopeKey);
+    const cfg = opts?.cfg ?? loadConfig();
     const channels: ChannelRuntimeSnapshot["channels"] = {};
     const channelAccounts: ChannelRuntimeSnapshot["channelAccounts"] = {};
     for (const plugin of listChannelPlugins()) {
@@ -279,7 +317,8 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
           : isAccountEnabled(account);
         const described = plugin.config.describeAccount?.(account, cfg);
         const configured = described?.configured;
-        const current = store.runtimes.get(id) ?? cloneDefaultRuntime(plugin.id, id);
+        const current =
+          store.runtimes.get(toScopedAccountKey(scopeKey, id)) ?? cloneDefaultRuntime(plugin.id, id);
         const next = { ...current, accountId: id };
         if (!next.running) {
           if (!enabled) {

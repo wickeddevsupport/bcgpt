@@ -1,10 +1,12 @@
 import type { getReplyFromConfig } from "../../../auto-reply/reply.js";
 import type { MsgContext } from "../../../auto-reply/templating.js";
+import type { OpenClawConfig } from "../../../config/config.js";
 import type { MentionConfig } from "../mentions.js";
 import type { WebInboundMsg } from "../types.js";
 import type { EchoTracker } from "./echo.js";
 import type { GroupHistoryEntry } from "./group-gating.js";
 import { loadConfig } from "../../../config/config.js";
+import { resolveWorkspaceRoute, type WorkspaceRouteResolution } from "../../../gateway/workspace-routing.js";
 import { logVerbose } from "../../../globals.js";
 import { resolveAgentRoute } from "../../../routing/resolve-route.js";
 import { buildGroupHistoryKey } from "../../../routing/session-key.js";
@@ -29,8 +31,15 @@ export function createWebOnMessageHandler(params: {
   replyLogger: ReturnType<(typeof import("../../../logging.js"))["getChildLogger"]>;
   baseMentionConfig: MentionConfig;
   account: { authDir?: string; accountId?: string };
+  resolveRoute?: (input: {
+    cfg: OpenClawConfig;
+    channel: string;
+    accountId?: string | null;
+    peer?: { kind: "group" | "direct"; id: string } | null;
+  }) => Promise<WorkspaceRouteResolution>;
 }) {
   const processForRoute = async (
+    cfg: OpenClawConfig,
     msg: WebInboundMsg,
     route: ReturnType<typeof resolveAgentRoute>,
     groupHistoryKey: string,
@@ -40,7 +49,7 @@ export function createWebOnMessageHandler(params: {
     },
   ) =>
     processMessage({
-      cfg: params.cfg,
+      cfg,
       msg,
       route,
       groupHistoryKey,
@@ -63,9 +72,8 @@ export function createWebOnMessageHandler(params: {
   return async (msg: WebInboundMsg) => {
     const conversationId = msg.conversationId ?? msg.from;
     const peerId = resolvePeerId(msg);
-    // Fresh config for bindings lookup; other routing inputs are payload-derived.
-    const route = resolveAgentRoute({
-      cfg: loadConfig(),
+    const routing = await (params.resolveRoute ?? resolveWorkspaceRoute)({
+      cfg: params.cfg,
       channel: "whatsapp",
       accountId: msg.accountId,
       peer: {
@@ -73,6 +81,8 @@ export function createWebOnMessageHandler(params: {
         id: peerId,
       },
     });
+    const effectiveCfg = routing.cfg;
+    const route = routing.route;
     const groupHistoryKey =
       msg.chatType === "group"
         ? buildGroupHistoryKey({
@@ -113,7 +123,7 @@ export function createWebOnMessageHandler(params: {
         OriginatingTo: conversationId,
       } satisfies MsgContext;
       updateLastRouteInBackground({
-        cfg: params.cfg,
+        cfg: effectiveCfg,
         backgroundTasks: params.backgroundTasks,
         storeAgentId: route.agentId,
         sessionKey: route.sessionKey,
@@ -125,7 +135,7 @@ export function createWebOnMessageHandler(params: {
       });
 
       const gating = applyGroupGating({
-        cfg: params.cfg,
+        cfg: effectiveCfg,
         msg,
         conversationId,
         groupHistoryKey,
@@ -153,18 +163,19 @@ export function createWebOnMessageHandler(params: {
     // Does not bypass group mention/activation gating above.
     if (
       await maybeBroadcastMessage({
-        cfg: params.cfg,
+        cfg: effectiveCfg,
         msg,
         peerId,
         route,
         groupHistoryKey,
         groupHistories: params.groupHistories,
-        processMessage: processForRoute,
+        processMessage: (nextMsg, nextRoute, nextHistoryKey, opts) =>
+          processForRoute(effectiveCfg, nextMsg, nextRoute, nextHistoryKey, opts),
       })
     ) {
       return;
     }
 
-    await processForRoute(msg, route, groupHistoryKey);
+    await processForRoute(effectiveCfg, msg, route, groupHistoryKey);
   };
 }

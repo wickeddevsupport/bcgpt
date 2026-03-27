@@ -55,11 +55,21 @@ async function loadChannelsConfigForClient(
   return cfg;
 }
 
+function resolveChannelRuntimeScopeKey(client?: GatewayClient | null): string | undefined {
+  if (!client || isSuperAdmin(client)) {
+    return undefined;
+  }
+  const workspaceId =
+    typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  return workspaceId ? `workspace:${workspaceId}` : undefined;
+}
+
 export async function logoutChannelAccount(params: {
   channelId: ChannelId;
   accountId?: string | null;
   cfg: OpenClawConfig;
   context: GatewayRequestContext;
+  client?: GatewayClient | null;
   plugin: ChannelPlugin;
 }): Promise<ChannelLogoutPayload> {
   const resolvedAccountId =
@@ -68,7 +78,10 @@ export async function logoutChannelAccount(params: {
     params.plugin.config.listAccountIds(params.cfg)[0] ||
     DEFAULT_ACCOUNT_ID;
   const account = params.plugin.config.resolveAccount(params.cfg, resolvedAccountId);
-  await params.context.stopChannel(params.channelId, resolvedAccountId);
+  await params.context.stopChannel(params.channelId, resolvedAccountId, {
+    scopeKey: resolveChannelRuntimeScopeKey(params.client),
+    cfg: params.cfg,
+  });
   const result = await params.plugin.gateway?.logoutAccount?.({
     cfg: params.cfg,
     accountId: resolvedAccountId,
@@ -81,7 +94,10 @@ export async function logoutChannelAccount(params: {
   const cleared = Boolean(result.cleared);
   const loggedOut = typeof result.loggedOut === "boolean" ? result.loggedOut : cleared;
   if (loggedOut) {
-    params.context.markChannelLoggedOut(params.channelId, true, resolvedAccountId);
+    params.context.markChannelLoggedOut(params.channelId, true, resolvedAccountId, {
+      scopeKey: resolveChannelRuntimeScopeKey(params.client),
+      cfg: params.cfg,
+    });
   }
   return {
     channel: params.channelId,
@@ -108,7 +124,10 @@ export const channelsHandlers: GatewayRequestHandlers = {
     const timeoutMsRaw = (params as { timeoutMs?: unknown }).timeoutMs;
     const timeoutMs = typeof timeoutMsRaw === "number" ? Math.max(1000, timeoutMsRaw) : 10_000;
     const cfg = await loadChannelsConfigForClient(client);
-    const runtime = context.getRuntimeSnapshot();
+    const runtime = context.getRuntimeSnapshot({
+      scopeKey: resolveChannelRuntimeScopeKey(client),
+      cfg,
+    });
     const plugins = listChannelPlugins();
     const pluginMap = new Map<ChannelId, ChannelPlugin>(
       plugins.map((plugin) => [plugin.id, plugin]),
@@ -313,6 +332,7 @@ export const channelsHandlers: GatewayRequestHandlers = {
         accountId,
         cfg,
         context,
+        client,
         plugin,
       });
       respond(true, payload, undefined);

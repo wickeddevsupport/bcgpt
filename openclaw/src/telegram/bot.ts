@@ -26,6 +26,7 @@ import { formatUncaughtError } from "../infra/errors.js";
 import { enqueueSystemEvent } from "../infra/system-events.js";
 import { getChildLogger } from "../logging.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import { resolveWorkspaceRoute } from "../gateway/workspace-routing.js";
 import { resolveAgentRoute } from "../routing/resolve-route.js";
 import { resolveTelegramAccount } from "./accounts.js";
 import { withTelegramApiErrorLogging } from "./api-logging.js";
@@ -449,14 +450,14 @@ export function createTelegramBot(opts: TelegramBotOptions) {
         : undefined;
       const peerId = isGroup ? buildTelegramGroupPeerId(chatId, resolvedThreadId) : String(chatId);
       const parentPeer = buildTelegramParentPeer({ isGroup, resolvedThreadId, chatId });
-      // Fresh config for bindings lookup; other routing inputs are payload-derived.
-      const route = resolveAgentRoute({
-        cfg: loadConfig(),
+      const routing = await resolveWorkspaceRoute({
+        cfg,
         channel: "telegram",
         accountId: account.accountId,
         peer: { kind: isGroup ? "group" : "direct", id: peerId },
         parentPeer,
       });
+      const route = routing.route;
       const sessionKey = route.sessionKey;
 
       // Enqueue system event for each added reaction
