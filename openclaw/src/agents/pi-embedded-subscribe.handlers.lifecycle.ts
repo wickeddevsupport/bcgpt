@@ -46,6 +46,10 @@ export function handleAutoCompactionEnd(
     ctx.resetForCompactionRetry();
     ctx.log.debug(`embedded run compaction retry: runId=${ctx.params.runId}`);
   } else {
+    // The final non-retrying compaction end is the terminal signal for the
+    // compaction chain. Clear any leftover retry debt so waiters cannot hang
+    // forever if lifecycle events arrive in a different order than expected.
+    ctx.state.pendingCompactionRetry = 0;
     ctx.maybeResolveCompactionWait();
   }
   emitAgentEvent({

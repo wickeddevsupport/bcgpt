@@ -56,6 +56,48 @@ describe("subscribeEmbeddedPiSession", () => {
     expect(resolved).toBe(true);
   });
 
+  it("resolves when the final compaction end arrives after partial retry lifecycle events", async () => {
+    const listeners: SessionEventHandler[] = [];
+    const session = {
+      subscribe: (listener: SessionEventHandler) => {
+        listeners.push(listener);
+        return () => {};
+      },
+    } as unknown as Parameters<typeof subscribeEmbeddedPiSession>[0]["session"];
+
+    const subscription = subscribeEmbeddedPiSession({
+      session,
+      runId: "run-3b",
+    });
+
+    for (const listener of listeners) {
+      listener({ type: "auto_compaction_end", willRetry: true });
+      listener({ type: "auto_compaction_end", willRetry: true });
+    }
+
+    let resolved = false;
+    const waitPromise = subscription.waitForCompactionRetry().then(() => {
+      resolved = true;
+    });
+
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    for (const listener of listeners) {
+      listener({ type: "agent_end" });
+    }
+
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    for (const listener of listeners) {
+      listener({ type: "auto_compaction_end", willRetry: false });
+    }
+
+    await waitPromise;
+    expect(resolved).toBe(true);
+  });
+
   it("emits compaction events on the agent event bus", async () => {
     let handler: ((evt: unknown) => void) | undefined;
     const session: StubSession = {
