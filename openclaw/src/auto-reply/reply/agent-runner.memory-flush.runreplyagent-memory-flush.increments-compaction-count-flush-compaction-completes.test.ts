@@ -122,7 +122,7 @@ function createBaseRun(params: {
 }
 
 describe("runReplyAgent memory flush", () => {
-  it("increments compaction count when flush compaction completes", async () => {
+  it("does not increment the real session compaction count when scratch flush compaction completes", async () => {
     runEmbeddedPiAgentMock.mockReset();
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-flush-"));
     const storePath = path.join(tmp, "sessions.json");
@@ -181,7 +181,7 @@ describe("runReplyAgent memory flush", () => {
     });
 
     const stored = JSON.parse(await fs.readFile(storePath, "utf-8"));
-    expect(stored[sessionKey].compactionCount).toBe(2);
-    expect(stored[sessionKey].memoryFlushCompactionCount).toBe(2);
+    expect(stored[sessionKey].compactionCount).toBe(1);
+    expect(stored[sessionKey].memoryFlushCompactionCount).toBe(1);
   });
 });

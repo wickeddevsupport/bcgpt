@@ -24,7 +24,6 @@ import {
   resolveMemoryFlushSettings,
   shouldRunMemoryFlush,
 } from "./memory-flush.js";
-import { incrementCompactionCount } from "./session-updates.js";
 
 async function createScratchTranscriptFile(sourceFile?: string): Promise<{
   scratchFile: string | undefined;
@@ -199,15 +198,13 @@ export async function runMemoryFlushIfNeeded(params: {
       (params.sessionKey ? activeSessionStore?.[params.sessionKey]?.compactionCount : 0) ??
       0;
     if (memoryCompactionCompleted) {
-      const nextCount = await incrementCompactionCount({
-        sessionEntry: activeSessionEntry,
-        sessionStore: activeSessionStore,
-        sessionKey: params.sessionKey,
-        storePath: params.storePath,
-      });
-      if (typeof nextCount === "number") {
-        memoryFlushCompactionCount = nextCount;
-      }
+      // Memory flush runs against a scratch transcript copy so any compaction that
+      // happens there should only suppress another flush in the same cycle, not
+      // count as a real user-session compaction.
+      memoryFlushCompactionCount =
+        activeSessionEntry?.compactionCount ??
+        (params.sessionKey ? activeSessionStore?.[params.sessionKey]?.compactionCount : 0) ??
+        0;
     }
     if (params.storePath && params.sessionKey) {
       try {
