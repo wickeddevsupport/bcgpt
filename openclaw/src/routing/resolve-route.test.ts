@@ -168,6 +168,70 @@ describe("resolveAgentRoute", () => {
     expect(route.matchedBy).toBe("binding.guild");
   });
 
+  test("channelId binding wins over catch-all channel binding", () => {
+    const cfg: OpenClawConfig = {
+      bindings: [
+        {
+          agentId: "assistant",
+          match: {
+            channel: "discord",
+            accountId: "*",
+          },
+        },
+        {
+          agentId: "marketing-agent",
+          match: {
+            channel: "discord",
+            channelId: "1486842570708357270",
+          },
+        },
+      ],
+    };
+
+    const route = resolveAgentRoute({
+      cfg,
+      channel: "discord",
+      accountId: "default",
+      peer: { kind: "channel", id: "1486842570708357270" },
+    });
+
+    expect(route.agentId).toBe("marketing-agent");
+    expect(route.sessionKey).toBe("agent:marketing-agent:discord:channel:1486842570708357270");
+    expect(route.matchedBy).toBe("binding.peer");
+  });
+
+  test("channelId binding on parent channel wins for discord threads", () => {
+    const cfg: OpenClawConfig = {
+      bindings: [
+        {
+          agentId: "assistant",
+          match: {
+            channel: "discord",
+            accountId: "*",
+          },
+        },
+        {
+          agentId: "design-agent",
+          match: {
+            channel: "discord",
+            channelId: "1486838096459993173",
+          },
+        },
+      ],
+    };
+
+    const route = resolveAgentRoute({
+      cfg,
+      channel: "discord",
+      accountId: "default",
+      peer: { kind: "channel", id: "thread-123" },
+      parentPeer: { kind: "channel", id: "1486838096459993173" },
+    });
+
+    expect(route.agentId).toBe("design-agent");
+    expect(route.matchedBy).toBe("binding.peer.parent");
+  });
+
   test("missing accountId in binding matches default account only", () => {
     const cfg: OpenClawConfig = {
       bindings: [{ agentId: "defaultAcct", match: { channel: "whatsapp" } }],

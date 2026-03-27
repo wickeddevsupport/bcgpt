@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -19,6 +20,14 @@ describe("workspace-config isolation", () => {
     const { workspaceConfigPath } = await import("./workspace-config.js");
     try {
       await fs.rm(path.dirname(workspaceConfigPath(workspaceId)), {
+        recursive: true,
+        force: true,
+      });
+    } catch {
+      // ignore test cleanup issues
+    }
+    try {
+      await fs.rm(path.join(os.homedir(), ".openclaw", "workspaces", workspaceId), {
         recursive: true,
         force: true,
       });
@@ -242,5 +251,79 @@ describe("workspace-config isolation", () => {
     expect((pm?.subagents as Record<string, unknown> | undefined)?.allowAgents).toEqual([
       "marketing-agent",
     ]);
+  });
+
+  it("normalizes shared assistant workspace paths to per-agent workspace paths", async () => {
+    const { loadEffectiveWorkspaceConfig, writeWorkspaceConfig } = await import("./workspace-config.js");
+    await writeWorkspaceConfig(workspaceId, {
+      agents: {
+        list: [
+          {
+            id: "assistant",
+            default: true,
+            workspaceId,
+            workspace: `~/.openclaw/workspaces/${workspaceId}/assistant`,
+          },
+          {
+            id: "marketing-agent",
+            workspaceId,
+            workspace: `~/.openclaw/workspaces/${workspaceId}/assistant`,
+          },
+        ],
+      },
+    });
+
+    const effective = await loadEffectiveWorkspaceConfig(workspaceId);
+    const agents = ((effective.agents as Record<string, unknown> | undefined)?.list ?? []) as Array<
+      Record<string, unknown>
+    >;
+    const assistant = agents.find((entry) => entry.id === "assistant");
+    const marketing = agents.find((entry) => entry.id === "marketing-agent");
+
+    expect(assistant?.workspace).toBe(`~/.openclaw/workspaces/${workspaceId}/assistant`);
+    expect(marketing?.workspace).toBe(`~/.openclaw/workspaces/${workspaceId}/marketing-agent`);
+  });
+
+  it("seeds bound main-session delivery targets from workspace channel bindings", async () => {
+    const { loadEffectiveWorkspaceConfig, writeWorkspaceConfig } = await import("./workspace-config.js");
+    await writeWorkspaceConfig(workspaceId, {
+      agents: {
+        list: [
+          { id: "assistant", default: true, workspaceId },
+          { id: "marketing-agent", workspaceId },
+        ],
+      },
+      bindings: [
+        {
+          agentId: "assistant",
+          match: { channel: "discord", accountId: "*" },
+        },
+        {
+          agentId: "marketing-agent",
+          match: { channel: "discord", channelId: "1486842570708357270" },
+        },
+      ],
+    });
+
+    const effective = await loadEffectiveWorkspaceConfig(workspaceId);
+    const { resolveStorePath } = await import("../config/sessions/paths.js");
+    const { loadSessionStore } = await import("../config/sessions/store.js");
+    const storePath = resolveStorePath(
+      (effective.session as Record<string, unknown> | undefined)?.store as string | undefined,
+      {
+        agentId: "marketing-agent",
+      },
+    );
+    const store = loadSessionStore(storePath, { skipCache: true });
+    const entry = store["agent:marketing-agent:main"];
+
+    expect(entry?.lastChannel).toBe("discord");
+    expect(entry?.lastTo).toBe("channel:1486842570708357270");
+    expect(entry?.deliveryContext).toEqual(
+      expect.objectContaining({
+        channel: "discord",
+        to: "channel:1486842570708357270",
+      }),
+    );
   });
 });

@@ -77,6 +77,7 @@ export type AgentBinding = {
   match: {
     channel: string;
     accountId?: string;
+    channelId?: string;
     peer?: { kind: ChatType; id: string };
     guildId?: string;
     teamId?: string;

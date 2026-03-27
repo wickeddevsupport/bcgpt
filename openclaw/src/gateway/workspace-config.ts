@@ -1,8 +1,13 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { resolveDefaultAgentId } from "../agents/agent-scope.js";
+import { getChannelPlugin } from "../channels/plugins/index.js";
 import type { OpenClawConfig } from "../config/config.js";
+import { resolveStorePath } from "../config/sessions/paths.js";
+import { updateLastRoute } from "../config/sessions/store.js";
 import { loadConfig } from "../config/config.js";
+import { buildAgentMainSessionKey, normalizeAgentId } from "../routing/session-key.js";
+import { isDeliverableMessageChannel, normalizeMessageChannel } from "../utils/message-channel.js";
 import { CONFIG_DIR, ensureDir, isRecord } from "../utils.js";
 
 type JsonObject = Record<string, unknown>;
@@ -47,6 +52,11 @@ export async function writeWorkspaceConfig(workspaceId: string, next: JsonObject
   await ensureDir(path.dirname(p));
   const raw = JSON.stringify(next, null, 2).trimEnd().concat("\n");
   await fs.writeFile(p, raw, "utf-8");
+  try {
+    await seedWorkspaceAgentBoundRoutes(workspaceId);
+  } catch {
+    // Best-effort session route seeding.
+  }
   try {
     const { refreshWorkspaceAiContext } = await import("./workspace-ai-context.js");
     await refreshWorkspaceAiContext(workspaceId);
@@ -107,6 +117,21 @@ function isWorkspaceScopedPath(value: unknown, workspaceId: string): boolean {
   return typeof value === "string" && value.includes(`/workspaces/${workspaceId}/`);
 }
 
+function hasExpectedWorkspaceAgentPath(value: unknown, workspaceId: string, agentId: string): boolean {
+  return typeof value === "string" && value.includes(`/workspaces/${workspaceId}/${agentId}`);
+}
+
+function shouldNormalizeWorkspaceAgentPath(
+  value: unknown,
+  workspaceId: string,
+  agentId: string,
+): boolean {
+  if (!isWorkspaceScopedPath(value, workspaceId)) {
+    return true;
+  }
+  return !hasExpectedWorkspaceAgentPath(value, workspaceId, agentId);
+}
+
 function normalizeWorkspaceAgentEntry(
   entry: JsonObject | null,
   workspaceId: string,
@@ -115,7 +140,7 @@ function normalizeWorkspaceAgentEntry(
   const agentId =
     typeof entry?.id === "string" && entry.id.trim() ? entry.id.trim() : fallbackAgentId;
   const next: JsonObject = { ...(entry ?? {}), id: agentId, workspaceId };
-  if (!isWorkspaceScopedPath(next.workspace, workspaceId)) {
+  if (shouldNormalizeWorkspaceAgentPath(next.workspace, workspaceId, agentId)) {
     next.workspace = workspaceDefaultAgentWorkspacePath(workspaceId, agentId);
   }
   return next;
@@ -250,6 +275,103 @@ function applyWorkspaceScopedPaths(mergedCfg: JsonObject, workspaceId: string): 
   };
 }
 
+type WorkspaceBindingRouteSeed = {
+  agentId: string;
+  channel: ReturnType<typeof normalizeMessageChannel>;
+  to: string;
+  accountId?: string;
+};
+
+function normalizeBoundTarget(params: {
+  channel: string;
+  channelId?: unknown;
+  peer?: unknown;
+}): string | null {
+  const normalizedChannel = normalizeMessageChannel(params.channel);
+  if (!normalizedChannel || !isDeliverableMessageChannel(normalizedChannel)) {
+    return null;
+  }
+  const plugin = getChannelPlugin(normalizedChannel);
+  const channelId =
+    typeof params.channelId === "string" && params.channelId.trim()
+      ? params.channelId.trim()
+      : "";
+  if (channelId) {
+    const raw = `channel:${channelId}`;
+    return plugin?.messaging?.normalizeTarget?.(raw) ?? raw;
+  }
+  const peer = isJsonObject(params.peer) ? params.peer : null;
+  const peerKind = typeof peer?.kind === "string" ? peer.kind.trim().toLowerCase() : "";
+  const peerId = typeof peer?.id === "string" ? peer.id.trim() : "";
+  if (!peerKind || !peerId) {
+    return null;
+  }
+  const raw =
+    peerKind === "direct"
+      ? `user:${peerId}`
+      : peerKind === "channel"
+        ? `channel:${peerId}`
+        : `group:${peerId}`;
+  return plugin?.messaging?.normalizeTarget?.(raw) ?? raw;
+}
+
+function collectWorkspaceBindingRouteSeeds(cfg: JsonObject): WorkspaceBindingRouteSeed[] {
+  const bindings = Array.isArray(cfg.bindings) ? cfg.bindings : [];
+  const seeds = new Map<string, WorkspaceBindingRouteSeed>();
+  for (const binding of bindings) {
+    if (!isJsonObject(binding)) {
+      continue;
+    }
+    const agentId = normalizeAgentId(typeof binding.agentId === "string" ? binding.agentId : "");
+    if (!agentId) {
+      continue;
+    }
+    const match = isJsonObject(binding.match) ? binding.match : null;
+    const channel = typeof match?.channel === "string" ? match.channel.trim() : "";
+    const normalizedChannel = normalizeMessageChannel(channel);
+    if (!normalizedChannel || !isDeliverableMessageChannel(normalizedChannel)) {
+      continue;
+    }
+    const to = normalizeBoundTarget({
+      channel,
+      channelId: match?.channelId,
+      peer: match?.peer,
+    });
+    if (!to) {
+      continue;
+    }
+    const rawAccountId = typeof match?.accountId === "string" ? match.accountId.trim() : "";
+    seeds.set(agentId, {
+      agentId,
+      channel: normalizedChannel,
+      to,
+      accountId: rawAccountId && rawAccountId !== "*" ? rawAccountId : undefined,
+    });
+  }
+  return Array.from(seeds.values());
+}
+
+async function seedWorkspaceAgentBoundRoutes(workspaceId: string): Promise<void> {
+  const effective = (await loadEffectiveWorkspaceConfig(workspaceId)) as OpenClawConfig;
+  const seeds = collectWorkspaceBindingRouteSeeds(effective as JsonObject);
+  if (seeds.length === 0) {
+    return;
+  }
+  for (const seed of seeds) {
+    const storePath = resolveStorePath(effective.session?.store, { agentId: seed.agentId });
+    await updateLastRoute({
+      storePath,
+      sessionKey: buildAgentMainSessionKey({
+        agentId: seed.agentId,
+        mainKey: effective.session?.mainKey,
+      }),
+      channel: seed.channel,
+      to: seed.to,
+      accountId: seed.accountId,
+    });
+  }
+}
+
 export function applyWorkspaceAgentCollaborationDefaults(
   config: JsonObject,
   workspaceId: string,
@@ -281,17 +403,27 @@ export function applyWorkspaceAgentCollaborationDefaults(
     const allowAgents = Array.isArray(subagents.allowAgents)
       ? subagents.allowAgents.map((value) => String(value).trim()).filter(Boolean)
       : [];
-    if (allowAgents.length > 0) {
-      return entry;
+    const normalizedId =
+      typeof entry.id === "string" && entry.id.trim() ? entry.id.trim() : "assistant";
+    let nextEntry: JsonObject = { ...entry };
+    if (shouldNormalizeWorkspaceAgentPath(nextEntry.workspace, wsId, normalizedId)) {
+      nextEntry = {
+        ...nextEntry,
+        workspace: workspaceDefaultAgentWorkspacePath(wsId, normalizedId),
+      };
+      mutated = true;
     }
-    mutated = true;
-    return {
-      ...entry,
-      subagents: {
-        ...subagents,
-        allowAgents: ["*"],
-      },
-    };
+    if (allowAgents.length === 0) {
+      nextEntry = {
+        ...nextEntry,
+        subagents: {
+          ...subagents,
+          allowAgents: ["*"],
+        },
+      };
+      mutated = true;
+    }
+    return nextEntry;
   });
 
   const tools = isJsonObject(config.tools) ? ({ ...config.tools } as JsonObject) : {};
