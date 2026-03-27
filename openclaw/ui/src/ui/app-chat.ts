@@ -31,6 +31,17 @@ export type ChatHost = {
 export const CHAT_SESSIONS_ACTIVE_MINUTES = 120;
 
 export function isChatBusy(host: ChatHost) {
+  // Safety valve: never let stale run state lock the composer forever.
+  if (
+    host.chatRunId &&
+    host.chatStreamStartedAt &&
+    Date.now() - host.chatStreamStartedAt > CHAT_RECOVERY_MAX_WAIT_MS
+  ) {
+    host.chatRunId = null;
+    host.chatStream = null;
+    host.chatStreamStartedAt = null;
+    host.chatSending = false;
+  }
   return host.chatSending || Boolean(host.chatRunId);
 }
 
@@ -102,6 +113,9 @@ function clearChatRecoveryPoll(host: ChatHost) {
   }
 }
 
+const CHAT_RECOVERY_POLL_INTERVAL_MS = 1500;
+const CHAT_RECOVERY_MAX_WAIT_MS = 25000;
+
 function startChatRecoveryPoll(host: ChatHost, runId: string) {
   clearChatRecoveryPoll(host);
   const startedAt = Date.now();
@@ -118,9 +132,9 @@ function startChatRecoveryPoll(host: ChatHost, runId: string) {
       void flushChatQueue(host);
       return;
     }
-    if (Date.now() - startedAt > 120_000) {
-      // Run still not reconciled after 2 minutes -- clear the active run indicator
-      // and show an error so the user knows to retry.
+    if (Date.now() - startedAt > CHAT_RECOVERY_MAX_WAIT_MS) {
+      // Fail-open quickly so chat never feels frozen.
+      // If history reconciliation lags/stalls, clear active run and allow next send.
       host.chatRunId = null;
       host.chatStream = null;
       host.chatStreamStartedAt = null;
@@ -128,7 +142,7 @@ function startChatRecoveryPoll(host: ChatHost, runId: string) {
         ...(Array.isArray(host.chatMessages) ? host.chatMessages : []),
         {
           role: "assistant",
-          content: [{ type: "text", text: "The response was interrupted (server timeout or restart). Please try again." }],
+          content: [{ type: "text", text: "Response sync took too long. Composer unlocked so you can continue." }],
           timestamp: Date.now(),
         },
       ];
@@ -136,9 +150,9 @@ function startChatRecoveryPoll(host: ChatHost, runId: string) {
       void flushChatQueue(host);
       return;
     }
-    host.chatHistoryRecoveryTimer = window.setTimeout(tick, 2500);
+    host.chatHistoryRecoveryTimer = window.setTimeout(tick, CHAT_RECOVERY_POLL_INTERVAL_MS);
   };
-  host.chatHistoryRecoveryTimer = window.setTimeout(tick, 2500);
+  host.chatHistoryRecoveryTimer = window.setTimeout(tick, CHAT_RECOVERY_POLL_INTERVAL_MS);
 }
 
 async function sendChatMessageNow(
