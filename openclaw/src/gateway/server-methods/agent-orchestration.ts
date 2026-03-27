@@ -5,6 +5,7 @@
  */
 
 import { z } from 'zod';
+import fs from "node:fs/promises";
 import type { ClientContext } from '../client.js';
 import {
   createTask,
@@ -22,6 +23,10 @@ import {
   type AgentWorkflow,
   type OrchestrationPattern,
 } from '../agent-orchestrator.js';
+import type { OpenClawConfig } from "../../config/config.js";
+import { ensureAgentWorkspace } from "../../agents/workspace.js";
+import { findAgentEntryIndex } from "../../commands/agents.config.js";
+import { resolveUserPath } from "../../utils.js";
 import { isSuperAdmin } from "../workspace-context.js";
 
 function normalizeTemplateAgentId(value: string): string {
@@ -38,6 +43,14 @@ function normalizeTemplateAgentId(value: string): string {
 
 function resolveWorkspaceScopedTemplatePath(workspaceId: string, agentId: string): string {
   return `~/.openclaw/workspaces/${workspaceId.trim()}/${normalizeTemplateAgentId(agentId)}`;
+}
+
+function resolveWorkspaceScopedTemplateAgentDir(workspaceId: string, agentId: string): string {
+  return `~/.openclaw/workspaces/${workspaceId.trim()}/agents/${normalizeTemplateAgentId(agentId)}/agent`;
+}
+
+function resolveWorkspaceScopedTemplateSessionsDir(workspaceId: string, agentId: string): string {
+  return `~/.openclaw/workspaces/${workspaceId.trim()}/agents/${normalizeTemplateAgentId(agentId)}/sessions`;
 }
 
 // Input schemas
@@ -351,9 +364,8 @@ export async function handleTemplateCreate(
   // Persist agent to config
   try {
     const { loadConfig, writeConfigFile } = await import('../../config/config.js');
-    
-    const cfg = loadConfig();
-    const agents = cfg.agents?.list || [];
+    const { loadEffectiveWorkspaceConfig, readWorkspaceConfig, writeWorkspaceConfig } = await import('../workspace-config.js');
+
     const workspaceId =
       client && !isSuperAdmin(client) && typeof client.pmosWorkspaceId === "string"
         ? client.pmosWorkspaceId.trim()
@@ -361,23 +373,63 @@ export async function handleTemplateCreate(
     const agentId = normalizeTemplateAgentId(
       template.config?.id || `agent-${crypto.randomUUID()}`,
     );
-    
+    const effectiveCfg = workspaceId
+      ? ((await loadEffectiveWorkspaceConfig(workspaceId)) as OpenClawConfig)
+      : loadConfig();
+    const persistedCfg = workspaceId
+      ? ((((await readWorkspaceConfig(workspaceId)) ?? {}) as OpenClawConfig) ?? {})
+      : loadConfig();
+    const existingAgents = Array.isArray(effectiveCfg.agents?.list) ? effectiveCfg.agents.list : [];
+    if (findAgentEntryIndex(existingAgents, agentId) >= 0) {
+      return {
+        success: false,
+        message: `Agent "${agentId}" already exists`,
+      };
+    }
+
+    const workspace = workspaceId
+      ? resolveWorkspaceScopedTemplatePath(workspaceId, agentId)
+      : template.config?.workspace;
+    const agentDir = workspaceId
+      ? resolveWorkspaceScopedTemplateAgentDir(workspaceId, agentId)
+      : template.config?.agentDir;
+
     // Create new agent entry from template
     const newAgent = {
       ...template.config,
       id: agentId,
       name: template.name,
       ...(workspaceId ? { workspaceId } : {}),
-      ...(workspaceId ? { workspace: resolveWorkspaceScopedTemplatePath(workspaceId, agentId) } : {}),
+      ...(workspace ? { workspace } : {}),
+      ...(agentDir ? { agentDir } : {}),
     };
-    
-    // Add to config
-    if (!cfg.agents) {
-      cfg.agents = { list: [] };
+
+    const persistedAgents = Array.isArray(persistedCfg.agents?.list) ? persistedCfg.agents.list : [];
+    const nextCfg: OpenClawConfig = {
+      ...persistedCfg,
+      agents: {
+        ...(persistedCfg.agents ?? {}),
+        list: [...persistedAgents, newAgent],
+      },
+    };
+
+    if (workspaceId) {
+      await writeWorkspaceConfig(workspaceId, nextCfg as unknown as Record<string, unknown>);
+    } else {
+      await writeConfigFile(nextCfg);
     }
-    cfg.agents.list = [...agents, newAgent];
-    
-    await writeConfigFile(cfg);
+
+    if (workspace) {
+      await ensureAgentWorkspace({ dir: workspace, ensureBootstrapFiles: true });
+    }
+    if (agentDir) {
+      await fs.mkdir(resolveUserPath(agentDir), { recursive: true });
+    }
+    if (workspaceId) {
+      await fs.mkdir(resolveUserPath(resolveWorkspaceScopedTemplateSessionsDir(workspaceId, agentId)), {
+        recursive: true,
+      });
+    }
     
     return {
       success: true,

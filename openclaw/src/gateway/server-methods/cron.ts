@@ -2,6 +2,7 @@ import type { CronJobCreate, CronJobPatch } from "../../cron/types.js";
 import type { GatewayRequestHandlers } from "./types.js";
 import { normalizeCronJobCreate, normalizeCronJobPatch } from "../../cron/normalize.js";
 import { readCronRunLogEntries, resolveCronRunLogPath } from "../../cron/run-log.js";
+import { resolveCronStorePath, saveCronStore } from "../../cron/store.js";
 import { validateScheduleTimestamp } from "../../cron/validate-timestamp.js";
 import {
   ErrorCodes,
@@ -23,6 +24,24 @@ import {
 } from "../workspace-context.js";
 import { loadEffectiveWorkspaceConfig } from "../workspace-config.js";
 import { resolveDefaultAgentId } from "../../agents/agent-scope.js";
+
+async function syncWorkspaceCronShadowStore(
+  context: Parameters<GatewayRequestHandlers["cron.add"]>[0]["context"],
+  workspaceId: string,
+) {
+  const effectiveCfg = await loadEffectiveWorkspaceConfig(workspaceId);
+  const storePath = resolveCronStorePath(
+    (effectiveCfg as { cron?: { store?: string } }).cron?.store,
+  );
+  const jobs = (await context.cron.list({ includeDisabled: true })).filter(
+    (job) => job.workspaceId === workspaceId,
+  );
+  await saveCronStore(storePath, {
+    version: 1,
+    jobs,
+  });
+  return storePath;
+}
 
 export const cronHandlers: GatewayRequestHandlers = {
   wake: ({ params, respond, context }) => {
@@ -148,6 +167,9 @@ export const cronHandlers: GatewayRequestHandlers = {
     }
     
     const job = await context.cron.add(jobCreate);
+    if (client?.pmosWorkspaceId && !isSuperAdmin(client)) {
+      await syncWorkspaceCronShadowStore(context, client.pmosWorkspaceId);
+    }
     respond(true, job, undefined);
   },
   "cron.update": async ({ params, respond, context, client }) => {
@@ -219,6 +241,9 @@ export const cronHandlers: GatewayRequestHandlers = {
       }
     }
     const job = await context.cron.update(jobId, patch);
+    if (client?.pmosWorkspaceId && !isSuperAdmin(client)) {
+      await syncWorkspaceCronShadowStore(context, client.pmosWorkspaceId);
+    }
     respond(true, job, undefined);
   },
   "cron.remove": async ({ params, respond, context, client }) => {
@@ -269,6 +294,9 @@ export const cronHandlers: GatewayRequestHandlers = {
     }
     
     const result = await context.cron.remove(jobId);
+    if (client?.pmosWorkspaceId && !isSuperAdmin(client)) {
+      await syncWorkspaceCronShadowStore(context, client.pmosWorkspaceId);
+    }
     respond(true, result, undefined);
   },
   "cron.run": async ({ params, respond, context, client }) => {

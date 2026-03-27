@@ -45,6 +45,14 @@ describe("workspace-config isolation", () => {
           match: { channel: "discord", accountId: "rajan" },
         },
       ],
+      routing: {
+        bindings: [
+          {
+            agentId: "assistant",
+            match: { channel: "discord", accountId: "legacy-rajan" },
+          },
+        ],
+      },
       session: {
         mainKey: "main",
         identityLinks: {
@@ -72,6 +80,7 @@ describe("workspace-config isolation", () => {
     expect(effective.channels).toBeUndefined();
     expect(effective.env).toBeUndefined();
     expect(effective.bindings).toBeUndefined();
+    expect((effective.routing as Record<string, unknown> | undefined)?.bindings).toBeUndefined();
     expect((effective.session as Record<string, unknown> | undefined)?.identityLinks).toBeUndefined();
     expect((effective.session as Record<string, unknown> | undefined)?.mainKey).toBe("main");
     expect(
@@ -156,9 +165,46 @@ describe("workspace-config isolation", () => {
     expect(agents[0]?.id).toBe("assistant");
     expect(agents[0]?.workspaceId).toBe(workspaceId);
     expect(defaults?.workspace).toBe(`~/.openclaw/workspaces/${workspaceId}/assistant`);
+    expect((effective.routing as Record<string, unknown> | undefined)?.defaultAgentId).toBe("assistant");
     expect(session?.store).toBe(
       `~/.openclaw/workspaces/${workspaceId}/agents/{agentId}/sessions/sessions.json`,
     );
     expect(cron?.store).toBe(`~/.openclaw/workspaces/${workspaceId}/cron/jobs.json`);
+  });
+
+  it("merges leaked same-workspace global agents into the workspace effective config", async () => {
+    mockGlobalConfig = {
+      agents: {
+        list: [
+          { id: "assistant", default: true },
+          { id: "growth-hacker", workspaceId, model: "github-copilot/gpt-4.1" },
+          { id: "rajan-only", workspaceId: "ws-other", model: "github-copilot/gpt-4.1" },
+        ],
+      },
+    };
+
+    const { loadEffectiveWorkspaceConfig, writeWorkspaceConfig } = await import("./workspace-config.js");
+    await writeWorkspaceConfig(workspaceId, {
+      agents: {
+        list: [{ id: "assistant", default: true, workspaceId }],
+      },
+    });
+
+    const effective = await loadEffectiveWorkspaceConfig(workspaceId);
+    const agents = ((effective.agents as Record<string, unknown> | undefined)?.list ?? []) as Array<
+      Record<string, unknown>
+    >;
+
+    expect(agents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "assistant", workspaceId }),
+        expect.objectContaining({
+          id: "growth-hacker",
+          workspaceId,
+          model: "github-copilot/gpt-4.1",
+        }),
+      ]),
+    );
+    expect(agents.find((entry) => entry.id === "rajan-only")).toBeUndefined();
   });
 });

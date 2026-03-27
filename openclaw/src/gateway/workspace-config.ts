@@ -76,6 +76,12 @@ function stripCrossWorkspaceInheritedConfig(globalCfg: JsonObject): JsonObject {
   delete next.env;
   delete next.bindings;
 
+  const routing = isJsonObject(next.routing) ? ({ ...next.routing } as JsonObject) : null;
+  if (routing && Object.prototype.hasOwnProperty.call(routing, "bindings")) {
+    delete routing.bindings;
+    next.routing = routing;
+  }
+
   const session = isJsonObject(next.session) ? ({ ...next.session } as JsonObject) : null;
   if (session && Object.prototype.hasOwnProperty.call(session, "identityLinks")) {
     delete session.identityLinks;
@@ -101,6 +107,69 @@ function isWorkspaceScopedPath(value: unknown, workspaceId: string): boolean {
   return typeof value === "string" && value.includes(`/workspaces/${workspaceId}/`);
 }
 
+function normalizeWorkspaceAgentEntry(
+  entry: JsonObject | null,
+  workspaceId: string,
+  fallbackAgentId: string,
+): JsonObject {
+  const agentId =
+    typeof entry?.id === "string" && entry.id.trim() ? entry.id.trim() : fallbackAgentId;
+  const next: JsonObject = { ...(entry ?? {}), id: agentId, workspaceId };
+  if (!isWorkspaceScopedPath(next.workspace, workspaceId)) {
+    next.workspace = workspaceDefaultAgentWorkspacePath(workspaceId, agentId);
+  }
+  return next;
+}
+
+function mergeWorkspaceAgentLists(
+  globalCfg: JsonObject,
+  workspaceCfg: JsonObject,
+  mergedCfg: JsonObject,
+  workspaceId: string,
+): JsonObject {
+  const wsId = workspaceId.trim();
+  const globalAgents =
+    isJsonObject(globalCfg.agents) && Array.isArray(globalCfg.agents.list) ? globalCfg.agents.list : [];
+  const workspaceAgents =
+    isJsonObject(workspaceCfg.agents) && Array.isArray(workspaceCfg.agents.list)
+      ? workspaceCfg.agents.list
+      : null;
+  if (!workspaceAgents) {
+    return mergedCfg;
+  }
+
+  const combined = new Map<string, JsonObject>();
+  for (const entry of globalAgents) {
+    if (!isJsonObject(entry)) {
+      continue;
+    }
+    const entryWs = typeof entry.workspaceId === "string" ? entry.workspaceId.trim() : "";
+    const agentId = typeof entry.id === "string" ? entry.id.trim() : "";
+    if (!agentId || entryWs !== wsId) {
+      continue;
+    }
+    combined.set(agentId, { ...entry });
+  }
+  for (const entry of workspaceAgents) {
+    if (!isJsonObject(entry)) {
+      continue;
+    }
+    const agentId = typeof entry.id === "string" ? entry.id.trim() : "";
+    if (!agentId) {
+      continue;
+    }
+    combined.set(agentId, { ...entry });
+  }
+
+  return {
+    ...mergedCfg,
+    agents: {
+      ...(isJsonObject(mergedCfg.agents) ? mergedCfg.agents : {}),
+      list: Array.from(combined.values()),
+    },
+  };
+}
+
 /**
  * Filter agents.list in the merged effective config to only include agents that
  * belong to the given workspaceId (i.e. entries with no workspaceId or with
@@ -112,38 +181,48 @@ function filterAgentsForWorkspace(mergedCfg: JsonObject, workspaceId: string): J
   const agentDefaults = isJsonObject(agents) && isJsonObject(agents.defaults) ? { ...agents.defaults } : {};
   const list = isJsonObject(agents) && Array.isArray(agents.list) ? agents.list : [];
   const wsId = workspaceId.trim();
-  const filtered = list.filter((entry) => {
-    if (!isJsonObject(entry)) {
-      return true; // keep non-object entries as-is
+  const workspaceEntries = list
+    .filter((entry): entry is JsonObject => {
+      if (!isJsonObject(entry)) {
+        return false;
+      }
+      return typeof entry.workspaceId === "string" && entry.workspaceId.trim() === wsId;
+    })
+    .map((entry) => normalizeWorkspaceAgentEntry(entry, wsId, String(entry.id ?? "").trim() || "assistant"));
+  const defaultAgentId = resolveDefaultAgentId(mergedCfg as OpenClawConfig);
+  const defaultTemplate =
+    list.find(
+      (entry) =>
+        isJsonObject(entry) &&
+        typeof entry.id === "string" &&
+        entry.id.trim() === defaultAgentId &&
+        (typeof entry.workspaceId !== "string" || entry.workspaceId.trim() === wsId),
+    ) ?? null;
+  const scoped = workspaceEntries.slice();
+  if (!scoped.some((entry) => String(entry.id ?? "").trim() === defaultAgentId)) {
+    scoped.unshift(normalizeWorkspaceAgentEntry(defaultTemplate, wsId, defaultAgentId));
+  }
+  if (!scoped.some((entry) => entry.default === true)) {
+    const defaultIndex = scoped.findIndex((entry) => String(entry.id ?? "").trim() === defaultAgentId);
+    if (defaultIndex >= 0) {
+      scoped[defaultIndex] = { ...scoped[defaultIndex], default: true };
     }
-    const entryWs = typeof entry.workspaceId === "string" ? entry.workspaceId.trim() : "";
-    // Keep: global agents (no workspaceId) or agents that belong to this workspace
-    return !entryWs || entryWs === wsId;
-  });
-  const scoped = filtered.map((entry) => {
-    if (!isJsonObject(entry)) {
-      return entry;
-    }
-    const entryWs = typeof entry.workspaceId === "string" ? entry.workspaceId.trim() : "";
-    return entryWs ? entry : { ...entry, workspaceId: wsId };
-  });
-  const mergedForDefault = {
-    ...mergedCfg,
-    agents: {
-      ...(isJsonObject(agents) ? agents : {}),
-      defaults: agentDefaults,
-      list: scoped,
-    },
-  } as OpenClawConfig;
-  const defaultAgentId = resolveDefaultAgentId(mergedForDefault);
+  }
   if (!isWorkspaceScopedPath(agentDefaults.workspace, wsId)) {
     agentDefaults.workspace = workspaceDefaultAgentWorkspacePath(wsId, defaultAgentId);
   }
-  if (scoped.length === 0) {
-    scoped.push({ id: defaultAgentId, default: true, workspaceId: wsId });
+  const routing = isJsonObject(mergedCfg.routing) ? { ...mergedCfg.routing } : {};
+  const routingDefaultAgentId =
+    typeof routing.defaultAgentId === "string" ? routing.defaultAgentId.trim() : "";
+  if (
+    !routingDefaultAgentId ||
+    !scoped.some((entry) => String(entry.id ?? "").trim() === routingDefaultAgentId)
+  ) {
+    routing.defaultAgentId = defaultAgentId;
   }
   return {
     ...mergedCfg,
+    routing,
     agents: {
       ...(isJsonObject(agents) ? agents : {}),
       defaults: agentDefaults,
@@ -177,7 +256,8 @@ export async function loadEffectiveWorkspaceConfig(workspaceId: string): Promise
   const workspaceCfg = (await readWorkspaceConfig(workspaceId)) ?? {};
   const merged = deepMerge(globalObject, workspaceCfg);
   const mergedObject = isJsonObject(merged) ? merged : globalObject;
-  const scopedPaths = applyWorkspaceScopedPaths(mergedObject, workspaceId);
+  const mergedAgents = mergeWorkspaceAgentLists(globalObject, workspaceCfg, mergedObject, workspaceId);
+  const scopedPaths = applyWorkspaceScopedPaths(mergedAgents, workspaceId);
   // Strip any agents from other workspaces that may have leaked into global config
   return filterAgentsForWorkspace(scopedPaths, workspaceId);
 }

@@ -2,7 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cronHandlers } from "./cron.js";
-import { writeWorkspaceConfig, workspaceConfigPath } from "../workspace-config.js";
+import { writeWorkspaceConfig, workspaceConfigPath, loadEffectiveWorkspaceConfig } from "../workspace-config.js";
+import { resolveCronStorePath } from "../../cron/store.js";
 
 describe("cron workspace isolation", () => {
   afterEach(() => {
@@ -37,7 +38,20 @@ describe("cron workspace isolation", () => {
       },
       respond,
       client: { pmosRole: "workspace_admin", pmosWorkspaceId: workspaceId } as any,
-      context: { cron: { add } } as any,
+      context: {
+        cron: {
+          add,
+          list: async () => [
+            {
+              id: "job-1",
+              enabled: true,
+              workspaceId,
+              agentId: "assistant",
+              schedule: { kind: "every", everyMs: 60_000 },
+            },
+          ],
+        },
+      } as any,
     } as any);
 
     expect(add).toHaveBeenCalledWith(
@@ -53,6 +67,21 @@ describe("cron workspace isolation", () => {
         agentId: "assistant",
       }),
       undefined,
+    );
+    const effectiveCfg = await loadEffectiveWorkspaceConfig(workspaceId);
+    const cronStorePath = resolveCronStorePath(
+      (effectiveCfg as { cron?: { store?: string } }).cron?.store,
+    );
+    const stored = JSON.parse(await fs.readFile(cronStorePath, "utf-8")) as {
+      jobs?: Array<{ workspaceId?: string; agentId?: string }>;
+    };
+    expect(stored.jobs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          workspaceId,
+          agentId: "assistant",
+        }),
+      ]),
     );
 
     await fs.rm(path.dirname(workspaceConfigPath(workspaceId)), {
