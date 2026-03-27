@@ -38,6 +38,7 @@ import {
   validateAgentWaitParams,
 } from "../protocol/index.js";
 import { loadSessionEntryForConfig } from "../session-utils.js";
+import { resolveWorkspaceEventScopeKey } from "../workspace-event-scope.js";
 import { formatForLog } from "../ws-log.js";
 import { isSuperAdmin } from "../workspace-context.js";
 import { waitForAgentJob } from "./agent-job.js";
@@ -321,10 +322,14 @@ export const agentHandlers: GatewayRequestHandlers = {
         context.addChatRun(idem, {
           sessionKey: requestedSessionKey,
           clientRunId: idem,
+          scopeKey: resolveWorkspaceEventScopeKey(client),
         });
         bestEffortDeliver = true;
       }
-      registerAgentRunContext(idem, { sessionKey: requestedSessionKey });
+      registerAgentRunContext(idem, {
+        sessionKey: requestedSessionKey,
+        scopeKey: resolveWorkspaceEventScopeKey(client),
+      });
     }
 
     const runId = idem;

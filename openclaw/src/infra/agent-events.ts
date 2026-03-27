@@ -9,10 +9,12 @@ export type AgentEventPayload = {
   ts: number;
   data: Record<string, unknown>;
   sessionKey?: string;
+  scopeKey?: string;
 };
 
 export type AgentRunContext = {
   sessionKey?: string;
+  scopeKey?: string;
   verboseLevel?: VerboseLevel;
   isHeartbeat?: boolean;
 };
@@ -33,6 +35,9 @@ export function registerAgentRunContext(runId: string, context: AgentRunContext)
   }
   if (context.sessionKey && existing.sessionKey !== context.sessionKey) {
     existing.sessionKey = context.sessionKey;
+  }
+  if (context.scopeKey && existing.scopeKey !== context.scopeKey) {
+    existing.scopeKey = context.scopeKey;
   }
   if (context.verboseLevel && existing.verboseLevel !== context.verboseLevel) {
     existing.verboseLevel = context.verboseLevel;
@@ -62,9 +67,12 @@ export function emitAgentEvent(event: Omit<AgentEventPayload, "seq" | "ts">) {
     typeof event.sessionKey === "string" && event.sessionKey.trim()
       ? event.sessionKey
       : context?.sessionKey;
+  const scopeKey =
+    typeof event.scopeKey === "string" && event.scopeKey.trim() ? event.scopeKey : context?.scopeKey;
   const enriched: AgentEventPayload = {
     ...event,
     sessionKey,
+    scopeKey,
     seq: nextSeq,
     ts: Date.now(),
   };

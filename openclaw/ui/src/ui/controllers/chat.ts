@@ -88,6 +88,7 @@ function reconcileRunWithHistory(state: ChatState, historyMessages: unknown[]): 
 export type ChatEventPayload = {
   runId: string;
   sessionKey: string;
+  scopeKey?: string;
   state: "delta" | "final" | "aborted" | "error";
   message?: unknown;
   errorMessage?: string;
@@ -97,6 +98,26 @@ type PendingChatMarker = {
   kind?: unknown;
   runId?: unknown;
 };
+
+function resolveExpectedScopeKey(state: ChatState): string {
+  const workspaceId = typeof state.pmosWorkspaceId === "string" ? state.pmosWorkspaceId.trim() : "";
+  return workspaceId ? `workspace:${workspaceId}` : "global";
+}
+
+function matchesChatEventScope(
+  state: ChatState,
+  payload?: Pick<ChatEventPayload, "runId" | "scopeKey">,
+): boolean {
+  const expectedScopeKey = resolveExpectedScopeKey(state);
+  const actualScopeKey = typeof payload?.scopeKey === "string" ? payload.scopeKey.trim() : "";
+  if (actualScopeKey) {
+    return actualScopeKey === expectedScopeKey;
+  }
+  if (expectedScopeKey === "global") {
+    return true;
+  }
+  return Boolean(payload?.runId && state.chatRunId && payload.runId === state.chatRunId);
+}
 
 function readPendingMarker(message: unknown): PendingChatMarker | null {
   if (!message || typeof message !== "object") {
@@ -525,6 +546,9 @@ export async function abortChatRun(state: ChatState): Promise<boolean> {
 
 export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
   if (!payload) {
+    return null;
+  }
+  if (!matchesChatEventScope(state, payload)) {
     return null;
   }
   if (payload.sessionKey !== state.sessionKey) {

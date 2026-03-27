@@ -4,6 +4,7 @@ export type ChatAbortControllerEntry = {
   controller: AbortController;
   sessionId: string;
   sessionKey: string;
+  scopeKey?: string;
   startedAtMs: number;
   expiresAtMs: number;
 };
@@ -51,13 +52,15 @@ function broadcastChatAborted(
   params: {
     runId: string;
     sessionKey: string;
+    scopeKey?: string;
     stopReason?: string;
   },
 ) {
-  const { runId, sessionKey, stopReason } = params;
+  const { runId, sessionKey, scopeKey, stopReason } = params;
   const payload = {
     runId,
     sessionKey,
+    scopeKey,
     seq: (ops.agentRunSeq.get(runId) ?? 0) + 1,
     state: "aborted" as const,
     stopReason,
@@ -71,15 +74,19 @@ export function abortChatRunById(
   params: {
     runId: string;
     sessionKey: string;
+    scopeKey?: string;
     stopReason?: string;
   },
 ): { aborted: boolean } {
-  const { runId, sessionKey, stopReason } = params;
+  const { runId, sessionKey, scopeKey, stopReason } = params;
   const active = ops.chatAbortControllers.get(runId);
   if (!active) {
     return { aborted: false };
   }
   if (active.sessionKey !== sessionKey) {
+    return { aborted: false };
+  }
+  if ((active.scopeKey ?? "") !== (scopeKey ?? "")) {
     return { aborted: false };
   }
 
@@ -89,7 +96,7 @@ export function abortChatRunById(
   ops.chatRunBuffers.delete(runId);
   ops.chatDeltaSentAt.delete(runId);
   ops.removeChatRun(runId, runId, sessionKey);
-  broadcastChatAborted(ops, { runId, sessionKey, stopReason });
+  broadcastChatAborted(ops, { runId, sessionKey, scopeKey, stopReason });
   return { aborted: true };
 }
 
@@ -97,16 +104,20 @@ export function abortChatRunsForSessionKey(
   ops: ChatAbortOps,
   params: {
     sessionKey: string;
+    scopeKey?: string;
     stopReason?: string;
   },
 ): { aborted: boolean; runIds: string[] } {
-  const { sessionKey, stopReason } = params;
+  const { sessionKey, scopeKey, stopReason } = params;
   const runIds: string[] = [];
   for (const [runId, active] of ops.chatAbortControllers) {
     if (active.sessionKey !== sessionKey) {
       continue;
     }
-    const res = abortChatRunById(ops, { runId, sessionKey, stopReason });
+    if ((active.scopeKey ?? "") !== (scopeKey ?? "")) {
+      continue;
+    }
+    const res = abortChatRunById(ops, { runId, sessionKey, scopeKey, stopReason });
     if (res.aborted) {
       runIds.push(runId);
     }

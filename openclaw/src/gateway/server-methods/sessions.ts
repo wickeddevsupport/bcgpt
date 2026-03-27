@@ -44,6 +44,7 @@ import {
 import { applySessionsPatchToStore } from "../sessions-patch.js";
 import { resolveSessionKeyFromResolveParams } from "../sessions-resolve.js";
 import { isSuperAdmin } from "../workspace-context.js";
+import { GLOBAL_EVENT_SCOPE_KEY, matchesWorkspaceEventScope, resolveWorkspaceEventScopeKey } from "../workspace-event-scope.js";
 import type { GatewayClient } from "./types.js";
 
 async function loadSessionsConfigForClient(
@@ -170,12 +171,23 @@ function withMainSessionFallback(params: {
 }
 
 function collectActiveRunsBySessionKey(
-  chatAbortControllers: ReadonlyMap<string, { sessionKey: string; startedAtMs?: number }>,
+  chatAbortControllers: ReadonlyMap<
+    string,
+    { sessionKey: string; scopeKey?: string; startedAtMs?: number }
+  >,
+  scopeKey: string,
 ): Map<string, { runId: string }> {
   const activeRuns = new Map<string, { runId: string; startedAtMs: number }>();
   for (const [runId, entry] of chatAbortControllers.entries()) {
     const sessionKey = typeof entry?.sessionKey === "string" ? entry.sessionKey.trim() : "";
     if (!sessionKey) {
+      continue;
+    }
+    const entryScopeKey =
+      typeof entry?.scopeKey === "string" && entry.scopeKey.trim()
+        ? entry.scopeKey.trim()
+        : GLOBAL_EVENT_SCOPE_KEY;
+    if (!matchesWorkspaceEventScope(scopeKey, entryScopeKey)) {
       continue;
     }
     const startedAtMs =
@@ -210,6 +222,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     }
     const p = params;
     const cfg = await loadSessionsConfigForClient(client);
+    const scopeKey = resolveWorkspaceEventScopeKey(client);
     const { storePath, store } = loadCombinedSessionStoreForGateway(cfg);
     
     // Apply workspace filtering for PMOS multi-tenant isolation
@@ -241,7 +254,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         true,
         annotateSessionsWithActiveRuns(
           withFallback,
-          collectActiveRunsBySessionKey(context.chatAbortControllers),
+          collectActiveRunsBySessionKey(context.chatAbortControllers, scopeKey),
         ),
         undefined,
       );
@@ -266,7 +279,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       true,
       annotateSessionsWithActiveRuns(
         withFallback,
-        collectActiveRunsBySessionKey(context.chatAbortControllers),
+        collectActiveRunsBySessionKey(context.chatAbortControllers, scopeKey),
       ),
       undefined,
     );

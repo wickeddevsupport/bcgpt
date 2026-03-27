@@ -119,12 +119,14 @@ export function syncWorkspaceSessionSelection(
 function syncActiveRunState(state: SessionsState, res: SessionsListResult): void {
   const currentKey = typeof state.sessionKey === "string" ? state.sessionKey.trim() : "";
   if (!currentKey) {
+    state.chatRunId = null;
     return;
   }
   const currentSession = Array.isArray(res.sessions)
     ? res.sessions.find((row) => (typeof row.key === "string" ? row.key.trim() : "") === currentKey)
     : undefined;
   if (!currentSession) {
+    state.chatRunId = null;
     return;
   }
   state.chatRunId = typeof currentSession.activeRunId === "string" ? currentSession.activeRunId : null;

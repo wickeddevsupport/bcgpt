@@ -49,6 +49,44 @@ describe("agent event handler", () => {
     nowSpy.mockRestore();
   });
 
+  it("propagates workspace scope for webchat chat events", () => {
+    const broadcast = vi.fn();
+    const broadcastToConnIds = vi.fn();
+    const nodeSendToSession = vi.fn();
+    const agentRunSeq = new Map<string, number>();
+    const chatRunState = createChatRunState();
+    const toolEventRecipients = createToolEventRecipientRegistry();
+    chatRunState.registry.add("run-scope", {
+      sessionKey: "agent:assistant:main",
+      clientRunId: "client-scope",
+      scopeKey: "workspace:ws-1",
+    });
+
+    const handler = createAgentEventHandler({
+      broadcast,
+      broadcastToConnIds,
+      nodeSendToSession,
+      agentRunSeq,
+      chatRunState,
+      resolveSessionKeyForRun: () => undefined,
+      clearAgentRunContext: vi.fn(),
+      toolEventRecipients,
+    });
+
+    handler({
+      runId: "run-scope",
+      seq: 1,
+      stream: "assistant",
+      ts: Date.now(),
+      data: { text: "Scoped hello" },
+    });
+
+    const payload = broadcast.mock.calls.find(([event]) => event === "chat")?.[1] as
+      | { scopeKey?: string }
+      | undefined;
+    expect(payload?.scopeKey).toBe("workspace:ws-1");
+  });
+
   it("emits chat delta for reasoning-only assistant events using buffered text", () => {
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(2_000);
     const broadcast = vi.fn();

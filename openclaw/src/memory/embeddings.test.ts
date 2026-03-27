@@ -23,6 +23,7 @@ describe("embedding provider remote overrides", () => {
     vi.resetAllMocks();
     vi.resetModules();
     vi.unstubAllGlobals();
+    vi.doUnmock("./node-llama.js");
   });
 
   it("uses remote baseUrl/apiKey and merges headers", async () => {
@@ -172,9 +173,15 @@ describe("embedding provider auto selection", () => {
     vi.resetAllMocks();
     vi.resetModules();
     vi.unstubAllGlobals();
+    vi.doUnmock("./node-llama.js");
   });
 
   it("prefers openai when a key resolves", async () => {
+    vi.doMock("./node-llama.js", () => ({
+      importNodeLlamaCpp: vi.fn(async () => {
+        throw new Error("node-llama-cpp missing");
+      }),
+    }));
     const { createEmbeddingProvider } = await import("./embeddings.js");
     const authModule = await import("../agents/model-auth.js");
     vi.mocked(authModule.resolveApiKeyForProvider).mockImplementation(async ({ provider }) => {
@@ -196,6 +203,11 @@ describe("embedding provider auto selection", () => {
   });
 
   it("uses gemini when openai is missing", async () => {
+    vi.doMock("./node-llama.js", () => ({
+      importNodeLlamaCpp: vi.fn(async () => {
+        throw new Error("node-llama-cpp missing");
+      }),
+    }));
     const fetchMock = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -232,6 +244,11 @@ describe("embedding provider auto selection", () => {
   });
 
   it("keeps explicit model when openai is selected", async () => {
+    vi.doMock("./node-llama.js", () => ({
+      importNodeLlamaCpp: vi.fn(async () => {
+        throw new Error("node-llama-cpp missing");
+      }),
+    }));
     const fetchMock = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -262,6 +279,39 @@ describe("embedding provider auto selection", () => {
     expect(url).toBe("https://api.openai.com/v1/embeddings");
     const payload = JSON.parse(String(init?.body ?? "{}")) as { model?: string };
     expect(payload.model).toBe("text-embedding-3-small");
+  });
+
+  it("prefers the built-in local embedding model when local runtime is available", async () => {
+    vi.doMock("./node-llama.js", () => ({
+      importNodeLlamaCpp: vi.fn(async () => ({
+        LlamaLogLevel: { error: "error" },
+        getLlama: async () => ({
+          loadModel: async () => ({
+            createEmbeddingContext: async () => ({
+              getEmbeddingFor: async () => ({ vector: Float32Array.from([1, 2, 3]) }),
+            }),
+          }),
+        }),
+        resolveModelFile: async () => "C:/models/embeddinggemma.gguf",
+      })),
+    }));
+
+    const { createEmbeddingProvider } = await import("./embeddings.js");
+    const authModule = await import("../agents/model-auth.js");
+    vi.mocked(authModule.resolveApiKeyForProvider).mockImplementation(async () => {
+      throw new Error('No API key found for provider "openai".');
+    });
+
+    const result = await createEmbeddingProvider({
+      config: {} as never,
+      provider: "auto",
+      model: "",
+      fallback: "none",
+    });
+
+    expect(result.requestedProvider).toBe("auto");
+    expect(result.provider.id).toBe("local");
+    expect(result.provider.model).toContain("embeddinggemma");
   });
 });
 

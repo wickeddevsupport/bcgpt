@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionsListResult } from "../types.ts";
 import {
+  loadSessions,
   syncWorkspaceSessionSelection,
   type SessionsState,
 } from "./sessions.ts";
@@ -83,5 +84,18 @@ describe("syncWorkspaceSessionSelection", () => {
     expect(state.settings?.sessionKey).toBe("agent:assistant:main");
     expect(state.settings?.lastActiveSessionKey).toBe("agent:assistant:main");
     expect(state.agentsSelectedId).toBe("assistant");
+  });
+
+  it("clears stale chatRunId when the active session row is missing", async () => {
+    const request = async () =>
+      createResult(["agent:assistant:chat:abc123", "agent:designer:main"]);
+    const state = createState({
+      client: { request } as unknown as SessionsState["client"],
+      chatRunId: "run-stale",
+    });
+
+    await loadSessions(state);
+
+    expect(state.chatRunId).toBeNull();
   });
 });

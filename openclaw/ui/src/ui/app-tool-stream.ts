@@ -11,6 +11,7 @@ export type AgentEventPayload = {
   stream: string;
   ts: number;
   sessionKey?: string;
+  scopeKey?: string;
   data: Record<string, unknown>;
 };
 
@@ -29,11 +30,29 @@ export type ToolStreamEntry = {
 type ToolStreamHost = {
   sessionKey: string;
   chatRunId: string | null;
+  pmosWorkspaceId?: string;
   toolStreamById: Map<string, ToolStreamEntry>;
   toolStreamOrder: string[];
   chatToolMessages: Record<string, unknown>[];
   toolStreamSyncTimer: number | null;
 };
+
+function resolveExpectedScopeKey(host: ToolStreamHost): string {
+  const workspaceId = typeof host.pmosWorkspaceId === "string" ? host.pmosWorkspaceId.trim() : "";
+  return workspaceId ? `workspace:${workspaceId}` : "global";
+}
+
+function matchesAgentEventScope(host: ToolStreamHost, payload?: Pick<AgentEventPayload, "runId" | "scopeKey">): boolean {
+  const expectedScopeKey = resolveExpectedScopeKey(host);
+  const actualScopeKey = typeof payload?.scopeKey === "string" ? payload.scopeKey.trim() : "";
+  if (actualScopeKey) {
+    return actualScopeKey === expectedScopeKey;
+  }
+  if (expectedScopeKey === "global") {
+    return true;
+  }
+  return Boolean(payload?.runId && host.chatRunId && payload.runId === host.chatRunId);
+}
 
 function isRelatedAgentSessionKey(activeSessionKey: string, candidateSessionKey: string): boolean {
   if (candidateSessionKey === activeSessionKey) {
@@ -233,6 +252,9 @@ export function handleCompactionEvent(host: CompactionHost, payload: AgentEventP
 
 export function handleAgentEvent(host: ToolStreamHost, payload?: AgentEventPayload) {
   if (!payload) {
+    return;
+  }
+  if (!matchesAgentEventScope(host, payload)) {
     return;
   }
 

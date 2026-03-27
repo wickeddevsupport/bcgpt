@@ -42,6 +42,24 @@ describe("handleChatEvent", () => {
     expect(handleChatEvent(state, payload)).toBe(null);
   });
 
+  it("ignores workspace events from another workspace scope", () => {
+    const state = createState({
+      sessionKey: "agent:assistant:main",
+      pmosWorkspaceId: "workspace-a",
+      chatRunId: "run-1",
+    });
+    const payload: ChatEventPayload = {
+      runId: "run-1",
+      sessionKey: "agent:assistant:main",
+      scopeKey: "workspace:workspace-b",
+      state: "delta",
+      message: { role: "assistant", content: [{ type: "text", text: "foreign" }] },
+    };
+
+    expect(handleChatEvent(state, payload)).toBe(null);
+    expect(state.chatStream).toBeNull();
+  });
+
   it("returns null for delta from another run", () => {
     const state = createState({
       sessionKey: "main",

@@ -58,12 +58,9 @@ export type EmbeddingProviderOptions = {
 const DEFAULT_LOCAL_MODEL = "hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf";
 
 function canAutoSelectLocal(options: EmbeddingProviderOptions): boolean {
-  const modelPath = options.local?.modelPath?.trim();
-  if (!modelPath) {
-    return false;
-  }
+  const modelPath = options.local?.modelPath?.trim() || DEFAULT_LOCAL_MODEL;
   if (/^(hf:|https?:)/i.test(modelPath)) {
-    return false;
+    return true;
   }
   const resolved = resolveUserPath(modelPath);
   try {

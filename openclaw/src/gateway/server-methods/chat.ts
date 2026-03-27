@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { MsgContext } from "../../auto-reply/templating.js";
 import type { GatewayClient, GatewayRequestContext, GatewayRequestHandlers } from "./types.js";
+import { normalizeVerboseLevel } from "../../auto-reply/thinking.js";
 import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { resolveThinkingDefault } from "../../agents/model-selection.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
@@ -40,9 +41,11 @@ import {
 import { formatForLog } from "../ws-log.js";
 import { injectTimestamp, timestampOptsFromConfig } from "./agent-timestamp.js";
 import { isSuperAdmin } from "../workspace-context.js";
+import { registerAgentRunContext } from "../../infra/agent-events.js";
 import { rateLimiter } from "../../security/rate-limiter.js";
 import { listAgentsForGateway, resolveGatewaySessionStoreTarget } from "../session-utils.js";
 import { inspectWorkspaceChatUrls } from "../url-routing.js";
+import { resolveWorkspaceEventScopeKey } from "../workspace-event-scope.js";
 
 type TranscriptAppendResult = {
   ok: boolean;
@@ -259,12 +262,14 @@ function broadcastChatFinal(params: {
   context: Pick<GatewayRequestContext, "broadcast" | "nodeSendToSession" | "agentRunSeq">;
   runId: string;
   sessionKey: string;
+  scopeKey?: string;
   message?: Record<string, unknown>;
 }) {
   const seq = nextChatSeq({ agentRunSeq: params.context.agentRunSeq }, params.runId);
   const payload = {
     runId: params.runId,
     sessionKey: params.sessionKey,
+    scopeKey: params.scopeKey,
     seq,
     state: "final" as const,
     message: params.message,
@@ -277,12 +282,14 @@ function broadcastChatError(params: {
   context: Pick<GatewayRequestContext, "broadcast" | "nodeSendToSession" | "agentRunSeq">;
   runId: string;
   sessionKey: string;
+  scopeKey?: string;
   errorMessage?: string;
 }) {
   const seq = nextChatSeq({ agentRunSeq: params.context.agentRunSeq }, params.runId);
   const payload = {
     runId: params.runId,
     sessionKey: params.sessionKey,
+    scopeKey: params.scopeKey,
     seq,
     state: "error" as const,
     errorMessage: params.errorMessage,
@@ -434,6 +441,7 @@ export const chatHandlers: GatewayRequestHandlers = {
 
     // Check workspace ownership for non-super-admin users
     const cfg = await loadChatConfigForClient(client);
+    const scopeKey = resolveWorkspaceEventScopeKey(client);
     if (!canAccessSession(sessionKey, cfg, client)) {
       respond(
         false,
@@ -457,6 +465,7 @@ export const chatHandlers: GatewayRequestHandlers = {
     if (!runId) {
       const res = abortChatRunsForSessionKey(ops, {
         sessionKey,
+        scopeKey,
         stopReason: "rpc",
       });
       respond(true, { ok: true, aborted: res.aborted, runIds: res.runIds });
@@ -480,6 +489,7 @@ export const chatHandlers: GatewayRequestHandlers = {
     const res = abortChatRunById(ops, {
       runId,
       sessionKey,
+      scopeKey,
       stopReason: "rpc",
     });
     respond(true, {
@@ -568,6 +578,7 @@ export const chatHandlers: GatewayRequestHandlers = {
     const rawSessionKey = p.sessionKey;
     const cfg = await loadChatConfigForClient(client);
     const { entry, canonicalKey: sessionKey } = loadSessionEntryForConfig(cfg, rawSessionKey);
+    const scopeKey = resolveWorkspaceEventScopeKey(client);
 
     // Check workspace ownership for non-super-admin users
     if (!canAccessSession(rawSessionKey, cfg, client)) {
@@ -614,7 +625,7 @@ export const chatHandlers: GatewayRequestHandlers = {
           broadcast: context.broadcast,
           nodeSendToSession: context.nodeSendToSession,
         },
-        { sessionKey: rawSessionKey, stopReason: "stop" },
+        { sessionKey: rawSessionKey, scopeKey, stopReason: "stop" },
       );
       respond(true, { ok: true, aborted: res.aborted, runIds: res.runIds });
       return;
@@ -643,6 +654,7 @@ export const chatHandlers: GatewayRequestHandlers = {
         controller: abortController,
         sessionId: entry?.sessionId ?? clientRunId,
         sessionKey: rawSessionKey,
+        scopeKey,
         startedAtMs: now,
         expiresAtMs: resolveChatRunExpiresAtMs({ now, timeoutMs }),
       });
@@ -693,6 +705,14 @@ export const chatHandlers: GatewayRequestHandlers = {
         cfg: effectiveCfg,
         agentId,
         channel: INTERNAL_MESSAGE_CHANNEL,
+      });
+      const verboseLevel = normalizeVerboseLevel(
+        entry?.verboseLevel ?? effectiveCfg.agents?.defaults?.verboseDefault,
+      );
+      registerAgentRunContext(clientRunId, {
+        sessionKey: rawSessionKey,
+        scopeKey,
+        verboseLevel,
       });
       const finalReplyParts: string[] = [];
       const dispatcher = createReplyDispatcher({
@@ -778,6 +798,7 @@ export const chatHandlers: GatewayRequestHandlers = {
               context,
               runId: clientRunId,
               sessionKey: rawSessionKey,
+              scopeKey,
               message,
             });
           }
@@ -803,6 +824,7 @@ export const chatHandlers: GatewayRequestHandlers = {
             context,
             runId: clientRunId,
             sessionKey: rawSessionKey,
+            scopeKey,
             errorMessage: String(err),
           });
         })

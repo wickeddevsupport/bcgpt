@@ -65,11 +65,32 @@ type GatewayHost = {
   assistantAgentId: string | null;
   sessionKey: string;
   chatRunId: string | null;
+  pmosWorkspaceId?: string;
   refreshSessionsAfterChat: Set<string>;
   pmosTraceEvents: PmosExecutionTraceEvent[];
   execApprovalQueue: ExecApprovalRequest[];
   execApprovalError: string | null;
 };
+
+function resolveExpectedScopeKey(host: GatewayHost): string {
+  const workspaceId = typeof host.pmosWorkspaceId === "string" ? host.pmosWorkspaceId.trim() : "";
+  return workspaceId ? `workspace:${workspaceId}` : "global";
+}
+
+function matchesScopedRunEvent(
+  host: GatewayHost,
+  payload?: { runId?: string; scopeKey?: string },
+): boolean {
+  const expectedScopeKey = resolveExpectedScopeKey(host);
+  const actualScopeKey = typeof payload?.scopeKey === "string" ? payload.scopeKey.trim() : "";
+  if (actualScopeKey) {
+    return actualScopeKey === expectedScopeKey;
+  }
+  if (expectedScopeKey === "global") {
+    return true;
+  }
+  return Boolean(payload?.runId && host.chatRunId && payload.runId === host.chatRunId);
+}
 
 type SessionDefaultsSnapshot = {
   defaultAgentId?: string;
@@ -157,6 +178,9 @@ function isRelatedAgentSessionKey(activeSessionKey: string, candidateSessionKey:
 }
 
 function refreshSessionsForRelatedAgentSession(host: GatewayHost, payload?: AgentEventPayload) {
+  if (!matchesScopedRunEvent(host, payload)) {
+    return;
+  }
   const relatedSessionKey =
     typeof payload?.sessionKey === "string" ? payload.sessionKey.trim() : "";
   if (!relatedSessionKey || !host.chatRunId || payload?.runId !== host.chatRunId) {
@@ -182,6 +206,9 @@ function refreshSessionsForRelatedAgentSession(host: GatewayHost, payload?: Agen
 
 function recordAgentTraceEvent(host: GatewayHost, payload?: AgentEventPayload) {
   if (!payload) {
+    return;
+  }
+  if (!matchesScopedRunEvent(host, payload)) {
     return;
   }
   if (
@@ -238,6 +265,9 @@ function recordAgentTraceEvent(host: GatewayHost, payload?: AgentEventPayload) {
 
 function recordChatTraceEvent(host: GatewayHost, payload?: ChatEventPayload) {
   if (!payload) {
+    return;
+  }
+  if (!matchesScopedRunEvent(host, payload)) {
     return;
   }
   if (payload.sessionKey && payload.sessionKey !== host.sessionKey) {
@@ -415,6 +445,9 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
     if (host.onboarding) {
       return;
     }
+    if (!matchesScopedRunEvent(host, payload)) {
+      return;
+    }
     recordAgentTraceEvent(host, payload);
     handleAgentEvent(host as unknown as Parameters<typeof handleAgentEvent>[0], payload);
     if (payload?.stream === "tool" || payload?.stream === "compaction") {
@@ -431,6 +464,9 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
 
   if (evt.event === "chat") {
     const payload = evt.payload as ChatEventPayload | undefined;
+    if (!matchesScopedRunEvent(host, payload)) {
+      return;
+    }
     recordChatTraceEvent(host, payload);
     if (payload?.sessionKey) {
       setLastActiveSessionKey(

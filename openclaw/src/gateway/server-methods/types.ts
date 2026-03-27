@@ -68,12 +68,15 @@ export type GatewayRequestContext = {
   chatAbortedRuns: Map<string, number>;
   chatRunBuffers: Map<string, string>;
   chatDeltaSentAt: Map<string, number>;
-  addChatRun: (sessionId: string, entry: { sessionKey: string; clientRunId: string }) => void;
+  addChatRun: (
+    sessionId: string,
+    entry: { sessionKey: string; clientRunId: string; scopeKey?: string },
+  ) => void;
   removeChatRun: (
     sessionId: string,
     clientRunId: string,
     sessionKey?: string,
-  ) => { sessionKey: string; clientRunId: string } | undefined;
+  ) => { sessionKey: string; clientRunId: string; scopeKey?: string } | undefined;
   registerToolEventRecipient: (runId: string, connId: string) => void;
   dedupe: Map<string, DedupeEntry>;
   wizardSessions: Map<string, WizardSession>;

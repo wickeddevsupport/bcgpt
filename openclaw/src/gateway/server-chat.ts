@@ -28,6 +28,7 @@ function shouldSuppressHeartbeatBroadcast(runId: string): boolean {
 export type ChatRunEntry = {
   sessionKey: string;
   clientRunId: string;
+  scopeKey?: string;
 };
 
 export type ChatRunRegistry = {
@@ -232,6 +233,7 @@ export function createAgentEventHandler({
     clientRunId: string,
     seq: number,
     text: string,
+    scopeKey?: string,
     thinking?: string,
   ) => {
     chatRunState.buffers.set(clientRunId, text);
@@ -249,6 +251,7 @@ export function createAgentEventHandler({
     const payload = {
       runId: clientRunId,
       sessionKey,
+      scopeKey,
       seq,
       state: "delta" as const,
       message: {
@@ -269,6 +272,7 @@ export function createAgentEventHandler({
     clientRunId: string,
     seq: number,
     jobState: "done" | "error",
+    scopeKey?: string,
     error?: unknown,
   ) => {
     const text = chatRunState.buffers.get(clientRunId)?.trim() ?? "";
@@ -279,6 +283,7 @@ export function createAgentEventHandler({
       const payload = {
         runId: clientRunId,
         sessionKey,
+        scopeKey,
         seq,
         state: "final" as const,
         message: {
@@ -297,6 +302,7 @@ export function createAgentEventHandler({
     const payload = {
       runId: clientRunId,
       sessionKey,
+      scopeKey,
       seq,
       state: "error" as const,
       errorMessage: error ? formatForLog(error) : undefined,
@@ -331,10 +337,15 @@ export function createAgentEventHandler({
     const chatLink = chatRunState.registry.peek(evt.runId);
     const sessionKey = chatLink?.sessionKey ?? resolveSessionKeyForRun(evt.runId);
     const clientRunId = chatLink?.clientRunId ?? evt.runId;
+    const runContext = getAgentRunContext(evt.runId);
+    const scopeKey = chatLink?.scopeKey ?? runContext?.scopeKey;
     const isAborted =
       chatRunState.abortedRuns.has(clientRunId) || chatRunState.abortedRuns.has(evt.runId);
     // Include sessionKey so Control UI can filter tool streams per session.
-    const agentPayload = sessionKey ? { ...evt, sessionKey } : evt;
+    const agentPayload =
+      sessionKey || scopeKey
+        ? { ...evt, ...(sessionKey ? { sessionKey } : {}), ...(scopeKey ? { scopeKey } : {}) }
+        : evt;
     const last = agentRunSeq.get(evt.runId) ?? 0;
     const isToolEvent = evt.stream === "tool";
     const toolVerbose = isToolEvent ? resolveToolVerboseLevel(evt.runId, sessionKey) : "off";
@@ -357,6 +368,7 @@ export function createAgentEventHandler({
         stream: "error",
         ts: Date.now(),
         sessionKey,
+        scopeKey,
         data: {
           reason: "seq gap",
           expected: last + 1,
@@ -389,7 +401,7 @@ export function createAgentEventHandler({
             ? evt.data.text
             : (chatRunState.buffers.get(clientRunId) ?? "");
         if (thinkingText || nextText) {
-          emitChatDelta(sessionKey, clientRunId, evt.seq, nextText, thinkingText);
+          emitChatDelta(sessionKey, clientRunId, evt.seq, nextText, scopeKey, thinkingText);
         }
       } else if (!isAborted && (lifecyclePhase === "end" || lifecyclePhase === "error")) {
         if (chatLink) {
@@ -403,6 +415,7 @@ export function createAgentEventHandler({
             finished.clientRunId,
             evt.seq,
             lifecyclePhase === "error" ? "error" : "done",
+            finished.scopeKey,
             evt.data?.error,
           );
         } else {
@@ -411,6 +424,7 @@ export function createAgentEventHandler({
             evt.runId,
             evt.seq,
             lifecyclePhase === "error" ? "error" : "done",
+            scopeKey,
             evt.data?.error,
           );
         }
