@@ -146,7 +146,7 @@ function normalizeAgentIdForCompare(value: unknown): string | null {
 }
 
 function workspaceScopedClient(
-  client: GatewayClient | undefined,
+  client: GatewayClient | null | undefined,
 ): { workspaceId: string } | null {
   if (!client || isSuperAdmin(client)) {
     return null;
@@ -157,6 +157,47 @@ function workspaceScopedClient(
     return null;
   }
   return { workspaceId };
+}
+
+type BaseHashSnapshot = {
+  exists: boolean;
+  hash?: string;
+  raw?: string | null;
+};
+
+type WorkspaceConfigSnapshot = BaseHashSnapshot & {
+  config: Record<string, unknown>;
+  path: string;
+};
+
+async function readWorkspaceConfigSnapshot(workspaceId: string): Promise<WorkspaceConfigSnapshot> {
+  const { readWorkspaceConfig, workspaceConfigPath } = await import("../workspace-config.js");
+  const existing = await readWorkspaceConfig(workspaceId);
+  const config = isJsonRecord(existing) ? existing : {};
+  const raw = JSON.stringify(config, null, 2);
+  return {
+    exists: existing != null,
+    config,
+    raw,
+    hash: resolveConfigSnapshotHash({ raw }) ?? undefined,
+    path: workspaceConfigPath(workspaceId),
+  };
+}
+
+function buildWorkspaceConfigResponse(snapshot: WorkspaceConfigSnapshot) {
+  const redactedConfig = redactConfigObject(snapshot.config);
+  const raw =
+    redactedConfig && typeof redactedConfig === "object"
+      ? JSON.stringify(redactedConfig, null, 2)
+      : snapshot.raw;
+  return {
+    path: snapshot.path,
+    config: redactedConfig,
+    raw,
+    valid: true,
+    issues: [],
+    hash: snapshot.hash,
+  };
 }
 
 const SHARED_AGENT_WORKSPACE_PATHS = new Set(["~/.openclaw/workspace", "~/.openclaw/workspace-main"]);
@@ -283,7 +324,7 @@ function resolveBaseHash(params: unknown): string | null {
 
 function requireConfigBaseHash(
   params: unknown,
-  snapshot: Awaited<ReturnType<typeof readConfigFileSnapshot>>,
+  snapshot: BaseHashSnapshot,
   respond: RespondFn,
 ): boolean {
   if (!snapshot.exists) {
@@ -338,6 +379,12 @@ export const configHandlers: GatewayRequestHandlers = {
           `invalid config.get params: ${formatValidationErrors(validateConfigGetParams.errors)}`,
         ),
       );
+      return;
+    }
+    const scoped = workspaceScopedClient(client);
+    if (scoped) {
+      const snapshot = await readWorkspaceConfigSnapshot(scoped.workspaceId);
+      respond(true, buildWorkspaceConfigResponse(snapshot), undefined);
       return;
     }
     const snapshot = await readConfigFileSnapshot();
@@ -418,10 +465,6 @@ export const configHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const snapshot = await readConfigFileSnapshot();
-    if (!requireConfigBaseHash(params, snapshot, respond)) {
-      return;
-    }
     const rawValue = (params as { raw?: unknown }).raw;
     if (typeof rawValue !== "string") {
       respond(
@@ -439,55 +482,48 @@ export const configHandlers: GatewayRequestHandlers = {
 
     const scoped = workspaceScopedClient(client);
     if (scoped) {
-      const merged = mergeWorkspaceScopedAgents(
-        snapshot.config as Record<string, unknown> | null | undefined,
-        parsedRes.parsed,
-        scoped.workspaceId,
-      );
-      if (!merged.ok) {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, merged.error));
+      const snapshot = await readWorkspaceConfigSnapshot(scoped.workspaceId);
+      if (!requireConfigBaseHash(params, snapshot, respond)) {
         return;
       }
-      const validatedScoped = validateConfigObjectWithPlugins(
-        stripWorkspaceIdsForValidation(merged.config),
-      );
-      if (!validatedScoped.ok) {
+      if (!isJsonRecord(parsedRes.parsed)) {
         respond(
           false,
           undefined,
-          errorShape(ErrorCodes.INVALID_REQUEST, "invalid config", {
-            details: { issues: validatedScoped.issues },
-          }),
+          errorShape(ErrorCodes.INVALID_REQUEST, "config.set raw must be an object"),
         );
         return;
       }
-      await writeConfigFile(merged.config);
-      const redactedScoped = redactConfigObject(merged.config) as Record<string, unknown>;
-      if (
-        redactedScoped?.agents &&
-        typeof redactedScoped.agents === "object" &&
-        !Array.isArray(redactedScoped.agents)
-      ) {
-        const agentsNode = redactedScoped.agents as Record<string, unknown>;
-        const list = toJsonRecordArray(agentsNode.list);
-        redactedScoped.agents = {
-          ...agentsNode,
-          list: list.filter((entry) => {
-            const entryWorkspace =
-              typeof entry.workspaceId === "string" ? entry.workspaceId.trim() : null;
-            return entryWorkspace === scoped.workspaceId;
-          }),
-        };
+      let restoredScoped: Record<string, unknown>;
+      try {
+        restoredScoped = restoreRedactedValues(
+          parsedRes.parsed,
+          snapshot.config,
+        ) as Record<string, unknown>;
+      } catch (err) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, String(err instanceof Error ? err.message : err)),
+        );
+        return;
       }
+      const { writeWorkspaceConfig } = await import("../workspace-config.js");
+      await writeWorkspaceConfig(scoped.workspaceId, restoredScoped);
+      const nextSnapshot = await readWorkspaceConfigSnapshot(scoped.workspaceId);
       respond(
         true,
         {
           ok: true,
-          path: CONFIG_PATH,
-          config: redactedScoped,
+          ...buildWorkspaceConfigResponse(nextSnapshot),
         },
         undefined,
       );
+      return;
+    }
+
+    const snapshot = await readConfigFileSnapshot();
+    if (!requireConfigBaseHash(params, snapshot, respond)) {
       return;
     }
 
@@ -550,28 +586,6 @@ export const configHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    // Only super-admins can modify global config via patch.
-    if (client && !isSuperAdmin(client)) {
-      respond(
-        false,
-        undefined,
-        errorShape(ErrorCodes.INVALID_REQUEST, "config modification requires super-admin privileges"),
-      );
-      return;
-    }
-
-    const snapshot = await readConfigFileSnapshot();
-    if (!requireConfigBaseHash(params, snapshot, respond)) {
-      return;
-    }
-    if (!snapshot.valid) {
-      respond(
-        false,
-        undefined,
-        errorShape(ErrorCodes.INVALID_REQUEST, "invalid config; fix before patching"),
-      );
-      return;
-    }
     const rawValue = (params as { raw?: unknown }).raw;
     if (typeof rawValue !== "string") {
       respond(
@@ -598,6 +612,68 @@ export const configHandlers: GatewayRequestHandlers = {
         false,
         undefined,
         errorShape(ErrorCodes.INVALID_REQUEST, "config.patch raw must be an object"),
+      );
+      return;
+    }
+    const scoped = workspaceScopedClient(client);
+    if (scoped) {
+      const snapshot = await readWorkspaceConfigSnapshot(scoped.workspaceId);
+      if (!requireConfigBaseHash(params, snapshot, respond)) {
+        return;
+      }
+      const merged = applyMergePatch(snapshot.config, parsedRes.parsed);
+      let restoredMerge: unknown;
+      try {
+        restoredMerge = restoreRedactedValues(merged, snapshot.config);
+      } catch (err) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, String(err instanceof Error ? err.message : err)),
+        );
+        return;
+      }
+      if (!isJsonRecord(restoredMerge)) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, "config.patch raw must be an object"),
+        );
+        return;
+      }
+      const { writeWorkspaceConfig } = await import("../workspace-config.js");
+      await writeWorkspaceConfig(scoped.workspaceId, restoredMerge);
+      const nextSnapshot = await readWorkspaceConfigSnapshot(scoped.workspaceId);
+      respond(
+        true,
+        {
+          ok: true,
+          ...buildWorkspaceConfigResponse(nextSnapshot),
+        },
+        undefined,
+      );
+      return;
+    }
+
+    // Only super-admins can modify global config via patch.
+    if (client && !isSuperAdmin(client)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, "config modification requires super-admin privileges"),
+      );
+      return;
+    }
+
+    const snapshot = await readConfigFileSnapshot();
+    if (!requireConfigBaseHash(params, snapshot, respond)) {
+      return;
+    }
+    if (!snapshot.valid) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, "invalid config; fix before patching"),
       );
       return;
     }
@@ -701,10 +777,6 @@ export const configHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const snapshot = await readConfigFileSnapshot();
-    if (!requireConfigBaseHash(params, snapshot, respond)) {
-      return;
-    }
     const rawValue = (params as { raw?: unknown }).raw;
     if (typeof rawValue !== "string") {
       respond(
@@ -725,97 +797,48 @@ export const configHandlers: GatewayRequestHandlers = {
 
     const scoped = workspaceScopedClient(client);
     if (scoped) {
-      const merged = mergeWorkspaceScopedAgents(
-        snapshot.config as Record<string, unknown> | null | undefined,
-        parsedRes.parsed,
-        scoped.workspaceId,
-      );
-      if (!merged.ok) {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, merged.error));
+      const snapshot = await readWorkspaceConfigSnapshot(scoped.workspaceId);
+      if (!requireConfigBaseHash(params, snapshot, respond)) {
         return;
       }
-      const validatedScoped = validateConfigObjectWithPlugins(
-        stripWorkspaceIdsForValidation(merged.config),
-      );
-      if (!validatedScoped.ok) {
+      if (!isJsonRecord(parsedRes.parsed)) {
         respond(
           false,
           undefined,
-          errorShape(ErrorCodes.INVALID_REQUEST, "invalid config", {
-            details: { issues: validatedScoped.issues },
-          }),
+          errorShape(ErrorCodes.INVALID_REQUEST, "config.apply raw must be an object"),
         );
         return;
       }
-      await writeConfigFile(merged.config);
-
-      const sessionKey =
-        typeof (params as { sessionKey?: unknown }).sessionKey === "string"
-          ? (params as { sessionKey?: string }).sessionKey?.trim() || undefined
-          : undefined;
-      const note =
-        typeof (params as { note?: unknown }).note === "string"
-          ? (params as { note?: string }).note?.trim() || undefined
-          : undefined;
-      const restartDelayMsRaw = (params as { restartDelayMs?: unknown }).restartDelayMs;
-      const restartDelayMs =
-        typeof restartDelayMsRaw === "number" && Number.isFinite(restartDelayMsRaw)
-          ? Math.max(0, Math.floor(restartDelayMsRaw))
-          : undefined;
-
-      const payload: RestartSentinelPayload = {
-        kind: "config-apply",
-        status: "ok",
-        ts: Date.now(),
-        sessionKey,
-        message: note ?? null,
-        doctorHint: formatDoctorNonInteractiveHint(),
-        stats: {
-          mode: "config.apply",
-          root: CONFIG_PATH,
-        },
-      };
-      let sentinelPath: string | null = null;
       try {
-        sentinelPath = await writeRestartSentinel(payload);
-      } catch {
-        sentinelPath = null;
+        const restoredScoped = restoreRedactedValues(
+          parsedRes.parsed,
+          snapshot.config,
+        ) as Record<string, unknown>;
+        const { writeWorkspaceConfig } = await import("../workspace-config.js");
+        await writeWorkspaceConfig(scoped.workspaceId, restoredScoped);
+      } catch (err) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, String(err instanceof Error ? err.message : err)),
+        );
+        return;
       }
-      const restart = scheduleGatewaySigusr1Restart({
-        delayMs: restartDelayMs,
-        reason: "config.apply",
-      });
-      const redactedScoped = redactConfigObject(merged.config) as Record<string, unknown>;
-      if (
-        redactedScoped?.agents &&
-        typeof redactedScoped.agents === "object" &&
-        !Array.isArray(redactedScoped.agents)
-      ) {
-        const agentsNode = redactedScoped.agents as Record<string, unknown>;
-        const list = toJsonRecordArray(agentsNode.list);
-        redactedScoped.agents = {
-          ...agentsNode,
-          list: list.filter((entry) => {
-            const entryWorkspace =
-              typeof entry.workspaceId === "string" ? entry.workspaceId.trim() : null;
-            return entryWorkspace === scoped.workspaceId;
-          }),
-        };
-      }
+      const nextSnapshot = await readWorkspaceConfigSnapshot(scoped.workspaceId);
       respond(
         true,
         {
           ok: true,
-          path: CONFIG_PATH,
-          config: redactedScoped,
-          restart,
-          sentinel: {
-            path: sentinelPath,
-            payload,
-          },
+          ...buildWorkspaceConfigResponse(nextSnapshot),
+          restart: { scheduled: false, reason: "workspace-config-no-gateway-restart" },
         },
         undefined,
       );
+      return;
+    }
+
+    const snapshot = await readConfigFileSnapshot();
+    if (!requireConfigBaseHash(params, snapshot, respond)) {
       return;
     }
 
