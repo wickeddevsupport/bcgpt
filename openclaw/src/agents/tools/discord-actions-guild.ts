@@ -1,5 +1,5 @@
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
-import type { DiscordActionConfig } from "../../config/config.js";
+import type { DiscordActionConfig, OpenClawConfig } from "../../config/config.js";
 import { getPresence } from "../../discord/monitor/presence-cache.js";
 import {
   addRoleDiscord,
@@ -43,6 +43,7 @@ export async function handleDiscordGuildAction(
   action: string,
   params: Record<string, unknown>,
   isActionEnabled: ActionGate<DiscordActionConfig>,
+  cfg: OpenClawConfig,
 ): Promise<AgentToolResult<unknown>> {
   const accountId = readStringParam(params, "accountId");
   switch (action) {
@@ -57,8 +58,8 @@ export async function handleDiscordGuildAction(
         required: true,
       });
       const member = accountId
-        ? await fetchMemberInfoDiscord(guildId, userId, { accountId })
-        : await fetchMemberInfoDiscord(guildId, userId);
+        ? await fetchMemberInfoDiscord(guildId, userId, { accountId, cfg })
+        : await fetchMemberInfoDiscord(guildId, userId, { cfg });
       const presence = getPresence(accountId, userId);
       const activities = presence?.activities ?? undefined;
       const status = presence?.status ?? undefined;
@@ -72,8 +73,8 @@ export async function handleDiscordGuildAction(
         required: true,
       });
       const roles = accountId
-        ? await fetchRoleInfoDiscord(guildId, { accountId })
-        : await fetchRoleInfoDiscord(guildId);
+        ? await fetchRoleInfoDiscord(guildId, { accountId, cfg })
+        : await fetchRoleInfoDiscord(guildId, { cfg });
       return jsonResult({ ok: true, roles });
     }
     case "emojiList": {
@@ -84,8 +85,8 @@ export async function handleDiscordGuildAction(
         required: true,
       });
       const emojis = accountId
-        ? await listGuildEmojisDiscord(guildId, { accountId })
-        : await listGuildEmojisDiscord(guildId);
+        ? await listGuildEmojisDiscord(guildId, { accountId, cfg })
+        : await listGuildEmojisDiscord(guildId, { cfg });
       return jsonResult({ ok: true, emojis });
     }
     case "emojiUpload": {
@@ -108,14 +109,14 @@ export async function handleDiscordGuildAction(
               mediaUrl,
               roleIds: roleIds?.length ? roleIds : undefined,
             },
-            { accountId },
+            { accountId, cfg },
           )
         : await uploadEmojiDiscord({
             guildId,
             name,
             mediaUrl,
             roleIds: roleIds?.length ? roleIds : undefined,
-          });
+          }, { cfg });
       return jsonResult({ ok: true, emoji });
     }
     case "stickerUpload": {
@@ -142,7 +143,7 @@ export async function handleDiscordGuildAction(
               tags,
               mediaUrl,
             },
-            { accountId },
+            { accountId, cfg },
           )
         : await uploadStickerDiscord({
             guildId,
@@ -150,7 +151,7 @@ export async function handleDiscordGuildAction(
             description,
             tags,
             mediaUrl,
-          });
+          }, { cfg });
       return jsonResult({ ok: true, sticker });
     }
     case "roleAdd": {
@@ -165,9 +166,9 @@ export async function handleDiscordGuildAction(
       });
       const roleId = readStringParam(params, "roleId", { required: true });
       if (accountId) {
-        await addRoleDiscord({ guildId, userId, roleId }, { accountId });
+        await addRoleDiscord({ guildId, userId, roleId }, { accountId, cfg });
       } else {
-        await addRoleDiscord({ guildId, userId, roleId });
+        await addRoleDiscord({ guildId, userId, roleId }, { cfg });
       }
       return jsonResult({ ok: true });
     }
@@ -183,9 +184,9 @@ export async function handleDiscordGuildAction(
       });
       const roleId = readStringParam(params, "roleId", { required: true });
       if (accountId) {
-        await removeRoleDiscord({ guildId, userId, roleId }, { accountId });
+        await removeRoleDiscord({ guildId, userId, roleId }, { accountId, cfg });
       } else {
-        await removeRoleDiscord({ guildId, userId, roleId });
+        await removeRoleDiscord({ guildId, userId, roleId }, { cfg });
       }
       return jsonResult({ ok: true });
     }
@@ -197,8 +198,8 @@ export async function handleDiscordGuildAction(
         required: true,
       });
       const channel = accountId
-        ? await fetchChannelInfoDiscord(channelId, { accountId })
-        : await fetchChannelInfoDiscord(channelId);
+        ? await fetchChannelInfoDiscord(channelId, { accountId, cfg })
+        : await fetchChannelInfoDiscord(channelId, { cfg });
       return jsonResult({ ok: true, channel });
     }
     case "channelList": {
@@ -209,8 +210,8 @@ export async function handleDiscordGuildAction(
         required: true,
       });
       const channels = accountId
-        ? await listGuildChannelsDiscord(guildId, { accountId })
-        : await listGuildChannelsDiscord(guildId);
+        ? await listGuildChannelsDiscord(guildId, { accountId, cfg })
+        : await listGuildChannelsDiscord(guildId, { cfg });
       return jsonResult({ ok: true, channels });
     }
     case "voiceStatus": {
@@ -224,8 +225,8 @@ export async function handleDiscordGuildAction(
         required: true,
       });
       const voice = accountId
-        ? await fetchVoiceStatusDiscord(guildId, userId, { accountId })
-        : await fetchVoiceStatusDiscord(guildId, userId);
+        ? await fetchVoiceStatusDiscord(guildId, userId, { accountId, cfg })
+        : await fetchVoiceStatusDiscord(guildId, userId, { cfg });
       return jsonResult({ ok: true, voice });
     }
     case "eventList": {
@@ -236,8 +237,8 @@ export async function handleDiscordGuildAction(
         required: true,
       });
       const events = accountId
-        ? await listScheduledEventsDiscord(guildId, { accountId })
-        : await listScheduledEventsDiscord(guildId);
+        ? await listScheduledEventsDiscord(guildId, { accountId, cfg })
+        : await listScheduledEventsDiscord(guildId, { cfg });
       return jsonResult({ ok: true, events });
     }
     case "eventCreate": {
@@ -268,8 +269,8 @@ export async function handleDiscordGuildAction(
         privacy_level: 2,
       };
       const event = accountId
-        ? await createScheduledEventDiscord(guildId, payload, { accountId })
-        : await createScheduledEventDiscord(guildId, payload);
+        ? await createScheduledEventDiscord(guildId, payload, { accountId, cfg })
+        : await createScheduledEventDiscord(guildId, payload, { cfg });
       return jsonResult({ ok: true, event });
     }
     case "channelCreate": {
@@ -294,7 +295,7 @@ export async function handleDiscordGuildAction(
               position: position ?? undefined,
               nsfw,
             },
-            { accountId },
+            { accountId, cfg },
           )
         : await createChannelDiscord({
             guildId,
@@ -304,7 +305,7 @@ export async function handleDiscordGuildAction(
             topic: topic ?? undefined,
             position: position ?? undefined,
             nsfw,
-          });
+          }, { cfg });
       return jsonResult({ ok: true, channel });
     }
     case "channelEdit": {
@@ -333,7 +334,7 @@ export async function handleDiscordGuildAction(
               nsfw,
               rateLimitPerUser: rateLimitPerUser ?? undefined,
             },
-            { accountId },
+            { accountId, cfg },
           )
         : await editChannelDiscord({
             channelId,
@@ -343,7 +344,7 @@ export async function handleDiscordGuildAction(
             parentId,
             nsfw,
             rateLimitPerUser: rateLimitPerUser ?? undefined,
-          });
+          }, { cfg });
       return jsonResult({ ok: true, channel });
     }
     case "channelDelete": {
@@ -354,8 +355,8 @@ export async function handleDiscordGuildAction(
         required: true,
       });
       const result = accountId
-        ? await deleteChannelDiscord(channelId, { accountId })
-        : await deleteChannelDiscord(channelId);
+        ? await deleteChannelDiscord(channelId, { accountId, cfg })
+        : await deleteChannelDiscord(channelId, { cfg });
       return jsonResult(result);
     }
     case "channelMove": {
@@ -376,7 +377,7 @@ export async function handleDiscordGuildAction(
             parentId,
             position: position ?? undefined,
           },
-          { accountId },
+          { accountId, cfg },
         );
       } else {
         await moveChannelDiscord({
@@ -384,7 +385,7 @@ export async function handleDiscordGuildAction(
           channelId,
           parentId,
           position: position ?? undefined,
-        });
+        }, { cfg });
       }
       return jsonResult({ ok: true });
     }
@@ -403,14 +404,14 @@ export async function handleDiscordGuildAction(
               type: 4,
               position: position ?? undefined,
             },
-            { accountId },
+            { accountId, cfg },
           )
         : await createChannelDiscord({
             guildId,
             name,
             type: 4,
             position: position ?? undefined,
-          });
+          }, { cfg });
       return jsonResult({ ok: true, category: channel });
     }
     case "categoryEdit": {
@@ -429,13 +430,13 @@ export async function handleDiscordGuildAction(
               name: name ?? undefined,
               position: position ?? undefined,
             },
-            { accountId },
+            { accountId, cfg },
           )
         : await editChannelDiscord({
             channelId: categoryId,
             name: name ?? undefined,
             position: position ?? undefined,
-          });
+          }, { cfg });
       return jsonResult({ ok: true, category: channel });
     }
     case "categoryDelete": {
@@ -446,8 +447,8 @@ export async function handleDiscordGuildAction(
         required: true,
       });
       const result = accountId
-        ? await deleteChannelDiscord(categoryId, { accountId })
-        : await deleteChannelDiscord(categoryId);
+        ? await deleteChannelDiscord(categoryId, { accountId, cfg })
+        : await deleteChannelDiscord(categoryId, { cfg });
       return jsonResult(result);
     }
     case "channelPermissionSet": {
@@ -473,7 +474,7 @@ export async function handleDiscordGuildAction(
             allow: allow ?? undefined,
             deny: deny ?? undefined,
           },
-          { accountId },
+          { accountId, cfg },
         );
       } else {
         await setChannelPermissionDiscord({
@@ -482,7 +483,7 @@ export async function handleDiscordGuildAction(
           targetType,
           allow: allow ?? undefined,
           deny: deny ?? undefined,
-        });
+        }, { cfg });
       }
       return jsonResult({ ok: true });
     }
@@ -495,9 +496,9 @@ export async function handleDiscordGuildAction(
       });
       const targetId = readStringParam(params, "targetId", { required: true });
       if (accountId) {
-        await removeChannelPermissionDiscord(channelId, targetId, { accountId });
+        await removeChannelPermissionDiscord(channelId, targetId, { accountId, cfg });
       } else {
-        await removeChannelPermissionDiscord(channelId, targetId);
+        await removeChannelPermissionDiscord(channelId, targetId, { cfg });
       }
       return jsonResult({ ok: true });
     }

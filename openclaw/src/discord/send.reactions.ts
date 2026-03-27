@@ -15,7 +15,7 @@ export async function reactMessageDiscord(
   emoji: string,
   opts: DiscordReactOpts = {},
 ) {
-  const cfg = loadConfig();
+  const cfg = opts.cfg ?? loadConfig();
   const { rest, request } = createDiscordClient(opts, cfg);
   const encoded = normalizeReactionEmoji(emoji);
   await request(

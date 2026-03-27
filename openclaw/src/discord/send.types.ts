@@ -1,4 +1,5 @@
 import type { RequestClient } from "@buape/carbon";
+import type { OpenClawConfig } from "../config/config.js";
 import type { RetryConfig } from "../infra/retry.js";
 
 export class DiscordSendError extends Error {
@@ -33,6 +34,7 @@ export type DiscordReactOpts = {
   rest?: RequestClient;
   verbose?: boolean;
   retry?: RetryConfig;
+  cfg?: OpenClawConfig;
 };
 
 export type DiscordReactionUser = {

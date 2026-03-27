@@ -1,5 +1,5 @@
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
-import type { DiscordActionConfig } from "../../config/config.js";
+import type { DiscordActionConfig, OpenClawConfig } from "../../config/config.js";
 import {
   createThreadDiscord,
   deleteMessageDiscord,
@@ -51,6 +51,7 @@ export async function handleDiscordMessagingAction(
   action: string,
   params: Record<string, unknown>,
   isActionEnabled: ActionGate<DiscordActionConfig>,
+  cfg: OpenClawConfig,
 ): Promise<AgentToolResult<unknown>> {
   const resolveChannelId = () =>
     resolveDiscordChannelId(
@@ -82,22 +83,22 @@ export async function handleDiscordMessagingAction(
       });
       if (remove) {
         if (accountId) {
-          await removeReactionDiscord(channelId, messageId, emoji, { accountId });
+          await removeReactionDiscord(channelId, messageId, emoji, { accountId, cfg });
         } else {
-          await removeReactionDiscord(channelId, messageId, emoji);
+          await removeReactionDiscord(channelId, messageId, emoji, { cfg });
         }
         return jsonResult({ ok: true, removed: emoji });
       }
       if (isEmpty) {
         const removed = accountId
-          ? await removeOwnReactionsDiscord(channelId, messageId, { accountId })
-          : await removeOwnReactionsDiscord(channelId, messageId);
+          ? await removeOwnReactionsDiscord(channelId, messageId, { accountId, cfg })
+          : await removeOwnReactionsDiscord(channelId, messageId, { cfg });
         return jsonResult({ ok: true, removed: removed.removed });
       }
       if (accountId) {
-        await reactMessageDiscord(channelId, messageId, emoji, { accountId });
+        await reactMessageDiscord(channelId, messageId, emoji, { accountId, cfg });
       } else {
-        await reactMessageDiscord(channelId, messageId, emoji);
+        await reactMessageDiscord(channelId, messageId, emoji, { cfg });
       }
       return jsonResult({ ok: true, added: emoji });
     }
@@ -114,6 +115,7 @@ export async function handleDiscordMessagingAction(
         typeof limitRaw === "number" && Number.isFinite(limitRaw) ? limitRaw : undefined;
       const reactions = await fetchReactionsDiscord(channelId, messageId, {
         ...(accountId ? { accountId } : {}),
+        cfg,
         limit,
       });
       return jsonResult({ ok: true, reactions });
@@ -167,8 +169,8 @@ export async function handleDiscordMessagingAction(
       }
       const channelId = resolveChannelId();
       const permissions = accountId
-        ? await fetchChannelPermissionsDiscord(channelId, { accountId })
-        : await fetchChannelPermissionsDiscord(channelId);
+        ? await fetchChannelPermissionsDiscord(channelId, { accountId, cfg })
+        : await fetchChannelPermissionsDiscord(channelId, { cfg });
       return jsonResult({ ok: true, permissions });
     }
     case "fetchMessage": {
@@ -191,8 +193,8 @@ export async function handleDiscordMessagingAction(
         );
       }
       const message = accountId
-        ? await fetchMessageDiscord(channelId, messageId, { accountId })
-        : await fetchMessageDiscord(channelId, messageId);
+        ? await fetchMessageDiscord(channelId, messageId, { accountId, cfg })
+        : await fetchMessageDiscord(channelId, messageId, { cfg });
       return jsonResult({
         ok: true,
         message: normalizeMessage(message),
@@ -216,8 +218,8 @@ export async function handleDiscordMessagingAction(
         around: readStringParam(params, "around"),
       };
       const messages = accountId
-        ? await readMessagesDiscord(channelId, query, { accountId })
-        : await readMessagesDiscord(channelId, query);
+        ? await readMessagesDiscord(channelId, query, { accountId, cfg })
+        : await readMessagesDiscord(channelId, query, { cfg });
       return jsonResult({
         ok: true,
         messages: messages.map((message) => normalizeMessage(message)),
@@ -236,6 +238,7 @@ export async function handleDiscordMessagingAction(
       const embeds =
         Array.isArray(params.embeds) && params.embeds.length > 0 ? params.embeds : undefined;
       const result = await sendMessageDiscord(to, content, {
+        cfg,
         ...(accountId ? { accountId } : {}),
         mediaUrl,
         replyTo,
@@ -255,8 +258,8 @@ export async function handleDiscordMessagingAction(
         required: true,
       });
       const message = accountId
-        ? await editMessageDiscord(channelId, messageId, { content }, { accountId })
-        : await editMessageDiscord(channelId, messageId, { content });
+        ? await editMessageDiscord(channelId, messageId, { content }, { accountId, cfg })
+        : await editMessageDiscord(channelId, messageId, { cfg });
       return jsonResult({ ok: true, message });
     }
     case "deleteMessage": {
@@ -268,9 +271,9 @@ export async function handleDiscordMessagingAction(
         required: true,
       });
       if (accountId) {
-        await deleteMessageDiscord(channelId, messageId, { accountId });
+        await deleteMessageDiscord(channelId, messageId, { accountId, cfg });
       } else {
-        await deleteMessageDiscord(channelId, messageId);
+        await deleteMessageDiscord(channelId, messageId, { cfg });
       }
       return jsonResult({ ok: true });
     }
@@ -291,9 +294,9 @@ export async function handleDiscordMessagingAction(
         ? await createThreadDiscord(
             channelId,
             { name, messageId, autoArchiveMinutes, content },
-            { accountId },
+            { accountId, cfg },
           )
-        : await createThreadDiscord(channelId, { name, messageId, autoArchiveMinutes, content });
+        : await createThreadDiscord(channelId, { name, messageId, autoArchiveMinutes, content }, { cfg });
       return jsonResult({ ok: true, thread });
     }
     case "threadList": {
@@ -320,7 +323,7 @@ export async function handleDiscordMessagingAction(
               before,
               limit,
             },
-            { accountId },
+            { accountId, cfg },
           )
         : await listThreadsDiscord({
             guildId,
@@ -328,7 +331,7 @@ export async function handleDiscordMessagingAction(
             includeArchived,
             before,
             limit,
-          });
+          }, { cfg });
       return jsonResult({ ok: true, threads });
     }
     case "threadReply": {
@@ -342,6 +345,7 @@ export async function handleDiscordMessagingAction(
       const mediaUrl = readStringParam(params, "mediaUrl");
       const replyTo = readStringParam(params, "replyTo");
       const result = await sendMessageDiscord(`channel:${channelId}`, content, {
+        cfg,
         ...(accountId ? { accountId } : {}),
         mediaUrl,
         replyTo,
@@ -357,9 +361,9 @@ export async function handleDiscordMessagingAction(
         required: true,
       });
       if (accountId) {
-        await pinMessageDiscord(channelId, messageId, { accountId });
+        await pinMessageDiscord(channelId, messageId, { accountId, cfg });
       } else {
-        await pinMessageDiscord(channelId, messageId);
+        await pinMessageDiscord(channelId, messageId, { cfg });
       }
       return jsonResult({ ok: true });
     }
@@ -372,9 +376,9 @@ export async function handleDiscordMessagingAction(
         required: true,
       });
       if (accountId) {
-        await unpinMessageDiscord(channelId, messageId, { accountId });
+        await unpinMessageDiscord(channelId, messageId, { accountId, cfg });
       } else {
-        await unpinMessageDiscord(channelId, messageId);
+        await unpinMessageDiscord(channelId, messageId, { cfg });
       }
       return jsonResult({ ok: true });
     }
@@ -384,8 +388,8 @@ export async function handleDiscordMessagingAction(
       }
       const channelId = resolveChannelId();
       const pins = accountId
-        ? await listPinsDiscord(channelId, { accountId })
-        : await listPinsDiscord(channelId);
+        ? await listPinsDiscord(channelId, { accountId, cfg })
+        : await listPinsDiscord(channelId, { cfg });
       return jsonResult({ ok: true, pins: pins.map((pin) => normalizeMessage(pin)) });
     }
     case "searchMessages": {
@@ -417,7 +421,7 @@ export async function handleDiscordMessagingAction(
               authorIds: authorIdList.length ? authorIdList : undefined,
               limit,
             },
-            { accountId },
+            { accountId, cfg },
           )
         : await searchMessagesDiscord({
             guildId,
@@ -425,7 +429,7 @@ export async function handleDiscordMessagingAction(
             channelIds: channelIdList.length ? channelIdList : undefined,
             authorIds: authorIdList.length ? authorIdList : undefined,
             limit,
-          });
+          }, { cfg });
       if (!results || typeof results !== "object") {
         return jsonResult({ ok: true, results });
       }

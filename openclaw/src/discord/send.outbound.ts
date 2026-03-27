@@ -56,7 +56,7 @@ export async function sendMessageDiscord(
   text: string,
   opts: DiscordSendOpts = {},
 ): Promise<DiscordSendResult> {
-  const cfg = loadConfig();
+  const cfg = opts.cfg ?? loadConfig();
   const accountInfo = resolveDiscordAccount({
     cfg,
     accountId: opts.accountId,
@@ -69,7 +69,10 @@ export async function sendMessageDiscord(
   const chunkMode = resolveChunkMode(cfg, "discord", accountInfo.accountId);
   const textWithTables = convertMarkdownTables(text ?? "", tableMode);
   const { token, rest, request } = createDiscordClient(opts, cfg);
-  const recipient = await parseAndResolveRecipient(to, opts.accountId);
+  const recipient = await parseAndResolveRecipient(to, {
+    accountId: opts.accountId,
+    cfg,
+  });
   const { channelId } = await resolveChannelId(rest, recipient, request);
 
   // Forum/Media channels reject POST /messages; auto-create a thread post instead.
@@ -229,9 +232,12 @@ export async function sendStickerDiscord(
   stickerIds: string[],
   opts: DiscordSendOpts & { content?: string } = {},
 ): Promise<DiscordSendResult> {
-  const cfg = loadConfig();
+  const cfg = opts.cfg ?? loadConfig();
   const { rest, request } = createDiscordClient(opts, cfg);
-  const recipient = await parseAndResolveRecipient(to, opts.accountId);
+  const recipient = await parseAndResolveRecipient(to, {
+    accountId: opts.accountId,
+    cfg,
+  });
   const { channelId } = await resolveChannelId(rest, recipient, request);
   const content = opts.content?.trim();
   const stickers = normalizeStickerIds(stickerIds);
@@ -256,9 +262,12 @@ export async function sendPollDiscord(
   poll: PollInput,
   opts: DiscordSendOpts & { content?: string } = {},
 ): Promise<DiscordSendResult> {
-  const cfg = loadConfig();
+  const cfg = opts.cfg ?? loadConfig();
   const { rest, request } = createDiscordClient(opts, cfg);
-  const recipient = await parseAndResolveRecipient(to, opts.accountId);
+  const recipient = await parseAndResolveRecipient(to, {
+    accountId: opts.accountId,
+    cfg,
+  });
   const { channelId } = await resolveChannelId(rest, recipient, request);
   const content = opts.content?.trim();
   const payload = normalizeDiscordPollInput(poll);

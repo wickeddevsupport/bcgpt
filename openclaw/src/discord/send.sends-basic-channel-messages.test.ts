@@ -1,5 +1,6 @@
 import { ChannelType, PermissionFlagsBits, Routes } from "discord-api-types/v10";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as configModule from "../config/config.js";
 import {
   deleteMessageDiscord,
   editMessageDiscord,
@@ -52,6 +53,19 @@ const makeRest = () => {
   };
 };
 
+const workspaceCfg = {
+  channels: {
+    discord: {
+      accounts: {
+        workspace: {
+          token: "workspace-token",
+          maxLinesPerMessage: 8,
+        },
+      },
+    },
+  },
+} as const;
+
 describe("sendMessageDiscord", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -74,6 +88,25 @@ describe("sendMessageDiscord", () => {
       Routes.channelMessages("789"),
       expect.objectContaining({ body: { content: "hello world" } }),
     );
+  });
+
+  it("uses injected cfg instead of loadConfig for outbound sends", async () => {
+    const loadConfigSpy = vi.spyOn(configModule, "loadConfig").mockImplementation(() => {
+      throw new Error("loadConfig should not be called when cfg is injected");
+    });
+    const { rest, postMock, getMock } = makeRest();
+    getMock.mockResolvedValueOnce({ type: ChannelType.GuildText });
+    postMock.mockResolvedValue({
+      id: "msg1",
+      channel_id: "789",
+    });
+    await sendMessageDiscord("channel:789", "hello world", {
+      rest,
+      accountId: "workspace",
+      cfg: workspaceCfg,
+    });
+    expect(loadConfigSpy).not.toHaveBeenCalled();
+    loadConfigSpy.mockRestore();
   });
 
   it("auto-creates a forum thread when target is a Forum channel", async () => {
@@ -420,6 +453,33 @@ describe("fetchChannelPermissionsDiscord", () => {
     expect(res.permissions).toContain("ViewChannel");
     expect(res.permissions).toContain("SendMessages");
     expect(res.isDm).toBe(false);
+  });
+
+  it("uses injected cfg instead of loadConfig for permission reads", async () => {
+    const loadConfigSpy = vi.spyOn(configModule, "loadConfig").mockImplementation(() => {
+      throw new Error("loadConfig should not be called when cfg is injected");
+    });
+    const { rest, getMock } = makeRest();
+    const perms = PermissionFlagsBits.ViewChannel | PermissionFlagsBits.SendMessages;
+    getMock
+      .mockResolvedValueOnce({
+        id: "chan1",
+        guild_id: "guild1",
+        permission_overwrites: [],
+      })
+      .mockResolvedValueOnce({ id: "bot1" })
+      .mockResolvedValueOnce({
+        id: "guild1",
+        roles: [{ id: "guild1", permissions: perms.toString() }],
+      })
+      .mockResolvedValueOnce({ roles: [] });
+    await fetchChannelPermissionsDiscord("chan1", {
+      rest,
+      accountId: "workspace",
+      cfg: workspaceCfg,
+    });
+    expect(loadConfigSpy).not.toHaveBeenCalled();
+    loadConfigSpy.mockRestore();
   });
 });
 

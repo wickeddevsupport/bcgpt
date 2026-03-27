@@ -3,6 +3,7 @@ import { RequestClient } from "@buape/carbon";
 import { PollLayoutType } from "discord-api-types/payloads/v10";
 import { Routes } from "discord-api-types/v10";
 import type { ChunkMode } from "../auto-reply/chunk.js";
+import type { OpenClawConfig } from "../config/config.js";
 import type { RetryConfig } from "../infra/retry.js";
 import { loadConfig } from "../config/config.js";
 import { createDiscordRetryRunner, type RetryRunner } from "../infra/retry-policy.js";
@@ -40,6 +41,7 @@ type DiscordClientOpts = {
   rest?: RequestClient;
   retry?: RetryConfig;
   verbose?: boolean;
+  cfg?: OpenClawConfig;
 };
 
 function resolveToken(params: { explicit?: string; accountId: string; fallbackToken?: string }) {
@@ -60,7 +62,7 @@ function resolveRest(token: string, rest?: RequestClient) {
   return rest ?? new RequestClient(token);
 }
 
-function createDiscordClient(opts: DiscordClientOpts, cfg = loadConfig()) {
+function createDiscordClient(opts: DiscordClientOpts, cfg = opts.cfg ?? loadConfig()) {
   const account = resolveDiscordAccount({ cfg, accountId: opts.accountId });
   const token = resolveToken({
     explicit: opts.token,
@@ -113,10 +115,10 @@ function parseRecipient(raw: string): DiscordRecipient {
  */
 export async function parseAndResolveRecipient(
   raw: string,
-  accountId?: string,
+  opts: { accountId?: string; cfg?: OpenClawConfig } = {},
 ): Promise<DiscordRecipient> {
-  const cfg = loadConfig();
-  const accountInfo = resolveDiscordAccount({ cfg, accountId });
+  const cfg = opts.cfg ?? loadConfig();
+  const accountInfo = resolveDiscordAccount({ cfg, accountId: opts.accountId });
 
   // First try to resolve using directory lookup (handles usernames)
   const trimmed = raw.trim();

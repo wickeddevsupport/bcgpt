@@ -62,16 +62,16 @@ export async function handleDiscordAction(
   const isActionEnabled = createActionGate(cfg.channels?.discord?.actions);
 
   if (messagingActions.has(action)) {
-    return await handleDiscordMessagingAction(action, params, isActionEnabled);
+    return await handleDiscordMessagingAction(action, params, isActionEnabled, cfg);
   }
   if (guildActions.has(action)) {
-    return await handleDiscordGuildAction(action, params, isActionEnabled);
+    return await handleDiscordGuildAction(action, params, isActionEnabled, cfg);
   }
   if (moderationActions.has(action)) {
-    return await handleDiscordModerationAction(action, params, isActionEnabled);
+    return await handleDiscordModerationAction(action, params, isActionEnabled, cfg);
   }
   if (presenceActions.has(action)) {
-    return await handleDiscordPresenceAction(action, params, isActionEnabled);
+    return await handleDiscordPresenceAction(action, params, isActionEnabled, cfg);
   }
   throw new Error(`Unknown action: ${action}`);
 }

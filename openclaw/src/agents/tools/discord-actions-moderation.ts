@@ -1,5 +1,5 @@
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
-import type { DiscordActionConfig } from "../../config/config.js";
+import type { DiscordActionConfig, OpenClawConfig } from "../../config/config.js";
 import { banMemberDiscord, kickMemberDiscord, timeoutMemberDiscord } from "../../discord/send.js";
 import { type ActionGate, jsonResult, readStringParam } from "./common.js";
 
@@ -7,6 +7,7 @@ export async function handleDiscordModerationAction(
   action: string,
   params: Record<string, unknown>,
   isActionEnabled: ActionGate<DiscordActionConfig>,
+  cfg: OpenClawConfig,
 ): Promise<AgentToolResult<unknown>> {
   const accountId = readStringParam(params, "accountId");
   switch (action) {
@@ -35,7 +36,7 @@ export async function handleDiscordModerationAction(
               until,
               reason,
             },
-            { accountId },
+            { accountId, cfg },
           )
         : await timeoutMemberDiscord({
             guildId,
@@ -43,7 +44,7 @@ export async function handleDiscordModerationAction(
             durationMinutes,
             until,
             reason,
-          });
+          }, { cfg });
       return jsonResult({ ok: true, member });
     }
     case "kick": {
@@ -58,9 +59,9 @@ export async function handleDiscordModerationAction(
       });
       const reason = readStringParam(params, "reason");
       if (accountId) {
-        await kickMemberDiscord({ guildId, userId, reason }, { accountId });
+        await kickMemberDiscord({ guildId, userId, reason }, { accountId, cfg });
       } else {
-        await kickMemberDiscord({ guildId, userId, reason });
+        await kickMemberDiscord({ guildId, userId, reason }, { cfg });
       }
       return jsonResult({ ok: true });
     }
@@ -87,7 +88,7 @@ export async function handleDiscordModerationAction(
             reason,
             deleteMessageDays,
           },
-          { accountId },
+          { accountId, cfg },
         );
       } else {
         await banMemberDiscord({
@@ -95,7 +96,7 @@ export async function handleDiscordModerationAction(
           userId,
           reason,
           deleteMessageDays,
-        });
+        }, { cfg });
       }
       return jsonResult({ ok: true });
     }

@@ -1,6 +1,7 @@
 import type { APIChannel, APIGuild, APIGuildMember, APIRole } from "discord-api-types/v10";
 import { RequestClient } from "@buape/carbon";
 import { ChannelType, PermissionFlagsBits, Routes } from "discord-api-types/v10";
+import type { OpenClawConfig } from "../config/config.js";
 import type { RetryConfig } from "../infra/retry.js";
 import type { DiscordPermissionsSummary, DiscordReactOpts } from "./send.types.js";
 import { loadConfig } from "../config/config.js";
@@ -17,6 +18,7 @@ type DiscordClientOpts = {
   rest?: RequestClient;
   retry?: RetryConfig;
   verbose?: boolean;
+  cfg?: OpenClawConfig;
 };
 
 function resolveToken(params: { explicit?: string; accountId: string; fallbackToken?: string }) {
@@ -38,7 +40,7 @@ function resolveRest(token: string, rest?: RequestClient) {
 }
 
 function resolveDiscordRest(opts: DiscordClientOpts) {
-  const cfg = loadConfig();
+  const cfg = opts.cfg ?? loadConfig();
   const account = resolveDiscordAccount({ cfg, accountId: opts.accountId });
   const token = resolveToken({
     explicit: opts.token,
