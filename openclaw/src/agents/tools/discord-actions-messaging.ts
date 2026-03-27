@@ -259,7 +259,7 @@ export async function handleDiscordMessagingAction(
       });
       const message = accountId
         ? await editMessageDiscord(channelId, messageId, { content }, { accountId, cfg })
-        : await editMessageDiscord(channelId, messageId, { cfg });
+        : await editMessageDiscord(channelId, messageId, { content }, { cfg });
       return jsonResult({ ok: true, message });
     }
     case "deleteMessage": {
