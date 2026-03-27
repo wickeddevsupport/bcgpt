@@ -137,4 +137,80 @@ describe("cron workspace isolation", () => {
       undefined,
     );
   });
+
+  it("assigns workspaceId for backend cron adds when the caller passes an explicit workspaceId", async () => {
+    const workspaceId = `cron-backend-${Date.now()}`;
+    await writeWorkspaceConfig(workspaceId, {
+      agents: {
+        list: [
+          {
+            id: "assistant",
+            default: true,
+            workspaceId,
+          },
+        ],
+      },
+    });
+
+    const respond = vi.fn();
+    const add = vi.fn(async (job) => job);
+
+    await cronHandlers["cron.add"]({
+      params: {
+        name: "Backend workspace reminder",
+        enabled: true,
+        workspaceId,
+        schedule: { kind: "every", everyMs: 60_000 },
+        sessionTarget: "main",
+        wakeMode: "now",
+        payload: { kind: "systemEvent", text: "hello" },
+      },
+      respond,
+      client: undefined,
+      context: {
+        cron: {
+          add,
+          list: async () => [
+            {
+              id: "job-1",
+              enabled: true,
+              workspaceId,
+              agentId: "assistant",
+              schedule: { kind: "every", everyMs: 60_000 },
+            },
+          ],
+        },
+      } as any,
+    } as any);
+
+    expect(add).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId,
+        agentId: "assistant",
+      }),
+    );
+  });
+
+  it("filters cron list to an explicit workspaceId for backend callers", async () => {
+    const respond = vi.fn();
+    const list = vi.fn(async () => [
+      { id: "job-a", workspaceId: "ws-a", enabled: true },
+      { id: "job-b", workspaceId: "ws-b", enabled: true },
+    ]);
+
+    await cronHandlers["cron.list"]({
+      params: { workspaceId: "ws-a", includeDisabled: true },
+      respond,
+      client: undefined,
+      context: { cron: { list } } as any,
+    } as any);
+
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      {
+        jobs: [{ id: "job-a", workspaceId: "ws-a", enabled: true }],
+      },
+      undefined,
+    );
+  });
 });

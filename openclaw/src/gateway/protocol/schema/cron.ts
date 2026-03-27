@@ -116,6 +116,7 @@ export const CronJobSchema = Type.Object(
   {
     id: NonEmptyString,
     agentId: Type.Optional(NonEmptyString),
+    workspaceId: Type.Optional(NonEmptyString),
     name: NonEmptyString,
     description: Type.Optional(Type.String()),
     enabled: Type.Boolean(),
@@ -135,11 +136,17 @@ export const CronJobSchema = Type.Object(
 export const CronListParamsSchema = Type.Object(
   {
     includeDisabled: Type.Optional(Type.Boolean()),
+    workspaceId: Type.Optional(NonEmptyString),
   },
   { additionalProperties: false },
 );
 
-export const CronStatusParamsSchema = Type.Object({}, { additionalProperties: false });
+export const CronStatusParamsSchema = Type.Object(
+  {
+    workspaceId: Type.Optional(NonEmptyString),
+  },
+  { additionalProperties: false },
+);
 
 export const CronAddParamsSchema = Type.Object(
   {
@@ -148,6 +155,7 @@ export const CronAddParamsSchema = Type.Object(
     description: Type.Optional(Type.String()),
     enabled: Type.Optional(Type.Boolean()),
     deleteAfterRun: Type.Optional(Type.Boolean()),
+    workspaceId: Type.Optional(NonEmptyString),
     schedule: CronScheduleSchema,
     sessionTarget: Type.Union([Type.Literal("main"), Type.Literal("isolated")]),
     wakeMode: Type.Union([Type.Literal("next-heartbeat"), Type.Literal("now")]),
@@ -178,6 +186,7 @@ export const CronUpdateParamsSchema = Type.Union([
   Type.Object(
     {
       id: NonEmptyString,
+      workspaceId: Type.Optional(NonEmptyString),
       patch: CronJobPatchSchema,
     },
     { additionalProperties: false },
@@ -185,6 +194,7 @@ export const CronUpdateParamsSchema = Type.Union([
   Type.Object(
     {
       jobId: NonEmptyString,
+      workspaceId: Type.Optional(NonEmptyString),
       patch: CronJobPatchSchema,
     },
     { additionalProperties: false },
@@ -195,12 +205,14 @@ export const CronRemoveParamsSchema = Type.Union([
   Type.Object(
     {
       id: NonEmptyString,
+      workspaceId: Type.Optional(NonEmptyString),
     },
     { additionalProperties: false },
   ),
   Type.Object(
     {
       jobId: NonEmptyString,
+      workspaceId: Type.Optional(NonEmptyString),
     },
     { additionalProperties: false },
   ),
@@ -211,6 +223,7 @@ export const CronRunParamsSchema = Type.Union([
     {
       id: NonEmptyString,
       mode: Type.Optional(Type.Union([Type.Literal("due"), Type.Literal("force")])),
+      workspaceId: Type.Optional(NonEmptyString),
     },
     { additionalProperties: false },
   ),
@@ -218,6 +231,7 @@ export const CronRunParamsSchema = Type.Union([
     {
       jobId: NonEmptyString,
       mode: Type.Optional(Type.Union([Type.Literal("due"), Type.Literal("force")])),
+      workspaceId: Type.Optional(NonEmptyString),
     },
     { additionalProperties: false },
   ),
@@ -228,6 +242,7 @@ export const CronRunsParamsSchema = Type.Union([
     {
       id: NonEmptyString,
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000 })),
+      workspaceId: Type.Optional(NonEmptyString),
     },
     { additionalProperties: false },
   ),
@@ -235,6 +250,7 @@ export const CronRunsParamsSchema = Type.Union([
     {
       jobId: NonEmptyString,
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000 })),
+      workspaceId: Type.Optional(NonEmptyString),
     },
     { additionalProperties: false },
   ),

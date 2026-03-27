@@ -4,7 +4,8 @@ import { loadConfig } from "../../config/config.js";
 import { normalizeCronJobCreate, normalizeCronJobPatch } from "../../cron/normalize.js";
 import { parseAgentSessionKey } from "../../sessions/session-key-utils.js";
 import { isRecord, truncateUtf16Safe } from "../../utils.js";
-import { resolveSessionAgentId } from "../agent-scope.js";
+import type { OpenClawConfig } from "../../config/config.js";
+import { resolveAgentConfig, resolveSessionAgentId } from "../agent-scope.js";
 import { optionalStringEnum, stringEnum } from "../schema/typebox.js";
 import { type AnyAgentTool, jsonResult, readStringParam } from "./common.js";
 import { callGatewayTool, type GatewayCallOptions } from "./gateway.js";
@@ -46,6 +47,7 @@ const CronToolSchema = Type.Object({
 
 type CronToolOptions = {
   agentSessionKey?: string;
+  config?: OpenClawConfig;
 };
 
 type ChatMessage = {
@@ -220,6 +222,21 @@ function inferDeliveryFromSessionKey(agentSessionKey?: string): CronDelivery | n
   return delivery;
 }
 
+function resolveWorkspaceIdFromToolOptions(opts?: CronToolOptions): string | undefined {
+  const cfg = opts?.config;
+  if (!cfg) {
+    return undefined;
+  }
+  const agentId = opts?.agentSessionKey
+    ? resolveSessionAgentId({ sessionKey: opts.agentSessionKey, config: cfg })
+    : undefined;
+  if (!agentId) {
+    return undefined;
+  }
+  const workspaceId = resolveAgentConfig(cfg, agentId)?.workspaceId?.trim();
+  return workspaceId || undefined;
+}
+
 export function createCronTool(opts?: CronToolOptions): AnyAgentTool {
   return {
     label: "Cron",
@@ -281,6 +298,7 @@ Use jobId as the canonical identifier; id is accepted for compatibility. Use con
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;
       const action = readStringParam(params, "action", { required: true });
+      const workspaceId = resolveWorkspaceIdFromToolOptions(opts);
       const gatewayOpts: GatewayCallOptions = {
         gatewayUrl: readStringParam(params, "gatewayUrl", { trim: false }),
         gatewayToken: readStringParam(params, "gatewayToken", { trim: false }),
@@ -289,11 +307,14 @@ Use jobId as the canonical identifier; id is accepted for compatibility. Use con
 
       switch (action) {
         case "status":
-          return jsonResult(await callGatewayTool("cron.status", gatewayOpts, {}));
+          return jsonResult(
+            await callGatewayTool("cron.status", gatewayOpts, workspaceId ? { workspaceId } : {}),
+          );
         case "list":
           return jsonResult(
             await callGatewayTool("cron.list", gatewayOpts, {
               includeDisabled: Boolean(params.includeDisabled),
+              ...(workspaceId ? { workspaceId } : {}),
             }),
           );
         case "add": {
@@ -352,8 +373,16 @@ Use jobId as the canonical identifier; id is accepted for compatibility. Use con
             throw new Error("job required");
           }
           const job = normalizeCronJobCreate(params.job) ?? params.job;
+          if (
+            workspaceId &&
+            job &&
+            typeof job === "object" &&
+            !("workspaceId" in job)
+          ) {
+            (job as { workspaceId?: string }).workspaceId = workspaceId;
+          }
           if (job && typeof job === "object" && !("agentId" in job)) {
-            const cfg = loadConfig();
+            const cfg = opts?.config ?? loadConfig();
             const agentId = opts?.agentSessionKey
               ? resolveSessionAgentId({ sessionKey: opts.agentSessionKey, config: cfg })
               : undefined;
@@ -427,6 +456,7 @@ Use jobId as the canonical identifier; id is accepted for compatibility. Use con
             await callGatewayTool("cron.update", gatewayOpts, {
               id,
               patch,
+              ...(workspaceId ? { workspaceId } : {}),
             }),
           );
         }
@@ -435,7 +465,12 @@ Use jobId as the canonical identifier; id is accepted for compatibility. Use con
           if (!id) {
             throw new Error("jobId required (id accepted for backward compatibility)");
           }
-          return jsonResult(await callGatewayTool("cron.remove", gatewayOpts, { id }));
+          return jsonResult(
+            await callGatewayTool("cron.remove", gatewayOpts, {
+              id,
+              ...(workspaceId ? { workspaceId } : {}),
+            }),
+          );
         }
         case "run": {
           const id = readStringParam(params, "jobId") ?? readStringParam(params, "id");
@@ -444,14 +479,25 @@ Use jobId as the canonical identifier; id is accepted for compatibility. Use con
           }
           const runMode =
             params.runMode === "due" || params.runMode === "force" ? params.runMode : "force";
-          return jsonResult(await callGatewayTool("cron.run", gatewayOpts, { id, mode: runMode }));
+          return jsonResult(
+            await callGatewayTool("cron.run", gatewayOpts, {
+              id,
+              mode: runMode,
+              ...(workspaceId ? { workspaceId } : {}),
+            }),
+          );
         }
         case "runs": {
           const id = readStringParam(params, "jobId") ?? readStringParam(params, "id");
           if (!id) {
             throw new Error("jobId required (id accepted for backward compatibility)");
           }
-          return jsonResult(await callGatewayTool("cron.runs", gatewayOpts, { id }));
+          return jsonResult(
+            await callGatewayTool("cron.runs", gatewayOpts, {
+              id,
+              ...(workspaceId ? { workspaceId } : {}),
+            }),
+          );
         }
         case "wake": {
           const text = readStringParam(params, "text", { required: true });

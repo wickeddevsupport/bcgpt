@@ -100,6 +100,7 @@ export function createOpenClawTools(options?: {
     }),
     createCronTool({
       agentSessionKey: options?.agentSessionKey,
+      config: options?.config,
     }),
     ...(messageTool ? [messageTool] : []),
     createTtsTool({

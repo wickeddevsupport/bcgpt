@@ -7,6 +7,8 @@ vi.mock("../../gateway/call.js", () => ({
 
 vi.mock("../agent-scope.js", () => ({
   resolveSessionAgentId: () => "agent-123",
+  resolveAgentConfig: (cfg: { agents?: { list?: Array<{ id?: string; workspaceId?: string }> } }) =>
+    cfg.agents?.list?.find((entry) => entry?.id === "agent-123"),
 }));
 
 import { createCronTool } from "./cron-tool.js";
@@ -120,6 +122,57 @@ describe("cron tool", () => {
       params?: { agentId?: unknown };
     };
     expect(call?.params?.agentId).toBeNull();
+  });
+
+  it("stamps workspaceId for workspace-scoped cron adds", async () => {
+    const tool = createCronTool({
+      agentSessionKey: "main",
+      config: {
+        agents: {
+          list: [{ id: "agent-123", workspaceId: "ws-rohit", default: true }],
+        },
+      },
+    });
+    await tool.execute("call-workspace-add", {
+      action: "add",
+      job: {
+        name: "workspace reminder",
+        schedule: { at: new Date(123).toISOString() },
+        payload: { kind: "systemEvent", text: "hello" },
+      },
+    });
+
+    const call = callGatewayMock.mock.calls[0]?.[0] as {
+      method?: string;
+      params?: { workspaceId?: string };
+    };
+    expect(call.method).toBe("cron.add");
+    expect(call.params?.workspaceId).toBe("ws-rohit");
+  });
+
+  it("passes workspaceId on workspace-scoped cron list calls", async () => {
+    const tool = createCronTool({
+      agentSessionKey: "main",
+      config: {
+        agents: {
+          list: [{ id: "agent-123", workspaceId: "ws-rohit", default: true }],
+        },
+      },
+    });
+    await tool.execute("call-workspace-list", {
+      action: "list",
+      includeDisabled: true,
+    });
+
+    const call = callGatewayMock.mock.calls[0]?.[0] as {
+      method?: string;
+      params?: { workspaceId?: string; includeDisabled?: boolean };
+    };
+    expect(call.method).toBe("cron.list");
+    expect(call.params).toEqual({
+      includeDisabled: true,
+      workspaceId: "ws-rohit",
+    });
   });
 
   it("adds recent context for systemEvent reminders when contextMessages > 0", async () => {
