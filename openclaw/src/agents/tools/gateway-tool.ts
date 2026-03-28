@@ -579,12 +579,16 @@ export function createGatewayTool(opts?: {
       if (action === "agents.files.list") {
         const agentId = readStringParam(params, "agentId", { required: true });
         if (workspaceId) {
+          const cfg = opts?.config;
+          if (!cfg) {
+            throw new Error("workspace config unavailable");
+          }
           const scopedAgentId = resolveWorkspaceScopedAgentId({
-            cfg: opts?.config,
+            cfg,
             workspaceId,
             requestedAgentId: agentId,
           });
-          const workspaceDir = resolveAgentWorkspaceDir(opts.config as OpenClawConfig, scopedAgentId);
+          const workspaceDir = resolveAgentWorkspaceDir(cfg, scopedAgentId);
           const files = await listWorkspaceScopedAgentFiles(workspaceDir);
           return jsonResult({
             ok: true,
@@ -598,15 +602,19 @@ export function createGatewayTool(opts?: {
         const agentId = readStringParam(params, "agentId", { required: true });
         const name = readStringParam(params, "name", { required: true });
         if (workspaceId) {
+          const cfg = opts?.config;
+          if (!cfg) {
+            throw new Error("workspace config unavailable");
+          }
           if (!isAllowedWorkspaceAgentFileName(name)) {
             throw new Error(`unsupported file "${name}"`);
           }
           const scopedAgentId = resolveWorkspaceScopedAgentId({
-            cfg: opts?.config,
+            cfg,
             workspaceId,
             requestedAgentId: agentId,
           });
-          const workspaceDir = resolveAgentWorkspaceDir(opts.config as OpenClawConfig, scopedAgentId);
+          const workspaceDir = resolveAgentWorkspaceDir(cfg, scopedAgentId);
           const filePath = path.resolve(workspaceDir, name.replace(/\\/g, "/"));
           try {
             const stat = await fs.stat(filePath);
