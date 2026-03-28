@@ -253,6 +253,76 @@ describe("runCronIsolatedAgentTurn", () => {
     });
   });
 
+  it("writes cron run transcripts into the workspace-scoped session tree", async () => {
+    await withTempHome(async (home) => {
+      const deps: CliDeps = {
+        sendMessageWhatsApp: vi.fn(),
+        sendMessageTelegram: vi.fn(),
+        sendMessageDiscord: vi.fn(),
+        sendMessageSignal: vi.fn(),
+        sendMessageIMessage: vi.fn(),
+      };
+      const workspaceId = "ws-1";
+      const heartbeatWorkspace = path.join(home, "workspaces", workspaceId, "heartbeat-agent");
+      vi.mocked(runEmbeddedPiAgent).mockResolvedValue({
+        payloads: [{ text: "ok" }],
+        meta: {
+          durationMs: 5,
+          agentMeta: { sessionId: "s", provider: "p", model: "m" },
+        },
+      });
+
+      const cfg = makeCfg(
+        home,
+        path.join(
+          home,
+          ".openclaw",
+          "workspaces",
+          workspaceId,
+          "agents",
+          "{agentId}",
+          "sessions",
+          "sessions.json",
+        ),
+        {
+          agents: {
+            defaults: { workspace: path.join(home, "default-workspace") },
+            list: [
+              { id: "main", default: true },
+              { id: "heartbeat-agent", workspace: heartbeatWorkspace },
+            ],
+          },
+        },
+      );
+
+      const res = await runCronIsolatedAgentTurn({
+        cfg,
+        deps,
+        job: {
+          ...makeJob({
+            kind: "agentTurn",
+            message: "do it",
+            deliver: false,
+          }),
+          agentId: "heartbeat-agent",
+          workspaceId,
+        },
+        message: "do it",
+        sessionKey: "cron:heartbeat-cron",
+        agentId: "heartbeat-agent",
+        lane: "cron",
+      });
+
+      expect(res.status).toBe("ok");
+      const call = vi.mocked(runEmbeddedPiAgent).mock.calls.at(-1)?.[0] as {
+        sessionFile?: string;
+      };
+      expect(call?.sessionFile).toContain(
+        path.join("workspaces", workspaceId, "agents", "heartbeat-agent", "sessions"),
+      );
+    });
+  });
+
   it("uses model override when provided", async () => {
     await withTempHome(async (home) => {
       const storePath = await writeSessionStore(home);

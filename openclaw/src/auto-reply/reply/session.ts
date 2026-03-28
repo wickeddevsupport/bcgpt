@@ -20,7 +20,7 @@ import {
   resolveGroupSessionKey,
   resolveSessionFilePath,
   resolveSessionKey,
-  resolveSessionTranscriptPath,
+  resolveSessionTranscriptPathForConfig,
   resolveStorePath,
   type SessionEntry,
   type SessionScope,
@@ -328,7 +328,8 @@ export async function initSessionState(params: {
     }
   }
   if (!sessionEntry.sessionFile) {
-    sessionEntry.sessionFile = resolveSessionTranscriptPath(
+    sessionEntry.sessionFile = resolveSessionTranscriptPathForConfig(
+      cfg,
       sessionEntry.sessionId,
       agentId,
       ctx.MessageThreadId,

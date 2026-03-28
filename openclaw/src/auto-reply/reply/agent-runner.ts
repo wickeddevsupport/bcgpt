@@ -13,7 +13,7 @@ import { hasNonzeroUsage } from "../../agents/usage.js";
 import {
   resolveAgentIdFromSessionKey,
   resolveSessionFilePath,
-  resolveSessionTranscriptPath,
+  resolveSessionTranscriptPathForConfig,
   type SessionEntry,
   updateSessionStore,
   updateSessionStoreEntry,
@@ -254,7 +254,8 @@ export async function runReplyAgent(params: {
       abortedLastRun: false,
     };
     const agentId = resolveAgentIdFromSessionKey(sessionKey);
-    const nextSessionFile = resolveSessionTranscriptPath(
+    const nextSessionFile = resolveSessionTranscriptPathForConfig(
+      cfg,
       nextSessionId,
       agentId,
       sessionCtx.MessageThreadId,
@@ -281,7 +282,7 @@ export async function runReplyAgent(params: {
       if (resolved) {
         transcriptCandidates.add(resolved);
       }
-      transcriptCandidates.add(resolveSessionTranscriptPath(prevSessionId, agentId));
+      transcriptCandidates.add(resolveSessionTranscriptPathForConfig(cfg, prevSessionId, agentId));
       for (const candidate of transcriptCandidates) {
         try {
           fs.unlinkSync(candidate);

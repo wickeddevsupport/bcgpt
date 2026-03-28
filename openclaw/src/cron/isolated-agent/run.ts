@@ -43,7 +43,7 @@ import {
 import { createOutboundSendDeps, type CliDeps } from "../../cli/outbound-send-deps.js";
 import {
   resolveAgentMainSessionKey,
-  resolveSessionTranscriptPath,
+  resolveSessionTranscriptPathForConfig,
   updateSessionStore,
 } from "../../config/sessions.js";
 import { registerAgentRunContext } from "../../infra/agent-events.js";
@@ -366,7 +366,11 @@ export async function runCronIsolatedAgentTurn(params: {
   const runStartedAt = Date.now();
   let runEndedAt = runStartedAt;
   try {
-    const sessionFile = resolveSessionTranscriptPath(cronSession.sessionEntry.sessionId, agentId);
+    const sessionFile = resolveSessionTranscriptPathForConfig(
+      cfgWithAgentDefaults,
+      cronSession.sessionEntry.sessionId,
+      agentId,
+    );
     const resolvedVerboseLevel =
       normalizeVerboseLevel(cronSession.sessionEntry.verboseLevel) ??
       normalizeVerboseLevel(agentCfg?.verboseDefault) ??

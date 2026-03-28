@@ -103,6 +103,29 @@ describe("initSessionState thread forking", () => {
       `${result.sessionEntry.sessionId}-topic-456.jsonl`,
     );
   });
+
+  it("writes new session transcripts beside a workspace-scoped session store", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-workspace-session-"));
+    const storePath = path.join(root, "workspaces", "ws-1", "agents", "assistant", "sessions", "sessions.json");
+
+    const cfg = {
+      session: { store: storePath },
+    } as OpenClawConfig;
+
+    const result = await initSessionState({
+      ctx: {
+        Body: "Hello workspace",
+        SessionKey: "agent:assistant:webchat:main",
+      },
+      cfg,
+      commandAuthorized: true,
+    });
+
+    expect(result.sessionEntry.sessionFile).toBeTruthy();
+    expect(result.sessionEntry.sessionFile).toContain(
+      path.join("workspaces", "ws-1", "agents", "assistant", "sessions"),
+    );
+  });
 });
 
 describe("initSessionState RawBody", () => {
