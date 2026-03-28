@@ -293,9 +293,6 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
     figmaSelectedFileName && figmaSelectedFileUrl
       ? `${figmaSelectedFileName} (${figmaSelectedFileUrl})`
       : figmaSelectedFileName ?? figmaSelectedFileUrl;
-  // Shared key: global BCGPT_API_KEY env var available (server-wide connection)
-  const bcgptSharedKeyAvailable = !bcgptApiKeySet && Boolean(process.env.BCGPT_API_KEY?.trim());
-
   const extraConnectorKeys = Object.keys(raw)
     .filter((key) => key !== "ops" && key !== "bcgpt" && key !== "figma" && key !== "activepieces")
     .sort((a, b) => a.localeCompare(b));
@@ -313,9 +310,9 @@ function describeConnectorSection(connectors: WorkspaceConnectors | null): strin
     `- ops projectId: ${opsProjectId ?? "(not set)"}`,
     `- ops user email: ${opsUserEmail ?? "(not set)"}`,
     `- ops user password present: ${yesNo(opsUserPasswordSet)}`,
-    `- basecamp connector configured: ${yesNo(Boolean(bcgptUrl || bcgptApiKeySet || bcgptSharedKeyAvailable))}`,
+    `- basecamp connector configured: ${yesNo(Boolean(bcgptUrl || bcgptApiKeySet))}`,
     `- basecamp url: ${bcgptUrl ?? process.env.BCGPT_URL?.trim() ?? "https://bcgpt.wickedlab.io"}`,
-    `- basecamp apiKey present: ${bcgptApiKeySet ? "yes" : bcgptSharedKeyAvailable ? "yes (shared server key)" : "no"}`,
+    `- basecamp apiKey present: ${yesNo(bcgptApiKeySet)}`,
     `- figma connector configured: ${yesNo(Boolean(figmaUrl || figmaConnected || figmaHandle || figmaEmail))}`,
     `- figma url: ${figmaUrl ?? "https://fm.wickedlab.io"}`,
     `- figma connected user: ${figmaHandle ?? figmaEmail ?? "(not synced)"}`,
@@ -369,9 +366,7 @@ function describeBcgptSection(input: {
   const bcgptUrl = asNonEmptyString(bcgpt.url);
   const bcgptApiKey = asNonEmptyString(bcgpt.apiKey);
 
-  // A connection exists if either the workspace or global key is available,
-  // OR if bcgptData was successfully fetched (meaning the global key worked).
-  const hasConnection = Boolean(bcgptApiKey) || Boolean(input.bcgptData);
+  const hasConnection = Boolean(bcgptApiKey);
   if (!hasConnection) {
     return [
       "## Basecamp Integration (bcgpt MCP Server)",
@@ -381,13 +376,10 @@ function describeBcgptSection(input: {
   }
 
   const serverUrl = bcgptUrl ?? "https://bcgpt.wickedlab.io";
-  const isSharedConnection = !bcgptApiKey && hasConnection;
 
   const lines: string[] = [
     "## Basecamp Integration (bcgpt MCP Server)",
-    isSharedConnection
-      ? `- status: CONNECTED (shared) — using server-wide Basecamp connection`
-      : `- status: CONNECTED — Basecamp API key is set for this workspace`,
+    "- status: CONNECTED - Basecamp API key is set for this workspace",
     `- server: ${serverUrl}`,
     "- protocol: MCP (Model Context Protocol) — Basecamp tools available",
     "",
@@ -518,6 +510,27 @@ function describeAgentSection(input: {
   return ["## Agent Assignments", ...lines].join("\n");
 }
 
+function describeOfficeCollaborationSection(input: {
+  effectiveConfig: JsonObject;
+  workspaceId: string;
+}): string {
+  const agents = collectAgentSummaries(input.effectiveConfig, input.workspaceId);
+  if (!agents.length) {
+    return ["## Office Collaboration", "- no workspace agents configured"].join("\n");
+  }
+
+  const ids = agents.map((agent) => agent.id).sort((a, b) => a.localeCompare(b));
+  return [
+    "## Office Collaboration",
+    `- workspace office agents: ${ids.join(", ")}`,
+    "- Use `agents_list` to discover teammate agent ids in this workspace.",
+    "- Use `sessions_list`, `sessions_history`, and `sessions_send` for cross-agent coordination.",
+    "- Use `gateway` action `agents.files.list` to inspect teammate bootstrap and memory files.",
+    "- Use `gateway` action `agents.files.get` to read teammate `HEARTBEAT.md`, `MEMORY.md`, `memory.md`, or `memory/*.md` files.",
+    "- Treat these office surfaces as workspace-local only. Never assume cross-workspace access.",
+  ].join("\n");
+}
+
 function describeCredentialSection(credentials: WorkspaceAiCredential[]): string {
   if (!credentials.length) {
     return ["## Connected Apps", "- no connected apps discovered for this workspace"].join("\n");
@@ -547,7 +560,7 @@ function describeWorkspaceConfigSection(input: {
     "## Workspace Config Summary",
     `- workspace config top-level keys: ${workspaceTopLevelKeys.length ? workspaceTopLevelKeys.join(", ") : "(none)"}`,
     `- effective config top-level keys: ${effectiveTopLevelKeys.length ? effectiveTopLevelKeys.join(", ") : "(none)"}`,
-    "- source of truth: global openclaw.json merged with workspace config plus workspace connectors/BYOK for secrets.",
+    "- source of truth: shared global model/tool availability plus this workspace config and this workspace's connectors/BYOK secrets.",
   ].join("\n");
 }
 
@@ -723,6 +736,11 @@ export function buildWorkspaceAiContextMarkdown(input: WorkspaceAiContextInput):
       workspaceId: input.workspaceId,
     }),
     "",
+    describeOfficeCollaborationSection({
+      effectiveConfig: input.effectiveConfig,
+      workspaceId: input.workspaceId,
+    }),
+    "",
     describeCredentialSection(input.credentials),
     "",
     describeProjectManagerSection(),
@@ -771,19 +789,19 @@ export async function refreshWorkspaceAiContext(
     }
   }
 
-  // Best-effort: fetch live Basecamp account/project data from the bcgpt connector.
-  // Falls back to the global BCGPT_API_KEY env var so workspace users on a shared
-  // bcgpt setup see live project data even without a workspace-scoped key.
+  // Best-effort: fetch live Basecamp account/project data from the workspace bcgpt connector.
   let bcgptData: BcgptWorkspaceData | null = null;
   if (opts.includeLiveCredentials) {
     const bcgptConnector = isRecord(connectors?.bcgpt) ? connectors.bcgpt : null;
     const workspaceBcgptApiKey = asNonEmptyString(bcgptConnector?.apiKey as unknown);
     const workspaceBcgptUrl = asNonEmptyString(bcgptConnector?.url as unknown);
-    // Resolve effective key/URL: workspace-scoped first, then global shared fallback
-    const effectiveBcgptApiKey = workspaceBcgptApiKey ?? (process.env.BCGPT_API_KEY?.trim() || null);
-    const effectiveBcgptUrl = workspaceBcgptUrl ?? (process.env.BCGPT_URL?.trim() || null) ?? "https://bcgpt.wickedlab.io";
-    if (effectiveBcgptApiKey) {
-      bcgptData = await fetchBcgptWorkspaceData(effectiveBcgptUrl, effectiveBcgptApiKey).catch(() => null);
+    const effectiveBcgptUrl =
+      workspaceBcgptUrl ?? (process.env.BCGPT_URL?.trim() || null) ?? "https://bcgpt.wickedlab.io";
+    if (workspaceBcgptApiKey) {
+      bcgptData = await fetchBcgptWorkspaceData(
+        effectiveBcgptUrl,
+        workspaceBcgptApiKey,
+      ).catch(() => null);
     }
   }
 

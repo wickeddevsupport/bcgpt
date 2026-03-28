@@ -139,4 +139,45 @@ describe("workspace-ai-context", () => {
     expect(refreshed.markdown).not.toContain("### Figma File Manager (FM) AI Capabilities");
     expect(refreshed.markdown).toContain("If the user pastes a Basecamp URL, treat that URL as the resource to inspect");
   });
+
+  it("does not treat shared bcgpt env keys as workspace configuration", async () => {
+    const prevApiKey = process.env.BCGPT_API_KEY;
+    const prevUrl = process.env.BCGPT_URL;
+    process.env.BCGPT_API_KEY = "shared-only-key";
+    process.env.BCGPT_URL = "https://bcgpt.shared.test";
+
+    try {
+      await writeWorkspaceConfig(workspaceId, {
+        agents: {
+          list: [
+            { id: "assistant", workspaceId, default: true },
+            { id: "heartbeat-agent", workspaceId },
+          ],
+        },
+      });
+
+      const refreshed = await refreshWorkspaceAiContext(workspaceId, {
+        includeLiveCredentials: true,
+      });
+
+      expect(refreshed.markdown).toContain("basecamp connector configured: no");
+      expect(refreshed.markdown).toContain("basecamp apiKey present: no");
+      expect(refreshed.markdown).toContain("status: NOT CONFIGURED");
+      expect(refreshed.markdown).toContain("## Office Collaboration");
+      expect(refreshed.markdown).toContain("gateway` action `agents.files.get`");
+      expect(refreshed.markdown).not.toContain("shared server key");
+      expect(refreshed.markdown).not.toContain("CONNECTED (shared)");
+    } finally {
+      if (prevApiKey === undefined) {
+        delete process.env.BCGPT_API_KEY;
+      } else {
+        process.env.BCGPT_API_KEY = prevApiKey;
+      }
+      if (prevUrl === undefined) {
+        delete process.env.BCGPT_URL;
+      } else {
+        process.env.BCGPT_URL = prevUrl;
+      }
+    }
+  });
 });

@@ -582,7 +582,7 @@ describe("pmos.projects.snapshot", () => {
     expect(payload.errors[0]).toContain("identity check failed");
   });
 
-  it("falls back to the shared bcgpt env key for workspace admins", async () => {
+  it("does not fall back to the shared bcgpt env key for workspace admins", async () => {
     process.env.BCGPT_API_KEY = "shared-key";
     process.env.BCGPT_URL = "https://bcgpt.shared.test";
 
@@ -641,10 +641,11 @@ describe("pmos.projects.snapshot", () => {
       totals: { projectCount: number };
     };
 
-    expect(payload.configured).toBe(true);
-    expect(payload.connected).toBe(true);
+    expect(payload.configured).toBe(false);
+    expect(payload.connected).toBe(false);
     expect(payload.connectorUrl).toBe("https://bcgpt.shared.test");
-    expect(payload.totals.projectCount).toBe(1);
+    expect(payload.totals.projectCount).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("accepts alternate tool payload shapes for projects and todos", async () => {

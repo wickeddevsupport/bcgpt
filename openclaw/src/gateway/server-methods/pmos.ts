@@ -791,9 +791,12 @@ async function resolveWorkspaceBcgptAccess(params: {
       null,
     "https://bcgpt.wickedlab.io",
   );
+  const sharedGlobalAccessAllowed =
+    params.allowGlobalSecrets &&
+    (!params.workspaceId || params.workspaceId === "global" || params.workspaceId === "root");
   const apiKey =
     (workspaceConnectors?.bcgpt?.apiKey as string | undefined)?.trim() ??
-    (params.allowGlobalSecrets
+    (sharedGlobalAccessAllowed
       ? readConfigString(cfg, ["pmos", "connectors", "bcgpt", "apiKey"]) ??
         (process.env.BCGPT_API_KEY?.trim() || null)
       : null);
@@ -2754,9 +2757,13 @@ export const pmosHandlers: GatewayRequestHandlers = {
       // Every workspace gets the shared key for connection-check purposes; the key value
       // is NEVER sent back to the client in the response.
       const workspaceBcgptKey = (workspaceConnectors?.bcgpt?.apiKey as string | undefined)?.trim() || null;
-      const globalBcgptKey =
-        readConfigString(cfg, ["pmos", "connectors", "bcgpt", "apiKey"])?.trim() ??
-        (process.env.BCGPT_API_KEY?.trim() || null);
+      const allowSharedBcgptKey = Boolean(
+        allowGlobalSecrets && (!workspaceId || workspaceId === "global" || workspaceId === "root"),
+      );
+      const globalBcgptKey = allowSharedBcgptKey
+        ? readConfigString(cfg, ["pmos", "connectors", "bcgpt", "apiKey"])?.trim() ??
+          (process.env.BCGPT_API_KEY?.trim() || null)
+        : null;
       const bcgptKey = workspaceBcgptKey ?? globalBcgptKey;
       const bcgptKeyIsShared = !workspaceBcgptKey && Boolean(globalBcgptKey);
 

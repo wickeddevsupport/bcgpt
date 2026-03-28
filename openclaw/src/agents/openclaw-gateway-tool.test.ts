@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import "./test-helpers/fast-core-tools.js";
 import { createOpenClawTools } from "./openclaw-tools.js";
+import { resolveAgentWorkspaceDir } from "./agent-scope.js";
 
 vi.mock("./tools/gateway.js", () => ({
   callGatewayTool: vi.fn(async (method: string) => {
@@ -261,6 +262,83 @@ describe("gateway tool", () => {
               subagents: { allowAgents: ["*"] },
             }),
           ]),
+        },
+      });
+    } finally {
+      if (previousStateDir === undefined) {
+        delete process.env.OPENCLAW_STATE_DIR;
+      } else {
+        process.env.OPENCLAW_STATE_DIR = previousStateDir;
+      }
+    }
+  });
+
+  it("lets workspace agents inspect coworker files locally", async () => {
+    const previousStateDir = process.env.OPENCLAW_STATE_DIR;
+    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-ws-files-"));
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+
+    try {
+      const sharedConfig = {
+        agents: {
+          list: [
+            { id: "assistant", workspaceId: "ws-rohit", default: true },
+            { id: "marketing-agent", workspaceId: "ws-rohit" },
+          ],
+        },
+      };
+      const marketingWorkspace = resolveAgentWorkspaceDir(
+        sharedConfig as any,
+        "marketing-agent",
+      );
+      await fs.mkdir(path.join(marketingWorkspace, "memory"), { recursive: true });
+      await fs.writeFile(path.join(marketingWorkspace, "MEMORY.md"), "# Marketing memory\n", "utf-8");
+      await fs.writeFile(
+        path.join(marketingWorkspace, "memory", "campaign.md"),
+        "# Campaign notes\n",
+        "utf-8",
+      );
+
+      const gatewayTool = createOpenClawTools({
+        agentSessionKey: "agent:assistant:webchat:session:abc",
+        config: sharedConfig,
+      }).find((candidate) => candidate.name === "gateway");
+      expect(gatewayTool).toBeDefined();
+      if (!gatewayTool) {
+        throw new Error("missing workspace gateway tool");
+      }
+
+      const listResult = await gatewayTool.execute("call-ws-files-list", {
+        action: "agents.files.list",
+        agentId: "marketing-agent",
+      });
+      expect(listResult.details).toMatchObject({
+        ok: true,
+        result: {
+          agentId: "marketing-agent",
+          workspaceId: "ws-rohit",
+          files: expect.arrayContaining([
+            expect.objectContaining({ name: "MEMORY.md", missing: false }),
+            expect.objectContaining({ name: "memory/campaign.md", missing: false }),
+          ]),
+        },
+      });
+
+      const getResult = await gatewayTool.execute("call-ws-files-get", {
+        action: "agents.files.get",
+        agentId: "marketing-agent",
+        name: "memory/campaign.md",
+      });
+      expect(getResult.details).toMatchObject({
+        ok: true,
+        result: {
+          agentId: "marketing-agent",
+          workspaceId: "ws-rohit",
+          file: expect.objectContaining({
+            name: "memory/campaign.md",
+            missing: false,
+            content: "# Campaign notes\n",
+          }),
         },
       });
     } finally {

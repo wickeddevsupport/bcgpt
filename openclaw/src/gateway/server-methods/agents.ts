@@ -71,7 +71,6 @@ const BOOTSTRAP_FILE_NAMES = [
 
 const MEMORY_FILE_NAMES = [DEFAULT_MEMORY_FILENAME, DEFAULT_MEMORY_ALT_FILENAME] as const;
 
-const ALLOWED_FILE_NAMES = new Set<string>([...BOOTSTRAP_FILE_NAMES, ...MEMORY_FILE_NAMES]);
 const WORKSPACE_AGENT_PATH_BASE = "~/.openclaw/workspaces";
 
 type FileMeta = {
@@ -155,33 +154,79 @@ async function listAgentFiles(workspaceDir: string) {
     }
   }
 
-  const primaryMemoryPath = path.join(workspaceDir, DEFAULT_MEMORY_FILENAME);
-  const primaryMeta = await statFile(primaryMemoryPath);
-  if (primaryMeta) {
-    files.push({
-      name: DEFAULT_MEMORY_FILENAME,
-      path: primaryMemoryPath,
-      missing: false,
-      size: primaryMeta.size,
-      updatedAtMs: primaryMeta.updatedAtMs,
-    });
-  } else {
-    const altMemoryPath = path.join(workspaceDir, DEFAULT_MEMORY_ALT_FILENAME);
-    const altMeta = await statFile(altMemoryPath);
-    if (altMeta) {
+  for (const name of MEMORY_FILE_NAMES) {
+    const filePath = path.join(workspaceDir, name);
+    const meta = await statFile(filePath);
+    if (meta) {
       files.push({
-        name: DEFAULT_MEMORY_ALT_FILENAME,
-        path: altMemoryPath,
+        name,
+        path: filePath,
         missing: false,
-        size: altMeta.size,
-        updatedAtMs: altMeta.updatedAtMs,
+        size: meta.size,
+        updatedAtMs: meta.updatedAtMs,
       });
-    } else {
-      files.push({ name: DEFAULT_MEMORY_FILENAME, path: primaryMemoryPath, missing: true });
     }
   }
 
+  if (!files.some((entry) => entry.name === DEFAULT_MEMORY_FILENAME)) {
+    files.push({
+      name: DEFAULT_MEMORY_FILENAME,
+      path: path.join(workspaceDir, DEFAULT_MEMORY_FILENAME),
+      missing: true,
+    });
+  }
+
+  const memoryDir = path.join(workspaceDir, "memory");
+  try {
+    const entries = await fs.readdir(memoryDir, { withFileTypes: true });
+    const memoryFiles = entries
+      .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".md"))
+      .map((entry) => entry.name)
+      .sort((a, b) => a.localeCompare(b));
+    for (const name of memoryFiles) {
+      const relName = path.posix.join("memory", name);
+      const filePath = path.join(memoryDir, name);
+      const meta = await statFile(filePath);
+      if (!meta) {
+        continue;
+      }
+      files.push({
+        name: relName,
+        path: filePath,
+        missing: false,
+        size: meta.size,
+        updatedAtMs: meta.updatedAtMs,
+      });
+    }
+  } catch {
+    // optional memory dir
+  }
+
   return files;
+}
+
+function isAllowedAgentFileName(name: string): boolean {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    return false;
+  }
+  if (([...BOOTSTRAP_FILE_NAMES, ...MEMORY_FILE_NAMES] as readonly string[]).includes(trimmed)) {
+    return true;
+  }
+  const normalized = trimmed.replace(/\\/g, "/");
+  if (!normalized.startsWith("memory/")) {
+    return false;
+  }
+  if (normalized.includes("..")) {
+    return false;
+  }
+  const baseName = path.posix.basename(normalized);
+  return baseName.length > 0 && baseName.toLowerCase().endsWith(".md");
+}
+
+function resolveAgentFilePath(workspaceDir: string, name: string): string {
+  const normalized = name.trim().replace(/\\/g, "/");
+  return path.resolve(workspaceDir, normalized);
 }
 
 function resolveAgentIdOrError(agentIdRaw: string, cfg: ReturnType<typeof loadConfig>) {
@@ -735,7 +780,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
     }
 
     const name = String(params.name ?? "").trim();
-    if (!ALLOWED_FILE_NAMES.has(name)) {
+    if (!isAllowedAgentFileName(name)) {
       respond(
         false,
         undefined,
@@ -744,7 +789,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
       return;
     }
     const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
-    const filePath = path.join(workspaceDir, name);
+    const filePath = resolveAgentFilePath(workspaceDir, name);
     const meta = await statFile(filePath);
     if (!meta) {
       respond(
@@ -810,7 +855,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
     }
 
     const name = String(params.name ?? "").trim();
-    if (!ALLOWED_FILE_NAMES.has(name)) {
+    if (!isAllowedAgentFileName(name)) {
       respond(
         false,
         undefined,
@@ -820,7 +865,10 @@ export const agentsHandlers: GatewayRequestHandlers = {
     }
     const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
     await fs.mkdir(workspaceDir, { recursive: true });
-    const filePath = path.join(workspaceDir, name);
+    if (name.replace(/\\/g, "/").startsWith("memory/")) {
+      await fs.mkdir(path.dirname(resolveAgentFilePath(workspaceDir, name)), { recursive: true });
+    }
+    const filePath = resolveAgentFilePath(workspaceDir, name);
     const content = String(params.content ?? "");
     await fs.writeFile(filePath, content, "utf-8");
     const meta = await statFile(filePath);
