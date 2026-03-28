@@ -41,7 +41,7 @@ function buildWorkspaceRouteInput(
   cfg: OpenClawConfig,
   input: Omit<ResolveAgentRouteInput, "cfg">,
 ): ReturnType<typeof resolveAgentRoute> {
-  return resolveAgentRoute({ cfg, ...input });
+  return resolveAgentRoute({ ...input, cfg });
 }
 
 export async function resolveWorkspaceRoute(

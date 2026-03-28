@@ -33,49 +33,6 @@ export function workspaceConfigPath(workspaceId: string): string {
   return path.join(CONFIG_DIR, "workspaces", safe, "config.json");
 }
 
-export async function readWorkspaceConfig(workspaceId: string): Promise<JsonObject | null> {
-  const p = workspaceConfigPath(workspaceId);
-  try {
-    const raw = await fs.readFile(p, "utf-8");
-    const parsed = JSON.parse(raw) as unknown;
-    if (!isJsonObject(parsed)) {
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-export async function writeWorkspaceConfig(workspaceId: string, next: JsonObject): Promise<void> {
-  const p = workspaceConfigPath(workspaceId);
-  await ensureDir(path.dirname(p));
-  const raw = JSON.stringify(next, null, 2).trimEnd().concat("\n");
-  await fs.writeFile(p, raw, "utf-8");
-  try {
-    await seedWorkspaceAgentBoundRoutes(workspaceId);
-  } catch {
-    // Best-effort session route seeding.
-  }
-  try {
-    const { refreshWorkspaceAiContext } = await import("./workspace-ai-context.js");
-    await refreshWorkspaceAiContext(workspaceId);
-  } catch {
-    // Best-effort context snapshot update.
-  }
-}
-
-export async function patchWorkspaceConfig(
-  workspaceId: string,
-  patch: JsonObject,
-): Promise<JsonObject> {
-  const existing = (await readWorkspaceConfig(workspaceId)) ?? {};
-  const merged = deepMerge(existing, patch);
-  const next = isJsonObject(merged) ? merged : {};
-  await writeWorkspaceConfig(workspaceId, next);
-  return next;
-}
-
 function stripCrossWorkspaceInheritedConfig(globalCfg: JsonObject): JsonObject {
   const next: JsonObject = { ...globalCfg };
 
@@ -144,6 +101,121 @@ function normalizeWorkspaceAgentEntry(
     next.workspace = workspaceDefaultAgentWorkspacePath(workspaceId, agentId);
   }
   return next;
+}
+
+export function normalizeWorkspaceConfigDocument(
+  workspaceId: string,
+  config: JsonObject,
+): JsonObject {
+  const wsId = workspaceId.trim();
+  if (!wsId) {
+    return config;
+  }
+
+  let next: JsonObject = { ...config };
+  const agents = isJsonObject(next.agents) ? ({ ...next.agents } as JsonObject) : null;
+  if (agents) {
+    const defaultAgentId =
+      typeof agents.defaultAgentId === "string" && agents.defaultAgentId.trim()
+        ? agents.defaultAgentId.trim()
+        : "assistant";
+    if (Array.isArray(agents.list)) {
+      agents.list = agents.list
+        .filter((entry): entry is JsonObject => isJsonObject(entry))
+        .filter((entry) => {
+          const entryWorkspaceId =
+            typeof entry.workspaceId === "string" ? entry.workspaceId.trim() : "";
+          return !entryWorkspaceId || entryWorkspaceId === wsId;
+        })
+        .map((entry) =>
+          normalizeWorkspaceAgentEntry(
+            entry,
+            wsId,
+            typeof entry.id === "string" && entry.id.trim() ? entry.id.trim() : defaultAgentId,
+          ),
+        );
+    }
+    const defaults = isJsonObject(agents.defaults) ? ({ ...agents.defaults } as JsonObject) : null;
+    if (defaults && shouldNormalizeWorkspaceAgentPath(defaults.workspace, wsId, defaultAgentId)) {
+      defaults.workspace = workspaceDefaultAgentWorkspacePath(wsId, defaultAgentId);
+      agents.defaults = defaults;
+    }
+    next.agents = agents;
+  }
+
+  const session = isJsonObject(next.session) ? ({ ...next.session } as JsonObject) : null;
+  if (
+    session &&
+    Object.prototype.hasOwnProperty.call(session, "store") &&
+    !isWorkspaceScopedPath(session.store, wsId)
+  ) {
+    session.store = workspaceSessionStorePath(wsId);
+    next.session = session;
+  }
+
+  const cron = isJsonObject(next.cron) ? ({ ...next.cron } as JsonObject) : null;
+  if (
+    cron &&
+    Object.prototype.hasOwnProperty.call(cron, "store") &&
+    !isWorkspaceScopedPath(cron.store, wsId)
+  ) {
+    cron.store = workspaceCronStorePath(wsId);
+    next.cron = cron;
+  }
+
+  return applyWorkspaceAgentCollaborationDefaults(next, wsId);
+}
+
+async function persistWorkspaceConfigFile(workspaceId: string, next: JsonObject): Promise<void> {
+  const p = workspaceConfigPath(workspaceId);
+  await ensureDir(path.dirname(p));
+  const raw = JSON.stringify(next, null, 2).trimEnd().concat("\n");
+  await fs.writeFile(p, raw, "utf-8");
+}
+
+export async function readWorkspaceConfig(workspaceId: string): Promise<JsonObject | null> {
+  const p = workspaceConfigPath(workspaceId);
+  try {
+    const raw = await fs.readFile(p, "utf-8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isJsonObject(parsed)) {
+      return null;
+    }
+    const normalized = normalizeWorkspaceConfigDocument(workspaceId, parsed);
+    if (JSON.stringify(normalized) !== JSON.stringify(parsed)) {
+      await persistWorkspaceConfigFile(workspaceId, normalized);
+    }
+    return normalized;
+  } catch {
+    return null;
+  }
+}
+
+export async function writeWorkspaceConfig(workspaceId: string, next: JsonObject): Promise<void> {
+  const normalized = normalizeWorkspaceConfigDocument(workspaceId, next);
+  await persistWorkspaceConfigFile(workspaceId, normalized);
+  try {
+    await seedWorkspaceAgentBoundRoutes(workspaceId);
+  } catch {
+    // Best-effort session route seeding.
+  }
+  try {
+    const { refreshWorkspaceAiContext } = await import("./workspace-ai-context.js");
+    await refreshWorkspaceAiContext(workspaceId);
+  } catch {
+    // Best-effort context snapshot update.
+  }
+}
+
+export async function patchWorkspaceConfig(
+  workspaceId: string,
+  patch: JsonObject,
+): Promise<JsonObject> {
+  const existing = (await readWorkspaceConfig(workspaceId)) ?? {};
+  const merged = deepMerge(existing, patch);
+  const next = isJsonObject(merged) ? merged : {};
+  await writeWorkspaceConfig(workspaceId, next);
+  return normalizeWorkspaceConfigDocument(workspaceId, next);
 }
 
 function mergeWorkspaceAgentLists(

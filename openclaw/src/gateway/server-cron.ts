@@ -15,7 +15,7 @@ import { getChildLogger } from "../logging.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 import { defaultRuntime } from "../runtime.js";
 import { resolveCronRuntimeStorePath, syncCronRuntimeStoreFromSourcesSync } from "./cron-runtime-store.js";
-import { workspaceConfigPath } from "./workspace-config.js";
+import { normalizeWorkspaceConfigDocument, workspaceConfigPath } from "./workspace-config.js";
 
 export type GatewayCronState = {
   cron: CronService;
@@ -48,9 +48,10 @@ export function buildGatewayCronService(params: {
     try {
       const raw = fs.readFileSync(workspaceConfigPath(wsId), "utf-8");
       const parsed = JSON.parse(raw) as unknown;
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>)
-        : null;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return null;
+      }
+      return normalizeWorkspaceConfigDocument(wsId, parsed as Record<string, unknown>);
     } catch {
       return null;
     }

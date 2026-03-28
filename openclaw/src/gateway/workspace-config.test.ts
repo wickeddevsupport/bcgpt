@@ -326,4 +326,67 @@ describe("workspace-config isolation", () => {
       }),
     );
   });
+
+  it("normalizes and persists legacy raw workspace config on read", async () => {
+    const { readWorkspaceConfig, workspaceConfigPath } = await import("./workspace-config.js");
+    const configPath = workspaceConfigPath(workspaceId);
+    await fs.mkdir(path.dirname(configPath), { recursive: true });
+    await fs.writeFile(
+      configPath,
+      JSON.stringify(
+        {
+          session: {
+            store: "~/.openclaw/agents/{agentId}/sessions/sessions.json",
+          },
+          cron: {
+            store: "~/.openclaw/cron/jobs.json",
+          },
+          agents: {
+            defaults: {
+              workspace: "~/.openclaw/workspace-main",
+            },
+            list: [
+              {
+                id: "assistant",
+                default: true,
+                workspace: "~/.openclaw/workspace-main",
+              },
+              {
+                id: "marketing-agent",
+                workspace: `~/.openclaw/workspaces/${workspaceId}/assistant`,
+              },
+            ],
+          },
+          tools: {
+            agentToAgent: {
+              enabled: false,
+            },
+          },
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+
+    const normalized = (await readWorkspaceConfig(workspaceId)) as Record<string, unknown>;
+    const saved = JSON.parse(await fs.readFile(configPath, "utf-8")) as Record<string, unknown>;
+    const savedAgents = ((saved.agents as Record<string, unknown> | undefined)?.list ?? []) as Array<
+      Record<string, unknown>
+    >;
+    const marketing = savedAgents.find((entry) => entry.id === "marketing-agent");
+
+    expect((normalized.session as Record<string, unknown> | undefined)?.store).toBe(
+      `~/.openclaw/workspaces/${workspaceId}/agents/{agentId}/sessions/sessions.json`,
+    );
+    expect((normalized.cron as Record<string, unknown> | undefined)?.store).toBe(
+      `~/.openclaw/workspaces/${workspaceId}/cron/jobs.json`,
+    );
+    expect(marketing?.workspaceId).toBe(workspaceId);
+    expect(marketing?.workspace).toBe(`~/.openclaw/workspaces/${workspaceId}/marketing-agent`);
+    expect(
+      (((saved.tools as Record<string, unknown> | undefined)?.agentToAgent as Record<string, unknown> | undefined)
+        ?.enabled),
+    ).toBe(true);
+  });
 });

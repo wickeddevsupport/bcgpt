@@ -20,7 +20,6 @@ import {
   listWorkflowEngineConnections as listWorkflowEngineConnectionsViaApi,
 } from "./workflow-api-client.js";
 import { readWorkspaceConnectors } from "./workspace-connectors.js";
-import { loadConfig } from "../config/config.js";
 
 const BASECAMP_ENSURE_SUCCESS_TTL_MS = 30_000;
 const BASECAMP_ENSURE_FAILURE_TTL_MS = 5_000;
@@ -135,21 +134,16 @@ export type BasecampCredentialEnsureResult = {
 async function resolveBasecampConnectorConfig(
   workspaceId: string,
 ): Promise<{ baseUrl: string; apiKey: string } | null> {
-  const cfg = loadConfig() as unknown;
   const wc = await readWorkspaceConnectors(workspaceId).catch(() => null);
 
-  // Workspace connector config is primary (per-tenant secrets).
-  // Global openclaw.json acts as shared fallback/defaults.
-  const configBaseUrl = normalizeBaseUrl(readConfigString(cfg, ["pmos", "connectors", "bcgpt", "url"]));
   const workspaceBaseUrl = normalizeBaseUrl(
     typeof wc?.bcgpt?.url === "string" ? wc.bcgpt.url : null,
   );
-  const baseUrl = workspaceBaseUrl ?? configBaseUrl ?? "https://bcgpt.wickedlab.io";
+  const baseUrl = workspaceBaseUrl ?? "https://bcgpt.wickedlab.io";
 
-  const configApiKey = readConfigString(cfg, ["pmos", "connectors", "bcgpt", "apiKey"]);
   const workspaceApiKey =
     typeof wc?.bcgpt?.apiKey === "string" ? wc.bcgpt.apiKey.trim() : null;
-  const apiKey = (workspaceApiKey ?? configApiKey ?? "").trim();
+  const apiKey = (workspaceApiKey ?? "").trim();
   if (!apiKey) {
     return null;
   }

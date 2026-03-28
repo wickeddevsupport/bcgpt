@@ -66,7 +66,10 @@ function resolveWorkspaceCronStorePathSync(workspaceId: string): string {
         ? (record.cron as Record<string, unknown>)
         : null;
     const store = typeof cron?.store === "string" ? cron.store.trim() : "";
-    return store ? resolveCronStorePath(store) : fallback;
+    if (!store || !store.includes(`/workspaces/${workspaceId}/`)) {
+      return fallback;
+    }
+    return resolveCronStorePath(store);
   } catch {
     return fallback;
   }
@@ -81,6 +84,21 @@ function dedupeJobsById(jobs: CronJob[]): CronJob[] {
     byId.set(job.id, job);
   }
   return Array.from(byId.values());
+}
+
+function normalizeWorkspaceJobs(jobs: CronJob[], workspaceId: string): CronJob[] {
+  return jobs
+    .filter(Boolean)
+    .map((job) => {
+      const jobWorkspaceId = typeof job.workspaceId === "string" ? job.workspaceId.trim() : "";
+      if (jobWorkspaceId === workspaceId) {
+        return job;
+      }
+      return {
+        ...job,
+        workspaceId,
+      };
+    });
 }
 
 export function resolveCronRuntimeStorePath(globalStorePath?: string): string {
@@ -116,11 +134,15 @@ export function syncCronRuntimeStoreFromSourcesSync(params?: {
   for (const workspaceId of workspaceIds) {
     const storePath = resolveWorkspaceCronStorePathSync(workspaceId);
     const workspaceStore = readCronStoreSync(storePath);
+    const normalizedWorkspaceJobs = normalizeWorkspaceJobs(workspaceStore.jobs, workspaceId);
     const migrated = dedupeJobsById([
-      ...workspaceStore.jobs,
+      ...normalizedWorkspaceJobs,
       ...(workspaceJobsFromGlobal.get(workspaceId) ?? []),
     ]);
-    if (migrated.length !== workspaceStore.jobs.length) {
+    const workspaceStoreChanged =
+      migrated.length !== workspaceStore.jobs.length ||
+      normalizedWorkspaceJobs.some((job, index) => job !== workspaceStore.jobs[index]);
+    if (workspaceStoreChanged) {
       saveCronStoreSync(storePath, { version: 1, jobs: migrated });
     }
     mergedRuntimeJobs.push(...migrated);
