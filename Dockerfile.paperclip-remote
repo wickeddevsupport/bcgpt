@@ -35,6 +35,27 @@ FROM base AS build
 WORKDIR /app
 COPY --from=deps /app /app
 COPY --from=source /src/paperclip/. .
+RUN python3 - <<'PY'
+from pathlib import Path
+path = Path('/app/server/src/routes/agents.ts')
+text = path.read_text()
+old = '''  router.post("/companies/:companyId/agents", validate(createAgentSchema), async (req, res) => {
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+
+    if (req.actor.type === "agent") {
+      assertBoard(req);
+    }
+'''
+new = '''  router.post("/companies/:companyId/agents", validate(createAgentSchema), async (req, res) => {
+    const companyId = req.params.companyId as string;
+    await assertCanCreateAgentsForCompany(req, companyId);
+'''
+if old not in text:
+    raise SystemExit('target block not found in agents.ts')
+path.write_text(text.replace(old, new, 1))
+print('patched /app/server/src/routes/agents.ts to honor assertCanCreateAgentsForCompany')
+PY
 RUN pnpm --filter @paperclipai/ui build
 RUN pnpm --filter @paperclipai/plugin-sdk build
 RUN pnpm --filter @paperclipai/server build
