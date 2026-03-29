@@ -35,27 +35,19 @@ FROM base AS build
 WORKDIR /app
 COPY --from=deps /app /app
 COPY --from=source /src/paperclip/. .
-RUN python3 - <<'PY'
-from pathlib import Path
-path = Path('/app/server/src/routes/agents.ts')
-text = path.read_text()
-old = '''  router.post("/companies/:companyId/agents", validate(createAgentSchema), async (req, res) => {
-    const companyId = req.params.companyId as string;
-    assertCompanyAccess(req, companyId);
-
-    if (req.actor.type === "agent") {
-      assertBoard(req);
-    }
-'''
-new = '''  router.post("/companies/:companyId/agents", validate(createAgentSchema), async (req, res) => {
-    const companyId = req.params.companyId as string;
-    await assertCanCreateAgentsForCompany(req, companyId);
-'''
-if old not in text:
-    raise SystemExit('target block not found in agents.ts')
-path.write_text(text.replace(old, new, 1))
-print('patched /app/server/src/routes/agents.ts to honor assertCanCreateAgentsForCompany')
-PY
+RUN node - <<'JS'
+const fs = require('fs');
+const path = '/app/server/src/routes/agents.ts';
+const text = fs.readFileSync(path, 'utf8');
+const oldBlock = `  router.post("/companies/:companyId/agents", validate(createAgentSchema), async (req, res) => {\n    const companyId = req.params.companyId as string;\n    assertCompanyAccess(req, companyId);\n\n    if (req.actor.type === "agent") {\n      assertBoard(req);\n    }\n`;
+const newBlock = `  router.post("/companies/:companyId/agents", validate(createAgentSchema), async (req, res) => {\n    const companyId = req.params.companyId as string;\n    await assertCanCreateAgentsForCompany(req, companyId);\n`;
+if (!text.includes(oldBlock)) {
+  console.error('target block not found in agents.ts');
+  process.exit(1);
+}
+fs.writeFileSync(path, text.replace(oldBlock, newBlock));
+console.log('patched /app/server/src/routes/agents.ts to honor assertCanCreateAgentsForCompany');
+JS
 RUN pnpm --filter @paperclipai/ui build
 RUN pnpm --filter @paperclipai/plugin-sdk build
 RUN pnpm --filter @paperclipai/server build
