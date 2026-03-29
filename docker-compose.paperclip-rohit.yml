@@ -16,8 +16,11 @@ services:
       retries: 20
   rohit-office:
     build:
-      context: /data/openclaw/paperclip
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: Dockerfile.paperclip-remote
+      args:
+        PAPERCLIP_REPO: https://github.com/paperclipai/paperclip.git
+        PAPERCLIP_REF: main
     restart: unless-stopped
     environment:
       DATABASE_URL: 'postgres://paperclip:${PAPERCLIP_DB_PASSWORD}@rohit-office-db:5432/paperclip'
