@@ -19,121 +19,178 @@
         <p class="eyebrow">PMOS</p>
         <h1>Project Management Operating System</h1>
         <p class="subtext">
-          Native PMOS surface on <strong>os.wickedlab.io</strong>. This shell drives PMOS intelligence, BCGPT data access, and Flow execution.
+          PMOS shell for direct OpenClaw work and Office/Paperclip orchestration. One dashboard, same user workspace underneath.
         </p>
       </div>
       <div class="hero-actions">
         <button id="refreshDashboardBtn" class="btn btn-primary">Refresh Dashboard</button>
-        <a class="btn btn-ghost" href="https://bcgpt.wickedlab.io/connect" target="_blank" rel="noopener noreferrer">MCP Connect</a>
+        <a id="openGatewayLink" class="btn btn-ghost" href="#" target="_blank" rel="noopener noreferrer">OpenClaw Gateway</a>
+        <a id="openPaperclipLink" class="btn btn-ghost" href="#" target="_blank" rel="noopener noreferrer">Open Office</a>
       </div>
     </header>
 
-    <section class="panel status-panel">
-      <h2>System Status</h2>
-      <div class="status-grid">
-        <article class="status-card">
-          <p class="label">PMOS</p>
-          <p id="pmosStatusValue" class="value">Loading...</p>
-          <p id="pmosToolsValue" class="hint"></p>
-        </article>
-        <article class="status-card">
-          <p class="label">BCGPT Integration</p>
-          <p id="bcgptStatusValue" class="value">Loading...</p>
-          <p id="bcgptStatusHint" class="hint"></p>
-        </article>
-        <article class="status-card">
-          <p class="label">Flow Integration</p>
-          <p id="flowStatusValue" class="value">Loading...</p>
-          <p id="flowStatusHint" class="hint"></p>
-        </article>
-        <article class="status-card">
-          <p class="label">Readiness</p>
-          <p id="readinessValue" class="value">Loading...</p>
-          <p id="readinessHint" class="hint"></p>
-        </article>
+    <section class="panel tabs-panel">
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="pmosTab">PMOS</button>
+        <button class="tab-btn" data-tab="openclawTab">OpenClaw</button>
+        <button class="tab-btn" data-tab="officeTab">Office</button>
       </div>
+      <p class="subtext">Switch between direct runtime access and the Office/Paperclip orchestration layer without leaving PMOS.</p>
     </section>
 
-    <section class="panel auth-panel">
-      <h2>Shell Access</h2>
-      <p class="subtext">Store local credentials for PMOS shell auth and BCGPT command execution. Keys remain in this browser only.</p>
-      <div class="auth-row">
-        <input id="pmosTokenInput" type="password" placeholder="PMOS shell token (optional)" />
-        <button id="saveTokenBtn" class="btn btn-small">Save Token</button>
-        <button id="clearTokenBtn" class="btn btn-small btn-ghost">Clear Token</button>
-      </div>
-      <p id="tokenStatusHint" class="hint"></p>
-      <div class="auth-row">
-        <input id="bcgptApiKeyInput" type="password" placeholder="BCGPT API key from /connect (for project commands)" />
-        <button id="saveBCGPTKeyBtn" class="btn btn-small">Save BCGPT Key</button>
-        <button id="clearBCGPTKeyBtn" class="btn btn-small btn-ghost">Clear Key</button>
-      </div>
-      <p id="bcgptKeyStatusHint" class="hint"></p>
-    </section>
-
-    <section class="panel chat-panel">
-      <div class="panel-head">
-        <h2>PMOS Chat Commander</h2>
-        <button id="clearChatBtn" class="btn btn-small btn-ghost">Clear Chat</button>
-      </div>
-      <p class="subtext">Natural-language command surface with approval gates for high-risk actions.</p>
-      <div id="chatLog" class="chat-log">
-        <div class="chat-item chat-assistant">PMOS ready. Ask for status, insights, or project analysis.</div>
-      </div>
-      <form id="chatForm" class="chat-form">
-        <textarea id="chatInput" rows="3" placeholder="Example: predict completion for project 123456"></textarea>
-        <button id="sendChatBtn" class="btn btn-primary" type="submit">Send</button>
-      </form>
-    </section>
-
-    <section class="panel commands-panel">
-      <h2>Command Center</h2>
-      <p class="subtext">Deterministic command path for direct PMOS control.</p>
-      <div class="command-grid">
-        <button class="btn btn-small quick-command" data-command="status">PMOS Status</button>
-        <button class="btn btn-small quick-command" data-command="insights">List Insights</button>
-        <button class="btn btn-small quick-command" data-command="cleanup">Cleanup</button>
-      </div>
-
-      <div class="project-actions">
-        <label for="projectIdInput">Project ID</label>
-        <input id="projectIdInput" type="text" placeholder="Basecamp project ID" />
-        <div class="command-grid">
-          <button class="btn btn-small project-command" data-command="health_project">Health Score</button>
-          <button class="btn btn-small project-command" data-command="predict_completion">Predict Completion</button>
-          <button class="btn btn-small project-command" data-command="context_analyze">Analyze Context</button>
-          <button class="btn btn-small project-command" data-command="patterns_work">Work Patterns</button>
+    <div id="pmosTab" class="tab-view active">
+      <section class="panel status-panel">
+        <h2>System Status</h2>
+        <div class="status-grid">
+          <article class="status-card">
+            <p class="label">PMOS</p>
+            <p id="pmosStatusValue" class="value">Loading...</p>
+            <p id="pmosToolsValue" class="hint"></p>
+          </article>
+          <article class="status-card">
+            <p class="label">BCGPT Integration</p>
+            <p id="bcgptStatusValue" class="value">Loading...</p>
+            <p id="bcgptStatusHint" class="hint"></p>
+          </article>
+          <article class="status-card">
+            <p class="label">Flow Integration</p>
+            <p id="flowStatusValue" class="value">Loading...</p>
+            <p id="flowStatusHint" class="hint"></p>
+          </article>
+          <article class="status-card">
+            <p class="label">Readiness</p>
+            <p id="readinessValue" class="value">Loading...</p>
+            <p id="readinessHint" class="hint"></p>
+          </article>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <section class="panel operations-panel">
-      <div class="panel-head">
-        <h2>Operation Timeline</h2>
-        <button id="refreshOperationsBtn" class="btn btn-small btn-ghost">Refresh</button>
-      </div>
-      <ul id="operationsList" class="operations-list">
-        <li class="insight-empty">No operations yet.</li>
-      </ul>
-    </section>
+      <section class="panel auth-panel">
+        <h2>Shell Access</h2>
+        <p class="subtext">Store local credentials for PMOS shell auth and BCGPT command execution. Keys remain in this browser only.</p>
+        <div class="auth-row">
+          <input id="pmosTokenInput" type="password" placeholder="PMOS shell token (optional)" />
+          <button id="saveTokenBtn" class="btn btn-small">Save Token</button>
+          <button id="clearTokenBtn" class="btn btn-small btn-ghost">Clear Token</button>
+        </div>
+        <p id="tokenStatusHint" class="hint"></p>
+        <div class="auth-row">
+          <input id="bcgptApiKeyInput" type="password" placeholder="BCGPT API key from /connect (for project commands)" />
+          <button id="saveBCGPTKeyBtn" class="btn btn-small">Save BCGPT Key</button>
+          <button id="clearBCGPTKeyBtn" class="btn btn-small btn-ghost">Clear Key</button>
+        </div>
+        <p id="bcgptKeyStatusHint" class="hint"></p>
+      </section>
 
-    <section class="panel output-panel">
-      <div class="panel-head">
-        <h2>Execution Output</h2>
-        <button id="clearOutputBtn" class="btn btn-small btn-ghost">Clear</button>
-      </div>
-      <pre id="outputArea" class="output">{ "message": "Ready. Run a command." }</pre>
-    </section>
+      <section class="panel chat-panel">
+        <div class="panel-head">
+          <h2>PMOS Chat Commander</h2>
+          <button id="clearChatBtn" class="btn btn-small btn-ghost">Clear Chat</button>
+        </div>
+        <p class="subtext">Natural-language command surface with approval gates for high-risk actions.</p>
+        <div id="chatLog" class="chat-log">
+          <div class="chat-item chat-assistant">PMOS ready. Ask for status, insights, or project analysis.</div>
+        </div>
+        <form id="chatForm" class="chat-form">
+          <textarea id="chatInput" rows="3" placeholder="Example: predict completion for project 123456"></textarea>
+          <button id="sendChatBtn" class="btn btn-primary" type="submit">Send</button>
+        </form>
+      </section>
 
-    <section class="panel insights-panel">
-      <div class="panel-head">
-        <h2>Latest Insights</h2>
-        <button id="refreshInsightsBtn" class="btn btn-small btn-ghost">Refresh</button>
-      </div>
-      <ul id="insightsList" class="insights-list">
-        <li class="insight-empty">Loading insights...</li>
-      </ul>
-    </section>
+      <section class="panel commands-panel">
+        <h2>Command Center</h2>
+        <p class="subtext">Deterministic command path for direct PMOS control.</p>
+        <div class="command-grid">
+          <button class="btn btn-small quick-command" data-command="status">PMOS Status</button>
+          <button class="btn btn-small quick-command" data-command="insights">List Insights</button>
+          <button class="btn btn-small quick-command" data-command="cleanup">Cleanup</button>
+        </div>
+
+        <div class="project-actions">
+          <label for="projectIdInput">Project ID</label>
+          <input id="projectIdInput" type="text" placeholder="Basecamp project ID" />
+          <div class="command-grid">
+            <button class="btn btn-small project-command" data-command="health_project">Health Score</button>
+            <button class="btn btn-small project-command" data-command="predict_completion">Predict Completion</button>
+            <button class="btn btn-small project-command" data-command="context_analyze">Analyze Context</button>
+            <button class="btn btn-small project-command" data-command="patterns_work">Work Patterns</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel operations-panel">
+        <div class="panel-head">
+          <h2>Operation Timeline</h2>
+          <button id="refreshOperationsBtn" class="btn btn-small btn-ghost">Refresh</button>
+        </div>
+        <ul id="operationsList" class="operations-list">
+          <li class="insight-empty">No operations yet.</li>
+        </ul>
+      </section>
+
+      <section class="panel output-panel">
+        <div class="panel-head">
+          <h2>Execution Output</h2>
+          <button id="clearOutputBtn" class="btn btn-small btn-ghost">Clear</button>
+        </div>
+        <pre id="outputArea" class="output">{ "message": "Ready. Run a command." }</pre>
+      </section>
+
+      <section class="panel insights-panel">
+        <div class="panel-head">
+          <h2>Latest Insights</h2>
+          <button id="refreshInsightsBtn" class="btn btn-small btn-ghost">Refresh</button>
+        </div>
+        <ul id="insightsList" class="insights-list">
+          <li class="insight-empty">Loading insights...</li>
+        </ul>
+      </section>
+    </div>
+
+    <div id="openclawTab" class="tab-view">
+      <section class="panel office-panel">
+        <div class="panel-head">
+          <h2>Workspace OpenClaw Binding</h2>
+          <button id="refreshOfficeBtn" class="btn btn-small btn-ghost">Refresh Binding</button>
+        </div>
+        <p class="subtext">This is the workspace-scoped OpenClaw bundle PMOS exposes to Office/Paperclip. It should represent this user/workspace, not the whole backend.</p>
+        <div class="office-grid">
+          <div>
+            <label for="officeUserNameInput">Employee name</label>
+            <input id="officeUserNameInput" type="text" placeholder="Rohit" />
+          </div>
+          <div>
+            <label for="officeWorkspaceIdInput">Workspace ID</label>
+            <input id="officeWorkspaceIdInput" type="text" placeholder="rohit-workspace" />
+          </div>
+        </div>
+        <div class="office-actions">
+          <button id="copyOpenClawConfigBtn" class="btn btn-small">Copy OpenClaw Config</button>
+          <button id="copyInvitePromptBtn" class="btn btn-small">Copy Invite Prompt</button>
+        </div>
+        <pre id="openclawConfigOutput" class="output office-output">{ "message": "Loading OpenClaw runtime bundle..." }</pre>
+      </section>
+    </div>
+
+    <div id="officeTab" class="tab-view">
+      <section class="panel office-panel">
+        <div class="panel-head">
+          <h2>Office / Paperclip</h2>
+          <a id="officeSettingsLink" class="btn btn-small btn-ghost" href="#" target="_blank" rel="noopener noreferrer">Open Paperclip Settings</a>
+        </div>
+        <p class="subtext">Paperclip stays untouched. PMOS exposes a ready OpenClaw gateway bundle for this workspace, and Office runs in the same dashboard.</p>
+        <div class="office-layout">
+          <div class="office-side">
+            <h3>Bootstrap</h3>
+            <p class="hint">Use the generated config when Paperclip asks for an OpenClaw Gateway runtime.</p>
+            <pre id="officeBootstrapOutput" class="output office-output">{ "message": "Loading Office bootstrap..." }</pre>
+          </div>
+          <div class="office-frame-wrap">
+            <iframe id="paperclipFrame" class="office-frame" src="about:blank" title="Paperclip Office"></iframe>
+          </div>
+        </div>
+      </section>
+    </div>
   </main>
 
   <script type="module" src="/static/app.js"></script>

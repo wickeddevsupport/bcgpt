@@ -19,19 +19,37 @@ const bcgptKeyStatusHint = document.getElementById('bcgptKeyStatusHint');
 const chatInput = document.getElementById('chatInput');
 const projectIdInput = document.getElementById('projectIdInput');
 
+const officeUserNameInput = document.getElementById('officeUserNameInput');
+const officeWorkspaceIdInput = document.getElementById('officeWorkspaceIdInput');
+const officeBootstrapOutput = document.getElementById('officeBootstrapOutput');
+const openclawConfigOutput = document.getElementById('openclawConfigOutput');
+const openGatewayLink = document.getElementById('openGatewayLink');
+const openPaperclipLink = document.getElementById('openPaperclipLink');
+const officeSettingsLink = document.getElementById('officeSettingsLink');
+const paperclipFrame = document.getElementById('paperclipFrame');
+
 const TOKEN_KEY = 'pmos_shell_token';
 const BCGPT_KEY = 'pmos_bcgpt_api_key';
 const SESSION_KEY = 'pmos_shell_session_id';
+const OFFICE_USER_KEY = 'pmos_office_user_name';
+const OFFICE_WORKSPACE_KEY = 'pmos_office_workspace_id';
+const ACTIVE_TAB_KEY = 'pmos_active_tab';
 
 let shellToken = localStorage.getItem(TOKEN_KEY) || '';
 let bcgptApiKey = localStorage.getItem(BCGPT_KEY) || '';
 let sessionId = localStorage.getItem(SESSION_KEY) || `ui-${Date.now().toString(36)}`;
 let isChatSending = false;
 let activeChatAbortController = null;
+let officeBootstrap = null;
 localStorage.setItem(SESSION_KEY, sessionId);
 
 function writeOutput(payload) {
   outputArea.textContent = JSON.stringify(payload, null, 2);
+}
+
+function writePre(node, payload) {
+  if (!node) return;
+  node.textContent = JSON.stringify(payload, null, 2);
 }
 
 function appendChat(role, message) {
@@ -57,27 +75,27 @@ function updateTokenUI() {
   setBCGPTKeyHint(bcgptApiKey ? 'BCGPT API key loaded from this browser session.' : 'No BCGPT API key set. Project commands may fail.');
 }
 
+function updateOfficeInputs() {
+  officeUserNameInput.value = localStorage.getItem(OFFICE_USER_KEY) || 'Rohit';
+  officeWorkspaceIdInput.value = localStorage.getItem(OFFICE_WORKSPACE_KEY) || 'rohit-workspace';
+}
+
+function rememberOfficeInputs() {
+  localStorage.setItem(OFFICE_USER_KEY, officeUserNameInput.value.trim() || 'Rohit');
+  localStorage.setItem(OFFICE_WORKSPACE_KEY, officeWorkspaceIdInput.value.trim() || 'rohit-workspace');
+}
+
 function authHeaders(base = {}) {
   const headers = { ...base };
-  if (shellToken) {
-    headers['x-pmos-token'] = shellToken;
-  }
-  if (bcgptApiKey) {
-    headers['x-bcgpt-api-key'] = bcgptApiKey;
-  }
+  if (shellToken) headers['x-pmos-token'] = shellToken;
+  if (bcgptApiKey) headers['x-bcgpt-api-key'] = bcgptApiKey;
   return headers;
 }
 
 async function requestJson(url, options = {}) {
-  const {
-    timeoutMs = 20000,
-    signal,
-    ...restOptions
-  } = options;
-
+  const { timeoutMs = 20000, signal, ...restOptions } = options;
   const timeoutController = new AbortController();
   const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
-
   let mergedSignal = timeoutController.signal;
   if (signal) {
     if (signal.aborted) {
@@ -93,14 +111,12 @@ async function requestJson(url, options = {}) {
       signal: mergedSignal,
       headers: authHeaders(restOptions.headers || {})
     });
-
     let payload;
     try {
       payload = await response.json();
     } catch {
       payload = { error: 'Invalid JSON response' };
     }
-
     return { response, payload };
   } finally {
     clearTimeout(timeoutId);
@@ -145,7 +161,6 @@ function renderInsights(insightsPayload) {
 
 function renderOperations(items = []) {
   operationsList.innerHTML = '';
-
   if (!Array.isArray(items) || items.length === 0) {
     const li = document.createElement('li');
     li.className = 'insight-empty';
@@ -186,17 +201,8 @@ function renderOperations(items = []) {
 function renderReadiness(readiness = {}) {
   const parts = [];
   const hasBCGPTKey = readiness.bcgpt_api_key_configured || Boolean(bcgptApiKey);
-  if (hasBCGPTKey) {
-    parts.push('BCGPT key ok');
-  } else {
-    parts.push('BCGPT key missing');
-  }
-  if (readiness.shell_auth_configured) {
-    parts.push('Shell auth on');
-  } else {
-    parts.push('Shell auth off');
-  }
-
+  parts.push(hasBCGPTKey ? 'BCGPT key ok' : 'BCGPT key missing');
+  parts.push(readiness.shell_auth_configured ? 'Shell auth on' : 'Shell auth off');
   const healthy = hasBCGPTKey;
   readinessValue.textContent = healthy ? 'Ready' : 'Partial';
   readinessValue.className = `value ${healthy ? 'status-ok' : 'status-bad'}`;
@@ -231,11 +237,39 @@ async function fetchOperations() {
   renderOperations(payload.operations || []);
 }
 
+function officeQuery() {
+  rememberOfficeInputs();
+  const params = new URLSearchParams({
+    user_name: officeUserNameInput.value.trim() || 'Rohit',
+    workspace_id: officeWorkspaceIdInput.value.trim() || 'rohit-workspace'
+  });
+  return params.toString();
+}
+
+async function fetchOfficeBootstrap() {
+  const { response, payload } = await requestJson(`/api/office/bootstrap?${officeQuery()}`);
+  if (!response.ok) {
+    officeBootstrap = null;
+    writePre(officeBootstrapOutput, payload);
+    writePre(openclawConfigOutput, payload);
+    return;
+  }
+  officeBootstrap = payload;
+  writePre(officeBootstrapOutput, payload);
+  writePre(openclawConfigOutput, payload.agentDefaultsPayload);
+
+  const gatewayUrl = payload?.openclaw?.url || '#';
+  const paperclipUrl = payload?.paperclip?.url || '#';
+  const paperclipSettingsUrl = payload?.paperclip?.companySettingsUrl || paperclipUrl;
+  openGatewayLink.href = gatewayUrl.replace(/^ws/, 'http');
+  openPaperclipLink.href = paperclipUrl;
+  officeSettingsLink.href = paperclipSettingsUrl;
+  paperclipFrame.src = paperclipUrl;
+}
+
 async function runCommand(command, projectId = null) {
   const body = { command };
-  if (projectId) {
-    body.project_id = projectId;
-  }
+  if (projectId) body.project_id = projectId;
 
   const { response, payload } = await requestJson('/api/command', {
     method: 'POST',
@@ -261,9 +295,7 @@ async function approveOperation(operationId) {
   });
 
   writeOutput(payload);
-  if (response.ok) {
-    appendChat('assistant', `Approved operation ${operationId} and executed.`);
-  }
+  if (response.ok) appendChat('assistant', `Approved operation ${operationId} and executed.`);
   await fetchOperations();
   await fetchDashboard();
 }
@@ -279,28 +311,20 @@ function setChatSendingState(sending) {
 }
 
 function refreshPanelsInBackground() {
-  Promise.allSettled([fetchOperations(), fetchDashboard()]).catch(() => {});
+  Promise.allSettled([fetchOperations(), fetchDashboard(), fetchOfficeBootstrap()]).catch(() => {});
 }
 
 async function sendChat() {
   const message = chatInput.value.trim();
-  if (!message || isChatSending) {
-    return;
-  }
+  if (!message || isChatSending) return;
 
   appendChat('user', message);
   chatInput.value = '';
   setChatSendingState(true);
 
-  const body = {
-    message,
-    session_id: sessionId
-  };
-
+  const body = { message, session_id: sessionId };
   const projectId = projectIdInput.value.trim();
-  if (projectId) {
-    body.project_id = projectId;
-  }
+  if (projectId) body.project_id = projectId;
 
   activeChatAbortController = new AbortController();
 
@@ -333,6 +357,25 @@ async function sendChat() {
   }
 }
 
+function setActiveTab(tabId) {
+  document.querySelectorAll('.tab-btn').forEach((button) => {
+    button.classList.toggle('active', button.dataset.tab === tabId);
+  });
+  document.querySelectorAll('.tab-view').forEach((view) => {
+    view.classList.toggle('active', view.id === tabId);
+  });
+  localStorage.setItem(ACTIVE_TAB_KEY, tabId);
+}
+
+async function copyText(text, successMessage) {
+  try {
+    await navigator.clipboard.writeText(text);
+    writeOutput({ ok: true, message: successMessage });
+  } catch (error) {
+    writeOutput({ ok: false, error: error.message || 'Clipboard copy failed' });
+  }
+}
+
 document.querySelectorAll('.quick-command').forEach((button) => {
   button.addEventListener('click', async () => {
     const command = button.getAttribute('data-command');
@@ -359,6 +402,7 @@ document.querySelectorAll('.project-command').forEach((button) => {
 document.getElementById('refreshDashboardBtn').addEventListener('click', async () => {
   try {
     await fetchDashboard();
+    await fetchOfficeBootstrap();
     writeOutput({ ok: true, message: 'Dashboard refreshed' });
   } catch (error) {
     writeOutput({ ok: false, error: error.message });
@@ -416,12 +460,38 @@ document.getElementById('chatForm').addEventListener('submit', async (event) => 
   await sendChat();
 });
 
+document.getElementById('refreshOfficeBtn').addEventListener('click', async () => {
+  await fetchOfficeBootstrap();
+  writeOutput({ ok: true, message: 'Office bootstrap refreshed' });
+});
+
+document.getElementById('copyOpenClawConfigBtn').addEventListener('click', async () => {
+  if (!officeBootstrap) return;
+  await copyText(JSON.stringify(officeBootstrap.agentDefaultsPayload, null, 2), 'OpenClaw config copied');
+});
+
+document.getElementById('copyInvitePromptBtn').addEventListener('click', async () => {
+  if (!officeBootstrap) return;
+  await copyText(officeBootstrap.invitePrompt, 'Invite prompt copied');
+});
+
+[officeUserNameInput, officeWorkspaceIdInput].forEach((input) => {
+  input.addEventListener('change', fetchOfficeBootstrap);
+});
+
+document.querySelectorAll('.tab-btn').forEach((button) => {
+  button.addEventListener('click', () => setActiveTab(button.dataset.tab));
+});
+
 async function init() {
   try {
     updateTokenUI();
+    updateOfficeInputs();
+    setActiveTab(localStorage.getItem(ACTIVE_TAB_KEY) || 'pmosTab');
     setChatSendingState(false);
     await fetchDashboard();
     await fetchOperations();
+    await fetchOfficeBootstrap();
     writeOutput({ ok: true, message: 'PMOS shell ready' });
   } catch (error) {
     writeOutput({ ok: false, error: error.message });

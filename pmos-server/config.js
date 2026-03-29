@@ -15,6 +15,11 @@ export const config = {
   // Flow integration
   flowUrl: process.env.FLOW_URL || 'https://flow.wickedlab.io',
 
+  // Office / Paperclip integration
+  paperclipUrl: process.env.PAPERCLIP_URL || 'http://127.0.0.1:3100',
+  openclawGatewayUrl: process.env.OPENCLAW_GATEWAY_URL || 'ws://127.0.0.1:3000',
+  openclawGatewayToken: process.env.OPENCLAW_GATEWAY_TOKEN || '',
+
   // Optional shell auth for PMOS interactive APIs
   shellToken: process.env.PMOS_SHELL_TOKEN || '',
   

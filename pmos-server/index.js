@@ -6,6 +6,7 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { config } from './config.js';
 import PMOSMCPServer from './mcp.js';
@@ -54,6 +55,9 @@ app.get('/api/info', (req, res) => {
     integration_config: {
       bcgpt_url: config.bcgptUrl,
       flow_url: config.flowUrl,
+      paperclip_url: config.paperclipUrl,
+      openclaw_gateway_url: config.openclawGatewayUrl,
+      openclaw_gateway_token_configured: !!resolveGatewayToken(),
       bcgpt_api_key_configured: !!config.bcgptApiKey,
       per_request_bcgpt_api_key_supported: true,
       shell_auth_configured: !!config.shellToken
@@ -121,6 +125,93 @@ function getHeaderValue(req, name) {
 
 function getAuthToken(req) {
   return req.get('x-pmos-token') || req.body?.token || req.query?.token || '';
+}
+
+function slugify(value, fallback = 'workspace') {
+  const normalized = String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return normalized || fallback;
+}
+
+function readJsonFileIfExists(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (error) {
+    console.warn(`Failed to read JSON from ${filePath}:`, error.message);
+    return null;
+  }
+}
+
+function resolveGatewayToken() {
+  if (config.openclawGatewayToken) return config.openclawGatewayToken;
+  const openclawConfig = readJsonFileIfExists('/data/openclaw/openclaw.json');
+  return openclawConfig?.gateway?.auth?.token || '';
+}
+
+function buildOfficeBootstrap(req) {
+  const requestedUserName = normalizeKey(
+    req.query?.user_name ||
+    req.query?.userName ||
+    req.body?.user_name ||
+    req.body?.userName ||
+    req.get?.('x-pmos-user-name')
+  );
+  const requestedWorkspaceId = normalizeKey(
+    req.query?.workspace_id ||
+    req.query?.workspaceId ||
+    req.body?.workspace_id ||
+    req.body?.workspaceId ||
+    req.get?.('x-pmos-workspace-id')
+  );
+
+  const userName = requestedUserName || 'Rohit';
+  const workspaceId = requestedWorkspaceId || `${slugify(userName, 'user')}-workspace`;
+  const companySlug = slugify(userName, 'company');
+  const gatewayToken = resolveGatewayToken();
+  const gatewayUrl = config.openclawGatewayUrl;
+
+  return {
+    workspace: {
+      id: workspaceId,
+      ownerName: userName,
+      companySlug
+    },
+    paperclip: {
+      url: config.paperclipUrl,
+      companySettingsUrl: `${config.paperclipUrl.replace(/\/$/, '')}/${companySlug}/company/settings`
+    },
+    openclaw: {
+      adapterType: 'openclaw_gateway',
+      url: gatewayUrl,
+      headers: {
+        'x-openclaw-token': gatewayToken
+      },
+      sessionKeyStrategy: 'workspace',
+      role: userName,
+      scopes: [workspaceId]
+    },
+    agentDefaultsPayload: {
+      url: gatewayUrl,
+      headers: {
+        'x-openclaw-token': gatewayToken
+      },
+      sessionKeyStrategy: 'workspace',
+      sessionKey: `pmos:${workspaceId}:paperclip`,
+      role: userName,
+      scopes: [workspaceId]
+    },
+    invitePrompt: [
+      `Join Paperclip company \"${companySlug}\" as an OpenClaw Gateway agent.`,
+      `Use adapterType \"openclaw_gateway\".`,
+      `Gateway URL: ${gatewayUrl}`,
+      `Gateway token header: x-openclaw-token = ${gatewayToken || '<missing>'}`,
+      `Workspace scope: ${workspaceId}`,
+      `Preferred session key: pmos:${workspaceId}:paperclip`
+    ].join('\n')
+  };
 }
 
 function getBCGPTApiKey(req) {
@@ -460,6 +551,29 @@ app.get('/api/status', (req, res) => {
     res.status(500).json({
       error: error.message
     });
+  }
+});
+
+app.get('/api/openclaw/runtime', requireShellAuth, (req, res) => {
+  try {
+    const bootstrap = buildOfficeBootstrap(req);
+    res.json({
+      ok: true,
+      workspace: bootstrap.workspace,
+      openclaw: bootstrap.openclaw,
+      agentDefaultsPayload: bootstrap.agentDefaultsPayload
+    });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.get('/api/office/bootstrap', requireShellAuth, (req, res) => {
+  try {
+    const bootstrap = buildOfficeBootstrap(req);
+    res.json({ ok: true, ...bootstrap });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
   }
 });
 
