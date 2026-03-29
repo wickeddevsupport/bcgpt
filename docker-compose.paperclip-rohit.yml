@@ -29,9 +29,12 @@ services:
       SERVE_UI: 'true'
       PAPERCLIP_HOME: /paperclip
       PAPERCLIP_INSTANCE_ID: rohit
+      PAPERCLIP_CONFIG: /paperclip/instances/rohit/config.json
       PAPERCLIP_DEPLOYMENT_MODE: authenticated
       PAPERCLIP_DEPLOYMENT_EXPOSURE: public
       PAPERCLIP_PUBLIC_URL: 'https://rohit.ops.wickedlab.io'
+      PAPERCLIP_AUTH_PUBLIC_BASE_URL: 'https://rohit.ops.wickedlab.io'
+      PAPERCLIP_MIGRATION_AUTO_APPLY: 'true'
       BETTER_AUTH_SECRET: '${BETTER_AUTH_SECRET}'
     volumes:
       - 'rohit-office-data:/paperclip'
