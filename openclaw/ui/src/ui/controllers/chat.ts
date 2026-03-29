@@ -602,7 +602,12 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
     }
   } else if (payload.state === "final") {
     state.chatMessages = clearPendingMarkersForRun(state.chatMessages, payload.runId);
+    // A final chat event is authoritative: the run is done even if history
+    // reconciliation lags or the websocket disconnects immediately after.
+    // Clear busy state here so the composer does not stay stuck on a stale run.
     state.chatStream = null;
+    state.chatRunId = null;
+    state.chatStreamStartedAt = null;
     state.chatSending = false;
   } else if (payload.state === "aborted") {
     state.chatMessages = clearPendingMarkersForRun(state.chatMessages, payload.runId);

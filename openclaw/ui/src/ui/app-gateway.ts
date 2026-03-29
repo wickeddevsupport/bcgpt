@@ -405,6 +405,16 @@ export function connectGateway(host: GatewayHost) {
       if (code !== 1012) {
         host.lastError = `disconnected (${code}): ${reason || "no reason"}`;
       }
+      // If a chat run was in flight when the socket closed, immediately fall back
+      // to history reconciliation over HTTP. This keeps the panel progressing even
+      // when live websocket events drop mid-run behind a proxy/reconnect.
+      if (host.chatRunId) {
+        const chatHost = host as unknown as { chatStreamStartedAt: number | null };
+        if (!chatHost.chatStreamStartedAt) {
+          chatHost.chatStreamStartedAt = Date.now() - 5000;
+        }
+        void loadChatHistory(host as unknown as OpenClawApp).catch(() => undefined);
+      }
     },
     onEvent: (evt) => {
       if (host.client !== client) {

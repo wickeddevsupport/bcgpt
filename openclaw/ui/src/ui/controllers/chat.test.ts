@@ -100,7 +100,7 @@ describe("handleChatEvent", () => {
     expect(state.chatStreamStartedAt).toBe(123);
   });
 
-  it("keeps own run active until history reconciliation completes", () => {
+  it("clears own run immediately on final so the composer does not stay stuck", () => {
     const state = createState({
       sessionKey: "main",
       chatRunId: "run-1",
@@ -113,9 +113,9 @@ describe("handleChatEvent", () => {
       state: "final",
     };
     expect(handleChatEvent(state, payload)).toBe("final");
-    expect(state.chatRunId).toBe("run-1");
+    expect(state.chatRunId).toBeNull();
     expect(state.chatStream).toBe(null);
-    expect(state.chatStreamStartedAt).toBe(100);
+    expect(state.chatStreamStartedAt).toBeNull();
   });
 
   it("shows reasoning-only deltas in the live stream", () => {

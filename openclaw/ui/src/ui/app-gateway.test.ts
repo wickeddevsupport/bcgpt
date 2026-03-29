@@ -166,6 +166,52 @@ describe("connectGateway", () => {
     expect(host.lastError).toContain("active");
   });
 
+  it("recovers chat history over HTTP when the websocket closes during an active run", async () => {
+    const host = {
+      settings: { gatewayUrl: "wss://example.test", token: "", lastActiveSessionKey: "main" },
+      password: "",
+      client: null,
+      connected: false,
+      hello: null,
+      lastError: null,
+      onboarding: false,
+      eventLogBuffer: [],
+      eventLog: [],
+      tab: "dashboard",
+      presenceEntries: [],
+      presenceError: null,
+      presenceStatus: null,
+      agentsLoading: false,
+      agentsList: null,
+      agentsError: null,
+      debugHealth: null,
+      assistantName: "",
+      assistantAvatar: null,
+      assistantAgentId: null,
+      sessionKey: "main",
+      chatRunId: "run-1",
+      chatStreamStartedAt: null,
+      refreshSessionsAfterChat: new Set<string>(),
+      pmosTraceEvents: [],
+      execApprovalQueue: [],
+      execApprovalError: null,
+      pmosAuthUser: { role: "workspace_admin" },
+      handlePmosRefreshConnectors: vi.fn(),
+    } as any;
+
+    connectGateway(host);
+    const client = gatewayClientInstances[0];
+    expect(client).toBeTruthy();
+
+    client.opts.onClose?.({ code: 1001, reason: "socket dropped" });
+    await Promise.resolve();
+
+    expect(host.connected).toBe(false);
+    expect(host.lastError).toContain("socket dropped");
+    expect(host.chatStreamStartedAt).not.toBeNull();
+    expect(vi.mocked(loadChatHistory)).toHaveBeenCalled();
+  });
+
   it("processes all queued chat deltas in a single animation frame", () => {
     const originalRaf = globalThis.requestAnimationFrame;
     let queuedFrame: FrameRequestCallback | null = null;
