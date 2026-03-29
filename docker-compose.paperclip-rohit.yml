@@ -1,0 +1,61 @@
+version: '3.9'
+services:
+  rohit-office-db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: paperclip
+      POSTGRES_PASSWORD: '${PAPERCLIP_DB_PASSWORD}'
+      POSTGRES_DB: paperclip
+    volumes:
+      - 'rohit-office-db-data:/var/lib/postgresql/data'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U paperclip -d paperclip']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  rohit-office:
+    build:
+      context: /data/openclaw/paperclip
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: 'postgres://paperclip:${PAPERCLIP_DB_PASSWORD}@rohit-office-db:5432/paperclip'
+      PORT: '3100'
+      HOST: '0.0.0.0'
+      SERVE_UI: 'true'
+      PAPERCLIP_HOME: /paperclip
+      PAPERCLIP_INSTANCE_ID: rohit
+      PAPERCLIP_DEPLOYMENT_MODE: authenticated
+      PAPERCLIP_DEPLOYMENT_EXPOSURE: public
+      PAPERCLIP_PUBLIC_URL: 'https://rohit.ops.wickedlab.io'
+      BETTER_AUTH_SECRET: '${BETTER_AUTH_SECRET}'
+    volumes:
+      - 'rohit-office-data:/paperclip'
+    depends_on:
+      rohit-office-db:
+        condition: service_healthy
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+      - traefik.http.middlewares.rohit-office-redirect-to-https.redirectscheme.scheme=https
+      - traefik.http.routers.rohit-office-http.entrypoints=http
+      - traefik.http.routers.rohit-office-http.rule=Host(`rohit.ops.wickedlab.io`)
+      - traefik.http.routers.rohit-office-http.middlewares=rohit-office-redirect-to-https
+      - traefik.http.routers.rohit-office.entrypoints=http,https
+      - traefik.http.routers.rohit-office.rule=Host(`rohit.ops.wickedlab.io`)
+      - traefik.http.routers.rohit-office.tls=true
+      - traefik.http.routers.rohit-office.tls.certresolver=letsencrypt
+      - traefik.http.services.rohit-office.loadbalancer.server.port=3100
+    networks:
+      - coolify
+    expose:
+      - '3100'
+volumes:
+  rohit-office-db-data:
+    name: rohit-office-db-data
+  rohit-office-data:
+    name: rohit-office-data
+networks:
+  coolify:
+    external: true
