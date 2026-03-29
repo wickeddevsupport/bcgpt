@@ -291,7 +291,13 @@ export async function refreshActiveTab(host: SettingsHost) {
     await loadConfig(host as unknown as OpenClawApp);
     await loadExecApprovals(host as unknown as OpenClawApp);
   }
-  if (host.tab === "chat") {
+  if (
+    host.tab === "chat" ||
+    host.tab === "dashboard" ||
+    host.tab === "command-center" ||
+    host.tab === "figma" ||
+    host.tab === "automations"
+  ) {
     await refreshChat(host as unknown as Parameters<typeof refreshChat>[0]);
     scheduleChatScroll(
       host as unknown as Parameters<typeof scheduleChatScroll>[0],

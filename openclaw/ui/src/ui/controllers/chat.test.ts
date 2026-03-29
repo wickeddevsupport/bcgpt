@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  abortChatRun,
   handleChatEvent,
   loadChatHistory,
   sendChatMessage,
@@ -184,6 +185,25 @@ describe("handleChatEvent", () => {
     expect(state.chatRunId).toBeNull();
     expect(state.chatStreamStartedAt).toBeNull();
     expect((state.chatMessages[0] as { role?: string }).role).toBe("assistant");
+  });
+
+  it("clears local busy state immediately after a successful abort", async () => {
+    const request = vi.fn().mockResolvedValue({ ok: true, aborted: true });
+    const state = createState({
+      sessionKey: "main",
+      chatRunId: "run-1",
+      chatSending: true,
+      chatStream: "Working",
+      chatStreamStartedAt: 123,
+      client: { request } as unknown as ChatState["client"],
+    });
+
+    await expect(abortChatRun(state)).resolves.toBe(true);
+    expect(request).toHaveBeenCalledWith("chat.abort", { sessionKey: "main", runId: "run-1" });
+    expect(state.chatRunId).toBeNull();
+    expect(state.chatSending).toBe(false);
+    expect(state.chatStream).toBeNull();
+    expect(state.chatStreamStartedAt).toBeNull();
   });
 
   it("ignores stale history responses that resolve after a newer refresh", async () => {

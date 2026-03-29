@@ -84,11 +84,9 @@ export function handleDisconnected(host: LifecycleHost) {
 
 export function handleUpdated(host: LifecycleHost, changed: Map<PropertyKey, unknown>) {
   const chatPanelActive = CHAT_PANEL_TABS.has(host.tab);
-  if (chatPanelActive && host.chatManualRefreshInFlight) {
-    return;
-  }
   if (
     chatPanelActive &&
+    !host.chatManualRefreshInFlight &&
     (changed.has("chatMessages") ||
       changed.has("chatToolMessages") ||
       changed.has("chatStream") ||

@@ -599,10 +599,14 @@ export function renderChatControls(state: AppViewState) {
             });
             app.scrollToBottom({ smooth: true });
           } finally {
-            requestAnimationFrame(() => {
+            // requestAnimationFrame can be heavily throttled (or paused) in background tabs,
+            // which leaves the chat panel stuck in a manual-refresh state until the browser
+            // decides to paint again. Release the lock on a plain timer so the panel always
+            // recovers even when the tab is not visible.
+            window.setTimeout(() => {
               app.chatManualRefreshInFlight = false;
               app.chatNewMessagesBelow = false;
-            });
+            }, 0);
           }
         }}
         title="Refresh chat data"

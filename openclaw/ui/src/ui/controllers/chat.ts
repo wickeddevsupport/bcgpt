@@ -553,6 +553,13 @@ export async function abortChatRun(state: ChatState): Promise<boolean> {
       "chat.abort",
       runId ? { sessionKey: state.sessionKey, runId } : { sessionKey: state.sessionKey },
     );
+    // Fail-open locally as soon as the gateway accepts the abort request.
+    // If the abort/final event is delayed or dropped, the composer and stop button
+    // should still recover immediately instead of leaving the chat panel stuck busy.
+    state.chatSending = false;
+    state.chatStream = null;
+    state.chatRunId = null;
+    state.chatStreamStartedAt = null;
     return true;
   } catch (err) {
     state.lastError = String(err);
