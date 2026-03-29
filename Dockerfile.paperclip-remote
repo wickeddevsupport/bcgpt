@@ -7,7 +7,7 @@ RUN corepack enable
 FROM base AS source
 WORKDIR /src
 ARG PAPERCLIP_REPO=https://github.com/paperclipai/paperclip.git
-ARG PAPERCLIP_REF=main
+ARG PAPERCLIP_REF=master
 RUN git clone --depth 1 --branch "$PAPERCLIP_REF" "$PAPERCLIP_REPO" paperclip
 WORKDIR /src/paperclip
 

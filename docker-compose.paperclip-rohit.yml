@@ -20,7 +20,7 @@ services:
       dockerfile: Dockerfile.paperclip-remote
       args:
         PAPERCLIP_REPO: https://github.com/paperclipai/paperclip.git
-        PAPERCLIP_REF: main
+        PAPERCLIP_REF: master
     restart: unless-stopped
     environment:
       DATABASE_URL: 'postgres://paperclip:${PAPERCLIP_DB_PASSWORD}@rohit-office-db:5432/paperclip'
