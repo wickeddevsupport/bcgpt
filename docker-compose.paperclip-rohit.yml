@@ -35,6 +35,8 @@ services:
       PAPERCLIP_PUBLIC_URL: 'https://rohit.ops.wickedlab.io'
       PAPERCLIP_AUTH_PUBLIC_BASE_URL: 'https://rohit.ops.wickedlab.io'
       PAPERCLIP_MIGRATION_AUTO_APPLY: 'true'
+      PAPERCLIP_BOOTSTRAP_ADMIN_EMAIL: '${PAPERCLIP_BOOTSTRAP_ADMIN_EMAIL}'
+      PAPERCLIP_BOOTSTRAP_ADMIN_NAME: '${PAPERCLIP_BOOTSTRAP_ADMIN_NAME:-Rajan}'
       BETTER_AUTH_SECRET: '${BETTER_AUTH_SECRET}'
     volumes:
       - 'rohit-office-data:/paperclip'
