@@ -67,10 +67,10 @@ function syncSelectedAgentForSession(state: SessionsState, key: string): void {
 export function syncWorkspaceSessionSelection(
   state: SessionsState,
   res: SessionsListResult,
-): void {
+): boolean {
   const role = state.pmosAuthUser?.role ?? null;
   if (!role || role === "super_admin") {
-    return;
+    return false;
   }
   const availableKeys = Array.isArray(res.sessions)
     ? res.sessions
@@ -82,7 +82,7 @@ export function syncWorkspaceSessionSelection(
     currentKey &&
     (availableKeys.includes(currentKey) || isKnownWorkspaceAgentSession(state, currentKey))
   ) {
-    return;
+    return false;
   }
   let nextKey = availableKeys[0] ?? "";
   if (!nextKey) {
@@ -97,7 +97,7 @@ export function syncWorkspaceSessionSelection(
     }
   }
   if (!nextKey || nextKey === currentKey) {
-    return;
+    return false;
   }
   state.sessionKey = nextKey;
   syncSelectedAgentForSession(state, nextKey);
@@ -114,9 +114,17 @@ export function syncWorkspaceSessionSelection(
       lastActiveSessionKey: nextKey,
     };
   }
+  return true;
 }
 
-function syncActiveRunState(state: SessionsState, res: SessionsListResult): void {
+function syncActiveRunState(
+  state: SessionsState,
+  res: SessionsListResult,
+  options?: {
+    preserveLocalRunIfSessionMissing?: boolean;
+    sessionSelectionChanged?: boolean;
+  },
+): void {
   const currentKey = typeof state.sessionKey === "string" ? state.sessionKey.trim() : "";
   if (!currentKey) {
     state.chatRunId = null;
@@ -126,13 +134,19 @@ function syncActiveRunState(state: SessionsState, res: SessionsListResult): void
     ? res.sessions.find((row) => (typeof row.key === "string" ? row.key.trim() : "") === currentKey)
     : undefined;
   if (!currentSession) {
-    state.chatRunId = null;
+    if (!state.chatRunId || !options?.preserveLocalRunIfSessionMissing) {
+      state.chatRunId = null;
+    }
     return;
   }
   const remoteActiveRunId =
     typeof currentSession.activeRunId === "string" ? currentSession.activeRunId : null;
   if (remoteActiveRunId) {
     state.chatRunId = remoteActiveRunId;
+    return;
+  }
+  if (options?.sessionSelectionChanged) {
+    state.chatRunId = null;
     return;
   }
   if (!state.chatRunId) {
@@ -175,8 +189,11 @@ export async function loadSessions(
     const res = await state.client.request<SessionsListResult | undefined>("sessions.list", params);
     if (res) {
       state.sessionsResult = res;
-      syncWorkspaceSessionSelection(state, res);
-      syncActiveRunState(state, res);
+      const sessionSelectionChanged = syncWorkspaceSessionSelection(state, res);
+      syncActiveRunState(state, res, {
+        preserveLocalRunIfSessionMissing: !sessionSelectionChanged,
+        sessionSelectionChanged,
+      });
     }
   } catch (err) {
     state.sessionsError = String(err);

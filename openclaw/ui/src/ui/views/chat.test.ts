@@ -57,6 +57,10 @@ describe("chat view", () => {
     const badge = container.querySelector(".chat-status-badge--ready");
     expect(badge?.textContent).toContain("Ready");
     expect(container.textContent).toContain("Waiting for the next message.");
+    const sendButton = Array.from(container.querySelectorAll("button")).find(
+      (btn) => btn.textContent?.includes("Send"),
+    );
+    expect(sendButton?.textContent).toContain("Send");
   });
 
   it("shows a working badge while streaming", () => {
@@ -167,6 +171,10 @@ describe("chat view", () => {
 
     expect(container.textContent).toContain("Finishing the current response.");
     expect(container.textContent).not.toContain("syncing history");
+    const queueButton = Array.from(container.querySelectorAll("button")).find(
+      (btn) => btn.textContent?.includes("Queue"),
+    );
+    expect(queueButton?.textContent).toContain("Queue");
   });
 
   it("shows a working badge from server session state after refresh", () => {
@@ -197,6 +205,10 @@ describe("chat view", () => {
     const badge = container.querySelector(".chat-compose .chat-status-badge--busy");
     expect(badge?.textContent).toContain("Working");
     expect(container.textContent).toContain("Restoring the active run after refresh.");
+    const queueButton = Array.from(container.querySelectorAll("button")).find(
+      (btn) => btn.textContent?.includes("Queue"),
+    );
+    expect(queueButton?.textContent).toContain("Queue");
   });
 
   it("stays busy while reconnecting to an active run", () => {

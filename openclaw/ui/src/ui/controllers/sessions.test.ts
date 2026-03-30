@@ -96,7 +96,7 @@ describe("syncWorkspaceSessionSelection", () => {
 
     await loadSessions(state);
 
-    expect(state.chatRunId).toBeNull();
+    expect(state.chatRunId).toBe("run-stale");
   });
 
   it("preserves the local chatRunId while the active session row has not caught up yet", async () => {
@@ -110,5 +110,24 @@ describe("syncWorkspaceSessionSelection", () => {
     await loadSessions(state);
 
     expect(state.chatRunId).toBe("run-local");
+  });
+
+  it("clears the local chatRunId when session selection falls back to a different session", async () => {
+    const request = async () =>
+      createResult(["agent:assistant:main", "agent:designer:main"]);
+    const state = createState({
+      client: { request } as unknown as SessionsState["client"],
+      sessionKey: "agent:ghost:main",
+      settings: {
+        sessionKey: "agent:ghost:main",
+        lastActiveSessionKey: "agent:ghost:main",
+      },
+      chatRunId: "run-stale",
+    });
+
+    await loadSessions(state);
+
+    expect(state.sessionKey).toBe("agent:assistant:main");
+    expect(state.chatRunId).toBeNull();
   });
 });
