@@ -32,7 +32,7 @@ function normalizeInlineModelEntry(
       ...canonical,
       ...model,
       provider: providerId,
-      baseUrl: model.baseUrl ?? providerConfig.baseUrl,
+      baseUrl: providerConfig.baseUrl,
       api: model.api ?? providerConfig.api ?? canonical.api,
       headers: {
         ...(canonical.headers ?? {}),
@@ -44,7 +44,7 @@ function normalizeInlineModelEntry(
   return {
     ...model,
     provider: providerId,
-    baseUrl: model.baseUrl ?? providerConfig.baseUrl,
+    baseUrl: providerConfig.baseUrl,
     api: model.api ?? providerConfig.api,
   };
 }
