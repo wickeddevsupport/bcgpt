@@ -168,6 +168,7 @@ export function createJob(state: CronServiceState, input: CronJobCreate): CronJo
   const enabled = typeof input.enabled === "boolean" ? input.enabled : true;
   const job: CronJob = {
     id,
+    workspaceId: input.workspaceId,
     agentId: normalizeOptionalAgentId(input.agentId),
     name: normalizeRequiredName(input.name),
     description: normalizeOptionalText(input.description),

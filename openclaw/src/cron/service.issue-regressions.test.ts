@@ -146,6 +146,42 @@ describe("Cron issue regressions", () => {
     await store.cleanup();
   });
 
+  it("persists workspaceId for workspace-scoped cron jobs", async () => {
+    const store = await makeStorePath();
+    const cron = new CronService({
+      cronEnabled: true,
+      storePath: store.storePath,
+      log: noopLogger,
+      enqueueSystemEvent: vi.fn(),
+      requestHeartbeatNow: vi.fn(),
+      runIsolatedAgentJob: vi.fn().mockResolvedValue({ status: "ok", summary: "ok" }),
+    });
+    await cron.start();
+
+    const created = await cron.add({
+      workspaceId: "ws-rohit",
+      name: "workspace scoped",
+      schedule: { kind: "every", everyMs: 60_000, anchorMs: Date.now() },
+      sessionTarget: "main",
+      payload: { kind: "systemEvent", text: "tick" },
+    });
+
+    expect(created.workspaceId).toBe("ws-rohit");
+
+    cron.stop();
+
+    const stored = JSON.parse(await fs.readFile(store.storePath, "utf-8")) as {
+      jobs?: Array<{ workspaceId?: string }>;
+    };
+    expect(stored.jobs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ workspaceId: "ws-rohit" }),
+      ]),
+    );
+
+    await store.cleanup();
+  });
+
   it("persists allowUnsafeExternalContent on agentTurn payload patches", async () => {
     const store = await makeStorePath();
     const cron = new CronService({
