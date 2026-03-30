@@ -76,38 +76,6 @@ describe("chat view", () => {
     expect(container.textContent).toContain("Streaming the current response.");
   });
 
-  it("shows a live in-thread status while reconnecting to an active run", () => {
-    const container = document.createElement("div");
-    render(
-      renderChat(
-        createProps({
-          connected: false,
-          activeRunId: "run-123",
-        }),
-      ),
-      container,
-    );
-
-    expect(container.querySelector(".chat-live-status")).not.toBeNull();
-    expect(container.textContent).toContain("Reconnecting to the active run.");
-  });
-
-  it("shows a live in-thread status while finishing a run before text is available", () => {
-    const container = document.createElement("div");
-    render(
-      renderChat(
-        createProps({
-          activeRunId: "run-123",
-          queue: [],
-        }),
-      ),
-      container,
-    );
-
-    expect(container.querySelector(".chat-live-status")).not.toBeNull();
-    expect(container.textContent).toContain("Finishing the current response.");
-  });
-
   it("keeps rendering streamed text when live text is already available", () => {
     const container = document.createElement("div");
     render(
@@ -121,31 +89,6 @@ describe("chat view", () => {
     );
 
     expect(container.textContent).toContain("Partial answer");
-    expect(container.querySelector(".chat-live-status")).toBeNull();
-  });
-
-  it("shows live tool status in-thread before visible assistant text starts", () => {
-    const container = document.createElement("div");
-    render(
-      renderChat(
-        createProps({
-          stream: "<thinking>Looking things up</thinking>",
-          streamStartedAt: Date.now(),
-          toolMessages: [
-            {
-              role: "assistant",
-              toolCallId: "tool-1",
-              content: [{ type: "toolcall", name: "web_search", arguments: { query: "status" } }],
-              timestamp: Date.now(),
-            },
-          ],
-        }),
-      ),
-      container,
-    );
-
-    expect(container.querySelector(".chat-live-status")).not.toBeNull();
-    expect(container.textContent).toContain("Calling web search...");
   });
 
   it("shows live reasoning while a stream is active even when the toggle is off", () => {

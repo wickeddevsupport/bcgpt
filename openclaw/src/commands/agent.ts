@@ -127,9 +127,9 @@ export async function agentCommand(
     opts.timeout !== undefined ? Number.parseInt(String(opts.timeout), 10) : undefined;
   if (
     timeoutSecondsRaw !== undefined &&
-    (Number.isNaN(timeoutSecondsRaw) || timeoutSecondsRaw <= 0)
+    (Number.isNaN(timeoutSecondsRaw) || timeoutSecondsRaw < 0)
   ) {
-    throw new Error("--timeout must be a positive integer (seconds)");
+    throw new Error("--timeout must be a non-negative integer (seconds, 0 disables timeout)");
   }
   const timeoutMs = resolveAgentTimeoutMs({
     cfg,

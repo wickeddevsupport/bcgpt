@@ -157,6 +157,7 @@ export type AgentDefaultsConfig = {
   blockStreamingCoalesce?: BlockStreamingCoalesceConfig;
   /** Human-like delay between block replies. */
   humanDelay?: HumanDelayConfig;
+  /** Agent run timeout in seconds. Set to 0 to disable the hard timeout. */
   timeoutSeconds?: number;
   /** Max inbound media size in MB for agent-visible attachments (text note or future image attach). */
   mediaMaxMb?: number;

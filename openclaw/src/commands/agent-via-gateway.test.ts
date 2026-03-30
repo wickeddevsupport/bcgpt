@@ -13,6 +13,7 @@ vi.mock("./agent.js", () => ({
 
 import type { OpenClawConfig } from "../config/config.js";
 import type { RuntimeEnv } from "../runtime.js";
+import { AGENT_NO_TIMEOUT_MS } from "../agents/timeout.js";
 import * as configModule from "../config/config.js";
 import { callGateway } from "../gateway/call.js";
 import { agentCliCommand } from "./agent-via-gateway.js";
@@ -118,6 +119,60 @@ describe("agentCliCommand", () => {
       expect(callGateway).not.toHaveBeenCalled();
       expect(agentCommand).toHaveBeenCalledTimes(1);
       expect(runtime.log).toHaveBeenCalledWith("local");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses no-timeout defaults for gateway agent runs", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-agent-cli-"));
+    const store = path.join(dir, "sessions.json");
+    mockConfig(store, { agents: { defaults: { timeoutSeconds: 0 } } });
+
+    vi.mocked(callGateway).mockResolvedValue({
+      runId: "idem-1",
+      status: "ok",
+      result: {
+        payloads: [{ text: "hello" }],
+      },
+    });
+
+    try {
+      await agentCliCommand({ message: "hi", to: "+1555" }, runtime);
+
+      expect(callGateway).toHaveBeenCalledWith(
+        expect.objectContaining({
+          params: expect.not.objectContaining({ timeout: expect.anything() }),
+          timeoutMs: AGENT_NO_TIMEOUT_MS,
+        }),
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts --timeout 0 for unlimited gateway agent runs", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-agent-cli-"));
+    const store = path.join(dir, "sessions.json");
+    mockConfig(store);
+
+    vi.mocked(callGateway).mockResolvedValue({
+      runId: "idem-1",
+      status: "ok",
+      result: {
+        payloads: [{ text: "hello" }],
+      },
+    });
+
+    try {
+      await agentCliCommand({ message: "hi", to: "+1555", timeout: "0" }, runtime);
+
+      expect(callGateway).toHaveBeenCalledWith(
+        expect.objectContaining({
+          params: expect.objectContaining({ timeout: 0 }),
+          timeoutMs: AGENT_NO_TIMEOUT_MS,
+        }),
+      );
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

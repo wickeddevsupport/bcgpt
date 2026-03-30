@@ -5,6 +5,7 @@ import { DEFAULT_CHAT_CHANNEL } from "../channels/registry.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import { withProgress } from "../cli/progress.js";
 import { loadConfig } from "../config/config.js";
+import { AGENT_NO_TIMEOUT_MS, resolveAgentTimeoutMs } from "../agents/timeout.js";
 import { callGateway, randomIdempotencyKey } from "../gateway/call.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 import {
@@ -52,13 +53,13 @@ export type AgentCliOpts = {
   local?: boolean;
 };
 
-function parseTimeoutSeconds(opts: { cfg: ReturnType<typeof loadConfig>; timeout?: string }) {
-  const raw =
-    opts.timeout !== undefined
-      ? Number.parseInt(String(opts.timeout), 10)
-      : (opts.cfg.agents?.defaults?.timeoutSeconds ?? 600);
-  if (Number.isNaN(raw) || raw <= 0) {
-    throw new Error("--timeout must be a positive integer (seconds)");
+function parseTimeoutSeconds(opts: { timeout?: string }) {
+  if (opts.timeout === undefined) {
+    return undefined;
+  }
+  const raw = Number.parseInt(String(opts.timeout), 10);
+  if (Number.isNaN(raw) || raw < 0) {
+    throw new Error("--timeout must be a non-negative integer (seconds, 0 disables timeout)");
   }
   return raw;
 }
@@ -103,8 +104,16 @@ export async function agentViaGatewayCommand(opts: AgentCliOpts, runtime: Runtim
       );
     }
   }
-  const timeoutSeconds = parseTimeoutSeconds({ cfg, timeout: opts.timeout });
-  const gatewayTimeoutMs = Math.max(10_000, (timeoutSeconds + 30) * 1000);
+  const timeoutSeconds = parseTimeoutSeconds({ timeout: opts.timeout });
+  const resolvedTimeoutMs = resolveAgentTimeoutMs({
+    cfg,
+    overrideSeconds: timeoutSeconds,
+    minMs: 10_000,
+  });
+  const gatewayTimeoutMs =
+    resolvedTimeoutMs >= AGENT_NO_TIMEOUT_MS - 30_000
+      ? AGENT_NO_TIMEOUT_MS
+      : Math.min(AGENT_NO_TIMEOUT_MS, resolvedTimeoutMs + 30_000);
 
   const sessionKey = resolveSessionKeyForRequest({
     cfg,

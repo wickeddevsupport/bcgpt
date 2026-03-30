@@ -239,37 +239,6 @@ img.chat-avatar {
   border-style: dashed;
 }
 
-.chat-live-status {
-  display: grid;
-  gap: 4px;
-  border-style: dashed;
-  background: rgba(255, 255, 255, 0.025);
-}
-
-.chat-live-status__label {
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-}
-
-.chat-live-status__detail {
-  color: var(--text-soft);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.chat-live-status--ready .chat-live-status__label {
-  color: var(--ok, #22c55e);
-}
-
-.chat-live-status--warn .chat-live-status__label {
-  color: var(--warn, #f59e0b);
-}
-
-.chat-live-status--busy .chat-live-status__label {
-  color: var(--accent, #f87171);
-}
-
 .chat-bubble--tool {
   background:
     linear-gradient(180deg, rgba(120, 211, 154, 0.06), rgba(120, 211, 154, 0.02)),

@@ -18,6 +18,7 @@ import { telegramPlugin } from "../../extensions/telegram/src/channel.js";
 import { setTelegramRuntime } from "../../extensions/telegram/src/runtime.js";
 import { loadModelCatalog } from "../agents/model-catalog.js";
 import { runEmbeddedPiAgent } from "../agents/pi-embedded.js";
+import { AGENT_NO_TIMEOUT_MS } from "../agents/timeout.js";
 import * as configModule from "../config/config.js";
 import { emitAgentEvent, onAgentEvent } from "../infra/agent-events.js";
 import { setActivePluginRegistry } from "../plugins/runtime.js";
@@ -133,6 +134,30 @@ describe("agentCommand", () => {
       const callArgs = vi.mocked(runEmbeddedPiAgent).mock.calls.at(-1)?.[0];
       expect(callArgs?.thinkLevel).toBe("high");
       expect(callArgs?.verboseLevel).toBe("on");
+    });
+  });
+
+  it("defaults embedded agent runs to no timeout", async () => {
+    await withTempHome(async (home) => {
+      const store = path.join(home, "sessions.json");
+      mockConfig(home, store, { timeoutSeconds: 0 });
+
+      await agentCommand({ message: "hi", to: "+1555" }, runtime);
+
+      const callArgs = vi.mocked(runEmbeddedPiAgent).mock.calls.at(-1)?.[0];
+      expect(callArgs?.timeoutMs).toBe(AGENT_NO_TIMEOUT_MS);
+    });
+  });
+
+  it("accepts --timeout 0 for embedded agent runs", async () => {
+    await withTempHome(async (home) => {
+      const store = path.join(home, "sessions.json");
+      mockConfig(home, store);
+
+      await agentCommand({ message: "hi", to: "+1555", timeout: "0" }, runtime);
+
+      const callArgs = vi.mocked(runEmbeddedPiAgent).mock.calls.at(-1)?.[0];
+      expect(callArgs?.timeoutMs).toBe(AGENT_NO_TIMEOUT_MS);
     });
   });
 
