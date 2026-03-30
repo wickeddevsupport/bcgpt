@@ -361,4 +361,48 @@ describe("resolveModel", () => {
       },
     });
   });
+
+  it("repairs stale inline github-copilot gpt-5.4 models missing IDE headers", () => {
+    const cfg: OpenClawConfig = {
+      models: {
+        providers: {
+          "github-copilot": {
+            baseUrl: "https://api.individual.githubcopilot.com",
+            models: [
+              {
+                id: "gpt-5.4",
+                name: "gpt-5.4",
+                api: "openai-responses",
+                reasoning: false,
+                input: ["text", "image"],
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                contextWindow: 128000,
+                maxTokens: 8192,
+              },
+            ],
+          },
+        },
+      },
+    } as OpenClawConfig;
+
+    vi.mocked(discoverModels).mockReturnValue({
+      find: vi.fn(() => null),
+    } as unknown as ReturnType<typeof discoverModels>);
+
+    const result = resolveModel("github-copilot", "gpt-5.4", "/tmp/agent", cfg);
+
+    expect(result.error).toBeUndefined();
+    expect(result.model).toMatchObject({
+      provider: "github-copilot",
+      id: "gpt-5.4",
+      api: "openai-responses",
+      baseUrl: "https://api.individual.githubcopilot.com",
+      headers: {
+        "Editor-Version": "vscode/1.107.0",
+        "Editor-Plugin-Version": "copilot-chat/0.35.0",
+        "User-Agent": "GitHubCopilotChat/0.35.0",
+        "Copilot-Integration-Id": "vscode-chat",
+      },
+    });
+  });
 });

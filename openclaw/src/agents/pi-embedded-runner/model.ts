@@ -1,6 +1,7 @@
 import type { Api, Model } from "@mariozechner/pi-ai";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { ModelDefinitionConfig } from "../../config/types.js";
+import { buildCopilotModelDefinition } from "../../providers/github-copilot-models.js";
 import { resolveOpenClawAgentDir } from "../agent-paths.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../defaults.js";
 import { normalizeModelCompat } from "../model-compat.js";
@@ -18,6 +19,35 @@ type InlineProviderConfig = {
   api?: ModelDefinitionConfig["api"];
   models?: ModelDefinitionConfig[];
 };
+
+function normalizeInlineModelEntry(
+  providerId: string,
+  providerConfig: InlineProviderConfig,
+  model: ModelDefinitionConfig,
+): InlineModelEntry {
+  const normalizedProvider = normalizeProviderId(providerId);
+  if (normalizedProvider === "github-copilot") {
+    const canonical = buildCopilotModelDefinition(model.id);
+    return {
+      ...canonical,
+      ...model,
+      provider: providerId,
+      baseUrl: model.baseUrl ?? providerConfig.baseUrl,
+      api: model.api ?? providerConfig.api ?? canonical.api,
+      headers: {
+        ...(canonical.headers ?? {}),
+        ...(model.headers ?? {}),
+      },
+    };
+  }
+
+  return {
+    ...model,
+    provider: providerId,
+    baseUrl: model.baseUrl ?? providerConfig.baseUrl,
+    api: model.api ?? providerConfig.api,
+  };
+}
 
 const OPENAI_CODEX_GPT_53_MODEL_ID = "gpt-5.3-codex";
 
@@ -169,12 +199,7 @@ export function buildInlineProviderModels(
     if (!trimmed) {
       return [];
     }
-    return (entry?.models ?? []).map((model) => ({
-      ...model,
-      provider: trimmed,
-      baseUrl: entry?.baseUrl,
-      api: model.api ?? entry?.api,
-    }));
+    return (entry?.models ?? []).map((model) => normalizeInlineModelEntry(trimmed, entry, model));
   });
 }
 
