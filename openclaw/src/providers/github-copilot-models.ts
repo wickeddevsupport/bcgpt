@@ -1,12 +1,10 @@
 import type { ModelDefinitionConfig } from "../config/types.js";
+import { COPILOT_IDE_HEADERS } from "./github-copilot-token.js";
 
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 const DEFAULT_MAX_TOKENS = 8192;
 
-// Only expose zero-premium-request models (0x multiplier on paid Copilot plans).
-// GPT-4.1, GPT-4o, and GPT-5 mini are free/unlimited. All other models (gpt-4.1-mini,
-// gpt-4.1-nano, Claude, Gemini, etc.) consume premium quota and are excluded.
-const DEFAULT_MODEL_IDS = ["gpt-4.1", "gpt-4o", "gpt-5-mini"] as const;
+const DEFAULT_MODEL_IDS = ["gpt-4.1", "gpt-4o", "gpt-5-mini", "gpt-5.4"] as const;
 
 const DEFAULT_MODEL_ID_SET = new Set(DEFAULT_MODEL_IDS.map((modelId) => modelId.toLowerCase()));
 
@@ -35,5 +33,6 @@ export function buildCopilotModelDefinition(modelId: string): ModelDefinitionCon
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: DEFAULT_CONTEXT_WINDOW,
     maxTokens: DEFAULT_MAX_TOKENS,
+    headers: { ...COPILOT_IDE_HEADERS },
   };
 }

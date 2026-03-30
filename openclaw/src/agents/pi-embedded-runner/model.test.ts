@@ -7,6 +7,7 @@ vi.mock("../pi-model-discovery.js", () => ({
 
 import type { OpenClawConfig } from "../../config/config.js";
 import { discoverModels } from "../pi-model-discovery.js";
+import { buildCopilotModelDefinition } from "../../providers/github-copilot-models.js";
 import { buildInlineProviderModels, resolveModel } from "./model.js";
 
 const makeModel = (id: string) => ({
@@ -326,5 +327,38 @@ describe("resolveModel", () => {
     expect(result.model?.headers).toEqual(templateModel.headers);
     expect(result.model?.id).toBe("gpt-5.4");
     expect(result.model?.provider).toBe("github-copilot");
+  });
+
+  it("preserves copilot IDE headers for inline github-copilot gpt-5.4 models", () => {
+    const cfg: OpenClawConfig = {
+      models: {
+        providers: {
+          "github-copilot": {
+            baseUrl: "https://api.individual.githubcopilot.com",
+            models: [buildCopilotModelDefinition("gpt-5.4")],
+          },
+        },
+      },
+    } as OpenClawConfig;
+
+    vi.mocked(discoverModels).mockReturnValue({
+      find: vi.fn(() => null),
+    } as unknown as ReturnType<typeof discoverModels>);
+
+    const result = resolveModel("github-copilot", "gpt-5.4", "/tmp/agent", cfg);
+
+    expect(result.error).toBeUndefined();
+    expect(result.model).toMatchObject({
+      provider: "github-copilot",
+      id: "gpt-5.4",
+      api: "openai-responses",
+      baseUrl: "https://api.individual.githubcopilot.com",
+      headers: {
+        "Editor-Version": "vscode/1.107.0",
+        "Editor-Plugin-Version": "copilot-chat/0.35.0",
+        "User-Agent": "GitHubCopilotChat/0.35.0",
+        "Copilot-Integration-Id": "vscode-chat",
+      },
+    });
   });
 });

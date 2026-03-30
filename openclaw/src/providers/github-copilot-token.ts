@@ -4,6 +4,13 @@ import { loadJsonFile, saveJsonFile } from "../infra/json-file.js";
 
 const COPILOT_TOKEN_URL = "https://api.github.com/copilot_internal/v2/token";
 
+export const COPILOT_IDE_HEADERS = {
+  "Editor-Version": "vscode/1.107.0",
+  "Editor-Plugin-Version": "copilot-chat/0.35.0",
+  "User-Agent": "GitHubCopilotChat/0.35.0",
+  "Copilot-Integration-Id": "vscode-chat",
+} as const;
+
 export type CachedCopilotToken = {
   token: string;
   /** milliseconds since epoch */
@@ -108,10 +115,7 @@ export async function resolveCopilotApiToken(params: {
     headers: {
       Accept: "application/json",
       Authorization: `Bearer ${params.githubToken}`,
-      "Editor-Version": "vscode/1.107.0",
-      "Editor-Plugin-Version": "copilot-chat/0.35.0",
-      "User-Agent": "GitHubCopilotChat/0.35.0",
-      "Copilot-Integration-Id": "vscode-chat",
+      ...COPILOT_IDE_HEADERS,
     },
   });
 
