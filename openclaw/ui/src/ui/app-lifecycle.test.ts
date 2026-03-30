@@ -5,12 +5,13 @@ vi.mock("./app-scroll.ts", () => ({
   observeTopbar: vi.fn(),
   scheduleChatScroll: vi.fn(),
   scheduleLogsScroll: vi.fn(),
+  resetChatScroll: vi.fn(),
 }));
 
 import { scheduleChatScroll } from "./app-scroll.ts";
 
 describe("handleUpdated", () => {
-  it("does not suppress chat update handling during manual refresh", () => {
+  it("keeps chat auto-scroll active while chat updates arrive", () => {
     const host = {
       tab: "dashboard",
       chatHasAutoScrolled: true,
@@ -25,9 +26,6 @@ describe("handleUpdated", () => {
     } as any;
 
     handleUpdated(host, new Map([["chatStream", null]]));
-    expect(vi.mocked(scheduleChatScroll)).not.toHaveBeenCalled();
-
-    handleUpdated({ ...host, chatManualRefreshInFlight: false }, new Map([["chatStream", null]]));
     expect(vi.mocked(scheduleChatScroll)).toHaveBeenCalledTimes(1);
   });
 });

@@ -5,7 +5,7 @@ import type { ThemeTransitionContext } from "./theme-transition.ts";
 import type { ThemeMode } from "./theme.ts";
 import type { SessionsListResult } from "./types.ts";
 import { parseAgentSessionKey } from "../../../src/routing/session-key.js";
-import { CHAT_SESSIONS_ACTIVE_MINUTES, refreshChat, refreshChatAvatar } from "./app-chat.ts";
+import { CHAT_SESSIONS_ACTIVE_MINUTES, refreshChatAvatar } from "./app-chat.ts";
 import { syncUrlWithSessionKey } from "./app-settings.ts";
 import { OpenClawApp } from "./app.ts";
 import { ChatState, loadChatHistory } from "./controllers/chat.ts";
@@ -583,36 +583,6 @@ export function renderChatControls(state: AppViewState) {
 
       <span class="chat-controls__separator">|</span>
 
-      <!-- Refresh -->
-      <button
-        class="btn btn--sm btn--icon"
-        ?disabled=${state.chatLoading || !state.connected}
-        @click=${async () => {
-          const app = state as unknown as OpenClawApp;
-          app.chatManualRefreshInFlight = true;
-          app.chatNewMessagesBelow = false;
-          await app.updateComplete;
-          app.resetToolStream();
-          try {
-            await refreshChat(state as unknown as Parameters<typeof refreshChat>[0], {
-              scheduleScroll: false,
-            });
-            app.scrollToBottom({ smooth: true });
-          } finally {
-            // requestAnimationFrame can be heavily throttled (or paused) in background tabs,
-            // which leaves the chat panel stuck in a manual-refresh state until the browser
-            // decides to paint again. Release the lock on a plain timer so the panel always
-            // recovers even when the tab is not visible.
-            window.setTimeout(() => {
-              app.chatManualRefreshInFlight = false;
-              app.chatNewMessagesBelow = false;
-            }, 0);
-          }
-        }}
-        title="Refresh chat data"
-      >
-        ${refreshIcon}
-      </button>
       <!-- Thinking toggle -->
       <button
         class="btn btn--sm btn--icon ${showThinking ? "active" : ""}"

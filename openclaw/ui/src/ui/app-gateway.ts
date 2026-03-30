@@ -488,15 +488,6 @@ export function connectGateway(host: GatewayHost) {
         void loadAssistantIdentity(app);
       }
       void refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0]);
-      if (host.chatRunId) {
-        // Ensure chatStreamStartedAt is set so reconcileRunWithHistory can detect
-        // when the run completes during recovery polling.
-        const chatHost = host as unknown as { chatStreamStartedAt: number | null };
-        if (!chatHost.chatStreamStartedAt) {
-          chatHost.chatStreamStartedAt = Date.now() - 5000;
-        }
-        void loadChatHistory(app).catch(() => undefined);
-      }
       // Auto-refresh connector status on connect so opsProvisioned is populated
       // immediately (no manual "Provision" click required).
       void app.handlePmosRefreshConnectors();
@@ -509,16 +500,6 @@ export function connectGateway(host: GatewayHost) {
       // Code 1012 = Service Restart (expected during config saves, don't show as error)
       if (code !== 1012) {
         host.lastError = `disconnected (${code}): ${reason || "no reason"}`;
-      }
-      // If a chat run was in flight when the socket closed, immediately fall back
-      // to history reconciliation over HTTP. This keeps the panel progressing even
-      // when live websocket events drop mid-run behind a proxy/reconnect.
-      if (host.chatRunId) {
-        const chatHost = host as unknown as { chatStreamStartedAt: number | null };
-        if (!chatHost.chatStreamStartedAt) {
-          chatHost.chatStreamStartedAt = Date.now() - 5000;
-        }
-        void loadChatHistory(host as unknown as OpenClawApp).catch(() => undefined);
       }
     },
     onEvent: (evt) => {
@@ -667,9 +648,6 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
       }
     }
     if (state === "final") {
-      const shouldReloadHistory =
-        foreignFinalWhileBusy ||
-        Boolean(payload?.runId && host.chatRunId && host.chatRunId === payload.runId);
       const finishFinalUi = () => {
         if (!host.chatRunId && !foreignFinalWhileBusy) {
           void flushChatQueueForEvent(host as unknown as Parameters<typeof flushChatQueueForEvent>[0]);
@@ -696,7 +674,7 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
           break;
         }
       };
-      if (shouldReloadHistory) {
+      if (foreignFinalWhileBusy) {
         void loadChatHistory(host as unknown as OpenClawApp).then(finishFinalUi);
       } else {
         finishFinalUi();

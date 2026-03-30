@@ -137,6 +137,30 @@ describe("handleChatEvent", () => {
     expect(state.chatStreamStartedAt).toBeNull();
   });
 
+  it("deduplicates repeated final assistant messages and clears stale errors", () => {
+    const finalMessage = {
+      role: "assistant",
+      content: [{ type: "text", text: "All set" }],
+      timestamp: 100,
+    };
+    const state = createState({
+      sessionKey: "main",
+      chatRunId: null,
+      chatMessages: [finalMessage],
+      lastError: "timeout",
+    });
+    const payload: ChatEventPayload = {
+      runId: "run-1",
+      sessionKey: "main",
+      state: "final",
+      message: finalMessage,
+    };
+
+    expect(handleChatEvent(state, payload)).toBe("final");
+    expect(state.chatMessages).toHaveLength(1);
+    expect(state.lastError).toBeNull();
+  });
+
   it("shows reasoning-only deltas in the live stream", () => {
     const state = createState({
       sessionKey: "main",

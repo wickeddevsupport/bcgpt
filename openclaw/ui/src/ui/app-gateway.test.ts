@@ -208,8 +208,8 @@ describe("connectGateway", () => {
 
     expect(host.connected).toBe(false);
     expect(host.lastError).toContain("socket dropped");
-    expect(host.chatStreamStartedAt).not.toBeNull();
-    expect(vi.mocked(loadChatHistory)).toHaveBeenCalled();
+    expect(host.chatStreamStartedAt).toBeNull();
+    expect(vi.mocked(loadChatHistory)).not.toHaveBeenCalled();
   });
 
   it("processes all queued chat deltas in a single animation frame", () => {
@@ -276,13 +276,11 @@ describe("connectGateway", () => {
     vi.stubGlobal("requestAnimationFrame", originalRaf);
   });
 
-  it("waits for history reconciliation before flushing the queued next message", async () => {
+  it("flushes the queued next message immediately on a normal final", async () => {
     vi.mocked(handleChatEvent).mockImplementation((state: unknown) => {
       (state as { chatStream: string | null }).chatStream = null;
-      return "final";
-    });
-    vi.mocked(loadChatHistory).mockImplementation(async (state: unknown) => {
       (state as { chatRunId: string | null }).chatRunId = null;
+      return "final";
     });
 
     const host = {
@@ -326,10 +324,7 @@ describe("connectGateway", () => {
       },
     });
 
-    expect(vi.mocked(flushChatQueueForEvent)).not.toHaveBeenCalled();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(vi.mocked(loadChatHistory)).toHaveBeenCalled();
+    expect(vi.mocked(loadChatHistory)).not.toHaveBeenCalled();
     expect(vi.mocked(flushChatQueueForEvent)).toHaveBeenCalledTimes(1);
   });
 

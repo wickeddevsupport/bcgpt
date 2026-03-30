@@ -133,6 +133,24 @@ export function renderReadingIndicatorGroup(assistant?: AssistantIdentity) {
   `;
 }
 
+export function renderLiveStatusGroup(
+  status: { label: string; detail: string; tone: "ready" | "busy" | "warn" },
+  assistant?: AssistantIdentity,
+) {
+  return html`
+    <div class="chat-group chat-group--timeline assistant">
+      ${renderGroupLead("assistant", assistant)}
+      <div class="chat-group-messages">
+        ${renderGroupHeader(assistant?.name ?? "Assistant", null)}
+        <div class="chat-bubble chat-live-status chat-live-status--${status.tone}" role="status" aria-live="polite">
+          <div class="chat-live-status__label">${status.label}</div>
+          <div class="chat-live-status__detail">${status.detail}</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 export function renderStreamingGroup(
   text: string,
   startedAt: number,

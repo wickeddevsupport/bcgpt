@@ -270,6 +270,14 @@ function clearPendingMarkersForRun(messages: unknown[], runId: string) {
   return changed ? next : messages;
 }
 
+function appendAssistantMessageIfNew(messages: unknown[], nextMessage: Record<string, unknown>) {
+  const lastMessage = messages[messages.length - 1];
+  if (lastMessage && comparableMessageKey(lastMessage) === comparableMessageKey(nextMessage)) {
+    return messages;
+  }
+  return [...messages, nextMessage];
+}
+
 function beginChatHistoryLoad(state: ChatState): number {
   const host = state as object;
   const nextVersion = (chatHistoryLoadVersion.get(host) ?? 0) + 1;
@@ -683,33 +691,29 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
     state.chatMessages = clearPendingMarkersForRun(state.chatMessages, payload.runId);
     // Final is authoritative even if history reconciliation lands later.
     clearActiveRun(state);
+    state.lastError = null;
     if (finalMessage && hasRenderableAssistantContent(finalMessage)) {
-      state.chatMessages = [...state.chatMessages, finalMessage];
+      state.chatMessages = appendAssistantMessageIfNew(state.chatMessages, finalMessage);
     } else if (streamedText) {
-      state.chatMessages = [
-        ...state.chatMessages,
-        {
-          role: "assistant",
-          content: [{ type: "text", text: streamedText }],
-          timestamp: Date.now(),
-        },
-      ];
+      state.chatMessages = appendAssistantMessageIfNew(state.chatMessages, {
+        role: "assistant",
+        content: [{ type: "text", text: streamedText }],
+        timestamp: Date.now(),
+      });
     }
   } else if (payload.state === "aborted") {
     const normalizedMessage = normalizeAbortedAssistantMessage(payload.message);
     const streamedText = stripThinkingFromStream(state.chatStream);
     state.chatMessages = clearPendingMarkersForRun(state.chatMessages, payload.runId);
+    state.lastError = null;
     if (normalizedMessage && hasRenderableAssistantContent(normalizedMessage)) {
-      state.chatMessages = [...state.chatMessages, normalizedMessage];
+      state.chatMessages = appendAssistantMessageIfNew(state.chatMessages, normalizedMessage);
     } else if (streamedText) {
-      state.chatMessages = [
-        ...state.chatMessages,
-        {
-          role: "assistant",
-          content: [{ type: "text", text: streamedText }],
-          timestamp: Date.now(),
-        },
-      ];
+      state.chatMessages = appendAssistantMessageIfNew(state.chatMessages, {
+        role: "assistant",
+        content: [{ type: "text", text: streamedText }],
+        timestamp: Date.now(),
+      });
     }
     clearActiveRun(state);
   } else if (payload.state === "error") {

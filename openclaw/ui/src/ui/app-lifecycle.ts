@@ -86,7 +86,6 @@ export function handleUpdated(host: LifecycleHost, changed: Map<PropertyKey, unk
   const chatPanelActive = CHAT_PANEL_TABS.has(host.tab);
   if (
     chatPanelActive &&
-    !host.chatManualRefreshInFlight &&
     (changed.has("chatMessages") ||
       changed.has("chatToolMessages") ||
       changed.has("chatStream") ||

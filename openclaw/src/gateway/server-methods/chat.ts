@@ -733,6 +733,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       });
 
       let agentRunStarted = false;
+      let agentRunId: string | null = null;
       void dispatchInboundMessage({
         ctx,
         cfg: effectiveCfg,
@@ -741,9 +742,20 @@ export const chatHandlers: GatewayRequestHandlers = {
           runId: clientRunId,
           abortSignal: abortController.signal,
           images: parsedImages.length > 0 ? parsedImages : undefined,
-          disableBlockStreaming: true,
+          disableBlockStreaming: false,
           onAgentRunStart: (runId) => {
             agentRunStarted = true;
+            agentRunId = runId;
+            context.addChatRun(runId, {
+              sessionKey: rawSessionKey,
+              clientRunId,
+              scopeKey,
+            });
+            registerAgentRunContext(runId, {
+              sessionKey: rawSessionKey,
+              scopeKey,
+              verboseLevel,
+            });
             const connId = typeof client?.connId === "string" ? client.connId : undefined;
             const wantsToolEvents = hasGatewayClientCap(
               client?.connect?.caps,
@@ -757,42 +769,42 @@ export const chatHandlers: GatewayRequestHandlers = {
         },
       })
         .then(() => {
-            context.chatAbortControllers.delete(clientRunId);
-          if (!agentRunStarted) {
-            const combinedReply = finalReplyParts
-              .map((part) => part.trim())
-              .filter(Boolean)
-              .join("\n\n")
-              .trim();
+          context.chatAbortControllers.delete(clientRunId);
+          const combinedReply = finalReplyParts
+            .map((part) => part.trim())
+            .filter(Boolean)
+            .join("\n\n")
+            .trim();
+          if (combinedReply) {
             let message: Record<string, unknown> | undefined;
-              if (combinedReply) {
-              const { storePath: latestStorePath, entry: latestEntry } =
-                loadSessionEntryForConfig(effectiveCfg, sessionKey);
-              const sessionId = latestEntry?.sessionId ?? entry?.sessionId ?? clientRunId;
-              const appended = appendAssistantTranscriptMessage({
-                  message: combinedReply,
-                sessionId,
-                storePath: latestStorePath,
-                sessionFile: latestEntry?.sessionFile,
-                createIfMissing: true,
-              });
-              if (appended.ok) {
-                message = appended.message;
-              } else {
-                context.logGateway.warn(
-                  `webchat transcript append failed: ${appended.error ?? "unknown error"}`,
-                );
-                const now = Date.now();
-                message = {
-                  role: "assistant",
-                  content: [{ type: "text", text: combinedReply }],
-                  timestamp: now,
-                  // Keep this compatible with Pi stopReason enums even though this message isn't
-                  // persisted to the transcript due to the append failure.
-                  stopReason: "stop",
-                  usage: { input: 0, output: 0, totalTokens: 0 },
-                };
-              }
+            const { storePath: latestStorePath, entry: latestEntry } = loadSessionEntryForConfig(
+              effectiveCfg,
+              sessionKey,
+            );
+            const sessionId = latestEntry?.sessionId ?? entry?.sessionId ?? clientRunId;
+            const appended = appendAssistantTranscriptMessage({
+              message: combinedReply,
+              sessionId,
+              storePath: latestStorePath,
+              sessionFile: latestEntry?.sessionFile,
+              createIfMissing: true,
+            });
+            if (appended.ok) {
+              message = appended.message;
+            } else {
+              context.logGateway.warn(
+                `webchat transcript append failed: ${appended.error ?? "unknown error"}`,
+              );
+              const now = Date.now();
+              message = {
+                role: "assistant",
+                content: [{ type: "text", text: combinedReply }],
+                timestamp: now,
+                // Keep this compatible with Pi stopReason enums even though this message isn't
+                // persisted to the transcript due to the append failure.
+                stopReason: "stop",
+                usage: { input: 0, output: 0, totalTokens: 0 },
+              };
             }
             broadcastChatFinal({
               context,
@@ -802,6 +814,9 @@ export const chatHandlers: GatewayRequestHandlers = {
               message,
             });
           }
+          if (agentRunStarted && agentRunId) {
+            context.removeChatRun(agentRunId, clientRunId, rawSessionKey);
+          }
           context.dedupe.set(`chat:${clientRunId}`, {
             ts: Date.now(),
             ok: true,
@@ -810,6 +825,9 @@ export const chatHandlers: GatewayRequestHandlers = {
         })
         .catch((err) => {
           context.chatAbortControllers.delete(clientRunId);
+          if (agentRunStarted && agentRunId) {
+            context.removeChatRun(agentRunId, clientRunId, rawSessionKey);
+          }
           const error = errorShape(ErrorCodes.UNAVAILABLE, String(err));
           context.dedupe.set(`chat:${clientRunId}`, {
             ts: Date.now(),

@@ -5,6 +5,7 @@ import type { SessionsListResult } from "../types.ts";
 import type { ChatItem, MessageGroup } from "../types/chat-types.ts";
 import type { ChatAttachment, ChatQueueItem } from "../ui-types.ts";
 import {
+  renderLiveStatusGroup,
   renderMessageGroup,
   renderReadingIndicatorGroup,
   renderStreamingGroup,
@@ -88,6 +89,11 @@ export type ChatProps = {
 
 const COMPACTION_TOAST_DURATION_MS = 5000;
 type ChatStatusTone = "ready" | "busy" | "warn";
+type ChatStatusState = {
+  label: string;
+  detail: string;
+  tone: ChatStatusTone;
+};
 
 function adjustTextareaHeight(el: HTMLTextAreaElement) {
   el.style.height = "auto";
@@ -156,14 +162,13 @@ function resolveThinkingSnippet(stream: string): string | null {
   return lastLine.length > 80 ? `${lastLine.slice(0, 77)}...` : lastLine;
 }
 
-function resolveChatStatus(props: ChatProps): {
-  label: string;
-  detail: string;
-  tone: ChatStatusTone;
-} {
+function resolveSessionHasActiveRun(props: ChatProps) {
   const activeSession = props.sessions?.sessions?.find((row) => row.key === props.sessionKey);
-  const sessionHasActiveRun =
-    activeSession?.hasActiveRun === true || Boolean(activeSession?.activeRunId);
+  return activeSession?.hasActiveRun === true || Boolean(activeSession?.activeRunId);
+}
+
+function resolveChatStatus(props: ChatProps): ChatStatusState {
+  const sessionHasActiveRun = resolveSessionHasActiveRun(props);
 
   if (!props.connected) {
     if (props.stream !== null || props.activeRunId || sessionHasActiveRun) {
@@ -225,7 +230,7 @@ function resolveChatStatus(props: ChatProps): {
       detail:
         props.queue.length > 0
           ? `Finishing the current response before sending ${props.queue.length} queued ${props.queue.length === 1 ? "message" : "messages"}.`
-          : "Finishing the current response and syncing history.",
+          : "Finishing the current response.",
       tone: "busy",
     };
   }
@@ -251,6 +256,26 @@ function resolveChatStatus(props: ChatProps): {
     detail: "Waiting for the next message.",
     tone: "ready",
   };
+}
+
+function resolveLiveThreadStatus(props: ChatProps, chatStatus: ChatStatusState): ChatStatusState | null {
+  if (chatStatus.tone === "ready") {
+    return null;
+  }
+  if (props.stream !== null) {
+    const visibleText = props.stream.replace(/<thinking>[\s\S]*?<\/thinking>\s*/g, "").trim();
+    if (visibleText) {
+      return null;
+    }
+    return chatStatus;
+  }
+  if (props.activeRunId || resolveSessionHasActiveRun(props) || props.compactionStatus?.active) {
+    return chatStatus;
+  }
+  if (!props.connected && (props.sending || props.queue.length > 0)) {
+    return chatStatus;
+  }
+  return null;
 }
 
 const CHAT_ATTACHMENT_ACCEPT = [
@@ -439,6 +464,7 @@ export function renderChat(props: ChatProps) {
   const showReasoning = props.showThinking;
   const showLiveReasoning = showReasoning || props.stream !== null;
   const chatStatus = resolveChatStatus(props);
+  const liveThreadStatus = resolveLiveThreadStatus(props, chatStatus);
   const assistantIdentity = {
     name: props.assistantName,
     avatar: props.assistantAvatar ?? props.assistantAvatarUrl ?? null,
@@ -484,6 +510,10 @@ export function renderChat(props: ChatProps) {
 
           if (item.kind === "reading-indicator") {
             return renderReadingIndicatorGroup(assistantIdentity);
+          }
+
+          if (item.kind === "live-status") {
+            return renderLiveStatusGroup(item, assistantIdentity);
           }
 
           if (item.kind === "stream") {
@@ -818,6 +848,8 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
   const items: ChatItem[] = [];
   const history = Array.isArray(props.messages) ? props.messages : [];
   const tools = Array.isArray(props.toolMessages) ? props.toolMessages : [];
+  const chatStatus = resolveChatStatus(props);
+  const liveThreadStatus = resolveLiveThreadStatus(props, chatStatus);
   const historyStart = Math.max(0, history.length - CHAT_HISTORY_RENDER_LIMIT);
   if (historyStart > 0) {
     items.push({
@@ -872,6 +904,13 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
   if (props.stream !== null) {
     const key = `stream:${props.sessionKey}:${props.streamStartedAt ?? "live"}`;
     if (props.stream.trim().length > 0) {
+      if (liveThreadStatus) {
+        items.push({
+          kind: "live-status",
+          key: `${key}:status`,
+          ...liveThreadStatus,
+        });
+      }
       items.push({
         kind: "stream",
         key,
@@ -879,8 +918,22 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
         startedAt: props.streamStartedAt ?? Date.now(),
       });
     } else {
-      items.push({ kind: "reading-indicator", key });
+      if (liveThreadStatus) {
+        items.push({
+          kind: "live-status",
+          key: `${key}:status`,
+          ...liveThreadStatus,
+        });
+      } else {
+        items.push({ kind: "reading-indicator", key });
+      }
     }
+  } else if (liveThreadStatus) {
+    items.push({
+      kind: "live-status",
+      key: `status:${props.sessionKey}:${props.activeRunId ?? "session"}`,
+      ...liveThreadStatus,
+    });
   }
 
   return groupMessages(items);
