@@ -380,12 +380,13 @@ export async function runCronIsolatedAgentTurn(params: {
       verboseLevel: resolvedVerboseLevel,
     });
     const messageChannel = resolvedDelivery.channel;
+    const fallbacksOverride = resolveAgentModelFallbacksOverride(params.cfg, agentId);
     const fallbackResult = await runWithModelFallback({
       cfg: cfgWithAgentDefaults,
       provider,
       model,
       agentDir,
-      fallbacksOverride: resolveAgentModelFallbacksOverride(params.cfg, agentId),
+      fallbacksOverride,
       run: (providerOverride, modelOverride) => {
         if (isCliProvider(providerOverride, cfgWithAgentDefaults)) {
           const cliSessionId = getCliSessionId(cronSession.sessionEntry, providerOverride);
@@ -409,6 +410,8 @@ export async function runCronIsolatedAgentTurn(params: {
           sessionId: cronSession.sessionEntry.sessionId,
           sessionKey: agentSessionKey,
           agentId,
+          allowModelFallback: true,
+          modelFallbacksOverride: fallbacksOverride,
           messageChannel,
           agentAccountId: resolvedDelivery.accountId,
           sessionFile,

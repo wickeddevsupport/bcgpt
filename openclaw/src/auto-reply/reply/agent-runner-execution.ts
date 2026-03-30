@@ -148,15 +148,16 @@ export async function runAgentTurnWithFallback(params: {
       };
       const blockReplyPipeline = params.blockReplyPipeline;
       const onToolResult = params.opts?.onToolResult;
+      const fallbacksOverride = resolveAgentModelFallbacksOverride(
+        params.followupRun.run.config,
+        resolveAgentIdFromSessionKey(params.followupRun.run.sessionKey),
+      );
       const fallbackResult = await runWithModelFallback({
         cfg: params.followupRun.run.config,
         provider: params.followupRun.run.provider,
         model: params.followupRun.run.model,
         agentDir: params.followupRun.run.agentDir,
-        fallbacksOverride: resolveAgentModelFallbacksOverride(
-          params.followupRun.run.config,
-          resolveAgentIdFromSessionKey(params.followupRun.run.sessionKey),
-        ),
+        fallbacksOverride,
         run: (provider, model) => {
           // Notify that model selection is complete (including after fallback).
           // This allows responsePrefix template interpolation with the actual model.
@@ -297,6 +298,8 @@ export async function runAgentTurnWithFallback(params: {
                 sessionId: params.followupRun.run.sessionId,
                 sessionKey: params.sessionKey,
                 agentId: params.followupRun.run.agentId,
+                allowModelFallback: true,
+                modelFallbacksOverride: fallbacksOverride,
                 messageProvider: params.sessionCtx.Provider?.trim().toLowerCase() || undefined,
                 agentAccountId: params.sessionCtx.AccountId,
                 messageTo: params.sessionCtx.OriginatingTo ?? params.sessionCtx.To,

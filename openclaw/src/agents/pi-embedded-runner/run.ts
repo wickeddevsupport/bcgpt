@@ -27,6 +27,7 @@ import {
   type ResolvedProviderAuth,
 } from "../model-auth.js";
 import { normalizeProviderId } from "../model-selection.js";
+import { hasModelFallbackCandidates } from "../model-fallback.js";
 import { ensureOpenClawModelsJson } from "../models-config.js";
 import {
   BILLING_ERROR_USER_MESSAGE,
@@ -187,7 +188,14 @@ export async function runEmbeddedPiAgent(
       const modelId = (params.model ?? DEFAULT_MODEL).trim() || DEFAULT_MODEL;
       const agentDir = params.agentDir ?? resolveOpenClawAgentDir();
       const fallbackConfigured =
-        (params.config?.agents?.defaults?.model?.fallbacks?.length ?? 0) > 0;
+        params.allowModelFallback === true
+          ? hasModelFallbackCandidates({
+              cfg: params.config,
+              provider,
+              model: modelId,
+              fallbacksOverride: params.modelFallbacksOverride,
+            })
+          : false;
       await ensureOpenClawModelsJson(params.config, agentDir);
 
       const { model, error, authStorage, modelRegistry } = resolveModel(

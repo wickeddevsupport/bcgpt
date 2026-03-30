@@ -206,6 +206,15 @@ function resolveFallbackCandidates(params: {
   return candidates;
 }
 
+export function hasModelFallbackCandidates(params: {
+  cfg: OpenClawConfig | undefined;
+  provider: string;
+  model: string;
+  fallbacksOverride?: string[];
+}): boolean {
+  return resolveFallbackCandidates(params).length > 1;
+}
+
 export async function runWithModelFallback<T>(params: {
   cfg: OpenClawConfig | undefined;
   provider: string;

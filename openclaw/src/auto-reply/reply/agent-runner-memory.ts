@@ -127,15 +127,16 @@ export async function runMemoryFlushIfNeeded(params: {
     params.followupRun.run.sessionFile,
   );
   try {
+    const fallbacksOverride = resolveAgentModelFallbacksOverride(
+      params.followupRun.run.config,
+      resolveAgentIdFromSessionKey(params.followupRun.run.sessionKey),
+    );
     await runWithModelFallback({
       cfg: params.followupRun.run.config,
       provider: params.followupRun.run.provider,
       model: params.followupRun.run.model,
       agentDir: params.followupRun.run.agentDir,
-      fallbacksOverride: resolveAgentModelFallbacksOverride(
-        params.followupRun.run.config,
-        resolveAgentIdFromSessionKey(params.followupRun.run.sessionKey),
-      ),
+      fallbacksOverride,
       run: (provider, model) => {
         const authProfileId =
           provider === params.followupRun.run.provider
@@ -145,6 +146,8 @@ export async function runMemoryFlushIfNeeded(params: {
           sessionId: params.followupRun.run.sessionId,
           sessionKey: params.sessionKey,
           agentId: params.followupRun.run.agentId,
+          allowModelFallback: true,
+          modelFallbacksOverride: fallbacksOverride,
           messageProvider: params.sessionCtx.Provider?.trim().toLowerCase() || undefined,
           agentAccountId: params.sessionCtx.AccountId,
           messageTo: params.sessionCtx.OriginatingTo ?? params.sessionCtx.To,

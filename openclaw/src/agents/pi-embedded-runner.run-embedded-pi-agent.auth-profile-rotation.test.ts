@@ -61,14 +61,33 @@ const makeAttempt = (overrides: Partial<EmbeddedRunAttemptResult>): EmbeddedRunA
   ...overrides,
 });
 
-const makeConfig = (opts?: { fallbacks?: string[]; apiKey?: string }): OpenClawConfig =>
+const makeConfig = (opts?: {
+  fallbacks?: string[];
+  apiKey?: string;
+  primary?: string;
+  agentId?: string;
+  agentFallbacks?: string[];
+}): OpenClawConfig =>
   ({
     agents: {
       defaults: {
         model: {
+          ...(opts?.primary ? { primary: opts.primary } : {}),
           fallbacks: opts?.fallbacks ?? [],
         },
       },
+      ...(opts?.agentId
+        ? {
+            list: [
+              {
+                id: opts.agentId,
+                model: {
+                  fallbacks: opts.agentFallbacks ?? [],
+                },
+              },
+            ],
+          }
+        : {}),
     },
     models: {
       providers: {
@@ -76,17 +95,15 @@ const makeConfig = (opts?: { fallbacks?: string[]; apiKey?: string }): OpenClawC
           api: "openai-responses",
           apiKey: opts?.apiKey ?? "sk-test",
           baseUrl: "https://example.com",
-          models: [
-            {
-              id: "mock-1",
-              name: "Mock 1",
-              reasoning: false,
-              input: ["text"],
-              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-              contextWindow: 16_000,
-              maxTokens: 2048,
-            },
-          ],
+          models: ["mock-1", "mock-2"].map((id) => ({
+            id,
+            name: `Mock ${id}`,
+            reasoning: false,
+            input: ["text"],
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: 16_000,
+            maxTokens: 2048,
+          })),
         },
       },
     },
@@ -410,6 +427,7 @@ describe("runEmbeddedPiAgent auth profile rotation", () => {
           runEmbeddedPiAgent({
             sessionId: "session:test",
             sessionKey: "agent:test:cooldown-failover",
+            allowModelFallback: true,
             sessionFile: path.join(workspaceDir, "session.jsonl"),
             workspaceDir,
             agentDir,
@@ -451,6 +469,7 @@ describe("runEmbeddedPiAgent auth profile rotation", () => {
         runEmbeddedPiAgent({
           sessionId: "session:test",
           sessionKey: "agent:test:auth-unavailable",
+          allowModelFallback: true,
           sessionFile: path.join(workspaceDir, "session.jsonl"),
           workspaceDir,
           agentDir,
@@ -461,6 +480,98 @@ describe("runEmbeddedPiAgent auth profile rotation", () => {
           authProfileIdSource: "auto",
           timeoutMs: 5_000,
           runId: "run:auth-unavailable",
+        }),
+      ).rejects.toMatchObject({ name: "FailoverError", reason: "auth" });
+
+      expect(runEmbeddedAttemptMock).not.toHaveBeenCalled();
+    } finally {
+      if (previousOpenAiKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = previousOpenAiKey;
+      }
+      await fs.rm(agentDir, { recursive: true, force: true });
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it("surfaces FailoverError when only agent-level fallbacks are configured", async () => {
+    const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-agent-"));
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-workspace-"));
+    try {
+      await writeAuthStore(agentDir);
+
+      runEmbeddedAttemptMock
+        .mockResolvedValueOnce(
+          makeAttempt({
+            promptError: new Error("401 unauthorized"),
+          }),
+        )
+        .mockResolvedValueOnce(
+          makeAttempt({
+            promptError: new Error("401 unauthorized"),
+          }),
+        );
+
+      await expect(
+        runEmbeddedPiAgent({
+          sessionId: "session:test",
+          sessionKey: "agent:test:agent-fallbacks",
+          agentId: "test-agent",
+          allowModelFallback: true,
+          modelFallbacksOverride: ["openai/mock-2"],
+          sessionFile: path.join(workspaceDir, "session.jsonl"),
+          workspaceDir,
+          agentDir,
+          config: makeConfig({
+            fallbacks: [],
+            agentId: "test-agent",
+            agentFallbacks: ["openai/mock-2"],
+          }),
+          prompt: "hello",
+          provider: "openai",
+          model: "mock-1",
+          authProfileIdSource: "auto",
+          timeoutMs: 5_000,
+          runId: "run:agent-fallbacks",
+        }),
+      ).rejects.toMatchObject({ name: "FailoverError", reason: "auth" });
+
+      expect(runEmbeddedAttemptMock).toHaveBeenCalledTimes(2);
+    } finally {
+      await fs.rm(agentDir, { recursive: true, force: true });
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it("surfaces FailoverError when the configured primary is the only fallback", async () => {
+    const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-agent-"));
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-workspace-"));
+    const previousOpenAiKey = process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    try {
+      const authPath = path.join(agentDir, "auth-profiles.json");
+      await fs.writeFile(authPath, JSON.stringify({ version: 1, profiles: {}, usageStats: {} }));
+
+      await expect(
+        runEmbeddedPiAgent({
+          sessionId: "session:test",
+          sessionKey: "agent:test:primary-fallback",
+          allowModelFallback: true,
+          sessionFile: path.join(workspaceDir, "session.jsonl"),
+          workspaceDir,
+          agentDir,
+          config: makeConfig({
+            fallbacks: [],
+            primary: "openai/mock-2",
+            apiKey: "",
+          }),
+          prompt: "hello",
+          provider: "openai",
+          model: "mock-1",
+          authProfileIdSource: "auto",
+          timeoutMs: 5_000,
+          runId: "run:primary-fallback",
         }),
       ).rejects.toMatchObject({ name: "FailoverError", reason: "auth" });
 

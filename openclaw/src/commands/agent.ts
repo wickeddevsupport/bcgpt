@@ -382,12 +382,13 @@ export async function agentCommand(
         opts.replyChannel ?? opts.channel,
       );
       const spawnedBy = opts.spawnedBy ?? sessionEntry?.spawnedBy;
+      const fallbacksOverride = resolveAgentModelFallbacksOverride(cfg, sessionAgentId);
       const fallbackResult = await runWithModelFallback({
         cfg,
         provider,
         model,
         agentDir,
-        fallbacksOverride: resolveAgentModelFallbacksOverride(cfg, sessionAgentId),
+        fallbacksOverride,
         run: (providerOverride, modelOverride) => {
           if (isCliProvider(providerOverride, cfg)) {
             const cliSessionId = getCliSessionId(sessionEntry, providerOverride);
@@ -416,6 +417,8 @@ export async function agentCommand(
             sessionId,
             sessionKey,
             agentId: sessionAgentId,
+            allowModelFallback: true,
+            modelFallbacksOverride: fallbacksOverride,
             messageChannel,
             agentAccountId: runContext.accountId,
             messageTo: opts.replyTo ?? opts.to,
