@@ -699,6 +699,12 @@ export async function loadPmosModelWorkspaceState(state: PmosModelAuthState) {
 
     hydrateFromEffectiveConfig(state, effectiveConfig);
 
+  const workspaceConfiguredModels = listConfiguredModels(workspaceConfig);
+  const effectiveConfiguredModels = listConfiguredModels(effectiveConfig);
+  const workspaceScopedRefs = collectModelRefsFromConfig(workspaceConfig);
+  const effectiveScopedRefs = collectModelRefsFromConfig(effectiveConfig);
+  const hasWorkspaceAllowlist = Object.keys(workspaceConfiguredModels).length > 0;
+
     const workspaceProviders = listConfiguredProvidersFromConfig(workspaceConfig);
     // Also count providers that have an API key in effective config (includes global config).
     // This ensures that models configured by superadmin via the Config panel are treated as
@@ -733,14 +739,14 @@ export async function loadPmosModelWorkspaceState(state: PmosModelAuthState) {
       catalogRefs.add(`${provider}/${id}`);
     }
 
-    const refs = collectModelRefsFromConfig(effectiveConfig);
-    for (const ref of catalogRefs) {
-      refs.add(ref);
+    const refs = new Set(hasWorkspaceAllowlist ? workspaceScopedRefs : effectiveScopedRefs);
+    if (!hasWorkspaceAllowlist) {
+      for (const ref of catalogRefs) {
+        refs.add(ref);
+      }
     }
 
     const defaultsPrimary = resolvePrimaryModel(getPath(effectiveConfig, ["agents", "defaults", "model"]));
-    const workspaceConfiguredModels = listConfiguredModels(workspaceConfig);
-    const effectiveConfiguredModels = listConfiguredModels(effectiveConfig);
     const agentEntries = readAgentEntries(effectiveConfig);
 
     const assignments: PmosAgentModelAssignment[] = agentEntries
@@ -751,7 +757,7 @@ export async function loadPmosModelWorkspaceState(state: PmosModelAuthState) {
         }
         const explicitModel = resolvePrimaryModel(agent.model);
         const modelRef = explicitModel ?? defaultsPrimary;
-        if (modelRef) {
+        if (modelRef && (!hasWorkspaceAllowlist || workspaceScopedRefs.has(modelRef))) {
           refs.add(modelRef);
         }
         return {
@@ -815,15 +821,7 @@ export async function loadPmosModelWorkspaceState(state: PmosModelAuthState) {
 
     state.pmosModelRows = rows;
     state.pmosAgentModelAssignments = assignments;
-    const selectableRefs = collectModelRefsFromConfig(effectiveConfig);
-    if (defaultsPrimary) {
-      selectableRefs.add(defaultsPrimary);
-    }
-    for (const assignment of assignments) {
-      if (assignment.modelRef) {
-        selectableRefs.add(assignment.modelRef);
-      }
-    }
+    const selectableRefs = new Set(hasWorkspaceAllowlist ? workspaceScopedRefs : effectiveScopedRefs);
     state.availableModels = Array.from(selectableRefs).sort((a, b) => a.localeCompare(b));
   } catch (err) {
     state.pmosModelCatalogError = String(err);

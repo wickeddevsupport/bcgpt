@@ -23,6 +23,12 @@ const OPENAI_CODEX_GPT_53_MODEL_ID = "gpt-5.3-codex";
 
 const OPENAI_CODEX_TEMPLATE_MODEL_IDS = ["gpt-5.2-codex"] as const;
 
+const GITHUB_COPILOT_STANDARD_TEMPLATE_MODEL_IDS = ["gpt-5.2", "gpt-5.1"] as const;
+const GITHUB_COPILOT_MINI_TEMPLATE_MODEL_IDS = ["gpt-5-mini"] as const;
+const GITHUB_COPILOT_CODEX_TEMPLATE_MODEL_IDS = ["gpt-5.2-codex", "gpt-5.1-codex"] as const;
+const GITHUB_COPILOT_CODEX_MINI_TEMPLATE_MODEL_IDS = ["gpt-5.1-codex-mini"] as const;
+const GITHUB_COPILOT_CODEX_MAX_TEMPLATE_MODEL_IDS = ["gpt-5.1-codex-max"] as const;
+
 // pi-ai's built-in Anthropic catalog can lag behind OpenClaw's defaults/docs.
 // Add forward-compat fallbacks for known-new IDs by cloning an older template model.
 const ANTHROPIC_OPUS_46_MODEL_ID = "claude-opus-4-6";
@@ -100,6 +106,47 @@ function resolveAnthropicOpus46ForwardCompatModel(
   templateIds.push(...ANTHROPIC_OPUS_TEMPLATE_MODEL_IDS);
 
   for (const templateId of [...new Set(templateIds)].filter(Boolean)) {
+    const template = modelRegistry.find(normalizedProvider, templateId) as Model<Api> | null;
+    if (!template) {
+      continue;
+    }
+    return normalizeModelCompat({
+      ...template,
+      id: trimmedModelId,
+      name: trimmedModelId,
+    } as Model<Api>);
+  }
+
+  return undefined;
+}
+
+function resolveGithubCopilotGpt5ForwardCompatModel(
+  provider: string,
+  modelId: string,
+  modelRegistry: ModelRegistry,
+): Model<Api> | undefined {
+  const normalizedProvider = normalizeProviderId(provider);
+  if (normalizedProvider !== "github-copilot") {
+    return undefined;
+  }
+
+  const trimmedModelId = modelId.trim();
+  const lower = trimmedModelId.toLowerCase();
+  if (!lower.startsWith("gpt-5")) {
+    return undefined;
+  }
+
+  const templateIds = lower.includes("-codex-max")
+    ? GITHUB_COPILOT_CODEX_MAX_TEMPLATE_MODEL_IDS
+    : lower.includes("-codex-mini")
+      ? GITHUB_COPILOT_CODEX_MINI_TEMPLATE_MODEL_IDS
+      : lower.includes("-codex")
+        ? GITHUB_COPILOT_CODEX_TEMPLATE_MODEL_IDS
+        : lower.endsWith("-mini")
+          ? GITHUB_COPILOT_MINI_TEMPLATE_MODEL_IDS
+          : GITHUB_COPILOT_STANDARD_TEMPLATE_MODEL_IDS;
+
+  for (const templateId of templateIds) {
     const template = modelRegistry.find(normalizedProvider, templateId) as Model<Api> | null;
     if (!template) {
       continue;
@@ -198,6 +245,14 @@ export function resolveModel(
     );
     if (anthropicForwardCompat) {
       return { model: anthropicForwardCompat, authStorage, modelRegistry };
+    }
+    const githubCopilotForwardCompat = resolveGithubCopilotGpt5ForwardCompatModel(
+      provider,
+      modelId,
+      modelRegistry,
+    );
+    if (githubCopilotForwardCompat) {
+      return { model: githubCopilotForwardCompat, authStorage, modelRegistry };
     }
     const providerCfg = providers[provider];
     if (providerCfg || modelId.startsWith("mock-")) {

@@ -9,11 +9,15 @@ export type AgentIdentityState = {
   agentIdentityById: Record<string, AgentIdentityResult>;
 };
 
+function hasLoadedAgentIdentity(identity: AgentIdentityResult | undefined): boolean {
+  return Boolean(identity?.agentId?.trim() && identity.name?.trim() && identity.avatar?.trim());
+}
+
 export async function loadAgentIdentity(state: AgentIdentityState, agentId: string) {
   if (!state.client || !state.connected || state.agentIdentityLoading) {
     return;
   }
-  if (state.agentIdentityById[agentId]) {
+  if (hasLoadedAgentIdentity(state.agentIdentityById[agentId])) {
     return;
   }
   state.agentIdentityLoading = true;
@@ -36,7 +40,7 @@ export async function loadAgentIdentities(state: AgentIdentityState, agentIds: s
   if (!state.client || !state.connected || state.agentIdentityLoading) {
     return;
   }
-  const missing = agentIds.filter((id) => !state.agentIdentityById[id]);
+  const missing = agentIds.filter((id) => !hasLoadedAgentIdentity(state.agentIdentityById[id]));
   if (missing.length === 0) {
     return;
   }

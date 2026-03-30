@@ -220,4 +220,93 @@ describe("pmos-model-auth", () => {
       active: true,
     });
   });
+
+  it("keeps workspace model selectors scoped to the workspace allowlist", async () => {
+    const state = createState();
+    state.client = {
+      request: vi.fn(async (method: string) => {
+        if (method === "pmos.config.workspace.get") {
+          return {
+            workspaceId: "ws-copilot",
+            workspaceConfig: {
+              agents: {
+                defaults: {
+                  model: {
+                    primary: "github-copilot/gpt-5.4",
+                  },
+                  models: {
+                    "github-copilot/gpt-5.4": {},
+                    "github-copilot/gpt-5-mini": {},
+                  },
+                },
+              },
+            },
+            effectiveConfig: {
+              agents: {
+                defaults: {
+                  model: {
+                    primary: "github-copilot/gpt-5.4",
+                  },
+                  models: {
+                    "github-copilot/gpt-5.4": {},
+                    "github-copilot/gpt-5-mini": {},
+                    "github-copilot/gpt-4o": {},
+                    "openai/gpt-5.2": {},
+                  },
+                },
+                list: [
+                  {
+                    id: "assistant",
+                    name: "Workspace Assistant",
+                    model: "github-copilot/gpt-5-mini",
+                  },
+                  {
+                    id: "global-legacy",
+                    name: "Global Legacy",
+                    model: "openai/gpt-5.2",
+                  },
+                ],
+              },
+              models: {
+                providers: {
+                  "github-copilot": {
+                    sharedForWorkspaces: true,
+                    api: "openai-responses",
+                    models: [{ id: "gpt-5.4" }, { id: "gpt-5-mini" }, { id: "gpt-4o" }],
+                  },
+                  openai: {
+                    apiKey: "sk-openai",
+                    baseUrl: "https://api.openai.com/v1",
+                    api: "openai-responses",
+                  },
+                },
+              },
+            },
+          };
+        }
+        if (method === "models.list") {
+          return {
+            models: [
+              { provider: "github-copilot", id: "gpt-5.4" },
+              { provider: "github-copilot", id: "gpt-5-mini" },
+              { provider: "github-copilot", id: "gpt-4o" },
+              { provider: "openai", id: "gpt-5.2" },
+            ],
+          };
+        }
+        throw new Error(`Unexpected method ${method}`);
+      }),
+    } as any;
+
+    await loadPmosModelWorkspaceState(state);
+
+    expect(state.availableModels).toEqual([
+      "github-copilot/gpt-5-mini",
+      "github-copilot/gpt-5.4",
+    ]);
+    expect((state.pmosModelRows ?? []).map((row) => row.ref)).toEqual([
+      "github-copilot/gpt-5-mini",
+      "github-copilot/gpt-5.4",
+    ]);
+  });
 });

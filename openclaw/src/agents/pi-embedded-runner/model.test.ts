@@ -207,6 +207,48 @@ describe("resolveModel", () => {
     });
   });
 
+  it("builds a github-copilot forward-compat fallback for gpt-5.4", () => {
+    const templateModel = {
+      id: "gpt-5.2",
+      name: "GPT-5.2",
+      provider: "github-copilot",
+      api: "openai-responses",
+      baseUrl: "https://api.githubcopilot.com",
+      reasoning: true,
+      input: ["text", "image"] as const,
+      headers: {
+        "User-Agent": "GitHubCopilotChat/0.26.7",
+        "Editor-Version": "vscode/1.99.3",
+      },
+      cost: { input: 1.25, output: 10, cacheRead: 0.125, cacheWrite: 0 },
+      contextWindow: 272000,
+      maxTokens: 128000,
+    };
+
+    vi.mocked(discoverModels).mockReturnValue({
+      find: vi.fn((provider: string, modelId: string) => {
+        if (provider === "github-copilot" && modelId === "gpt-5.2") {
+          return templateModel;
+        }
+        return null;
+      }),
+    } as unknown as ReturnType<typeof discoverModels>);
+
+    const result = resolveModel("github-copilot", "gpt-5.4", "/tmp/agent");
+
+    expect(result.error).toBeUndefined();
+    expect(result.model).toMatchObject({
+      provider: "github-copilot",
+      id: "gpt-5.4",
+      api: "openai-responses",
+      baseUrl: "https://api.githubcopilot.com",
+      reasoning: true,
+      headers: templateModel.headers,
+      contextWindow: 272000,
+      maxTokens: 128000,
+    });
+  });
+
   it("keeps unknown-model errors for non-gpt-5 openai-codex ids", () => {
     const result = resolveModel("openai-codex", "gpt-4.1-mini", "/tmp/agent");
     expect(result.model).toBeUndefined();
@@ -238,5 +280,51 @@ describe("resolveModel", () => {
     expect(result.model?.api).toBe("openai-codex-responses");
     expect(result.model?.id).toBe("gpt-5.3-codex");
     expect(result.model?.provider).toBe("openai-codex");
+  });
+
+  it("uses github-copilot fallback even when github-copilot provider is configured", () => {
+    const cfg: OpenClawConfig = {
+      models: {
+        providers: {
+          "github-copilot": {
+            baseUrl: "https://custom.example.com",
+          },
+        },
+      },
+    } as OpenClawConfig;
+
+    const templateModel = {
+      id: "gpt-5.2",
+      name: "GPT-5.2",
+      provider: "github-copilot",
+      api: "openai-responses",
+      baseUrl: "https://api.githubcopilot.com",
+      reasoning: true,
+      input: ["text", "image"] as const,
+      headers: {
+        "Copilot-Integration-Id": "vscode-chat",
+      },
+      cost: { input: 1.25, output: 10, cacheRead: 0.125, cacheWrite: 0 },
+      contextWindow: 272000,
+      maxTokens: 128000,
+    };
+
+    vi.mocked(discoverModels).mockReturnValue({
+      find: vi.fn((provider: string, modelId: string) => {
+        if (provider === "github-copilot" && modelId === "gpt-5.2") {
+          return templateModel;
+        }
+        return null;
+      }),
+    } as unknown as ReturnType<typeof discoverModels>);
+
+    const result = resolveModel("github-copilot", "gpt-5.4", "/tmp/agent", cfg);
+
+    expect(result.error).toBeUndefined();
+    expect(result.model?.api).toBe("openai-responses");
+    expect(result.model?.baseUrl).toBe("https://api.githubcopilot.com");
+    expect(result.model?.headers).toEqual(templateModel.headers);
+    expect(result.model?.id).toBe("gpt-5.4");
+    expect(result.model?.provider).toBe("github-copilot");
   });
 });
