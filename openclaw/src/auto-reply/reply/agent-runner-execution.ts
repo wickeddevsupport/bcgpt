@@ -98,6 +98,9 @@ export async function runAgentTurnWithFallback(params: {
   let fallbackModel = params.followupRun.run.model;
   let didResetAfterCompactionFailure = false;
 
+  const isLifecycleTerminalPhase = (phase: unknown): phase is "end" | "error" =>
+    phase === "end" || phase === "error";
+
   while (true) {
     try {
       const allowPartialStream = !(
@@ -255,224 +258,278 @@ export async function runAgentTurnWithFallback(params: {
             provider === params.followupRun.run.provider
               ? params.followupRun.run.authProfileId
               : undefined;
-          return runEmbeddedPiAgent({
-            sessionId: params.followupRun.run.sessionId,
-            sessionKey: params.sessionKey,
-            agentId: params.followupRun.run.agentId,
-            messageProvider: params.sessionCtx.Provider?.trim().toLowerCase() || undefined,
-            agentAccountId: params.sessionCtx.AccountId,
-            messageTo: params.sessionCtx.OriginatingTo ?? params.sessionCtx.To,
-            messageThreadId: params.sessionCtx.MessageThreadId ?? undefined,
-            groupId: resolveGroupSessionKey(params.sessionCtx)?.id,
-            groupChannel:
-              params.sessionCtx.GroupChannel?.trim() ?? params.sessionCtx.GroupSubject?.trim(),
-            groupSpace: params.sessionCtx.GroupSpace?.trim() ?? undefined,
-            senderId: params.sessionCtx.SenderId?.trim() || undefined,
-            senderName: params.sessionCtx.SenderName?.trim() || undefined,
-            senderUsername: params.sessionCtx.SenderUsername?.trim() || undefined,
-            senderE164: params.sessionCtx.SenderE164?.trim() || undefined,
-            // Provider threading context for tool auto-injection
-            ...buildThreadingToolContext({
-              sessionCtx: params.sessionCtx,
-              config: params.followupRun.run.config,
-              hasRepliedRef: params.opts?.hasRepliedRef,
-            }),
-            sessionFile: params.followupRun.run.sessionFile,
-            workspaceDir: params.followupRun.run.workspaceDir,
-            agentDir: params.followupRun.run.agentDir,
-            config: params.followupRun.run.config,
-            skillsSnapshot: params.followupRun.run.skillsSnapshot,
-            prompt: params.commandBody,
-            extraSystemPrompt: params.followupRun.run.extraSystemPrompt,
-            ownerNumbers: params.followupRun.run.ownerNumbers,
-            enforceFinalTag: resolveEnforceFinalTag(params.followupRun.run, provider),
-            provider,
-            model,
-            authProfileId,
-            authProfileIdSource: authProfileId
-              ? params.followupRun.run.authProfileIdSource
-              : undefined,
-            thinkLevel: params.followupRun.run.thinkLevel,
-            verboseLevel: params.followupRun.run.verboseLevel,
-            reasoningLevel: params.followupRun.run.reasoningLevel,
-            execOverrides: params.followupRun.run.execOverrides,
-            toolResultFormat: (() => {
-              const channel = resolveMessageChannel(
-                params.sessionCtx.Surface,
-                params.sessionCtx.Provider,
-              );
-              if (!channel) {
-                return "markdown";
-              }
-              return isMarkdownCapableMessageChannel(channel) ? "markdown" : "plain";
-            })(),
-            bashElevated: params.followupRun.run.bashElevated,
-            timeoutMs: params.followupRun.run.timeoutMs,
-            runId,
-            images: params.opts?.images,
-            abortSignal: params.opts?.abortSignal,
-            blockReplyBreak: params.resolvedBlockStreamingBreak,
-            blockReplyChunking: params.blockReplyChunking,
-            onPartialReply: allowPartialStream
-              ? async (payload) => {
-                  const textForTyping = await handlePartialForTyping(payload);
-                  if (!params.opts?.onPartialReply || textForTyping === undefined) {
-                    return;
+          const embeddedStartedAt = Date.now();
+          let embeddedLifecycleTerminalEmitted = false;
+          const emitEmbeddedLifecycleBackstop = (
+            result?: Awaited<ReturnType<typeof runEmbeddedPiAgent>>,
+            err?: unknown,
+          ) => {
+            if (embeddedLifecycleTerminalEmitted) {
+              return;
+            }
+            const errorPayload = result?.payloads?.find(
+              (payload) =>
+                payload.isError === true &&
+                typeof payload.text === "string" &&
+                payload.text.trim().length > 0,
+            );
+            const errorMessage =
+              (typeof errorPayload?.text === "string" ? errorPayload.text.trim() : undefined) ||
+              result?.meta.error?.message?.trim() ||
+              (result?.meta.aborted ? "Embedded run aborted." : undefined) ||
+              (err instanceof Error ? err.message : typeof err === "string" ? err : undefined);
+            emitAgentEvent({
+              runId,
+              stream: "lifecycle",
+              data: {
+                phase: errorMessage ? "error" : "end",
+                startedAt: embeddedStartedAt,
+                endedAt: Date.now(),
+                ...(errorMessage ? { error: errorMessage } : {}),
+              },
+            });
+            embeddedLifecycleTerminalEmitted = true;
+          };
+
+          return (async () => {
+            try {
+              const result = await runEmbeddedPiAgent({
+                sessionId: params.followupRun.run.sessionId,
+                sessionKey: params.sessionKey,
+                agentId: params.followupRun.run.agentId,
+                messageProvider: params.sessionCtx.Provider?.trim().toLowerCase() || undefined,
+                agentAccountId: params.sessionCtx.AccountId,
+                messageTo: params.sessionCtx.OriginatingTo ?? params.sessionCtx.To,
+                messageThreadId: params.sessionCtx.MessageThreadId ?? undefined,
+                groupId: resolveGroupSessionKey(params.sessionCtx)?.id,
+                groupChannel:
+                  params.sessionCtx.GroupChannel?.trim() ?? params.sessionCtx.GroupSubject?.trim(),
+                groupSpace: params.sessionCtx.GroupSpace?.trim() ?? undefined,
+                senderId: params.sessionCtx.SenderId?.trim() || undefined,
+                senderName: params.sessionCtx.SenderName?.trim() || undefined,
+                senderUsername: params.sessionCtx.SenderUsername?.trim() || undefined,
+                senderE164: params.sessionCtx.SenderE164?.trim() || undefined,
+                // Provider threading context for tool auto-injection
+                ...buildThreadingToolContext({
+                  sessionCtx: params.sessionCtx,
+                  config: params.followupRun.run.config,
+                  hasRepliedRef: params.opts?.hasRepliedRef,
+                }),
+                sessionFile: params.followupRun.run.sessionFile,
+                workspaceDir: params.followupRun.run.workspaceDir,
+                agentDir: params.followupRun.run.agentDir,
+                config: params.followupRun.run.config,
+                skillsSnapshot: params.followupRun.run.skillsSnapshot,
+                prompt: params.commandBody,
+                extraSystemPrompt: params.followupRun.run.extraSystemPrompt,
+                ownerNumbers: params.followupRun.run.ownerNumbers,
+                enforceFinalTag: resolveEnforceFinalTag(params.followupRun.run, provider),
+                provider,
+                model,
+                authProfileId,
+                authProfileIdSource: authProfileId
+                  ? params.followupRun.run.authProfileIdSource
+                  : undefined,
+                thinkLevel: params.followupRun.run.thinkLevel,
+                verboseLevel: params.followupRun.run.verboseLevel,
+                reasoningLevel: params.followupRun.run.reasoningLevel,
+                execOverrides: params.followupRun.run.execOverrides,
+                toolResultFormat: (() => {
+                  const channel = resolveMessageChannel(
+                    params.sessionCtx.Surface,
+                    params.sessionCtx.Provider,
+                  );
+                  if (!channel) {
+                    return "markdown";
                   }
-                  await params.opts.onPartialReply({
-                    text: textForTyping,
-                    mediaUrls: payload.mediaUrls,
-                  });
-                }
-              : undefined,
-            onAssistantMessageStart: async () => {
-              await params.typingSignals.signalMessageStart();
-            },
-            onReasoningStream:
-              params.typingSignals.shouldStartOnReasoning || params.opts?.onReasoningStream
-                ? async (payload) => {
-                    if (payload.text?.trim()) {
-                      emitAgentEvent({
-                        runId,
-                        stream: "assistant",
-                        data: {
-                          thinking: payload.text,
-                        },
+                  return isMarkdownCapableMessageChannel(channel) ? "markdown" : "plain";
+                })(),
+                bashElevated: params.followupRun.run.bashElevated,
+                timeoutMs: params.followupRun.run.timeoutMs,
+                runId,
+                images: params.opts?.images,
+                abortSignal: params.opts?.abortSignal,
+                blockReplyBreak: params.resolvedBlockStreamingBreak,
+                blockReplyChunking: params.blockReplyChunking,
+                onPartialReply: allowPartialStream
+                  ? async (payload) => {
+                      const textForTyping = await handlePartialForTyping(payload);
+                      if (!params.opts?.onPartialReply || textForTyping === undefined) {
+                        return;
+                      }
+                      await params.opts.onPartialReply({
+                        text: textForTyping,
+                        mediaUrls: payload.mediaUrls,
                       });
                     }
-                    await params.typingSignals.signalReasoningDelta();
-                    await params.opts?.onReasoningStream?.({
-                      text: payload.text,
-                      mediaUrls: payload.mediaUrls,
-                    });
-                  }
-                : undefined,
-            onAgentEvent: async (evt) => {
-              // Trigger typing when tools start executing.
-              // Must await to ensure typing indicator starts before tool summaries are emitted.
-              if (evt.stream === "tool") {
-                const phase = typeof evt.data.phase === "string" ? evt.data.phase : "";
-                if (phase === "start" || phase === "update") {
-                  await params.typingSignals.signalToolStart();
-                }
-              }
-              // Track auto-compaction completion
-              if (evt.stream === "compaction") {
-                const phase = typeof evt.data.phase === "string" ? evt.data.phase : "";
-                const willRetry = Boolean(evt.data.willRetry);
-                if (phase === "end" && !willRetry) {
-                  autoCompactionCompleted = true;
-                }
-              }
-            },
-            // Always pass onBlockReply so flushBlockReplyBuffer works before tool execution,
-            // even when regular block streaming is disabled. The handler sends directly
-            // via opts.onBlockReply when the pipeline isn't available.
-            onBlockReply: params.opts?.onBlockReply
-              ? async (payload) => {
-                  const { text, skip } = normalizeStreamingText(payload);
-                  const hasPayloadMedia = (payload.mediaUrls?.length ?? 0) > 0;
-                  if (skip && !hasPayloadMedia) {
-                    return;
-                  }
-                  const currentMessageId =
-                    params.sessionCtx.MessageSidFull ?? params.sessionCtx.MessageSid;
-                  const taggedPayload = applyReplyTagsToPayload(
-                    {
-                      text,
-                      mediaUrls: payload.mediaUrls,
-                      mediaUrl: payload.mediaUrls?.[0],
-                      replyToId: payload.replyToId,
-                      replyToTag: payload.replyToTag,
-                      replyToCurrent: payload.replyToCurrent,
-                    },
-                    currentMessageId,
-                  );
-                  // Let through payloads with audioAsVoice flag even if empty (need to track it)
-                  if (!isRenderablePayload(taggedPayload) && !payload.audioAsVoice) {
-                    return;
-                  }
-                  const parsed = parseReplyDirectives(taggedPayload.text ?? "", {
-                    currentMessageId,
-                    silentToken: SILENT_REPLY_TOKEN,
-                  });
-                  const cleaned = parsed.text || undefined;
-                  const hasRenderableMedia =
-                    Boolean(taggedPayload.mediaUrl) || (taggedPayload.mediaUrls?.length ?? 0) > 0;
-                  // Skip empty payloads unless they have audioAsVoice flag (need to track it)
+                  : undefined,
+                onAssistantMessageStart: async () => {
+                  await params.typingSignals.signalMessageStart();
+                },
+                onReasoningStream:
+                  params.typingSignals.shouldStartOnReasoning || params.opts?.onReasoningStream
+                    ? async (payload) => {
+                        if (payload.text?.trim()) {
+                          emitAgentEvent({
+                            runId,
+                            stream: "assistant",
+                            data: {
+                              thinking: payload.text,
+                            },
+                          });
+                        }
+                        await params.typingSignals.signalReasoningDelta();
+                        await params.opts?.onReasoningStream?.({
+                          text: payload.text,
+                          mediaUrls: payload.mediaUrls,
+                        });
+                      }
+                    : undefined,
+                onAgentEvent: async (evt) => {
                   if (
-                    !cleaned &&
-                    !hasRenderableMedia &&
-                    !payload.audioAsVoice &&
-                    !parsed.audioAsVoice
+                    evt.stream === "lifecycle" &&
+                    isLifecycleTerminalPhase(evt.data?.phase)
                   ) {
-                    return;
+                    embeddedLifecycleTerminalEmitted = true;
                   }
-                  if (parsed.isSilent && !hasRenderableMedia) {
-                    return;
-                  }
-
-                  const blockPayload: ReplyPayload = params.applyReplyToMode({
-                    ...taggedPayload,
-                    text: cleaned,
-                    audioAsVoice: Boolean(parsed.audioAsVoice || payload.audioAsVoice),
-                    replyToId: taggedPayload.replyToId ?? parsed.replyToId,
-                    replyToTag: taggedPayload.replyToTag || parsed.replyToTag,
-                    replyToCurrent: taggedPayload.replyToCurrent || parsed.replyToCurrent,
-                  });
-
-                  void params.typingSignals
-                    .signalTextDelta(cleaned ?? taggedPayload.text)
-                    .catch((err) => {
-                      logVerbose(`block reply typing signal failed: ${String(err)}`);
-                    });
-
-                  // Use pipeline if available (block streaming enabled), otherwise send directly
-                  if (params.blockStreamingEnabled && params.blockReplyPipeline) {
-                    params.blockReplyPipeline.enqueue(blockPayload);
-                  } else if (params.blockStreamingEnabled) {
-                    // Send directly when flushing before tool execution (no pipeline but streaming enabled).
-                    // Track sent key to avoid duplicate in final payloads.
-                    directlySentBlockKeys.add(createBlockReplyPayloadKey(blockPayload));
-                    await params.opts?.onBlockReply?.(blockPayload);
-                  }
-                  // When streaming is disabled entirely, blocks are accumulated in final text instead.
-                }
-              : undefined,
-            onBlockReplyFlush:
-              params.blockStreamingEnabled && blockReplyPipeline
-                ? async () => {
-                    await blockReplyPipeline.flush({ force: true });
-                  }
-                : undefined,
-            shouldEmitToolResult: params.shouldEmitToolResult,
-            shouldEmitToolOutput: params.shouldEmitToolOutput,
-            onToolResult: onToolResult
-              ? (payload) => {
-                  // `subscribeEmbeddedPiSession` may invoke tool callbacks without awaiting them.
-                  // If a tool callback starts typing after the run finalized, we can end up with
-                  // a typing loop that never sees a matching markRunComplete(). Track and drain.
-                  const task = (async () => {
-                    const { text, skip } = normalizeStreamingText(payload);
-                    if (skip) {
-                      return;
+                  // Trigger typing when tools start executing.
+                  // Must await to ensure typing indicator starts before tool summaries are emitted.
+                  if (evt.stream === "tool") {
+                    const phase = typeof evt.data.phase === "string" ? evt.data.phase : "";
+                    if (phase === "start" || phase === "update") {
+                      await params.typingSignals.signalToolStart();
                     }
-                    await params.typingSignals.signalTextDelta(text);
-                    await onToolResult({
-                      text,
-                      mediaUrls: payload.mediaUrls,
-                    });
-                  })()
-                    .catch((err) => {
-                      logVerbose(`tool result delivery failed: ${String(err)}`);
-                    })
-                    .finally(() => {
-                      params.pendingToolTasks.delete(task);
-                    });
-                  params.pendingToolTasks.add(task);
-                }
-              : undefined,
-          });
+                  }
+                  // Track auto-compaction completion
+                  if (evt.stream === "compaction") {
+                    const phase = typeof evt.data.phase === "string" ? evt.data.phase : "";
+                    const willRetry = Boolean(evt.data.willRetry);
+                    if (phase === "end" && !willRetry) {
+                      autoCompactionCompleted = true;
+                    }
+                  }
+                },
+                // Always pass onBlockReply so flushBlockReplyBuffer works before tool execution,
+                // even when regular block streaming is disabled. The handler sends directly
+                // via opts.onBlockReply when the pipeline isn't available.
+                onBlockReply: params.opts?.onBlockReply
+                  ? async (payload) => {
+                      const { text, skip } = normalizeStreamingText(payload);
+                      const hasPayloadMedia = (payload.mediaUrls?.length ?? 0) > 0;
+                      if (skip && !hasPayloadMedia) {
+                        return;
+                      }
+                      const currentMessageId =
+                        params.sessionCtx.MessageSidFull ?? params.sessionCtx.MessageSid;
+                      const taggedPayload = applyReplyTagsToPayload(
+                        {
+                          text,
+                          mediaUrls: payload.mediaUrls,
+                          mediaUrl: payload.mediaUrls?.[0],
+                          replyToId: payload.replyToId,
+                          replyToTag: payload.replyToTag,
+                          replyToCurrent: payload.replyToCurrent,
+                        },
+                        currentMessageId,
+                      );
+                      // Let through payloads with audioAsVoice flag even if empty (need to track it)
+                      if (!isRenderablePayload(taggedPayload) && !payload.audioAsVoice) {
+                        return;
+                      }
+                      const parsed = parseReplyDirectives(taggedPayload.text ?? "", {
+                        currentMessageId,
+                        silentToken: SILENT_REPLY_TOKEN,
+                      });
+                      const cleaned = parsed.text || undefined;
+                      const hasRenderableMedia =
+                        Boolean(taggedPayload.mediaUrl) ||
+                        (taggedPayload.mediaUrls?.length ?? 0) > 0;
+                      // Skip empty payloads unless they have audioAsVoice flag (need to track it)
+                      if (
+                        !cleaned &&
+                        !hasRenderableMedia &&
+                        !payload.audioAsVoice &&
+                        !parsed.audioAsVoice
+                      ) {
+                        return;
+                      }
+                      if (parsed.isSilent && !hasRenderableMedia) {
+                        return;
+                      }
+
+                      const blockPayload: ReplyPayload = params.applyReplyToMode({
+                        ...taggedPayload,
+                        text: cleaned,
+                        audioAsVoice: Boolean(parsed.audioAsVoice || payload.audioAsVoice),
+                        replyToId: taggedPayload.replyToId ?? parsed.replyToId,
+                        replyToTag: taggedPayload.replyToTag || parsed.replyToTag,
+                        replyToCurrent: taggedPayload.replyToCurrent || parsed.replyToCurrent,
+                      });
+
+                      void params.typingSignals
+                        .signalTextDelta(cleaned ?? taggedPayload.text)
+                        .catch((err) => {
+                          logVerbose(`block reply typing signal failed: ${String(err)}`);
+                        });
+
+                      // Use pipeline if available (block streaming enabled), otherwise send directly
+                      if (params.blockStreamingEnabled && params.blockReplyPipeline) {
+                        params.blockReplyPipeline.enqueue(blockPayload);
+                      } else if (params.blockStreamingEnabled) {
+                        // Send directly when flushing before tool execution (no pipeline but streaming enabled).
+                        // Track sent key to avoid duplicate in final payloads.
+                        directlySentBlockKeys.add(createBlockReplyPayloadKey(blockPayload));
+                        await params.opts?.onBlockReply?.(blockPayload);
+                      }
+                      // When streaming is disabled entirely, blocks are accumulated in final text instead.
+                    }
+                  : undefined,
+                onBlockReplyFlush:
+                  params.blockStreamingEnabled && blockReplyPipeline
+                    ? async () => {
+                        await blockReplyPipeline.flush({ force: true });
+                      }
+                    : undefined,
+                shouldEmitToolResult: params.shouldEmitToolResult,
+                shouldEmitToolOutput: params.shouldEmitToolOutput,
+                onToolResult: onToolResult
+                  ? (payload) => {
+                      // `subscribeEmbeddedPiSession` may invoke tool callbacks without awaiting them.
+                      // If a tool callback starts typing after the run finalized, we can end up with
+                      // a typing loop that never sees a matching markRunComplete(). Track and drain.
+                      const task = (async () => {
+                        const { text, skip } = normalizeStreamingText(payload);
+                        if (skip) {
+                          return;
+                        }
+                        await params.typingSignals.signalTextDelta(text);
+                        await onToolResult({
+                          text,
+                          mediaUrls: payload.mediaUrls,
+                        });
+                      })()
+                        .catch((err) => {
+                          logVerbose(`tool result delivery failed: ${String(err)}`);
+                        })
+                        .finally(() => {
+                          params.pendingToolTasks.delete(task);
+                        });
+                      params.pendingToolTasks.add(task);
+                    }
+                  : undefined,
+              });
+
+              emitEmbeddedLifecycleBackstop(result);
+              return result;
+            } catch (err) {
+              emitEmbeddedLifecycleBackstop(undefined, err);
+              throw err;
+            } finally {
+              if (!embeddedLifecycleTerminalEmitted) {
+                emitEmbeddedLifecycleBackstop(undefined, "Embedded run completed without lifecycle terminal event");
+              }
+            }
+          })();
         },
       });
       runResult = fallbackResult.result;
