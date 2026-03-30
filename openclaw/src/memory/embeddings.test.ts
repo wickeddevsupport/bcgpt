@@ -313,6 +313,43 @@ describe("embedding provider auto selection", () => {
     expect(result.provider.id).toBe("local");
     expect(result.provider.model).toContain("embeddinggemma");
   });
+
+  it("uses OpenClaw state cache for local embeddings when no cache dir is configured", async () => {
+    const resolveModelFile = vi.fn(async () => "C:/models/embeddinggemma.gguf");
+    vi.doMock("../config/paths.js", () => ({
+      resolveStateDir: vi.fn(() => "/tmp/openclaw-state"),
+    }));
+    vi.doMock("./node-llama.js", () => ({
+      importNodeLlamaCpp: vi.fn(async () => ({
+        LlamaLogLevel: { error: "error" },
+        getLlama: async () => ({
+          loadModel: async () => ({
+            createEmbeddingContext: async () => ({
+              getEmbeddingFor: async () => ({ vector: Float32Array.from([1, 2, 3]) }),
+            }),
+          }),
+        }),
+        resolveModelFile,
+      })),
+    }));
+
+    const { createEmbeddingProvider } = await import("./embeddings.js");
+    const result = await createEmbeddingProvider({
+      config: {} as never,
+      provider: "local",
+      model: "",
+      fallback: "none",
+    });
+
+    await result.provider.embedQuery("hello");
+
+    const [, cacheDir] = resolveModelFile.mock.calls[0] ?? [];
+    expect(resolveModelFile).toHaveBeenCalledWith(
+      "hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf",
+      expect.any(String),
+    );
+    expect(String(cacheDir).replace(/\\/g, "/")).toBe("/tmp/openclaw-state/cache/node-llama-cpp");
+  });
 });
 
 describe("embedding provider local fallback", () => {

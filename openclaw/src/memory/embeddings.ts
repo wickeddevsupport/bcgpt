@@ -1,6 +1,8 @@
 import type { Llama, LlamaEmbeddingContext, LlamaModel } from "node-llama-cpp";
 import fsSync from "node:fs";
+import path from "node:path";
 import type { OpenClawConfig } from "../config/config.js";
+import { resolveStateDir } from "../config/paths.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { resolveUserPath } from "../utils.js";
 import { createGeminiEmbeddingProvider, type GeminiEmbeddingClient } from "./embeddings-gemini.js";
@@ -57,6 +59,14 @@ export type EmbeddingProviderOptions = {
 
 const DEFAULT_LOCAL_MODEL = "hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf";
 
+function resolveLocalModelCacheDir(raw?: string): string {
+  const trimmed = raw?.trim();
+  if (trimmed) {
+    return resolveUserPath(trimmed);
+  }
+  return path.join(resolveStateDir(process.env), "cache", "node-llama-cpp");
+}
+
 function canAutoSelectLocal(options: EmbeddingProviderOptions): boolean {
   const modelPath = options.local?.modelPath?.trim() || DEFAULT_LOCAL_MODEL;
   if (/^(hf:|https?:)/i.test(modelPath)) {
@@ -79,7 +89,7 @@ async function createLocalEmbeddingProvider(
   options: EmbeddingProviderOptions,
 ): Promise<EmbeddingProvider> {
   const modelPath = options.local?.modelPath?.trim() || DEFAULT_LOCAL_MODEL;
-  const modelCacheDir = options.local?.modelCacheDir?.trim();
+  const modelCacheDir = resolveLocalModelCacheDir(options.local?.modelCacheDir);
 
   // Lazy-load node-llama-cpp to keep startup light unless local is enabled.
   const { getLlama, resolveModelFile, LlamaLogLevel } = await importNodeLlamaCpp();
@@ -93,7 +103,7 @@ async function createLocalEmbeddingProvider(
       llama = await getLlama({ logLevel: LlamaLogLevel.error });
     }
     if (!embeddingModel) {
-      const resolved = await resolveModelFile(modelPath, modelCacheDir || undefined);
+      const resolved = await resolveModelFile(modelPath, modelCacheDir);
       embeddingModel = await llama.loadModel({ modelPath: resolved });
     }
     if (!embeddingContext) {

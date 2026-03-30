@@ -31,17 +31,6 @@ export type ChatHost = {
 export const CHAT_SESSIONS_ACTIVE_MINUTES = 120;
 
 export function isChatBusy(host: ChatHost) {
-  // Safety valve: never let stale run state lock the composer forever.
-  if (
-    host.chatRunId &&
-    host.chatStreamStartedAt &&
-    Date.now() - host.chatStreamStartedAt > CHAT_RECOVERY_MAX_WAIT_MS
-  ) {
-    host.chatRunId = null;
-    host.chatStream = null;
-    host.chatStreamStartedAt = null;
-    host.chatSending = false;
-  }
   return host.chatSending || Boolean(host.chatRunId);
 }
 
@@ -115,6 +104,7 @@ function clearChatRecoveryPoll(host: ChatHost) {
 
 const CHAT_RECOVERY_POLL_INTERVAL_MS = 1500;
 const CHAT_RECOVERY_MAX_WAIT_MS = 25000;
+const CHAT_RECOVERY_STEADY_POLL_INTERVAL_MS = 5000;
 
 function startChatRecoveryPoll(host: ChatHost, runId: string) {
   clearChatRecoveryPoll(host);
@@ -133,24 +123,22 @@ function startChatRecoveryPoll(host: ChatHost, runId: string) {
       return;
     }
     if (Date.now() - startedAt > CHAT_RECOVERY_MAX_WAIT_MS) {
-      // Fail-open quickly so chat never feels frozen.
-      // If history reconciliation lags/stalls, clear active run and allow next send.
-      host.chatRunId = null;
-      host.chatStream = null;
-      host.chatStreamStartedAt = null;
-      host.chatMessages = [
-        ...(Array.isArray(host.chatMessages) ? host.chatMessages : []),
-        {
-          role: "assistant",
-          content: [{ type: "text", text: "Response sync took too long. Composer unlocked so you can continue." }],
-          timestamp: Date.now(),
-        },
-      ];
-      clearChatRecoveryPoll(host);
-      void flushChatQueue(host);
-      return;
+      await loadSessions(host as unknown as OpenClawApp, {
+        activeMinutes: CHAT_SESSIONS_ACTIVE_MINUTES,
+      }).catch(() => undefined);
+      if (host.chatRunId !== runId) {
+        clearChatRecoveryPoll(host);
+        const scrollHost = host as unknown as Parameters<typeof scheduleChatScroll>[0];
+        scheduleChatScroll(scrollHost, true);
+        void flushChatQueue(host);
+        return;
+      }
     }
-    host.chatHistoryRecoveryTimer = window.setTimeout(tick, CHAT_RECOVERY_POLL_INTERVAL_MS);
+    const nextDelay =
+      Date.now() - startedAt > CHAT_RECOVERY_MAX_WAIT_MS
+        ? CHAT_RECOVERY_STEADY_POLL_INTERVAL_MS
+        : CHAT_RECOVERY_POLL_INTERVAL_MS;
+    host.chatHistoryRecoveryTimer = window.setTimeout(tick, nextDelay);
   };
   host.chatHistoryRecoveryTimer = window.setTimeout(tick, CHAT_RECOVERY_POLL_INTERVAL_MS);
 }

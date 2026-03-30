@@ -166,6 +166,20 @@ function resolveChatStatus(props: ChatProps): {
     activeSession?.hasActiveRun === true || Boolean(activeSession?.activeRunId);
 
   if (!props.connected) {
+    if (props.stream !== null || props.activeRunId || sessionHasActiveRun) {
+      return {
+        label: "Working",
+        detail: "Reconnecting to the active run.",
+        tone: "busy",
+      };
+    }
+    if (props.sending || props.queue.length > 0 || props.loading) {
+      return {
+        label: "Working",
+        detail: "Waiting to reconnect before sending queued messages.",
+        tone: "busy",
+      };
+    }
     return {
       label: "Offline",
       detail: "Reconnect to resume chat activity.",

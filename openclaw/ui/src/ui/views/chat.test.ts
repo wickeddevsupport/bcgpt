@@ -125,6 +125,24 @@ describe("chat view", () => {
     expect(container.textContent).toContain("Restoring the active run after refresh.");
   });
 
+  it("stays busy while reconnecting to an active run", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          connected: false,
+          activeRunId: "run-123",
+        }),
+      ),
+      container,
+    );
+
+    const badge = container.querySelector(".chat-compose .chat-status-badge--busy");
+    expect(badge?.textContent).toContain("Working");
+    expect(container.textContent).toContain("Reconnecting to the active run.");
+    expect(container.textContent).not.toContain("Reconnect to resume chat activity.");
+  });
+
   it("renders compacting indicator as a badge", () => {
     const container = document.createElement("div");
     render(

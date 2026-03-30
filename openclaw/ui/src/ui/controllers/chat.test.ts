@@ -116,6 +116,25 @@ describe("handleChatEvent", () => {
     expect(state.chatRunId).toBeNull();
     expect(state.chatStream).toBe(null);
     expect(state.chatStreamStartedAt).toBeNull();
+    expect(JSON.stringify(state.chatMessages)).toContain("Reply");
+  });
+
+  it("clears own run immediately even when final arrives without reply content", () => {
+    const state = createState({
+      sessionKey: "main",
+      chatRunId: "run-1",
+      chatStream: "<thinking>Reviewing</thinking>",
+      chatStreamStartedAt: 100,
+    });
+    const payload: ChatEventPayload = {
+      runId: "run-1",
+      sessionKey: "main",
+      state: "final",
+    };
+    expect(handleChatEvent(state, payload)).toBe("final");
+    expect(state.chatRunId).toBeNull();
+    expect(state.chatStream).toBeNull();
+    expect(state.chatStreamStartedAt).toBeNull();
   });
 
   it("shows reasoning-only deltas in the live stream", () => {

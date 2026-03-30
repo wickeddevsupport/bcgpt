@@ -67,6 +67,7 @@ ENV COREPACK_HOME=/app/.cache/corepack
 # - keep mutable runtime/cache directories writable without a recursive chown
 # - allow HOME=/app workflows to create dotfiles (.npmrc, .cache, etc.)
 RUN printf '#!/usr/bin/env bash\nexec node /app/openclaw/openclaw.mjs "$@"\n' > /usr/local/bin/openclaw \
+  && if command -v python3 >/dev/null 2>&1 && ! command -v python >/dev/null 2>&1; then ln -s "$(command -v python3)" /usr/local/bin/python; fi \
   && chmod 755 /usr/local/bin/openclaw /usr/local/bin/pmos-entrypoint ./scripts/prime-openclaw-state.mjs \
   && install -d -o node -g node -m 0755 /app/.openclaw /app/.openclaw/mcporter /app/.cache /app/.cache/npm /app/.cache/corepack /app/.npm-global
 

@@ -27,6 +27,8 @@ export type ChatState = {
 };
 
 const chatHistoryLoadVersion = new WeakMap<object, number>();
+const finalizedRunAt = new WeakMap<object, { runId: string; at: number }>();
+const FINAL_HISTORY_GRACE_MS = 1500;
 
 function normalizeBasePath(value: string | null | undefined): string {
   const trimmed = String(value ?? "").trim();
@@ -62,6 +64,74 @@ function isAssistantReply(message: unknown): boolean {
   return raw.role === "assistant";
 }
 
+function clearActiveRun(state: ChatState) {
+  state.chatRunId = null;
+  state.chatStream = null;
+  state.chatStreamStartedAt = null;
+  state.chatSending = false;
+  finalizedRunAt.delete(state as object);
+}
+
+function normalizeAssistantMessage(
+  message: unknown,
+  options: {
+    roleRequirement: "required" | "optional";
+    roleCaseSensitive?: boolean;
+    requireContentArray?: boolean;
+    allowTextField?: boolean;
+  },
+): Record<string, unknown> | null {
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+  const candidate = message as Record<string, unknown>;
+  const roleValue = candidate.role;
+  if (typeof roleValue === "string") {
+    const role = options.roleCaseSensitive ? roleValue : roleValue.toLowerCase();
+    if (role !== "assistant") {
+      return null;
+    }
+  } else if (options.roleRequirement === "required") {
+    return null;
+  }
+
+  if (options.requireContentArray) {
+    return Array.isArray(candidate.content) ? candidate : null;
+  }
+  if (!("content" in candidate) && !(options.allowTextField && "text" in candidate)) {
+    return null;
+  }
+  return candidate;
+}
+
+function normalizeFinalAssistantMessage(message: unknown): Record<string, unknown> | null {
+  return normalizeAssistantMessage(message, {
+    roleRequirement: "optional",
+    allowTextField: true,
+  });
+}
+
+function normalizeAbortedAssistantMessage(message: unknown): Record<string, unknown> | null {
+  return normalizeAssistantMessage(message, {
+    roleRequirement: "required",
+    roleCaseSensitive: true,
+    requireContentArray: true,
+  });
+}
+
+function hasRenderableAssistantContent(message: unknown): boolean {
+  const text = extractText(message)?.trim() ?? "";
+  const thinking = extractThinking(message)?.trim() ?? "";
+  return Boolean(text || thinking);
+}
+
+function stripThinkingFromStream(stream: string | null): string {
+  if (!stream) {
+    return "";
+  }
+  return stream.replace(/<thinking>[\s\S]*?<\/thinking>\s*/g, "").trim();
+}
+
 function reconcileRunWithHistory(state: ChatState, historyMessages: unknown[]): boolean {
   if (!state.chatRunId || !state.chatStreamStartedAt) {
     return false;
@@ -81,10 +151,7 @@ function reconcileRunWithHistory(state: ChatState, historyMessages: unknown[]): 
   if (!hasAssistantReply) {
     return false;
   }
-  state.chatRunId = null;
-  state.chatStream = null;
-  state.chatStreamStartedAt = null;
-  state.chatSending = false;
+  clearActiveRun(state);
   return true;
 }
 
@@ -225,6 +292,16 @@ function applyChatHistoryResult(
   const historyMessages = Array.isArray(res.messages) ? res.messages : [];
   const previousMessages = Array.isArray(state.chatMessages) ? state.chatMessages : [];
   const recovered = reconcileRunWithHistory(state, historyMessages);
+  if (!recovered) {
+    const finalized = finalizedRunAt.get(state as object);
+    if (
+      finalized &&
+      state.chatRunId === finalized.runId &&
+      Date.now() - finalized.at >= FINAL_HISTORY_GRACE_MS
+    ) {
+      clearActiveRun(state);
+    }
+  }
   state.chatMessages = mergePendingMessages({
     history: historyMessages,
     previous: previousMessages,
@@ -475,6 +552,7 @@ export async function sendChatMessage(
   state.chatRunId = runId;
   state.chatStream = "";
   state.chatStreamStartedAt = now;
+  finalizedRunAt.delete(state as object);
 
   // Convert attachments to API format
   const apiAttachments = hasAttachments
@@ -525,9 +603,7 @@ export async function sendChatMessage(
     return runId;
   } catch (err) {
     const error = String(err);
-    state.chatRunId = null;
-    state.chatStream = null;
-    state.chatStreamStartedAt = null;
+    clearActiveRun(state);
     state.lastError = error;
     state.chatMessages = [
       ...state.chatMessages,
@@ -588,6 +664,7 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
   }
 
   if (payload.state === "delta") {
+    finalizedRunAt.delete(state as object);
     const next = extractText(payload.message);
     const thinking = extractThinking(payload.message);
     // Update stream whenever we have thinking OR text content.
@@ -601,26 +678,43 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
       state.chatStream = streamText;
     }
   } else if (payload.state === "final") {
+    const streamedText = stripThinkingFromStream(state.chatStream);
+    const finalMessage = normalizeFinalAssistantMessage(payload.message);
     state.chatMessages = clearPendingMarkersForRun(state.chatMessages, payload.runId);
-    // A final chat event is authoritative: the run is done even if history
-    // reconciliation lags or the websocket disconnects immediately after.
-    // Clear busy state here so the composer does not stay stuck on a stale run.
-    state.chatStream = null;
-    state.chatRunId = null;
-    state.chatStreamStartedAt = null;
-    state.chatSending = false;
+    // Final is authoritative even if history reconciliation lands later.
+    clearActiveRun(state);
+    if (finalMessage && hasRenderableAssistantContent(finalMessage)) {
+      state.chatMessages = [...state.chatMessages, finalMessage];
+    } else if (streamedText) {
+      state.chatMessages = [
+        ...state.chatMessages,
+        {
+          role: "assistant",
+          content: [{ type: "text", text: streamedText }],
+          timestamp: Date.now(),
+        },
+      ];
+    }
   } else if (payload.state === "aborted") {
+    const normalizedMessage = normalizeAbortedAssistantMessage(payload.message);
+    const streamedText = stripThinkingFromStream(state.chatStream);
     state.chatMessages = clearPendingMarkersForRun(state.chatMessages, payload.runId);
-    state.chatStream = null;
-    state.chatRunId = null;
-    state.chatStreamStartedAt = null;
-    state.chatSending = false;
+    if (normalizedMessage && hasRenderableAssistantContent(normalizedMessage)) {
+      state.chatMessages = [...state.chatMessages, normalizedMessage];
+    } else if (streamedText) {
+      state.chatMessages = [
+        ...state.chatMessages,
+        {
+          role: "assistant",
+          content: [{ type: "text", text: streamedText }],
+          timestamp: Date.now(),
+        },
+      ];
+    }
+    clearActiveRun(state);
   } else if (payload.state === "error") {
     state.chatMessages = clearPendingMarkersForRun(state.chatMessages, payload.runId);
-    state.chatStream = null;
-    state.chatRunId = null;
-    state.chatStreamStartedAt = null;
-    state.chatSending = false;
+    clearActiveRun(state);
     state.lastError = payload.errorMessage ?? "chat error";
   }
   return payload.state;
