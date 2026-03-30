@@ -41,6 +41,7 @@ import { GatewayBrowserClient } from "./gateway.ts";
 const pendingChatDelta = new WeakMap<object, ChatEventPayload[]>();
 const chatDeltaRafId = new WeakMap<object, number>();
 const relatedSessionRefreshSeen = new WeakMap<object, Set<string>>();
+const chatFinalizationTimer = new WeakMap<object, number>();
 
 type GatewayHost = {
   settings: UiSettings;
@@ -65,11 +66,22 @@ type GatewayHost = {
   assistantAgentId: string | null;
   sessionKey: string;
   chatRunId: string | null;
+  chatStream: string | null;
+  chatMessages: unknown[];
+  chatToolMessages?: unknown[];
   pmosWorkspaceId?: string;
+  sessionsResult?: {
+    sessions?: Array<{
+      key?: string;
+      hasActiveRun?: boolean;
+      activeRunId?: string;
+    }>;
+  } | null;
   refreshSessionsAfterChat: Set<string>;
   pmosTraceEvents: PmosExecutionTraceEvent[];
   execApprovalQueue: ExecApprovalRequest[];
   execApprovalError: string | null;
+  notificationsOpen?: boolean;
 };
 
 function resolveExpectedScopeKey(host: GatewayHost): string {
@@ -205,6 +217,9 @@ function refreshSessionsForRelatedAgentSession(host: GatewayHost, payload?: Agen
 }
 
 function recordAgentTraceEvent(host: GatewayHost, payload?: AgentEventPayload) {
+  if (!(host.tab === "dashboard" || host.notificationsOpen)) {
+    return;
+  }
   if (!payload) {
     return;
   }
@@ -264,6 +279,9 @@ function recordAgentTraceEvent(host: GatewayHost, payload?: AgentEventPayload) {
 }
 
 function recordChatTraceEvent(host: GatewayHost, payload?: ChatEventPayload) {
+  if (!(host.tab === "dashboard" || host.notificationsOpen)) {
+    return;
+  }
   if (!payload) {
     return;
   }
@@ -332,6 +350,93 @@ function recordChatTraceEvent(host: GatewayHost, payload?: ChatEventPayload) {
     runId: payload.runId,
     sessionKey: payload.sessionKey,
   });
+}
+
+function clearChatFinalizationTimer(host: GatewayHost) {
+  const timer = chatFinalizationTimer.get(host);
+  if (timer != null) {
+    window.clearTimeout(timer);
+    chatFinalizationTimer.delete(host);
+  }
+}
+
+function scheduleChatFinalizationFallback(host: GatewayHost, runId: string | undefined) {
+  clearChatFinalizationTimer(host);
+  if (!runId) {
+    return;
+  }
+  const timer = window.setTimeout(() => {
+    chatFinalizationTimer.delete(host);
+    if (host.chatRunId !== runId || host.chatStream) {
+      return;
+    }
+    host.chatRunId = null;
+    void flushChatQueueForEvent(host as unknown as Parameters<typeof flushChatQueueForEvent>[0]);
+    scheduleChatScroll(host as unknown as Parameters<typeof scheduleChatScroll>[0], true);
+  }, 1800);
+  chatFinalizationTimer.set(host, timer);
+}
+
+function messageToolCallId(message: unknown): string {
+  if (!message || typeof message !== "object") {
+    return "";
+  }
+  const raw = message as Record<string, unknown>;
+  const direct = typeof raw.toolCallId === "string" ? raw.toolCallId.trim() : "";
+  if (direct) {
+    return direct;
+  }
+  const alt = typeof raw.tool_call_id === "string" ? raw.tool_call_id.trim() : "";
+  return alt;
+}
+
+function mergeLiveToolMessagesIntoChat(host: GatewayHost) {
+  const toolMessages = Array.isArray(host.chatToolMessages) ? host.chatToolMessages : [];
+  if (toolMessages.length === 0) {
+    return;
+  }
+  const existingToolCallIds = new Set(
+    (Array.isArray(host.chatMessages) ? host.chatMessages : [])
+      .map((message) => messageToolCallId(message))
+      .filter(Boolean),
+  );
+  const additions = toolMessages.filter((message) => {
+    const toolCallId = messageToolCallId(message);
+    if (!toolCallId || existingToolCallIds.has(toolCallId)) {
+      return false;
+    }
+    existingToolCallIds.add(toolCallId);
+    return true;
+  });
+  if (additions.length === 0) {
+    return;
+  }
+  host.chatMessages = [...(Array.isArray(host.chatMessages) ? host.chatMessages : []), ...additions];
+}
+
+function clearLocalSessionActiveRun(host: GatewayHost, payload?: ChatEventPayload) {
+  const sessionKey = typeof payload?.sessionKey === "string" ? payload.sessionKey.trim() : "";
+  const runId = typeof payload?.runId === "string" ? payload.runId.trim() : "";
+  if (!sessionKey || !host.sessionsResult?.sessions?.length) {
+    return;
+  }
+  host.sessionsResult = {
+    ...host.sessionsResult,
+    sessions: host.sessionsResult.sessions.map((session) => {
+      if ((typeof session.key === "string" ? session.key.trim() : "") !== sessionKey) {
+        return session;
+      }
+      const currentRunId = typeof session.activeRunId === "string" ? session.activeRunId.trim() : "";
+      if (runId && currentRunId && currentRunId !== runId) {
+        return session;
+      }
+      return {
+        ...session,
+        hasActiveRun: false,
+        activeRunId: undefined,
+      };
+    }),
+  };
 }
 
 export function connectGateway(host: GatewayHost) {
@@ -464,11 +569,6 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
       scheduleChatScroll(host as unknown as Parameters<typeof scheduleChatScroll>[0]);
     }
     refreshSessionsForRelatedAgentSession(host, payload);
-    // After compaction ends, refresh chat history so the compacted state is visible immediately
-    // instead of waiting for the next message round-trip to trigger a history reload.
-    if (payload?.stream === "compaction" && payload?.data?.phase === "end") {
-      void loadChatHistory(host as unknown as OpenClawApp);
-    }
     return;
   }
 
@@ -478,7 +578,13 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
       return;
     }
     recordChatTraceEvent(host, payload);
-    if (payload?.sessionKey) {
+    // Only persist the active session when the event belongs to the session
+    // the user is actually viewing. Background events (heartbeats, sub-agent
+    // runs on other sessions) must NOT overwrite the user's chosen session.
+    if (
+      payload?.sessionKey &&
+      payload.sessionKey === (host as unknown as { sessionKey?: string }).sessionKey
+    ) {
       setLastActiveSessionKey(
         host as unknown as Parameters<typeof setLastActiveSessionKey>[0],
         payload.sessionKey,
@@ -487,6 +593,7 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
 
     // For streaming deltas, coalesce via rAF: only one Lit re-render per animation frame.
     if (payload?.state === "delta") {
+      clearChatFinalizationTimer(host);
       const queue = pendingChatDelta.get(host) ?? [];
       queue.push(payload);
       pendingChatDelta.set(host, queue);
@@ -526,13 +633,24 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
       }
     }
 
-    const state = handleChatEvent(host as unknown as OpenClawApp, payload);
     const foreignFinalWhileBusy =
-      state === "final" &&
+      payload?.state === "final" &&
       typeof payload?.runId === "string" &&
       Boolean(host.chatRunId) &&
       payload.runId !== host.chatRunId;
+    if (
+      (payload?.state === "final" || payload?.state === "error" || payload?.state === "aborted") &&
+      !foreignFinalWhileBusy
+    ) {
+      mergeLiveToolMessagesIntoChat(host);
+    }
+
+    const state = handleChatEvent(host as unknown as OpenClawApp, payload);
+    if (state === "error" || state === "aborted") {
+      clearChatFinalizationTimer(host);
+    }
     if ((state === "final" || state === "error" || state === "aborted") && !foreignFinalWhileBusy) {
+      clearLocalSessionActiveRun(host, payload);
       resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
       relatedSessionRefreshSeen.delete(host);
       if (state === "error" || state === "aborted") {
@@ -549,14 +667,18 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
       }
     }
     if (state === "final") {
-      void loadChatHistory(host as unknown as OpenClawApp).then(() => {
+      const shouldReloadHistory =
+        foreignFinalWhileBusy ||
+        Boolean(payload?.runId && host.chatRunId && host.chatRunId === payload.runId);
+      const finishFinalUi = () => {
         if (!host.chatRunId && !foreignFinalWhileBusy) {
           void flushChatQueueForEvent(host as unknown as Parameters<typeof flushChatQueueForEvent>[0]);
+        } else if (!foreignFinalWhileBusy) {
+          scheduleChatFinalizationFallback(host, payload?.runId);
         }
         scheduleChatScroll(
           host as unknown as Parameters<typeof scheduleChatScroll>[0],
         );
-        // Speak the last assistant message if TTS is enabled
         const msgs = Array.isArray(host.chatMessages) ? host.chatMessages : [];
         for (let i = msgs.length - 1; i >= 0; i--) {
           const m = msgs[i] as Record<string, unknown> | null;
@@ -573,7 +695,12 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
           speakText(text);
           break;
         }
-      });
+      };
+      if (shouldReloadHistory) {
+        void loadChatHistory(host as unknown as OpenClawApp).then(finishFinalUi);
+      } else {
+        finishFinalUi();
+      }
     } else if (state === "error" || state === "aborted") {
       scheduleChatScroll(
         host as unknown as Parameters<typeof scheduleChatScroll>[0],

@@ -279,18 +279,21 @@ export function createAgentEventHandler({
     chatRunState.buffers.delete(clientRunId);
     chatRunState.deltaSentAt.delete(clientRunId);
     if (jobState === "done") {
-      const effectiveText = text || "Request completed.";
       const payload = {
         runId: clientRunId,
         sessionKey,
         scopeKey,
         seq,
         state: "final" as const,
-        message: {
-          role: "assistant" as const,
-          content: [{ type: "text" as const, text: effectiveText }],
-          timestamp: Date.now(),
-        },
+        ...(text
+          ? {
+              message: {
+                role: "assistant" as const,
+                content: [{ type: "text" as const, text }],
+                timestamp: Date.now(),
+              },
+            }
+          : {}),
       };
       // Suppress webchat broadcast for heartbeat runs when showOk is false
       if (!shouldSuppressHeartbeatBroadcast(clientRunId)) {

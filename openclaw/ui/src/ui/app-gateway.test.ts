@@ -332,4 +332,211 @@ describe("connectGateway", () => {
     expect(vi.mocked(loadChatHistory)).toHaveBeenCalled();
     expect(vi.mocked(flushChatQueueForEvent)).toHaveBeenCalledTimes(1);
   });
+
+  it("skips history reload when final already includes the assistant reply", async () => {
+    vi.mocked(handleChatEvent).mockImplementation((state: unknown) => {
+      (state as { chatRunId: string | null }).chatRunId = null;
+      (state as { chatMessages: unknown[] }).chatMessages = [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "Done" }],
+        },
+      ];
+      return "final";
+    });
+
+    const host = {
+      settings: { gatewayUrl: "wss://example.test", token: "", lastActiveSessionKey: "main" },
+      password: "",
+      client: null,
+      connected: true,
+      hello: null,
+      lastError: null,
+      onboarding: false,
+      eventLogBuffer: [],
+      eventLog: [],
+      tab: "chat",
+      presenceEntries: [],
+      presenceError: null,
+      presenceStatus: null,
+      agentsLoading: false,
+      agentsList: null,
+      agentsError: null,
+      debugHealth: null,
+      assistantName: "",
+      assistantAvatar: null,
+      assistantAgentId: null,
+      sessionKey: "main",
+      chatRunId: "run-1",
+      chatQueue: [{ id: "q1", text: "queued", createdAt: Date.now() }],
+      refreshSessionsAfterChat: new Set<string>(),
+      pmosTraceEvents: [],
+      execApprovalQueue: [],
+      execApprovalError: null,
+      chatMessages: [],
+      chatStream: null,
+      notificationsOpen: false,
+      toolStreamOrder: [],
+    } as any;
+
+    handleGatewayEvent(host, {
+      type: "event",
+      event: "chat",
+      payload: {
+        runId: "run-1",
+        sessionKey: "main",
+        state: "final",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "Done" }],
+        },
+      },
+    });
+
+    expect(vi.mocked(loadChatHistory)).not.toHaveBeenCalled();
+    expect(vi.mocked(flushChatQueueForEvent)).toHaveBeenCalledTimes(1);
+  });
+
+  it("promotes live tool messages into chat history and skips reload on normal finals", () => {
+    vi.mocked(handleChatEvent).mockImplementation((state: unknown) => {
+      const host = state as { chatRunId: string | null; chatMessages: unknown[] };
+      host.chatMessages = [
+        ...host.chatMessages,
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "Done" }],
+        },
+      ];
+      host.chatRunId = null;
+      return "final";
+    });
+
+    const host = {
+      settings: { gatewayUrl: "wss://example.test", token: "", lastActiveSessionKey: "main" },
+      password: "",
+      client: null,
+      connected: true,
+      hello: null,
+      lastError: null,
+      onboarding: false,
+      eventLogBuffer: [],
+      eventLog: [],
+      tab: "chat",
+      presenceEntries: [],
+      presenceError: null,
+      presenceStatus: null,
+      agentsLoading: false,
+      agentsList: null,
+      agentsError: null,
+      debugHealth: null,
+      assistantName: "",
+      assistantAvatar: null,
+      assistantAgentId: null,
+      sessionKey: "main",
+      chatRunId: "run-1",
+      chatQueue: [],
+      refreshSessionsAfterChat: new Set<string>(),
+      pmosTraceEvents: [],
+      execApprovalQueue: [],
+      execApprovalError: null,
+      chatMessages: [],
+      chatToolMessages: [
+        {
+          role: "assistant",
+          toolCallId: "tool-1",
+          content: [
+            { type: "toolcall", name: "web_search", arguments: { query: "status" } },
+            { type: "toolresult", name: "web_search", text: "Search complete" },
+          ],
+          timestamp: Date.now(),
+        },
+      ],
+      chatStream: null,
+      notificationsOpen: false,
+      toolStreamOrder: ["tool-1"],
+    } as any;
+
+    handleGatewayEvent(host, {
+      type: "event",
+      event: "chat",
+      payload: {
+        runId: "run-1",
+        sessionKey: "main",
+        state: "final",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "Done" }],
+        },
+      },
+    });
+
+    expect(vi.mocked(loadChatHistory)).not.toHaveBeenCalled();
+    expect(host.chatMessages).toHaveLength(2);
+    expect((host.chatMessages[0] as { toolCallId?: string }).toolCallId).toBe("tool-1");
+    expect((host.chatMessages[1] as { content?: Array<{ text?: string }> }).content?.[0]?.text).toBe(
+      "Done",
+    );
+    expect(vi.mocked(flushChatQueueForEvent)).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears a stale session active run marker on terminal chat events", () => {
+    vi.mocked(handleChatEvent).mockImplementation((state: unknown) => {
+      (state as { chatRunId: string | null }).chatRunId = null;
+      return "final";
+    });
+
+    const host = {
+      settings: { gatewayUrl: "wss://example.test", token: "", lastActiveSessionKey: "main" },
+      password: "",
+      client: null,
+      connected: true,
+      hello: null,
+      lastError: null,
+      onboarding: false,
+      eventLogBuffer: [],
+      eventLog: [],
+      tab: "chat",
+      presenceEntries: [],
+      presenceError: null,
+      presenceStatus: null,
+      agentsLoading: false,
+      agentsList: null,
+      agentsError: null,
+      debugHealth: null,
+      assistantName: "",
+      assistantAvatar: null,
+      assistantAgentId: null,
+      sessionKey: "main",
+      chatRunId: "run-1",
+      chatQueue: [],
+      refreshSessionsAfterChat: new Set<string>(),
+      pmosTraceEvents: [],
+      execApprovalQueue: [],
+      execApprovalError: null,
+      chatMessages: [],
+      chatStream: null,
+      notificationsOpen: false,
+      toolStreamOrder: [],
+      sessionsResult: {
+        ts: 0,
+        path: "",
+        count: 1,
+        defaults: {},
+        sessions: [{ key: "main", kind: "direct", updatedAt: null, hasActiveRun: true, activeRunId: "run-1" }],
+      },
+    } as any;
+
+    handleGatewayEvent(host, {
+      type: "event",
+      event: "chat",
+      payload: {
+        runId: "run-1",
+        sessionKey: "main",
+        state: "final",
+      },
+    });
+
+    expect(host.sessionsResult.sessions[0]?.hasActiveRun).toBe(false);
+    expect(host.sessionsResult.sessions[0]?.activeRunId).toBeUndefined();
+  });
 });

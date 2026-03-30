@@ -1,5 +1,6 @@
 import type { OpenClawApp } from "./app.ts";
 import type { GatewayHelloOk } from "./gateway.ts";
+import type { SessionsListResult } from "./types.ts";
 import type { ChatAttachment, ChatQueueItem } from "./ui-types.ts";
 import { parseAgentSessionKey } from "../../../src/sessions/session-key-utils.js";
 import { resetChatScroll, scheduleChatScroll } from "./app-scroll.ts";
@@ -22,6 +23,7 @@ export type ChatHost = {
   chatStreamStartedAt: number | null;
   chatHistoryRecoveryTimer?: number | null;
   sessionKey: string;
+  sessionsResult?: SessionsListResult | null;
   basePath: string;
   hello: GatewayHelloOk | null;
   chatAvatarUrl: string | null;
@@ -30,8 +32,17 @@ export type ChatHost = {
 
 export const CHAT_SESSIONS_ACTIVE_MINUTES = 120;
 
+function hasRemoteActiveRun(host: ChatHost): boolean {
+  const currentKey = typeof host.sessionKey === "string" ? host.sessionKey.trim() : "";
+  if (!currentKey) {
+    return false;
+  }
+  const currentSession = host.sessionsResult?.sessions?.find((row) => row.key === currentKey);
+  return currentSession?.hasActiveRun === true || Boolean(currentSession?.activeRunId);
+}
+
 export function isChatBusy(host: ChatHost) {
-  return host.chatSending || Boolean(host.chatRunId);
+  return host.chatSending || Boolean(host.chatRunId) || hasRemoteActiveRun(host);
 }
 
 export function isChatStopCommand(text: string) {

@@ -13,4 +13,23 @@ describe("isChatBusy", () => {
     expect(isChatBusy(host)).toBe(true);
     expect(host.chatRunId).toBe("run-123");
   });
+
+  it("treats a server-reported active session run as busy", () => {
+    const host = {
+      chatSending: false,
+      chatRunId: null,
+      sessionKey: "main",
+      sessionsResult: {
+        ts: Date.now(),
+        path: "",
+        count: 1,
+        defaults: {},
+        sessions: [
+          { key: "main", kind: "direct", updatedAt: null, hasActiveRun: true, activeRunId: "run-remote" },
+        ],
+      },
+    };
+
+    expect(isChatBusy(host as never)).toBe(true);
+  });
 });

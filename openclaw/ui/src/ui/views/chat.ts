@@ -437,6 +437,7 @@ export function renderChat(props: ChatProps) {
   // We keep reading reasoningLevel for other uses (e.g. toolbar icon state), but decouple
   // reasoning display from it so the toggle always works.
   const showReasoning = props.showThinking;
+  const showLiveReasoning = showReasoning || props.stream !== null;
   const chatStatus = resolveChatStatus(props);
   const assistantIdentity = {
     name: props.assistantName,
@@ -491,7 +492,7 @@ export function renderChat(props: ChatProps) {
               item.startedAt,
               props.onOpenSidebar,
               assistantIdentity,
-              showReasoning,
+              showLiveReasoning,
             );
           }
 
@@ -858,7 +859,7 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
       message: msg,
     });
   }
-  if (props.showThinking) {
+  if (props.showThinking || tools.length > 0) {
     for (let i = 0; i < tools.length; i++) {
       items.push({
         kind: "message",

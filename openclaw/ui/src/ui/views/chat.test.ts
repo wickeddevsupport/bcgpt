@@ -76,6 +76,51 @@ describe("chat view", () => {
     expect(container.textContent).toContain("Streaming the current response.");
   });
 
+  it("shows live reasoning while a stream is active even when the toggle is off", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          showThinking: false,
+          stream: "<thinking>Plan next step</thinking>\nWorking through the reply",
+          streamStartedAt: Date.now(),
+        }),
+      ),
+      container,
+    );
+
+    expect(container.textContent).toContain("Thinking");
+    expect(container.textContent).toContain("Plan next step");
+  });
+
+  it("shows live tool updates while a run is active even when the toggle is off", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          showThinking: false,
+          activeRunId: "run-123",
+          toolMessages: [
+            {
+              role: "assistant",
+              toolCallId: "tool-1",
+              content: [
+                { type: "toolcall", name: "web_search", arguments: { query: "status" } },
+                { type: "toolresult", name: "web_search", text: "Search complete" },
+              ],
+              timestamp: Date.now(),
+            },
+          ],
+        }),
+      ),
+      container,
+    );
+
+    expect(container.querySelector(".chat-tool-card")).not.toBeNull();
+    expect(container.textContent).toContain("web_search");
+    expect(container.textContent).toContain("Search complete");
+  });
+
   it("shows a working badge while finalizing a completed run", () => {
     const container = document.createElement("div");
     render(

@@ -757,20 +757,20 @@ export const chatHandlers: GatewayRequestHandlers = {
         },
       })
         .then(() => {
+            context.chatAbortControllers.delete(clientRunId);
           if (!agentRunStarted) {
             const combinedReply = finalReplyParts
               .map((part) => part.trim())
               .filter(Boolean)
               .join("\n\n")
               .trim();
-            const effectiveReply = combinedReply || "Request completed.";
             let message: Record<string, unknown> | undefined;
-            if (effectiveReply) {
+              if (combinedReply) {
               const { storePath: latestStorePath, entry: latestEntry } =
                 loadSessionEntryForConfig(effectiveCfg, sessionKey);
               const sessionId = latestEntry?.sessionId ?? entry?.sessionId ?? clientRunId;
               const appended = appendAssistantTranscriptMessage({
-                message: effectiveReply,
+                  message: combinedReply,
                 sessionId,
                 storePath: latestStorePath,
                 sessionFile: latestEntry?.sessionFile,
@@ -785,7 +785,7 @@ export const chatHandlers: GatewayRequestHandlers = {
                 const now = Date.now();
                 message = {
                   role: "assistant",
-                  content: [{ type: "text", text: effectiveReply }],
+                  content: [{ type: "text", text: combinedReply }],
                   timestamp: now,
                   // Keep this compatible with Pi stopReason enums even though this message isn't
                   // persisted to the transcript due to the append failure.
@@ -809,6 +809,7 @@ export const chatHandlers: GatewayRequestHandlers = {
           });
         })
         .catch((err) => {
+          context.chatAbortControllers.delete(clientRunId);
           const error = errorShape(ErrorCodes.UNAVAILABLE, String(err));
           context.dedupe.set(`chat:${clientRunId}`, {
             ts: Date.now(),
@@ -827,9 +828,6 @@ export const chatHandlers: GatewayRequestHandlers = {
             scopeKey,
             errorMessage: String(err),
           });
-        })
-        .finally(() => {
-          context.chatAbortControllers.delete(clientRunId);
         });
     } catch (err) {
       const error = errorShape(ErrorCodes.UNAVAILABLE, String(err));
