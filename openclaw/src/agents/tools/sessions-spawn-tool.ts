@@ -299,6 +299,7 @@ export function createSessionsSpawnTool(opts?: {
         runId: childRunId,
         childSessionKey,
         requesterSessionKey: requesterInternalKey,
+        workspaceId,
         requesterOrigin,
         requesterDisplayKey,
         task,

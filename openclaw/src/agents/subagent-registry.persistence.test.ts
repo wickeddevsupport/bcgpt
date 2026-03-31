@@ -51,6 +51,7 @@ describe("subagent registry persistence", () => {
       runId: "run-1",
       childSessionKey: "agent:main:subagent:test",
       requesterSessionKey: "agent:main:main",
+      workspaceId: "ws-rohit",
       requesterOrigin: { channel: " whatsapp ", accountId: " acct-main " },
       requesterDisplayKey: "main",
       task: "do the thing",
@@ -89,6 +90,7 @@ describe("subagent registry persistence", () => {
       childSessionKey: string;
       childRunId: string;
       requesterSessionKey: string;
+      workspaceId?: string;
       requesterOrigin?: { channel?: string; accountId?: string };
       task: string;
       cleanup: string;
@@ -96,6 +98,7 @@ describe("subagent registry persistence", () => {
     };
     const first = announceSpy.mock.calls[0]?.[0] as unknown as AnnounceParams;
     expect(first.childSessionKey).toBe("agent:main:subagent:test");
+    expect(first.workspaceId).toBe("ws-rohit");
     expect(first.requesterOrigin?.channel).toBe("whatsapp");
     expect(first.requesterOrigin?.accountId).toBe("acct-main");
   });

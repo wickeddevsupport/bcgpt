@@ -4,7 +4,11 @@ import type { OpenClawConfig } from "../../config/config.js";
 import { loadConfig } from "../../config/config.js";
 import { callGateway } from "../../gateway/call.js";
 import { capArrayByJsonBytes } from "../../gateway/session-utils.fs.js";
-import { isSubagentSessionKey, resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
+import {
+  isSubagentSessionKey,
+  normalizeAgentId,
+  resolveAgentIdFromSessionKey,
+} from "../../routing/session-key.js";
 import { truncateUtf16Safe } from "../../utils.js";
 import { jsonResult, readStringParam } from "./common.js";
 import {
@@ -181,6 +185,7 @@ export function createSessionsHistoryTool(opts?: {
   agentSessionKey?: string;
   config?: OpenClawConfig;
   sandboxed?: boolean;
+  requesterAgentIdOverride?: string;
 }): AnyAgentTool {
   return {
     label: "Session History",
@@ -196,6 +201,7 @@ export function createSessionsHistoryTool(opts?: {
       const workspaceId = resolveWorkspaceIdFromSessionToolOptions({
         agentSessionKey: opts?.agentSessionKey,
         config: cfg,
+        requesterAgentIdOverride: opts?.requesterAgentIdOverride,
       });
       const { mainKey, alias } = resolveMainSessionAlias(cfg);
       const visibility = resolveSandboxSessionToolsVisibility(cfg);
@@ -244,7 +250,9 @@ export function createSessionsHistoryTool(opts?: {
       }
 
       const a2aPolicy = createAgentToAgentPolicy(cfg);
-      const requesterAgentId = resolveAgentIdFromSessionKey(requesterInternalKey);
+      const requesterAgentId = normalizeAgentId(
+        opts?.requesterAgentIdOverride ?? resolveAgentIdFromSessionKey(requesterInternalKey),
+      );
       const targetAgentId = resolveAgentIdFromSessionKey(resolvedKey);
       const isCrossAgent = requesterAgentId !== targetAgentId;
       if (isCrossAgent) {

@@ -9,6 +9,7 @@ const embeddedRunMock = {
   queueEmbeddedPiMessage: vi.fn(() => false),
   waitForEmbeddedPiRunEnd: vi.fn(async () => true),
 };
+const loadEffectiveWorkspaceConfigMock = vi.fn(async () => configOverride);
 let sessionStore: Record<string, Record<string, unknown>> = {};
 let configOverride: ReturnType<(typeof import("../config/config.js"))["loadConfig"]> = {
   session: {
@@ -60,10 +61,15 @@ vi.mock("../config/config.js", async (importOriginal) => {
   };
 });
 
+vi.mock("../gateway/workspace-config.js", () => ({
+  loadEffectiveWorkspaceConfig: (workspaceId: string) => loadEffectiveWorkspaceConfigMock(workspaceId),
+}));
+
 describe("subagent announce formatting", () => {
   beforeEach(() => {
     agentSpy.mockClear();
     sessionsDeleteSpy.mockClear();
+    loadEffectiveWorkspaceConfigMock.mockClear();
     embeddedRunMock.isEmbeddedPiRunActive.mockReset().mockReturnValue(false);
     embeddedRunMock.isEmbeddedPiRunStreaming.mockReset().mockReturnValue(false);
     embeddedRunMock.queueEmbeddedPiMessage.mockReset().mockReturnValue(false);
@@ -127,6 +133,29 @@ describe("subagent announce formatting", () => {
     const call = agentSpy.mock.calls[0]?.[0] as { params?: { message?: string } };
     const msg = call?.params?.message as string;
     expect(msg).toContain("completed successfully");
+  });
+
+  it("preserves workspaceId on announce and cleanup calls", async () => {
+    const { runSubagentAnnounceFlow } = await import("./subagent-announce.js");
+
+    await runSubagentAnnounceFlow({
+      childSessionKey: "agent:main:subagent:test",
+      childRunId: "run-workspace",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      task: "do thing",
+      timeoutMs: 1000,
+      cleanup: "delete",
+      waitForCompletion: false,
+      outcome: { status: "ok" },
+      workspaceId: "ws-rohit",
+    });
+
+    expect(loadEffectiveWorkspaceConfigMock).toHaveBeenCalledWith("ws-rohit");
+    const announceCall = agentSpy.mock.calls[0]?.[0] as { params?: Record<string, unknown> };
+    expect(announceCall?.params?.workspaceId).toBe("ws-rohit");
+    const deleteCall = sessionsDeleteSpy.mock.calls[0]?.[0] as { params?: Record<string, unknown> };
+    expect(deleteCall?.params?.workspaceId).toBe("ws-rohit");
   });
 
   it("steers announcements into an active run when queue mode is steer", async () => {

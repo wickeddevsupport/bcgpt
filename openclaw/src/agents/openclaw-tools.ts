@@ -120,17 +120,20 @@ export function createOpenClawTools(options?: {
       agentSessionKey: options?.agentSessionKey,
       config: options?.config,
       sandboxed: options?.sandboxed,
+      requesterAgentIdOverride: options?.requesterAgentIdOverride,
     }),
     createSessionsHistoryTool({
       agentSessionKey: options?.agentSessionKey,
       config: options?.config,
       sandboxed: options?.sandboxed,
+      requesterAgentIdOverride: options?.requesterAgentIdOverride,
     }),
     createSessionsSendTool({
       agentSessionKey: options?.agentSessionKey,
       agentChannel: options?.agentChannel,
       config: options?.config,
       sandboxed: options?.sandboxed,
+      requesterAgentIdOverride: options?.requesterAgentIdOverride,
     }),
     createSessionsSpawnTool({
       agentSessionKey: options?.agentSessionKey,
@@ -148,6 +151,7 @@ export function createOpenClawTools(options?: {
     createSessionStatusTool({
       agentSessionKey: options?.agentSessionKey,
       config: options?.config,
+      requesterAgentIdOverride: options?.requesterAgentIdOverride,
     }),
     ...(webSearchTool ? [webSearchTool] : []),
     ...(webFetchTool ? [webFetchTool] : []),

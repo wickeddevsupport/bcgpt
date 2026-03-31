@@ -66,52 +66,15 @@ export async function preflightDiscordMessage(
     return null;
   }
 
-  const allowBots = params.discordConfig?.allowBots ?? false;
   if (params.botUserId && author.id === params.botUserId) {
     // Always ignore own messages to prevent self-reply loops
     return null;
-  }
-
-  const pluralkitConfig = params.discordConfig?.pluralkit;
-  const webhookId = resolveDiscordWebhookId(message);
-  const shouldCheckPluralKit = Boolean(pluralkitConfig?.enabled) && !webhookId;
-  let pluralkitInfo: Awaited<ReturnType<typeof fetchPluralKitMessageInfo>> = null;
-  if (shouldCheckPluralKit) {
-    try {
-      pluralkitInfo = await fetchPluralKitMessageInfo({
-        messageId: message.id,
-        config: pluralkitConfig,
-      });
-    } catch (err) {
-      logVerbose(`discord: pluralkit lookup failed for ${message.id}: ${String(err)}`);
-    }
-  }
-  const sender = resolveDiscordSenderIdentity({
-    author,
-    member: params.data.member,
-    pluralkitInfo,
-  });
-
-  if (author.bot) {
-    if (!allowBots && !sender.isPluralKit) {
-      logVerbose("discord: drop bot message (allowBots=false)");
-      return null;
-    }
   }
 
   const isGuildMessage = Boolean(params.data.guild_id);
   const channelInfo = await resolveDiscordChannelInfo(params.client, message.channelId);
   const isDirectMessage = channelInfo?.type === ChannelType.DM;
   const isGroupDm = channelInfo?.type === ChannelType.GroupDM;
-
-  if (isGroupDm && !params.groupDmEnabled) {
-    logVerbose("discord: drop group dm (group dms disabled)");
-    return null;
-  }
-  if (isDirectMessage && !params.dmEnabled) {
-    logVerbose("discord: drop dm (dms disabled)");
-    return null;
-  }
 
   const botId = params.botUserId;
   const baseText = resolveDiscordMessageText(message, {
@@ -165,7 +128,53 @@ export async function preflightDiscordMessage(
   });
   const cfg = routing.cfg;
   const discordConfig = cfg.channels?.discord ?? params.discordConfig;
+  const effectiveGuildEntries =
+    cfg.channels?.discord?.guilds && typeof cfg.channels.discord.guilds === "object"
+      ? (cfg.channels.discord.guilds as NonNullable<typeof params.guildEntries>)
+      : params.guildEntries;
+  const effectiveGroupPolicy = discordConfig?.groupPolicy ?? params.groupPolicy;
+  const effectiveAllowFrom = Array.isArray(discordConfig?.dm?.allowFrom)
+    ? (discordConfig.dm.allowFrom as Array<string | number>)
+    : params.allowFrom;
+  const effectiveGroupDmChannels = Array.isArray(discordConfig?.dm?.groupChannels)
+    ? (discordConfig.dm.groupChannels as Array<string | number>)
+    : params.groupDmChannels;
+  const effectiveGroupDmEnabled = discordConfig?.dm?.groupEnabled ?? params.groupDmEnabled;
+  const effectiveDmEnabled = discordConfig?.dm?.enabled ?? params.dmEnabled;
   const route = routing.route;
+
+  const pluralkitConfig = discordConfig?.pluralkit;
+  const webhookId = resolveDiscordWebhookId(message);
+  const shouldCheckPluralKit = Boolean(pluralkitConfig?.enabled) && !webhookId;
+  let pluralkitInfo: Awaited<ReturnType<typeof fetchPluralKitMessageInfo>> = null;
+  if (shouldCheckPluralKit) {
+    try {
+      pluralkitInfo = await fetchPluralKitMessageInfo({
+        messageId: message.id,
+        config: pluralkitConfig,
+      });
+    } catch (err) {
+      logVerbose(`discord: pluralkit lookup failed for ${message.id}: ${String(err)}`);
+    }
+  }
+  const sender = resolveDiscordSenderIdentity({
+    author,
+    member: params.data.member,
+    pluralkitInfo,
+  });
+  const allowBots = discordConfig?.allowBots ?? params.discordConfig?.allowBots ?? false;
+  if (author.bot && !allowBots && !sender.isPluralKit) {
+    logVerbose("discord: drop bot message (allowBots=false)");
+    return null;
+  }
+  if (isGroupDm && !effectiveGroupDmEnabled) {
+    logVerbose("discord: drop group dm (group dms disabled)");
+    return null;
+  }
+  if (isDirectMessage && !effectiveDmEnabled) {
+    logVerbose("discord: drop dm (dms disabled)");
+    return null;
+  }
 
   const dmPolicy = discordConfig?.dm?.policy ?? "pairing";
   let commandAuthorized = true;
@@ -282,13 +291,13 @@ export async function preflightDiscordMessage(
   const guildInfo = isGuildMessage
     ? resolveDiscordGuildEntry({
         guild: params.data.guild ?? undefined,
-        guildEntries: params.guildEntries,
+        guildEntries: effectiveGuildEntries,
       })
     : null;
   if (
     isGuildMessage &&
-    params.guildEntries &&
-    Object.keys(params.guildEntries).length > 0 &&
+    effectiveGuildEntries &&
+    Object.keys(effectiveGuildEntries).length > 0 &&
     !guildInfo
   ) {
     logVerbose(
@@ -338,7 +347,7 @@ export async function preflightDiscordMessage(
   const groupDmAllowed =
     isGroupDm &&
     resolveGroupDmAllow({
-      channels: params.groupDmChannels,
+      channels: effectiveGroupDmChannels,
       channelId: message.channelId,
       channelName: displayChannelName,
       channelSlug: displayChannelSlug,
@@ -353,13 +362,13 @@ export async function preflightDiscordMessage(
   if (
     isGuildMessage &&
     !isDiscordGroupAllowedByPolicy({
-      groupPolicy: params.groupPolicy,
+      groupPolicy: effectiveGroupPolicy,
       guildAllowlisted: Boolean(guildInfo),
       channelAllowlistConfigured,
       channelAllowed,
     })
   ) {
-    if (params.groupPolicy === "disabled") {
+    if (effectiveGroupPolicy === "disabled") {
       logVerbose(`discord: drop guild message (groupPolicy: disabled, ${channelMatchMeta})`);
     } else if (!channelAllowlistConfigured) {
       logVerbose(
@@ -406,13 +415,13 @@ export async function preflightDiscordMessage(
     guildInfo,
   });
   const allowTextCommands = shouldHandleTextCommands({
-    cfg: params.cfg,
+    cfg,
     surface: "discord",
   });
-  const hasControlCommandInMessage = hasControlCommand(baseText, params.cfg);
+  const hasControlCommandInMessage = hasControlCommand(baseText, cfg);
 
   if (!isDirectMessage) {
-    const ownerAllowList = normalizeDiscordAllowList(params.allowFrom, [
+    const ownerAllowList = normalizeDiscordAllowList(effectiveAllowFrom, [
       "discord:",
       "user:",
       "pk:",
@@ -434,7 +443,7 @@ export async function preflightDiscordMessage(
             userTag: sender.tag,
           })
         : false;
-    const useAccessGroups = params.cfg.commands?.useAccessGroups !== false;
+    const useAccessGroups = cfg.commands?.useAccessGroups !== false;
     const commandGate = resolveControlCommandGate({
       useAccessGroups,
       authorizers: [
@@ -540,7 +549,7 @@ export async function preflightDiscordMessage(
     textLimit: params.textLimit,
     replyToMode: params.replyToMode,
     ackReactionScope: params.ackReactionScope,
-    groupPolicy: params.groupPolicy,
+    groupPolicy: effectiveGroupPolicy,
     data: params.data,
     client: params.client,
     message,

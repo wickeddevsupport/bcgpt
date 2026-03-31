@@ -4,7 +4,16 @@ import { COPILOT_IDE_HEADERS } from "./github-copilot-token.js";
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 const DEFAULT_MAX_TOKENS = 8192;
 
-const DEFAULT_MODEL_IDS = ["gpt-4.1", "gpt-4o", "gpt-5-mini", "gpt-5.4"] as const;
+const DEFAULT_MODEL_IDS = [
+  "gpt-4.1",
+  "gpt-4.1-mini",
+  "gpt-4.1-nano",
+  "gpt-4o",
+  "gpt-5-mini",
+  "gpt-5.1",
+  "gpt-5.2",
+  "gpt-5.4",
+] as const;
 
 const DEFAULT_MODEL_ID_SET = new Set(DEFAULT_MODEL_IDS.map((modelId) => modelId.toLowerCase()));
 

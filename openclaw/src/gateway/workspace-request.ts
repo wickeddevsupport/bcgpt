@@ -25,6 +25,10 @@ export function resolveEffectiveRequestWorkspaceId(
   if (!client) {
     return requestedWorkspaceId;
   }
+  const hasPmosContext = Boolean(clientWorkspaceId || client.pmosRole);
+  if (!hasPmosContext) {
+    return requestedWorkspaceId;
+  }
   if (isSuperAdmin(client)) {
     return requestedWorkspaceId;
   }

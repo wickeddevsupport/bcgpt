@@ -81,4 +81,54 @@ describe("sessions_send gating", () => {
       }),
     );
   });
+
+  it("recovers workspace scope from workspace-scoped config paths when requester metadata is absent", async () => {
+    callGatewayMock.mockImplementation(async (opts: unknown) => {
+      const request = opts as { method?: string };
+      if (request.method === "agent") {
+        return { runId: "run-workspace-fallback", acceptedAt: 1001 };
+      }
+      return {};
+    });
+
+    const tool = createSessionsSendTool({
+      agentSessionKey: "discord:group:req",
+      requesterAgentIdOverride: "assistant",
+      agentChannel: "discord",
+      config: {
+        session: {
+          scope: "per-sender",
+          mainKey: "main",
+          store: "~/.openclaw/workspaces/ws-rohit/agents/{agentId}/sessions/sessions.json",
+        },
+        agents: {
+          list: [
+            { id: "assistant", default: true },
+            { id: "designer" },
+          ],
+        },
+        tools: { agentToAgent: { enabled: true, allow: ["*"] } },
+      } as never,
+    });
+
+    const result = await tool.execute("call3", {
+      sessionKey: "agent:designer:main",
+      message: "hi",
+      timeoutSeconds: 0,
+    });
+
+    expect(result.details).toMatchObject({
+      status: "accepted",
+      runId: "run-workspace-fallback",
+    });
+    expect(callGatewayMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "agent",
+        params: expect.objectContaining({
+          sessionKey: "agent:designer:main",
+          workspaceId: "ws-rohit",
+        }),
+      }),
+    );
+  });
 });

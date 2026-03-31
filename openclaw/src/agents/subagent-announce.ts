@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import { resolveQueueSettings } from "../auto-reply/reply/queue.js";
-import { loadConfig } from "../config/config.js";
+import { type OpenClawConfig, loadConfig } from "../config/config.js";
 import {
   loadSessionStore,
   resolveAgentIdFromSessionKey,
@@ -25,6 +25,25 @@ import {
 } from "./pi-embedded.js";
 import { type AnnounceQueueItem, enqueueAnnounce } from "./subagent-announce-queue.js";
 import { readLatestAssistantReply } from "./tools/agent-step.js";
+import { withWorkspaceScope } from "./tools/sessions-helpers.js";
+
+async function loadScopedConfig(workspaceId?: string): Promise<OpenClawConfig> {
+  const cfg = loadConfig();
+  const trimmedWorkspaceId = typeof workspaceId === "string" ? workspaceId.trim() : "";
+  if (!trimmedWorkspaceId) {
+    return cfg;
+  }
+  try {
+    const { loadEffectiveWorkspaceConfig } = await import("../gateway/workspace-config.js");
+    const effectiveCfg = await loadEffectiveWorkspaceConfig(trimmedWorkspaceId);
+    if (effectiveCfg && typeof effectiveCfg === "object") {
+      return effectiveCfg as OpenClawConfig;
+    }
+  } catch {
+    // Fall back to global config when the workspace overlay cannot be loaded.
+  }
+  return cfg;
+}
 
 function formatTokenCount(value?: number) {
   if (!value || !Number.isFinite(value)) {
@@ -74,8 +93,8 @@ function resolveModelCost(params: {
   return entry?.cost;
 }
 
-async function waitForSessionUsage(params: { sessionKey: string }) {
-  const cfg = loadConfig();
+async function waitForSessionUsage(params: { sessionKey: string; workspaceId?: string }) {
+  const cfg = await loadScopedConfig(params.workspaceId);
   const agentId = resolveAgentIdFromSessionKey(params.sessionKey);
   const storePath = resolveStorePath(cfg.session?.store, { agentId });
   let entry = loadSessionStore(storePath)[params.sessionKey];
@@ -112,13 +131,15 @@ function resolveAnnounceOrigin(
   return mergeDeliveryContext(requesterOrigin, deliveryContextFromSession(entry));
 }
 
-async function sendAnnounce(item: AnnounceQueueItem) {
+async function sendAnnounce(item: AnnounceQueueItem, workspaceId?: string) {
   const origin = item.origin;
   const threadId =
     origin?.threadId != null && origin.threadId !== "" ? String(origin.threadId) : undefined;
+  const cfg = await loadScopedConfig(workspaceId);
   await callGateway({
+    config: cfg,
     method: "agent",
-    params: {
+    params: withWorkspaceScope({
       sessionKey: item.sessionKey,
       message: item.prompt,
       channel: origin?.channel,
@@ -127,7 +148,7 @@ async function sendAnnounce(item: AnnounceQueueItem) {
       threadId,
       deliver: true,
       idempotencyKey: crypto.randomUUID(),
-    },
+    }, workspaceId),
     expectFinal: true,
     timeoutMs: 60_000,
   });
@@ -155,8 +176,8 @@ function resolveRequesterStoreKey(
   return `agent:${agentId}:${raw}`;
 }
 
-function loadRequesterSessionEntry(requesterSessionKey: string) {
-  const cfg = loadConfig();
+async function loadRequesterSessionEntry(requesterSessionKey: string, workspaceId?: string) {
+  const cfg = await loadScopedConfig(workspaceId);
   const canonicalKey = resolveRequesterStoreKey(cfg, requesterSessionKey);
   const agentId = resolveAgentIdFromSessionKey(canonicalKey);
   const storePath = resolveStorePath(cfg.session?.store, { agentId });
@@ -170,8 +191,12 @@ async function maybeQueueSubagentAnnounce(params: {
   triggerMessage: string;
   summaryLine?: string;
   requesterOrigin?: DeliveryContext;
+  workspaceId?: string;
 }): Promise<"steered" | "queued" | "none"> {
-  const { cfg, entry } = loadRequesterSessionEntry(params.requesterSessionKey);
+  const { cfg, entry } = await loadRequesterSessionEntry(
+    params.requesterSessionKey,
+    params.workspaceId,
+  );
   const canonicalKey = resolveRequesterStoreKey(cfg, params.requesterSessionKey);
   const sessionId = entry?.sessionId;
   if (!sessionId) {
@@ -210,7 +235,7 @@ async function maybeQueueSubagentAnnounce(params: {
         origin,
       },
       settings: queueSettings,
-      send: sendAnnounce,
+      send: (item) => sendAnnounce(item, params.workspaceId),
     });
     return "queued";
   }
@@ -222,10 +247,12 @@ async function buildSubagentStatsLine(params: {
   sessionKey: string;
   startedAt?: number;
   endedAt?: number;
+  workspaceId?: string;
 }) {
-  const cfg = loadConfig();
+  const cfg = await loadScopedConfig(params.workspaceId);
   const { entry, storePath } = await waitForSessionUsage({
     sessionKey: params.sessionKey,
+    workspaceId: params.workspaceId,
   });
 
   const sessionId = entry?.sessionId;
@@ -276,8 +303,8 @@ async function buildSubagentStatsLine(params: {
   return `Stats: ${parts.join(" \u2022 ")}`;
 }
 
-function loadSessionEntryByKey(sessionKey: string) {
-  const cfg = loadConfig();
+async function loadSessionEntryByKey(sessionKey: string, workspaceId?: string) {
+  const cfg = await loadScopedConfig(workspaceId);
   const agentId = resolveAgentIdFromSessionKey(sessionKey);
   const storePath = resolveStorePath(cfg.session?.store, { agentId });
   const store = loadSessionStore(storePath);
@@ -288,6 +315,8 @@ async function readLatestAssistantReplyWithRetry(params: {
   sessionKey: string;
   initialReply?: string;
   maxWaitMs: number;
+  config?: OpenClawConfig;
+  workspaceId?: string;
 }): Promise<string | undefined> {
   let reply = params.initialReply?.trim() ? params.initialReply : undefined;
   if (reply) {
@@ -297,7 +326,11 @@ async function readLatestAssistantReplyWithRetry(params: {
   const deadline = Date.now() + Math.max(0, Math.min(params.maxWaitMs, 15_000));
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 300));
-    const latest = await readLatestAssistantReply({ sessionKey: params.sessionKey });
+    const latest = await readLatestAssistantReply({
+      sessionKey: params.sessionKey,
+      config: params.config,
+      workspaceId: params.workspaceId,
+    });
     if (latest?.trim()) {
       return latest;
     }
@@ -368,6 +401,7 @@ export async function runSubagentAnnounceFlow(params: {
   childSessionKey: string;
   childRunId: string;
   requesterSessionKey: string;
+  workspaceId?: string;
   requesterOrigin?: DeliveryContext;
   requesterDisplayKey: string;
   task: string;
@@ -383,14 +417,15 @@ export async function runSubagentAnnounceFlow(params: {
 }): Promise<boolean> {
   let didAnnounce = false;
   let shouldDeleteChildSession = params.cleanup === "delete";
+  const scopedCfg = await loadScopedConfig(params.workspaceId);
   try {
     const requesterOrigin = normalizeDeliveryContext(params.requesterOrigin);
-    const childSessionId = (() => {
-      const entry = loadSessionEntryByKey(params.childSessionKey);
+    const childSessionId = (await (async () => {
+      const entry = await loadSessionEntryByKey(params.childSessionKey, params.workspaceId);
       return typeof entry?.sessionId === "string" && entry.sessionId.trim()
         ? entry.sessionId.trim()
         : undefined;
-    })();
+    })());
     const settleTimeoutMs = Math.min(Math.max(params.timeoutMs, 1), 120_000);
     let reply = params.roundOneReply;
     let outcome: SubagentRunOutcome | undefined = params.outcome;
@@ -445,7 +480,11 @@ export async function runSubagentAnnounceFlow(params: {
     }
 
     if (!reply) {
-      reply = await readLatestAssistantReply({ sessionKey: params.childSessionKey });
+      reply = await readLatestAssistantReply({
+        sessionKey: params.childSessionKey,
+        config: scopedCfg,
+        workspaceId: params.workspaceId,
+      });
     }
 
     if (!reply?.trim()) {
@@ -453,6 +492,8 @@ export async function runSubagentAnnounceFlow(params: {
         sessionKey: params.childSessionKey,
         initialReply: reply,
         maxWaitMs: params.timeoutMs,
+        config: scopedCfg,
+        workspaceId: params.workspaceId,
       });
     }
 
@@ -471,6 +512,7 @@ export async function runSubagentAnnounceFlow(params: {
       sessionKey: params.childSessionKey,
       startedAt: params.startedAt,
       endedAt: params.endedAt,
+      workspaceId: params.workspaceId,
     });
 
     // Build status label
@@ -504,6 +546,7 @@ export async function runSubagentAnnounceFlow(params: {
       triggerMessage,
       summaryLine: taskLabel,
       requesterOrigin,
+      workspaceId: params.workspaceId,
     });
     if (queued === "steered") {
       didAnnounce = true;
@@ -517,12 +560,16 @@ export async function runSubagentAnnounceFlow(params: {
     // Send to main agent - it will respond in its own voice
     let directOrigin = requesterOrigin;
     if (!directOrigin) {
-      const { entry } = loadRequesterSessionEntry(params.requesterSessionKey);
+      const { entry } = await loadRequesterSessionEntry(
+        params.requesterSessionKey,
+        params.workspaceId,
+      );
       directOrigin = deliveryContextFromSession(entry);
     }
     await callGateway({
+      config: scopedCfg,
       method: "agent",
-      params: {
+      params: withWorkspaceScope({
         sessionKey: params.requesterSessionKey,
         message: triggerMessage,
         deliver: true,
@@ -534,7 +581,7 @@ export async function runSubagentAnnounceFlow(params: {
             ? String(directOrigin.threadId)
             : undefined,
         idempotencyKey: crypto.randomUUID(),
-      },
+      }, params.workspaceId),
       expectFinal: true,
       timeoutMs: 60_000,
     });
@@ -548,8 +595,12 @@ export async function runSubagentAnnounceFlow(params: {
     if (params.label) {
       try {
         await callGateway({
+          config: scopedCfg,
           method: "sessions.patch",
-          params: { key: params.childSessionKey, label: params.label },
+          params: withWorkspaceScope(
+            { key: params.childSessionKey, label: params.label },
+            params.workspaceId,
+          ),
           timeoutMs: 10_000,
         });
       } catch {
@@ -559,8 +610,12 @@ export async function runSubagentAnnounceFlow(params: {
     if (shouldDeleteChildSession) {
       try {
         await callGateway({
+          config: scopedCfg,
           method: "sessions.delete",
-          params: { key: params.childSessionKey, deleteTranscript: true },
+          params: withWorkspaceScope(
+            { key: params.childSessionKey, deleteTranscript: true },
+            params.workspaceId,
+          ),
           timeoutMs: 10_000,
         });
       } catch {

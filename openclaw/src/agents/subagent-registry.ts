@@ -13,6 +13,7 @@ export type SubagentRunRecord = {
   runId: string;
   childSessionKey: string;
   requesterSessionKey: string;
+  workspaceId?: string;
   requesterOrigin?: DeliveryContext;
   requesterDisplayKey: string;
   task: string;
@@ -66,6 +67,7 @@ function resumeSubagentRun(runId: string) {
       childSessionKey: entry.childSessionKey,
       childRunId: entry.runId,
       requesterSessionKey: entry.requesterSessionKey,
+      workspaceId: entry.workspaceId,
       requesterOrigin,
       requesterDisplayKey: entry.requesterDisplayKey,
       task: entry.task,
@@ -169,7 +171,9 @@ async function sweepSubagentRuns() {
     try {
       await callGateway({
         method: "sessions.delete",
-        params: { key: entry.childSessionKey, deleteTranscript: true },
+        params: entry.workspaceId
+          ? { key: entry.childSessionKey, deleteTranscript: true, workspaceId: entry.workspaceId }
+          : { key: entry.childSessionKey, deleteTranscript: true },
         timeoutMs: 10_000,
       });
     } catch {
@@ -227,6 +231,7 @@ function ensureListener() {
       childSessionKey: entry.childSessionKey,
       childRunId: entry.runId,
       requesterSessionKey: entry.requesterSessionKey,
+      workspaceId: entry.workspaceId,
       requesterOrigin,
       requesterDisplayKey: entry.requesterDisplayKey,
       task: entry.task,
@@ -283,6 +288,7 @@ export function registerSubagentRun(params: {
   runId: string;
   childSessionKey: string;
   requesterSessionKey: string;
+  workspaceId?: string;
   requesterOrigin?: DeliveryContext;
   requesterDisplayKey: string;
   task: string;
@@ -300,6 +306,7 @@ export function registerSubagentRun(params: {
     runId: params.runId,
     childSessionKey: params.childSessionKey,
     requesterSessionKey: params.requesterSessionKey,
+    workspaceId: params.workspaceId,
     requesterOrigin,
     requesterDisplayKey: params.requesterDisplayKey,
     task: params.task,
@@ -371,6 +378,7 @@ async function waitForSubagentCompletion(runId: string, waitTimeoutMs: number) {
       childSessionKey: entry.childSessionKey,
       childRunId: entry.runId,
       requesterSessionKey: entry.requesterSessionKey,
+      workspaceId: entry.workspaceId,
       requesterOrigin,
       requesterDisplayKey: entry.requesterDisplayKey,
       task: entry.task,

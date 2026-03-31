@@ -4,7 +4,11 @@ import type { AnyAgentTool } from "./common.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import { loadConfig } from "../../config/config.js";
 import { callGateway } from "../../gateway/call.js";
-import { isSubagentSessionKey, resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
+import {
+  isSubagentSessionKey,
+  normalizeAgentId,
+  resolveAgentIdFromSessionKey,
+} from "../../routing/session-key.js";
 import { jsonResult, readStringArrayParam } from "./common.js";
 import {
   createAgentToAgentPolicy,
@@ -34,6 +38,7 @@ export function createSessionsListTool(opts?: {
   agentSessionKey?: string;
   config?: OpenClawConfig;
   sandboxed?: boolean;
+  requesterAgentIdOverride?: string;
 }): AnyAgentTool {
   return {
     label: "Sessions",
@@ -46,6 +51,7 @@ export function createSessionsListTool(opts?: {
       const workspaceId = resolveWorkspaceIdFromSessionToolOptions({
         agentSessionKey: opts?.agentSessionKey,
         config: cfg,
+        requesterAgentIdOverride: opts?.requesterAgentIdOverride,
       });
       const { mainKey, alias } = resolveMainSessionAlias(cfg);
       const visibility = resolveSandboxSessionToolsVisibility(cfg);
@@ -100,7 +106,9 @@ export function createSessionsListTool(opts?: {
       const sessions = Array.isArray(list?.sessions) ? list.sessions : [];
       const storePath = typeof list?.path === "string" ? list.path : undefined;
       const a2aPolicy = createAgentToAgentPolicy(cfg);
-      const requesterAgentId = resolveAgentIdFromSessionKey(requesterInternalKey);
+      const requesterAgentId = normalizeAgentId(
+        opts?.requesterAgentIdOverride ?? resolveAgentIdFromSessionKey(requesterInternalKey),
+      );
       const rows: SessionListRow[] = [];
 
       for (const entry of sessions) {

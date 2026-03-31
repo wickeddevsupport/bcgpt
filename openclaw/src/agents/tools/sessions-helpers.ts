@@ -46,6 +46,54 @@ function normalizeKey(value?: string) {
   return trimmed ? trimmed : undefined;
 }
 
+const WORKSPACE_PATH_RE = /(?:^|[\\/])workspaces[\\/]([^\\/]+)(?:[\\/]|$)/i;
+
+function trimWorkspaceId(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function extractWorkspaceIdFromPath(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const match = WORKSPACE_PATH_RE.exec(value.trim());
+  const workspaceId = match?.[1]?.trim();
+  return workspaceId || undefined;
+}
+
+function resolveWorkspaceIdFromScopedConfig(cfg: OpenClawConfig): string | undefined {
+  const explicitPathWorkspaceId =
+    extractWorkspaceIdFromPath(cfg.session?.store) ??
+    extractWorkspaceIdFromPath(cfg.cron?.store) ??
+    extractWorkspaceIdFromPath(cfg.agents?.defaults?.workspace);
+  if (explicitPathWorkspaceId) {
+    return explicitPathWorkspaceId;
+  }
+
+  const workspaceIds = new Set<string>();
+  for (const entry of cfg.agents?.list ?? []) {
+    const explicitWorkspaceId = trimWorkspaceId((entry as { workspaceId?: unknown }).workspaceId);
+    if (explicitWorkspaceId) {
+      workspaceIds.add(explicitWorkspaceId);
+      continue;
+    }
+    const derivedWorkspaceId =
+      extractWorkspaceIdFromPath(entry?.workspace) ?? extractWorkspaceIdFromPath(entry?.agentDir);
+    if (derivedWorkspaceId) {
+      workspaceIds.add(derivedWorkspaceId);
+    }
+  }
+
+  if (workspaceIds.size === 1) {
+    return Array.from(workspaceIds)[0];
+  }
+  return undefined;
+}
+
 export function resolveMainSessionAlias(cfg: OpenClawConfig) {
   const mainKey = normalizeMainKey(cfg.session?.mainKey);
   const scope = cfg.session?.scope ?? "per-sender";
@@ -85,10 +133,10 @@ export function resolveWorkspaceIdFromSessionToolOptions(opts?: {
       ? resolveSessionAgentId({ sessionKey: opts.agentSessionKey, config: cfg })
       : undefined;
   if (!agentId) {
-    return undefined;
+    return resolveWorkspaceIdFromScopedConfig(cfg);
   }
   const workspaceId = resolveAgentConfig(cfg, agentId)?.workspaceId?.trim();
-  return workspaceId || undefined;
+  return workspaceId || resolveWorkspaceIdFromScopedConfig(cfg);
 }
 
 export function withWorkspaceScope<T extends Record<string, unknown>>(

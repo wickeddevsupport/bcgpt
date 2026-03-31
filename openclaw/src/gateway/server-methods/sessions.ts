@@ -76,7 +76,7 @@ function resolveWorkspaceSessionAgentIds(
 ): Set<string> | null {
   const workspaceId = resolveEffectiveRequestWorkspaceId(client ?? null, params) ?? "";
   if (!workspaceId) {
-    return !client || isSuperAdmin(client) ? null : new Set<string>();
+    return null;
   }
   const { agents } = listAgentsForGateway(cfg);
   return new Set(
@@ -370,14 +370,18 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     }
     const p = params;
     const cfg = await loadSessionsConfigForClient(client, p);
+    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client, p);
 
-    const resolved = resolveSessionKeyFromResolveParams({ cfg, p });
+    const resolved = resolveSessionKeyFromResolveParams({
+      cfg,
+      p,
+      allowedAgentIds: workspaceAgentIds,
+    });
     if (!resolved.ok) {
       respond(false, undefined, resolved.error);
       return;
     }
-    
-    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client, p);
+
     if (workspaceAgentIds) {
       const target = resolveGatewaySessionStoreTarget({ cfg, key: resolved.key });
       if (!workspaceAgentIds.has(target.agentId)) {

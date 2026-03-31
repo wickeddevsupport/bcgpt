@@ -350,7 +350,7 @@ describe("gateway agent handler", () => {
       respond,
       context: makeContext(),
       req: { type: "req", id: "ws-2", method: "agent" },
-      client: null,
+      client: { connect: { client: { id: "gateway-client" } } } as any,
       isWebchatConnect: () => false,
     });
 

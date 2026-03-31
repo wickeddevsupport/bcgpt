@@ -20,6 +20,7 @@ import {
 import {
   buildAgentMainSessionKey,
   DEFAULT_AGENT_ID,
+  normalizeAgentId,
   resolveAgentIdFromSessionKey,
 } from "../../routing/session-key.js";
 import { applyModelOverrideToSessionEntry } from "../../sessions/model-overrides.js";
@@ -251,6 +252,7 @@ async function resolveModelOverride(params: {
 export function createSessionStatusTool(opts?: {
   agentSessionKey?: string;
   config?: OpenClawConfig;
+  requesterAgentIdOverride?: string;
 }): AnyAgentTool {
   return {
     label: "Session Status",
@@ -270,8 +272,10 @@ export function createSessionStatusTool(opts?: {
         throw new Error("sessionKey required");
       }
 
-      const requesterAgentId = resolveAgentIdFromSessionKey(
-        opts?.agentSessionKey ?? requestedKeyRaw,
+      const requesterAgentId = normalizeAgentId(
+        opts?.requesterAgentIdOverride ?? resolveAgentIdFromSessionKey(
+          opts?.agentSessionKey ?? requestedKeyRaw,
+        ),
       );
       const ensureAgentAccess = (targetAgentId: string) => {
         if (targetAgentId === requesterAgentId) {

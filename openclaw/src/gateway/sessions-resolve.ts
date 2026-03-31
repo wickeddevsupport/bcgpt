@@ -18,6 +18,7 @@ export type SessionsResolveResult = { ok: true; key: string } | { ok: false; err
 export function resolveSessionKeyFromResolveParams(params: {
   cfg: OpenClawConfig;
   p: SessionsResolveParams;
+  allowedAgentIds?: ReadonlySet<string> | null;
 }): SessionsResolveResult {
   const { cfg, p } = params;
 
@@ -45,6 +46,12 @@ export function resolveSessionKeyFromResolveParams(params: {
 
   if (hasKey) {
     const target = resolveGatewaySessionStoreTarget({ cfg, key });
+    if (params.allowedAgentIds && !params.allowedAgentIds.has(target.agentId)) {
+      return {
+        ok: false,
+        error: errorShape(ErrorCodes.INVALID_REQUEST, `No session found: ${key}`),
+      };
+    }
     const store = loadSessionStore(target.storePath);
     const existingKey = target.storeKeys.find((candidate) => store[candidate]);
     if (!existingKey) {
@@ -57,7 +64,9 @@ export function resolveSessionKeyFromResolveParams(params: {
   }
 
   if (hasSessionId) {
-    const { storePath, store } = loadCombinedSessionStoreForGateway(cfg);
+    const { storePath, store } = loadCombinedSessionStoreForGateway(cfg, {
+      agentIds: params.allowedAgentIds,
+    });
     const list = listSessionsFromStore({
       cfg,
       storePath,
@@ -101,7 +110,9 @@ export function resolveSessionKeyFromResolveParams(params: {
     };
   }
 
-  const { storePath, store } = loadCombinedSessionStoreForGateway(cfg);
+  const { storePath, store } = loadCombinedSessionStoreForGateway(cfg, {
+    agentIds: params.allowedAgentIds,
+  });
   const list = listSessionsFromStore({
     cfg,
     storePath,

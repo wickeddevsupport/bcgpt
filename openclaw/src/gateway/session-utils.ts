@@ -278,6 +278,30 @@ function listConfiguredAgentIds(cfg: OpenClawConfig): string[] {
   return sorted;
 }
 
+function normalizeAllowedAgentIds(agentIds?: Iterable<string> | null): Set<string> | null {
+  if (!agentIds) {
+    return null;
+  }
+  const normalized = new Set<string>();
+  for (const agentId of agentIds) {
+    const id = normalizeAgentId(agentId);
+    if (id) {
+      normalized.add(id);
+    }
+  }
+  return normalized;
+}
+
+function shouldIncludeCombinedSessionAgent(
+  agentId: string,
+  allowedAgentIds: Set<string> | null,
+): boolean {
+  if (!allowedAgentIds) {
+    return true;
+  }
+  return allowedAgentIds.has(normalizeAgentId(agentId));
+}
+
 export function listAgentsForGateway(cfg: OpenClawConfig): {
   defaultId: string;
   mainKey: string;
@@ -469,11 +493,15 @@ function mergeSessionEntryIntoCombined(params: {
   }
 }
 
-export function loadCombinedSessionStoreForGateway(cfg: OpenClawConfig): {
+export function loadCombinedSessionStoreForGateway(
+  cfg: OpenClawConfig,
+  opts?: { agentIds?: Iterable<string> | null },
+): {
   storePath: string;
   store: Record<string, SessionEntry>;
 } {
   const storeConfig = cfg.session?.store;
+  const allowedAgentIds = normalizeAllowedAgentIds(opts?.agentIds);
   if (storeConfig && !isStorePathTemplate(storeConfig)) {
     const storePath = resolveStorePath(storeConfig);
     const defaultAgentId = normalizeAgentId(resolveDefaultAgentId(cfg));
@@ -481,17 +509,23 @@ export function loadCombinedSessionStoreForGateway(cfg: OpenClawConfig): {
     const combined: Record<string, SessionEntry> = {};
     for (const [key, entry] of Object.entries(store)) {
       const canonicalKey = canonicalizeSessionKeyForAgent(defaultAgentId, key);
+      const agentId = resolveSessionStoreAgentId(cfg, canonicalKey);
+      if (!shouldIncludeCombinedSessionAgent(agentId, allowedAgentIds)) {
+        continue;
+      }
       mergeSessionEntryIntoCombined({
         combined,
         entry,
-        agentId: defaultAgentId,
+        agentId,
         canonicalKey,
       });
     }
     return { storePath, store: combined };
   }
 
-  const agentIds = listConfiguredAgentIds(cfg);
+  const agentIds = listConfiguredAgentIds(cfg).filter((agentId) =>
+    shouldIncludeCombinedSessionAgent(agentId, allowedAgentIds),
+  );
   const combined: Record<string, SessionEntry> = {};
   for (const agentId of agentIds) {
     const storePath = resolveStorePath(storeConfig, { agentId });

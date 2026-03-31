@@ -31,6 +31,14 @@ describe("extractAssistantText", () => {
     expect(extractAssistantText(message)).toBe("Hi there");
   });
 
+  it("extracts output_text blocks", () => {
+    const message = {
+      role: "assistant",
+      content: [{ type: "output_text", text: "Hi from output_text" }],
+    };
+    expect(extractAssistantText(message)).toBe("Hi from output_text");
+  });
+
   it("rewrites error-ish assistant text only when the transcript marks it as an error", () => {
     const message = {
       role: "assistant",
