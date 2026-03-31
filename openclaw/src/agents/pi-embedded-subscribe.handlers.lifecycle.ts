@@ -4,6 +4,9 @@ import { emitAgentEvent } from "../infra/agent-events.js";
 import { createInlineCodeState } from "../markdown/code-spans.js";
 
 export function handleAgentStart(ctx: EmbeddedPiSubscribeContext) {
+  if (ctx.state.pendingCompactionRetry > 0) {
+    ctx.clearCompactionRetryResumeWatch();
+  }
   ctx.log.debug(`embedded run agent start: runId=${ctx.params.runId}`);
   emitAgentEvent({
     runId: ctx.params.runId,
@@ -44,6 +47,7 @@ export function handleAutoCompactionEnd(
   if (willRetry) {
     ctx.noteCompactionRetry();
     ctx.resetForCompactionRetry();
+    ctx.scheduleCompactionRetryResumeWatch();
     ctx.log.debug(`embedded run compaction retry: runId=${ctx.params.runId}`);
   } else {
     // The final non-retrying compaction end is the terminal signal for the

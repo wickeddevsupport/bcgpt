@@ -98,6 +98,88 @@ describe("subscribeEmbeddedPiSession", () => {
     expect(resolved).toBe(true);
   });
 
+  it("attempts a recovery continue when compaction retry never resumes", async () => {
+    vi.useFakeTimers();
+    try {
+      const listeners: SessionEventHandler[] = [];
+      const continueMock = vi.fn().mockImplementation(async () => {
+        for (const listener of listeners) {
+          listener({ type: "agent_start" });
+          listener({ type: "agent_end" });
+        }
+      });
+      const session = {
+        isStreaming: false,
+        continue: continueMock,
+        subscribe: (listener: SessionEventHandler) => {
+          listeners.push(listener);
+          return () => {};
+        },
+      } as unknown as Parameters<typeof subscribeEmbeddedPiSession>[0]["session"];
+
+      const subscription = subscribeEmbeddedPiSession({
+        session,
+        runId: "run-recover",
+      });
+
+      for (const listener of listeners) {
+        listener({ type: "auto_compaction_end", willRetry: true });
+      }
+
+      let resolved = false;
+      const waitPromise = subscription.waitForCompactionRetry().then(() => {
+        resolved = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(1500);
+      await waitPromise;
+
+      expect(continueMock).toHaveBeenCalledTimes(1);
+      expect(resolved).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects when stalled compaction retry recovery cannot resume", async () => {
+    vi.useFakeTimers();
+    try {
+      const listeners: SessionEventHandler[] = [];
+      const continueMock = vi
+        .fn()
+        .mockRejectedValue(new Error("Cannot continue from message role: assistant"));
+      const session = {
+        isStreaming: false,
+        continue: continueMock,
+        subscribe: (listener: SessionEventHandler) => {
+          listeners.push(listener);
+          return () => {};
+        },
+      } as unknown as Parameters<typeof subscribeEmbeddedPiSession>[0]["session"];
+
+      const subscription = subscribeEmbeddedPiSession({
+        session,
+        runId: "run-stalled",
+      });
+
+      for (const listener of listeners) {
+        listener({ type: "auto_compaction_end", willRetry: true });
+      }
+
+      const waitPromise = subscription.waitForCompactionRetry();
+      const rejection = expect(waitPromise).rejects.toThrow(
+        "Compaction retry stalled before resume: Cannot continue from message role: assistant",
+      );
+
+      await vi.advanceTimersByTimeAsync(1500);
+
+      await rejection;
+      expect(continueMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("emits compaction events on the agent event bus", async () => {
     let handler: ((evt: unknown) => void) | undefined;
     const session: StubSession = {
