@@ -180,9 +180,11 @@ describe("chat view", () => {
 
   it("shows a working badge from server session state after refresh", () => {
     const container = document.createElement("div");
+    const onAbort = vi.fn();
     render(
       renderChat(
         createProps({
+          onAbort,
           sessions: {
             ts: 0,
             path: "",
@@ -210,6 +212,12 @@ describe("chat view", () => {
       (btn) => btn.textContent?.includes("Queue"),
     );
     expect(queueButton?.textContent).toContain("Queue");
+    const stopButton = Array.from(container.querySelectorAll("button")).find(
+      (btn) => btn.textContent?.trim() === "Stop",
+    );
+    expect(stopButton).not.toBeUndefined();
+    stopButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onAbort).toHaveBeenCalledTimes(1);
   });
 
   it("stays busy while reconnecting to an active run", () => {
@@ -352,8 +360,38 @@ describe("chat view", () => {
       (btn) => btn.getAttribute("title") === "Refresh chat history",
     );
     expect(refreshButton).not.toBeUndefined();
+    expect(refreshButton?.textContent).toContain("Refresh");
     refreshButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("updates the compose placeholder when the server reports an active run", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          sessions: {
+            ts: 0,
+            path: "",
+            count: 1,
+            defaults: { model: null, contextTokens: null },
+            sessions: [
+              {
+                key: "main",
+                kind: "direct",
+                updatedAt: Date.now(),
+                hasActiveRun: true,
+                activeRunId: "run-123",
+              },
+            ],
+          },
+        }),
+      ),
+      container,
+    );
+
+    const input = container.querySelector("textarea");
+    expect(input?.getAttribute("placeholder")).toContain("queue it");
   });
 
   it("renders a compact agent header when expanded", () => {

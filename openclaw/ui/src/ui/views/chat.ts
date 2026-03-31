@@ -167,6 +167,10 @@ function resolveSessionHasActiveRun(props: ChatProps) {
   return activeSession?.hasActiveRun === true || Boolean(activeSession?.activeRunId);
 }
 
+function resolveCanAbort(props: ChatProps, sessionHasActiveRun: boolean): boolean {
+  return Boolean(props.onAbort) && (Boolean(props.canAbort) || sessionHasActiveRun);
+}
+
 function resolveChatStatus(props: ChatProps): ChatStatusState {
   const sessionHasActiveRun = resolveSessionHasActiveRun(props);
 
@@ -431,11 +435,11 @@ function renderAttachmentPreview(props: ChatProps) {
 }
 
 export function renderChat(props: ChatProps) {
-  const canCompose = props.connected;
   const sessionHasActiveRun = resolveSessionHasActiveRun(props);
   const isBusy = props.sending || props.stream !== null;
   const queuesNextMessage = isBusy || Boolean(props.activeRunId) || sessionHasActiveRun;
-  const canAbort = Boolean(props.canAbort && props.onAbort);
+  const canAbort = resolveCanAbort(props, sessionHasActiveRun);
+  const canCompose = props.connected;
   const activeSession = props.sessions?.sessions?.find((row) => row.key === props.sessionKey);
   const reasoningLevel = activeSession?.reasoningLevel ?? "off";
   // Show reasoning whenever the toggle is on, regardless of session's configured reasoningLevel.
@@ -454,7 +458,9 @@ export function renderChat(props: ChatProps) {
 
   const hasAttachments = (props.attachments?.length ?? 0) > 0;
   const composePlaceholder = props.connected
-    ? hasAttachments
+    ? queuesNextMessage
+      ? "Current response is still running. Type a follow-up to queue it..."
+      : hasAttachments
       ? "Add a message or attach more files..."
       : "Message (↩ to send, Shift+↩ for newline — drag or paste images/PDFs/code)"
     : "Connect to the gateway to start chatting…";
@@ -734,6 +740,7 @@ export function renderChat(props: ChatProps) {
               @click=${props.onRefresh}
             >
               ${props.refreshing ? icons.loader : icons.scrollText}
+              <span>${props.refreshing ? "Refreshing" : "Refresh"}</span>
             </button>
             <button
               class="btn"

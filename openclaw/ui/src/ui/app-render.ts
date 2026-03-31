@@ -2,7 +2,7 @@ import { html, nothing } from "lit";
 import type { AppViewState } from "./app-view-state.ts";
 import type { UsageState } from "./controllers/usage.ts";
 import { parseAgentSessionKey } from "../../../src/routing/session-key.js";
-import { refreshChatAvatar } from "./app-chat.ts";
+import { refreshChat } from "./app-chat.ts";
 import {
   activateChatSession,
   buildNewAgentSessionKey,
@@ -16,7 +16,6 @@ import { loadAgentIdentities, loadAgentIdentity } from "./controllers/agent-iden
 import { loadAgentSkills } from "./controllers/agent-skills.ts";
 import { createAgentListRow, loadAgents, upsertAgentsListResult } from "./controllers/agents.ts";
 import { loadChannels } from "./controllers/channels.ts";
-import { loadChatHistory } from "./controllers/chat.ts";
 import {
   applyConfig,
   loadConfig,
@@ -607,7 +606,7 @@ export function renderApp(state: AppViewState) {
       state.chatManualRefreshInFlight = true;
       state.resetToolStream();
       try {
-        await Promise.all([loadChatHistory(state), refreshChatAvatar(state)]);
+        await refreshChat(state, { scheduleScroll: false });
       } finally {
         state.chatManualRefreshInFlight = false;
       }
