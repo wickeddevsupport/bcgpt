@@ -247,7 +247,10 @@ function nextChatSeq(context: { agentRunSeq: Map<string, number> }, runId: strin
 }
 
 function broadcastChatFinal(params: {
-  context: Pick<GatewayRequestContext, "broadcast" | "nodeSendToSession" | "agentRunSeq">;
+  context: Pick<
+    GatewayRequestContext,
+    "broadcast" | "nodeSendToSession" | "agentRunSeq" | "chatRunBuffers" | "chatDeltaSentAt"
+  >;
   runId: string;
   sessionKey: string;
   scopeKey?: string;
@@ -262,7 +265,48 @@ function broadcastChatFinal(params: {
     state: "final" as const,
     message: params.message,
   };
+  params.context.chatRunBuffers.delete(params.runId);
+  params.context.chatDeltaSentAt.delete(params.runId);
   params.context.broadcast("chat", payload);
+  params.context.nodeSendToSession(params.sessionKey, "chat", payload);
+}
+
+function broadcastChatDelta(params: {
+  context: Pick<
+    GatewayRequestContext,
+    "broadcast" | "nodeSendToSession" | "agentRunSeq" | "chatRunBuffers" | "chatDeltaSentAt"
+  >;
+  runId: string;
+  sessionKey: string;
+  scopeKey?: string;
+  text: string;
+}) {
+  const nextText = params.text;
+  if (!nextText) {
+    return;
+  }
+  const accumulated = (params.context.chatRunBuffers.get(params.runId) ?? "") + nextText;
+  params.context.chatRunBuffers.set(params.runId, accumulated);
+  const now = Date.now();
+  const last = params.context.chatDeltaSentAt.get(params.runId) ?? 0;
+  if (now - last < 50) {
+    return;
+  }
+  params.context.chatDeltaSentAt.set(params.runId, now);
+  const seq = nextChatSeq({ agentRunSeq: params.context.agentRunSeq }, params.runId);
+  const payload = {
+    runId: params.runId,
+    sessionKey: params.sessionKey,
+    scopeKey: params.scopeKey,
+    seq,
+    state: "delta" as const,
+    message: {
+      role: "assistant" as const,
+      content: [{ type: "text" as const, text: accumulated }],
+      timestamp: now,
+    },
+  };
+  params.context.broadcast("chat", payload, { dropIfSlow: true });
   params.context.nodeSendToSession(params.sessionKey, "chat", payload);
 }
 
@@ -716,6 +760,20 @@ export const chatHandlers: GatewayRequestHandlers = {
           context.logGateway.warn(`webchat dispatch failed: ${formatForLog(err)}`);
         },
         deliver: async (payload, info) => {
+          if (info.kind === "block") {
+            const text = payload.text ?? "";
+            if (!text) {
+              return;
+            }
+            broadcastChatDelta({
+              context,
+              runId: clientRunId,
+              sessionKey: rawSessionKey,
+              scopeKey,
+              text,
+            });
+            return;
+          }
           if (info.kind !== "final") {
             return;
           }
@@ -765,11 +823,13 @@ export const chatHandlers: GatewayRequestHandlers = {
       })
         .then(() => {
           context.chatAbortControllers.delete(clientRunId);
-          const combinedReply = finalReplyParts
-            .map((part) => part.trim())
-            .filter(Boolean)
-            .join("\n\n")
-            .trim();
+          const combinedReply =
+            finalReplyParts
+              .map((part) => part.trim())
+              .filter(Boolean)
+              .join("\n\n")
+              .trim() ||
+            (context.chatRunBuffers.get(clientRunId)?.trim() ?? "");
           if (combinedReply) {
             let message: Record<string, unknown> | undefined;
             const { storePath: latestStorePath, entry: latestEntry } = loadSessionEntryForConfig(

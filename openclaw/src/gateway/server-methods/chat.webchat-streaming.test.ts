@@ -60,7 +60,7 @@ async function flushAsyncWork() {
 }
 
 describe("chat.send webchat streaming", () => {
-  it("registers the runtime run id, enables block streaming, and broadcasts fallback finals", async () => {
+  it("registers the runtime run id, enables block streaming, broadcasts deltas, and broadcasts fallback finals", async () => {
     dispatchInboundMessageMock.mockReset();
     dispatchInboundMessageMock.mockImplementation(async ({ dispatcher, replyOptions }) => {
       replyOptions?.onAgentRunStart?.("agent-run-1");
@@ -104,6 +104,22 @@ describe("chat.send webchat streaming", () => {
       scopeKey: "global",
     });
     expect(context.registerToolEventRecipient).toHaveBeenCalledWith("agent-run-1", "conn-1");
+
+    const chatDeltaBroadcast = vi
+      .mocked(context.broadcast)
+      .mock.calls.find((call) => call[0] === "chat" && (call[1] as { state?: string }).state === "delta");
+    expect(chatDeltaBroadcast).toBeTruthy();
+    expect(chatDeltaBroadcast?.[1]).toEqual(
+      expect.objectContaining({
+        runId: "idem-1",
+        sessionKey: "main",
+        state: "delta",
+        message: expect.objectContaining({
+          role: "assistant",
+          content: [{ type: "text", text: "Chunk 1" }],
+        }),
+      }),
+    );
 
     const chatBroadcast = vi
       .mocked(context.broadcast)
