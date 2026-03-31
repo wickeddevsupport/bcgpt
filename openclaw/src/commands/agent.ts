@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import type { AgentCommandOpts } from "./agent/types.js";
 import {
   listAgentIds,
@@ -39,6 +40,7 @@ import { formatCliCommand } from "../cli/command-format.js";
 import { type CliDeps, createDefaultDeps } from "../cli/deps.js";
 import { loadConfig } from "../config/config.js";
 import {
+  ensureSessionTranscript,
   resolveAgentIdFromSessionKey,
   resolveSessionFilePath,
   type SessionEntry,
@@ -60,6 +62,23 @@ import { deliverAgentCommandResult } from "./agent/delivery.js";
 import { resolveAgentRunContext } from "./agent/run-context.js";
 import { updateSessionStoreAfterAgentRun } from "./agent/session-store.js";
 import { resolveSession } from "./agent/session.js";
+
+function resolveReplySummary(result: Awaited<ReturnType<typeof runEmbeddedPiAgent>>) {
+  const replyPayload = (result.payloads ?? []).find(
+    (payload) =>
+      payload.isError !== true &&
+      typeof payload.text === "string" &&
+      payload.text.trim().length > 0,
+  );
+  const replyDisposition = result.meta.replyDisposition ?? (replyPayload?.text ? "reply" : "unavailable");
+  return {
+    replyDisposition,
+    reply:
+      replyDisposition === "reply"
+        ? result.meta.replyText?.trim() || replyPayload?.text?.trim()
+        : undefined,
+  };
+}
 
 export async function agentCommand(
   opts: AgentCommandOpts,
@@ -368,6 +387,15 @@ export async function agentCommand(
     const sessionFile = resolveSessionFilePath(sessionId, sessionEntry, {
       agentId: sessionAgentId,
     });
+    sessionEntry =
+      (await ensureSessionTranscript({
+        sessionId,
+        sessionFile,
+        sessionKey,
+        entry: sessionEntry,
+        store: sessionStore,
+        storePath,
+      })) ?? sessionEntry;
 
     const startedAt = Date.now();
     let lifecycleEnded = false;
@@ -504,6 +532,7 @@ export async function agentCommand(
         cfg,
         contextTokensOverride: agentCfg?.contextTokens,
         sessionId,
+        sessionFile,
         sessionKey,
         storePath,
         sessionStore,
@@ -516,6 +545,21 @@ export async function agentCommand(
     }
 
     const payloads = result.payloads ?? [];
+    const transcriptStatus = fs.existsSync(sessionFile) ? "ready" : "missing";
+    const { reply, replyDisposition } = resolveReplySummary(result);
+    emitAgentEvent({
+      runId,
+      stream: "result",
+      data: {
+        sessionId,
+        sessionFile,
+        transcriptStatus,
+        reply,
+        replyDisposition,
+        didSendViaMessagingTool: result.didSendViaMessagingTool ?? false,
+        messagingToolSentTexts: result.messagingToolSentTexts ?? [],
+      },
+    });
     return await deliverAgentCommandResult({
       cfg,
       deps,

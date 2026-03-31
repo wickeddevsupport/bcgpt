@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import type { ThinkLevel } from "../../auto-reply/thinking.js";
+import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../../auto-reply/tokens.js";
 import type { RunEmbeddedPiAgentParams } from "./run/params.js";
 import type { EmbeddedPiAgentMeta, EmbeddedPiRunResult } from "./types.js";
 import { enqueueCommandInLane } from "../../process/command-queue.js";
@@ -60,6 +61,7 @@ import {
   sessionLikelyHasOversizedToolResults,
 } from "./tool-result-truncation.js";
 import { describeUnknownError } from "./utils.js";
+import { extractAssistantText } from "../pi-embedded-utils.js";
 
 type ApiKeyInfo = ResolvedProviderAuth;
 
@@ -879,6 +881,22 @@ export async function runEmbeddedPiAgent(
             toolResultFormat: resolvedToolResultFormat,
             inlineToolResultsAllowed: false,
           });
+          const replyPayload = payloads.find(
+            (payload) =>
+              payload.isError !== true &&
+              typeof payload.text === "string" &&
+              payload.text.trim().length > 0,
+          );
+          const rawAssistantText = attempt.lastAssistant
+            ? extractAssistantText(attempt.lastAssistant).trim()
+            : "";
+          const replyDisposition = attempt.didSendViaMessagingTool
+            ? "sent_via_messaging_tool"
+            : replyPayload?.text
+              ? "reply"
+              : rawAssistantText && isSilentReplyText(rawAssistantText, SILENT_REPLY_TOKEN)
+                ? "no_reply"
+                : "unavailable";
 
           log.debug(
             `embedded run done: runId=${params.runId} sessionId=${params.sessionId} durationMs=${Date.now() - started} aborted=${aborted}`,
@@ -900,6 +918,8 @@ export async function runEmbeddedPiAgent(
             payloads: payloads.length ? payloads : undefined,
             meta: {
               durationMs: Date.now() - started,
+              replyDisposition,
+              replyText: replyDisposition === "reply" ? replyPayload?.text?.trim() : undefined,
               agentMeta,
               aborted,
               systemPromptReport: attempt.systemPromptReport,

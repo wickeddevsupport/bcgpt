@@ -1,5 +1,6 @@
 import type { ImageContent } from "@mariozechner/pi-ai";
 import type { ThinkLevel } from "../auto-reply/thinking.js";
+import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import type { OpenClawConfig } from "../config/config.js";
 import type { EmbeddedPiRunResult } from "./pi-embedded-runner.js";
 import { resolveHeartbeatPrompt } from "../auto-reply/heartbeat.js";
@@ -286,12 +287,15 @@ export async function runCliAgent(params: {
     });
 
     const text = output.text?.trim();
-    const payloads = text ? [{ text }] : undefined;
+    const isSilentReply = text ? isSilentReplyText(text, SILENT_REPLY_TOKEN) : false;
+    const payloads = text && !isSilentReply ? [{ text }] : undefined;
 
     return {
       payloads,
       meta: {
         durationMs: Date.now() - started,
+        replyDisposition: isSilentReply ? "no_reply" : text ? "reply" : "unavailable",
+        replyText: text && !isSilentReply ? text : undefined,
         agentMeta: {
           sessionId: output.sessionId ?? sessionIdSent ?? params.sessionId ?? "",
           provider: params.provider,

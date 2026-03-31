@@ -91,6 +91,41 @@ describe("agentCommand", () => {
     });
   });
 
+  it("repairs rotated sessions by creating and persisting the current transcript", async () => {
+    await withTempHome(async (home) => {
+      const store = path.join(home, "sessions.json");
+      fs.mkdirSync(path.dirname(store), { recursive: true });
+      fs.writeFileSync(
+        store,
+        JSON.stringify(
+          {
+            main: {
+              sessionId: "stale-session",
+              updatedAt: 0,
+            },
+          },
+          null,
+          2,
+        ),
+      );
+      mockConfig(home, store);
+
+      await agentCommand({ message: "hello", sessionKey: "main" }, runtime);
+
+      const callArgs = vi.mocked(runEmbeddedPiAgent).mock.calls.at(-1)?.[0];
+      expect(callArgs?.sessionId).toBeTruthy();
+      expect(callArgs?.sessionId).not.toBe("stale-session");
+      expect(fs.existsSync(callArgs?.sessionFile ?? "")).toBe(true);
+
+      const saved = JSON.parse(fs.readFileSync(store, "utf-8")) as Record<
+        string,
+        { sessionId?: string; sessionFile?: string }
+      >;
+      expect(saved.main?.sessionId).toBe(callArgs?.sessionId);
+      expect(saved.main?.sessionFile).toBe(callArgs?.sessionFile);
+    });
+  });
+
   it("uses an explicit config override for workspace-scoped runs", async () => {
     await withTempHome(async (home) => {
       const globalStore = path.join(home, "global-sessions.json");

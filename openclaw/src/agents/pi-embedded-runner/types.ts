@@ -19,6 +19,8 @@ export type EmbeddedPiRunMeta = {
   durationMs: number;
   agentMeta?: EmbeddedPiAgentMeta;
   aborted?: boolean;
+  replyDisposition?: "reply" | "no_reply" | "sent_via_messaging_tool" | "unavailable";
+  replyText?: string;
   systemPromptReport?: SessionSystemPromptReport;
   error?: {
     kind: "context_overflow" | "compaction_failure" | "role_ordering" | "image_size";

@@ -541,10 +541,18 @@ export const agentHandlers: GatewayRequestHandlers = {
     }
     respond(true, {
       runId,
-      status: snapshot.status,
+      status: snapshot.status ?? "ok",
       startedAt: snapshot.startedAt,
       endedAt: snapshot.endedAt,
       error: snapshot.error,
+      resultReady: snapshot.resultReady ?? false,
+      reply: snapshot.reply,
+      replyDisposition: snapshot.replyDisposition,
+      sessionId: snapshot.sessionId,
+      sessionFile: snapshot.sessionFile,
+      transcriptStatus: snapshot.transcriptStatus,
+      didSendViaMessagingTool: snapshot.didSendViaMessagingTool,
+      messagingToolSentTexts: snapshot.messagingToolSentTexts,
     });
   },
 };

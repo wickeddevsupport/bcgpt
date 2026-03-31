@@ -74,6 +74,17 @@ describe("sessions_send gateway loopback", () => {
         timestamp: Date.now(),
       };
       await fs.appendFile(sessionFile, `${JSON.stringify({ message })}\n`, "utf8");
+      emitAgentEvent({
+        runId,
+        stream: "result",
+        data: {
+          sessionId,
+          sessionFile,
+          transcriptStatus: "ready",
+          reply: text,
+          replyDisposition: "reply",
+        },
+      });
 
       emitAgentEvent({
         runId,
@@ -137,6 +148,17 @@ describe("sessions_send label lookup", () => {
         content: [{ type: "text", text }],
       };
       await fs.appendFile(sessionFile, `${JSON.stringify({ message })}\n`, "utf8");
+      emitAgentEvent({
+        runId,
+        stream: "result",
+        data: {
+          sessionId,
+          sessionFile,
+          transcriptStatus: "ready",
+          reply: text,
+          replyDisposition: "reply",
+        },
+      });
 
       emitAgentEvent({
         runId,

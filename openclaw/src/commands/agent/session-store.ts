@@ -14,6 +14,7 @@ export async function updateSessionStoreAfterAgentRun(params: {
   cfg: OpenClawConfig;
   contextTokensOverride?: number;
   sessionId: string;
+  sessionFile: string;
   sessionKey: string;
   storePath: string;
   sessionStore: Record<string, SessionEntry>;
@@ -26,6 +27,7 @@ export async function updateSessionStoreAfterAgentRun(params: {
   const {
     cfg,
     sessionId,
+    sessionFile,
     sessionKey,
     storePath,
     sessionStore,
@@ -50,6 +52,7 @@ export async function updateSessionStoreAfterAgentRun(params: {
   const next: SessionEntry = {
     ...entry,
     sessionId,
+    sessionFile,
     updatedAt: Date.now(),
     modelProvider: providerUsed,
     model: modelUsed,

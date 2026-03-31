@@ -5,7 +5,7 @@ import { callGateway } from "../../gateway/call.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { AGENT_LANE_NESTED } from "../lanes.js";
-import { readLatestAssistantReply, runAgentStep } from "./agent-step.js";
+import { extractReplyFromAgentWait, runAgentStep } from "./agent-step.js";
 import { resolveAnnounceTarget } from "./sessions-announce-target.js";
 import {
   buildAgentToAgentAnnounceContext,
@@ -35,7 +35,13 @@ export async function runSessionsSendA2AFlow(params: {
     let latestReply = params.roundOneReply;
     if (!primaryReply && params.waitRunId) {
       const waitMs = Math.min(params.announceTimeoutMs, 60_000);
-      const wait = await callGateway<{ status: string }>({
+      const wait = await callGateway<{
+        status?: string;
+        reply?: string;
+        replyDisposition?: string;
+        resultReady?: boolean;
+        transcriptStatus?: string;
+      }>({
         config: params.config,
         method: "agent.wait",
         params: {
@@ -44,14 +50,8 @@ export async function runSessionsSendA2AFlow(params: {
         },
         timeoutMs: waitMs + 2000,
       });
-      if (wait?.status === "ok") {
-        primaryReply = await readLatestAssistantReply({
-          sessionKey: params.targetSessionKey,
-          config: params.config,
-          workspaceId: params.workspaceId,
-        });
-        latestReply = primaryReply;
-      }
+      primaryReply = extractReplyFromAgentWait(wait);
+      latestReply = primaryReply;
     }
     if (!latestReply) {
       return;

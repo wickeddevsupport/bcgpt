@@ -19,12 +19,10 @@ import { AGENT_LANE_NESTED } from "../lanes.js";
 import { jsonResult, readStringParam } from "./common.js";
 import {
   createAgentToAgentPolicy,
-  extractAssistantText,
   resolveInternalSessionKey,
   resolveMainSessionAlias,
   resolveSessionReference,
   resolveWorkspaceIdFromSessionToolOptions,
-  stripToolMessages,
   withWorkspaceScope,
 } from "./sessions-helpers.js";
 import { buildAgentToAgentMessageContext, resolvePingPongTurns } from "./sessions-send-helpers.js";
@@ -386,8 +384,19 @@ export function createSessionsSendTool(opts?: {
 
       let waitStatus: string | undefined;
       let waitError: string | undefined;
+      let waitReply: string | undefined;
+      let waitReplyDisposition: string | undefined;
+      let waitResultReady = false;
+      let waitTranscriptStatus: string | undefined;
       try {
-        const wait = await callGateway<{ status?: string; error?: string }>({
+        const wait = await callGateway<{
+          status?: string;
+          error?: string;
+          reply?: string;
+          replyDisposition?: string;
+          resultReady?: boolean;
+          transcriptStatus?: string;
+        }>({
           config: cfg,
           method: "agent.wait",
           params: {
@@ -398,6 +407,11 @@ export function createSessionsSendTool(opts?: {
         });
         waitStatus = typeof wait?.status === "string" ? wait.status : undefined;
         waitError = typeof wait?.error === "string" ? wait.error : undefined;
+        waitReply = typeof wait?.reply === "string" && wait.reply.trim() ? wait.reply.trim() : undefined;
+        waitReplyDisposition = typeof wait?.replyDisposition === "string" ? wait.replyDisposition : undefined;
+        waitResultReady = wait?.resultReady === true;
+        waitTranscriptStatus =
+          typeof wait?.transcriptStatus === "string" ? wait.transcriptStatus : undefined;
       } catch (err) {
         const messageText =
           err instanceof Error ? err.message : typeof err === "string" ? err : "error";
@@ -426,20 +440,38 @@ export function createSessionsSendTool(opts?: {
         });
       }
 
-      const history = await callGateway<{ messages: Array<unknown> }>({
-        config: cfg,
-        method: "chat.history",
-        params: withWorkspaceScope({ sessionKey: resolvedKey, limit: 50 }, workspaceId),
-      });
-      const filtered = stripToolMessages(Array.isArray(history?.messages) ? history.messages : []);
-      const last = filtered.length > 0 ? filtered[filtered.length - 1] : undefined;
-      const reply = last ? extractAssistantText(last) : undefined;
-      startA2AFlow(reply ?? undefined);
+      if (!waitResultReady) {
+        return jsonResult({
+          runId,
+          status: "error",
+          error: "Agent run completed but no current-run result was published.",
+          sessionKey: displayKey,
+        });
+      }
+      if (waitTranscriptStatus === "missing") {
+        return jsonResult({
+          runId,
+          status: "error",
+          error: "Agent run completed but the current session transcript is missing.",
+          sessionKey: displayKey,
+        });
+      }
+      if (waitReplyDisposition === "unavailable") {
+        return jsonResult({
+          runId,
+          status: "error",
+          error: "Agent run completed but no current-run reply was retrievable.",
+          sessionKey: displayKey,
+        });
+      }
+
+      startA2AFlow(waitReplyDisposition === "reply" ? waitReply : undefined, runId);
 
       return jsonResult({
         runId,
         status: "ok",
-        reply,
+        reply: waitReply,
+        replyDisposition: waitReplyDisposition,
         sessionKey: displayKey,
         delivery,
       });

@@ -3,11 +3,24 @@ import type { OpenClawConfig } from "../../config/config.js";
 import { callGateway } from "../../gateway/call.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../../utils/message-channel.js";
 import { AGENT_LANE_NESTED } from "../lanes.js";
-import {
-  extractAssistantText,
-  stripToolMessages,
-  withWorkspaceScope,
-} from "./sessions-helpers.js";
+import { extractAssistantText, stripToolMessages, withWorkspaceScope } from "./sessions-helpers.js";
+
+export function extractReplyFromAgentWait(wait: {
+  status?: string;
+  reply?: string;
+  replyDisposition?: string;
+  resultReady?: boolean;
+  transcriptStatus?: string;
+}): string | undefined {
+  if (wait.status !== "ok" || wait.resultReady !== true || wait.transcriptStatus === "missing") {
+    return undefined;
+  }
+  if (wait.replyDisposition !== "reply") {
+    return undefined;
+  }
+  const reply = wait.reply?.trim();
+  return reply ? reply : undefined;
+}
 
 export async function readLatestAssistantReply(params: {
   sessionKey: string;
@@ -57,7 +70,13 @@ export async function runAgentStep(params: {
   const stepRunId = typeof response?.runId === "string" && response.runId ? response.runId : "";
   const resolvedRunId = stepRunId || stepIdem;
   const stepWaitMs = Math.min(params.timeoutMs, 60_000);
-  const wait = await callGateway<{ status?: string }>({
+  const wait = await callGateway<{
+    status?: string;
+    reply?: string;
+    replyDisposition?: string;
+    resultReady?: boolean;
+    transcriptStatus?: string;
+  }>({
     method: "agent.wait",
     params: {
       runId: resolvedRunId,
@@ -68,9 +87,5 @@ export async function runAgentStep(params: {
   if (wait?.status !== "ok") {
     return undefined;
   }
-  return await readLatestAssistantReply({
-    sessionKey: params.sessionKey,
-    config: params.config,
-    workspaceId: params.workspaceId,
-  });
+  return extractReplyFromAgentWait(wait);
 }

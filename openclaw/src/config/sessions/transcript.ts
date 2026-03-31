@@ -75,6 +75,54 @@ async function ensureSessionHeader(params: {
   await fs.promises.writeFile(params.sessionFile, `${JSON.stringify(header)}\n`, "utf-8");
 }
 
+export async function ensureSessionTranscript(params: {
+  sessionId: string;
+  sessionFile: string;
+  sessionKey?: string;
+  entry?: SessionEntry;
+  store?: Record<string, SessionEntry>;
+  storePath?: string;
+}): Promise<SessionEntry | undefined> {
+  await ensureSessionHeader({
+    sessionFile: params.sessionFile,
+    sessionId: params.sessionId,
+  });
+
+  const sessionKey = params.sessionKey?.trim();
+  if (!sessionKey || !params.storePath) {
+    return params.entry;
+  }
+
+  const current =
+    params.store?.[sessionKey] ??
+    params.entry ?? {
+      sessionId: params.sessionId,
+      updatedAt: Date.now(),
+    };
+  const currentFile = current.sessionFile?.trim() || undefined;
+  const needsUpdate = current.sessionId !== params.sessionId || currentFile !== params.sessionFile;
+  if (!needsUpdate) {
+    return current;
+  }
+
+  const next: SessionEntry = {
+    ...current,
+    sessionId: params.sessionId,
+    sessionFile: params.sessionFile,
+  };
+  if (params.store) {
+    params.store[sessionKey] = next;
+  }
+  await updateSessionStore(
+    params.storePath,
+    (store) => {
+      store[sessionKey] = next;
+    },
+    { activeSessionKey: sessionKey },
+  );
+  return next;
+}
+
 export async function appendAssistantMessageToSessionTranscript(params: {
   agentId?: string;
   sessionKey: string;

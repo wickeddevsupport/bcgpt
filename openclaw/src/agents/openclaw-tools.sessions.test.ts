@@ -401,24 +401,13 @@ describe("sessions tools", () => {
       if (request.method === "agent.wait") {
         const params = request.params as { runId?: string } | undefined;
         lastWaitedRunId = params?.runId;
-        return { runId: params?.runId ?? "run-1", status: "ok" };
-      }
-      if (request.method === "chat.history") {
-        _historyCallCount += 1;
-        const text = (lastWaitedRunId && replyByRunId.get(lastWaitedRunId)) ?? "";
         return {
-          messages: [
-            {
-              role: "assistant",
-              content: [
-                {
-                  type: "text",
-                  text,
-                },
-              ],
-              timestamp: 20,
-            },
-          ],
+          runId: params?.runId ?? "run-1",
+          status: "ok",
+          resultReady: true,
+          transcriptStatus: "ready",
+          replyDisposition: "reply",
+          reply: (lastWaitedRunId && replyByRunId.get(lastWaitedRunId)) ?? "",
         };
       }
       if (request.method === "send") {
@@ -449,7 +438,6 @@ describe("sessions tools", () => {
     });
     await waitForCalls(() => calls.filter((call) => call.method === "agent").length, 4);
     await waitForCalls(() => calls.filter((call) => call.method === "agent.wait").length, 4);
-    await waitForCalls(() => calls.filter((call) => call.method === "chat.history").length, 4);
 
     const waitPromise = tool.execute("call6", {
       sessionKey: "main",
@@ -465,11 +453,9 @@ describe("sessions tools", () => {
     expect(typeof (waited.details as { runId?: string }).runId).toBe("string");
     await waitForCalls(() => calls.filter((call) => call.method === "agent").length, 8);
     await waitForCalls(() => calls.filter((call) => call.method === "agent.wait").length, 8);
-    await waitForCalls(() => calls.filter((call) => call.method === "chat.history").length, 8);
 
     const agentCalls = calls.filter((call) => call.method === "agent");
     const waitCalls = calls.filter((call) => call.method === "agent.wait");
-    const historyOnlyCalls = calls.filter((call) => call.method === "chat.history");
     expect(agentCalls).toHaveLength(8);
     for (const call of agentCalls) {
       expect(call.params).toMatchObject({
@@ -505,8 +491,79 @@ describe("sessions tools", () => {
       ),
     ).toBe(true);
     expect(waitCalls).toHaveLength(8);
-    expect(historyOnlyCalls).toHaveLength(8);
+    expect(calls.some((call) => call.method === "chat.history")).toBe(false);
     expect(sendCallCount).toBe(0);
+  });
+
+  it("sessions_send fails when the current transcript is missing", async () => {
+    callGatewayMock.mockReset();
+    callGatewayMock.mockImplementation(async (opts: unknown) => {
+      const request = opts as { method?: string };
+      if (request.method === "agent") {
+        return { runId: "run-missing-transcript", acceptedAt: 123 };
+      }
+      if (request.method === "agent.wait") {
+        return {
+          status: "ok",
+          resultReady: true,
+          transcriptStatus: "missing",
+          replyDisposition: "unavailable",
+        };
+      }
+      return {};
+    });
+
+    const tool = createOpenClawTools().find((candidate) => candidate.name === "sessions_send");
+    expect(tool).toBeDefined();
+    if (!tool) {
+      throw new Error("missing sessions_send tool");
+    }
+
+    const result = await tool.execute("call-missing-transcript", {
+      sessionKey: "main",
+      message: "ping",
+      timeoutSeconds: 1,
+    });
+    expect(result.details).toMatchObject({
+      status: "error",
+      error: "Agent run completed but the current session transcript is missing.",
+    });
+  });
+
+  it("sessions_send preserves intentional no-reply runs", async () => {
+    callGatewayMock.mockReset();
+    callGatewayMock.mockImplementation(async (opts: unknown) => {
+      const request = opts as { method?: string };
+      if (request.method === "agent") {
+        return { runId: "run-no-reply", acceptedAt: 123 };
+      }
+      if (request.method === "agent.wait") {
+        return {
+          status: "ok",
+          resultReady: true,
+          transcriptStatus: "ready",
+          replyDisposition: "no_reply",
+        };
+      }
+      return {};
+    });
+
+    const tool = createOpenClawTools().find((candidate) => candidate.name === "sessions_send");
+    expect(tool).toBeDefined();
+    if (!tool) {
+      throw new Error("missing sessions_send tool");
+    }
+
+    const result = await tool.execute("call-no-reply", {
+      sessionKey: "main",
+      message: "ping",
+      timeoutSeconds: 1,
+    });
+    expect(result.details).toMatchObject({
+      status: "ok",
+      replyDisposition: "no_reply",
+    });
+    expect((result.details as { reply?: string }).reply).toBeUndefined();
   });
 
   it("sessions_send resolves sessionId inputs", async () => {
@@ -525,10 +582,7 @@ describe("sessions tools", () => {
         return { runId: "run-1", acceptedAt: 123 };
       }
       if (request.method === "agent.wait") {
-        return { status: "ok" };
-      }
-      if (request.method === "chat.history") {
-        return { messages: [] };
+        return { status: "ok", resultReady: true, transcriptStatus: "ready", replyDisposition: "no_reply" };
       }
       return {};
     });
@@ -566,10 +620,7 @@ describe("sessions tools", () => {
         return { runId: "run-agent-main", acceptedAt: 1500 };
       }
       if (request.method === "agent.wait") {
-        return { status: "ok" };
-      }
-      if (request.method === "chat.history") {
-        return { messages: [] };
+        return { status: "ok", resultReady: true, transcriptStatus: "ready", replyDisposition: "no_reply" };
       }
       return {};
     });
@@ -709,18 +760,13 @@ describe("sessions tools", () => {
       if (request.method === "agent.wait") {
         const params = request.params as { runId?: string } | undefined;
         lastWaitedRunId = params?.runId;
-        return { runId: params?.runId ?? "run-1", status: "ok" };
-      }
-      if (request.method === "chat.history") {
-        const text = (lastWaitedRunId && replyByRunId.get(lastWaitedRunId)) ?? "";
         return {
-          messages: [
-            {
-              role: "assistant",
-              content: [{ type: "text", text }],
-              timestamp: 20,
-            },
-          ],
+          runId: params?.runId ?? "run-1",
+          status: "ok",
+          resultReady: true,
+          transcriptStatus: "ready",
+          replyDisposition: "reply",
+          reply: (lastWaitedRunId && replyByRunId.get(lastWaitedRunId)) ?? "",
         };
       }
       if (request.method === "send") {
