@@ -658,8 +658,12 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
   if (!matchesChatEventScope(state, payload)) {
     return null;
   }
-  if (payload.sessionKey !== state.sessionKey) {
+  const isActiveRunEvent = Boolean(payload.runId && state.chatRunId && payload.runId === state.chatRunId);
+  if (payload.sessionKey !== state.sessionKey && !isActiveRunEvent) {
     return null;
+  }
+  if (isActiveRunEvent && payload.sessionKey && payload.sessionKey !== state.sessionKey) {
+    state.sessionKey = payload.sessionKey;
   }
 
   // Final from another run (e.g. sub-agent announce): refresh history to show new message.

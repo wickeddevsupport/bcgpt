@@ -43,6 +43,30 @@ describe("handleChatEvent", () => {
     expect(handleChatEvent(state, payload)).toBe(null);
   });
 
+  it("accepts active-run events after the runtime session key changes", () => {
+    const state = createState({
+      sessionKey: "main",
+      chatRunId: "run-1",
+      chatStream: "Working...",
+      chatStreamStartedAt: 100,
+    });
+    const payload: ChatEventPayload = {
+      runId: "run-1",
+      sessionKey: "agent:assistant:main",
+      state: "final",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "Recovered after session repair" }],
+      },
+    };
+
+    expect(handleChatEvent(state, payload)).toBe("final");
+    expect(state.sessionKey).toBe("agent:assistant:main");
+    expect(state.chatRunId).toBeNull();
+    expect(state.chatStream).toBeNull();
+    expect(JSON.stringify(state.chatMessages)).toContain("Recovered after session repair");
+  });
+
   it("ignores workspace events from another workspace scope", () => {
     const state = createState({
       sessionKey: "agent:assistant:main",
