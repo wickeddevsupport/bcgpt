@@ -11,7 +11,7 @@ import type {
   SessionToolUsage,
 } from "../../infra/session-cost-usage.js";
 import type { GatewayRequestHandlers } from "./types.js";
-import { loadConfig } from "../../config/config.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import { resolveSessionTranscriptPathForConfig } from "../../config/sessions/paths.js";
 import { loadProviderUsageSummary } from "../../infra/provider-usage.js";
 import {
@@ -33,7 +33,10 @@ import {
   loadCombinedSessionStoreForGateway,
   loadSessionEntryForConfig,
 } from "../session-utils.js";
-import { isSuperAdmin } from "../workspace-context.js";
+import {
+  resolveWorkspaceRequestContext,
+  type WorkspaceRequestContext,
+} from "../workspace-request.js";
 import type { GatewayClient } from "./types.js";
 
 const COST_USAGE_CACHE_TTL_MS = 30_000;
@@ -48,48 +51,35 @@ type CostUsageCacheEntry = {
 
 const costUsageCache = new Map<string, CostUsageCacheEntry>();
 
-async function loadUsageConfigForClient(client?: GatewayClient): Promise<ReturnType<typeof loadConfig>> {
-  let cfg = loadConfig();
-  if (!client || isSuperAdmin(client)) {
-    return cfg;
-  }
-  const workspaceId =
-    typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
-  if (!workspaceId) {
-    return cfg;
-  }
-  try {
-    const { loadEffectiveWorkspaceConfig } = await import("../workspace-config.js");
-    const effectiveCfg = await loadEffectiveWorkspaceConfig(workspaceId);
-    if (effectiveCfg && typeof effectiveCfg === "object") {
-      cfg = effectiveCfg as typeof cfg;
-    }
-  } catch {
-    // Fall back to global config if workspace-effective config is unavailable.
-  }
-  return cfg;
+async function loadUsageWorkspaceContext(
+  client?: GatewayClient,
+  params?: unknown,
+): Promise<WorkspaceRequestContext> {
+  return await resolveWorkspaceRequestContext(client ?? null, params, { configLabel: "usage" });
 }
 
-function resolveUsageCacheScope(config: ReturnType<typeof loadConfig>): string {
+function resolveUsageCacheScope(context: WorkspaceRequestContext): string {
+  const config = context.cfg;
   const sessionStore =
     typeof config.session?.store === "string" && config.session.store.trim()
       ? config.session.store.trim()
       : "";
   if (sessionStore) {
-    return `session:${sessionStore}`;
+    return `${context.scopeKey}:session:${sessionStore}`;
   }
   const agents = listAgentsForGateway(config).agents;
   if (agents.length === 0) {
-    return "global";
+    return context.scopeKey;
   }
-  return agents
+  const configScope = agents
     .map((agent) => `${agent.workspaceId ?? "global"}:${normalizeAgentId(agent.id)}`)
     .sort()
     .join("|");
+  return `${context.scopeKey}:${configScope}`;
 }
 
 function resolveUsageSessionFile(
-  config: ReturnType<typeof loadConfig>,
+  config: OpenClawConfig,
   sessionId: string,
   entry?: SessionEntry,
   agentId?: string,
@@ -172,7 +162,7 @@ const parseDateRange = (params: {
 type DiscoveredSessionWithAgent = DiscoveredSession & { agentId: string };
 
 async function discoverAllSessionsForUsage(params: {
-  config: ReturnType<typeof loadConfig>;
+  config: OpenClawConfig;
   startMs: number;
   endMs: number;
   agentIds?: Set<string> | null;
@@ -194,27 +184,8 @@ async function discoverAllSessionsForUsage(params: {
   return results.flat().toSorted((a, b) => b.mtime - a.mtime);
 }
 
-function resolveUsageWorkspaceAgentIds(
-  config: ReturnType<typeof loadConfig>,
-  client?: GatewayClient,
-): Set<string> | null {
-  if (!client || isSuperAdmin(client)) {
-    return null;
-  }
-  const workspaceId = typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
-  if (!workspaceId) {
-    return null;
-  }
-  const { agents } = listAgentsForGateway(config);
-  return new Set(
-    agents
-      .filter((agent) => agent.workspaceId === workspaceId)
-      .map((agent) => normalizeAgentId(agent.id)),
-  );
-}
-
 function resolveUsageSessionAgentId(
-  config: ReturnType<typeof loadConfig>,
+  config: OpenClawConfig,
   key: string,
 ): string | null {
   const trimmed = key.trim();
@@ -230,7 +201,7 @@ function resolveUsageSessionAgentId(
 }
 
 function canAccessUsageSessionKey(
-  config: ReturnType<typeof loadConfig>,
+  config: OpenClawConfig,
   key: string,
   workspaceAgentIds: Set<string> | null,
 ): boolean {
@@ -242,7 +213,7 @@ function canAccessUsageSessionKey(
 }
 
 function filterUsageSessionStore(
-  config: ReturnType<typeof loadConfig>,
+  config: OpenClawConfig,
   store: Record<string, SessionEntry>,
   workspaceAgentIds: Set<string> | null,
 ): Record<string, SessionEntry> {
@@ -261,9 +232,9 @@ function filterUsageSessionStore(
 async function loadCostUsageSummaryCached(params: {
   startMs: number;
   endMs: number;
-  config: ReturnType<typeof loadConfig>;
+  workspaceContext: WorkspaceRequestContext;
 }): Promise<CostUsageSummary> {
-  const cacheKey = `${resolveUsageCacheScope(params.config)}-${params.startMs}-${params.endMs}`;
+  const cacheKey = `${resolveUsageCacheScope(params.workspaceContext)}-${params.startMs}-${params.endMs}`;
   const now = Date.now();
   const cached = costUsageCache.get(cacheKey);
   if (cached?.summary && cached.updatedAt && now - cached.updatedAt < COST_USAGE_CACHE_TTL_MS) {
@@ -281,7 +252,7 @@ async function loadCostUsageSummaryCached(params: {
   const inFlight = loadCostUsageSummary({
     startMs: params.startMs,
     endMs: params.endMs,
-    config: params.config,
+    config: params.workspaceContext.cfg,
   })
     .then((summary) => {
       costUsageCache.set(cacheKey, { summary, updatedAt: Date.now() });
@@ -381,13 +352,19 @@ export const usageHandlers: GatewayRequestHandlers = {
     respond(true, summary, undefined);
   },
   "usage.cost": async ({ respond, params, client }) => {
-    const config = await loadUsageConfigForClient(client);
+    let workspaceContext: WorkspaceRequestContext;
+    try {
+      workspaceContext = await loadUsageWorkspaceContext(client, params);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+      return;
+    }
     const { startMs, endMs } = parseDateRange({
       startDate: params?.startDate,
       endDate: params?.endDate,
       days: params?.days,
     });
-    const summary = await loadCostUsageSummaryCached({ startMs, endMs, config });
+    const summary = await loadCostUsageSummaryCached({ startMs, endMs, workspaceContext });
     respond(true, summary, undefined);
   },
   "sessions.usage": async ({ respond, params, client }) => {
@@ -404,8 +381,15 @@ export const usageHandlers: GatewayRequestHandlers = {
     }
 
     const p = params;
-    const config = await loadUsageConfigForClient(client);
-    const workspaceAgentIds = resolveUsageWorkspaceAgentIds(config, client);
+    let workspaceContext: WorkspaceRequestContext;
+    try {
+      workspaceContext = await loadUsageWorkspaceContext(client, p);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+      return;
+    }
+    const config = workspaceContext.cfg;
+    const workspaceAgentIds = workspaceContext.workspaceAgentIds;
     const { startMs, endMs } = parseDateRange({
       startDate: p.startDate,
       endDate: p.endDate,
@@ -915,8 +899,15 @@ export const usageHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const config = await loadUsageConfigForClient(client);
-    const workspaceAgentIds = resolveUsageWorkspaceAgentIds(config, client);
+    let workspaceContext: WorkspaceRequestContext;
+    try {
+      workspaceContext = await loadUsageWorkspaceContext(client, params);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+      return;
+    }
+    const config = workspaceContext.cfg;
+    const workspaceAgentIds = workspaceContext.workspaceAgentIds;
     if (!canAccessUsageSessionKey(config, key, workspaceAgentIds)) {
       respond(
         false,
@@ -965,8 +956,15 @@ export const usageHandlers: GatewayRequestHandlers = {
         ? Math.min(params.limit, 1000)
         : 200;
 
-    const config = await loadUsageConfigForClient(client);
-    const workspaceAgentIds = resolveUsageWorkspaceAgentIds(config, client);
+    let workspaceContext: WorkspaceRequestContext;
+    try {
+      workspaceContext = await loadUsageWorkspaceContext(client, params);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+      return;
+    }
+    const config = workspaceContext.cfg;
+    const workspaceAgentIds = workspaceContext.workspaceAgentIds;
     if (!canAccessUsageSessionKey(config, key, workspaceAgentIds)) {
       respond(true, { logs: [] }, undefined);
       return;

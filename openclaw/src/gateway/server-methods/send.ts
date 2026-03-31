@@ -19,7 +19,7 @@ import {
   validatePollParams,
   validateSendParams,
 } from "../protocol/index.js";
-import { resolveEffectiveRequestWorkspaceId } from "../workspace-request.js";
+import { resolveWorkspaceRequestContext } from "../workspace-request.js";
 import { formatForLog } from "../ws-log.js";
 
 type InflightResult = {
@@ -47,23 +47,13 @@ async function loadSendConfigForClient(
   client?: GatewayClient | null,
   params?: unknown,
 ): Promise<ReturnType<typeof loadConfig>> {
-  let cfg = loadConfig();
-  const workspaceId = resolveEffectiveRequestWorkspaceId(client ?? null, params) ?? "";
-  if (!workspaceId) {
-    return cfg;
-  }
   try {
-    const { loadEffectiveWorkspaceConfig } = await import("../workspace-config.js");
-    const effectiveCfg = await loadEffectiveWorkspaceConfig(workspaceId);
-    if (effectiveCfg && typeof effectiveCfg === "object") {
-      cfg = effectiveCfg as typeof cfg;
-    }
+    return (
+      await resolveWorkspaceRequestContext(client ?? null, params, { configLabel: "send" })
+    ).cfg;
   } catch (err) {
-    throw new Error(
-      `failed to load workspace-scoped send config for ${workspaceId}: ${formatForLog(err)}`,
-    );
+    throw new Error(formatForLog(err));
   }
-  return cfg;
 }
 
 export const sendHandlers: GatewayRequestHandlers = {

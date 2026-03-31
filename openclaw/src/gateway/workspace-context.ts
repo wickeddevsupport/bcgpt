@@ -8,17 +8,30 @@
 import type { GatewayClient } from "./server-methods/types.js";
 
 /**
- * Extract workspace ID from gateway client
+ * Extract the raw workspace ID attached to the client PMOS context.
+ * This does not consider request params or super-admin targeting.
+ */
+export function getClientWorkspaceId(client: GatewayClient): string | undefined {
+  if (typeof client.pmosWorkspaceId !== "string") {
+    return undefined;
+  }
+  const trimmed = client.pmosWorkspaceId.trim();
+  return trimmed || undefined;
+}
+
+/**
+ * @deprecated Prefer getClientWorkspaceId for raw client identity reads, or
+ * resolveWorkspaceRequestContext for request-scoped decisions.
  */
 export function getWorkspaceId(client: GatewayClient): string | undefined {
-  return client.pmosWorkspaceId;
+  return getClientWorkspaceId(client);
 }
 
 /**
  * Require workspace ID - throws if missing
  */
 export function requireWorkspaceId(client: GatewayClient): string {
-  const workspaceId = getWorkspaceId(client);
+  const workspaceId = getClientWorkspaceId(client);
   if (!workspaceId) {
     throw new Error("Workspace ID required for this operation");
   }
@@ -35,7 +48,7 @@ export function isWorkspaceOwned(client: GatewayClient, resourceWorkspaceId?: st
   if (!resourceWorkspaceId) {
     return false;
   }
-  const clientWorkspaceId = getWorkspaceId(client);
+  const clientWorkspaceId = getClientWorkspaceId(client);
   return clientWorkspaceId === resourceWorkspaceId;
 }
 
@@ -59,7 +72,7 @@ export function filterByWorkspace<T extends { workspaceId?: string }>(
   items: T[],
   client: GatewayClient,
 ): T[] {
-  const workspaceId = getWorkspaceId(client);
+  const workspaceId = getClientWorkspaceId(client);
   if (!workspaceId) {
     // No workspace context - return all (backwards compatibility for non-PMOS usage)
     return items;
@@ -74,7 +87,7 @@ export function addWorkspaceId<T extends Record<string, unknown>>(
   resource: T,
   client: GatewayClient,
 ): T & { workspaceId?: string } {
-  const workspaceId = getWorkspaceId(client);
+  const workspaceId = getClientWorkspaceId(client);
   if (!workspaceId) {
     return resource;
   }
@@ -110,7 +123,7 @@ export function canManageWorkspaceAsAdmin(
   if (client.pmosRole !== "workspace_admin") {
     return false;
   }
-  const clientWorkspaceId = getWorkspaceId(client);
+  const clientWorkspaceId = getClientWorkspaceId(client);
   if (!clientWorkspaceId) {
     return false;
   }
@@ -130,5 +143,5 @@ export function getEffectiveWorkspaceId(
   if (isSuperAdmin(client) && targetWorkspaceId) {
     return targetWorkspaceId;
   }
-  return getWorkspaceId(client);
+  return getClientWorkspaceId(client);
 }

@@ -63,20 +63,41 @@ describe("gateway usage helpers", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-02-05T00:00:00.000Z"));
 
-    const config = {} as unknown as ReturnType<import("../../config/config.js").loadConfig>;
+    const workspaceContext = {
+      scopeKey: "workspace:ws-a",
+      cfg: {},
+    } as never;
     const a = await __test.loadCostUsageSummaryCached({
       startMs: 1,
       endMs: 2,
-      config,
+      workspaceContext,
     });
     const b = await __test.loadCostUsageSummaryCached({
       startMs: 1,
       endMs: 2,
-      config,
+      workspaceContext,
     });
 
     expect(a.totals.totalTokens).toBe(1);
     expect(b.totals.totalTokens).toBe(1);
     expect(vi.mocked(loadCostUsageSummary)).toHaveBeenCalledTimes(1);
+  });
+
+  it("separates cached usage summaries by workspace scope", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-02-05T00:00:00.000Z"));
+
+    await __test.loadCostUsageSummaryCached({
+      startMs: 1,
+      endMs: 2,
+      workspaceContext: { scopeKey: "workspace:ws-a", cfg: {} } as never,
+    });
+    await __test.loadCostUsageSummaryCached({
+      startMs: 1,
+      endMs: 2,
+      workspaceContext: { scopeKey: "workspace:ws-b", cfg: {} } as never,
+    });
+
+    expect(vi.mocked(loadCostUsageSummary)).toHaveBeenCalledTimes(2);
   });
 });

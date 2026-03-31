@@ -10,7 +10,7 @@ import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { dispatchInboundMessage } from "../../auto-reply/dispatch.js";
 import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.js";
 import { createReplyPrefixOptions } from "../../channels/reply-prefix.js";
-import { loadConfig } from "../../config/config.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import { resolveSendPolicy } from "../../sessions/send-policy.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../../utils/message-channel.js";
 import {
@@ -45,8 +45,12 @@ import { registerAgentRunContext } from "../../infra/agent-events.js";
 import { rateLimiter } from "../../security/rate-limiter.js";
 import { listAgentsForGateway, resolveGatewaySessionStoreTarget } from "../session-utils.js";
 import { inspectWorkspaceChatUrls } from "../url-routing.js";
-import { resolveWorkspaceEventScopeKey } from "../workspace-event-scope.js";
-import { resolveEffectiveRequestWorkspaceId } from "../workspace-request.js";
+import {
+  resolveEffectiveRequestWorkspaceId,
+  resolveWorkspaceRequestContext,
+  type WorkspaceRequestContext,
+  workspaceRequestCanAccessSessionKey,
+} from "../workspace-request.js";
 
 type TranscriptAppendResult = {
   ok: boolean;
@@ -57,25 +61,11 @@ type TranscriptAppendResult = {
 
 type AppendMessageArg = Parameters<SessionManager["appendMessage"]>[0];
 
-async function loadChatConfigForClient(
+async function loadChatWorkspaceContext(
   client: GatewayClient | null,
   params?: unknown,
-): Promise<ReturnType<typeof loadConfig>> {
-  let cfg = loadConfig();
-  const workspaceId = resolveEffectiveRequestWorkspaceId(client, params) ?? "";
-  if (!workspaceId) {
-    return cfg;
-  }
-  try {
-    const { loadEffectiveWorkspaceConfig } = await import("../workspace-config.js");
-    const effectiveCfg = await loadEffectiveWorkspaceConfig(workspaceId);
-    if (effectiveCfg && typeof effectiveCfg === "object") {
-      cfg = effectiveCfg as typeof cfg;
-    }
-  } catch {
-    // Fall back to global config if workspace effective config cannot be loaded.
-  }
-  return cfg;
+): Promise<WorkspaceRequestContext> {
+  return await resolveWorkspaceRequestContext(client, params, { configLabel: "chat" });
 }
 
 function resolveTranscriptPath(params: {
@@ -302,36 +292,16 @@ function broadcastChatError(params: {
  */
 function canAccessSession(
   sessionKey: string,
-  cfg: ReturnType<typeof loadConfig>,
-  client: GatewayClient | null,
-  params?: unknown,
+  workspaceContext: WorkspaceRequestContext,
 ): boolean {
-  if (!client || isSuperAdmin(client)) {
-    return true;
-  }
-
-  const workspaceId = resolveEffectiveRequestWorkspaceId(client, params) ?? "";
-  if (!workspaceId) {
-    return true;
-  }
-
-  const target = resolveGatewaySessionStoreTarget({ cfg, key: sessionKey });
-  const { agents } = listAgentsForGateway(cfg);
-  const workspaceAgentIds = new Set(
-    agents
-      .filter((a) => (typeof a.workspaceId === "string" ? a.workspaceId.trim() : "") === workspaceId)
-      .map((a) => a.id),
-  );
-
-  return workspaceAgentIds.has(target.agentId);
+  return workspaceRequestCanAccessSessionKey(workspaceContext, sessionKey);
 }
 
 export function shouldRouteToPmosWorkspaceChat(
   client: GatewayClient | null,
   message: string,
 ): boolean {
-  const workspaceId =
-    typeof client?.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  const workspaceId = resolveEffectiveRequestWorkspaceId(client, undefined) ?? "";
   if (!workspaceId) {
     return false;
   }
@@ -344,10 +314,8 @@ export function shouldRouteToPmosWorkspaceChat(
 }
 
 async function buildWorkspaceSystemPrompt(
-  client: GatewayClient | null,
+  workspaceId?: string,
 ): Promise<string> {
-  const workspaceId =
-    typeof client?.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
   if (!workspaceId) {
     return "";
   }
@@ -380,11 +348,18 @@ export const chatHandlers: GatewayRequestHandlers = {
       sessionKey: string;
       limit?: number;
     };
-    const cfg = await loadChatConfigForClient(client, params);
+    let workspaceContext: WorkspaceRequestContext;
+    try {
+      workspaceContext = await loadChatWorkspaceContext(client, params);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+      return;
+    }
+    const cfg = workspaceContext.cfg;
     const { storePath, entry } = loadSessionEntryForConfig(cfg, sessionKey);
 
     // Check workspace ownership for non-super-admin users
-    if (!canAccessSession(sessionKey, cfg, client, params)) {
+    if (!canAccessSession(sessionKey, workspaceContext)) {
       respond(
         false,
         undefined,
@@ -446,9 +421,16 @@ export const chatHandlers: GatewayRequestHandlers = {
     };
 
     // Check workspace ownership for non-super-admin users
-    const cfg = await loadChatConfigForClient(client, params);
-    const scopeKey = resolveWorkspaceEventScopeKey(client);
-    if (!canAccessSession(sessionKey, cfg, client, params)) {
+    let workspaceContext: WorkspaceRequestContext;
+    try {
+      workspaceContext = await loadChatWorkspaceContext(client, params);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+      return;
+    }
+    const cfg = workspaceContext.cfg;
+    const scopeKey = workspaceContext.scopeKey;
+    if (!canAccessSession(sessionKey, workspaceContext)) {
       respond(
         false,
         undefined,
@@ -516,7 +498,14 @@ export const chatHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    const chatRateCheck = rateLimiter.check(client?.pmosWorkspaceId ?? "global", "chat.send");
+    let workspaceContext: WorkspaceRequestContext;
+    try {
+      workspaceContext = await loadChatWorkspaceContext(client, params);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+      return;
+    }
+    const chatRateCheck = rateLimiter.check(workspaceContext.scopeKey, "chat.send");
     if (!chatRateCheck.allowed) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, `Rate limit exceeded. Retry after ${chatRateCheck.retryAfter}s`));
       return;
@@ -582,12 +571,12 @@ export const chatHandlers: GatewayRequestHandlers = {
       }
     }
     const rawSessionKey = p.sessionKey;
-    const cfg = await loadChatConfigForClient(client, params);
+    const cfg = workspaceContext.cfg;
     const { entry, canonicalKey: sessionKey } = loadSessionEntryForConfig(cfg, rawSessionKey);
-    const scopeKey = resolveWorkspaceEventScopeKey(client);
+    const scopeKey = workspaceContext.scopeKey;
 
     // Check workspace ownership for non-super-admin users
-    if (!canAccessSession(rawSessionKey, cfg, client, params)) {
+    if (!canAccessSession(rawSessionKey, workspaceContext)) {
       respond(
         false,
         undefined,
@@ -599,7 +588,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       cfg,
       overrideMs: p.timeoutMs,
     });
-    const workspaceSystemPrompt = await buildWorkspaceSystemPrompt(client);
+    const workspaceSystemPrompt = await buildWorkspaceSystemPrompt(workspaceContext.workspaceId);
     const now = Date.now();
     const clientRunId = p.idempotencyKey;
 
@@ -892,11 +881,18 @@ export const chatHandlers: GatewayRequestHandlers = {
 
     // Load session to find transcript file
     const rawSessionKey = p.sessionKey;
-    const cfg = await loadChatConfigForClient(client, params);
+    let workspaceContext: WorkspaceRequestContext;
+    try {
+      workspaceContext = await loadChatWorkspaceContext(client, params);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+      return;
+    }
+    const cfg = workspaceContext.cfg;
     const { storePath, entry } = loadSessionEntryForConfig(cfg, rawSessionKey);
 
     // Check workspace ownership for non-super-admin users
-    if (!canAccessSession(rawSessionKey, cfg, client, params)) {
+    if (!canAccessSession(rawSessionKey, workspaceContext)) {
       respond(
         false,
         undefined,

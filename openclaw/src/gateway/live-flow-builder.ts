@@ -7,6 +7,7 @@
 
 import type { Workflow } from './n8n-workspace-triggers.js';
 import type { ClientContext } from './client.js';
+import { getClientWorkspaceId } from './workspace-context.js';
 
 // Canvas node position
 export interface NodePosition {
@@ -424,7 +425,7 @@ export async function executeFlowControl(
   workflowId: string,
   client: ClientContext
 ): Promise<FlowControlResult> {
-  const workspaceId = client.pmosWorkspaceId;
+  const workspaceId = getClientWorkspaceId(client);
   
   // Import workflow-engine API client for real operations.
   const {

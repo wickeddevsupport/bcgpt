@@ -35,7 +35,7 @@ import {
   validateConfigSchemaParams,
   validateConfigSetParams,
 } from "../protocol/index.js";
-import { isSuperAdmin, filterByWorkspace } from "../workspace-context.js";
+import { getClientWorkspaceId, isSuperAdmin, filterByWorkspace } from "../workspace-context.js";
 import { auditLogger } from "../../security/audit-logger.js";
 import type { GatewayClient } from "./types.js";
 import { applyWorkspaceAgentCollaborationDefaults } from "../workspace-config.js";
@@ -152,8 +152,7 @@ function workspaceScopedClient(
   if (!client || isSuperAdmin(client)) {
     return null;
   }
-  const workspaceId =
-    typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  const workspaceId = getClientWorkspaceId(client) ?? "";
   if (!workspaceId) {
     return null;
   }
@@ -757,7 +756,7 @@ export const configHandlers: GatewayRequestHandlers = {
 
     // Audit log config modification
     auditLogger.logSuccess("config.updated", {
-      workspaceId: client?.pmosWorkspaceId,
+      workspaceId: client ? getClientWorkspaceId(client) : undefined,
       resource: "config",
       resourceId: "system",
       metadata: { method: "patch", sessionKey, note },

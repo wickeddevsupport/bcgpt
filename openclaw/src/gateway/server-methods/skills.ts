@@ -22,6 +22,7 @@ import {
   validateSkillsUpdateParams,
 } from "../protocol/index.js";
 import { filterByWorkspace, isSuperAdmin } from "../workspace-context.js";
+import { resolveWorkspaceRequestContext } from "../workspace-request.js";
 import { listAgentsForGateway } from "../session-utils.js";
 
 function listWorkspaceDirs(cfg: OpenClawConfig): string[] {
@@ -72,25 +73,9 @@ function collectSkillBins(entries: SkillEntry[]): string[] {
 async function loadSkillsConfigForClient(
   client: Parameters<GatewayRequestHandlers["skills.status"]>[0]["client"],
 ): Promise<ReturnType<typeof loadConfig>> {
-  let cfg = loadConfig();
-  if (!client || isSuperAdmin(client)) {
-    return cfg;
-  }
-  const workspaceId =
-    typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
-  if (!workspaceId) {
-    return cfg;
-  }
-  try {
-    const { loadEffectiveWorkspaceConfig } = await import("../workspace-config.js");
-    const effectiveCfg = await loadEffectiveWorkspaceConfig(workspaceId);
-    if (effectiveCfg && typeof effectiveCfg === "object") {
-      cfg = effectiveCfg as typeof cfg;
-    }
-  } catch {
-    // Fall back to global config if workspace-effective config is unavailable.
-  }
-  return cfg;
+  return (
+    await resolveWorkspaceRequestContext(client ?? null, undefined, { configLabel: "skills" })
+  ).cfg;
 }
 
 export const skillsHandlers: GatewayRequestHandlers = {

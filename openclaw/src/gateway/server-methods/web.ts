@@ -8,6 +8,7 @@ import {
   validateWebLoginStartParams,
   validateWebLoginWaitParams,
 } from "../protocol/index.js";
+import { resolveWorkspaceRequestContext } from "../workspace-request.js";
 import { formatForLog } from "../ws-log.js";
 
 const WEB_LOGIN_METHODS = new Set(["web.login.start", "web.login.wait"]);
@@ -21,28 +22,13 @@ async function loadWebConfigForClient(client?: {
   pmosWorkspaceId?: string;
   pmosRole?: string;
 } | null): Promise<OpenClawConfig> {
-  const { loadConfig } = await import("../../config/config.js");
-  let cfg = loadConfig();
-  const workspaceId =
-    typeof client?.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
-  const isSuperAdmin = client?.pmosRole === "super_admin";
-  if (!workspaceId || isSuperAdmin) {
-    return cfg;
-  }
-  try {
-    const { loadEffectiveWorkspaceConfig } = await import("../workspace-config.js");
-    cfg = (await loadEffectiveWorkspaceConfig(workspaceId)) as OpenClawConfig;
-  } catch (err) {
-    throw new Error(
-      `failed to load workspace-scoped web config for ${workspaceId}: ${formatForLog(err)}`,
-    );
-  }
-  return cfg;
+  return (
+    await resolveWorkspaceRequestContext(client as never, undefined, { configLabel: "web" })
+  ).cfg as OpenClawConfig;
 }
 
 function resolveWebRuntimeScopeKey(client?: { pmosWorkspaceId?: string; pmosRole?: string } | null): string | undefined {
-  const workspaceId =
-    typeof client?.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  const workspaceId = client ? getClientWorkspaceId(client as never) ?? "" : "";
   if (!workspaceId || client?.pmosRole === "super_admin") {
     return undefined;
   }

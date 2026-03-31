@@ -48,6 +48,7 @@ import { listAgentsForGateway } from "../session-utils.js";
 import {
   filterByWorkspace,
   addWorkspaceId,
+  getClientWorkspaceId,
   requireWorkspaceOwnership,
   isSuperAdmin,
 } from "../workspace-context.js";
@@ -82,8 +83,7 @@ function resolveWorkspaceScopedAgentPath(
   client: { pmosWorkspaceId?: string | null } | undefined,
   agentId: string,
 ): string | null {
-  const workspaceId =
-    typeof client?.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  const workspaceId = client ? getClientWorkspaceId(client as never) ?? "" : "";
   if (!workspaceId) {
     return null;
   }
@@ -94,8 +94,7 @@ function resolveWorkspaceScopedAgentDir(
   client: { pmosWorkspaceId?: string | null } | undefined,
   agentId: string,
 ): string | null {
-  const workspaceId =
-    typeof client?.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  const workspaceId = client ? getClientWorkspaceId(client as never) ?? "" : "";
   if (!workspaceId) {
     return null;
   }
@@ -106,8 +105,7 @@ function resolveWorkspaceScopedSessionsDir(
   client: { pmosWorkspaceId?: string | null } | undefined,
   agentId: string,
 ): string | null {
-  const workspaceId =
-    typeof client?.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  const workspaceId = client ? getClientWorkspaceId(client as never) ?? "" : "";
   if (!workspaceId) {
     return null;
   }
@@ -269,8 +267,7 @@ async function loadAgentsConfigForClient(
   if (!client || isSuperAdmin(client)) {
     return cfg;
   }
-  const workspaceId =
-    typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  const workspaceId = getClientWorkspaceId(client as never) ?? "";
   if (!workspaceId) {
     return cfg;
   }
@@ -289,8 +286,7 @@ async function loadAgentsConfigForClient(
 async function loadPersistedAgentsConfigForClient(
   client: { pmosWorkspaceId?: string | null } | undefined,
 ): Promise<OpenClawConfig> {
-  const workspaceId =
-    typeof client?.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  const workspaceId = client ? getClientWorkspaceId(client as never) ?? "" : "";
   if (workspaceId && !isSuperAdmin(client as never)) {
     return (((await readWorkspaceConfig(workspaceId)) ?? {}) as OpenClawConfig) ?? {};
   }
@@ -301,8 +297,7 @@ async function persistAgentsConfigForClient(
   client: { pmosWorkspaceId?: string | null } | undefined,
   cfg: OpenClawConfig,
 ): Promise<void> {
-  const workspaceId =
-    typeof client?.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  const workspaceId = client ? getClientWorkspaceId(client as never) ?? "" : "";
   if (workspaceId && !isSuperAdmin(client as never)) {
     const nextCfg = applyWorkspaceAgentCollaborationDefaults(
       (cfg as unknown as Record<string, unknown>) ?? {},
@@ -361,7 +356,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
     }
 
     // Rate limit agent creation per workspace
-    const createWorkspaceId = client?.pmosWorkspaceId ?? "global";
+    const createWorkspaceId = getClientWorkspaceId(client as never) ?? "global";
     const createRateCheck = rateLimiter.check(createWorkspaceId, "agents.create");
     if (!createRateCheck.allowed) {
       respond(
@@ -427,8 +422,8 @@ export const agentsHandlers: GatewayRequestHandlers = {
       workspace: workspaceDir,
       ...(model ? { model } : {}),
       ...(theme ? { theme } : {}),
-      ...(typeof client?.pmosWorkspaceId === "string" && client.pmosWorkspaceId.trim()
-        ? { workspaceId: client.pmosWorkspaceId.trim() }
+      ...(getClientWorkspaceId(client as never)
+        ? { workspaceId: getClientWorkspaceId(client as never) }
         : {}),
     });
 
@@ -481,7 +476,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
 
     // Audit log successful agent creation
     auditLogger.logSuccess("agent.created", {
-      workspaceId: client?.pmosWorkspaceId,
+      workspaceId: getClientWorkspaceId(client as never),
       resource: "agent",
       resourceId: agentId,
       metadata: { name: rawName, workspace: workspaceDir },
@@ -504,7 +499,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const updateRateCheck = rateLimiter.check(client?.pmosWorkspaceId ?? "global", "agents.update");
+    const updateRateCheck = rateLimiter.check(getClientWorkspaceId(client as never) ?? "global", "agents.update");
     if (!updateRateCheck.allowed) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, `Rate limit exceeded. Retry after ${updateRateCheck.retryAfter}s`));
       return;
@@ -566,8 +561,8 @@ export const agentsHandlers: GatewayRequestHandlers = {
       ...(model ? { model } : {}),
       ...(emoji ? { emoji } : {}),
       ...(theme ? { theme } : {}),
-      ...(typeof client?.pmosWorkspaceId === "string" && client.pmosWorkspaceId.trim()
-        ? { workspaceId: client.pmosWorkspaceId.trim() }
+      ...(getClientWorkspaceId(client as never)
+        ? { workspaceId: getClientWorkspaceId(client as never) }
         : {}),
     });
 
@@ -636,7 +631,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const deleteRateCheck = rateLimiter.check(client?.pmosWorkspaceId ?? "global", "agents.delete");
+    const deleteRateCheck = rateLimiter.check(getClientWorkspaceId(client as never) ?? "global", "agents.delete");
     if (!deleteRateCheck.allowed) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, `Rate limit exceeded. Retry after ${deleteRateCheck.retryAfter}s`));
       return;
@@ -701,7 +696,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
 
     // Audit log successful agent deletion
     auditLogger.logSuccess("agent.deleted", {
-      workspaceId: client?.pmosWorkspaceId,
+      workspaceId: getClientWorkspaceId(client as never),
       resource: "agent",
       resourceId: agentId,
       metadata: { deleteFiles, removedBindings: result.removedBindings },

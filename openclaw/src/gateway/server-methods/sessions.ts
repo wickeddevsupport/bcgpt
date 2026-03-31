@@ -5,7 +5,7 @@ import { resolveDefaultAgentId } from "../../agents/agent-scope.js";
 import { abortEmbeddedPiRun, waitForEmbeddedPiRunEnd } from "../../agents/pi-embedded.js";
 import { stopSubagentsForRequester } from "../../auto-reply/reply/abort.js";
 import { clearSessionQueues } from "../../auto-reply/reply/queue.js";
-import { loadConfig } from "../../config/config.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import {
   loadSessionStore,
   snapshotSessionOrigin,
@@ -43,76 +43,33 @@ import {
 } from "../session-utils.js";
 import { applySessionsPatchToStore } from "../sessions-patch.js";
 import { resolveSessionKeyFromResolveParams } from "../sessions-resolve.js";
-import { isSuperAdmin } from "../workspace-context.js";
-import { GLOBAL_EVENT_SCOPE_KEY, matchesWorkspaceEventScope, resolveWorkspaceEventScopeKey } from "../workspace-event-scope.js";
-import { resolveEffectiveRequestWorkspaceId } from "../workspace-request.js";
+import { GLOBAL_EVENT_SCOPE_KEY, matchesWorkspaceEventScope } from "../workspace-event-scope.js";
+import {
+  resolveWorkspaceRequestContext,
+  type WorkspaceRequestContext,
+  workspaceRequestCanAccessAgent,
+} from "../workspace-request.js";
 import type { GatewayClient } from "./types.js";
 
-async function loadSessionsConfigForClient(
+async function loadSessionsWorkspaceContext(
   client?: GatewayClient,
   params?: unknown,
-): Promise<ReturnType<typeof loadConfig>> {
-  let cfg = loadConfig();
-  const workspaceId = resolveEffectiveRequestWorkspaceId(client ?? null, params) ?? "";
-  if (!workspaceId) {
-    return cfg;
-  }
-  try {
-    const { loadEffectiveWorkspaceConfig } = await import("../workspace-config.js");
-    const effectiveCfg = await loadEffectiveWorkspaceConfig(workspaceId);
-    if (effectiveCfg && typeof effectiveCfg === "object") {
-      cfg = effectiveCfg as typeof cfg;
-    }
-  } catch {
-    // Fall back to global config if workspace effective config cannot be loaded.
-  }
-  return cfg;
-}
-
-function resolveWorkspaceSessionAgentIds(
-  cfg: ReturnType<typeof loadConfig>,
-  client?: GatewayClient,
-  params?: unknown,
-): Set<string> | null {
-  const workspaceId = resolveEffectiveRequestWorkspaceId(client ?? null, params) ?? "";
-  if (!workspaceId) {
-    return null;
-  }
-  const { agents } = listAgentsForGateway(cfg);
-  return new Set(
-    agents
-      .filter((a) => (typeof a.workspaceId === "string" ? a.workspaceId.trim() : "") === workspaceId)
-      .map((a) => a.id),
-  );
-}
-
-function isWorkspaceVisibleSessionKey(key: string, workspaceAgentIds: Set<string>): boolean {
-  if (key === "global" || key === "unknown") {
-    return false;
-  }
-  const parsed = parseAgentSessionKey(key);
-  if (!parsed?.agentId) {
-    return false;
-  }
-  const agentId = normalizeAgentId(parsed.agentId);
-  return workspaceAgentIds.has(agentId);
+): Promise<WorkspaceRequestContext> {
+  return await resolveWorkspaceRequestContext(client ?? null, params, {
+    configLabel: "sessions",
+  });
 }
 
 function resolveClientMainSessionKey(
-  cfg: ReturnType<typeof loadConfig>,
-  client?: GatewayClient,
+  cfg: OpenClawConfig,
+  workspaceContext: WorkspaceRequestContext,
 ): string {
-  if (!client || isSuperAdmin(client)) {
-    return resolveMainSessionKey(cfg);
-  }
-  const workspaceId =
-    typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
-  if (!workspaceId) {
+  if (!workspaceContext.workspaceAgentIds) {
     return resolveMainSessionKey(cfg);
   }
   const listed = listAgentsForGateway(cfg);
   const workspaceAgents = listed.agents.filter(
-    (agent) => (typeof agent.workspaceId === "string" ? agent.workspaceId.trim() : "") === workspaceId,
+    (agent) => workspaceContext.workspaceAgentIds?.has(normalizeAgentId(agent.id)),
   );
   const defaultAgentId =
     (workspaceAgents.some((agent) => agent.id === listed.defaultId) ? listed.defaultId : undefined) ??
@@ -127,14 +84,14 @@ function resolveClientMainSessionKey(
 }
 
 function withMainSessionFallback(params: {
-  cfg: ReturnType<typeof loadConfig>;
+  cfg: OpenClawConfig;
   storePath: string;
   store: Record<string, SessionEntry>;
   opts: typeof validateSessionsListParams extends { } ? any : never;
   result: ReturnType<typeof listSessionsFromStore>;
-  client?: GatewayClient;
+  workspaceContext: WorkspaceRequestContext;
 }) {
-  const { cfg, storePath, store, opts, result, client } = params;
+  const { cfg, storePath, store, opts, result, workspaceContext } = params;
   const activeMinutes =
     typeof opts.activeMinutes === "number" && Number.isFinite(opts.activeMinutes)
       ? Math.max(1, Math.floor(opts.activeMinutes))
@@ -142,7 +99,7 @@ function withMainSessionFallback(params: {
   if (activeMinutes === undefined || result.count > 0) {
     return result;
   }
-  const mainKey = resolveClientMainSessionKey(cfg, client);
+  const mainKey = resolveClientMainSessionKey(cfg, workspaceContext);
   if (!mainKey) {
     return result;
   }
@@ -216,46 +173,17 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
     const p = params;
-    const cfg = await loadSessionsConfigForClient(client, p);
-    const scopeKey = resolveWorkspaceEventScopeKey(client);
-    const { storePath, store } = loadCombinedSessionStoreForGateway(cfg);
-    
-    // Apply workspace filtering for PMOS multi-tenant isolation
-    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client, p);
-    if (workspaceAgentIds) {
-      // Filter store to only include sessions for workspace agents
-      const filteredStore: Record<string, SessionEntry> = {};
-      for (const [key, entry] of Object.entries(store)) {
-        if (isWorkspaceVisibleSessionKey(key, workspaceAgentIds)) {
-          filteredStore[key] = entry;
-        }
-      }
-      
-      const result = listSessionsFromStore({
-        cfg,
-        storePath,
-        store: filteredStore,
-        opts: p,
-      });
-      const withFallback = withMainSessionFallback({
-        cfg,
-        storePath,
-        store: filteredStore,
-        opts: p,
-        result,
-        client,
-      });
-      respond(
-        true,
-        annotateSessionsWithActiveRuns(
-          withFallback,
-          collectActiveRunsBySessionKey(context.chatAbortControllers, scopeKey),
-        ),
-        undefined,
-      );
+    let workspaceContext: WorkspaceRequestContext;
+    try {
+      workspaceContext = await loadSessionsWorkspaceContext(client, p);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
       return;
     }
-    
+    const cfg = workspaceContext.cfg;
+    const { storePath, store } = loadCombinedSessionStoreForGateway(cfg, {
+      agentIds: workspaceContext.workspaceAgentIds,
+    });
     const result = listSessionsFromStore({
       cfg,
       storePath,
@@ -268,13 +196,13 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       store,
       opts: p,
       result,
-      client,
+      workspaceContext,
     });
     respond(
       true,
       annotateSessionsWithActiveRuns(
         withFallback,
-        collectActiveRunsBySessionKey(context.chatAbortControllers, scopeKey),
+        collectActiveRunsBySessionKey(context.chatAbortControllers, workspaceContext.scopeKey),
       ),
       undefined,
     );
@@ -311,8 +239,14 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const cfg = await loadSessionsConfigForClient(client, p);
-    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client, p);
+    let workspaceContext: WorkspaceRequestContext;
+    try {
+      workspaceContext = await loadSessionsWorkspaceContext(client, p);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+      return;
+    }
+    const cfg = workspaceContext.cfg;
     
     const storeCache = new Map<string, Record<string, SessionEntry>>();
     const previews: SessionsPreviewEntry[] = [];
@@ -322,7 +256,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         const target = resolveGatewaySessionStoreTarget({ cfg, key });
         
         // Check workspace ownership for non-super-admin users
-        if (workspaceAgentIds && !workspaceAgentIds.has(target.agentId)) {
+        if (!workspaceRequestCanAccessAgent(workspaceContext, target.agentId)) {
           previews.push({ key, status: "missing", items: [] });
           continue;
         }
@@ -369,29 +303,33 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
     const p = params;
-    const cfg = await loadSessionsConfigForClient(client, p);
-    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client, p);
+    let workspaceContext: WorkspaceRequestContext;
+    try {
+      workspaceContext = await loadSessionsWorkspaceContext(client, p);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+      return;
+    }
+    const cfg = workspaceContext.cfg;
 
     const resolved = resolveSessionKeyFromResolveParams({
       cfg,
       p,
-      allowedAgentIds: workspaceAgentIds,
+      allowedAgentIds: workspaceContext.workspaceAgentIds,
     });
     if (!resolved.ok) {
       respond(false, undefined, resolved.error);
       return;
     }
 
-    if (workspaceAgentIds) {
-      const target = resolveGatewaySessionStoreTarget({ cfg, key: resolved.key });
-      if (!workspaceAgentIds.has(target.agentId)) {
-        respond(
-          false,
-          undefined,
-          errorShape(ErrorCodes.INVALID_REQUEST, `session "${resolved.key}" not found`),
-        );
-        return;
-      }
+    const target = resolveGatewaySessionStoreTarget({ cfg, key: resolved.key });
+    if (!workspaceRequestCanAccessAgent(workspaceContext, target.agentId)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, `session "${resolved.key}" not found`),
+      );
+      return;
     }
     
     respond(true, { ok: true, key: resolved.key }, undefined);
@@ -415,18 +353,22 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const cfg = await loadSessionsConfigForClient(client, p);
+    let workspaceContext: WorkspaceRequestContext;
+    try {
+      workspaceContext = await loadSessionsWorkspaceContext(client, p);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+      return;
+    }
+    const cfg = workspaceContext.cfg;
     const target = resolveGatewaySessionStoreTarget({ cfg, key });
-    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client, p);
-    if (workspaceAgentIds) {
-      if (!workspaceAgentIds.has(target.agentId)) {
-        respond(
-          false,
-          undefined,
-          errorShape(ErrorCodes.INVALID_REQUEST, `session "${key}" not found`),
-        );
-        return;
-      }
+    if (!workspaceRequestCanAccessAgent(workspaceContext, target.agentId)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, `session "${key}" not found`),
+      );
+      return;
     }
     
     const storePath = target.storePath;
@@ -483,18 +425,22 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const cfg = await loadSessionsConfigForClient(client, p);
+    let workspaceContext: WorkspaceRequestContext;
+    try {
+      workspaceContext = await loadSessionsWorkspaceContext(client, p);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+      return;
+    }
+    const cfg = workspaceContext.cfg;
     const target = resolveGatewaySessionStoreTarget({ cfg, key });
-    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client, p);
-    if (workspaceAgentIds) {
-      if (!workspaceAgentIds.has(target.agentId)) {
-        respond(
-          false,
-          undefined,
-          errorShape(ErrorCodes.INVALID_REQUEST, `session "${key}" not found`),
-        );
-        return;
-      }
+    if (!workspaceRequestCanAccessAgent(workspaceContext, target.agentId)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, `session "${key}" not found`),
+      );
+      return;
     }
     
     const storePath = target.storePath;
@@ -553,7 +499,14 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const cfg = await loadSessionsConfigForClient(client, p);
+    let workspaceContext: WorkspaceRequestContext;
+    try {
+      workspaceContext = await loadSessionsWorkspaceContext(client, p);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+      return;
+    }
+    const cfg = workspaceContext.cfg;
     const mainKey = resolveMainSessionKey(cfg);
     const target = resolveGatewaySessionStoreTarget({ cfg, key });
     if (target.canonicalKey === mainKey) {
@@ -565,16 +518,13 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client, p);
-    if (workspaceAgentIds) {
-      if (!workspaceAgentIds.has(target.agentId)) {
-        respond(
-          false,
-          undefined,
-          errorShape(ErrorCodes.INVALID_REQUEST, `session "${key}" not found`),
-        );
-        return;
-      }
+    if (!workspaceRequestCanAccessAgent(workspaceContext, target.agentId)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, `session "${key}" not found`),
+      );
+      return;
     }
 
     const deleteTranscript = typeof p.deleteTranscript === "boolean" ? p.deleteTranscript : true;
@@ -662,18 +612,22 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         ? Math.max(1, Math.floor(p.maxLines))
         : 400;
 
-    const cfg = await loadSessionsConfigForClient(client, p);
+    let workspaceContext: WorkspaceRequestContext;
+    try {
+      workspaceContext = await loadSessionsWorkspaceContext(client, p);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+      return;
+    }
+    const cfg = workspaceContext.cfg;
     const target = resolveGatewaySessionStoreTarget({ cfg, key });
-    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client, p);
-    if (workspaceAgentIds) {
-      if (!workspaceAgentIds.has(target.agentId)) {
-        respond(
-          false,
-          undefined,
-          errorShape(ErrorCodes.INVALID_REQUEST, `session "${key}" not found`),
-        );
-        return;
-      }
+    if (!workspaceRequestCanAccessAgent(workspaceContext, target.agentId)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, `session "${key}" not found`),
+      );
+      return;
     }
     
     const storePath = target.storePath;

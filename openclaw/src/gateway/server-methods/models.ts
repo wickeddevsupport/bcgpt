@@ -5,20 +5,17 @@ import {
   formatValidationErrors,
   validateModelsListParams,
 } from "../protocol/index.js";
-import { loadConfig, type OpenClawConfig } from "../../config/config.js";
-import { loadEffectiveWorkspaceConfig } from "../workspace-config.js";
-import { resolveEffectiveRequestWorkspaceId } from "../workspace-request.js";
+import type { OpenClawConfig } from "../../config/config.js";
+import { resolveWorkspaceRequestContext } from "../workspace-request.js";
 import type { GatewayClient } from "./types.js";
 
 async function loadModelsConfigForClient(
   client: GatewayClient | null,
   params: unknown,
 ): Promise<OpenClawConfig> {
-  const workspaceId = resolveEffectiveRequestWorkspaceId(client, params);
-  if (!workspaceId) {
-    return loadConfig();
-  }
-  return (await loadEffectiveWorkspaceConfig(workspaceId)) as OpenClawConfig;
+  return (
+    await resolveWorkspaceRequestContext(client, params, { configLabel: "models" })
+  ).cfg as OpenClawConfig;
 }
 
 export const modelsHandlers: GatewayRequestHandlers = {

@@ -14,6 +14,7 @@ import {
   WORKFLOW_TEMPLATES,
 } from '../chat-to-workflow.js';
 import type { Workflow } from '../n8n-workspace-triggers.js';
+import { getClientWorkspaceId } from '../workspace-context.js';
 
 // Input schemas
 const ChatWorkflowCreateSchema = z.object({
@@ -142,7 +143,7 @@ export async function handleWorkflowCreate(
     };
   }
   
-  const workspaceId = client.pmosWorkspaceId;
+  const workspaceId = getClientWorkspaceId(client as never);
   if (!workspaceId) {
     return {
       success: false,
@@ -203,7 +204,7 @@ export async function handleTemplateDeploy(
     };
   }
   
-  const workspaceId = client.pmosWorkspaceId;
+  const workspaceId = getClientWorkspaceId(client as never);
   if (!workspaceId) {
     return {
       success: false,
@@ -309,7 +310,7 @@ export async function handleWorkflowConfirm(
     };
   }
   
-  const workspaceId = client.pmosWorkspaceId;
+  const workspaceId = getClientWorkspaceId(client as never);
   if (!workspaceId) {
     return {
       success: false,

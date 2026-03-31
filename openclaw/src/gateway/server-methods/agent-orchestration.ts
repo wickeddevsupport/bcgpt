@@ -364,18 +364,17 @@ export async function handleTemplateCreate(
   // Persist agent to config
   try {
     const { loadConfig, writeConfigFile } = await import('../../config/config.js');
-    const { loadEffectiveWorkspaceConfig, readWorkspaceConfig, writeWorkspaceConfig } = await import('../workspace-config.js');
+    const { readWorkspaceConfig, writeWorkspaceConfig } = await import('../workspace-config.js');
+    const { resolveWorkspaceRequestContext } = await import('../workspace-request.js');
 
-    const workspaceId =
-      client && !isSuperAdmin(client) && typeof client.pmosWorkspaceId === "string"
-        ? client.pmosWorkspaceId.trim()
-        : "";
+    const workspaceContext = await resolveWorkspaceRequestContext(client as never, undefined, {
+      configLabel: 'agent-orchestration',
+    });
+    const workspaceId = workspaceContext.workspaceId ?? "";
     const agentId = normalizeTemplateAgentId(
       template.config?.id || `agent-${crypto.randomUUID()}`,
     );
-    const effectiveCfg = workspaceId
-      ? ((await loadEffectiveWorkspaceConfig(workspaceId)) as OpenClawConfig)
-      : loadConfig();
+    const effectiveCfg = workspaceId ? workspaceContext.cfg : loadConfig();
     const persistedCfg = workspaceId
       ? ((((await readWorkspaceConfig(workspaceId)) ?? {}) as OpenClawConfig) ?? {})
       : loadConfig();

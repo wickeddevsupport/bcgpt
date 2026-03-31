@@ -1,11 +1,19 @@
 import type { GatewayClient } from "./server-methods/types.js";
+import { resolveWorkspaceRequestScopeKey } from "./workspace-request.js";
 
 export const GLOBAL_EVENT_SCOPE_KEY = "global";
 
-export function resolveWorkspaceEventScopeKey(client: GatewayClient | null | undefined): string {
+export function resolveWorkspaceEventScopeKey(
+  clientOrWorkspaceId: GatewayClient | string | null | undefined,
+): string {
+  if (typeof clientOrWorkspaceId === "string") {
+    return resolveWorkspaceRequestScopeKey(clientOrWorkspaceId);
+  }
   const workspaceId =
-    typeof client?.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
-  return workspaceId ? `workspace:${workspaceId}` : GLOBAL_EVENT_SCOPE_KEY;
+    typeof clientOrWorkspaceId?.pmosWorkspaceId === "string"
+      ? clientOrWorkspaceId.pmosWorkspaceId.trim()
+      : "";
+  return resolveWorkspaceRequestScopeKey(workspaceId);
 }
 
 export function matchesWorkspaceEventScope(expectedScopeKey: string, actualScopeKey?: string): boolean {

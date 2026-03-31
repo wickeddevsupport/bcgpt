@@ -26,6 +26,7 @@ import {
   WORKFLOW_LIBRARY,
   type NodePosition,
 } from '../live-flow-builder.js';
+import { getClientWorkspaceId } from '../workspace-context.js';
 
 // Input schemas
 const WorkflowIdSchema = z.object({
@@ -442,7 +443,7 @@ export async function handleTemplateDeployment(
     };
   }
   
-  const workspaceId = client.pmosWorkspaceId;
+  const workspaceId = getClientWorkspaceId(client as never);
   if (!workspaceId) {
     return {
       success: false,

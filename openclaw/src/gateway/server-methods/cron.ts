@@ -19,6 +19,7 @@ import {
 } from "../protocol/index.js";
 import {
   filterByWorkspace,
+  getClientWorkspaceId,
   isSuperAdmin,
   requireWorkspaceOwnership,
 } from "../workspace-context.js";
@@ -36,7 +37,7 @@ function resolveCronWorkspaceId(
   params?: { workspaceId?: unknown } | null,
 ): string | undefined {
   const requestedWorkspaceId = trimWorkspaceId(params?.workspaceId);
-  const clientWorkspaceId = trimWorkspaceId(client?.pmosWorkspaceId);
+  const clientWorkspaceId = client ? getClientWorkspaceId(client as never) : undefined;
   if (client && isSuperAdmin(client)) {
     return requestedWorkspaceId ?? clientWorkspaceId;
   }
@@ -301,7 +302,7 @@ export const cronHandlers: GatewayRequestHandlers = {
         );
         return;
       }
-      if (client?.pmosWorkspaceId && !isSuperAdmin(client)) {
+      if (getClientWorkspaceId(client as never) && !isSuperAdmin(client)) {
         try {
           requireWorkspaceOwnership(client, job.workspaceId, "cron job");
         } catch {
@@ -378,7 +379,7 @@ export const cronHandlers: GatewayRequestHandlers = {
         );
         return;
       }
-      if (client?.pmosWorkspaceId && !isSuperAdmin(client)) {
+      if (getClientWorkspaceId(client as never) && !isSuperAdmin(client)) {
         try {
           requireWorkspaceOwnership(client, job.workspaceId, "cron job");
         } catch {
@@ -443,7 +444,7 @@ export const cronHandlers: GatewayRequestHandlers = {
         );
         return;
       }
-      if (client?.pmosWorkspaceId && !isSuperAdmin(client)) {
+      if (getClientWorkspaceId(client as never) && !isSuperAdmin(client)) {
         try {
           requireWorkspaceOwnership(client, job.workspaceId, "cron job");
         } catch {
@@ -501,7 +502,7 @@ export const cronHandlers: GatewayRequestHandlers = {
         );
         return;
       }
-      if (client?.pmosWorkspaceId && !isSuperAdmin(client)) {
+      if (getClientWorkspaceId(client as never) && !isSuperAdmin(client)) {
         try {
           requireWorkspaceOwnership(client, job.workspaceId, "cron job");
         } catch {

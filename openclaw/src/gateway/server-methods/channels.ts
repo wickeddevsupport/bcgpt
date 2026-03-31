@@ -22,7 +22,8 @@ import {
   validateChannelsStatusParams,
 } from "../protocol/index.js";
 import { formatForLog } from "../ws-log.js";
-import { isSuperAdmin } from "../workspace-context.js";
+import { getClientWorkspaceId, isSuperAdmin } from "../workspace-context.js";
+import { resolveWorkspaceRequestContext } from "../workspace-request.js";
 
 type ChannelLogoutPayload = {
   channel: ChannelId;
@@ -34,35 +35,16 @@ type ChannelLogoutPayload = {
 async function loadChannelsConfigForClient(
   client?: GatewayClient,
 ): Promise<OpenClawConfig> {
-  let cfg = loadConfig();
-  if (!client || isSuperAdmin(client)) {
-    return cfg;
-  }
-  const workspaceId =
-    typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
-  if (!workspaceId) {
-    return cfg;
-  }
-  try {
-    const { loadEffectiveWorkspaceConfig } = await import("../workspace-config.js");
-    const effectiveCfg = await loadEffectiveWorkspaceConfig(workspaceId);
-    if (effectiveCfg && typeof effectiveCfg === "object") {
-      cfg = effectiveCfg as OpenClawConfig;
-    }
-  } catch (err) {
-    throw new Error(
-      `failed to load workspace-scoped channel config for ${workspaceId}: ${formatForLog(err)}`,
-    );
-  }
-  return cfg;
+  return (
+    await resolveWorkspaceRequestContext(client ?? null, undefined, { configLabel: "channels" })
+  ).cfg as OpenClawConfig;
 }
 
 function resolveChannelRuntimeScopeKey(client?: GatewayClient | null): string | undefined {
   if (!client || isSuperAdmin(client)) {
     return undefined;
   }
-  const workspaceId =
-    typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  const workspaceId = getClientWorkspaceId(client) ?? "";
   return workspaceId ? `workspace:${workspaceId}` : undefined;
 }
 

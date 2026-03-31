@@ -7,6 +7,7 @@
 
 import type { Agent } from '../config/schema.js';
 import type { ClientContext } from './client.js';
+import { getClientWorkspaceId } from './workspace-context.js';
 
 // Agent task definition
 export interface AgentTask {
@@ -340,7 +341,7 @@ async function executeAgentTask(task: AgentTask, client: ClientContext): Promise
     if (task.type === 'workflow') {
       // Execute workflow via n8n
       const { executeN8nWorkflow } = await import('./n8n-api-client.js');
-      const workspaceId = client.pmosWorkspaceId;
+      const workspaceId = getClientWorkspaceId(client);
       const workflowId = (task.payload as { workflowId?: string })?.workflowId;
       
       if (!workspaceId || !workflowId) {

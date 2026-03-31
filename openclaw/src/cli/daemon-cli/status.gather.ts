@@ -42,6 +42,11 @@ type GatewayStatusSummary = {
 };
 
 export type DaemonStatus = {
+  scope: {
+    kind: "global-daemon";
+    summary: string;
+    note: string;
+  };
   service: {
     label: string;
     loaded: boolean;
@@ -243,6 +248,12 @@ export async function gatherDaemonStatus(
   }
 
   return {
+    scope: {
+      kind: "global-daemon",
+      summary: "Global daemon status",
+      note:
+        "Reports the daemon and CLI global config/store universe only; it does not describe workspace-effective runtime state.",
+    },
     service: {
       label: service.label,
       loaded,

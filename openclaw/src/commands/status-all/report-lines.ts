@@ -145,7 +145,10 @@ export async function buildStatusAllReportLines(params: {
   });
 
   const lines: string[] = [];
-  lines.push(heading("OpenClaw status --all"));
+  lines.push(heading("OpenClaw status --all (global daemon scope)"));
+  lines.push(
+    "This report shows the daemon/global config, agents, channels, and session stores. It does not represent workspace-effective runtime state.",
+  );
   lines.push("");
   lines.push(heading("Overview"));
   lines.push(overview.trimEnd());
