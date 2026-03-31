@@ -249,7 +249,7 @@ function nextChatSeq(context: { agentRunSeq: Map<string, number> }, runId: strin
 function broadcastChatFinal(params: {
   context: Pick<
     GatewayRequestContext,
-    "broadcast" | "nodeSendToSession" | "agentRunSeq" | "chatRunBuffers" | "chatDeltaSentAt"
+    "broadcast" | "nodeSendToSession" | "agentRunSeq" | "chatRunBuffers" | "chatDeltaSentAt" | "logGateway"
   >;
   runId: string;
   sessionKey: string;
@@ -267,6 +267,9 @@ function broadcastChatFinal(params: {
   };
   params.context.chatRunBuffers.delete(params.runId);
   params.context.chatDeltaSentAt.delete(params.runId);
+  params.context.logGateway.info(
+    `chat broadcast state=final run=${params.runId} seq=${seq} session=${params.sessionKey}`,
+  );
   params.context.broadcast("chat", payload);
   params.context.nodeSendToSession(params.sessionKey, "chat", payload);
 }
@@ -274,7 +277,7 @@ function broadcastChatFinal(params: {
 function broadcastChatDelta(params: {
   context: Pick<
     GatewayRequestContext,
-    "broadcast" | "nodeSendToSession" | "agentRunSeq" | "chatRunBuffers" | "chatDeltaSentAt"
+    "broadcast" | "nodeSendToSession" | "agentRunSeq" | "chatRunBuffers" | "chatDeltaSentAt" | "logGateway"
   >;
   runId: string;
   sessionKey: string;
@@ -306,6 +309,9 @@ function broadcastChatDelta(params: {
       timestamp: now,
     },
   };
+  params.context.logGateway.info(
+    `chat broadcast state=delta run=${params.runId} seq=${seq} len=${accumulated.length} session=${params.sessionKey}`,
+  );
   params.context.broadcast("chat", payload, { dropIfSlow: true });
   params.context.nodeSendToSession(params.sessionKey, "chat", payload);
 }
@@ -765,6 +771,9 @@ export const chatHandlers: GatewayRequestHandlers = {
             if (!text) {
               return;
             }
+            context.logGateway.info(
+              `webchat deliver kind=block run=${clientRunId} textLen=${text.length}`,
+            );
             broadcastChatDelta({
               context,
               runId: clientRunId,
