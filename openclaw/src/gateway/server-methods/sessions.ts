@@ -45,17 +45,15 @@ import { applySessionsPatchToStore } from "../sessions-patch.js";
 import { resolveSessionKeyFromResolveParams } from "../sessions-resolve.js";
 import { isSuperAdmin } from "../workspace-context.js";
 import { GLOBAL_EVENT_SCOPE_KEY, matchesWorkspaceEventScope, resolveWorkspaceEventScopeKey } from "../workspace-event-scope.js";
+import { resolveEffectiveRequestWorkspaceId } from "../workspace-request.js";
 import type { GatewayClient } from "./types.js";
 
 async function loadSessionsConfigForClient(
   client?: GatewayClient,
+  params?: unknown,
 ): Promise<ReturnType<typeof loadConfig>> {
   let cfg = loadConfig();
-  if (!client || isSuperAdmin(client)) {
-    return cfg;
-  }
-  const workspaceId =
-    typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  const workspaceId = resolveEffectiveRequestWorkspaceId(client ?? null, params) ?? "";
   if (!workspaceId) {
     return cfg;
   }
@@ -74,14 +72,11 @@ async function loadSessionsConfigForClient(
 function resolveWorkspaceSessionAgentIds(
   cfg: ReturnType<typeof loadConfig>,
   client?: GatewayClient,
+  params?: unknown,
 ): Set<string> | null {
-  if (!client || isSuperAdmin(client)) {
-    return null;
-  }
-  const workspaceId =
-    typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  const workspaceId = resolveEffectiveRequestWorkspaceId(client ?? null, params) ?? "";
   if (!workspaceId) {
-    return new Set<string>();
+    return !client || isSuperAdmin(client) ? null : new Set<string>();
   }
   const { agents } = listAgentsForGateway(cfg);
   return new Set(
@@ -221,12 +216,12 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
     const p = params;
-    const cfg = await loadSessionsConfigForClient(client);
+    const cfg = await loadSessionsConfigForClient(client, p);
     const scopeKey = resolveWorkspaceEventScopeKey(client);
     const { storePath, store } = loadCombinedSessionStoreForGateway(cfg);
     
     // Apply workspace filtering for PMOS multi-tenant isolation
-    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client);
+    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client, p);
     if (workspaceAgentIds) {
       // Filter store to only include sessions for workspace agents
       const filteredStore: Record<string, SessionEntry> = {};
@@ -316,8 +311,8 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const cfg = await loadSessionsConfigForClient(client);
-    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client);
+    const cfg = await loadSessionsConfigForClient(client, p);
+    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client, p);
     
     const storeCache = new Map<string, Record<string, SessionEntry>>();
     const previews: SessionsPreviewEntry[] = [];
@@ -374,7 +369,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
     const p = params;
-    const cfg = await loadSessionsConfigForClient(client);
+    const cfg = await loadSessionsConfigForClient(client, p);
 
     const resolved = resolveSessionKeyFromResolveParams({ cfg, p });
     if (!resolved.ok) {
@@ -382,7 +377,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
     
-    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client);
+    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client, p);
     if (workspaceAgentIds) {
       const target = resolveGatewaySessionStoreTarget({ cfg, key: resolved.key });
       if (!workspaceAgentIds.has(target.agentId)) {
@@ -416,9 +411,9 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const cfg = await loadSessionsConfigForClient(client);
+    const cfg = await loadSessionsConfigForClient(client, p);
     const target = resolveGatewaySessionStoreTarget({ cfg, key });
-    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client);
+    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client, p);
     if (workspaceAgentIds) {
       if (!workspaceAgentIds.has(target.agentId)) {
         respond(
@@ -484,9 +479,9 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const cfg = await loadSessionsConfigForClient(client);
+    const cfg = await loadSessionsConfigForClient(client, p);
     const target = resolveGatewaySessionStoreTarget({ cfg, key });
-    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client);
+    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client, p);
     if (workspaceAgentIds) {
       if (!workspaceAgentIds.has(target.agentId)) {
         respond(
@@ -554,7 +549,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const cfg = await loadSessionsConfigForClient(client);
+    const cfg = await loadSessionsConfigForClient(client, p);
     const mainKey = resolveMainSessionKey(cfg);
     const target = resolveGatewaySessionStoreTarget({ cfg, key });
     if (target.canonicalKey === mainKey) {
@@ -566,7 +561,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client);
+    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client, p);
     if (workspaceAgentIds) {
       if (!workspaceAgentIds.has(target.agentId)) {
         respond(
@@ -663,9 +658,9 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         ? Math.max(1, Math.floor(p.maxLines))
         : 400;
 
-    const cfg = await loadSessionsConfigForClient(client);
+    const cfg = await loadSessionsConfigForClient(client, p);
     const target = resolveGatewaySessionStoreTarget({ cfg, key });
-    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client);
+    const workspaceAgentIds = resolveWorkspaceSessionAgentIds(cfg, client, p);
     if (workspaceAgentIds) {
       if (!workspaceAgentIds.has(target.agentId)) {
         respond(

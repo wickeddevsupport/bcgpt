@@ -302,6 +302,68 @@ describe("gateway agent handler", () => {
     expect(mocks.agentCommand.mock.calls[0][0].cfg).toBe(workspaceCfg);
   });
 
+  it("uses explicit workspaceId for backend workspace agent runs without PMOS client", async () => {
+    const workspaceCfg = {
+      agents: {
+        list: [{ id: "ops", default: true, workspaceId: "ws-1" }],
+      },
+      session: {
+        mainKey: "main",
+      },
+    };
+    mocks.loadConfigReturn = {
+      agents: {
+        list: [{ id: "main", default: true }],
+      },
+      session: {
+        mainKey: "main",
+      },
+    };
+    mocks.listAgentIds.mockImplementation((cfg?: { agents?: { list?: Array<{ id?: string }> } }) =>
+      (cfg?.agents?.list ?? []).map((entry) => entry.id ?? "").filter(Boolean),
+    );
+    mocks.loadEffectiveWorkspaceConfig.mockResolvedValue(workspaceCfg);
+    mocks.loadSessionEntryForConfig.mockReturnValue({
+      cfg: workspaceCfg,
+      storePath: "/tmp/ws-sessions.json",
+      entry: {
+        sessionId: "workspace-session-id",
+        updatedAt: Date.now(),
+      },
+      canonicalKey: "agent:ops:main",
+    });
+    mocks.updateSessionStore.mockResolvedValue(undefined);
+    mocks.agentCommand.mockResolvedValue({
+      payloads: [{ text: "ok" }],
+      meta: { durationMs: 100 },
+    });
+
+    const respond = vi.fn();
+    await agentHandlers.agent({
+      params: {
+        message: "hello from backend workspace",
+        agentId: "ops",
+        sessionKey: "agent:ops:main",
+        workspaceId: "ws-1",
+        idempotencyKey: "backend-workspace-agent-run",
+      },
+      respond,
+      context: makeContext(),
+      req: { type: "req", id: "ws-2", method: "agent" },
+      client: null,
+      isWebchatConnect: () => false,
+    });
+
+    await vi.waitFor(() => expect(mocks.agentCommand).toHaveBeenCalled());
+
+    expect(mocks.loadEffectiveWorkspaceConfig).toHaveBeenCalledWith("ws-1");
+    expect(mocks.loadSessionEntryForConfig).toHaveBeenCalledWith(
+      workspaceCfg,
+      "agent:ops:main",
+    );
+    expect(mocks.agentCommand.mock.calls[0][0].cfg).toBe(workspaceCfg);
+  });
+
   it("resolves agent.identity.get against workspace-effective defaults", async () => {
     const workspaceCfg = {
       agents: {

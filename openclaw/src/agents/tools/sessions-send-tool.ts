@@ -23,7 +23,9 @@ import {
   resolveInternalSessionKey,
   resolveMainSessionAlias,
   resolveSessionReference,
+  resolveWorkspaceIdFromSessionToolOptions,
   stripToolMessages,
+  withWorkspaceScope,
 } from "./sessions-helpers.js";
 import { buildAgentToAgentMessageContext, resolvePingPongTurns } from "./sessions-send-helpers.js";
 import { runSessionsSendA2AFlow } from "./sessions-send-tool.a2a.js";
@@ -52,6 +54,10 @@ export function createSessionsSendTool(opts?: {
       const params = args as Record<string, unknown>;
       const message = readStringParam(params, "message", { required: true });
       const cfg = opts?.config ?? loadConfig();
+      const workspaceId = resolveWorkspaceIdFromSessionToolOptions({
+        agentSessionKey: opts?.agentSessionKey,
+        config: cfg,
+      });
       const { mainKey, alias } = resolveMainSessionAlias(cfg);
       const visibility = cfg.agents?.defaults?.sandbox?.sessionToolsVisibility ?? "spawned";
       const requesterInternalKey =
@@ -87,8 +93,9 @@ export function createSessionsSendTool(opts?: {
 
       const listSessions = async (listParams: Record<string, unknown>) => {
         const result = await callGateway<{ sessions: Array<{ key: string }> }>({
+          config: cfg,
           method: "sessions.list",
-          params: listParams,
+          params: withWorkspaceScope(listParams, workspaceId),
           timeoutMs: 10_000,
         });
         return Array.isArray(result?.sessions) ? result.sessions : [];
@@ -166,8 +173,9 @@ export function createSessionsSendTool(opts?: {
         let resolvedKey = "";
         try {
           const resolved = await callGateway<{ key: string }>({
+            config: cfg,
             method: "sessions.resolve",
-            params: resolveParams,
+            params: withWorkspaceScope(resolveParams, workspaceId),
             timeoutMs: 10_000,
           });
           resolvedKey = typeof resolved?.key === "string" ? resolved.key.trim() : "";
@@ -225,6 +233,8 @@ export function createSessionsSendTool(opts?: {
         mainKey,
         requesterInternalKey,
         restrictToSpawned,
+        cfg,
+        workspaceId,
       });
       if (!resolvedSession.ok) {
         return jsonResult({
@@ -314,14 +324,17 @@ export function createSessionsSendTool(opts?: {
           requesterChannel,
           roundOneReply,
           waitRunId,
+          config: cfg,
+          workspaceId,
         });
       };
 
       if (timeoutSeconds === 0) {
         try {
           const response = await callGateway<{ runId: string }>({
+            config: cfg,
             method: "agent",
-            params: sendParams,
+            params: withWorkspaceScope(sendParams, workspaceId),
             timeoutMs: 10_000,
           });
           if (typeof response?.runId === "string" && response.runId) {
@@ -348,8 +361,9 @@ export function createSessionsSendTool(opts?: {
 
       try {
         const response = await callGateway<{ runId: string }>({
+          config: cfg,
           method: "agent",
-          params: sendParams,
+          params: withWorkspaceScope(sendParams, workspaceId),
           timeoutMs: 10_000,
         });
         if (typeof response?.runId === "string" && response.runId) {
@@ -370,6 +384,7 @@ export function createSessionsSendTool(opts?: {
       let waitError: string | undefined;
       try {
         const wait = await callGateway<{ status?: string; error?: string }>({
+          config: cfg,
           method: "agent.wait",
           params: {
             runId,
@@ -408,8 +423,9 @@ export function createSessionsSendTool(opts?: {
       }
 
       const history = await callGateway<{ messages: Array<unknown> }>({
+        config: cfg,
         method: "chat.history",
-        params: { sessionKey: resolvedKey, limit: 50 },
+        params: withWorkspaceScope({ sessionKey: resolvedKey, limit: 50 }, workspaceId),
       });
       const filtered = stripToolMessages(Array.isArray(history?.messages) ? history.messages : []);
       const last = filtered.length > 0 ? filtered[filtered.length - 1] : undefined;

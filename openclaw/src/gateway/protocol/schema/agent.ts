@@ -23,6 +23,7 @@ export const SendParamsSchema = Type.Object(
     accountId: Type.Optional(Type.String()),
     /** Optional session key for mirroring delivered output back into the transcript. */
     sessionKey: Type.Optional(Type.String()),
+    workspaceId: Type.Optional(NonEmptyString),
     idempotencyKey: NonEmptyString,
   },
   { additionalProperties: false },
@@ -65,6 +66,7 @@ export const AgentParamsSchema = Type.Object(
     lane: Type.Optional(Type.String()),
     extraSystemPrompt: Type.Optional(Type.String()),
     idempotencyKey: NonEmptyString,
+    workspaceId: Type.Optional(NonEmptyString),
     label: Type.Optional(SessionLabelString),
     spawnedBy: Type.Optional(Type.String()),
   },

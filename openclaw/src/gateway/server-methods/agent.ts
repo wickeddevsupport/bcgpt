@@ -39,21 +39,18 @@ import {
 } from "../protocol/index.js";
 import { loadSessionEntryForConfig } from "../session-utils.js";
 import { resolveWorkspaceEventScopeKey } from "../workspace-event-scope.js";
+import { resolveEffectiveRequestWorkspaceId } from "../workspace-request.js";
 import { formatForLog } from "../ws-log.js";
-import { isSuperAdmin } from "../workspace-context.js";
 import { waitForAgentJob } from "./agent-job.js";
 import { injectTimestamp, timestampOptsFromConfig } from "./agent-timestamp.js";
 import type { GatewayClient } from "./types.js";
 
 async function loadAgentConfigForClient(
   client: GatewayClient | null,
+  params?: unknown,
 ): Promise<ReturnType<typeof loadConfig>> {
   let cfg = loadConfig();
-  if (!client || isSuperAdmin(client)) {
-    return cfg;
-  }
-  const workspaceId =
-    typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  const workspaceId = resolveEffectiveRequestWorkspaceId(client, params) ?? "";
   if (!workspaceId) {
     return cfg;
   }
@@ -112,8 +109,9 @@ export const agentHandlers: GatewayRequestHandlers = {
       timeout?: number;
       label?: string;
       spawnedBy?: string;
+      workspaceId?: string;
     };
-    const cfg = await loadAgentConfigForClient(client);
+    const cfg = await loadAgentConfigForClient(client, p);
     const idem = request.idempotencyKey;
     const groupIdRaw = typeof request.groupId === "string" ? request.groupId.trim() : "";
     const groupChannelRaw =
@@ -501,7 +499,7 @@ export const agentHandlers: GatewayRequestHandlers = {
       }
       agentId = resolved;
     }
-    const cfg = await loadAgentConfigForClient(client);
+    const cfg = await loadAgentConfigForClient(client, p);
     const identity = resolveAssistantIdentity({ cfg, agentId });
     const avatarValue =
       resolveAssistantAvatarUrl({

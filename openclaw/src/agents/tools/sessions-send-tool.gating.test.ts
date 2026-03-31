@@ -39,4 +39,46 @@ describe("sessions_send gating", () => {
     expect(callGatewayMock).not.toHaveBeenCalled();
     expect(result.details).toMatchObject({ status: "forbidden" });
   });
+
+  it("forwards workspace scope on backend agent calls", async () => {
+    callGatewayMock.mockImplementation(async (opts: unknown) => {
+      const request = opts as { method?: string };
+      if (request.method === "agent") {
+        return { runId: "run-workspace", acceptedAt: 1000 };
+      }
+      return {};
+    });
+
+    const tool = createSessionsSendTool({
+      agentSessionKey: "agent:assistant:main",
+      agentChannel: "whatsapp",
+      config: {
+        session: { scope: "per-sender", mainKey: "main" },
+        agents: {
+          list: [
+            { id: "assistant", default: true, workspaceId: "ws-rohit" },
+            { id: "designer", workspaceId: "ws-rohit" },
+          ],
+        },
+        tools: { agentToAgent: { enabled: true, allow: ["*"] } },
+      } as never,
+    });
+
+    const result = await tool.execute("call2", {
+      sessionKey: "agent:designer:main",
+      message: "hi",
+      timeoutSeconds: 0,
+    });
+
+    expect(result.details).toMatchObject({ status: "accepted", runId: "run-workspace" });
+    expect(callGatewayMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "agent",
+        params: expect.objectContaining({
+          sessionKey: "agent:designer:main",
+          workspaceId: "ws-rohit",
+        }),
+      }),
+    );
+  });
 });

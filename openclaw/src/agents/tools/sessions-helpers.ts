@@ -1,6 +1,7 @@
 import type { OpenClawConfig } from "../../config/config.js";
 import { callGateway } from "../../gateway/call.js";
 import { isAcpSessionKey, normalizeMainKey } from "../../routing/session-key.js";
+import { resolveAgentConfig, resolveSessionAgentId } from "../agent-scope.js";
 import { sanitizeUserFacingText } from "../pi-embedded-helpers.js";
 import {
   stripDowngradedToolCallText,
@@ -67,6 +68,37 @@ export function resolveInternalSessionKey(params: { key: string; alias: string; 
     return params.alias;
   }
   return params.key;
+}
+
+export function resolveWorkspaceIdFromSessionToolOptions(opts?: {
+  agentSessionKey?: string;
+  config?: OpenClawConfig;
+  requesterAgentIdOverride?: string;
+}): string | undefined {
+  const cfg = opts?.config;
+  if (!cfg) {
+    return undefined;
+  }
+  const agentId = opts?.requesterAgentIdOverride?.trim()
+    ? opts.requesterAgentIdOverride.trim()
+    : opts?.agentSessionKey
+      ? resolveSessionAgentId({ sessionKey: opts.agentSessionKey, config: cfg })
+      : undefined;
+  if (!agentId) {
+    return undefined;
+  }
+  const workspaceId = resolveAgentConfig(cfg, agentId)?.workspaceId?.trim();
+  return workspaceId || undefined;
+}
+
+export function withWorkspaceScope<T extends Record<string, unknown>>(
+  params: T,
+  workspaceId?: string,
+): T & { workspaceId?: string } {
+  if (!workspaceId) {
+    return params as T & { workspaceId?: string };
+  }
+  return { ...params, workspaceId };
 }
 
 export type AgentToAgentPolicy = {
@@ -164,17 +196,20 @@ async function resolveSessionKeyFromSessionId(params: {
   mainKey: string;
   requesterInternalKey?: string;
   restrictToSpawned: boolean;
+  cfg?: OpenClawConfig;
+  workspaceId?: string;
 }): Promise<SessionReferenceResolution> {
   try {
     // Resolve via gateway so we respect store routing and visibility rules.
     const result = await callGateway<{ key?: string }>({
+      config: params.cfg,
       method: "sessions.resolve",
-      params: {
+      params: withWorkspaceScope({
         sessionId: params.sessionId,
         spawnedBy: params.restrictToSpawned ? params.requesterInternalKey : undefined,
         includeGlobal: !params.restrictToSpawned,
         includeUnknown: !params.restrictToSpawned,
-      },
+      }, params.workspaceId),
     });
     const key = typeof result?.key === "string" ? result.key.trim() : "";
     if (!key) {
@@ -217,15 +252,18 @@ async function resolveSessionKeyFromKey(params: {
   mainKey: string;
   requesterInternalKey?: string;
   restrictToSpawned: boolean;
+  cfg?: OpenClawConfig;
+  workspaceId?: string;
 }): Promise<SessionReferenceResolution | null> {
   try {
     // Try key-based resolution first so non-standard keys keep working.
     const result = await callGateway<{ key?: string }>({
+      config: params.cfg,
       method: "sessions.resolve",
-      params: {
+      params: withWorkspaceScope({
         key: params.key,
         spawnedBy: params.restrictToSpawned ? params.requesterInternalKey : undefined,
-      },
+      }, params.workspaceId),
     });
     const key = typeof result?.key === "string" ? result.key.trim() : "";
     if (!key) {
@@ -252,6 +290,8 @@ export async function resolveSessionReference(params: {
   mainKey: string;
   requesterInternalKey?: string;
   restrictToSpawned: boolean;
+  cfg?: OpenClawConfig;
+  workspaceId?: string;
 }): Promise<SessionReferenceResolution> {
   const raw = params.sessionKey.trim();
   if (shouldResolveSessionIdInput(raw)) {
@@ -262,6 +302,8 @@ export async function resolveSessionReference(params: {
       mainKey: params.mainKey,
       requesterInternalKey: params.requesterInternalKey,
       restrictToSpawned: params.restrictToSpawned,
+      cfg: params.cfg,
+      workspaceId: params.workspaceId,
     });
     if (resolvedByKey) {
       return resolvedByKey;
@@ -272,6 +314,8 @@ export async function resolveSessionReference(params: {
       mainKey: params.mainKey,
       requesterInternalKey: params.requesterInternalKey,
       restrictToSpawned: params.restrictToSpawned,
+      cfg: params.cfg,
+      workspaceId: params.workspaceId,
     });
   }
 
@@ -377,7 +421,8 @@ export function extractAssistantText(message: unknown): string | undefined {
     if (!block || typeof block !== "object") {
       continue;
     }
-    if ((block as { type?: unknown }).type !== "text") {
+    const type = (block as { type?: unknown }).type;
+    if (type !== "text" && type !== "output_text") {
       continue;
     }
     const text = (block as { text?: unknown }).text;

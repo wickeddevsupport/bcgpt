@@ -1,12 +1,15 @@
 import type { AnnounceTarget } from "./sessions-send-helpers.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import { getChannelPlugin, normalizeChannelId } from "../../channels/plugins/index.js";
 import { callGateway } from "../../gateway/call.js";
-import { SessionListRow } from "./sessions-helpers.js";
+import { SessionListRow, withWorkspaceScope } from "./sessions-helpers.js";
 import { resolveAnnounceTargetFromKey } from "./sessions-send-helpers.js";
 
 export async function resolveAnnounceTarget(params: {
   sessionKey: string;
   displayKey: string;
+  config?: OpenClawConfig;
+  workspaceId?: string;
 }): Promise<AnnounceTarget | null> {
   const parsed = resolveAnnounceTargetFromKey(params.sessionKey);
   const parsedDisplay = resolveAnnounceTargetFromKey(params.displayKey);
@@ -22,12 +25,13 @@ export async function resolveAnnounceTarget(params: {
 
   try {
     const list = await callGateway<{ sessions: Array<SessionListRow> }>({
+      config: params.config,
       method: "sessions.list",
-      params: {
+      params: withWorkspaceScope({
         includeGlobal: true,
         includeUnknown: true,
         limit: 200,
-      },
+      }, params.workspaceId),
     });
     const sessions = Array.isArray(list?.sessions) ? list.sessions : [];
     const match =

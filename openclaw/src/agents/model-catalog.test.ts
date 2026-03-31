@@ -85,7 +85,7 @@ describe("loadModelCatalog", () => {
     expect(warnSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("filters github-copilot down to the shared zero-premium models", async () => {
+  it("includes all discovered github-copilot models", async () => {
     __setModelCatalogImportForTest(
       async () =>
         ({
@@ -107,10 +107,102 @@ describe("loadModelCatalog", () => {
 
     const result = await loadModelCatalog({ config: {} as OpenClawConfig });
     expect(result).toEqual([
-      { id: "gpt-4.1", name: "GPT-4.1", provider: "github-copilot" },
-      { id: "gpt-4o", name: "GPT-4o", provider: "github-copilot" },
-      { id: "gpt-5-mini", name: "GPT-5 mini", provider: "github-copilot" },
-      { id: "gpt-4.1", name: "GPT-4.1", provider: "openai" },
+      {
+        id: "gpt-4.1",
+        name: "GPT-4.1",
+        provider: "github-copilot",
+        contextWindow: undefined,
+        reasoning: undefined,
+        input: undefined,
+      },
+      {
+        id: "gpt-4o",
+        name: "GPT-4o",
+        provider: "github-copilot",
+        contextWindow: undefined,
+        reasoning: undefined,
+        input: undefined,
+      },
+      {
+        id: "gpt-5-mini",
+        name: "GPT-5 mini",
+        provider: "github-copilot",
+        contextWindow: undefined,
+        reasoning: undefined,
+        input: undefined,
+      },
+      {
+        id: "gpt-5.2",
+        name: "GPT-5.2",
+        provider: "github-copilot",
+        contextWindow: undefined,
+        reasoning: undefined,
+        input: undefined,
+      },
+      {
+        id: "o3",
+        name: "o3",
+        provider: "github-copilot",
+        contextWindow: undefined,
+        reasoning: undefined,
+        input: undefined,
+      },
+      {
+        id: "gpt-4.1",
+        name: "GPT-4.1",
+        provider: "openai",
+        contextWindow: undefined,
+        reasoning: undefined,
+        input: undefined,
+      },
     ]);
+  });
+
+  it("caches model catalogs per effective models config", async () => {
+    let call = 0;
+
+    __setModelCatalogImportForTest(async () => {
+      call += 1;
+      return {
+        AuthStorage: class {},
+        ModelRegistry: class {
+          getAll() {
+            if (call === 1) {
+              return [{ id: "gpt-4.1", name: "GPT-4.1", provider: "openai" }];
+            }
+            return [{ id: "gpt-5.2", name: "GPT-5.2", provider: "openai" }];
+          }
+        },
+      } as unknown as PiSdkModule;
+    });
+
+    const first = await loadModelCatalog({
+      config: {
+        models: {
+          providers: {
+            openai: {
+              apiKey: "a",
+              models: [{ id: "gpt-4.1" }],
+            },
+          },
+        },
+      } as unknown as OpenClawConfig,
+    });
+    const second = await loadModelCatalog({
+      config: {
+        models: {
+          providers: {
+            openai: {
+              apiKey: "b",
+              models: [{ id: "gpt-5.2" }],
+            },
+          },
+        },
+      } as unknown as OpenClawConfig,
+    });
+
+    expect(first).toEqual([{ id: "gpt-4.1", name: "GPT-4.1", provider: "openai" }]);
+    expect(second).toEqual([{ id: "gpt-5.2", name: "GPT-5.2", provider: "openai" }]);
+    expect(call).toBe(2);
   });
 });

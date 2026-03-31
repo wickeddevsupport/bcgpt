@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import type { OpenClawConfig } from "../../config/config.js";
 import type { GatewayMessageChannel } from "../../utils/message-channel.js";
 import { callGateway } from "../../gateway/call.js";
 import { formatErrorMessage } from "../../infra/errors.js";
@@ -25,6 +26,8 @@ export async function runSessionsSendA2AFlow(params: {
   requesterChannel?: GatewayMessageChannel;
   roundOneReply?: string;
   waitRunId?: string;
+  config?: OpenClawConfig;
+  workspaceId?: string;
 }) {
   const runContextId = params.waitRunId ?? "unknown";
   try {
@@ -33,6 +36,7 @@ export async function runSessionsSendA2AFlow(params: {
     if (!primaryReply && params.waitRunId) {
       const waitMs = Math.min(params.announceTimeoutMs, 60_000);
       const wait = await callGateway<{ status: string }>({
+        config: params.config,
         method: "agent.wait",
         params: {
           runId: params.waitRunId,
@@ -43,6 +47,8 @@ export async function runSessionsSendA2AFlow(params: {
       if (wait?.status === "ok") {
         primaryReply = await readLatestAssistantReply({
           sessionKey: params.targetSessionKey,
+          config: params.config,
+          workspaceId: params.workspaceId,
         });
         latestReply = primaryReply;
       }
@@ -54,6 +60,8 @@ export async function runSessionsSendA2AFlow(params: {
     const announceTarget = await resolveAnnounceTarget({
       sessionKey: params.targetSessionKey,
       displayKey: params.displayKey,
+      config: params.config,
+      workspaceId: params.workspaceId,
     });
     const targetChannel = announceTarget?.channel ?? "unknown";
 
@@ -83,6 +91,8 @@ export async function runSessionsSendA2AFlow(params: {
           extraSystemPrompt: replyPrompt,
           timeoutMs: params.announceTimeoutMs,
           lane: AGENT_LANE_NESTED,
+          config: params.config,
+          workspaceId: params.workspaceId,
         });
         if (!replyText || isReplySkip(replyText)) {
           break;
@@ -110,10 +120,13 @@ export async function runSessionsSendA2AFlow(params: {
       extraSystemPrompt: announcePrompt,
       timeoutMs: params.announceTimeoutMs,
       lane: AGENT_LANE_NESTED,
+      config: params.config,
+      workspaceId: params.workspaceId,
     });
     if (announceTarget && announceReply && announceReply.trim() && !isAnnounceSkip(announceReply)) {
       try {
         await callGateway({
+          config: params.config,
           method: "send",
           params: {
             to: announceTarget.to,
@@ -121,6 +134,7 @@ export async function runSessionsSendA2AFlow(params: {
             channel: announceTarget.channel,
             accountId: announceTarget.accountId,
             idempotencyKey: crypto.randomUUID(),
+            workspaceId: params.workspaceId,
           },
           timeoutMs: 10_000,
         });

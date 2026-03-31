@@ -3,9 +3,9 @@ import {
   type ModelCatalogEntry,
   resetModelCatalogCacheForTest,
 } from "../agents/model-catalog.js";
-import { loadConfig } from "../config/config.js";
 
 export type GatewayModelChoice = ModelCatalogEntry;
+export type GatewayModelCatalogParams = NonNullable<Parameters<typeof loadModelCatalog>[0]>;
 
 // Test-only escape hatch: model catalog is cached at module scope for the
 // process lifetime, which is fine for the real gateway daemon, but makes
@@ -14,6 +14,8 @@ export function __resetModelCatalogCacheForTest() {
   resetModelCatalogCacheForTest();
 }
 
-export async function loadGatewayModelCatalog(): Promise<GatewayModelChoice[]> {
-  return await loadModelCatalog({ config: loadConfig() });
+export async function loadGatewayModelCatalog(
+  params?: GatewayModelCatalogParams,
+): Promise<GatewayModelChoice[]> {
+  return await loadModelCatalog(params);
 }

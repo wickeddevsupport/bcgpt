@@ -4,6 +4,7 @@ import type { HealthSummary } from "../commands/health.js";
 import type { ChatAbortControllerEntry } from "./chat-abort.js";
 import type { ChatRunEntry } from "./server-chat.js";
 import type { DedupeEntry } from "./server-shared.js";
+import type { GatewayModelCatalogParams } from "./server-model-catalog.js";
 
 export type NodeEventContext = {
   deps: CliDeps;
@@ -26,7 +27,7 @@ export type NodeEventContext = {
   agentRunSeq: Map<string, number>;
   getHealthCache: () => HealthSummary | null;
   refreshHealthSnapshot: (opts?: { probe?: boolean }) => Promise<HealthSummary>;
-  loadGatewayModelCatalog: () => Promise<ModelCatalogEntry[]>;
+  loadGatewayModelCatalog: (params?: GatewayModelCatalogParams) => Promise<ModelCatalogEntry[]>;
   logGateway: { warn: (msg: string) => void };
 };
 

@@ -19,8 +19,8 @@ import {
   validatePollParams,
   validateSendParams,
 } from "../protocol/index.js";
+import { resolveEffectiveRequestWorkspaceId } from "../workspace-request.js";
 import { formatForLog } from "../ws-log.js";
-import { isSuperAdmin } from "../workspace-context.js";
 
 type InflightResult = {
   ok: boolean;
@@ -45,13 +45,10 @@ const getInflightMap = (context: GatewayRequestContext) => {
 
 async function loadSendConfigForClient(
   client?: GatewayClient | null,
+  params?: unknown,
 ): Promise<ReturnType<typeof loadConfig>> {
   let cfg = loadConfig();
-  if (!client || isSuperAdmin(client)) {
-    return cfg;
-  }
-  const workspaceId =
-    typeof client.pmosWorkspaceId === "string" ? client.pmosWorkspaceId.trim() : "";
+  const workspaceId = resolveEffectiveRequestWorkspaceId(client ?? null, params) ?? "";
   if (!workspaceId) {
     return cfg;
   }
@@ -142,7 +139,7 @@ export const sendHandlers: GatewayRequestHandlers = {
 
     const work = (async (): Promise<InflightResult> => {
       try {
-        const cfg = await loadSendConfigForClient(client);
+        const cfg = await loadSendConfigForClient(client, p);
         const resolved = resolveOutboundTarget({
           channel: outboundChannel,
           to,

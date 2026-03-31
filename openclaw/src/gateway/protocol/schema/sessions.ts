@@ -5,6 +5,7 @@ export const SessionsListParamsSchema = Type.Object(
   {
     limit: Type.Optional(Type.Integer({ minimum: 1 })),
     activeMinutes: Type.Optional(Type.Integer({ minimum: 1 })),
+    workspaceId: Type.Optional(NonEmptyString),
     includeGlobal: Type.Optional(Type.Boolean()),
     includeUnknown: Type.Optional(Type.Boolean()),
     /**
@@ -28,6 +29,7 @@ export const SessionsListParamsSchema = Type.Object(
 export const SessionsPreviewParamsSchema = Type.Object(
   {
     keys: Type.Array(NonEmptyString, { minItems: 1 }),
+    workspaceId: Type.Optional(NonEmptyString),
     limit: Type.Optional(Type.Integer({ minimum: 1 })),
     maxChars: Type.Optional(Type.Integer({ minimum: 20 })),
   },
@@ -40,6 +42,7 @@ export const SessionsResolveParamsSchema = Type.Object(
     sessionId: Type.Optional(NonEmptyString),
     label: Type.Optional(SessionLabelString),
     agentId: Type.Optional(NonEmptyString),
+    workspaceId: Type.Optional(NonEmptyString),
     spawnedBy: Type.Optional(NonEmptyString),
     includeGlobal: Type.Optional(Type.Boolean()),
     includeUnknown: Type.Optional(Type.Boolean()),
@@ -50,6 +53,7 @@ export const SessionsResolveParamsSchema = Type.Object(
 export const SessionsPatchParamsSchema = Type.Object(
   {
     key: NonEmptyString,
+    workspaceId: Type.Optional(NonEmptyString),
     label: Type.Optional(Type.Union([SessionLabelString, Type.Null()])),
     thinkingLevel: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),
     verboseLevel: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),
@@ -82,13 +86,14 @@ export const SessionsPatchParamsSchema = Type.Object(
 );
 
 export const SessionsResetParamsSchema = Type.Object(
-  { key: NonEmptyString },
+  { key: NonEmptyString, workspaceId: Type.Optional(NonEmptyString) },
   { additionalProperties: false },
 );
 
 export const SessionsDeleteParamsSchema = Type.Object(
   {
     key: NonEmptyString,
+    workspaceId: Type.Optional(NonEmptyString),
     deleteTranscript: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
@@ -97,6 +102,7 @@ export const SessionsDeleteParamsSchema = Type.Object(
 export const SessionsCompactParamsSchema = Type.Object(
   {
     key: NonEmptyString,
+    workspaceId: Type.Optional(NonEmptyString),
     maxLines: Type.Optional(Type.Integer({ minimum: 1 })),
   },
   { additionalProperties: false },

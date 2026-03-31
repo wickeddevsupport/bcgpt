@@ -26,6 +26,7 @@ export const LogsTailResultSchema = Type.Object(
 export const ChatHistoryParamsSchema = Type.Object(
   {
     sessionKey: NonEmptyString,
+    workspaceId: Type.Optional(NonEmptyString),
     limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000 })),
   },
   { additionalProperties: false },

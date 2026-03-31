@@ -12,8 +12,10 @@ import {
   resolveSessionReference,
   resolveMainSessionAlias,
   resolveInternalSessionKey,
+  resolveWorkspaceIdFromSessionToolOptions,
   SessionListRow,
   stripToolMessages,
+  withWorkspaceScope,
 } from "./sessions-helpers.js";
 
 const SessionsHistoryToolSchema = Type.Object({
@@ -154,16 +156,19 @@ function resolveSandboxSessionToolsVisibility(cfg: ReturnType<typeof loadConfig>
 async function isSpawnedSessionAllowed(params: {
   requesterSessionKey: string;
   targetSessionKey: string;
+  cfg?: OpenClawConfig;
+  workspaceId?: string;
 }): Promise<boolean> {
   try {
     const list = await callGateway<{ sessions: Array<SessionListRow> }>({
+      config: params.cfg,
       method: "sessions.list",
-      params: {
+      params: withWorkspaceScope({
         includeGlobal: false,
         includeUnknown: false,
         limit: 500,
         spawnedBy: params.requesterSessionKey,
-      },
+      }, params.workspaceId),
     });
     const sessions = Array.isArray(list?.sessions) ? list.sessions : [];
     return sessions.some((entry) => entry?.key === params.targetSessionKey);
@@ -188,6 +193,10 @@ export function createSessionsHistoryTool(opts?: {
         required: true,
       });
       const cfg = opts?.config ?? loadConfig();
+      const workspaceId = resolveWorkspaceIdFromSessionToolOptions({
+        agentSessionKey: opts?.agentSessionKey,
+        config: cfg,
+      });
       const { mainKey, alias } = resolveMainSessionAlias(cfg);
       const visibility = resolveSandboxSessionToolsVisibility(cfg);
       const requesterInternalKey =
@@ -209,6 +218,8 @@ export function createSessionsHistoryTool(opts?: {
         mainKey,
         requesterInternalKey,
         restrictToSpawned,
+        cfg,
+        workspaceId,
       });
       if (!resolvedSession.ok) {
         return jsonResult({ status: resolvedSession.status, error: resolvedSession.error });
@@ -221,6 +232,8 @@ export function createSessionsHistoryTool(opts?: {
         const ok = await isSpawnedSessionAllowed({
           requesterSessionKey: requesterInternalKey,
           targetSessionKey: resolvedKey,
+          cfg,
+          workspaceId,
         });
         if (!ok) {
           return jsonResult({
@@ -256,8 +269,9 @@ export function createSessionsHistoryTool(opts?: {
           : undefined;
       const includeTools = Boolean(params.includeTools);
       const result = await callGateway<{ messages: Array<unknown> }>({
+        config: cfg,
         method: "chat.history",
-        params: { sessionKey: resolvedKey, limit },
+        params: withWorkspaceScope({ sessionKey: resolvedKey, limit }, workspaceId),
       });
       const rawMessages = Array.isArray(result?.messages) ? result.messages : [];
       const selectedMessages = includeTools ? rawMessages : stripToolMessages(rawMessages);

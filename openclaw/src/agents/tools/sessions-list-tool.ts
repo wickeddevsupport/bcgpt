@@ -13,8 +13,10 @@ import {
   resolveDisplaySessionKey,
   resolveInternalSessionKey,
   resolveMainSessionAlias,
+  resolveWorkspaceIdFromSessionToolOptions,
   type SessionListRow,
   stripToolMessages,
+  withWorkspaceScope,
 } from "./sessions-helpers.js";
 
 const SessionsListToolSchema = Type.Object({
@@ -41,6 +43,10 @@ export function createSessionsListTool(opts?: {
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;
       const cfg = opts?.config ?? loadConfig();
+      const workspaceId = resolveWorkspaceIdFromSessionToolOptions({
+        agentSessionKey: opts?.agentSessionKey,
+        config: cfg,
+      });
       const { mainKey, alias } = resolveMainSessionAlias(cfg);
       const visibility = resolveSandboxSessionToolsVisibility(cfg);
       const requesterInternalKey =
@@ -80,14 +86,15 @@ export function createSessionsListTool(opts?: {
       const messageLimit = Math.min(messageLimitRaw, 20);
 
       const list = await callGateway<{ sessions: Array<SessionListRow>; path: string }>({
+        config: cfg,
         method: "sessions.list",
-        params: {
+        params: withWorkspaceScope({
           limit,
           activeMinutes,
           includeGlobal: !restrictToSpawned,
           includeUnknown: !restrictToSpawned,
           spawnedBy: restrictToSpawned ? requesterInternalKey : undefined,
-        },
+        }, workspaceId),
       });
 
       const sessions = Array.isArray(list?.sessions) ? list.sessions : [];
@@ -197,8 +204,9 @@ export function createSessionsListTool(opts?: {
             mainKey,
           });
           const history = await callGateway<{ messages: Array<unknown> }>({
+            config: cfg,
             method: "chat.history",
-            params: { sessionKey: resolvedKey, limit: messageLimit },
+            params: withWorkspaceScope({ sessionKey: resolvedKey, limit: messageLimit }, workspaceId),
           });
           const rawMessages = Array.isArray(history?.messages) ? history.messages : [];
           const filtered = stripToolMessages(rawMessages);

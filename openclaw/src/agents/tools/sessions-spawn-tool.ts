@@ -22,6 +22,8 @@ import {
   resolveDisplaySessionKey,
   resolveInternalSessionKey,
   resolveMainSessionAlias,
+  resolveWorkspaceIdFromSessionToolOptions,
+  withWorkspaceScope,
 } from "./sessions-helpers.js";
 
 const SessionsSpawnToolSchema = Type.Object({
@@ -119,6 +121,11 @@ export function createSessionsSpawnTool(opts?: {
       let modelApplied = false;
 
       const cfg = opts?.config ?? loadConfig();
+      const workspaceId = resolveWorkspaceIdFromSessionToolOptions({
+        agentSessionKey: opts?.agentSessionKey,
+        config: cfg,
+        requesterAgentIdOverride: opts?.requesterAgentIdOverride,
+      });
       const { mainKey, alias } = resolveMainSessionAlias(cfg);
       const requesterSessionKey = opts?.agentSessionKey;
       if (typeof requesterSessionKey === "string" && isSubagentSessionKey(requesterSessionKey)) {
@@ -196,8 +203,9 @@ export function createSessionsSpawnTool(opts?: {
       if (resolvedModel) {
         try {
           await callGateway({
+            config: cfg,
             method: "sessions.patch",
-            params: { key: childSessionKey, model: resolvedModel },
+            params: withWorkspaceScope({ key: childSessionKey, model: resolvedModel }, workspaceId),
             timeoutMs: 10_000,
           });
           modelApplied = true;
@@ -219,11 +227,12 @@ export function createSessionsSpawnTool(opts?: {
       if (thinkingOverride !== undefined) {
         try {
           await callGateway({
+            config: cfg,
             method: "sessions.patch",
-            params: {
+            params: withWorkspaceScope({
               key: childSessionKey,
               thinkingLevel: thinkingOverride === "off" ? null : thinkingOverride,
-            },
+            }, workspaceId),
             timeoutMs: 10_000,
           });
         } catch (err) {
@@ -248,8 +257,9 @@ export function createSessionsSpawnTool(opts?: {
       let childRunId: string = childIdem;
       try {
         const response = await callGateway<{ runId: string }>({
+          config: cfg,
           method: "agent",
-          params: {
+          params: withWorkspaceScope({
             message: task,
             sessionKey: childSessionKey,
             channel: requesterOrigin?.channel,
@@ -268,7 +278,7 @@ export function createSessionsSpawnTool(opts?: {
             groupId: opts?.agentGroupId ?? undefined,
             groupChannel: opts?.agentGroupChannel ?? undefined,
             groupSpace: opts?.agentGroupSpace ?? undefined,
-          },
+          }, workspaceId),
           timeoutMs: 10_000,
         });
         if (typeof response?.runId === "string" && response.runId) {

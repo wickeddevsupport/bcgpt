@@ -10,6 +10,7 @@ import type { ConnectParams, ErrorShape, RequestFrame } from "../protocol/index.
 import type { ChannelRuntimeSnapshot } from "../server-channels.js";
 import type { DedupeEntry } from "../server-shared.js";
 import type { PmosRole } from "../pmos-auth.js";
+import type { GatewayModelCatalogParams } from "../server-model-catalog.js";
 
 type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
 
@@ -32,7 +33,7 @@ export type GatewayRequestContext = {
   deps: ReturnType<typeof createDefaultDeps>;
   cron: CronService;
   cronStorePath: string;
-  loadGatewayModelCatalog: () => Promise<ModelCatalogEntry[]>;
+  loadGatewayModelCatalog: (params?: GatewayModelCatalogParams) => Promise<ModelCatalogEntry[]>;
   getHealthCache: () => HealthSummary | null;
   refreshHealthSnapshot: (opts?: { probe?: boolean }) => Promise<HealthSummary>;
   logHealth: { error: (message: string) => void };

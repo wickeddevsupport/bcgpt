@@ -1,5 +1,4 @@
 import { type OpenClawConfig, loadConfig } from "../config/config.js";
-import { isDefaultCopilotModelId } from "../providers/github-copilot-models.js";
 import { resolveOpenClawAgentDir } from "./agent-paths.js";
 import { ensureOpenClawModelsJson } from "./models-config.js";
 
@@ -23,14 +22,26 @@ type DiscoveredModel = {
 
 type PiSdkModule = typeof import("./pi-model-discovery.js");
 
-let modelCatalogPromise: Promise<ModelCatalogEntry[]> | null = null;
-let hasLoggedModelCatalogError = false;
+const modelCatalogPromises = new Map<string, Promise<ModelCatalogEntry[]>>();
+const loggedModelCatalogErrors = new Set<string>();
 const defaultImportPiSdk = () => import("./pi-model-discovery.js");
 let importPiSdk = defaultImportPiSdk;
 
+function getModelCatalogCacheKey(cfg: OpenClawConfig): string {
+  const agentDir = resolveOpenClawAgentDir();
+  try {
+    return JSON.stringify({
+      agentDir,
+      models: cfg.models ?? null,
+    });
+  } catch {
+    return agentDir;
+  }
+}
+
 export function resetModelCatalogCacheForTest() {
-  modelCatalogPromise = null;
-  hasLoggedModelCatalogError = false;
+  modelCatalogPromises.clear();
+  loggedModelCatalogErrors.clear();
   importPiSdk = defaultImportPiSdk;
 }
 
@@ -43,14 +54,20 @@ export async function loadModelCatalog(params?: {
   config?: OpenClawConfig;
   useCache?: boolean;
 }): Promise<ModelCatalogEntry[]> {
+  const cfg = params?.config ?? loadConfig();
+  const cacheKey = getModelCatalogCacheKey(cfg);
+
   if (params?.useCache === false) {
-    modelCatalogPromise = null;
-  }
-  if (modelCatalogPromise) {
-    return modelCatalogPromise;
+    modelCatalogPromises.delete(cacheKey);
+    loggedModelCatalogErrors.delete(cacheKey);
   }
 
-  modelCatalogPromise = (async () => {
+  const cachedPromise = modelCatalogPromises.get(cacheKey);
+  if (cachedPromise) {
+    return cachedPromise;
+  }
+
+  const promise = (async () => {
     const models: ModelCatalogEntry[] = [];
     const sortModels = (entries: ModelCatalogEntry[]) =>
       entries.sort((a, b) => {
@@ -61,7 +78,6 @@ export async function loadModelCatalog(params?: {
         return a.name.localeCompare(b.name);
       });
     try {
-      const cfg = params?.config ?? loadConfig();
       await ensureOpenClawModelsJson(cfg);
       // IMPORTANT: keep the dynamic import *inside* the try/catch.
       // If this fails once (e.g. during a pnpm install that temporarily swaps node_modules),
@@ -86,9 +102,6 @@ export async function loadModelCatalog(params?: {
         if (!provider) {
           continue;
         }
-        if (provider.toLowerCase() === "github-copilot" && !isDefaultCopilotModelId(id)) {
-          continue;
-        }
         const name = String(entry?.name ?? id).trim() || id;
         const contextWindow =
           typeof entry?.contextWindow === "number" && entry.contextWindow > 0
@@ -101,17 +114,17 @@ export async function loadModelCatalog(params?: {
 
       if (models.length === 0) {
         // If we found nothing, don't cache this result so we can try again.
-        modelCatalogPromise = null;
+        modelCatalogPromises.delete(cacheKey);
       }
 
       return sortModels(models);
     } catch (error) {
-      if (!hasLoggedModelCatalogError) {
-        hasLoggedModelCatalogError = true;
+      if (!loggedModelCatalogErrors.has(cacheKey)) {
+        loggedModelCatalogErrors.add(cacheKey);
         console.warn(`[model-catalog] Failed to load model catalog: ${String(error)}`);
       }
       // Don't poison the cache on transient dependency/filesystem issues.
-      modelCatalogPromise = null;
+      modelCatalogPromises.delete(cacheKey);
       if (models.length > 0) {
         return sortModels(models);
       }
@@ -119,7 +132,8 @@ export async function loadModelCatalog(params?: {
     }
   })();
 
-  return modelCatalogPromise;
+  modelCatalogPromises.set(cacheKey, promise);
+  return promise;
 }
 
 /**

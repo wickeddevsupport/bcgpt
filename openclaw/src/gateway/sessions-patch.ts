@@ -29,6 +29,7 @@ import {
   errorShape,
   type SessionsPatchParams,
 } from "./protocol/index.js";
+import type { GatewayModelCatalogParams } from "./server-model-catalog.js";
 
 function invalid(message: string): { ok: false; error: ErrorShape } {
   return { ok: false, error: errorShape(ErrorCodes.INVALID_REQUEST, message) };
@@ -63,7 +64,9 @@ export async function applySessionsPatchToStore(params: {
   store: Record<string, SessionEntry>;
   storeKey: string;
   patch: SessionsPatchParams;
-  loadGatewayModelCatalog?: () => Promise<ModelCatalogEntry[]>;
+  loadGatewayModelCatalog?: (
+    catalogParams?: GatewayModelCatalogParams,
+  ) => Promise<ModelCatalogEntry[]>;
 }): Promise<{ ok: true; entry: SessionEntry } | { ok: false; error: ErrorShape }> {
   const { cfg, store, storeKey, patch } = params;
   const now = Date.now();
@@ -270,7 +273,7 @@ export async function applySessionsPatchToStore(params: {
           error: errorShape(ErrorCodes.UNAVAILABLE, "model catalog unavailable"),
         };
       }
-      const catalog = await params.loadGatewayModelCatalog();
+      const catalog = await params.loadGatewayModelCatalog({ config: cfg });
       const resolved = resolveAllowedModelRef({
         cfg,
         catalog,
