@@ -59,13 +59,20 @@ function resolveExpectedScopeKey(host: ToolStreamHost): string {
   return workspaceId ? `workspace:${workspaceId}` : "global";
 }
 
-function matchesAgentEventScope(host: ToolStreamHost, payload?: Pick<AgentEventPayload, "runId" | "scopeKey">): boolean {
+function matchesAgentEventScope(
+  host: ToolStreamHost,
+  payload?: Pick<AgentEventPayload, "runId" | "scopeKey" | "sessionKey">,
+): boolean {
   const expectedScopeKey = resolveExpectedScopeKey(host);
   const actualScopeKey = typeof payload?.scopeKey === "string" ? payload.scopeKey.trim() : "";
   if (actualScopeKey) {
     return actualScopeKey === expectedScopeKey;
   }
   if (expectedScopeKey === "global") {
+    return true;
+  }
+  const sessionKey = typeof payload?.sessionKey === "string" ? payload.sessionKey.trim() : "";
+  if (sessionKey && isRelatedAgentSessionKey(host.sessionKey, sessionKey)) {
     return true;
   }
   const activeRunId = resolveCurrentActiveRunId(host);
@@ -294,7 +301,7 @@ export function handleAgentEvent(host: ToolStreamHost, payload?: AgentEventPaylo
   if (!sessionKey && activeRunId && payload.runId !== activeRunId) {
     return;
   }
-  if (activeRunId && payload.runId !== activeRunId) {
+  if (!sessionKey && activeRunId && payload.runId !== activeRunId) {
     return;
   }
   if (!activeRunId) {
