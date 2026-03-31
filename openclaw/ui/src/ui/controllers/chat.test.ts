@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { hasRememberedCompletedSessionRun } from "../session-active-run.ts";
 import {
   abortChatRun,
   handleChatEvent,
@@ -26,6 +27,10 @@ function createState(overrides: Partial<ChatState> = {}): ChatState {
     ...overrides,
   };
 }
+
+beforeEach(() => {
+  sessionStorage.clear();
+});
 
 describe("handleChatEvent", () => {
   it("returns null when payload is missing", () => {
@@ -389,6 +394,92 @@ describe("handleChatEvent", () => {
 
     expect(JSON.stringify(state.chatMessages)).toContain("newer response");
     expect(JSON.stringify(state.chatMessages)).not.toContain("older response");
+  });
+
+  it("marks a recovered run complete when history load resolves the response", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === "chat.history") {
+        return {
+          messages: [
+            {
+              role: "assistant",
+              content: [{ type: "text", text: "Recovered from history" }],
+              timestamp: 200,
+            },
+          ],
+          thinkingLevel: "off",
+        };
+      }
+      throw new Error(`unexpected method: ${method}`);
+    });
+    const state = createState({
+      sessionKey: "main",
+      chatRunId: "run-123",
+      chatStream: "Working...",
+      chatStreamStartedAt: 100,
+      sessionsResult: {
+        ts: 0,
+        path: "",
+        count: 1,
+        defaults: {},
+        sessions: [
+          {
+            key: "main",
+            kind: "direct",
+            updatedAt: 150,
+            hasActiveRun: true,
+            activeRunId: "run-123",
+          },
+        ],
+      },
+      client: { request } as unknown as ChatState["client"],
+    });
+
+    await loadChatHistory(state);
+
+    expect(state.chatRunId).toBeNull();
+    expect(state.chatStream).toBeNull();
+    expect(state.sessionsResult?.sessions[0]?.hasActiveRun).toBe(false);
+    expect(state.sessionsResult?.sessions[0]?.activeRunId).toBeUndefined();
+    expect(hasRememberedCompletedSessionRun("main", "run-123")).toBe(true);
+  });
+
+  it("ignores late deltas for a run that was already finalized via history recovery", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === "chat.history") {
+        return {
+          messages: [
+            {
+              role: "assistant",
+              content: [{ type: "text", text: "Recovered from history" }],
+              timestamp: 200,
+            },
+          ],
+          thinkingLevel: "off",
+        };
+      }
+      throw new Error(`unexpected method: ${method}`);
+    });
+    const state = createState({
+      sessionKey: "main",
+      chatRunId: "run-123",
+      chatStream: "Working...",
+      chatStreamStartedAt: 100,
+      client: { request } as unknown as ChatState["client"],
+    });
+
+    await loadChatHistory(state);
+
+    const payload: ChatEventPayload = {
+      runId: "run-123",
+      sessionKey: "main",
+      state: "delta",
+      message: { role: "assistant", content: [{ type: "text", text: "late delta" }] },
+    };
+
+    expect(handleChatEvent(state, payload)).toBeNull();
+    expect(state.chatStream).toBeNull();
+    expect(JSON.stringify(state.chatMessages)).not.toContain("late delta");
   });
 
   it("repairs a missing workspace session during history load instead of falling back", async () => {

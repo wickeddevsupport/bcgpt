@@ -2,6 +2,7 @@ import type { GatewayBrowserClient } from "../gateway.ts";
 import type { SessionsListResult } from "../types.ts";
 import type { ChatAttachment } from "../ui-types.ts";
 import { extractText, extractThinking } from "../chat/message-extract.ts";
+import { rememberCompletedSessionRun } from "../session-active-run.ts";
 import { generateUUID } from "../uuid.ts";
 import { parseAgentSessionKey } from "../../../../src/routing/session-key.js";
 
@@ -74,13 +75,61 @@ function isAssistantReply(message: unknown): boolean {
   return raw.role === "assistant";
 }
 
-function clearActiveRun(state: ChatState) {
+function clearActiveRun(state: ChatState, opts?: { finalizedRunId?: string | null }) {
   state.chatRunId = null;
   state.chatStream = null;
   state.chatStreamStartedAt = null;
   state.chatSending = false;
-  finalizedRunAt.delete(state as object);
+  const finalizedRunId =
+    typeof opts?.finalizedRunId === "string" ? opts.finalizedRunId.trim() : "";
+  if (finalizedRunId) {
+    finalizedRunAt.set(state as object, { runId: finalizedRunId, at: Date.now() });
+  } else {
+    finalizedRunAt.delete(state as object);
+  }
   liveRunStreamState.delete(state as object);
+}
+
+function clearRecoveredSessionActiveRun(state: ChatState, runId?: string | null) {
+  const sessionKey = state.sessionKey.trim();
+  if (!sessionKey || !state.sessionsResult?.sessions?.length) {
+    return;
+  }
+  const normalizedRunId = typeof runId === "string" ? runId.trim() : "";
+  state.sessionsResult = {
+    ...state.sessionsResult,
+    sessions: state.sessionsResult.sessions.map((session) => {
+      if ((typeof session.key === "string" ? session.key.trim() : "") !== sessionKey) {
+        return session;
+      }
+      const currentRunId =
+        typeof session.activeRunId === "string" ? session.activeRunId.trim() : "";
+      if (normalizedRunId && currentRunId && currentRunId !== normalizedRunId) {
+        return session;
+      }
+      return {
+        ...session,
+        hasActiveRun: false,
+        activeRunId: undefined,
+      };
+    }),
+  };
+}
+
+function markRunCompleted(state: ChatState, runId?: string | null) {
+  const normalizedRunId = typeof runId === "string" ? runId.trim() : "";
+  if (normalizedRunId) {
+    rememberCompletedSessionRun(state.sessionKey, normalizedRunId);
+  }
+  clearRecoveredSessionActiveRun(state, normalizedRunId);
+}
+
+function isFinalizedRun(state: ChatState, runId?: string | null): boolean {
+  const normalizedRunId = typeof runId === "string" ? runId.trim() : "";
+  if (!normalizedRunId) {
+    return false;
+  }
+  return finalizedRunAt.get(state as object)?.runId === normalizedRunId;
 }
 
 function composeLiveStreamText(thinkingText: string, contentText: string): string | null {
@@ -180,9 +229,10 @@ function stripThinkingFromStream(stream: string | null): string {
   return stream.replace(/<thinking>[\s\S]*?<\/thinking>\s*/g, "").trim();
 }
 
-function reconcileRunWithHistory(state: ChatState, historyMessages: unknown[]): boolean {
-  if (!state.chatRunId || !state.chatStreamStartedAt) {
-    return false;
+function reconcileRunWithHistory(state: ChatState, historyMessages: unknown[]): string | null {
+  const activeRunId = typeof state.chatRunId === "string" ? state.chatRunId.trim() : "";
+  if (!activeRunId || !state.chatStreamStartedAt) {
+    return null;
   }
   const runStartedAt = state.chatStreamStartedAt;
   const hasAssistantReply = historyMessages.some((message) => {
@@ -197,10 +247,10 @@ function reconcileRunWithHistory(state: ChatState, historyMessages: unknown[]): 
     return Boolean(text || thinking);
   });
   if (!hasAssistantReply) {
-    return false;
+    return null;
   }
-  clearActiveRun(state);
-  return true;
+  clearActiveRun(state, { finalizedRunId: activeRunId });
+  return activeRunId;
 }
 
 export type ChatEventPayload = {
@@ -358,7 +408,11 @@ function applyChatHistoryResult(
   }
   const historyMessages = Array.isArray(res.messages) ? res.messages : [];
   const previousMessages = Array.isArray(state.chatMessages) ? state.chatMessages : [];
-  const recovered = reconcileRunWithHistory(state, historyMessages);
+  const recoveredRunId = reconcileRunWithHistory(state, historyMessages);
+  const recovered = Boolean(recoveredRunId);
+  if (recoveredRunId) {
+    markRunCompleted(state, recoveredRunId);
+  }
   if (!recovered) {
     const finalized = finalizedRunAt.get(state as object);
     if (
@@ -714,6 +768,9 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
   if (!payload) {
     return null;
   }
+  if (isFinalizedRun(state, payload.runId)) {
+    return payload.state === "delta" ? null : payload.state;
+  }
   if (!matchesChatEventScope(state, payload)) {
     return null;
   }
@@ -745,7 +802,8 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
     const finalMessage = normalizeFinalAssistantMessage(payload.message);
     state.chatMessages = clearPendingMarkersForRun(state.chatMessages, payload.runId);
     // Final is authoritative even if history reconciliation lands later.
-    clearActiveRun(state);
+    clearActiveRun(state, { finalizedRunId: payload.runId ?? activeRunId });
+    markRunCompleted(state, payload.runId ?? activeRunId);
     state.lastError = null;
     if (finalMessage && hasRenderableAssistantContent(finalMessage)) {
       state.chatMessages = appendAssistantMessageIfNew(state.chatMessages, finalMessage);
@@ -770,10 +828,12 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
         timestamp: Date.now(),
       });
     }
-    clearActiveRun(state);
+    clearActiveRun(state, { finalizedRunId: payload.runId ?? activeRunId });
+    markRunCompleted(state, payload.runId ?? activeRunId);
   } else if (payload.state === "error") {
     state.chatMessages = clearPendingMarkersForRun(state.chatMessages, payload.runId);
-    clearActiveRun(state);
+    clearActiveRun(state, { finalizedRunId: payload.runId ?? activeRunId });
+    markRunCompleted(state, payload.runId ?? activeRunId);
     state.lastError = payload.errorMessage ?? "chat error";
   }
   return payload.state;
