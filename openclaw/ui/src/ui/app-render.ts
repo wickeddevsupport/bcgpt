@@ -599,9 +599,18 @@ export function renderApp(state: AppViewState) {
     error: state.lastError,
     sessions: state.sessionsResult,
     focusMode: chatFocus,
-    onRefresh: () => {
+    refreshing: state.chatManualRefreshInFlight,
+    onRefresh: async () => {
+      if (state.chatManualRefreshInFlight) {
+        return;
+      }
+      state.chatManualRefreshInFlight = true;
       state.resetToolStream();
-      return Promise.all([loadChatHistory(state), refreshChatAvatar(state)]);
+      try {
+        await Promise.all([loadChatHistory(state), refreshChatAvatar(state)]);
+      } finally {
+        state.chatManualRefreshInFlight = false;
+      }
     },
     onToggleFocusMode: () => {
       if (state.onboarding) {

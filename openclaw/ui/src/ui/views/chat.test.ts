@@ -39,6 +39,7 @@ function createProps(overrides: Partial<ChatProps> = {}): ChatProps {
     focusMode: false,
     assistantName: "OpenClaw",
     assistantAvatar: null,
+    refreshing: false,
     onRefresh: () => undefined,
     onToggleFocusMode: () => undefined,
     onDraftChange: () => undefined,
@@ -333,6 +334,26 @@ describe("chat view", () => {
     newSessionButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(onNewSession).toHaveBeenCalledTimes(1);
     expect(container.textContent).not.toContain("Stop");
+  });
+
+  it("renders a manual refresh button that calls onRefresh", () => {
+    const container = document.createElement("div");
+    const onRefresh = vi.fn();
+    render(
+      renderChat(
+        createProps({
+          onRefresh,
+        }),
+      ),
+      container,
+    );
+
+    const refreshButton = Array.from(container.querySelectorAll("button")).find(
+      (btn) => btn.getAttribute("title") === "Refresh chat history",
+    );
+    expect(refreshButton).not.toBeUndefined();
+    refreshButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 
   it("renders a compact agent header when expanded", () => {

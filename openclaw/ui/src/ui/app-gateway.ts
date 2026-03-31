@@ -461,12 +461,12 @@ export function connectGateway(host: GatewayHost) {
       host.lastError = null;
       host.hello = hello;
       applySnapshot(host, hello);
-      const hadLocalActiveRun = Boolean(host.chatRunId);
-      if (!hadLocalActiveRun) {
-        host.chatRunId = null;
-        (host as unknown as { chatStream: string | null }).chatStream = null;
-        (host as unknown as { chatStreamStartedAt: number | null }).chatStreamStartedAt = null;
-      }
+      // Reset orphaned chat run state from before disconnect.
+      // If the final event was missed while the socket was down, keeping the old
+      // local run id leaves the composer stuck busy until a full page refresh.
+      host.chatRunId = null;
+      (host as unknown as { chatStream: string | null }).chatStream = null;
+      (host as unknown as { chatStreamStartedAt: number | null }).chatStreamStartedAt = null;
       // Clear gateway restart flag now that we've reconnected successfully.
       (host as unknown as { pmosGatewayRestarting: boolean }).pmosGatewayRestarting = false;
       (host as unknown as { pmosGatewayRestartError: string | null }).pmosGatewayRestartError = null;

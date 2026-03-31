@@ -212,6 +212,53 @@ describe("connectGateway", () => {
     expect(vi.mocked(loadChatHistory)).not.toHaveBeenCalled();
   });
 
+  it("clears stale local run state when the gateway reconnects", async () => {
+    const host = {
+      settings: { gatewayUrl: "wss://example.test", token: "", lastActiveSessionKey: "main" },
+      password: "",
+      client: null,
+      connected: false,
+      hello: null,
+      lastError: "old error",
+      onboarding: false,
+      eventLogBuffer: [],
+      eventLog: [],
+      tab: "chat",
+      presenceEntries: [],
+      presenceError: null,
+      presenceStatus: null,
+      agentsLoading: false,
+      agentsList: null,
+      agentsError: null,
+      debugHealth: null,
+      assistantName: "",
+      assistantAvatar: null,
+      assistantAgentId: null,
+      sessionKey: "main",
+      chatRunId: "run-1",
+      chatStream: "partial reply",
+      chatStreamStartedAt: Date.now() - 1_000,
+      refreshSessionsAfterChat: new Set<string>(),
+      pmosTraceEvents: [],
+      execApprovalQueue: [],
+      execApprovalError: null,
+      pmosAuthUser: { role: "workspace_admin" },
+      handlePmosRefreshConnectors: vi.fn(),
+    } as any;
+
+    connectGateway(host);
+    const client = gatewayClientInstances[0];
+    expect(client).toBeTruthy();
+
+    await client.opts.onHello?.({ snapshot: {} });
+
+    expect(host.connected).toBe(true);
+    expect(host.lastError).toBeNull();
+    expect(host.chatRunId).toBeNull();
+    expect(host.chatStream).toBeNull();
+    expect(host.chatStreamStartedAt).toBeNull();
+  });
+
   it("processes all queued chat deltas in a single animation frame", () => {
     const originalRaf = globalThis.requestAnimationFrame;
     let queuedFrame: FrameRequestCallback | null = null;

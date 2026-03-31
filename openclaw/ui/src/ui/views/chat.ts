@@ -70,6 +70,7 @@ export type ChatProps = {
   // Scroll control
   showNewMessages?: boolean;
   onScrollToBottom?: () => void;
+  refreshing?: boolean;
   // Event handlers
   onRefresh: () => void;
   onToggleFocusMode: () => void;
@@ -725,6 +726,15 @@ export function renderChat(props: ChatProps) {
             ></textarea>
           </label>
           <div class="chat-compose__actions">
+            <button
+              class="btn"
+              type="button"
+              title="Refresh chat history"
+              ?disabled=${!props.connected || props.refreshing}
+              @click=${props.onRefresh}
+            >
+              ${props.refreshing ? icons.loader : icons.scrollText}
+            </button>
             <button
               class="btn"
               type="button"
