@@ -20,6 +20,9 @@ import { generateUUID } from "./uuid.ts";
 
 export type ChatHost = {
   connected: boolean;
+  client?: {
+    request: <T = unknown>(method: string, params?: Record<string, unknown>) => Promise<T>;
+  } | null;
   chatMessage: string;
   chatAttachments: ChatAttachment[];
   chatQueue: ChatQueueItem[];
@@ -158,6 +161,17 @@ const CHAT_RECOVERY_POLL_INTERVAL_MS = 1500;
 const CHAT_RECOVERY_MAX_WAIT_MS = 25000;
 const CHAT_RECOVERY_STEADY_POLL_INTERVAL_MS = 5000;
 
+async function reconcileLiveChatHistory(host: ChatHost, runId: string) {
+  if (host.chatRunId !== runId) {
+    return;
+  }
+  const hasLiveStream = typeof host.chatStream === "string" && host.chatStream.trim().length > 0;
+  if (hasLiveStream) {
+    return;
+  }
+  await loadChatHistory(host as unknown as OpenClawApp).catch(() => undefined);
+}
+
 type AgentWaitResult = {
   runId: string;
   status: "ok" | "error" | "timeout";
@@ -190,6 +204,7 @@ function startChatRecoveryPoll(host: ChatHost, runId: string) {
       clearChatRecoveryPoll(host);
       return;
     }
+    await reconcileLiveChatHistory(host, runId);
     const timeoutMs =
       Date.now() - startedAt > CHAT_RECOVERY_MAX_WAIT_MS
         ? CHAT_RECOVERY_STEADY_POLL_INTERVAL_MS
@@ -208,7 +223,7 @@ function startChatRecoveryPoll(host: ChatHost, runId: string) {
       return;
     }
 
-    await loadSessions(host as unknown as OpenClawApp, {
+    await loadSessions(host as unknown as Parameters<typeof loadSessions>[0], {
       activeMinutes: CHAT_SESSIONS_ACTIVE_MINUTES,
     }).catch(() => undefined);
     await loadChatHistory(host as unknown as OpenClawApp).catch(() => undefined);
@@ -350,7 +365,7 @@ export async function refreshChat(host: ChatHost, opts?: { scheduleScroll?: bool
   if (isWorkspaceUser) {
     // For PMOS workspace users, sessions.list may clamp a stale session key from old browser state.
     // Load sessions first so chat.history never fires against a foreign/invalid session.
-    await loadSessions(host as unknown as OpenClawApp, {
+    await loadSessions(host as unknown as Parameters<typeof loadSessions>[0], {
       activeMinutes: CHAT_SESSIONS_ACTIVE_MINUTES,
     });
     await Promise.all([
@@ -360,7 +375,7 @@ export async function refreshChat(host: ChatHost, opts?: { scheduleScroll?: bool
   } else {
     await Promise.all([
       loadChatHistory(host as unknown as OpenClawApp),
-      loadSessions(host as unknown as OpenClawApp, {
+      loadSessions(host as unknown as Parameters<typeof loadSessions>[0], {
         activeMinutes: CHAT_SESSIONS_ACTIVE_MINUTES,
       }),
       refreshChatAvatar(host),
