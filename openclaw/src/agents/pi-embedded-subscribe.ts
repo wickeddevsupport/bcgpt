@@ -276,7 +276,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
       const pendingCount = state.pendingCompactionRetry;
       const runLabel = `runId=${params.runId} retries=${pendingCount}`;
       ctx.log.warn(`embedded run compaction retry stalled before resume: ${runLabel}`);
-      void params.session.continue().catch((err: unknown) => {
+      void params.session.agent.continue().catch((err: unknown) => {
         const detail = err instanceof Error ? err.message : String(err);
         state.pendingCompactionRetry = 0;
         settleCompactionRetry(

@@ -109,8 +109,10 @@ describe("subscribeEmbeddedPiSession", () => {
         }
       });
       const session = {
+        agent: {
+          continue: continueMock,
+        },
         isStreaming: false,
-        continue: continueMock,
         subscribe: (listener: SessionEventHandler) => {
           listeners.push(listener);
           return () => {};
@@ -149,8 +151,10 @@ describe("subscribeEmbeddedPiSession", () => {
         .fn()
         .mockRejectedValue(new Error("Cannot continue from message role: assistant"));
       const session = {
+        agent: {
+          continue: continueMock,
+        },
         isStreaming: false,
-        continue: continueMock,
         subscribe: (listener: SessionEventHandler) => {
           listeners.push(listener);
           return () => {};
