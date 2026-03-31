@@ -8,7 +8,12 @@ import { resolveBlockingRecoveredSessionRun } from "./session-active-run.ts";
 import { resetChatScroll, scheduleChatScroll } from "./app-scroll.ts";
 import { setLastActiveSessionKey } from "./app-settings.ts";
 import { resetToolStream } from "./app-tool-stream.ts";
-import { abortChatRun, loadChatHistory, sendChatMessage } from "./controllers/chat.ts";
+import {
+  abortChatRun,
+  finalizeChatRunFromWait,
+  loadChatHistory,
+  sendChatMessage,
+} from "./controllers/chat.ts";
 import { loadSessions } from "./controllers/sessions.ts";
 import { normalizeBasePath } from "./navigation.ts";
 import { generateUUID } from "./uuid.ts";
@@ -153,6 +158,30 @@ const CHAT_RECOVERY_POLL_INTERVAL_MS = 1500;
 const CHAT_RECOVERY_MAX_WAIT_MS = 25000;
 const CHAT_RECOVERY_STEADY_POLL_INTERVAL_MS = 5000;
 
+type AgentWaitResult = {
+  runId: string;
+  status: "ok" | "error" | "timeout";
+  error?: string;
+};
+
+async function waitForChatRunLifecycle(
+  host: ChatHost,
+  runId: string,
+  timeoutMs: number,
+): Promise<AgentWaitResult | null> {
+  if (!host.client || !host.connected) {
+    return null;
+  }
+  try {
+    return await host.client.request<AgentWaitResult>("agent.wait", {
+      runId,
+      timeoutMs,
+    });
+  } catch {
+    return null;
+  }
+}
+
 function startChatRecoveryPoll(host: ChatHost, runId: string) {
   clearChatRecoveryPoll(host);
   const startedAt = Date.now();
@@ -161,7 +190,11 @@ function startChatRecoveryPoll(host: ChatHost, runId: string) {
       clearChatRecoveryPoll(host);
       return;
     }
-    await loadChatHistory(host as unknown as OpenClawApp);
+    const timeoutMs =
+      Date.now() - startedAt > CHAT_RECOVERY_MAX_WAIT_MS
+        ? CHAT_RECOVERY_STEADY_POLL_INTERVAL_MS
+        : CHAT_RECOVERY_POLL_INTERVAL_MS;
+    const waitResult = await waitForChatRunLifecycle(host, runId, timeoutMs);
     if (host.chatRunId !== runId) {
       clearChatRecoveryPoll(host);
       const scrollHost = host as unknown as Parameters<typeof scheduleChatScroll>[0];
@@ -169,23 +202,25 @@ function startChatRecoveryPoll(host: ChatHost, runId: string) {
       void flushChatQueue(host);
       return;
     }
-    if (Date.now() - startedAt > CHAT_RECOVERY_MAX_WAIT_MS) {
-      await loadSessions(host as unknown as OpenClawApp, {
-        activeMinutes: CHAT_SESSIONS_ACTIVE_MINUTES,
-      }).catch(() => undefined);
-      if (host.chatRunId !== runId) {
-        clearChatRecoveryPoll(host);
-        const scrollHost = host as unknown as Parameters<typeof scheduleChatScroll>[0];
-        scheduleChatScroll(scrollHost, true);
-        void flushChatQueue(host);
-        return;
-      }
+    if (!waitResult || waitResult.status === "timeout") {
+      const retryDelay = waitResult ? 0 : timeoutMs;
+      host.chatHistoryRecoveryTimer = window.setTimeout(tick, retryDelay);
+      return;
     }
-    const nextDelay =
-      Date.now() - startedAt > CHAT_RECOVERY_MAX_WAIT_MS
-        ? CHAT_RECOVERY_STEADY_POLL_INTERVAL_MS
-        : CHAT_RECOVERY_POLL_INTERVAL_MS;
-    host.chatHistoryRecoveryTimer = window.setTimeout(tick, nextDelay);
+
+    await loadSessions(host as unknown as OpenClawApp, {
+      activeMinutes: CHAT_SESSIONS_ACTIVE_MINUTES,
+    }).catch(() => undefined);
+    await loadChatHistory(host as unknown as OpenClawApp).catch(() => undefined);
+
+    if (host.chatRunId === runId) {
+      finalizeChatRunFromWait(host as unknown as OpenClawApp, waitResult);
+    }
+
+    clearChatRecoveryPoll(host);
+    const scrollHost = host as unknown as Parameters<typeof scheduleChatScroll>[0];
+    scheduleChatScroll(scrollHost, true);
+    void flushChatQueue(host);
   };
   host.chatHistoryRecoveryTimer = window.setTimeout(tick, CHAT_RECOVERY_POLL_INTERVAL_MS);
 }

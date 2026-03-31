@@ -39,7 +39,6 @@ const liveRunStreamState = new WeakMap<
     contentText: string;
   }
 >();
-const FINAL_HISTORY_GRACE_MS = 1500;
 
 function normalizeBasePath(value: string | null | undefined): string {
   const trimmed = String(value ?? "").trim();
@@ -229,30 +228,6 @@ function stripThinkingFromStream(stream: string | null): string {
   return stream.replace(/<thinking>[\s\S]*?<\/thinking>\s*/g, "").trim();
 }
 
-function reconcileRunWithHistory(state: ChatState, historyMessages: unknown[]): string | null {
-  const activeRunId = typeof state.chatRunId === "string" ? state.chatRunId.trim() : "";
-  if (!activeRunId || !state.chatStreamStartedAt) {
-    return null;
-  }
-  const runStartedAt = state.chatStreamStartedAt;
-  const hasAssistantReply = historyMessages.some((message) => {
-    if (!isAssistantReply(message)) {
-      return false;
-    }
-    if (messageTimestamp(message) < runStartedAt) {
-      return false;
-    }
-    const text = extractText(message)?.trim() ?? "";
-    const thinking = extractThinking(message)?.trim() ?? "";
-    return Boolean(text || thinking);
-  });
-  if (!hasAssistantReply) {
-    return null;
-  }
-  clearActiveRun(state, { finalizedRunId: activeRunId });
-  return activeRunId;
-}
-
 export type ChatEventPayload = {
   runId: string;
   sessionKey: string;
@@ -408,28 +383,72 @@ function applyChatHistoryResult(
   }
   const historyMessages = Array.isArray(res.messages) ? res.messages : [];
   const previousMessages = Array.isArray(state.chatMessages) ? state.chatMessages : [];
-  const recoveredRunId = reconcileRunWithHistory(state, historyMessages);
-  const recovered = Boolean(recoveredRunId);
-  if (recoveredRunId) {
-    markRunCompleted(state, recoveredRunId);
-  }
-  if (!recovered) {
-    const finalized = finalizedRunAt.get(state as object);
-    if (
-      finalized &&
-      state.chatRunId === finalized.runId &&
-      Date.now() - finalized.at >= FINAL_HISTORY_GRACE_MS
-    ) {
-      clearActiveRun(state);
-    }
-  }
   state.chatMessages = mergePendingMessages({
     history: historyMessages,
     previous: previousMessages,
-    activeRunId: recovered ? null : state.chatRunId,
+    activeRunId: state.chatRunId,
   });
   state.chatThinkingLevel = res.thinkingLevel ?? null;
   state.lastError = null;
+  return true;
+}
+
+export type ChatLifecycleWaitResult = {
+  runId: string;
+  status: "ok" | "error" | "timeout";
+  error?: string | null;
+};
+
+function hasAssistantReplySince(messages: unknown[], startedAt: number | null): boolean {
+  return messages.some((message) => {
+    if (!isAssistantReply(message)) {
+      return false;
+    }
+    const timestamp = messageTimestamp(message);
+    if (startedAt != null && timestamp > 0 && timestamp < startedAt) {
+      return false;
+    }
+    const text = extractText(message)?.trim() ?? "";
+    const thinking = extractThinking(message)?.trim() ?? "";
+    return Boolean(text || thinking);
+  });
+}
+
+export function finalizeChatRunFromWait(
+  state: ChatState,
+  result?: ChatLifecycleWaitResult,
+): boolean {
+  const runId = typeof result?.runId === "string" ? result.runId.trim() : "";
+  if (!runId || result?.status === "timeout") {
+    return false;
+  }
+  const activeRunId = resolveCurrentActiveRunId(state);
+  if (!activeRunId || activeRunId !== runId) {
+    return false;
+  }
+
+  const streamedText = stripThinkingFromStream(state.chatStream);
+  const runStartedAt = state.chatStreamStartedAt;
+  const chatMessages = Array.isArray(state.chatMessages) ? state.chatMessages : [];
+  const hasHistoryAssistant = hasAssistantReplySince(chatMessages, runStartedAt);
+
+  state.chatMessages = clearPendingMarkersForRun(chatMessages, runId);
+  clearActiveRun(state, { finalizedRunId: runId });
+  markRunCompleted(state, runId);
+
+  if (result.status === "error") {
+    state.lastError = result.error ?? "chat error";
+    return true;
+  }
+
+  state.lastError = null;
+  if (!hasHistoryAssistant && streamedText) {
+    state.chatMessages = appendAssistantMessageIfNew(state.chatMessages, {
+      role: "assistant",
+      content: [{ type: "text", text: streamedText }],
+      timestamp: Date.now(),
+    });
+  }
   return true;
 }
 

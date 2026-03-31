@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { hasRememberedCompletedSessionRun } from "../session-active-run.ts";
 import {
   abortChatRun,
+  finalizeChatRunFromWait,
   handleChatEvent,
   loadChatHistory,
   sendChatMessage,
+  type ChatLifecycleWaitResult,
   type ChatEventPayload,
   type ChatState,
 } from "./chat.ts";
@@ -298,7 +300,7 @@ describe("handleChatEvent", () => {
     expect((state.chatMessages[0] as { role?: string }).role).toBe("user");
   });
 
-  it("reconciles a finalized run once history includes the assistant reply", async () => {
+  it("keeps the active run live when history loads during an in-flight response", async () => {
     const state = createState({
       sessionKey: "main",
       chatRunId: "run-1",
@@ -319,8 +321,8 @@ describe("handleChatEvent", () => {
 
     await loadChatHistory(state);
 
-    expect(state.chatRunId).toBeNull();
-    expect(state.chatStreamStartedAt).toBeNull();
+    expect(state.chatRunId).toBe("run-1");
+    expect(state.chatStreamStartedAt).toBe(100);
     expect((state.chatMessages[0] as { role?: string }).role).toBe("assistant");
   });
 
@@ -396,7 +398,7 @@ describe("handleChatEvent", () => {
     expect(JSON.stringify(state.chatMessages)).not.toContain("older response");
   });
 
-  it("marks a recovered run complete when history load resolves the response", async () => {
+  it("keeps the active run live during history refresh even when history already has assistant text", async () => {
     const request = vi.fn(async (method: string) => {
       if (method === "chat.history") {
         return {
@@ -437,6 +439,49 @@ describe("handleChatEvent", () => {
 
     await loadChatHistory(state);
 
+    expect(state.chatRunId).toBe("run-123");
+    expect(state.chatStream).toBe("Working...");
+    expect(state.sessionsResult?.sessions[0]?.hasActiveRun).toBe(true);
+    expect(state.sessionsResult?.sessions[0]?.activeRunId).toBe("run-123");
+    expect(hasRememberedCompletedSessionRun("main", "run-123")).toBe(false);
+  });
+
+  it("finalizes a run from lifecycle wait once completion is confirmed", () => {
+    const state = createState({
+      sessionKey: "main",
+      chatRunId: "run-123",
+      chatStream: "Working...",
+      chatStreamStartedAt: 100,
+      chatMessages: [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "Recovered from history" }],
+          timestamp: 200,
+        },
+      ],
+      sessionsResult: {
+        ts: 0,
+        path: "",
+        count: 1,
+        defaults: {},
+        sessions: [
+          {
+            key: "main",
+            kind: "direct",
+            updatedAt: 150,
+            hasActiveRun: true,
+            activeRunId: "run-123",
+          },
+        ],
+      },
+    });
+    const result: ChatLifecycleWaitResult = {
+      runId: "run-123",
+      status: "ok",
+    };
+
+    expect(finalizeChatRunFromWait(state, result)).toBe(true);
+
     expect(state.chatRunId).toBeNull();
     expect(state.chatStream).toBeNull();
     expect(state.sessionsResult?.sessions[0]?.hasActiveRun).toBe(false);
@@ -444,31 +489,20 @@ describe("handleChatEvent", () => {
     expect(hasRememberedCompletedSessionRun("main", "run-123")).toBe(true);
   });
 
-  it("ignores late deltas for a run that was already finalized via history recovery", async () => {
-    const request = vi.fn(async (method: string) => {
-      if (method === "chat.history") {
-        return {
-          messages: [
-            {
-              role: "assistant",
-              content: [{ type: "text", text: "Recovered from history" }],
-              timestamp: 200,
-            },
-          ],
-          thinkingLevel: "off",
-        };
-      }
-      throw new Error(`unexpected method: ${method}`);
-    });
+  it("ignores late deltas for a run that was already finalized via lifecycle wait", () => {
     const state = createState({
       sessionKey: "main",
       chatRunId: "run-123",
       chatStream: "Working...",
       chatStreamStartedAt: 100,
-      client: { request } as unknown as ChatState["client"],
     });
 
-    await loadChatHistory(state);
+    expect(
+      finalizeChatRunFromWait(state, {
+        runId: "run-123",
+        status: "ok",
+      }),
+    ).toBe(true);
 
     const payload: ChatEventPayload = {
       runId: "run-123",
