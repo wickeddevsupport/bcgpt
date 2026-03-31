@@ -767,20 +767,12 @@ export const chatHandlers: GatewayRequestHandlers = {
         },
         deliver: async (payload, info) => {
           if (info.kind === "block") {
-            const text = payload.text ?? "";
-            if (!text) {
-              return;
-            }
-            context.logGateway.info(
-              `webchat deliver kind=block run=${clientRunId} textLen=${text.length}`,
-            );
-            broadcastChatDelta({
-              context,
-              runId: clientRunId,
-              sessionKey: rawSessionKey,
-              scopeKey,
-              text,
-            });
+            // Block text is NOT broadcast as a chat delta here.  Token-level
+            // streaming already flows through the global emitAgentEvent →
+            // server-chat createAgentEventHandler → emitChatDelta path, which
+            // populates the shared chatRunBuffers for final fallback.  Adding
+            // a broadcastChatDelta here would corrupt the shared buffer (it
+            // accumulates, while the token path replaces with cumulative text).
             return;
           }
           if (info.kind !== "final") {
