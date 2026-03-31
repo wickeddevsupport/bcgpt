@@ -78,6 +78,32 @@ import Testing
         }
     }
 
+    @Test func agentEventMapsToAgent() {
+        let payload = OpenClawProtocol.AnyCodable([
+            "runId": OpenClawProtocol.AnyCodable("run-1"),
+            "sessionKey": OpenClawProtocol.AnyCodable("main"),
+            "seq": OpenClawProtocol.AnyCodable(2),
+            "stream": OpenClawProtocol.AnyCodable("assistant"),
+            "ts": OpenClawProtocol.AnyCodable(123),
+            "data": OpenClawProtocol.AnyCodable([
+                "text": OpenClawProtocol.AnyCodable("hello"),
+                "delta": OpenClawProtocol.AnyCodable("lo"),
+            ]),
+        ])
+        let frame = EventFrame(type: "event", event: "agent", payload: payload, seq: 1, stateversion: nil)
+        let mapped = MacGatewayChatTransport.mapPushToTransportEvent(.event(frame))
+
+        switch mapped {
+        case let .agent(agent):
+            #expect(agent.runId == "run-1")
+            #expect(agent.sessionKey == "main")
+            #expect(agent.stream == "assistant")
+            #expect(agent.data["delta"]?.value as? String == "lo")
+        default:
+            Issue.record("expected .agent from agent event, got \(String(describing: mapped))")
+        }
+    }
+
     @Test func unknownEventMapsToNil() {
         let frame = EventFrame(
             type: "event",

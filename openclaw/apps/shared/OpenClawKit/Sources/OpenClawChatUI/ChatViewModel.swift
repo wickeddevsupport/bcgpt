@@ -408,15 +408,17 @@ public final class OpenClawChatViewModel {
     }
 
     private func handleAgentEvent(_ evt: OpenClawAgentEventPayload) {
-        if let sessionId, evt.runId != sessionId {
+        if let eventSessionKey = evt.sessionKey {
+            guard eventSessionKey == self.sessionKey else { return }
+        } else if let sessionId, evt.runId != sessionId {
             return
         }
 
         switch evt.stream {
         case "assistant":
-            if let text = evt.data["text"]?.value as? String {
-                self.streamingAssistantText = text
-            }
+            self.streamingAssistantText = Self.nextStreamingAssistantText(
+                current: self.streamingAssistantText,
+                data: evt.data)
         case "tool":
             guard let phase = evt.data["phase"]?.value as? String else { return }
             guard let name = evt.data["name"]?.value as? String else { return }
@@ -435,6 +437,24 @@ public final class OpenClawChatViewModel {
         default:
             break
         }
+    }
+
+    private static func nextStreamingAssistantText(
+        current: String?,
+        data: [String: AnyCodable]) -> String?
+    {
+        let cumulativeText = data["text"]?.value as? String
+        let deltaText = data["delta"]?.value as? String
+
+        if let cumulativeText, !cumulativeText.isEmpty {
+            return cumulativeText
+        }
+
+        guard let deltaText, !deltaText.isEmpty else {
+            return current
+        }
+
+        return (current ?? "") + deltaText
     }
 
     private func refreshHistoryAfterRun() async {

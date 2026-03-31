@@ -139,6 +139,7 @@ extension TestChatTransportState {
 @Suite struct ChatViewModelTests {
     @Test func streamsAssistantAndClearsOnFinal() async throws {
         let sessionId = "sess-main"
+        let runId = "run-main"
         let history1 = OpenClawChatHistoryPayload(
             sessionKey: "main",
             sessionId: sessionId,
@@ -171,11 +172,28 @@ extension TestChatTransportState {
         transport.emit(
             .agent(
                 OpenClawAgentEventPayload(
-                    runId: sessionId,
+                    runId: runId,
+                    sessionKey: "main",
                     seq: 1,
                     stream: "assistant",
                     ts: Int(Date().timeIntervalSince1970 * 1000),
-                    data: ["text": AnyCodable("streaming…")])))
+                    data: [
+                        "text": AnyCodable("stream"),
+                        "delta": AnyCodable("stream"),
+                    ])))
+
+        transport.emit(
+            .agent(
+                OpenClawAgentEventPayload(
+                    runId: runId,
+                    sessionKey: "main",
+                    seq: 2,
+                    stream: "assistant",
+                    ts: Int(Date().timeIntervalSince1970 * 1000),
+                    data: [
+                        "text": AnyCodable("streaming…"),
+                        "delta": AnyCodable("ing…"),
+                    ])))
 
         try await waitUntil("assistant stream visible") {
             await MainActor.run { vm.streamingAssistantText == "streaming…" }
@@ -184,8 +202,9 @@ extension TestChatTransportState {
         transport.emit(
             .agent(
                 OpenClawAgentEventPayload(
-                    runId: sessionId,
-                    seq: 2,
+                    runId: runId,
+                    sessionKey: "main",
+                    seq: 3,
                     stream: "tool",
                     ts: Int(Date().timeIntervalSince1970 * 1000),
                     data: [
@@ -217,6 +236,7 @@ extension TestChatTransportState {
 
     @Test func clearsStreamingOnExternalFinalEvent() async throws {
         let sessionId = "sess-main"
+        let externalRunId = "external-run"
         let history = OpenClawChatHistoryPayload(
             sessionKey: "main",
             sessionId: sessionId,
@@ -231,16 +251,18 @@ extension TestChatTransportState {
         transport.emit(
             .agent(
                 OpenClawAgentEventPayload(
-                    runId: sessionId,
+                    runId: externalRunId,
+                    sessionKey: "main",
                     seq: 1,
                     stream: "assistant",
                     ts: Int(Date().timeIntervalSince1970 * 1000),
-                    data: ["text": AnyCodable("external stream")])))
+                    data: ["delta": AnyCodable("external stream")])))
 
         transport.emit(
             .agent(
                 OpenClawAgentEventPayload(
-                    runId: sessionId,
+                    runId: externalRunId,
+                    sessionKey: "main",
                     seq: 2,
                     stream: "tool",
                     ts: Int(Date().timeIntervalSince1970 * 1000),
@@ -422,6 +444,7 @@ extension TestChatTransportState {
 
     @Test func clearsStreamingOnExternalErrorEvent() async throws {
         let sessionId = "sess-main"
+        let externalRunId = "external-run"
         let history = OpenClawChatHistoryPayload(
             sessionKey: "main",
             sessionId: sessionId,
@@ -436,11 +459,12 @@ extension TestChatTransportState {
         transport.emit(
             .agent(
                 OpenClawAgentEventPayload(
-                    runId: sessionId,
+                    runId: externalRunId,
+                    sessionKey: "main",
                     seq: 1,
                     stream: "assistant",
                     ts: Int(Date().timeIntervalSince1970 * 1000),
-                    data: ["text": AnyCodable("external stream")])))
+                    data: ["delta": AnyCodable("external stream")])))
 
         try await waitUntil("streaming active") {
             await MainActor.run { vm.streamingAssistantText == "external stream" }
@@ -456,6 +480,33 @@ extension TestChatTransportState {
                     errorMessage: "boom")))
 
         try await waitUntil("streaming cleared") { await MainActor.run { vm.streamingAssistantText == nil } }
+    }
+
+    @Test func ignoresAssistantEventsFromOtherSessions() async throws {
+        let sessionId = "sess-main"
+        let history = OpenClawChatHistoryPayload(
+            sessionKey: "main",
+            sessionId: sessionId,
+            messages: [],
+            thinkingLevel: "off")
+        let transport = TestChatTransport(historyResponses: [history])
+        let vm = await MainActor.run { OpenClawChatViewModel(sessionKey: "main", transport: transport) }
+
+        await MainActor.run { vm.load() }
+        try await waitUntil("bootstrap") { await MainActor.run { vm.healthOK && vm.sessionId == sessionId } }
+
+        transport.emit(
+            .agent(
+                OpenClawAgentEventPayload(
+                    runId: "run-other",
+                    sessionKey: "other",
+                    seq: 1,
+                    stream: "assistant",
+                    ts: Int(Date().timeIntervalSince1970 * 1000),
+                    data: ["delta": AnyCodable("should ignore")]))))
+
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        #expect(await MainActor.run { vm.streamingAssistantText } == nil)
     }
 
     @Test func abortRequestsDoNotClearPendingUntilAbortedEvent() async throws {
