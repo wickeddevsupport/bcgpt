@@ -304,15 +304,23 @@ function canAccessSession(
   sessionKey: string,
   cfg: ReturnType<typeof loadConfig>,
   client: GatewayClient | null,
+  params?: unknown,
 ): boolean {
   if (!client || isSuperAdmin(client)) {
+    return true;
+  }
+
+  const workspaceId = resolveEffectiveRequestWorkspaceId(client, params) ?? "";
+  if (!workspaceId) {
     return true;
   }
 
   const target = resolveGatewaySessionStoreTarget({ cfg, key: sessionKey });
   const { agents } = listAgentsForGateway(cfg);
   const workspaceAgentIds = new Set(
-    agents.filter((a) => a.workspaceId === client.pmosWorkspaceId).map((a) => a.id),
+    agents
+      .filter((a) => (typeof a.workspaceId === "string" ? a.workspaceId.trim() : "") === workspaceId)
+      .map((a) => a.id),
   );
 
   return workspaceAgentIds.has(target.agentId);
@@ -376,7 +384,7 @@ export const chatHandlers: GatewayRequestHandlers = {
     const { storePath, entry } = loadSessionEntryForConfig(cfg, sessionKey);
 
     // Check workspace ownership for non-super-admin users
-    if (!canAccessSession(sessionKey, cfg, client)) {
+    if (!canAccessSession(sessionKey, cfg, client, params)) {
       respond(
         false,
         undefined,
@@ -440,7 +448,7 @@ export const chatHandlers: GatewayRequestHandlers = {
     // Check workspace ownership for non-super-admin users
     const cfg = await loadChatConfigForClient(client, params);
     const scopeKey = resolveWorkspaceEventScopeKey(client);
-    if (!canAccessSession(sessionKey, cfg, client)) {
+    if (!canAccessSession(sessionKey, cfg, client, params)) {
       respond(
         false,
         undefined,
@@ -579,7 +587,7 @@ export const chatHandlers: GatewayRequestHandlers = {
     const scopeKey = resolveWorkspaceEventScopeKey(client);
 
     // Check workspace ownership for non-super-admin users
-    if (!canAccessSession(rawSessionKey, cfg, client)) {
+    if (!canAccessSession(rawSessionKey, cfg, client, params)) {
       respond(
         false,
         undefined,
@@ -888,7 +896,7 @@ export const chatHandlers: GatewayRequestHandlers = {
     const { storePath, entry } = loadSessionEntryForConfig(cfg, rawSessionKey);
 
     // Check workspace ownership for non-super-admin users
-    if (!canAccessSession(rawSessionKey, cfg, client)) {
+    if (!canAccessSession(rawSessionKey, cfg, client, params)) {
       respond(
         false,
         undefined,

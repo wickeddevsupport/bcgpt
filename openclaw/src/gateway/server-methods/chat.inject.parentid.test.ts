@@ -29,7 +29,7 @@ describe("gateway chat.inject transcript writes", () => {
       const original = await importOriginal();
       return {
         ...original,
-        loadSessionEntry: () => ({
+        loadSessionEntryForConfig: () => ({
           storePath: "/tmp/store.json",
           entry: {
             sessionId: "sess-1",
