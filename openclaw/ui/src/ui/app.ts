@@ -384,6 +384,7 @@ export class OpenClawApp extends LitElement {
   @state() chatRunId: string | null = null;
   chatHistoryRecoveryTimer: number | null = null;
   @state() compactionStatus: CompactionStatus | null = null;
+  compactionClearTimer: number | null = null;
   @state() chatAvatarUrl: string | null = null;
   @state() chatThinkingLevel: string | null = null;
   @state() chatQueue: ChatQueueItem[] = [];

@@ -581,4 +581,184 @@ describe("connectGateway", () => {
     expect(host.sessionsResult.sessions[0]?.hasActiveRun).toBe(false);
     expect(host.sessionsResult.sessions[0]?.activeRunId).toBeUndefined();
   });
+
+  it("clears a stale session active run marker by run id when terminal chat events omit sessionKey", () => {
+    vi.mocked(handleChatEvent).mockImplementation((state: unknown) => {
+      (state as { chatRunId: string | null }).chatRunId = null;
+      return "final";
+    });
+
+    const host = {
+      settings: { gatewayUrl: "wss://example.test", token: "", lastActiveSessionKey: "main" },
+      password: "",
+      client: null,
+      connected: true,
+      hello: null,
+      lastError: null,
+      onboarding: false,
+      eventLogBuffer: [],
+      eventLog: [],
+      tab: "chat",
+      presenceEntries: [],
+      presenceError: null,
+      presenceStatus: null,
+      agentsLoading: false,
+      agentsList: null,
+      agentsError: null,
+      debugHealth: null,
+      assistantName: "",
+      assistantAvatar: null,
+      assistantAgentId: null,
+      sessionKey: "main",
+      chatRunId: "run-1",
+      chatQueue: [],
+      refreshSessionsAfterChat: new Set<string>(),
+      pmosTraceEvents: [],
+      execApprovalQueue: [],
+      execApprovalError: null,
+      chatMessages: [],
+      chatStream: null,
+      notificationsOpen: false,
+      toolStreamOrder: [],
+      sessionsResult: {
+        ts: 0,
+        path: "",
+        count: 1,
+        defaults: {},
+        sessions: [{ key: "main", kind: "direct", updatedAt: null, hasActiveRun: true, activeRunId: "run-1" }],
+      },
+    } as any;
+
+    handleGatewayEvent(host, {
+      type: "event",
+      event: "chat",
+      payload: {
+        runId: "run-1",
+        state: "final",
+      },
+    } as any);
+
+    expect(host.sessionsResult.sessions[0]?.hasActiveRun).toBe(false);
+    expect(host.sessionsResult.sessions[0]?.activeRunId).toBeUndefined();
+  });
+
+  it("clears stale compaction state on terminal chat events", () => {
+    vi.mocked(handleChatEvent).mockImplementation((state: unknown) => {
+      (state as { chatRunId: string | null }).chatRunId = null;
+      return "final";
+    });
+
+    const host = {
+      settings: { gatewayUrl: "wss://example.test", token: "", lastActiveSessionKey: "main" },
+      password: "",
+      client: null,
+      connected: true,
+      hello: null,
+      lastError: null,
+      onboarding: false,
+      eventLogBuffer: [],
+      eventLog: [],
+      tab: "chat",
+      presenceEntries: [],
+      presenceError: null,
+      presenceStatus: null,
+      agentsLoading: false,
+      agentsList: null,
+      agentsError: null,
+      debugHealth: null,
+      assistantName: "",
+      assistantAvatar: null,
+      assistantAgentId: null,
+      sessionKey: "main",
+      chatRunId: "run-1",
+      chatQueue: [],
+      refreshSessionsAfterChat: new Set<string>(),
+      pmosTraceEvents: [],
+      execApprovalQueue: [],
+      execApprovalError: null,
+      chatMessages: [],
+      chatStream: null,
+      notificationsOpen: false,
+      toolStreamOrder: [],
+      compactionStatus: { active: true, startedAt: Date.now(), completedAt: null },
+      compactionClearTimer: 123,
+      sessionsResult: {
+        ts: 0,
+        path: "",
+        count: 1,
+        defaults: {},
+        sessions: [{ key: "main", kind: "direct", updatedAt: null, hasActiveRun: true, activeRunId: "run-1" }],
+      },
+    } as any;
+
+    handleGatewayEvent(host, {
+      type: "event",
+      event: "chat",
+      payload: {
+        runId: "run-1",
+        sessionKey: "main",
+        state: "final",
+      },
+    });
+
+    expect(host.compactionStatus).toBeNull();
+    expect(host.compactionClearTimer).toBeNull();
+  });
+
+  it("clears a recovered compaction-only active run when compaction ends", () => {
+    const host = {
+      settings: { gatewayUrl: "wss://example.test", token: "", lastActiveSessionKey: "main" },
+      password: "",
+      client: null,
+      connected: true,
+      hello: null,
+      lastError: null,
+      onboarding: false,
+      eventLogBuffer: [],
+      eventLog: [],
+      tab: "chat",
+      presenceEntries: [],
+      presenceError: null,
+      presenceStatus: null,
+      agentsLoading: false,
+      agentsList: null,
+      agentsError: null,
+      debugHealth: null,
+      assistantName: "",
+      assistantAvatar: null,
+      assistantAgentId: null,
+      sessionKey: "main",
+      chatRunId: null,
+      chatQueue: [],
+      refreshSessionsAfterChat: new Set<string>(),
+      pmosTraceEvents: [],
+      execApprovalQueue: [],
+      execApprovalError: null,
+      chatMessages: [],
+      chatStream: null,
+      notificationsOpen: false,
+      toolStreamOrder: [],
+      sessionsResult: {
+        ts: 0,
+        path: "",
+        count: 1,
+        defaults: {},
+        sessions: [{ key: "main", kind: "direct", updatedAt: null, hasActiveRun: true, activeRunId: "run-1" }],
+      },
+    } as any;
+
+    handleGatewayEvent(host, {
+      type: "event",
+      event: "agent",
+      payload: {
+        runId: "run-1",
+        sessionKey: "main",
+        stream: "compaction",
+        data: { phase: "end" },
+      },
+    });
+
+    expect(host.sessionsResult.sessions[0]?.hasActiveRun).toBe(false);
+    expect(host.sessionsResult.sessions[0]?.activeRunId).toBeUndefined();
+  });
 });

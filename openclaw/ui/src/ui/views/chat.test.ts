@@ -1,6 +1,7 @@
 import { render } from "lit";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionsListResult } from "../types.ts";
+import { rememberCompletedSessionRun } from "../session-active-run.ts";
 import { renderChat, type ChatProps } from "./chat.ts";
 
 function createSessions(): SessionsListResult {
@@ -51,6 +52,10 @@ function createProps(overrides: Partial<ChatProps> = {}): ChatProps {
 }
 
 describe("chat view", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+  });
+
   it("shows a ready badge when chat is idle", () => {
     const container = document.createElement("div");
     render(renderChat(createProps()), container);
@@ -256,6 +261,79 @@ describe("chat view", () => {
     const indicator = container.querySelector(".compaction-indicator--active");
     expect(indicator).not.toBeNull();
     expect(indicator?.textContent).toContain("Compacting context...");
+  });
+
+  it("keeps the composer ready during background compaction-only activity", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          compactionStatus: {
+            active: true,
+            startedAt: Date.now(),
+            completedAt: null,
+          },
+          sessions: {
+            ts: 0,
+            path: "",
+            count: 1,
+            defaults: { model: null, contextTokens: null },
+            sessions: [
+              {
+                key: "main",
+                kind: "direct",
+                updatedAt: Date.now(),
+                hasActiveRun: true,
+                activeRunId: "run-compact",
+              },
+            ],
+          },
+        }),
+      ),
+      container,
+    );
+
+    const badge = container.querySelector(".chat-compose .chat-status-badge--ready");
+    expect(badge?.textContent).toContain("Ready");
+    const sendButton = Array.from(container.querySelectorAll("button")).find(
+      (btn) => btn.textContent?.includes("Send"),
+    );
+    expect(sendButton?.textContent).toContain("Send");
+    expect(container.textContent).not.toContain("Restoring the active run after refresh.");
+  });
+
+  it("does not relock the composer for a completed recovered run after refresh", () => {
+    rememberCompletedSessionRun("main", "run-123");
+
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          sessions: {
+            ts: 0,
+            path: "",
+            count: 1,
+            defaults: { model: null, contextTokens: null },
+            sessions: [
+              {
+                key: "main",
+                kind: "direct",
+                updatedAt: Date.now(),
+                hasActiveRun: true,
+                activeRunId: "run-123",
+              },
+            ],
+          },
+        }),
+      ),
+      container,
+    );
+
+    const badge = container.querySelector(".chat-compose .chat-status-badge--ready");
+    expect(badge?.textContent).toContain("Ready");
+    expect(container.textContent).not.toContain("Restoring the active run after refresh.");
+    const input = container.querySelector("textarea");
+    expect(input?.getAttribute("placeholder")).not.toContain("queue it");
   });
 
   it("renders completion indicator shortly after compaction", () => {

@@ -31,11 +31,28 @@ type ToolStreamHost = {
   sessionKey: string;
   chatRunId: string | null;
   pmosWorkspaceId?: string;
+  sessionsResult?: {
+    sessions?: Array<{
+      key?: string;
+      activeRunId?: string;
+      hasActiveRun?: boolean;
+    }>;
+  } | null;
   toolStreamById: Map<string, ToolStreamEntry>;
   toolStreamOrder: string[];
   chatToolMessages: Record<string, unknown>[];
   toolStreamSyncTimer: number | null;
 };
+
+function resolveCurrentActiveRunId(host: ToolStreamHost): string | null {
+  if (host.chatRunId) {
+    return host.chatRunId;
+  }
+  const currentSession = host.sessionsResult?.sessions?.find((row) => row.key === host.sessionKey);
+  const remoteActiveRunId =
+    typeof currentSession?.activeRunId === "string" ? currentSession.activeRunId.trim() : "";
+  return remoteActiveRunId || null;
+}
 
 function resolveExpectedScopeKey(host: ToolStreamHost): string {
   const workspaceId = typeof host.pmosWorkspaceId === "string" ? host.pmosWorkspaceId.trim() : "";
@@ -51,7 +68,8 @@ function matchesAgentEventScope(host: ToolStreamHost, payload?: Pick<AgentEventP
   if (expectedScopeKey === "global") {
     return true;
   }
-  return Boolean(payload?.runId && host.chatRunId && payload.runId === host.chatRunId);
+  const activeRunId = resolveCurrentActiveRunId(host);
+  return Boolean(payload?.runId && activeRunId && payload.runId === activeRunId);
 }
 
 function isRelatedAgentSessionKey(activeSessionKey: string, candidateSessionKey: string): boolean {
@@ -271,14 +289,15 @@ export function handleAgentEvent(host: ToolStreamHost, payload?: AgentEventPaylo
   if (sessionKey && !isRelatedAgentSessionKey(host.sessionKey, sessionKey)) {
     return;
   }
+  const activeRunId = resolveCurrentActiveRunId(host);
   // Fallback: only accept session-less events for the active run.
-  if (!sessionKey && host.chatRunId && payload.runId !== host.chatRunId) {
+  if (!sessionKey && activeRunId && payload.runId !== activeRunId) {
     return;
   }
-  if (host.chatRunId && payload.runId !== host.chatRunId) {
+  if (activeRunId && payload.runId !== activeRunId) {
     return;
   }
-  if (!host.chatRunId) {
+  if (!activeRunId) {
     return;
   }
 

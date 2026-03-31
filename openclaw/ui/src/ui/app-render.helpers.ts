@@ -285,6 +285,20 @@ export async function activateChatSession(
     }
   }
   state.sessionKey = next;
+  const realtimeState = state as AppViewState & {
+    chatHistoryRecoveryTimer?: number | null;
+    compactionClearTimer?: number | null;
+    compactionStatus?: unknown;
+  };
+  if (realtimeState.chatHistoryRecoveryTimer != null) {
+    window.clearTimeout(realtimeState.chatHistoryRecoveryTimer);
+    realtimeState.chatHistoryRecoveryTimer = null;
+  }
+  if (realtimeState.compactionClearTimer != null) {
+    window.clearTimeout(realtimeState.compactionClearTimer);
+    realtimeState.compactionClearTimer = null;
+  }
+  realtimeState.compactionStatus = null;
   syncSelectedAgentForSession(state, next);
   state.chatMessage = "";
   state.chatAttachments = [];

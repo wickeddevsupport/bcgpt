@@ -1,4 +1,5 @@
 import type { GatewayBrowserClient } from "../gateway.ts";
+import type { SessionsListResult } from "../types.ts";
 import type { ChatAttachment } from "../ui-types.ts";
 import { extractText, extractThinking } from "../chat/message-extract.ts";
 import { generateUUID } from "../uuid.ts";
@@ -20,6 +21,7 @@ export type ChatState = {
   chatStream: string | null;
   chatStreamStartedAt: number | null;
   lastError: string | null;
+  sessionsResult?: SessionsListResult | null;
   /** Set for PMOS workspace users (real UUID, not "default"). Used for workspace-aware validation paths. */
   pmosWorkspaceId?: string;
   /** Current screen context (selected project + tab) injected into PMOS chat system prompt. */
@@ -28,6 +30,14 @@ export type ChatState = {
 
 const chatHistoryLoadVersion = new WeakMap<object, number>();
 const finalizedRunAt = new WeakMap<object, { runId: string; at: number }>();
+const liveRunStreamState = new WeakMap<
+  object,
+  {
+    runId: string;
+    thinkingText: string;
+    contentText: string;
+  }
+>();
 const FINAL_HISTORY_GRACE_MS = 1500;
 
 function normalizeBasePath(value: string | null | undefined): string {
@@ -70,6 +80,44 @@ function clearActiveRun(state: ChatState) {
   state.chatStreamStartedAt = null;
   state.chatSending = false;
   finalizedRunAt.delete(state as object);
+  liveRunStreamState.delete(state as object);
+}
+
+function composeLiveStreamText(thinkingText: string, contentText: string): string | null {
+  const thinking = thinkingText.trim();
+  const content = contentText.trim();
+  if (!thinking && !content) {
+    return null;
+  }
+  if (!thinking) {
+    return content;
+  }
+  return content ? `<thinking>${thinking}</thinking>\n${content}` : `<thinking>${thinking}</thinking>`;
+}
+
+function updateLiveRunStream(state: ChatState, runId: string, message: unknown) {
+  const host = state as object;
+  const previous = liveRunStreamState.get(host);
+  const nextState =
+    previous && previous.runId === runId
+      ? previous
+      : {
+          runId,
+          thinkingText: "",
+          contentText: "",
+        };
+  const nextThinking = extractThinking(message)?.trim() ?? "";
+  const nextContent = extractText(message)?.trim() ?? "";
+
+  if (nextThinking) {
+    nextState.thinkingText = nextThinking;
+  }
+  if (nextContent) {
+    nextState.contentText = nextContent;
+  }
+
+  liveRunStreamState.set(host, nextState);
+  state.chatStream = composeLiveStreamText(nextState.thinkingText, nextState.contentText);
 }
 
 function normalizeAssistantMessage(
@@ -174,6 +222,16 @@ function resolveExpectedScopeKey(state: ChatState): string {
   return workspaceId ? `workspace:${workspaceId}` : "global";
 }
 
+function resolveCurrentActiveRunId(state: ChatState): string | null {
+  if (state.chatRunId) {
+    return state.chatRunId;
+  }
+  const currentSession = state.sessionsResult?.sessions?.find((row) => row.key === state.sessionKey);
+  const remoteActiveRunId =
+    typeof currentSession?.activeRunId === "string" ? currentSession.activeRunId.trim() : "";
+  return remoteActiveRunId || null;
+}
+
 function matchesChatEventScope(
   state: ChatState,
   payload?: Pick<ChatEventPayload, "runId" | "scopeKey">,
@@ -186,7 +244,8 @@ function matchesChatEventScope(
   if (expectedScopeKey === "global") {
     return true;
   }
-  return Boolean(payload?.runId && state.chatRunId && payload.runId === state.chatRunId);
+  const activeRunId = resolveCurrentActiveRunId(state);
+  return Boolean(payload?.runId && activeRunId && payload.runId === activeRunId);
 }
 
 function readPendingMarker(message: unknown): PendingChatMarker | null {
@@ -658,7 +717,8 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
   if (!matchesChatEventScope(state, payload)) {
     return null;
   }
-  const isActiveRunEvent = Boolean(payload.runId && state.chatRunId && payload.runId === state.chatRunId);
+  const activeRunId = resolveCurrentActiveRunId(state);
+  const isActiveRunEvent = Boolean(payload.runId && activeRunId && payload.runId === activeRunId);
   if (payload.sessionKey !== state.sessionKey && !isActiveRunEvent) {
     return null;
   }
@@ -668,7 +728,7 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
 
   // Final from another run (e.g. sub-agent announce): refresh history to show new message.
   // See https://github.com/openclaw/openclaw/issues/1909
-  if (payload.runId && state.chatRunId && payload.runId !== state.chatRunId) {
+  if (payload.runId && activeRunId && payload.runId !== activeRunId) {
     if (payload.state === "final") {
       return "final";
     }
@@ -677,17 +737,8 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
 
   if (payload.state === "delta") {
     finalizedRunAt.delete(state as object);
-    const next = extractText(payload.message);
-    const thinking = extractThinking(payload.message);
-    // Update stream whenever we have thinking OR text content.
-    // When only thinking is present (text hasn't started yet), we still surface it
-    // so the UI shows the live reasoning stream instead of a static 3-dot indicator.
-    const textPart = typeof next === "string" ? next : "";
-    if (thinking || textPart) {
-      // Encode live thinking as inline tags so renderStreamingGroup can display it.
-      // extractThinkingCached and extractTextCached in grouped-render handle this format.
-      const streamText = thinking ? `<thinking>${thinking}</thinking>\n${textPart}` : textPart;
-      state.chatStream = streamText;
+    if (payload.runId) {
+      updateLiveRunStream(state, payload.runId, payload.message);
     }
   } else if (payload.state === "final") {
     const streamedText = stripThinkingFromStream(state.chatStream);

@@ -3,6 +3,8 @@ import type { GatewayHelloOk } from "./gateway.ts";
 import type { SessionsListResult } from "./types.ts";
 import type { ChatAttachment, ChatQueueItem } from "./ui-types.ts";
 import { parseAgentSessionKey } from "../../../src/sessions/session-key-utils.js";
+import { rememberCompletedSessionRun } from "./session-active-run.ts";
+import { resolveBlockingRecoveredSessionRun } from "./session-active-run.ts";
 import { resetChatScroll, scheduleChatScroll } from "./app-scroll.ts";
 import { setLastActiveSessionKey } from "./app-settings.ts";
 import { resetToolStream } from "./app-tool-stream.ts";
@@ -24,6 +26,7 @@ export type ChatHost = {
   chatHistoryRecoveryTimer?: number | null;
   sessionKey: string;
   sessionsResult?: SessionsListResult | null;
+  compactionStatus?: { active?: boolean } | null;
   basePath: string;
   hello: GatewayHelloOk | null;
   chatAvatarUrl: string | null;
@@ -32,13 +35,22 @@ export type ChatHost = {
 
 export const CHAT_SESSIONS_ACTIVE_MINUTES = 120;
 
+function resolveRecoveredActiveRunId(host: ChatHost): string | null {
+  const currentSession = host.sessionsResult?.sessions?.find((row) => row.key === host.sessionKey);
+  const remoteActiveRunId =
+    typeof currentSession?.activeRunId === "string" ? currentSession.activeRunId.trim() : "";
+  return remoteActiveRunId || null;
+}
+
 function hasRemoteActiveRun(host: ChatHost): boolean {
-  const currentKey = typeof host.sessionKey === "string" ? host.sessionKey.trim() : "";
-  if (!currentKey) {
-    return false;
-  }
-  const currentSession = host.sessionsResult?.sessions?.find((row) => row.key === currentKey);
-  return currentSession?.hasActiveRun === true || Boolean(currentSession?.activeRunId);
+  return resolveBlockingRecoveredSessionRun({
+    sessionKey: host.sessionKey,
+    sessions: host.sessionsResult?.sessions,
+    localRunId: host.chatRunId,
+    localStream: host.chatStream,
+    localSending: host.chatSending,
+    compactionActive: host.compactionStatus?.active === true,
+  });
 }
 
 export function isChatBusy(host: ChatHost) {
@@ -79,8 +91,32 @@ export async function handleAbortChat(host: ChatHost) {
   if (!host.connected) {
     return;
   }
+  const activeRunId = host.chatRunId || resolveRecoveredActiveRunId(host);
   host.chatMessage = "";
-  await abortChatRun(host as unknown as OpenClawApp);
+  const aborted = await abortChatRun(host as unknown as OpenClawApp);
+  if (!aborted) {
+    return;
+  }
+  clearChatRecoveryPoll(host);
+  const currentKey = host.sessionKey.trim();
+  if (currentKey && host.sessionsResult?.sessions?.length) {
+    if (activeRunId) {
+      rememberCompletedSessionRun(currentKey, activeRunId);
+    }
+    host.sessionsResult = {
+      ...host.sessionsResult,
+      sessions: host.sessionsResult.sessions.map((session) => {
+        if ((typeof session.key === "string" ? session.key.trim() : "") !== currentKey) {
+          return session;
+        }
+        return {
+          ...session,
+          hasActiveRun: false,
+          activeRunId: undefined,
+        };
+      }),
+    };
+  }
 }
 
 function enqueueChatMessage(

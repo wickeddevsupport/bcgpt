@@ -35,6 +35,7 @@ import {
 } from "./controllers/pmos-trace.ts";
 import { loadSessions } from "./controllers/sessions.ts";
 import { GatewayBrowserClient } from "./gateway.ts";
+import { rememberCompletedSessionRun } from "./session-active-run.ts";
 
 // Per-host rAF coalescing state for chat delta events.
 // Batches rapid-fire deltas so at most one Lit re-render fires per animation frame.
@@ -67,8 +68,15 @@ type GatewayHost = {
   sessionKey: string;
   chatRunId: string | null;
   chatStream: string | null;
+  chatHistoryRecoveryTimer?: number | null;
   chatMessages: unknown[];
   chatToolMessages?: unknown[];
+  compactionStatus?: {
+    active: boolean;
+    startedAt: number | null;
+    completedAt: number | null;
+  } | null;
+  compactionClearTimer?: number | null;
   pmosWorkspaceId?: string;
   sessionsResult?: {
     sessions?: Array<{
@@ -101,7 +109,11 @@ function matchesScopedRunEvent(
   if (expectedScopeKey === "global") {
     return true;
   }
-  return Boolean(payload?.runId && host.chatRunId && payload.runId === host.chatRunId);
+  const currentSession = host.sessionsResult?.sessions?.find((row) => row.key === host.sessionKey);
+  const activeRunId =
+    host.chatRunId ||
+    (typeof currentSession?.activeRunId === "string" ? currentSession.activeRunId.trim() : "");
+  return Boolean(payload?.runId && activeRunId && payload.runId === activeRunId);
 }
 
 type SessionDefaultsSnapshot = {
@@ -360,6 +372,21 @@ function clearChatFinalizationTimer(host: GatewayHost) {
   }
 }
 
+function clearChatRecoveryTimer(host: GatewayHost) {
+  if (host.chatHistoryRecoveryTimer != null) {
+    window.clearTimeout(host.chatHistoryRecoveryTimer);
+    host.chatHistoryRecoveryTimer = null;
+  }
+}
+
+function clearCompactionIndicator(host: GatewayHost) {
+  if (host.compactionClearTimer != null) {
+    window.clearTimeout(host.compactionClearTimer);
+    host.compactionClearTimer = null;
+  }
+  host.compactionStatus = null;
+}
+
 function scheduleChatFinalizationFallback(host: GatewayHost, runId: string | undefined) {
   clearChatFinalizationTimer(host);
   if (!runId) {
@@ -414,11 +441,27 @@ function mergeLiveToolMessagesIntoChat(host: GatewayHost) {
   host.chatMessages = [...(Array.isArray(host.chatMessages) ? host.chatMessages : []), ...additions];
 }
 
-function clearLocalSessionActiveRun(host: GatewayHost, payload?: ChatEventPayload) {
-  const sessionKey = typeof payload?.sessionKey === "string" ? payload.sessionKey.trim() : "";
+function clearLocalSessionActiveRun(
+  host: GatewayHost,
+  payload?: Pick<ChatEventPayload, "sessionKey" | "runId">,
+) {
   const runId = typeof payload?.runId === "string" ? payload.runId.trim() : "";
-  if (!sessionKey || !host.sessionsResult?.sessions?.length) {
+  if (!host.sessionsResult?.sessions?.length) {
     return;
+  }
+  let sessionKey = typeof payload?.sessionKey === "string" ? payload.sessionKey.trim() : "";
+  if (!sessionKey && runId) {
+    sessionKey =
+      host.sessionsResult.sessions.find((session) => {
+        const currentRunId = typeof session.activeRunId === "string" ? session.activeRunId.trim() : "";
+        return currentRunId === runId;
+      })?.key?.trim() ?? "";
+  }
+  if (!sessionKey) {
+    return;
+  }
+  if (runId) {
+    rememberCompletedSessionRun(sessionKey, runId);
   }
   host.sessionsResult = {
     ...host.sessionsResult,
@@ -461,6 +504,8 @@ export function connectGateway(host: GatewayHost) {
       host.lastError = null;
       host.hello = hello;
       applySnapshot(host, hello);
+      clearChatRecoveryTimer(host);
+      clearCompactionIndicator(host);
       // Reset orphaned chat run state from before disconnect.
       // If the final event was missed while the socket was down, keeping the old
       // local run id leaves the composer stuck busy until a full page refresh.
@@ -546,6 +591,14 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
     }
     recordAgentTraceEvent(host, payload);
     handleAgentEvent(host as unknown as Parameters<typeof handleAgentEvent>[0], payload);
+    if (
+      payload?.stream === "compaction" &&
+      payload.data?.phase === "end" &&
+      !host.chatRunId &&
+      !host.chatStream
+    ) {
+      clearLocalSessionActiveRun(host, payload);
+    }
     if (payload?.stream === "tool" || payload?.stream === "compaction") {
       scheduleChatScroll(host as unknown as Parameters<typeof scheduleChatScroll>[0]);
     }
@@ -633,6 +686,7 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
     if ((state === "final" || state === "error" || state === "aborted") && !foreignFinalWhileBusy) {
       clearLocalSessionActiveRun(host, payload);
       resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
+      clearCompactionIndicator(host);
       relatedSessionRefreshSeen.delete(host);
       if (state === "error" || state === "aborted") {
         void flushChatQueueForEvent(host as unknown as Parameters<typeof flushChatQueueForEvent>[0]);

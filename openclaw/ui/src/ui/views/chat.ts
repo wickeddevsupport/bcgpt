@@ -2,6 +2,7 @@ import { html, nothing } from "lit";
 import { ref } from "lit/directives/ref.js";
 import { repeat } from "lit/directives/repeat.js";
 import type { SessionsListResult } from "../types.ts";
+import { resolveBlockingRecoveredSessionRun } from "../session-active-run.ts";
 import type { ChatItem, MessageGroup } from "../types/chat-types.ts";
 import type { ChatAttachment, ChatQueueItem } from "../ui-types.ts";
 import {
@@ -163,8 +164,14 @@ function resolveThinkingSnippet(stream: string): string | null {
 }
 
 function resolveSessionHasActiveRun(props: ChatProps) {
-  const activeSession = props.sessions?.sessions?.find((row) => row.key === props.sessionKey);
-  return activeSession?.hasActiveRun === true || Boolean(activeSession?.activeRunId);
+  return resolveBlockingRecoveredSessionRun({
+    sessionKey: props.sessionKey,
+    sessions: props.sessions?.sessions,
+    localRunId: props.activeRunId,
+    localStream: props.stream,
+    localSending: props.sending,
+    compactionActive: props.compactionStatus?.active === true,
+  });
 }
 
 function resolveCanAbort(props: ChatProps, sessionHasActiveRun: boolean): boolean {
@@ -193,14 +200,6 @@ function resolveChatStatus(props: ChatProps): ChatStatusState {
       label: "Offline",
       detail: "Reconnect to resume chat activity.",
       tone: "warn",
-    };
-  }
-
-  if (props.compactionStatus?.active) {
-    return {
-      label: "Working",
-      detail: "Compacting context for the next turn.",
-      tone: "busy",
     };
   }
 

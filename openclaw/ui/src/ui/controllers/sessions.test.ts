@@ -112,6 +112,34 @@ describe("syncWorkspaceSessionSelection", () => {
     expect(state.chatRunId).toBe("run-local");
   });
 
+  it("does not overwrite the local chatRunId with a recovered remote session run", async () => {
+    const request = async () => ({
+      ...createResult(["agent:assistant:main", "agent:designer:main"]),
+      sessions: [
+        {
+          key: "agent:assistant:main",
+          kind: "direct" as const,
+          updatedAt: Date.now(),
+          hasActiveRun: true,
+          activeRunId: "run-remote",
+        },
+        {
+          key: "agent:designer:main",
+          kind: "direct" as const,
+          updatedAt: Date.now(),
+        },
+      ],
+    });
+    const state = createState({
+      client: { request } as unknown as SessionsState["client"],
+      chatRunId: "run-local",
+    });
+
+    await loadSessions(state);
+
+    expect(state.chatRunId).toBe("run-local");
+  });
+
   it("clears the local chatRunId when session selection falls back to a different session", async () => {
     const request = async () =>
       createResult(["agent:assistant:main", "agent:designer:main"]);

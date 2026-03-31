@@ -142,7 +142,10 @@ function syncActiveRunState(
   const remoteActiveRunId =
     typeof currentSession.activeRunId === "string" ? currentSession.activeRunId : null;
   if (remoteActiveRunId) {
-    state.chatRunId = remoteActiveRunId;
+    // Keep the local live run id authoritative for streaming/tool event routing.
+    // Session rows are still used by the view to show recovered active-run status,
+    // but mirroring them into chatRunId causes the composer/badge to drift when
+    // the server row lags or survives reconnects longer than the live stream.
     return;
   }
   if (options?.sessionSelectionChanged) {

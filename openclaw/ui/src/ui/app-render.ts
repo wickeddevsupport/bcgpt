@@ -1365,8 +1365,21 @@ onAbort: () => void state.handleAbortChat(),
                 onSettingsChange: (next) => state.applySettings(next),
                 onPasswordChange: (next) => (state.password = next),
                 onSessionKeyChange: (next) => {
+                  if (state.chatHistoryRecoveryTimer != null) {
+                    window.clearTimeout(state.chatHistoryRecoveryTimer);
+                    state.chatHistoryRecoveryTimer = null;
+                  }
+                  if ((state as { compactionClearTimer?: number | null }).compactionClearTimer != null) {
+                    window.clearTimeout((state as { compactionClearTimer?: number | null }).compactionClearTimer!);
+                    (state as { compactionClearTimer?: number | null }).compactionClearTimer = null;
+                  }
+                  state.compactionStatus = null;
                   state.sessionKey = next;
                   state.chatMessage = "";
+                  state.chatStream = null;
+                  state.chatStreamStartedAt = null;
+                  state.chatRunId = null;
+                  state.chatQueue = [];
                   state.resetToolStream();
                   state.applySettings({
                     ...state.settings,

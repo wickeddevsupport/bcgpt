@@ -85,6 +85,37 @@ describe("handleChatEvent", () => {
     expect(state.chatStream).toBeNull();
   });
 
+  it("accepts restored workspace events using the recovered active run id", () => {
+    const state = createState({
+      sessionKey: "agent:assistant:main",
+      pmosWorkspaceId: "workspace-a",
+      sessionsResult: {
+        ts: 0,
+        path: "",
+        count: 1,
+        defaults: {},
+        sessions: [
+          {
+            key: "agent:assistant:main",
+            kind: "direct",
+            updatedAt: null,
+            hasActiveRun: true,
+            activeRunId: "run-restore",
+          },
+        ],
+      },
+    });
+    const payload: ChatEventPayload = {
+      runId: "run-restore",
+      sessionKey: "agent:assistant:main",
+      state: "delta",
+      message: { role: "assistant", content: [{ type: "text", text: "Recovered stream" }] },
+    };
+
+    expect(handleChatEvent(state, payload)).toBe("delta");
+    expect(state.chatStream).toContain("Recovered stream");
+  });
+
   it("returns null for delta from another run", () => {
     const state = createState({
       sessionKey: "main",
@@ -202,6 +233,40 @@ describe("handleChatEvent", () => {
 
     expect(handleChatEvent(state, payload)).toBe("delta");
     expect(state.chatStream).toContain("<thinking>Reviewing the current config</thinking>");
+  });
+
+  it("keeps prior reasoning visible while later deltas stream text", () => {
+    const state = createState({
+      sessionKey: "main",
+      chatRunId: "run-1",
+    });
+
+    expect(
+      handleChatEvent(state, {
+        runId: "run-1",
+        sessionKey: "main",
+        state: "delta",
+        message: {
+          role: "assistant",
+          content: [{ type: "thinking", thinking: "Planning the response" }],
+        },
+      }),
+    ).toBe("delta");
+
+    expect(
+      handleChatEvent(state, {
+        runId: "run-1",
+        sessionKey: "main",
+        state: "delta",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "Here is the answer" }],
+        },
+      }),
+    ).toBe("delta");
+
+    expect(state.chatStream).toContain("<thinking>Planning the response</thinking>");
+    expect(state.chatStream).toContain("Here is the answer");
   });
 
   it("keeps pending optimistic user message during history refresh while run is active", async () => {
