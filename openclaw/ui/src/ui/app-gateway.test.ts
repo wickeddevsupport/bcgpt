@@ -323,7 +323,7 @@ describe("connectGateway", () => {
     vi.stubGlobal("requestAnimationFrame", originalRaf);
   });
 
-  it("flushes the queued next message immediately on a normal final", async () => {
+  it("reloads history before flushing the queued next message when a final has no assistant content", async () => {
     vi.mocked(handleChatEvent).mockImplementation((state: unknown) => {
       (state as { chatStream: string | null }).chatStream = null;
       (state as { chatRunId: string | null }).chatRunId = null;
@@ -371,7 +371,9 @@ describe("connectGateway", () => {
       },
     });
 
-    expect(vi.mocked(loadChatHistory)).not.toHaveBeenCalled();
+    await Promise.resolve();
+
+    expect(vi.mocked(loadChatHistory)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(flushChatQueueForEvent)).toHaveBeenCalledTimes(1);
   });
 
@@ -436,6 +438,62 @@ describe("connectGateway", () => {
     });
 
     expect(vi.mocked(loadChatHistory)).not.toHaveBeenCalled();
+    expect(vi.mocked(flushChatQueueForEvent)).toHaveBeenCalledTimes(1);
+  });
+
+  it("reloads history when a final arrives without assistant content or live stream text", async () => {
+    vi.mocked(handleChatEvent).mockImplementation((state: unknown) => {
+      (state as { chatRunId: string | null }).chatRunId = null;
+      return "final";
+    });
+
+    const host = {
+      settings: { gatewayUrl: "wss://example.test", token: "", lastActiveSessionKey: "main" },
+      password: "",
+      client: null,
+      connected: true,
+      hello: null,
+      lastError: null,
+      onboarding: false,
+      eventLogBuffer: [],
+      eventLog: [],
+      tab: "chat",
+      presenceEntries: [],
+      presenceError: null,
+      presenceStatus: null,
+      agentsLoading: false,
+      agentsList: null,
+      agentsError: null,
+      debugHealth: null,
+      assistantName: "",
+      assistantAvatar: null,
+      assistantAgentId: null,
+      sessionKey: "main",
+      chatRunId: "run-1",
+      chatQueue: [],
+      refreshSessionsAfterChat: new Set<string>(),
+      pmosTraceEvents: [],
+      execApprovalQueue: [],
+      execApprovalError: null,
+      chatMessages: [],
+      chatStream: null,
+      notificationsOpen: false,
+      toolStreamOrder: [],
+    } as any;
+
+    handleGatewayEvent(host, {
+      type: "event",
+      event: "chat",
+      payload: {
+        runId: "run-1",
+        sessionKey: "main",
+        state: "final",
+      },
+    });
+
+    await Promise.resolve();
+
+    expect(vi.mocked(loadChatHistory)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(flushChatQueueForEvent)).toHaveBeenCalledTimes(1);
   });
 

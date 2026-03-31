@@ -672,6 +672,14 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
       typeof payload?.runId === "string" &&
       Boolean(host.chatRunId) &&
       payload.runId !== host.chatRunId;
+    const hadLiveStreamBeforeFinal =
+      payload?.state === "final" && typeof host.chatStream === "string" && host.chatStream.trim().length > 0;
+    const finalMessageText = payload?.state === "final" ? extractText(payload?.message)?.trim() ?? "" : "";
+    const finalMessageThinking =
+      payload?.state === "final" ? extractThinking(payload?.message)?.trim() ?? "" : "";
+    const shouldReloadHistoryAfterFinal =
+      payload?.state === "final" &&
+      (foreignFinalWhileBusy || (!hadLiveStreamBeforeFinal && !finalMessageText && !finalMessageThinking));
     if (
       (payload?.state === "final" || payload?.state === "error" || payload?.state === "aborted") &&
       !foreignFinalWhileBusy
@@ -728,7 +736,7 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
           break;
         }
       };
-      if (foreignFinalWhileBusy) {
+      if (shouldReloadHistoryAfterFinal) {
         void loadChatHistory(host as unknown as OpenClawApp).then(finishFinalUi);
       } else {
         finishFinalUi();
