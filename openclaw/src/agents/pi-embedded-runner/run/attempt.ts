@@ -837,7 +837,17 @@ export async function runEmbeddedAttempt(
               promptError = err;
             }
           } else {
-            throw err;
+            // Compaction retry errors (e.g. stalled resume) are non-fatal –
+            // the compaction itself succeeded and the original response was
+            // already produced.  Capture as promptError so it's logged, but
+            // don't crash the run.
+            const msg = err instanceof Error ? err.message : String(err);
+            log.warn(
+              `embedded run compaction retry error (non-fatal): runId=${params.runId} – ${msg}`,
+            );
+            if (!promptError) {
+              promptError = err;
+            }
           }
         }
 

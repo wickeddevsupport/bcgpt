@@ -143,7 +143,7 @@ describe("subscribeEmbeddedPiSession", () => {
     }
   });
 
-  it("rejects when stalled compaction retry recovery cannot resume", async () => {
+  it("resolves gracefully when stalled compaction retry hits role ordering error", async () => {
     vi.useFakeTimers();
     try {
       const listeners: SessionEventHandler[] = [];
@@ -170,9 +170,51 @@ describe("subscribeEmbeddedPiSession", () => {
         listener({ type: "auto_compaction_end", willRetry: true });
       }
 
+      let resolved = false;
+      const waitPromise = subscription.waitForCompactionRetry().then(() => {
+        resolved = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(1500);
+
+      await waitPromise;
+      expect(continueMock).toHaveBeenCalledTimes(1);
+      expect(resolved).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects when stalled compaction retry recovery hits non-role error", async () => {
+    vi.useFakeTimers();
+    try {
+      const listeners: SessionEventHandler[] = [];
+      const continueMock = vi
+        .fn()
+        .mockRejectedValue(new Error("Network connection lost"));
+      const session = {
+        agent: {
+          continue: continueMock,
+        },
+        isStreaming: false,
+        subscribe: (listener: SessionEventHandler) => {
+          listeners.push(listener);
+          return () => {};
+        },
+      } as unknown as Parameters<typeof subscribeEmbeddedPiSession>[0]["session"];
+
+      const subscription = subscribeEmbeddedPiSession({
+        session,
+        runId: "run-net-err",
+      });
+
+      for (const listener of listeners) {
+        listener({ type: "auto_compaction_end", willRetry: true });
+      }
+
       const waitPromise = subscription.waitForCompactionRetry();
       const rejection = expect(waitPromise).rejects.toThrow(
-        "Compaction retry stalled before resume: Cannot continue from message role: assistant",
+        "Compaction retry stalled before resume: Network connection lost",
       );
 
       await vi.advanceTimersByTimeAsync(1500);

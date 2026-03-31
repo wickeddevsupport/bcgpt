@@ -275,9 +275,23 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
       }
       const pendingCount = state.pendingCompactionRetry;
       const runLabel = `runId=${params.runId} retries=${pendingCount}`;
-      ctx.log.warn(`embedded run compaction retry stalled before resume: ${runLabel}`);
+      log.warn(`embedded run compaction retry stalled before resume: ${runLabel}`);
       void params.session.agent.continue().catch((err: unknown) => {
         const detail = err instanceof Error ? err.message : String(err);
+        // Role-ordering / "Cannot continue" errors mean the agent transcript
+        // ends with an assistant turn after compaction.  The compaction itself
+        // succeeded and the original response was already delivered, so settle
+        // as resolved instead of rejecting (which would crash the run).
+        const isRoleError =
+          /cannot continue from message role|roles must alternate|incorrect role/i.test(detail);
+        if (isRoleError) {
+          log.warn(
+            `embedded run compaction retry resume skipped (role ordering): ${runLabel} – ${detail}`,
+          );
+          state.pendingCompactionRetry = 0;
+          settleCompactionRetry();
+          return;
+        }
         state.pendingCompactionRetry = 0;
         settleCompactionRetry(
           new Error(`Compaction retry stalled before resume: ${detail}`),
