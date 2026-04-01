@@ -228,26 +228,25 @@ describe("pmos smart memory runtime", () => {
   });
 
   it("excludes pmos-smart-memory results from recall to prevent recursive ingestion", async () => {
-    const manager = createMemoryManager({
-      search: vi.fn().mockResolvedValue([
-        {
-          path: "pmos-smart-memory/agent-assistant-main.md",
-          startLine: 1,
-          endLine: 3,
-          score: 0.95,
-          snippet: "Recycled memory that should be excluded.",
-          source: "memory",
-        },
-        {
-          path: "docs/architecture.md",
-          startLine: 10,
-          endLine: 12,
-          score: 0.80,
-          snippet: "Real architecture note about tenant isolation.",
-          source: "memory",
-        },
-      ]),
-    });
+    const searchFn = vi.fn().mockResolvedValue([
+      {
+        path: "pmos-smart-memory/agent-assistant-main.md",
+        startLine: 1,
+        endLine: 3,
+        score: 0.95,
+        snippet: "Recycled memory that should be excluded.",
+        source: "memory",
+      },
+      {
+        path: "docs/architecture.md",
+        startLine: 10,
+        endLine: 12,
+        score: 0.80,
+        snippet: "Real architecture note about tenant isolation.",
+        source: "memory",
+      },
+    ]);
+    const manager = createMemoryManager({ search: searchFn });
 
     const handler = createBeforeAgentStartHandler({
       config: resolvePmosSmartMemoryConfig({ enabled: true }),
@@ -267,6 +266,11 @@ describe("pmos smart memory runtime", () => {
 
     expect(result?.prependContext).toContain("Real architecture note");
     expect(result?.prependContext).not.toContain("Recycled memory that should be excluded");
+    // Verify over-fetch: default maxResults is 3, so search should request 3 * 3 = 9
+    expect(searchFn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ maxResults: 9 }),
+    );
   });
 
   it("strips injected recall blocks from messages before capture", async () => {
@@ -317,6 +321,8 @@ describe("pmos smart memory runtime", () => {
     }
     expect(content).not.toContain("Relevant workspace memory:");
     expect(content).not.toContain("Old recalled fact");
+    // The real user question after the injected block should be preserved
+    expect(content).toContain("deploy strategy");
   });
 
   it("skips capture on unsuccessful turns", async () => {
@@ -403,5 +409,8 @@ describe("pmos smart memory runtime", () => {
     // Must not contain a fabricated .jsonl path
     expect(content).not.toContain(".jsonl");
     expect(content).not.toContain("sessions/");
+    // Must not contain misleading 'Source transcript:' label
+    expect(content).not.toContain("Source transcript:");
+    expect(content).not.toContain("Transcript:");
   });
 });

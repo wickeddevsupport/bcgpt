@@ -29,6 +29,7 @@ import { resolveUserPath } from "../../src/utils.js";
 const WORKSPACE_PATH_RE = /(?:^|[\\/])workspaces[\\/]([^\\/]+)(?:[\\/]|$)/i;
 const DEFAULT_CAPTURE_DIR = "memory/pmos-smart-memory";
 const DEFAULT_RECALL_MAX_RESULTS = 3;
+const RECALL_OVERFETCH_MULTIPLIER = 3;
 const DEFAULT_RECALL_MIN_SCORE = 0.35;
 const DEFAULT_RECALL_MAX_CHARS = 1600;
 const DEFAULT_RECALL_MIN_QUERY_CHARS = 20;
@@ -224,13 +225,17 @@ export function createBeforeAgentStartHandler(params: {
         return;
       }
 
+      // Over-fetch to compensate for PMOS smart-memory results that will be filtered out
       const rawResults = await manager.search(query, {
-        maxResults: params.config.recall.maxResults,
+        maxResults: params.config.recall.maxResults * RECALL_OVERFETCH_MULTIPLIER,
         minScore: params.config.recall.minScore,
         sessionKey: ctx.sessionKey,
       });
-      // Exclude PMOS smart-memory output to prevent recursive memory ingestion
-      const results = filterRecallResults(rawResults);
+      // Exclude PMOS smart-memory output, then trim to the requested limit
+      const results = filterRecallResults(rawResults).slice(
+        0,
+        params.config.recall.maxResults,
+      );
       const prependContext = renderRecallContext(results, params.config.recall.maxChars);
       if (!prependContext) {
         return;
@@ -302,7 +307,7 @@ export function createAgentEndHandler(params: {
         workspaceId: runtime.workspaceId,
         sessionKey: ctx.sessionKey,
         generatedAt: new Date(deps.now()).toISOString(),
-        durableMemoryText: extraction.durableMemoryText,
+        durableMemoryText: cleanDurableMemoryText(extraction.durableMemoryText),
       });
       await deps.writeFile(capturePath, content, "utf-8");
       await syncMemoryIndex(runtime, deps, params.logger);
@@ -475,6 +480,18 @@ function filterRecallResults(results: MemorySearchResult[]): MemorySearchResult[
   );
 }
 
+/**
+ * Remove the misleading "Source transcript:" line that the shared extractor adds,
+ * since we pass a session key rather than a real file path.
+ */
+function cleanDurableMemoryText(text: string): string {
+  return text
+    .replace(/^Source transcript:.*$/gm, "")
+    .replace(/^Transcript:.*$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 /** Strip injected/synthetic blocks from text before durable memory extraction. */
 function stripInjectedBlocks(text: string): string {
   let cleaned = text;
@@ -504,14 +521,15 @@ function serializeAgentMessages(
     if (message.role !== "user" && message.role !== "assistant") {
       continue;
     }
-    let text = extractMessageText(message.content);
-    if (!text) {
+    const rawText = extractRawMessageText(message.content);
+    if (!rawText) {
       continue;
     }
-    if (opts?.stripInjected) {
-      text = stripInjectedBlocks(text);
-      if (!text) continue;
-    }
+    // Strip injected blocks BEFORE normalization to preserve block boundaries
+    const stripped = opts?.stripInjected ? stripInjectedBlocks(rawText) : rawText;
+    if (!stripped) continue;
+    const text = normalizeText(stripped);
+    if (!text) continue;
     lines.push(
       JSON.stringify({
         type: "message",
@@ -525,9 +543,10 @@ function serializeAgentMessages(
   return lines.join("\n");
 }
 
-function extractMessageText(content: unknown): string | null {
+/** Extract raw (un-normalized) text from message content, preserving newlines for block stripping. */
+function extractRawMessageText(content: unknown): string | null {
   if (typeof content === "string") {
-    return normalizeText(content);
+    return content.trim() || null;
   }
   if (!Array.isArray(content)) {
     return null;
@@ -541,19 +560,18 @@ function extractMessageText(content: unknown): string | null {
     const text = (block as { type?: unknown; text?: unknown }).type === "text"
       ? (block as { text?: unknown }).text
       : undefined;
-    if (typeof text !== "string") {
+    if (typeof text !== "string" || !text.trim()) {
       continue;
     }
-    const normalized = normalizeText(text);
-    if (normalized) {
-      parts.push(normalized);
-    }
+    parts.push(text.trim());
   }
 
-  if (parts.length === 0) {
-    return null;
-  }
-  return parts.join(" ");
+  return parts.length > 0 ? parts.join("\n\n") : null;
+}
+
+function extractMessageText(content: unknown): string | null {
+  const raw = extractRawMessageText(content);
+  return raw ? normalizeText(raw) : null;
 }
 
 function normalizeText(value: unknown): string | null {
