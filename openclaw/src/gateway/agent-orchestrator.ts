@@ -13,7 +13,7 @@ import { getClientWorkspaceId } from './workspace-context.js';
 export interface AgentTask {
   id: string;
   agentId: string;
-  type: 'chat' | 'workflow' | 'automation' | 'monitoring';
+  type: 'chat' | 'automation' | 'monitoring';
   payload: unknown;
   priority: 'low' | 'normal' | 'high' | 'urgent';
   status: 'pending' | 'running' | 'completed' | 'failed';
@@ -338,26 +338,7 @@ async function executeAgentTask(task: AgentTask, client: ClientContext): Promise
       };
     }
     
-    if (task.type === 'workflow') {
-      // Execute workflow via n8n
-      const { executeN8nWorkflow } = await import('./n8n-api-client.js');
-      const workspaceId = getClientWorkspaceId(client);
-      const workflowId = (task.payload as { workflowId?: string })?.workflowId;
-      
-      if (!workspaceId || !workflowId) {
-        throw new Error('Workflow execution requires workspaceId and workflowId');
-      }
-      
-      const result = await executeN8nWorkflow(workspaceId, workflowId);
-      
-      return {
-        type: task.type,
-        agentId: task.agentId,
-        payload: task.payload,
-        executionId: result.executionId,
-        executedAt: new Date().toISOString(),
-      };
-    }
+    // Generic task types (automation, monitoring) fall through to default behavior
     
     // Default: generic task execution
     return {

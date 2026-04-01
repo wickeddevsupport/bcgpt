@@ -354,7 +354,7 @@ export const __test = {
 };
 
 /**
- * Redact workflow-engine user passwords before returning connectors to the UI.
+ * Redact user passwords before returning connectors to the UI.
  * Keep lightweight metadata (email + hasPassword) so users can manage
  * provisioning without exposing stored secrets.
  */
@@ -362,7 +362,7 @@ function stripSensitiveUserCredentialsFromConnectors(
   connectors: Record<string, unknown>,
 ): Record<string, unknown> {
   const next = { ...connectors };
-  for (const connectorKey of ["ops", "activepieces"]) {
+  for (const connectorKey of ["ops"]) {
     const connector = next[connectorKey];
     if (!isJsonObject(connector) || !("user" in connector)) {
       continue;
@@ -1374,13 +1374,12 @@ function isGreetingOnlyMessage(message: string): boolean {
 }
 
 // ── Intent-based tool/context filtering ──────────────────────────────────────
-type ChatIntent = "basecamp" | "workflow" | "figma" | "general";
+type ChatIntent = "basecamp" | "figma" | "general";
 type WorkspaceChatUrlHints = ReturnType<typeof inspectWorkspaceChatUrls>;
 type PmosChatExecutionMode =
   | "general"
   | "basecamp_lookup"
   | "basecamp_manager"
-  | "workflow"
   | "figma"
   | "cross_system";
 
@@ -1392,7 +1391,7 @@ export type PmosChatExecutionPlan = {
   includeCredentials: boolean;
   includeScreenContext: boolean;
   includeUrlHints: boolean;
-  responseStyle: "concise" | "project_manager" | "workflow_operator" | "design_analyst" | "orchestrator";
+  responseStyle: "concise" | "project_manager" | "design_analyst" | "orchestrator";
   plannerSummary: string;
   thinkingNote: string;
   guidance: string[];
@@ -1509,14 +1508,6 @@ function buildPmosPlannerGuidance(params: {
         );
       }
       break;
-    case "workflow":
-      guidance.push(
-        "- Check connected credentials only when the task truly involves automations or workflow changes.",
-      );
-      guidance.push(
-        "- When creating or updating workflows, act directly through the workflow tools instead of emitting import JSON for the user.",
-      );
-      break;
     case "figma":
       guidance.push(
         "- Prefer the live Figma MCP surface for context-first reads such as design context, metadata, screenshots, variables, or annotations.",
@@ -1539,7 +1530,7 @@ function buildPmosPlannerGuidance(params: {
       break;
     case "general":
       guidance.push(
-        "- Answer like native OpenClaw first. Do not inspect Basecamp, Figma, workflows, connectors, or credentials unless the task clearly requires live workspace data.",
+        "- Answer like native OpenClaw first. Do not inspect Basecamp or Figma unless the task clearly requires live workspace data.",
       );
       break;
   }
@@ -1577,18 +1568,9 @@ export function buildPmosChatExecutionPlan(params: {
     intents.has("figma") && isFigmaDeepContextRequest(latestUserMessage);
   const shouldPreferExplicitFigmaFileRouting =
     Boolean(params.urlHints.figmaUrl) && !hasMixedWorkspaceUrls;
-  const workflowWithBasecampTarget =
-    intents.has("workflow") &&
-    intents.has("basecamp") &&
-    !intents.has("figma") &&
-    !params.urlHints.basecampUrl &&
-    specialistIntents.length === 2;
-
   let mode: PmosChatExecutionMode = "general";
-  if (hasMixedWorkspaceUrls || (specialistIntents.length > 1 && !workflowWithBasecampTarget)) {
+  if (hasMixedWorkspaceUrls || specialistIntents.length > 1) {
     mode = "cross_system";
-  } else if (intents.has("workflow")) {
-    mode = "workflow";
   } else if (intents.has("figma")) {
     mode = "figma";
   } else if (intents.has("basecamp")) {
@@ -1600,7 +1582,7 @@ export function buildPmosChatExecutionPlan(params: {
     /(\bworkspace\b|\bcommand center\b|\bavailable tools\b|\bwhat can you access\b)/i.test(
       latestUserMessage,
     );
-  const includeCredentials = mode === "workflow" || (mode === "cross_system" && intents.has("workflow"));
+  const includeCredentials = false;
   // Always include screen context when it's present — the user has a project or tab
   // open and the AI should always be aware of it, regardless of message content.
   const includeScreenContext = params.hasScreenContext;
@@ -1611,11 +1593,9 @@ export function buildPmosChatExecutionPlan(params: {
   const responseStyle =
     mode === "basecamp_manager"
       ? "project_manager"
-      : mode === "workflow"
-        ? "workflow_operator"
-        : mode === "figma"
-          ? "design_analyst"
-          : mode === "cross_system"
+      : mode === "figma"
+        ? "design_analyst"
+        : mode === "cross_system"
             ? "orchestrator"
             : "concise";
 
@@ -1623,7 +1603,6 @@ export function buildPmosChatExecutionPlan(params: {
     general: "Native chat turn. Keep context minimal and only escalate into workspace tools if the request truly needs live data.",
     basecamp_lookup: "Deterministic Basecamp lookup. Use exact tools and keep the reply focused on the requested project-management object or queue.",
     basecamp_manager: "Project-manager briefing. Pull the necessary Basecamp data, triage it, and answer like a strong operator rather than a raw reporter.",
-    workflow: "Workflow operator turn. Inspect only the automation/credential context needed to complete the requested workflow task.",
     figma: "Design-context turn. Anchor to the relevant Figma file and use the smallest matching MCP capability surface.",
     cross_system: "Cross-system orchestration turn. Plan the narrowest multi-tool sequence before gathering live data.",
   };
@@ -1631,7 +1610,6 @@ export function buildPmosChatExecutionPlan(params: {
     general: "Focusing on the user's request and keeping context tight.",
     basecamp_lookup: "Pulling only the exact Basecamp data needed for this lookup.",
     basecamp_manager: "Building a focused project-manager brief from live Basecamp data.",
-    workflow: "Checking only the workflow connections and actions relevant to this request.",
     figma: "Anchoring to the right design context before inspecting the file.",
     cross_system: "Planning the smallest cross-system probe before gathering live data.",
   };
@@ -1670,11 +1648,7 @@ const BASECAMP_DISCOVERY_TOOL_NAMES = new Set([
 const BASECAMP_RAW_TOOL_NAMES = new Set([
   "bcgpt_basecamp_raw",
 ]);
-const WORKFLOW_TOOL_NAMES = new Set([
-  "pmos_ops_list_credentials", "pmos_ops_list_workflows", "pmos_ops_list_node_types",
-  "pmos_ops_create_workflow", "pmos_ops_get_workflow", "pmos_ops_execute_workflow",
-  "pmos_ops_update_workflow",
-]);
+
 const FIGMA_TOOL_NAMES = new Set([
   "figma_get_context", "figma_mcp_list_tools", "figma_mcp_call", "figma_pat_audit_file",
 ]);
@@ -1730,9 +1704,6 @@ function filterToolDefinitionsByIntents(
     if (shouldExposeBasecampRawTool(options.latestUserMessage ?? "", options.urlHints ?? {})) {
       addToolNames(allowed, BASECAMP_RAW_TOOL_NAMES);
     }
-  }
-  if (effectiveIntents.has("workflow")) {
-    addToolNames(allowed, WORKFLOW_TOOL_NAMES);
   }
   if (effectiveIntents.has("figma")) {
     addToolNames(allowed, FIGMA_TOOL_NAMES);
@@ -2767,13 +2738,6 @@ export const pmosHandlers: GatewayRequestHandlers = {
       const bcgptKey = workspaceBcgptKey ?? globalBcgptKey;
       const bcgptKeyIsShared = !workspaceBcgptKey && Boolean(globalBcgptKey);
 
-      // Keep Basecamp app-connection provisioned automatically for workspace keys.
-      // This is best-effort and should never fail connector status.
-      if (workspaceId && workspaceBcgptKey) {
-        const { ensureWorkspaceBasecampCredential } = await import("../credential-sync.js");
-        await ensureWorkspaceBasecampCredential(workspaceId).catch(() => undefined);
-      }
-
       const ops: ConnectorResult = {
         url: opsUrl,
         projectId: opsProjectId,
@@ -3272,104 +3236,14 @@ export const pmosHandlers: GatewayRequestHandlers = {
       const merged = deepMergeJson(existing, connectors as Record<string, unknown>);
       let next = isJsonObject(merged) ? merged : existing;
 
-      const readTrimmed = (value: unknown): string | null => {
-        if (typeof value !== "string") return null;
-        const trimmed = value.trim();
-        return trimmed || null;
-      };
-
-      const existingObj = isJsonObject(existing) ? existing : {};
-      const existingOpsConnector = isJsonObject(existingObj.ops)
-        ? (existingObj.ops as Record<string, unknown>)
-        : {};
-      const existingActivepiecesConnector = isJsonObject(existingObj.activepieces)
-        ? (existingObj.activepieces as Record<string, unknown>)
-        : {};
-      const existingOpsUser = isJsonObject(existingOpsConnector.user)
-        ? (existingOpsConnector.user as Record<string, unknown>)
-        : {};
-      const existingActivepiecesUser = isJsonObject(existingActivepiecesConnector.user)
-        ? (existingActivepiecesConnector.user as Record<string, unknown>)
-        : {};
-      const previousIdentityPassword =
-        readTrimmed(existingActivepiecesUser.password) ?? readTrimmed(existingOpsUser.password) ?? "";
-
-      const nextObj = isJsonObject(next) ? next : {};
-      const opsConnector = isJsonObject(nextObj.ops) ? (nextObj.ops as Record<string, unknown>) : {};
-      const activepiecesConnector = isJsonObject(nextObj.activepieces)
-        ? (nextObj.activepieces as Record<string, unknown>)
-        : {};
-      const opsUser = isJsonObject(opsConnector.user) ? (opsConnector.user as Record<string, unknown>) : {};
-      const activepiecesUser = isJsonObject(activepiecesConnector.user)
-        ? (activepiecesConnector.user as Record<string, unknown>)
-        : {};
-
-      const identityEmail =
-        (readTrimmed(opsUser.email) ?? readTrimmed(activepiecesUser.email) ?? "").toLowerCase();
-      const identityPassword = readTrimmed(opsUser.password) ?? readTrimmed(activepiecesUser.password) ?? "";
-      const flowUrl =
-        readTrimmed(opsConnector.url) ??
-        readTrimmed(activepiecesConnector.url) ??
-        "https://flow.wickedlab.io";
-
-      if (identityEmail && identityPassword) {
-        const mirrored = deepMergeJson(next, {
-          ops: {
-            url: flowUrl,
-            user: {
-              email: identityEmail,
-              password: identityPassword,
-            },
-          },
-        });
-        if (isJsonObject(mirrored)) {
-          next = mirrored;
-        }
-      }
-
       await writeWorkspaceConnectors(workspaceId, next);
-      if (identityEmail && identityPassword) {
-        const { ensureActivepiecesCredentialParity } = await import("../pmos-auth-http.js");
-        await ensureActivepiecesCredentialParity({
-          baseUrl: flowUrl,
-          email: identityEmail,
-          password: identityPassword,
-          previousPassword: previousIdentityPassword || null,
-        }).catch(() => undefined);
-      }
-      let workflowConnection:
-        | {
-            configured: boolean;
-            ok: boolean;
-            credentialId?: string;
-            error?: string;
-            skippedReason?: "missing_api_key";
-          }
-        | undefined;
-      const workspaceBcgptApiKey =
-        typeof (next as { bcgpt?: { apiKey?: unknown } } | null)?.bcgpt?.apiKey === "string"
-          ? (next as { bcgpt?: { apiKey?: string } }).bcgpt?.apiKey?.trim() ?? ""
-          : "";
-      if (workspaceBcgptApiKey) {
-        const { ensureWorkspaceBasecampCredential } = await import("../credential-sync.js");
-        workflowConnection = await ensureWorkspaceBasecampCredential(workspaceId).catch((err) => ({
-          configured: true,
-          ok: false,
-          error: err instanceof Error ? err.message : String(err),
-        }));
-      } else {
-        workflowConnection = {
-          configured: false,
-          ok: false,
-          skippedReason: "missing_api_key",
-        };
-      }
+
       const safeConnectors = isSuperAdmin(client)
         ? next
         : stripSensitiveUserCredentialsFromConnectors(next);
       respond(
         true,
-        { ok: true, workspaceId, connectors: safeConnectors, workflowConnection },
+        { ok: true, workspaceId, connectors: safeConnectors },
         undefined,
       );
     } catch (err) {
@@ -3390,34 +3264,12 @@ export const pmosHandlers: GatewayRequestHandlers = {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
       const connectors = (await readWorkspaceConnectors(workspaceId)) ?? {};
-      // Strip workflow-engine login passwords before returning connectors to non-super-admin clients.
+      // Strip login passwords before returning connectors to non-super-admin clients.
       // api keys (ops.apiKey, bcgpt.apiKey) are kept as-is so the UI can display configured status.
       const safeConnectors = isSuperAdmin(client)
         ? connectors
         : stripSensitiveUserCredentialsFromConnectors(connectors);
       respond(true, { workspaceId, connectors: safeConnectors }, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  // Provision legacy remote n8n fallback credentials for a workspace when needed.
-  // - Attempts to create a Project using the global OPS API key
-  // - Attempts to create a workspace-scoped API key (if supported)
-  // - Persists `ops.url`, `ops.apiKey` and `ops.projectId` into the workspace connectors file
-  // - Returns { projectId?, apiKey? } on success; responds with an explanatory error on failure
-  "pmos.connectors.workspace.provision_ops": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const workspaceId = requireWorkspaceId(client);
-      const projectName =
-        typeof params?.projectName === "string" && params.projectName.trim()
-          ? params.projectName.trim()
-          : undefined;
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { provisionWorkspaceOps } = await import("../pmos-provision-ops.js");
-      const result = await provisionWorkspaceOps(workspaceId, projectName);
-      respond(true, result, undefined);
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }
@@ -3547,63 +3399,6 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 
-  // â"€â"€ Chat-to-Workflow Creation â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-
-  "pmos.workflow.create": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const { handleWorkflowCreate } = await import("./chat-to-workflow.js");
-      const result = await handleWorkflowCreate(params, client);
-      respond(result.success, result, result.success ? undefined : errorShape(ErrorCodes.INVALID_REQUEST, result.message || "Failed to create workflow"));
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.workflow.template.list": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const { handleTemplateList } = await import("./chat-to-workflow.js");
-      const result = await handleTemplateList(params, client);
-      respond(result.success, result, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.workflow.template.deploy": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const { handleTemplateDeploy } = await import("./chat-to-workflow.js");
-      const result = await handleTemplateDeploy(params, client);
-      respond(result.success, result, result.success ? undefined : errorShape(ErrorCodes.INVALID_REQUEST, result.message || "Failed to deploy template"));
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.workflow.confirm": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const { handleWorkflowConfirm } = await import("./chat-to-workflow.js");
-      const result = await handleWorkflowConfirm(params, client);
-      respond(result.success, result, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.workflow.intent.parse": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const { handleIntentParse } = await import("./chat-to-workflow.js");
-      const result = await handleIntentParse(params, client);
-      respond(result.success, result, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
   // â"€â"€ Multi-Agent Orchestration â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
   "pmos.agent.parallel": async ({ params, respond, client }) => {
@@ -3716,944 +3511,7 @@ export const pmosHandlers: GatewayRequestHandlers = {
     }
   },
 
-  // â"€â"€ Live Flow Builder â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-
-  "pmos.flow.canvas.subscribe": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const { handleCanvasSubscribe } = await import("./live-flow-builder.js");
-      const result = await handleCanvasSubscribe(params, client);
-      respond(result.success, result, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.flow.canvas.unsubscribe": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const { handleCanvasUnsubscribe } = await import("./live-flow-builder.js");
-      const result = await handleCanvasUnsubscribe(params, client);
-      respond(result.success, result, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.flow.execution.subscribe": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const { handleExecutionSubscribe } = await import("./live-flow-builder.js");
-      const result = await handleExecutionSubscribe(params, client);
-      respond(result.success, result, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.flow.execution.unsubscribe": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const { handleExecutionUnsubscribe } = await import("./live-flow-builder.js");
-      const result = await handleExecutionUnsubscribe(params, client);
-      respond(result.success, result, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.flow.updates.fetch": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const { handlePendingUpdatesFetch } = await import("./live-flow-builder.js");
-      const result = await handlePendingUpdatesFetch(params, client);
-      respond(result.success, result, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.flow.execution.history": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const { handleExecutionHistoryFetch } = await import("./live-flow-builder.js");
-      const result = await handleExecutionHistoryFetch(params, client);
-      respond(result.success, result, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.flow.control": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const { handleFlowControl } = await import("./live-flow-builder.js");
-      const result = await handleFlowControl(params, client);
-      respond(result.success, result, result.success ? undefined : errorShape(ErrorCodes.INVALID_REQUEST, result.message));
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.flow.node.move": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const { handleNodeMove } = await import("./live-flow-builder.js");
-      const result = await handleNodeMove(params, client);
-      respond(result.success, result, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.flow.node.add": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const { handleNodeAdd } = await import("./live-flow-builder.js");
-      const result = await handleNodeAdd(params, client);
-      respond(result.success, result, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.flow.node.remove": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const { handleNodeRemove } = await import("./live-flow-builder.js");
-      const result = await handleNodeRemove(params, client);
-      respond(result.success, result, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.flow.connection.add": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const { handleConnectionAdd } = await import("./live-flow-builder.js");
-      const result = await handleConnectionAdd(params, client);
-      respond(result.success, result, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.flow.connection.remove": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const { handleConnectionRemove } = await import("./live-flow-builder.js");
-      const result = await handleConnectionRemove(params, client);
-      respond(result.success, result, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.flow.template.search": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const { handleTemplateSearch } = await import("./live-flow-builder.js");
-      const result = await handleTemplateSearch(params, client);
-      respond(result.success, result, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.flow.template.featured": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const { handleFeaturedTemplatesFetch } = await import("./live-flow-builder.js");
-      const result = await handleFeaturedTemplatesFetch(params, client);
-      respond(result.success, result, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.flow.template.deploy": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const { handleTemplateDeployment } = await import("./live-flow-builder.js");
-      const result = await handleTemplateDeployment(params, client);
-      respond(result.success, result, result.success ? undefined : errorShape(ErrorCodes.INVALID_REQUEST, result.message));
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.flow.status": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const { handleFlowBuilderStatusQuery } = await import("./live-flow-builder.js");
-      const result = await handleFlowBuilderStatusQuery(params, client);
-      respond(result.success, result, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.flow.library.list": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const { handleWorkflowLibraryList } = await import("./live-flow-builder.js");
-      const result = await handleWorkflowLibraryList(params, client);
-      respond(result.success, result, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  // â"€â"€ AI Workflow Assistant (uses global openclaw.json model config) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-
-  "pmos.workflow.assist": async ({ params, respond, client, context }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const workspaceId = requireWorkspaceId(client);
-
-      const p = params as {
-        messages?: Array<{ role: string; content: string }>;
-        message?: string;
-        currentWorkflowId?: string;
-      } | null;
-
-      const rawMessages: Array<{ role: string; content: string }> = Array.isArray(p?.messages) ? [...p.messages] : [];
-      if (p?.message && typeof p.message === "string") {
-        rawMessages.push({ role: "user", content: p.message });
-      }
-      if (rawMessages.length === 0) {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "messages required"));
-        return;
-      }
-
-      const messages = rawMessages
-        .filter(m => m.role === "user" || m.role === "assistant")
-        .map(m => ({ role: m.role as "user" | "assistant", content: String(m.content) }));
-
-      const {
-        callWorkspaceModelAgentLoop,
-        WORKFLOW_ASSISTANT_SYSTEM_PROMPT,
-        getWorkspaceN8nNodeCatalog,
-      } = await import("../workflow-ai.js");
-      // Fetch available credentials and inject into system prompt so AI can reference them
-      const {
-        fetchWorkspaceCredentials,
-        buildCredentialContext,
-      } = await import("../credential-sync.js");
-      const withTimeout = async <T>(
-        promise: Promise<T>,
-        timeoutMs: number,
-        fallback: T,
-      ): Promise<T> => {
-        let timer: ReturnType<typeof setTimeout> | null = null;
-        try {
-          return await Promise.race([
-            promise,
-            new Promise<T>((resolve) => {
-              timer = setTimeout(() => resolve(fallback), timeoutMs);
-            }),
-          ]);
-        } finally {
-          if (timer) {
-            clearTimeout(timer);
-          }
-        }
-      };
-
-      const availableCredentials = await withTimeout(
-        fetchWorkspaceCredentials(workspaceId).catch(() => []),
-        6000,
-        [] as Awaited<ReturnType<typeof fetchWorkspaceCredentials>>,
-      );
-      const credentialContext = buildCredentialContext(availableCredentials);
-      const liveNodeCatalog = await withTimeout(
-        getWorkspaceN8nNodeCatalog(workspaceId).catch(() => ""),
-        6000,
-        "",
-      );
-      // NOTE: Workspace memory (AI_CONTEXT.md) is intentionally NOT included in the workflow
-      // assistant prompt -- it causes models to treat workflow requests as memory recall queries.
-      const workspaceContext = `## Workspace Context
-- Workspace ID: ${workspaceId}
-- Use node type names from the live workspace catalog when available.
-- Treat openclaw.json + workspace connector data as the source of truth for integration configuration.
-- If required credentials are missing, explicitly tell the user which provider config to add in openclaw.json.
-- If a live node catalog is unavailable, explicitly say so instead of inventing node names.`;
-
-      // If a workflow is currently open in the canvas, fetch and inject its full details
-      const currentWorkflowId = typeof p?.currentWorkflowId === "string" ? p.currentWorkflowId.trim() : null;
-      let currentWorkflowContext = "";
-      if (currentWorkflowId) {
-        const { getWorkflowEngineWorkflow } = await import("../workflow-api-client.js");
-        const wfResult = await withTimeout(
-          getWorkflowEngineWorkflow(workspaceId, currentWorkflowId).catch(() => ({ ok: false as const })),
-          4000,
-          { ok: false as const },
-        );
-        if (wfResult.ok && wfResult.workflow) {
-          const wf = wfResult.workflow as { id: string; name: string; active: boolean; nodes: unknown[]; connections: unknown };
-          currentWorkflowContext = `## Currently Open Workflow in Canvas
-- Workflow ID: ${wf.id}
-- Name: ${wf.name}
-- Active: ${wf.active}
-- Nodes (${Array.isArray(wf.nodes) ? wf.nodes.length : 0} total): ${JSON.stringify(wf.nodes, null, 2)}
-- Connections: ${JSON.stringify(wf.connections, null, 2)}
-
-When the user asks to edit, modify, add, remove or update this workflow, use pmos_ops_update_workflow with workflow_id="${wf.id}".`;
-        }
-      }
-      const agentBehaviorRules = [
-        "## Critical Behaviour Rules (Automations AI)",
-        "- When asked to create or build a workflow: CALL pmos_ops_create_workflow IMMEDIATELY -- never output JSON for the user to import manually.",
-        "- Always call pmos_ops_list_credentials FIRST to discover which integrations are available.",
-        "- After creating a workflow, tell the user its name and ID, and what they should do next (e.g. activate it, add a webhook).",
-        "- Never describe a workflow in text and say 'import it' -- use the tool to create it directly.",
-        "- When the user asks to edit/modify/add nodes/remove nodes from an EXISTING workflow (especially one currently open in the canvas): call pmos_ops_get_workflow first to fetch current state, then call pmos_ops_update_workflow with the FULL updated nodes+connections.",
-        "- pmos_ops_update_workflow replaces the entire workflow -- always include ALL existing nodes plus any new ones.",
-        "- Available tools: pmos_ops_list_credentials, pmos_ops_list_workflows, pmos_ops_list_node_types, pmos_ops_create_workflow, pmos_ops_get_workflow, pmos_ops_update_workflow, pmos_ops_execute_workflow.",
-      ].join("\n");
-      const systemPrompt = [
-        WORKFLOW_ASSISTANT_SYSTEM_PROMPT,
-        agentBehaviorRules,
-        liveNodeCatalog,
-        credentialContext,
-        workspaceContext,
-        currentWorkflowContext,
-      ]
-        .filter((part) => part && part.trim().length > 0)
-        .join("\n\n");
-
-      // â"€â"€ Tool definitions â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-      const tools = [
-        {
-          type: "function" as const,
-          function: {
-            name: "pmos_ops_list_credentials",
-            description: "List available workflow-engine credentials/integrations configured for this workspace (Basecamp, Slack, GitHub, etc.)",
-            parameters: { type: "object", properties: {}, additionalProperties: false },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "pmos_ops_list_workflows",
-            description: "List existing workflow-engine flows in this workspace",
-            parameters: { type: "object", properties: {}, additionalProperties: false },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "pmos_ops_list_node_types",
-            description: "List available workflow node types (triggers and actions). Legacy-compatible aliases remain accepted where needed.",
-            parameters: { type: "object", properties: {}, additionalProperties: false },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "pmos_ops_create_workflow",
-            description: "Create a new workflow-engine flow. Always call pmos_ops_list_credentials first to know which credential IDs to use.",
-            parameters: {
-              type: "object",
-              required: ["name", "nodes", "connections"],
-              additionalProperties: false,
-              properties: {
-                name: { type: "string", description: "Descriptive workflow name" },
-                nodes: {
-                  type: "array",
-                  description: "Array of workflow node objects, each with: id, name, type, typeVersion, position [x,y], parameters, and optionally credentials",
-                },
-                connections: {
-                  type: "object",
-                  description: "Connections object mapping source node name â†' { main: [[{ node, type, index }]] }",
-                },
-              },
-            },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "pmos_ops_get_workflow",
-            description: "Get full details of an existing workflow-engine flow by ID",
-            parameters: {
-              type: "object",
-              required: ["workflow_id"],
-              additionalProperties: false,
-              properties: {
-                workflow_id: { type: "string", description: "The workflow-engine flow ID" },
-              },
-            },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "pmos_ops_update_workflow",
-            description: "Update an existing workflow-engine flow -- add, remove or modify nodes and connections. Always call pmos_ops_get_workflow first to retrieve current state, then include ALL nodes (existing + modified) in the update.",
-            parameters: {
-              type: "object",
-              required: ["workflow_id", "nodes", "connections"],
-              additionalProperties: false,
-              properties: {
-                workflow_id: { type: "string", description: "The workflow-engine flow ID to update" },
-                name: { type: "string", description: "Optional new name for the workflow" },
-                nodes: {
-                  type: "array",
-                  description: "Complete array of ALL node objects for the workflow (existing + new/updated)",
-                },
-                connections: {
-                  type: "object",
-                  description: "Complete connections object (all existing + new connections)",
-                },
-              },
-            },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "pmos_ops_execute_workflow",
-            description: "Execute (test-run) a workflow-engine flow by ID",
-            parameters: {
-              type: "object",
-              required: ["workflow_id"],
-              additionalProperties: false,
-              properties: {
-                workflow_id: { type: "string", description: "The workflow-engine flow ID to execute" },
-              },
-            },
-          },
-        },
-
-        {
-          type: "function" as const,
-          function: {
-            name: "web_search",
-            description: "Search the web for current information, documentation, or design resources.",
-            parameters: {
-              type: "object",
-              required: ["query"],
-              additionalProperties: false,
-              properties: {
-                query: { type: "string", description: "Search query" },
-              },
-            },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "web_fetch",
-            description: "Fetch the content of a URL. Use to call the Figma REST API or read any web page.",
-            parameters: {
-              type: "object",
-              required: ["url"],
-              additionalProperties: false,
-              properties: {
-                url: { type: "string", description: "URL to fetch" },
-              },
-            },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "figma_get_context",
-            description: "Get the current Figma workspace context: connected status, active file name/ID/URL, team, and connection details.",
-            parameters: { type: "object", properties: {}, additionalProperties: false },
-          },
-        },
-      ];
-
-
-      // â"€â"€ Progress push helper â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-      const pushProgress = (stepOrPayload: string | Record<string, unknown>) => {
-        if (client?.connId) {
-          const payload = typeof stepOrPayload === "string"
-            ? { step: stepOrPayload }
-            : stepOrPayload;
-          context.broadcastToConnIds(
-            "pmos.workflow.assist.progress",
-            payload,
-            new Set([client.connId]),
-          );
-        }
-      };
-
-      // â"€â"€ Track created workflow for UI refresh â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-      let createdWorkflowId: string | undefined;
-      let createdWorkflowName: string | undefined;
-
-      // â"€â"€ Tool executor â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-      const executeTool = async (toolName: string, args: Record<string, unknown>): Promise<string> => {
-        const {
-          createWorkflowEngineWorkflow,
-          executeWorkflowEngineWorkflow,
-          getWorkflowEngineWorkflow,
-          listWorkflowEngineConnections,
-          listWorkflowEngineNodeTypes,
-          listWorkflowEngineWorkflows,
-        } = await import("../workflow-api-client.js");
-
-        const normalizedToolName = toolName.startsWith("pmos_n8n_")
-          ? `pmos_ops_${toolName.slice("pmos_n8n_".length)}`
-          : toolName;
-
-        switch (normalizedToolName) {
-          case "pmos_ops_list_credentials": {
-            pushProgress("Checking available integrations...");
-            const r = await listWorkflowEngineConnections(workspaceId);
-            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to list credentials" });
-            return JSON.stringify({
-              credentials: (r.credentials ?? []).map((c) => ({ id: c.id, name: c.name, type: c.type })),
-            });
-          }
-          case "pmos_ops_list_workflows": {
-            pushProgress("Loading existing workflows...");
-            const r = await listWorkflowEngineWorkflows(workspaceId);
-            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to list workflows" });
-            return JSON.stringify({
-              workflows: (r.workflows ?? []).map((w) => ({ id: w.id, name: w.name, active: w.active })),
-            });
-          }
-          case "pmos_ops_list_node_types": {
-            pushProgress("Looking up available node types...");
-            const r = await listWorkflowEngineNodeTypes(workspaceId);
-            // Always inject the custom Basecamp node + all essential core n8n nodes,
-            // regardless of what the live n8n REST API returns (it often returns empty).
-            const BASECAMP_CUSTOM_NODE = {
-              name: "n8n-nodes-basecamp.basecamp",
-              displayName: "Basecamp (BCgpt Custom Node)",
-              description: "Full Basecamp integration -- projects, todos, messages, events, files, and more. ALWAYS use this node type for Basecamp.",
-              group: ["custom"],
-              version: 1,
-            };
-            const CORE_N8N_NODES = [
-              { name: "n8n-nodes-base.manualTrigger", displayName: "Manual Trigger", description: "Start workflow manually", group: ["trigger"], version: 1 },
-              { name: "n8n-nodes-base.scheduleTrigger", displayName: "Schedule Trigger", description: "Trigger on a cron schedule (daily, hourly, etc.)", group: ["trigger"], version: 1 },
-              { name: "n8n-nodes-base.webhook", displayName: "Webhook", description: "HTTP webhook trigger -- use this type name, NOT webhookTrigger", group: ["trigger"], version: 1 },
-              { name: "n8n-nodes-base.if", displayName: "IF", description: "Branch workflow on a condition (true/false)", group: ["transform"], version: 1 },
-              { name: "n8n-nodes-base.switch", displayName: "Switch", description: "Route items to multiple output branches", group: ["transform"], version: 1 },
-              { name: "n8n-nodes-base.merge", displayName: "Merge", description: "Merge data from multiple branches", group: ["transform"], version: 1 },
-              { name: "n8n-nodes-base.code", displayName: "Code", description: "Execute custom JavaScript or Python", group: ["transform"], version: 1 },
-              { name: "n8n-nodes-base.set", displayName: "Edit Fields (Set)", description: "Set or map field values", group: ["transform"], version: 1 },
-              { name: "n8n-nodes-base.filter", displayName: "Filter", description: "Keep only items matching a condition", group: ["transform"], version: 1 },
-              { name: "n8n-nodes-base.httpRequest", displayName: "HTTP Request", description: "Make HTTP GET/POST/PUT/DELETE requests", group: ["output"], version: 1 },
-              { name: "n8n-nodes-base.splitInBatches", displayName: "Loop Over Items", description: "Process items in batches", group: ["transform"], version: 1 },
-              { name: "n8n-nodes-base.noOp", displayName: "No Operation", description: "Pass-through node", group: ["organization"], version: 1 },
-            ];
-            const liveNodes = r.ok ? (r.nodeTypes ?? []) : [];
-            // Remove any basecamp entry from live list (we inject ours at top),
-            // and remove any live nodes that duplicate our core list.
-            const coreNames = new Set(["n8n-nodes-basecamp.basecamp", ...CORE_N8N_NODES.map(n => n.name)]);
-            const filteredLiveNodes = liveNodes.filter(
-              (n) => !coreNames.has(String(n.name ?? "")) && !String(n.name ?? "").toLowerCase().includes("basecamp")
-            );
-            const nodeTypes = [BASECAMP_CUSTOM_NODE, ...CORE_N8N_NODES, ...filteredLiveNodes].slice(0, 250);
-            return JSON.stringify({ nodeTypes });
-          }
-          case "pmos_ops_create_workflow": {
-            const name = String(args.name ?? "").trim();
-            let nodes = Array.isArray(args.nodes) ? args.nodes : [];
-            const connections =
-              args.connections && typeof args.connections === "object"
-                ? (args.connections as Record<string, unknown>)
-                : {};
-            if (!name) return JSON.stringify({ error: "name is required" });
-            if (!nodes.length) return JSON.stringify({ error: "nodes array is required and must not be empty" });
-
-            // â"€â"€ Node type validation & auto-correction â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-            // Correct wrong node type names that the AI commonly uses.
-            const NODE_TYPE_CORRECTIONS: Record<string, string> = {
-              "n8n-nodes-base.webhookTrigger": "n8n-nodes-base.webhook",
-              "n8n-nodes-base.cron": "n8n-nodes-base.scheduleTrigger",
-              "n8n-nodes-base.interval": "n8n-nodes-base.scheduleTrigger",
-              "n8n-nodes-base.function": "n8n-nodes-base.code",
-              "n8n-nodes-base.functionItem": "n8n-nodes-base.code",
-              "n8n-nodes-base.itemListsMerge": "n8n-nodes-base.merge",
-              "n8n-nodes-base.googleSheetsRowTrigger": "n8n-nodes-base.googleSheetsTrigger",
-              "n8n-nodes-base.rssFeedRead": "n8n-nodes-base.rssFeedReadTrigger",
-            };
-            let correctedCount = 0;
-            nodes = nodes.map((node: Record<string, unknown>) => {
-              const t = String(node.type ?? "");
-              // Auto-correct Basecamp nodes to use our custom node
-              if (t.toLowerCase().includes("basecamp") && t !== "n8n-nodes-basecamp.basecamp") {
-                correctedCount++;
-                return { ...node, type: "n8n-nodes-basecamp.basecamp" };
-              }
-              // Auto-correct known wrong n8n type names
-              if (NODE_TYPE_CORRECTIONS[t]) {
-                correctedCount++;
-                return { ...node, type: NODE_TYPE_CORRECTIONS[t] };
-              }
-              return node;
-            });
-            if (correctedCount > 0) {
-              pushProgress(`âš™ï¸ Auto-corrected ${correctedCount} node type(s) to valid workflow aliases.`);
-            }
-
-            // â"€â"€ Credential check for Basecamp nodes â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-            const hasBasecampNode = nodes.some((n: Record<string, unknown>) =>
-              String(n.type ?? "") === "n8n-nodes-basecamp.basecamp"
-            );
-            if (hasBasecampNode) {
-              const credR = await listWorkflowEngineConnections(workspaceId);
-              const creds = credR.ok ? (credR.credentials ?? []) : [];
-              const basecampCred = creds.find((c) => c.type === "basecampApi");
-              if (!basecampCred) {
-                return JSON.stringify({
-                  error: "Basecamp credential not configured",
-                  userMessage: "âš ï¸ Your Basecamp integration is not set up yet. Please go to **Settings â†' Integrations** and add your Basecamp API key before creating this workflow. Once configured, I'll build the workflow automatically.",
-                  actionRequired: "configure_basecamp_credential",
-                });
-              }
-              // Inject the credential ID into any Basecamp node that's missing it
-              const basecampCredId = basecampCred.id;
-              nodes = nodes.map((node: Record<string, unknown>) => {
-                if (String(node.type ?? "") === "n8n-nodes-basecamp.basecamp") {
-                  const existingCred = node.credentials as Record<string, unknown> | undefined;
-                  if (!existingCred?.basecampApi) {
-                    return {
-                      ...node,
-                      credentials: {
-                        ...(existingCred ?? {}),
-                        basecampApi: { id: basecampCredId, name: basecampCred.name },
-                      },
-                    };
-                  }
-                }
-                return node;
-              });
-            }
-
-            // â"€â"€ Per-node streaming â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-            // Push one step event per node so UI shows live "building" feel.
-            pushProgress(`ðŸ"§ Building workflow "${name}" with ${nodes.length} nodes...`);
-            for (const node of nodes) {
-              const nodeName = String((node as Record<string, unknown>).name ?? "node");
-              const nodeType = String((node as Record<string, unknown>).type ?? "");
-              const displayType = nodeType.split(".").pop() ?? nodeType;
-              pushProgress({ type: "node_added", nodeName, nodeType: displayType, step: `âž• Adding node: ${nodeName} (${displayType})` });
-              // Small yield to let the event flush
-              await new Promise((res) => setTimeout(res, 30));
-            }
-
-            const r = await createWorkflowEngineWorkflow(workspaceId, {
-              name,
-              active: false,
-              nodes: nodes as Parameters<typeof createWorkflowEngineWorkflow>[1]["nodes"],
-              connections,
-            });
-            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to create workflow" });
-            createdWorkflowId = r.workflow?.id;
-            createdWorkflowName = name;
-            // Navigate the canvas to the new workflow immediately (live creation feel)
-            if (createdWorkflowId) {
-              pushProgress({ type: "workflow_ready", workflowId: createdWorkflowId });
-            }
-            pushProgress(`âœ… Workflow "${name}" created with ${nodes.length} nodes!`);
-            return JSON.stringify({
-              success: true,
-              workflowId: r.workflow?.id,
-              workflowName: name,
-              nodeCount: nodes.length,
-              message: `Workflow "${name}" created successfully with ${nodes.length} nodes! ID: ${r.workflow?.id}. It's currently inactive -- activate it in the Workflows panel when ready.`,
-            });
-          }
-          case "pmos_ops_update_workflow": {
-            const id = String(args.workflow_id ?? "").trim();
-            if (!id) return JSON.stringify({ error: "workflow_id is required" });
-            const { updateWorkflowEngineWorkflow } = await import("../workflow-api-client.js");
-            pushProgress(`Updating workflow...`);
-            const r = await updateWorkflowEngineWorkflow(workspaceId, id, {
-              ...(typeof args.name === "string" ? { name: args.name } : {}),
-              ...(Array.isArray(args.nodes) ? { nodes: args.nodes as Parameters<typeof createWorkflowEngineWorkflow>[1]["nodes"] } : {}),
-              ...(args.connections && typeof args.connections === "object" ? { connections: args.connections as Record<string, unknown> } : {}),
-            });
-            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to update workflow" });
-            // Push workflow_ready so the canvas refreshes immediately
-            pushProgress({ type: "workflow_ready", workflowId: id });
-            pushProgress(`âœ… Workflow updated!`);
-            return JSON.stringify({
-              success: true,
-              workflowId: id,
-              message: `Workflow updated successfully. The canvas will reload to show the changes.`,
-            });
-          }
-          case "pmos_ops_get_workflow": {
-            const id = String(args.workflow_id ?? "").trim();
-            if (!id) return JSON.stringify({ error: "workflow_id is required" });
-            const r = await getWorkflowEngineWorkflow(workspaceId, id);
-            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to get workflow" });
-            return JSON.stringify(r.workflow);
-          }
-          case "pmos_ops_execute_workflow": {
-            const id = String(args.workflow_id ?? "").trim();
-            if (!id) return JSON.stringify({ error: "workflow_id is required" });
-            pushProgress("Executing workflow...");
-            const r = await executeWorkflowEngineWorkflow(workspaceId, id);
-            if (!r.ok) return JSON.stringify({ error: r.error ?? "Failed to execute workflow" });
-            return JSON.stringify({ success: true, executionId: r.executionId ?? "unknown" });
-          }
-
-          case "web_search": {
-            const q = String(args.query ?? "").trim();
-            if (!q) return JSON.stringify({ error: "query is required" });
-            const { duckDuckGoSearch: ddgSearch } = await import("../pmos-mcp-http.js");
-            const sr = await ddgSearch(q, 5);
-            return JSON.stringify(sr);
-          }
-          case "web_fetch": {
-            const fetchUrl = String(args.url ?? "").trim();
-            if (!fetchUrl) return JSON.stringify({ error: "url is required" });
-            const fetchResp = await fetch(fetchUrl, {
-              signal: AbortSignal.timeout(10000),
-              headers: { "User-Agent": "OpenClaw/1.0" },
-            });
-            const fetchText = await fetchResp.text();
-            return JSON.stringify({ url: fetchUrl, status: fetchResp.status, content: fetchText.slice(0, 15000) });
-          }
-          case "figma_get_context": {
-            const figmaContext = await readWorkspaceFigmaContext(workspaceId);
-            return JSON.stringify({
-              ...figmaContext,
-              note: "Use figma_mcp_list_tools next, then figma_mcp_call for live Figma operations.",
-            });
-          }
-          default:
-            return JSON.stringify({ error: `Unknown tool: ${toolName}` });
-        }
-      };
-
-      const latestUserMessage = [...messages]
-        .reverse()
-        .find((message) => message.role === "user")?.content ?? "";
-      const pastedUrlHints = inspectWorkspaceChatUrls(latestUserMessage);
-      const intents = detectChatIntents(latestUserMessage, pastedUrlHints);
-      const disableBasecampTools = isGreetingOnlyMessage(latestUserMessage);
-      const agentTools = filterToolDefinitionsByIntents(tools, intents, {
-        disableBasecampTools,
-        latestUserMessage,
-        urlHints: pastedUrlHints,
-      });
-
-      pushProgress("Thinking...");
-      const result = await callWorkspaceModelAgentLoop(
-        workspaceId,
-        systemPrompt,
-        messages,
-        agentTools,
-        executeTool,
-        {
-          maxTokens: 2048,
-          maxIterations: 8,
-        },
-      );
-
-      if (!result.ok) {
-        respond(
-          true,
-          {
-            ok: true,
-            message: `AI model unavailable: ${result.error ?? "unknown error"}. Please check your model configuration in Settings â†' AI Model Setup.`,
-            workflowCreated: false,
-          },
-          undefined,
-        );
-        return;
-      }
-
-      // â"€â"€ JSON-response fallback â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-      // The system prompt asks the AI to return JSON: {message, workflow?}.
-      // If the AI returned a workflow object in text (no tool_calls used),
-      // parse and create it directly so models without function-calling still work.
-      // Handles: bare JSON, markdown-fenced ```json ... ```, or JSON embedded in text.
-      let finalText = result.text ?? "";
-      const extractJsonFromText = (text: string): string | null => {
-        const trimmed = text.trim();
-        // 1. Bare JSON
-        if (trimmed.startsWith("{")) return trimmed;
-        // 2. Markdown fence: ```json ... ``` or ``` ... ```
-        const fenceMatch = trimmed.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-        if (fenceMatch) return fenceMatch[1];
-        // 3. Largest {...} block in the text
-        const firstBrace = trimmed.indexOf("{");
-        if (firstBrace !== -1) {
-          let depth = 0;
-          let lastClose = -1;
-          for (let i = firstBrace; i < trimmed.length; i++) {
-            if (trimmed[i] === "{") depth++;
-            else if (trimmed[i] === "}") {
-              depth--;
-              if (depth === 0) { lastClose = i; break; }
-            }
-          }
-          if (lastClose !== -1) return trimmed.slice(firstBrace, lastClose + 1);
-        }
-        return null;
-      };
-
-      // â"€â"€ JSON-mode retry â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-      // If the agent loop returned plain prose (model doesn't use tool_calls AND
-      // didn't output JSON), retry once using callWorkspaceModel with
-      // response_format:json_object forced, so the model MUST return JSON.
-      if (!createdWorkflowId && result.ok && !extractJsonFromText(finalText)) {
-        try {
-          const { callWorkspaceModel: callWsJson } = await import("../workflow-ai.js");
-          pushProgress("Formulating automation plan...");
-          const retryResult = await callWsJson(
-            workspaceId,
-            systemPrompt,
-            messages,
-            { maxTokens: 4096, jsonMode: true },
-          );
-          if (retryResult.ok && retryResult.text && retryResult.text.trim().length > 10) {
-            finalText = retryResult.text;
-          }
-        } catch {
-          // retry failed -- proceed with original text
-        }
-      }
-      const jsonCandidate = !createdWorkflowId ? extractJsonFromText(finalText) : null;
-      if (!createdWorkflowId && jsonCandidate) {
-        try {
-          const aiJson = JSON.parse(jsonCandidate) as Record<string, unknown>;
-          // Handle {message, workflow: {...}} wrapper OR direct {name, nodes, connections} object
-          const wfData: Record<string, unknown> | undefined =
-            (aiJson.workflow && typeof aiJson.workflow === "object" && !Array.isArray(aiJson.workflow))
-              ? aiJson.workflow as Record<string, unknown>
-              : (typeof aiJson.name === "string" && Array.isArray(aiJson.nodes))
-                ? aiJson
-                : undefined;
-          if (wfData && typeof wfData.name === "string" && Array.isArray(wfData.nodes)) {
-            const wfName = wfData.name.trim();
-            let wfNodes = wfData.nodes as Array<Record<string, unknown>>;
-            const wfConns = (wfData.connections && typeof wfData.connections === "object")
-              ? wfData.connections as Record<string, unknown>
-              : {};
-            if (wfName && wfNodes.length > 0) {
-              // Apply the same type corrections as the tool handler
-              const JSON_TYPE_CORRECTIONS: Record<string, string> = {
-                "n8n-nodes-base.webhookTrigger": "n8n-nodes-base.webhook",
-                "n8n-nodes-base.cron": "n8n-nodes-base.scheduleTrigger",
-                "n8n-nodes-base.interval": "n8n-nodes-base.scheduleTrigger",
-                "n8n-nodes-base.function": "n8n-nodes-base.code",
-                "n8n-nodes-base.functionItem": "n8n-nodes-base.code",
-                "n8n-nodes-base.itemListsMerge": "n8n-nodes-base.merge",
-                "n8n-nodes-base.googleSheetsRowTrigger": "n8n-nodes-base.googleSheetsTrigger",
-                "n8n-nodes-base.rssFeedRead": "n8n-nodes-base.rssFeedReadTrigger",
-              };
-              wfNodes = wfNodes.map((node) => {
-                const t = String(node.type ?? "");
-                if (t.toLowerCase().includes("basecamp") && t !== "n8n-nodes-basecamp.basecamp") {
-                  return { ...node, type: "n8n-nodes-basecamp.basecamp" };
-                }
-                if (JSON_TYPE_CORRECTIONS[t]) return { ...node, type: JSON_TYPE_CORRECTIONS[t] };
-                return node;
-              });
-              // Inject Basecamp credentials
-              const hasBasecampNode = wfNodes.some(
-                (n) => String(n.type ?? "") === "n8n-nodes-basecamp.basecamp",
-              );
-              if (hasBasecampNode) {
-                const { listWorkflowEngineConnections: listCreds } = await import("../workflow-api-client.js");
-                const credR2 = await listCreds(workspaceId);
-                const bcCred = (credR2.ok ? (credR2.credentials ?? []) : []).find(
-                  (c) => c.type === "basecampApi",
-                );
-                if (bcCred) {
-                  wfNodes = wfNodes.map((node) => {
-                    if (String(node.type ?? "") === "n8n-nodes-basecamp.basecamp") {
-                      const existing = node.credentials as Record<string, unknown> | undefined;
-                      if (!existing?.basecampApi) {
-                        return {
-                          ...node,
-                          credentials: {
-                            ...(existing ?? {}),
-                            basecampApi: { id: bcCred.id, name: bcCred.name },
-                          },
-                        };
-                      }
-                    }
-                    return node;
-                  });
-                }
-              }
-              // Emit per-node streaming events
-              pushProgress(`ðŸ"§ Building workflow "${wfName}" with ${wfNodes.length} nodes...`);
-              for (const node of wfNodes) {
-                const nodeName = String(node.name ?? "node");
-                const nodeType = String(node.type ?? "");
-                pushProgress({
-                  type: "node_added",
-                  nodeName,
-                  nodeType: nodeType.split(".").pop() ?? nodeType,
-                  step: `âž• Adding node: ${nodeName}`,
-                });
-                await new Promise<void>((res) => setTimeout(res, 30));
-              }
-              const { createWorkflowEngineWorkflow: createWf } = await import("../workflow-api-client.js");
-              const createR = await createWf(workspaceId, {
-                name: wfName,
-                active: false,
-                nodes: wfNodes as Parameters<typeof createWf>[1]["nodes"],
-                connections: wfConns,
-              });
-              if (createR.ok && createR.workflow?.id) {
-                createdWorkflowId = createR.workflow.id;
-                createdWorkflowName = wfName;
-                pushProgress({ type: "workflow_ready", workflowId: createdWorkflowId });
-                pushProgress(`âœ… Workflow "${wfName}" created with ${wfNodes.length} nodes!`);
-              }
-            }
-          }
-        } catch {
-          // Not valid JSON or workflow extraction failed -- stream text as-is
-        }
-      }
-
-      // Extract human-readable message from JSON response if applicable
-      let displayMessage = finalText;
-      const displayJsonCandidate = extractJsonFromText(finalText);
-      if (displayJsonCandidate) {
-        try {
-          const msgJson = JSON.parse(displayJsonCandidate) as Record<string, unknown>;
-          if (typeof msgJson.message === "string" && msgJson.message.trim()) {
-            displayMessage = msgJson.message;
-          }
-        } catch {
-          // use raw text
-        }
-      }
-
-      // Stream the response text token-by-token for a live typing effect
-      if (displayMessage && client?.connId) {
-        const CHUNK = 4; // characters per push (~80 chars/sec at 50ms interval)
-        for (let i = 0; i < displayMessage.length; i += CHUNK) {
-          pushProgress({ type: "token", text: displayMessage.slice(i, i + CHUNK) });
-          await new Promise<void>((r) => setTimeout(r, 12));
-        }
-      }
-
-      respond(true, {
-        ok: true,
-        message: displayMessage,
-        workflowCreated: Boolean(createdWorkflowId),
-        workflowId: createdWorkflowId,
-        workflowName: createdWorkflowName,
-        providerUsed: result.providerUsed,
-        _debugModelText: finalText.slice(0, 800),
-      }, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  // â"€â"€ Workspace Chat (agentic -- can directly create/modify workflow-engine flows via tool calls) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+  // â"€â"€ Workspace Chat (agentic) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
   "pmos.chat.send": async ({ req, params, respond, client, context }) => {
     try {
@@ -4741,14 +3599,6 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             return `Calling the Basecamp MCP tool ${String(args.tool ?? "").trim() || "unknown"}.`;
           case "bcgpt_basecamp_raw":
             return `Fetching raw Basecamp data from ${String(args.path ?? "").trim() || "the requested API path"}.`;
-          case "pmos_ops_list_credentials":
-            return "Checking which workflow and integration credentials are available in this workspace.";
-          case "pmos_ops_list_workflows":
-            return "Listing the current workflows so I can inspect what already exists.";
-          case "pmos_ops_get_workflow":
-            return `Opening workflow ${String(args.workflow_id ?? "").trim() || ""} to inspect its structure.`;
-          case "pmos_ops_execute_workflow":
-            return `Running workflow ${String(args.workflow_id ?? "").trim() || ""} to verify its behavior.`;
           case "pmos_parallel_subtasks":
             return `Splitting the request into ${Array.isArray(args.tasks) ? args.tasks.length : 0} parallel subtask probe(s).`;
           case "fm_get_context":
@@ -4821,10 +3671,6 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
 
       const { callWorkspaceModelAgentLoop } = await import("../workflow-ai.js");
       const { getWorkspaceAiContextForPrompt } = await import("../workspace-ai-context.js");
-      const {
-        fetchWorkspaceCredentials,
-        buildCredentialContext,
-      } = await import("../credential-sync.js");
 
       // Load agent config for agent-specific chat sessions
       let agentConfig: Awaited<ReturnType<typeof import("../../agents/agent-scope.js").resolveAgentConfig>> = undefined;
@@ -4886,7 +3732,6 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const directBasecampShortcut =
         plan.mode !== "cross_system" &&
         intents.has("basecamp") &&
-        !intents.has("workflow") &&
         !intents.has("figma") &&
         !isGreetingOnlyMessage(latestUserMessage)
           ? inferDirectBasecampChatShortcut(latestUserMessage, pastedUrlHints)
@@ -4929,30 +3774,18 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         }
       }
 
-      const [workspaceAiContext, availableCredentials] = await Promise.all([
-        plan.includeWorkspaceMemory
-          ? withTimeout(
-              getWorkspaceAiContextForPrompt(workspaceId, {
-                ensureFresh: false,
-                maxChars: 2500,
-              }).catch(() => ""),
-              3500,
-              "",
-            )
-          : Promise.resolve(""),
-        plan.includeCredentials
-          ? withTimeout(
-              fetchWorkspaceCredentials(workspaceId).catch(() => []),
-              4500,
-              [] as Awaited<ReturnType<typeof fetchWorkspaceCredentials>>,
-            )
-          : Promise.resolve([] as Awaited<ReturnType<typeof fetchWorkspaceCredentials>>),
-      ]);
+      const workspaceAiContext = plan.includeWorkspaceMemory
+        ? await withTimeout(
+            getWorkspaceAiContextForPrompt(workspaceId, {
+              ensureFresh: false,
+              maxChars: 2500,
+            }).catch(() => ""),
+            3500,
+            "",
+          )
+        : "";
 
-      const credentialContext =
-        plan.includeCredentials && availableCredentials.length > 0
-          ? buildCredentialContext(availableCredentials)
-          : "";
+      const credentialContext = "";
 
       // Build agent-aware preamble: custom agents get their identity injected
       const agentIdentity = agentConfig?.identity as
@@ -4970,9 +3803,6 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       const compactToolFamilyLines = [
         intents.has("basecamp")
           ? "- Basecamp: `bcgpt_list_projects`, `bcgpt_mcp_call`, `bcgpt_smart_action`, `bcgpt_list_tools`, `bcgpt_basecamp_raw`."
-          : null,
-        intents.has("workflow")
-          ? "- Workflows: `pmos_ops_list_credentials`, `pmos_ops_list_workflows`, `pmos_ops_get_workflow`, `pmos_ops_create_workflow`, `pmos_ops_update_workflow`, `pmos_ops_execute_workflow`."
           : null,
         intents.has("figma")
           ? "- Figma: `figma_get_context`, `figma_mcp_list_tools`, `figma_mcp_call`, `figma_pat_audit_file`."
@@ -5124,101 +3954,6 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         {
           type: "function" as const,
           function: {
-            name: "pmos_ops_list_credentials",
-            description: "List available workflow-engine credentials/integrations configured for this workspace (Basecamp, Slack, GitHub, etc.)",
-            parameters: { type: "object", properties: {}, additionalProperties: false },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "pmos_ops_list_workflows",
-            description: "List existing workflow-engine flows in this workspace",
-            parameters: { type: "object", properties: {}, additionalProperties: false },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "pmos_ops_list_node_types",
-            description: "List available workflow node types (triggers and actions). Legacy-compatible aliases remain accepted where needed.",
-            parameters: { type: "object", properties: {}, additionalProperties: false },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "pmos_ops_create_workflow",
-            description: "Create a new workflow-engine flow. Always call pmos_ops_list_credentials first to know which credential IDs to use in node parameters.",
-            parameters: {
-              type: "object",
-              required: ["name", "nodes", "connections"],
-              additionalProperties: false,
-              properties: {
-                name: { type: "string", description: "Descriptive workflow name" },
-                nodes: {
-                  type: "array",
-                  description: "Array of workflow node objects, each with: id, name, type, typeVersion, position [x,y], parameters, and optionally credentials",
-                },
-                connections: {
-                  type: "object",
-                  description: "Connections object mapping source node name â†' { main: [[{ node, type, index }]] }",
-                },
-              },
-            },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "pmos_ops_get_workflow",
-            description: "Get full details of an existing workflow-engine flow by ID",
-            parameters: {
-              type: "object",
-              required: ["workflow_id"],
-              additionalProperties: false,
-              properties: {
-                workflow_id: { type: "string", description: "The workflow-engine flow ID" },
-              },
-            },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "pmos_ops_execute_workflow",
-            description: "Execute (test-run) a workflow-engine flow by ID",
-            parameters: {
-              type: "object",
-              required: ["workflow_id"],
-              additionalProperties: false,
-              properties: {
-                workflow_id: { type: "string", description: "The workflow-engine flow ID to execute" },
-              },
-            },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
-            name: "pmos_ops_update_workflow",
-            description: "Update an existing workflow-engine flow (edit nodes, connections, or name). Use when the user says 'add', 'modify', 'fix', 'change', or 'update' an existing workflow.",
-            parameters: {
-              type: "object",
-              required: ["workflow_id", "name", "nodes", "connections"],
-              additionalProperties: false,
-              properties: {
-                workflow_id: { type: "string", description: "The workflow-engine flow ID to update" },
-                name: { type: "string", description: "Workflow name (can keep existing)" },
-                nodes: { type: "array", description: "Full updated array of workflow node objects" },
-                connections: { type: "object", description: "Full updated connections object" },
-              },
-            },
-          },
-        },
-        {
-          type: "function" as const,
-          function: {
             name: "pmos_parallel_subtasks",
             description:
               "Spawn temporary parallel subagents for independent probes, then return their findings so the main agent can aggregate and continue reasoning.",
@@ -5349,21 +4084,9 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
       let figmaMcpFailureSeen = false;
 
 
-      // â"€â"€ Tool executor -- calls n8n-api-client directly â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+      // â"€â"€ Tool executor â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
       const executeTool = async (toolName: string, args: Record<string, unknown>): Promise<string> => {
-        const {
-          createWorkflowEngineWorkflow,
-          executeWorkflowEngineWorkflow,
-          getWorkflowEngineWorkflow,
-          listWorkflowEngineConnections,
-          listWorkflowEngineNodeTypes,
-          listWorkflowEngineWorkflows,
-          updateWorkflowEngineWorkflow,
-        } = await import("../workflow-api-client.js");
-
-        const normalizedToolName = toolName.startsWith("pmos_n8n_")
-          ? `pmos_ops_${toolName.slice("pmos_n8n_".length)}`
-          : toolName;
+        const normalizedToolName = toolName;
         const toolCallId = `${liveRunId || "pmos"}:tool:${++liveToolSeq}`;
         if (liveStreamEnabled) {
           emitThinking(describeToolAction(normalizedToolName, args));
@@ -5672,168 +4395,6 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
             finishTool(payload);
             return JSON.stringify(payload);
           }
-          case "pmos_ops_list_credentials": {
-            const r = await listWorkflowEngineConnections(workspaceId);
-            if (!r.ok) {
-              const payload = { error: r.error ?? "Failed to list credentials" };
-              finishTool(payload);
-              return JSON.stringify(payload);
-            }
-            const payload = {
-              credentials: (r.credentials ?? []).map((c) => ({ id: c.id, name: c.name, type: c.type })),
-            };
-            finishTool(payload);
-            return JSON.stringify(payload);
-          }
-          case "pmos_ops_list_workflows": {
-            const r = await listWorkflowEngineWorkflows(workspaceId);
-            if (!r.ok) {
-              const payload = { error: r.error ?? "Failed to list workflows" };
-              finishTool(payload);
-              return JSON.stringify(payload);
-            }
-            const payload = {
-              workflows: (r.workflows ?? []).map((w) => ({ id: w.id, name: w.name, active: w.active })),
-            };
-            finishTool(payload);
-            return JSON.stringify(payload);
-          }
-          case "pmos_ops_list_node_types": {
-            const r2 = await listWorkflowEngineNodeTypes(workspaceId);
-            const BASECAMP_NODE2 = { name: "n8n-nodes-basecamp.basecamp", displayName: "Basecamp (BCgpt Custom Node)", description: "Full Basecamp integration. ALWAYS use this for Basecamp.", group: ["custom"], version: 1 };
-            const CORE_NODES2 = [
-              { name: "n8n-nodes-base.manualTrigger", displayName: "Manual Trigger", group: ["trigger"], version: 1 },
-              { name: "n8n-nodes-base.scheduleTrigger", displayName: "Schedule Trigger", group: ["trigger"], version: 1 },
-              { name: "n8n-nodes-base.webhook", displayName: "Webhook", description: "HTTP webhook trigger -- type is webhook NOT webhookTrigger", group: ["trigger"], version: 1 },
-              { name: "n8n-nodes-base.if", displayName: "IF", group: ["transform"], version: 1 },
-              { name: "n8n-nodes-base.switch", displayName: "Switch", group: ["transform"], version: 1 },
-              { name: "n8n-nodes-base.merge", displayName: "Merge", group: ["transform"], version: 1 },
-              { name: "n8n-nodes-base.code", displayName: "Code", group: ["transform"], version: 1 },
-              { name: "n8n-nodes-base.set", displayName: "Edit Fields (Set)", group: ["transform"], version: 1 },
-              { name: "n8n-nodes-base.filter", displayName: "Filter", group: ["transform"], version: 1 },
-              { name: "n8n-nodes-base.httpRequest", displayName: "HTTP Request", group: ["output"], version: 1 },
-              { name: "n8n-nodes-base.splitInBatches", displayName: "Loop Over Items", group: ["transform"], version: 1 },
-            ];
-            const live2 = (r2.ok ? (r2.nodeTypes ?? []) : []).filter(
-              (n: { name?: string }) => n.name !== "n8n-nodes-basecamp.basecamp" && !CORE_NODES2.some(c => c.name === n.name)
-            );
-            const payload = { nodeTypes: [BASECAMP_NODE2, ...CORE_NODES2, ...live2].slice(0, 250) };
-            finishTool(payload);
-            return JSON.stringify(payload);
-          }
-          case "pmos_ops_create_workflow": {
-            const name = String(args.name ?? "").trim();
-            let nodes2 = Array.isArray(args.nodes) ? [...args.nodes] : [];
-            const connections =
-              args.connections && typeof args.connections === "object"
-                ? (args.connections as Record<string, unknown>)
-                : {};
-            if (!name) return JSON.stringify({ error: "name is required" });
-            if (!nodes2.length) return JSON.stringify({ error: "nodes array is required and must not be empty" });
-            // Auto-correct wrong node type names
-            const TYPE_FIXES2: Record<string, string> = {
-              "n8n-nodes-base.webhookTrigger": "n8n-nodes-base.webhook",
-              "n8n-nodes-base.cron": "n8n-nodes-base.scheduleTrigger",
-              "n8n-nodes-base.interval": "n8n-nodes-base.scheduleTrigger",
-              "n8n-nodes-base.function": "n8n-nodes-base.code",
-              "n8n-nodes-base.functionItem": "n8n-nodes-base.code",
-            };
-            nodes2 = nodes2.map((node: Record<string, unknown>) => {
-              const t = String(node.type ?? "");
-              if (t.toLowerCase().includes("basecamp") && t !== "n8n-nodes-basecamp.basecamp") return { ...node, type: "n8n-nodes-basecamp.basecamp" };
-              if (TYPE_FIXES2[t]) return { ...node, type: TYPE_FIXES2[t] };
-              return node;
-            });
-            const r = await createWorkflowEngineWorkflow(workspaceId, {
-              name,
-              active: false,
-              nodes: nodes2 as Parameters<typeof createWorkflowEngineWorkflow>[1]["nodes"],
-              connections,
-            });
-            if (!r.ok) {
-              const payload = { error: r.error ?? "Failed to create workflow" };
-              finishTool(payload);
-              return JSON.stringify(payload);
-            }
-            const payload = {
-              success: true,
-              workflowId: r.workflow?.id,
-              workflowName: name,
-              message: `Workflow "${name}" created successfully! ID: ${r.workflow?.id}. It's currently inactive -- activate it in the Workflows panel when ready.`,
-            };
-            finishTool(payload);
-            return JSON.stringify(payload);
-          }
-          case "pmos_ops_get_workflow": {
-            const id = String(args.workflow_id ?? "").trim();
-            if (!id) {
-              const payload = { error: "workflow_id is required" };
-              finishTool(payload);
-              return JSON.stringify(payload);
-            }
-            const r = await getWorkflowEngineWorkflow(workspaceId, id);
-            if (!r.ok) {
-              const payload = { error: r.error ?? "Failed to get workflow" };
-              finishTool(payload);
-              return JSON.stringify(payload);
-            }
-            finishTool(r.workflow);
-            return JSON.stringify(r.workflow);
-          }
-          case "pmos_ops_execute_workflow": {
-            const id = String(args.workflow_id ?? "").trim();
-            if (!id) {
-              const payload = { error: "workflow_id is required" };
-              finishTool(payload);
-              return JSON.stringify(payload);
-            }
-            const r = await executeWorkflowEngineWorkflow(workspaceId, id);
-            if (!r.ok) {
-              const payload = { error: r.error ?? "Failed to execute workflow" };
-              finishTool(payload);
-              return JSON.stringify(payload);
-            }
-            const payload = { success: true, executionId: r.executionId ?? "unknown" };
-            finishTool(payload);
-            return JSON.stringify(payload);
-          }
-          case "pmos_ops_update_workflow": {
-            const wfId = String(args.workflow_id ?? "").trim();
-            const wfName = String(args.name ?? "").trim();
-            const wfNodes = Array.isArray(args.nodes) ? args.nodes : [];
-            const wfConnections =
-              args.connections && typeof args.connections === "object"
-                ? (args.connections as Record<string, unknown>)
-                : {};
-            if (!wfId) {
-              const payload = { error: "workflow_id is required" };
-              finishTool(payload);
-              return JSON.stringify(payload);
-            }
-            if (!wfName) {
-              const payload = { error: "name is required" };
-              finishTool(payload);
-              return JSON.stringify(payload);
-            }
-            const ur = await updateWorkflowEngineWorkflow(workspaceId, wfId, {
-              name: wfName,
-              nodes: wfNodes as Parameters<typeof updateWorkflowEngineWorkflow>[2]["nodes"],
-              connections: wfConnections,
-            });
-            if (!ur.ok) {
-              const payload = { error: ur.error ?? "Failed to update workflow" };
-              finishTool(payload);
-              return JSON.stringify(payload);
-            }
-            const payload = {
-              success: true,
-              workflowId: wfId,
-              workflowName: wfName,
-              message: `Workflow "${wfName}" (ID: ${wfId}) updated successfully.`,
-            };
-            finishTool(payload);
-            return JSON.stringify(payload);
-          }
           case "pmos_parallel_subtasks": {
             const rawTasks = Array.isArray(args.tasks)
               ? args.tasks.filter(
@@ -5876,10 +4437,36 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
               finishTool(payload);
               return JSON.stringify(payload);
             }
-            const { duckDuckGoSearch: ddgSearch } = await import("../pmos-mcp-http.js");
-            const sr = await ddgSearch(q, 5);
-            finishTool(sr);
-            return JSON.stringify(sr);
+            try {
+              const ddgUrl = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(q)}`;
+              const ddgRes = await fetch(ddgUrl, {
+                headers: { "User-Agent": "Mozilla/5.0 (compatible; OpenClaw/1.0; +https://wickedlab.io)", Accept: "text/html" },
+                signal: AbortSignal.timeout(8000),
+              });
+              if (!ddgRes.ok) { const p = { error: `DuckDuckGo search failed: HTTP ${ddgRes.status}` }; finishTool(p); return JSON.stringify(p); }
+              const html = await ddgRes.text();
+              const linkRe = /<a[^>]+class="result-link"[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/gi;
+              const snippetRe = /<td[^>]+class="result-snippet"[^>]*>([\s\S]*?)<\/td>/gi;
+              const links: Array<{ url: string; title: string }> = [];
+              let m: RegExpExecArray | null;
+              while ((m = linkRe.exec(html)) !== null && links.length < 5) {
+                const href = m[1] ?? "";
+                const ttl = m[2] ?? "";
+                try { const u = new URL(href, "https://lite.duckduckgo.com"); links.push({ url: decodeURIComponent(u.searchParams.get("uddg") ?? u.searchParams.get("u") ?? href), title: ttl.trim() }); } catch { links.push({ url: href, title: ttl.trim() }); }
+              }
+              const snips: string[] = [];
+              let sm: RegExpExecArray | null;
+              while ((sm = snippetRe.exec(html)) !== null) { const raw = (sm[1] ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(); if (raw) snips.push(raw); }
+              const results = links.map((l, i) => ({ title: l.title, url: l.url, snippet: snips[i] ?? "" }));
+              const text = results.length ? [`Search results for: ${q}`, "", ...results.map((r, i) => `${i + 1}. **${r.title}**\n   ${r.url}\n   ${r.snippet}`)].join("\n") : `No results found for: ${q}`;
+              const sr = [{ type: "text" as const, text }];
+              finishTool(sr);
+              return JSON.stringify(sr);
+            } catch (ddgErr) {
+              const p = { error: `Web search error: ${String(ddgErr)}` };
+              finishTool(p);
+              return JSON.stringify(p);
+            }
           }
           case "web_fetch": {
             const fetchUrl = String(args.url ?? "").trim();
@@ -6167,7 +4754,7 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     }
   },
 
-  // â"€â"€ Connections: Real n8n credential list â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+  // â"€â"€ Projects snapshot â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
   "pmos.projects.snapshot": async ({ respond, client, params }) => {
     try {
@@ -6566,10 +5153,8 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
   "pmos.connections.list": async ({ respond, client }) => {
     try {
       if (!client) throw new Error("client context required");
-      const workspaceId = requireWorkspaceId(client);
-      const { fetchWorkspaceCredentials } = await import("../credential-sync.js");
-      const credentials = await fetchWorkspaceCredentials(workspaceId);
-      respond(true, { credentials }, undefined);
+      requireWorkspaceId(client);
+      respond(true, { credentials: [] }, undefined);
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }
@@ -6592,311 +5177,6 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
     }
   },
 
-  // â"€â"€ Basecamp credential setup in workflow engine â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-
-  "pmos.workflow.setup.basecamp": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const workspaceId = requireWorkspaceId(client);
-      const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
-      const wc = await readWorkspaceConnectors(workspaceId);
-      const bcgptApiKey = (wc?.bcgpt?.apiKey as string | undefined)?.trim();
-      if (!bcgptApiKey) {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "No BCGPT API key stored. Save your Basecamp connection key in Integrations first."));
-        return;
-      }
-      const { upsertBasecampWorkflowConnection } = await import("../workflow-api-client.js");
-      const result = await upsertBasecampWorkflowConnection(workspaceId, bcgptApiKey);
-      if (!result.ok) {
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to configure Basecamp credential in workflow engine"));
-        return;
-      }
-      respond(true, { ok: true, credentialId: result.credentialId, message: "Basecamp credential configured in your workflow engine." }, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.flow.setup.basecamp": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const workspaceId = requireWorkspaceId(client);
-      const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
-      const wc = await readWorkspaceConnectors(workspaceId);
-      const bcgptApiKey = (wc?.bcgpt?.apiKey as string | undefined)?.trim();
-      if (!bcgptApiKey) {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "No BCGPT API key stored. Save your Basecamp connection key in Integrations first."));
-        return;
-      }
-      const { upsertBasecampWorkflowConnection } = await import("../workflow-api-client.js");
-      const result = await upsertBasecampWorkflowConnection(workspaceId, bcgptApiKey);
-      if (!result.ok) {
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to configure Basecamp credential in workflow engine"));
-        return;
-      }
-      respond(true, { ok: true, credentialId: result.credentialId, message: "Basecamp credential configured in your workflow engine." }, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.ops.setup.basecamp": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const workspaceId = requireWorkspaceId(client);
-      const { readWorkspaceConnectors } = await import("../workspace-connectors.js");
-      const wc = await readWorkspaceConnectors(workspaceId);
-      const bcgptApiKey = (wc?.bcgpt?.apiKey as string | undefined)?.trim();
-      if (!bcgptApiKey) {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "No BCGPT API key stored. Save your Basecamp connection key in Integrations first."));
-        return;
-      }
-      const { upsertBasecampWorkflowConnection } = await import("../workflow-api-client.js");
-      const result = await upsertBasecampWorkflowConnection(workspaceId, bcgptApiKey);
-      if (!result.ok) {
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to configure Basecamp credential in workflow engine"));
-        return;
-      }
-      respond(true, { ok: true, credentialId: result.credentialId, message: "Basecamp credential configured in your workflow engine." }, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  // â"€â"€ Workflow Engine Credentials Management â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-
-  "pmos.n8n.credentials.list": async ({ respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const workspaceId = requireWorkspaceId(client);
-      const { listWorkflowEngineConnections } = await import("../workflow-api-client.js");
-      const result = await listWorkflowEngineConnections(workspaceId);
-      if (!result.ok) {
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to list workflow-engine credentials"));
-        return;
-      }
-      respond(true, { credentials: result.credentials }, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.flow.credentials.list": async ({ respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const workspaceId = requireWorkspaceId(client);
-      const { listWorkflowEngineConnections } = await import("../workflow-api-client.js");
-      const result = await listWorkflowEngineConnections(workspaceId);
-      if (!result.ok) {
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to list workflow-engine credentials"));
-        return;
-      }
-      respond(true, { credentials: result.credentials }, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.workflow.credentials.list": async ({ respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const workspaceId = requireWorkspaceId(client);
-      const { listWorkflowEngineConnections } = await import("../workflow-api-client.js");
-      const result = await listWorkflowEngineConnections(workspaceId);
-      if (!result.ok) {
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to list workflow-engine credentials"));
-        return;
-      }
-      respond(true, { credentials: result.credentials }, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.ops.credentials.list": async ({ respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const workspaceId = requireWorkspaceId(client);
-      const { listWorkflowEngineConnections } = await import("../workflow-api-client.js");
-      const result = await listWorkflowEngineConnections(workspaceId);
-      if (!result.ok) {
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to list workflow-engine credentials"));
-        return;
-      }
-      respond(true, { credentials: result.credentials }, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.n8n.credentials.create": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const workspaceId = requireWorkspaceId(client);
-      const p = params as { name?: string; type?: string; data?: Record<string, unknown> } | null;
-      if (!p?.name || !p?.type) {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "name and type required"));
-        return;
-      }
-      const { createWorkflowEngineConnection } = await import("../workflow-api-client.js");
-      const result = await createWorkflowEngineConnection(workspaceId, p.name, p.type, p.data || {});
-      if (!result.ok) {
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to create workflow-engine credential"));
-        return;
-      }
-      respond(true, { ok: true, credentialId: result.credentialId }, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.flow.credentials.create": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const workspaceId = requireWorkspaceId(client);
-      const p = params as { name?: string; type?: string; data?: Record<string, unknown> } | null;
-      if (!p?.name || !p?.type) {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "name and type required"));
-        return;
-      }
-      const { createWorkflowEngineConnection } = await import("../workflow-api-client.js");
-      const result = await createWorkflowEngineConnection(workspaceId, p.name, p.type, p.data || {});
-      if (!result.ok) {
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to create workflow-engine credential"));
-        return;
-      }
-      respond(true, { ok: true, credentialId: result.credentialId }, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.workflow.credentials.create": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const workspaceId = requireWorkspaceId(client);
-      const p = params as { name?: string; type?: string; data?: Record<string, unknown> } | null;
-      if (!p?.name || !p?.type) {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "name and type required"));
-        return;
-      }
-      const { createWorkflowEngineConnection } = await import("../workflow-api-client.js");
-      const result = await createWorkflowEngineConnection(workspaceId, p.name, p.type, p.data || {});
-      if (!result.ok) {
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to create workflow-engine credential"));
-        return;
-      }
-      respond(true, { ok: true, credentialId: result.credentialId }, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.ops.credentials.create": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const workspaceId = requireWorkspaceId(client);
-      const p = params as { name?: string; type?: string; data?: Record<string, unknown> } | null;
-      if (!p?.name || !p?.type) {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "name and type required"));
-        return;
-      }
-      const { createWorkflowEngineConnection } = await import("../workflow-api-client.js");
-      const result = await createWorkflowEngineConnection(workspaceId, p.name, p.type, p.data || {});
-      if (!result.ok) {
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to create workflow-engine credential"));
-        return;
-      }
-      respond(true, { ok: true, credentialId: result.credentialId }, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.n8n.credentials.delete": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const workspaceId = requireWorkspaceId(client);
-      const p = params as { credentialId?: string } | null;
-      if (!p?.credentialId) {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "credentialId required"));
-        return;
-      }
-      const { deleteWorkflowEngineConnection } = await import("../workflow-api-client.js");
-      const result = await deleteWorkflowEngineConnection(workspaceId, p.credentialId);
-      if (!result.ok) {
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to delete workflow-engine credential"));
-        return;
-      }
-      respond(true, { ok: true }, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.flow.credentials.delete": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const workspaceId = requireWorkspaceId(client);
-      const p = params as { credentialId?: string } | null;
-      if (!p?.credentialId) {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "credentialId required"));
-        return;
-      }
-      const { deleteWorkflowEngineConnection } = await import("../workflow-api-client.js");
-      const result = await deleteWorkflowEngineConnection(workspaceId, p.credentialId);
-      if (!result.ok) {
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to delete workflow-engine credential"));
-        return;
-      }
-      respond(true, { ok: true }, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.workflow.credentials.delete": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const workspaceId = requireWorkspaceId(client);
-      const p = params as { credentialId?: string } | null;
-      if (!p?.credentialId) {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "credentialId required"));
-        return;
-      }
-      const { deleteWorkflowEngineConnection } = await import("../workflow-api-client.js");
-      const result = await deleteWorkflowEngineConnection(workspaceId, p.credentialId);
-      if (!result.ok) {
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to delete workflow-engine credential"));
-        return;
-      }
-      respond(true, { ok: true }, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
-  "pmos.ops.credentials.delete": async ({ params, respond, client }) => {
-    try {
-      if (!client) throw new Error("client context required");
-      const workspaceId = requireWorkspaceId(client);
-      const p = params as { credentialId?: string } | null;
-      if (!p?.credentialId) {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "credentialId required"));
-        return;
-      }
-      const { deleteWorkflowEngineConnection } = await import("../workflow-api-client.js");
-      const result = await deleteWorkflowEngineConnection(workspaceId, p.credentialId);
-      if (!result.ok) {
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error || "Failed to delete workflow-engine credential"));
-        return;
-      }
-      respond(true, { ok: true }, undefined);
-    } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    }
-  },
-
   // â"€â"€ Super-admin: reset all workspaces to a single fresh starter agent â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
   "pmos.admin.reset-all-workspaces": async ({ respond, client }) => {
@@ -6906,15 +5186,22 @@ When the user asks to edit, modify, add, remove or update this workflow, use pmo
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "super_admin role required"));
         return;
       }
-      const [{ listPmosWorkspaces }, { resetWorkspaceToSingleStarter }] = await Promise.all([
-        import("../pmos-auth.js"),
-        import("../pmos-auth-http.js"),
-      ]);
+      const { listPmosWorkspaces } = await import("../pmos-auth.js");
       const workspaces = await listPmosWorkspaces();
       const results: Array<{ workspaceId: string; ok: boolean; error?: string }> = [];
       for (const ws of workspaces) {
         try {
-          await resetWorkspaceToSingleStarter(ws.workspaceId);
+          // Reset workspace config: wipe agents list so starter is re-provisioned
+          const { readWorkspaceConfig, writeWorkspaceConfig } = await import("../workspace-config.js");
+          const existing = (await readWorkspaceConfig(ws.workspaceId)) ?? {};
+          const agents = (typeof existing === "object" && existing !== null && "agents" in existing && typeof (existing as Record<string, unknown>).agents === "object")
+            ? { ...(existing as Record<string, unknown>).agents as Record<string, unknown> }
+            : {};
+          delete agents.list;
+          delete agents.defaults;
+          const cleaned: Record<string, unknown> = { ...(existing as Record<string, unknown>), agents };
+          if (Object.keys(agents).length === 0) delete cleaned.agents;
+          await writeWorkspaceConfig(ws.workspaceId, cleaned);
           results.push({ workspaceId: ws.workspaceId, ok: true });
         } catch (err) {
           results.push({ workspaceId: ws.workspaceId, ok: false, error: String(err) });

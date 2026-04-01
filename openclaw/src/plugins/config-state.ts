@@ -21,10 +21,7 @@ export const BUNDLED_ENABLED_BY_DEFAULT = new Set<string>([
   "pmos-workspace-tools",
 ]);
 
-const FORCE_DISABLED_PLUGIN_IDS = new Set<string>([
-  "pmos-activepieces",
-  "pmos-activepieces.archived",
-]);
+const FORCE_DISABLED_PLUGIN_IDS = new Set<string>([]);
 
 const normalizeList = (value: unknown): string[] => {
   if (!Array.isArray(value)) {

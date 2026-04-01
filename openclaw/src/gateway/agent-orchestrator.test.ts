@@ -62,7 +62,7 @@ describe('Agent Orchestrator', () => {
   describe('getAgentTasks', () => {
     it('returns tasks for a specific agent', () => {
       createTask('agent-1', 'chat', { message: 'Hello' });
-      createTask('agent-1', 'workflow', { workflowId: 'wf-1' });
+      createTask('agent-1', 'automation', { trigger: 'schedule' });
       createTask('agent-2', 'chat', { message: 'World' });
       
       const tasks = getAgentTasks('agent-1');

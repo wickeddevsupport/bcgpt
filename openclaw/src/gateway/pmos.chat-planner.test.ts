@@ -33,20 +33,6 @@ describe("buildPmosChatExecutionPlan", () => {
     expect(plan.guidance.join("\n")).toContain("world-class project manager");
   });
 
-  it("pulls workflow credentials only for workflow tasks", () => {
-    const plan = buildPmosChatExecutionPlan({
-      latestUserMessage: "create a workflow that posts Basecamp deploy failures into Slack",
-      urlHints: {},
-      pastedUrlCount: 0,
-      hasScreenContext: false,
-    });
-
-    expect(plan.mode).toBe("workflow");
-    expect(plan.includeCredentials).toBe(true);
-    expect(plan.includeWorkspaceMemory).toBe(false);
-    expect(plan.responseStyle).toBe("workflow_operator");
-  });
-
   it("anchors figma requests to explicit files and screen context", () => {
     const plan = buildPmosChatExecutionPlan({
       latestUserMessage:

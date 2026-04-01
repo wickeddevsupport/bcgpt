@@ -43,17 +43,9 @@ import { getBearerToken, getHeader } from "./http-utils.js";
 import { resolveGatewayClientIp } from "./net.js";
 import { handleOpenAiHttpRequest } from "./openai-http.js";
 import { handleOpenResponsesHttpRequest } from "./openresponses-http.js";
-import { handlePmosAuthHttpRequest } from "./pmos-auth-http.js";
 import { handleByokHttp } from "./byok-http.js";
 import { handleWorkspaceConfigHttp } from "./workspace-config-http.js";
-import {
-  handleLocalN8nRequest,
-  handleOpsProxyRequest,
-  tunnelN8nWebSocket,
-} from "./pmos-ops-proxy.js";
 import { handleToolsInvokeHttpRequest } from "./tools-invoke-http.js";
-import { handleN8nAiHttpRequest } from "./n8n-ai-http.js";
-import { handlePmosMcpHttpRequest } from "./pmos-mcp-http.js";
 import { handleFigmaMcpHttpRequest } from "./figma-mcp-http.js";
 import { handleFigmaPluginBridgeHttpRequest } from "./figma-plugin-bridge-http.js";
 
@@ -329,37 +321,16 @@ export function createGatewayHttpServer(opts: {
     try {
       const configSnapshot = loadConfig();
       const trustedProxies = configSnapshot.gateway?.trustedProxies ?? [];
-      if (
-        await handlePmosAuthHttpRequest({
-          req,
-          res,
-          controlUiBasePath,
-        })
-      ) {
-        return;
-      }
       if (await handleByokHttp(req, res)) {
         return;
       }
       if (await handleWorkspaceConfigHttp(req, res)) {
         return;
       }
-      if (await handleN8nAiHttpRequest(req, res)) {
-        return;
-      }
-      if (await handlePmosMcpHttpRequest(req, res)) {
-        return;
-      }
       if (await handleFigmaMcpHttpRequest(req, res)) {
         return;
       }
       if (await handleFigmaPluginBridgeHttpRequest(req, res)) {
-        return;
-      }
-      if (await handleLocalN8nRequest(req, res)) {
-        return;
-      }
-      if (await handleOpsProxyRequest(req, res)) {
         return;
       }
       if (await handleHooksRequest(req, res)) {
@@ -485,10 +456,6 @@ export function attachGatewayUpgradeHandler(opts: {
         if (canvasHost.handleUpgrade(req, socket, head)) {
           return;
         }
-      }
-      // Tunnel n8n WebSocket push connection to local n8n if configured
-      if (await tunnelN8nWebSocket(req, socket, head)) {
-        return;
       }
       wss.handleUpgrade(req, socket, head, (ws) => {
         wss.emit("connection", ws, req);

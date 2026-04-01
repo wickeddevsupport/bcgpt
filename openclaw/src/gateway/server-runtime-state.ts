@@ -15,7 +15,6 @@ import { CANVAS_HOST_PATH } from "../canvas-host/a2ui.js";
 import { type CanvasHostHandler, createCanvasHostHandler } from "../canvas-host/server.js";
 import { resolveGatewayListenHosts } from "./net.js";
 import { createGatewayBroadcaster } from "./server-broadcast.js";
-import { spawnEmbeddedN8nIfVendored } from "./n8n-embed.js";
 import {
   type ChatRunEntry,
   createChatRunState,
@@ -106,18 +105,6 @@ export async function createGatewayRuntimeState(params: {
     } catch (err) {
       params.logCanvas.warn(`canvas host failed to start: ${String(err)}`);
     }
-  }
-
-  // Legacy embedded n8n support is opt-in only. Activepieces is the primary
-  // workflow engine, but a vendored n8n can still be started explicitly for
-  // compatibility testing.
-  try {
-    const spawned = await spawnEmbeddedN8nIfVendored();
-    if (spawned) {
-      params.log.info(`[n8n] embedded n8n started at ${spawned.url}`);
-    }
-  } catch (err) {
-    params.log.warn(`[n8n] embedded start failed: ${String(err)}`);
   }
 
   const clients = new Set<GatewayWsClient>();

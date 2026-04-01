@@ -780,14 +780,8 @@ export async function refreshWorkspaceAiContext(
   ]);
 
   let credentials = Array.isArray(opts.credentials) ? opts.credentials : [];
-  if (credentials.length === 0 && opts.includeLiveCredentials) {
-    try {
-      const { fetchWorkspaceCredentials } = await import("./credential-sync.js");
-      credentials = await fetchWorkspaceCredentials(wsId);
-    } catch {
-      credentials = [];
-    }
-  }
+  // Workflow engine credential fetching removed — credentials stay empty
+  void credentials;
 
   // Best-effort: fetch live Basecamp account/project data from the workspace bcgpt connector.
   let bcgptData: BcgptWorkspaceData | null = null;
