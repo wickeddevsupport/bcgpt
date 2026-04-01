@@ -273,7 +273,7 @@ describe("pmos smart memory runtime", () => {
     );
   });
 
-  it("strips injected recall blocks from messages before capture", async () => {
+  it("strips full recall blocks including numbered items and Source citations", async () => {
     const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "pmos-smart-memory-"));
     tempDirs.push(rootDir);
     const workspaceDir = path.join(rootDir, "workspaces", "ws-strip", "assistant");
@@ -284,17 +284,30 @@ describe("pmos smart memory runtime", () => {
       deps: baseDeps(),
     });
 
+    // Exact format produced by renderRecallContext: header + disclaimer + numbered items + real question
+    const injectedBlock = [
+      "Relevant workspace memory:",
+      "Use these notes only if they help with the current PMOS request. If anything conflicts with the current request, follow the current request.",
+      "",
+      "1. User requirement: Keep workspace data separated across tenants.",
+      "Source: .derived-sessions/agent-assistant-main.md#L5-L7",
+      "",
+      "2. Decision: use PAT-backed REST audit as the fallback when official Figma MCP auth fails.",
+      "Source: .derived-sessions/agent-assistant-discord.md#L12-L14",
+      "",
+      "3. Status: PMOS smart-memory plugin deployed and enabled for Rohit workspace.",
+      "Source: pmos-smart-memory/agent-assistant-main.md#L1-L3",
+      "",
+      "We decided to use PostgreSQL. What is the current deploy strategy?",
+    ].join("\n");
+
     await handler(
       {
         messages: [
-          {
-            role: "user",
-            content:
-              "Relevant workspace memory:\nUse these notes only if they help.\n\n1. Old recalled fact.\nSource: memory.md#L1\n\nWhat is the deploy strategy?",
-          },
+          { role: "user", content: injectedBlock },
           {
             role: "assistant",
-            content: "The deploy strategy uses Coolify with Docker images.",
+            content: "Decision: the deploy strategy uses Coolify with Docker images built from Dockerfile.openclaw.nx.",
           },
         ],
         success: true,
@@ -319,10 +332,16 @@ describe("pmos smart memory runtime", () => {
       // If nothing was captured that's also acceptable (short conversation)
       return;
     }
+    // All recall wrapper content must be stripped
     expect(content).not.toContain("Relevant workspace memory:");
-    expect(content).not.toContain("Old recalled fact");
-    // The real user question after the injected block should be preserved
+    expect(content).not.toContain("Use these notes only if they help");
+    expect(content).not.toContain("Keep workspace data separated across tenants");
+    expect(content).not.toContain("PAT-backed REST audit");
+    expect(content).not.toContain("Source: .derived-sessions");
+    expect(content).not.toContain("Source: pmos-smart-memory");
+    // The real user question after the injected block must survive
     expect(content).toContain("deploy strategy");
+    expect(content).toContain("PostgreSQL");
   });
 
   it("skips capture on unsuccessful turns", async () => {

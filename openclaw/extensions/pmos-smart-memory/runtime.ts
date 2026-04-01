@@ -41,10 +41,9 @@ const PMOS_MEMORY_PATH_SEGMENT = "pmos-smart-memory";
 /**
  * Patterns that indicate injected/synthetic text which must be stripped before
  * durable fact extraction to prevent memory-on-memory contamination.
+ * Note: recall-block stripping is handled by stripRecallBlock() separately.
  */
 const INJECTED_BLOCK_PATTERNS: RegExp[] = [
-  // Recall blocks injected by this plugin or similar recall systems
-  /Relevant workspace memory:[\s\S]*?(?=\n{2,}|$)/gi,
   // Untrusted content wrappers
   /<<<EXTERNAL_UNTRUSTED_CONTENT>>>[\s\S]*?<<<\/EXTERNAL_UNTRUSTED_CONTENT>>>/gi,
   /\[UNTRUSTED\][\s\S]*?\[\/UNTRUSTED\]/gi,
@@ -482,14 +481,86 @@ function filterRecallResults(results: MemorySearchResult[]): MemorySearchResult[
 
 /** Strip injected/synthetic blocks from text before durable memory extraction. */
 function stripInjectedBlocks(text: string): string {
-  let cleaned = text;
+  // 1. Strip full recall blocks (header + disclaimer + numbered items + Source: citations)
+  let cleaned = stripRecallBlock(text);
+
+  // 2. Strip remaining synthetic wrappers
   for (const pattern of INJECTED_BLOCK_PATTERNS) {
-    // Reset lastIndex for global regexes
     pattern.lastIndex = 0;
     cleaned = cleaned.replace(pattern, "");
   }
+
   // Collapse excessive blank lines left by stripping
   return cleaned.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/**
+ * Strip the "Relevant workspace memory:" recall block that this plugin (or
+ * similar recall systems) prepends to user messages.  The block has the form:
+ *
+ *   Relevant workspace memory:
+ *   <disclaimer line>
+ *
+ *   1. <snippet>
+ *   Source: <citation>
+ *
+ *   2. <snippet>
+ *   Source: <citation>
+ *
+ * The real user content follows after the last Source: citation.
+ * This function scans line-by-line to reliably strip the full block.
+ */
+function stripRecallBlock(text: string): string {
+  const HEADER = "Relevant workspace memory:";
+  const idx = text.indexOf(HEADER);
+  if (idx === -1) return text;
+
+  const before = text.slice(0, idx);
+  const lines = text.slice(idx).split("\n");
+
+  let endLineIdx = 0;
+  let seenNumberedItem = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+
+    // Line 0 is the header itself
+    if (i === 0) {
+      endLineIdx = i;
+      continue;
+    }
+
+    // Numbered recall item (e.g. "1. snippet text")
+    if (/^\d+\.\s/.test(trimmed)) {
+      seenNumberedItem = true;
+      endLineIdx = i;
+      continue;
+    }
+
+    // Source citation line
+    if (/^Source:\s/.test(trimmed)) {
+      endLineIdx = i;
+      continue;
+    }
+
+    // Blank lines between items — skip but don't advance endLineIdx
+    if (!trimmed) {
+      continue;
+    }
+
+    // Non-blank, non-recall line:
+    // Before any numbered item, allow up to 2 disclaimer lines after the header
+    if (!seenNumberedItem && i <= 2) {
+      endLineIdx = i;
+      continue;
+    }
+
+    // We've passed the recall block — stop here
+    break;
+  }
+
+  const remaining = lines.slice(endLineIdx + 1).join("\n");
+  return before + remaining;
 }
 
 function serializeAgentMessages(
