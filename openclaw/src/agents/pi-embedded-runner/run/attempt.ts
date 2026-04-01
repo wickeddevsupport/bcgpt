@@ -87,6 +87,7 @@ import {
 } from "../system-prompt.js";
 import { splitSdkTools } from "../tool-split.js";
 import { describeUnknownError, mapThinkingLevel } from "../utils.js";
+import { waitForCompactionRetryWithAggregateTimeout } from "./compaction-retry-aggregate-timeout.js";
 import { detectAndLoadPromptImages } from "./images.js";
 
 export function injectHistoryImagesIntoMessages(
@@ -646,6 +647,7 @@ export async function runEmbeddedAttempt(
         toolMetas,
         unsubscribe,
         waitForCompactionRetry,
+        isCompactionInFlight,
         getMessagingToolSentTexts,
         getMessagingToolSentTargets,
         didSendViaMessagingTool,
@@ -830,17 +832,27 @@ export async function runEmbeddedAttempt(
         }
 
         try {
-          await waitForCompactionRetry();
+          const COMPACTION_RETRY_AGGREGATE_TIMEOUT_MS = 60_000;
+          const compactionRetryWait = await waitForCompactionRetryWithAggregateTimeout({
+            waitForCompactionRetry,
+            abortable,
+            aggregateTimeoutMs: COMPACTION_RETRY_AGGREGATE_TIMEOUT_MS,
+            isCompactionStillInFlight: isCompactionInFlight,
+          });
+          if (compactionRetryWait.timedOut) {
+            log.warn(
+              `compaction retry aggregate timeout (${COMPACTION_RETRY_AGGREGATE_TIMEOUT_MS}ms): ` +
+                `proceeding with current state runId=${params.runId} sessionId=${params.sessionId}`,
+            );
+          }
         } catch (err) {
           if (isRunnerAbortError(err)) {
             if (!promptError) {
               promptError = err;
             }
           } else {
-            // Compaction retry errors (e.g. stalled resume) are non-fatal –
-            // the compaction itself succeeded and the original response was
-            // already produced.  Capture as promptError so it's logged, but
-            // don't crash the run.
+            // Compaction retry errors are non-fatal – the compaction itself
+            // succeeded and the original response was already produced.
             const msg = err instanceof Error ? err.message : String(err);
             log.warn(
               `embedded run compaction retry error (non-fatal): runId=${params.runId} – ${msg}`,

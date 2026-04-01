@@ -56,8 +56,6 @@ export type EmbeddedPiSubscribeState = {
   compactionRetryResolve?: () => void;
   compactionRetryReject?: (error: Error) => void;
   compactionRetryPromise: Promise<void> | null;
-  compactionRetryError?: Error;
-  compactionRetryResumeTimer?: ReturnType<typeof setTimeout>;
 
   messagingToolSentTexts: string[];
   messagingToolSentTextsNormalized: string[];
@@ -104,8 +102,6 @@ export type EmbeddedPiSubscribeContext = {
   noteCompactionRetry: () => void;
   resolveCompactionRetry: () => void;
   maybeResolveCompactionWait: () => void;
-  clearCompactionRetryResumeWatch: () => void;
-  scheduleCompactionRetryResumeWatch: () => void;
   recordAssistantUsage: (usage: unknown) => void;
   incrementCompactionCount: () => void;
   getUsageTotals: () => NormalizedUsage | undefined;

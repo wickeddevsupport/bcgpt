@@ -4,9 +4,6 @@ import { emitAgentEvent } from "../infra/agent-events.js";
 import { createInlineCodeState } from "../markdown/code-spans.js";
 
 export function handleAgentStart(ctx: EmbeddedPiSubscribeContext) {
-  if (ctx.state.pendingCompactionRetry > 0) {
-    ctx.clearCompactionRetryResumeWatch();
-  }
   ctx.log.debug(`embedded run agent start: runId=${ctx.params.runId}`);
   emitAgentEvent({
     runId: ctx.params.runId,
@@ -24,7 +21,6 @@ export function handleAgentStart(ctx: EmbeddedPiSubscribeContext) {
 
 export function handleAutoCompactionStart(ctx: EmbeddedPiSubscribeContext) {
   ctx.state.compactionInFlight = true;
-  ctx.incrementCompactionCount();
   ctx.ensureCompactionPromise();
   ctx.log.debug(`embedded run compaction start: runId=${ctx.params.runId}`);
   emitAgentEvent({
@@ -40,20 +36,24 @@ export function handleAutoCompactionStart(ctx: EmbeddedPiSubscribeContext) {
 
 export function handleAutoCompactionEnd(
   ctx: EmbeddedPiSubscribeContext,
-  evt: AgentEvent & { willRetry?: unknown },
+  evt: AgentEvent & { willRetry?: unknown; result?: unknown; aborted?: unknown },
 ) {
   ctx.state.compactionInFlight = false;
   const willRetry = Boolean(evt.willRetry);
+  // Increment counter whenever compaction actually produced a result,
+  // regardless of willRetry.  Overflow-triggered compaction sets willRetry=true
+  // (the framework retries the LLM request), but the compaction itself succeeded
+  // and context was trimmed — the counter must reflect that.
+  const hasResult = evt.result != null;
+  const wasAborted = Boolean(evt.aborted);
+  if (hasResult && !wasAborted) {
+    ctx.incrementCompactionCount();
+  }
   if (willRetry) {
     ctx.noteCompactionRetry();
     ctx.resetForCompactionRetry();
-    ctx.scheduleCompactionRetryResumeWatch();
     ctx.log.debug(`embedded run compaction retry: runId=${ctx.params.runId}`);
   } else {
-    // The final non-retrying compaction end is the terminal signal for the
-    // compaction chain. Clear any leftover retry debt so waiters cannot hang
-    // forever if lifecycle events arrive in a different order than expected.
-    ctx.state.pendingCompactionRetry = 0;
     ctx.maybeResolveCompactionWait();
   }
   emitAgentEvent({

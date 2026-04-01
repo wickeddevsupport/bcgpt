@@ -56,7 +56,7 @@ describe("subscribeEmbeddedPiSession", () => {
     expect(resolved).toBe(true);
   });
 
-  it("resolves when the final compaction end arrives after partial retry lifecycle events", async () => {
+  it("does not count compaction until end event with result", async () => {
     const listeners: SessionEventHandler[] = [];
     const session = {
       subscribe: (listener: SessionEventHandler) => {
@@ -67,163 +67,51 @@ describe("subscribeEmbeddedPiSession", () => {
 
     const subscription = subscribeEmbeddedPiSession({
       session,
-      runId: "run-3b",
+      runId: "run-compaction-count",
     });
 
     for (const listener of listeners) {
-      listener({ type: "auto_compaction_end", willRetry: true });
-      listener({ type: "auto_compaction_end", willRetry: true });
+      listener({ type: "auto_compaction_start" });
     }
+    expect(subscription.getCompactionCount()).toBe(0);
 
-    let resolved = false;
-    const waitPromise = subscription.waitForCompactionRetry().then(() => {
-      resolved = true;
+    // willRetry with result — counter IS incremented (overflow compaction succeeded)
+    for (const listener of listeners) {
+      listener({ type: "auto_compaction_end", willRetry: true, result: { summary: "s" } });
+    }
+    expect(subscription.getCompactionCount()).toBe(1);
+
+    // willRetry=false with result — counter incremented again
+    for (const listener of listeners) {
+      listener({ type: "auto_compaction_end", willRetry: false, result: { summary: "s2" } });
+    }
+    expect(subscription.getCompactionCount()).toBe(2);
+  });
+
+  it("does not count compaction when result is absent", async () => {
+    const listeners: SessionEventHandler[] = [];
+    const session = {
+      subscribe: (listener: SessionEventHandler) => {
+        listeners.push(listener);
+        return () => {};
+      },
+    } as unknown as Parameters<typeof subscribeEmbeddedPiSession>[0]["session"];
+
+    const subscription = subscribeEmbeddedPiSession({
+      session,
+      runId: "run-compaction-no-result",
     });
 
-    await Promise.resolve();
-    expect(resolved).toBe(false);
+    // No result — counter stays at 0
+    for (const listener of listeners) {
+      listener({ type: "auto_compaction_end", willRetry: false, result: undefined });
+    }
+    expect(subscription.getCompactionCount()).toBe(0);
 
     for (const listener of listeners) {
-      listener({ type: "agent_end" });
+      listener({ type: "auto_compaction_end", willRetry: false, aborted: true });
     }
-
-    await Promise.resolve();
-    expect(resolved).toBe(false);
-
-    for (const listener of listeners) {
-      listener({ type: "auto_compaction_end", willRetry: false });
-    }
-
-    await waitPromise;
-    expect(resolved).toBe(true);
-  });
-
-  it("attempts a recovery continue when compaction retry never resumes", async () => {
-    vi.useFakeTimers();
-    try {
-      const listeners: SessionEventHandler[] = [];
-      const continueMock = vi.fn().mockImplementation(async () => {
-        for (const listener of listeners) {
-          listener({ type: "agent_start" });
-          listener({ type: "agent_end" });
-        }
-      });
-      const session = {
-        agent: {
-          continue: continueMock,
-        },
-        isStreaming: false,
-        subscribe: (listener: SessionEventHandler) => {
-          listeners.push(listener);
-          return () => {};
-        },
-      } as unknown as Parameters<typeof subscribeEmbeddedPiSession>[0]["session"];
-
-      const subscription = subscribeEmbeddedPiSession({
-        session,
-        runId: "run-recover",
-      });
-
-      for (const listener of listeners) {
-        listener({ type: "auto_compaction_end", willRetry: true });
-      }
-
-      let resolved = false;
-      const waitPromise = subscription.waitForCompactionRetry().then(() => {
-        resolved = true;
-      });
-
-      await vi.advanceTimersByTimeAsync(1500);
-      await waitPromise;
-
-      expect(continueMock).toHaveBeenCalledTimes(1);
-      expect(resolved).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("resolves gracefully when stalled compaction retry hits role ordering error", async () => {
-    vi.useFakeTimers();
-    try {
-      const listeners: SessionEventHandler[] = [];
-      const continueMock = vi
-        .fn()
-        .mockRejectedValue(new Error("Cannot continue from message role: assistant"));
-      const session = {
-        agent: {
-          continue: continueMock,
-        },
-        isStreaming: false,
-        subscribe: (listener: SessionEventHandler) => {
-          listeners.push(listener);
-          return () => {};
-        },
-      } as unknown as Parameters<typeof subscribeEmbeddedPiSession>[0]["session"];
-
-      const subscription = subscribeEmbeddedPiSession({
-        session,
-        runId: "run-stalled",
-      });
-
-      for (const listener of listeners) {
-        listener({ type: "auto_compaction_end", willRetry: true });
-      }
-
-      let resolved = false;
-      const waitPromise = subscription.waitForCompactionRetry().then(() => {
-        resolved = true;
-      });
-
-      await vi.advanceTimersByTimeAsync(1500);
-
-      await waitPromise;
-      expect(continueMock).toHaveBeenCalledTimes(1);
-      expect(resolved).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("rejects when stalled compaction retry recovery hits non-role error", async () => {
-    vi.useFakeTimers();
-    try {
-      const listeners: SessionEventHandler[] = [];
-      const continueMock = vi
-        .fn()
-        .mockRejectedValue(new Error("Network connection lost"));
-      const session = {
-        agent: {
-          continue: continueMock,
-        },
-        isStreaming: false,
-        subscribe: (listener: SessionEventHandler) => {
-          listeners.push(listener);
-          return () => {};
-        },
-      } as unknown as Parameters<typeof subscribeEmbeddedPiSession>[0]["session"];
-
-      const subscription = subscribeEmbeddedPiSession({
-        session,
-        runId: "run-net-err",
-      });
-
-      for (const listener of listeners) {
-        listener({ type: "auto_compaction_end", willRetry: true });
-      }
-
-      const waitPromise = subscription.waitForCompactionRetry();
-      const rejection = expect(waitPromise).rejects.toThrow(
-        "Compaction retry stalled before resume: Network connection lost",
-      );
-
-      await vi.advanceTimersByTimeAsync(1500);
-
-      await rejection;
-      expect(continueMock).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(subscription.getCompactionCount()).toBe(0);
   });
 
   it("emits compaction events on the agent event bus", async () => {

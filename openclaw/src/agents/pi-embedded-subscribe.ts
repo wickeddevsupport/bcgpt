@@ -29,7 +29,6 @@ export type {
 } from "./pi-embedded-subscribe.types.js";
 
 export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionParams) {
-  const COMPACTION_RETRY_RESUME_TIMEOUT_MS = 1500;
   const reasoningMode = params.reasoningMode ?? "off";
   const toolResultFormat = params.toolResultFormat ?? "markdown";
   const useMarkdown = toolResultFormat === "markdown";
@@ -66,8 +65,6 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     compactionRetryResolve: undefined,
     compactionRetryReject: undefined,
     compactionRetryPromise: null,
-    compactionRetryError: undefined,
-    compactionRetryResumeTimer: undefined,
     messagingToolSentTexts: [],
     messagingToolSentTextsNormalized: [],
     messagingToolSentTargets: [],
@@ -203,42 +200,22 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     }
   };
 
-  const clearCompactionRetryResumeWatch = () => {
-    if (state.compactionRetryResumeTimer) {
-      clearTimeout(state.compactionRetryResumeTimer);
-      state.compactionRetryResumeTimer = undefined;
-    }
-  };
-
-  const settleCompactionRetry = (error?: Error) => {
-    clearCompactionRetryResumeWatch();
-    const resolve = state.compactionRetryResolve;
-    const reject = state.compactionRetryReject;
-    state.compactionRetryResolve = undefined;
-    state.compactionRetryReject = undefined;
-    state.compactionRetryPromise = null;
-    state.compactionRetryError = error;
-    if (error) {
-      reject?.(error);
-      return;
-    }
-    resolve?.();
-  };
-
   const ensureCompactionPromise = () => {
-    if (state.compactionRetryError) {
-      return;
-    }
     if (!state.compactionRetryPromise) {
+      // Create a single promise that resolves when ALL pending compactions complete
+      // (tracked by pendingCompactionRetry counter, decremented in resolveCompactionRetry)
       state.compactionRetryPromise = new Promise((resolve, reject) => {
         state.compactionRetryResolve = resolve;
         state.compactionRetryReject = reject;
+      });
+      // Swallow unobserved rejections (e.g. from unsubscribe)
+      state.compactionRetryPromise.catch((err) => {
+        log.debug(`compaction promise rejected (no waiter): ${String(err)}`);
       });
     }
   };
 
   const noteCompactionRetry = () => {
-    state.compactionRetryError = undefined;
     state.pendingCompactionRetry += 1;
     ensureCompactionPromise();
   };
@@ -249,55 +226,20 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     }
     state.pendingCompactionRetry -= 1;
     if (state.pendingCompactionRetry === 0 && !state.compactionInFlight) {
-      settleCompactionRetry();
+      state.compactionRetryResolve?.();
+      state.compactionRetryResolve = undefined;
+      state.compactionRetryReject = undefined;
+      state.compactionRetryPromise = null;
     }
   };
 
   const maybeResolveCompactionWait = () => {
     if (state.pendingCompactionRetry === 0 && !state.compactionInFlight) {
-      settleCompactionRetry();
+      state.compactionRetryResolve?.();
+      state.compactionRetryResolve = undefined;
+      state.compactionRetryReject = undefined;
+      state.compactionRetryPromise = null;
     }
-  };
-
-  const scheduleCompactionRetryResumeWatch = () => {
-    clearCompactionRetryResumeWatch();
-    if (state.pendingCompactionRetry <= 0 || state.compactionInFlight) {
-      return;
-    }
-    state.compactionRetryResumeTimer = setTimeout(() => {
-      state.compactionRetryResumeTimer = undefined;
-      if (state.pendingCompactionRetry <= 0 || state.compactionInFlight) {
-        return;
-      }
-      if (params.session.isStreaming) {
-        scheduleCompactionRetryResumeWatch();
-        return;
-      }
-      const pendingCount = state.pendingCompactionRetry;
-      const runLabel = `runId=${params.runId} retries=${pendingCount}`;
-      log.warn(`embedded run compaction retry stalled before resume: ${runLabel}`);
-      void params.session.agent.continue().catch((err: unknown) => {
-        const detail = err instanceof Error ? err.message : String(err);
-        // Role-ordering / "Cannot continue" errors mean the agent transcript
-        // ends with an assistant turn after compaction.  The compaction itself
-        // succeeded and the original response was already delivered, so settle
-        // as resolved instead of rejecting (which would crash the run).
-        const isRoleError =
-          /cannot continue from message role|roles must alternate|incorrect role/i.test(detail);
-        if (isRoleError) {
-          log.warn(
-            `embedded run compaction retry resume skipped (role ordering): ${runLabel} – ${detail}`,
-          );
-          state.pendingCompactionRetry = 0;
-          settleCompactionRetry();
-          return;
-        }
-        state.pendingCompactionRetry = 0;
-        settleCompactionRetry(
-          new Error(`Compaction retry stalled before resume: ${detail}`),
-        );
-      });
-    }, COMPACTION_RETRY_RESUME_TIMEOUT_MS);
   };
   const recordAssistantUsage = (usageLike: unknown) => {
     const usage = normalizeUsage((usageLike ?? undefined) as UsageLike | undefined);
@@ -644,8 +586,6 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     noteCompactionRetry,
     resolveCompactionRetry,
     maybeResolveCompactionWait,
-    clearCompactionRetryResumeWatch,
-    scheduleCompactionRetryResumeWatch,
     recordAssistantUsage,
     incrementCompactionCount,
     getUsageTotals,
@@ -659,6 +599,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     toolMetas,
     unsubscribe,
     isCompacting: () => state.compactionInFlight || state.pendingCompactionRetry > 0,
+    isCompactionInFlight: () => state.compactionInFlight,
     getMessagingToolSentTexts: () => messagingToolSentTexts.slice(),
     getMessagingToolSentTargets: () => messagingToolSentTargets.slice(),
     // Returns true if any messaging tool successfully sent a message.
@@ -669,28 +610,14 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     getUsageTotals,
     getCompactionCount: () => compactionCount,
     waitForCompactionRetry: () => {
-      if (state.compactionRetryError) {
-        return Promise.reject(state.compactionRetryError);
-      }
       if (state.compactionInFlight || state.pendingCompactionRetry > 0) {
         ensureCompactionPromise();
-        if (state.compactionRetryError) {
-          return Promise.reject(state.compactionRetryError);
-        }
         return state.compactionRetryPromise ?? Promise.resolve();
       }
       return new Promise<void>((resolve, reject) => {
         queueMicrotask(() => {
-          if (state.compactionRetryError) {
-            reject(state.compactionRetryError);
-            return;
-          }
           if (state.compactionInFlight || state.pendingCompactionRetry > 0) {
             ensureCompactionPromise();
-            if (state.compactionRetryError) {
-              reject(state.compactionRetryError);
-              return;
-            }
             void (state.compactionRetryPromise ?? Promise.resolve()).then(resolve, reject);
           } else {
             resolve();
