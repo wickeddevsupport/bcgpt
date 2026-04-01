@@ -1,0 +1,21 @@
+{
+  "name": "@openclaw/pmos-smart-memory",
+  "version": "2026.2.9",
+  "private": true,
+  "description": "OpenClaw PMOS smart memory plugin",
+  "type": "module",
+  "dependencies": {
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "openclaw": "workspace:*"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.1.26"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
