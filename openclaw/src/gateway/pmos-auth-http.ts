@@ -122,7 +122,12 @@ export async function handlePmosAuthHttp(
       }
 
       case "login": {
-        const body = (await readJsonBody(req, MAX_BODY_BYTES)) as Record<string, unknown> | null;
+        const bodyResult = await readJsonBody(req, MAX_BODY_BYTES);
+        if (!bodyResult.ok) {
+          sendJson(res, 400, { ok: false, error: bodyResult.error });
+          return true;
+        }
+        const body = bodyResult.value as Record<string, unknown>;
         const email = typeof body?.email === "string" ? body.email : "";
         const password = typeof body?.password === "string" ? body.password : "";
         const result = await loginPmosUser({ email, password });
@@ -136,10 +141,15 @@ export async function handlePmosAuthHttp(
       }
 
       case "signup": {
-        const body = (await readJsonBody(req, MAX_BODY_BYTES)) as Record<string, unknown> | null;
-        const name = typeof body?.name === "string" ? body.name : "";
-        const email = typeof body?.email === "string" ? body.email : "";
-        const password = typeof body?.password === "string" ? body.password : "";
+        const signupResult = await readJsonBody(req, MAX_BODY_BYTES);
+        if (!signupResult.ok) {
+          sendJson(res, 400, { ok: false, error: signupResult.error });
+          return true;
+        }
+        const signupBody = signupResult.value as Record<string, unknown>;
+        const name = typeof signupBody?.name === "string" ? signupBody.name : "";
+        const email = typeof signupBody?.email === "string" ? signupBody.email : "";
+        const password = typeof signupBody?.password === "string" ? signupBody.password : "";
         const result = await signupPmosUser({ name, email, password });
         if (!result.ok) {
           sendJson(res, result.status, { ok: false, error: result.error });
@@ -166,9 +176,14 @@ export async function handlePmosAuthHttp(
           sendJson(res, 401, { ok: false, error: "Authentication required" });
           return true;
         }
-        const body = (await readJsonBody(req, MAX_BODY_BYTES)) as Record<string, unknown> | null;
-        const currentPassword = typeof body?.currentPassword === "string" ? body.currentPassword : "";
-        const newPassword = typeof body?.newPassword === "string" ? body.newPassword : "";
+        const cpResult = await readJsonBody(req, MAX_BODY_BYTES);
+        if (!cpResult.ok) {
+          sendJson(res, 400, { ok: false, error: cpResult.error });
+          return true;
+        }
+        const cpBody = cpResult.value as Record<string, unknown>;
+        const currentPassword = typeof cpBody?.currentPassword === "string" ? cpBody.currentPassword : "";
+        const newPassword = typeof cpBody?.newPassword === "string" ? cpBody.newPassword : "";
         const result = await changePmosUserPassword({
           userId: session.user.id,
           currentPassword,
@@ -189,9 +204,14 @@ export async function handlePmosAuthHttp(
           sendJson(res, 401, { ok: false, error: "Authentication required" });
           return true;
         }
-        const body = (await readJsonBody(req, MAX_BODY_BYTES)) as Record<string, unknown> | null;
-        const email = typeof body?.email === "string" ? body.email : "";
-        const newPassword = typeof body?.newPassword === "string" ? body.newPassword : "";
+        const arResult = await readJsonBody(req, MAX_BODY_BYTES);
+        if (!arResult.ok) {
+          sendJson(res, 400, { ok: false, error: arResult.error });
+          return true;
+        }
+        const arBody = arResult.value as Record<string, unknown>;
+        const email = typeof arBody?.email === "string" ? arBody.email : "";
+        const newPassword = typeof arBody?.newPassword === "string" ? arBody.newPassword : "";
         const result = await adminResetPmosUserPassword({
           actorUserId: session.user.id,
           targetEmail: email,
