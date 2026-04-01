@@ -248,6 +248,7 @@ const COMPACTION_TOAST_DURATION_MS = 5000;
 export function handleCompactionEvent(host: CompactionHost, payload: AgentEventPayload) {
   const data = payload.data ?? {};
   const phase = typeof data.phase === "string" ? data.phase : "";
+  const willRetry = Boolean(data.willRetry);
 
   // Clear any existing timer
   if (host.compactionClearTimer != null) {
@@ -262,16 +263,26 @@ export function handleCompactionEvent(host: CompactionHost, payload: AgentEventP
       completedAt: null,
     };
   } else if (phase === "end") {
-    host.compactionStatus = {
-      active: false,
-      startedAt: host.compactionStatus?.startedAt ?? null,
-      completedAt: Date.now(),
-    };
-    // Auto-clear the toast after duration
-    host.compactionClearTimer = window.setTimeout(() => {
-      host.compactionStatus = null;
-      host.compactionClearTimer = null;
-    }, COMPACTION_TOAST_DURATION_MS);
+    if (willRetry) {
+      // Another compaction cycle is imminent — keep the active indicator
+      // so the UI doesn't briefly flash "Context compacted" then restart.
+      host.compactionStatus = {
+        active: true,
+        startedAt: host.compactionStatus?.startedAt ?? Date.now(),
+        completedAt: null,
+      };
+    } else {
+      host.compactionStatus = {
+        active: false,
+        startedAt: host.compactionStatus?.startedAt ?? null,
+        completedAt: Date.now(),
+      };
+      // Auto-clear the toast after duration
+      host.compactionClearTimer = window.setTimeout(() => {
+        host.compactionStatus = null;
+        host.compactionClearTimer = null;
+      }, COMPACTION_TOAST_DURATION_MS);
+    }
   }
 }
 

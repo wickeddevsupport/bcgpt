@@ -763,7 +763,7 @@ describe("connectGateway", () => {
     expect(host.compactionClearTimer).toBeNull();
   });
 
-  it("clears a recovered compaction-only active run when compaction ends", () => {
+  it("does not clear a recovered active run when compaction ends (chat final handles cleanup)", () => {
     const host = {
       settings: { gatewayUrl: "wss://example.test", token: "", lastActiveSessionKey: "main" },
       password: "",
@@ -816,7 +816,9 @@ describe("connectGateway", () => {
       },
     });
 
-    expect(host.sessionsResult.sessions[0]?.hasActiveRun).toBe(false);
-    expect(host.sessionsResult.sessions[0]?.activeRunId).toBeUndefined();
+    // Session active run is preserved — the agent run continues after compaction.
+    // clearLocalSessionActiveRun will fire on the subsequent chat final event.
+    expect(host.sessionsResult.sessions[0]?.hasActiveRun).toBe(true);
+    expect(host.sessionsResult.sessions[0]?.activeRunId).toBe("run-1");
   });
 });

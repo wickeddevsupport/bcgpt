@@ -238,6 +238,14 @@ function resolveChatStatus(props: ChatProps): ChatStatusState {
     };
   }
 
+  if (props.compactionStatus?.active) {
+    return {
+      label: "Working",
+      detail: "Compacting context to continue the conversation.",
+      tone: "busy",
+    };
+  }
+
   if (sessionHasActiveRun) {
     return {
       label: "Working",

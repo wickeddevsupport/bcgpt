@@ -132,7 +132,7 @@ export function normalizeVerboseLevel(raw?: string | null): VerboseLevel | undef
   if (["full", "all", "everything"].includes(key)) {
     return "full";
   }
-  if (["on", "minimal", "true", "yes", "1"].includes(key)) {
+  if (["on", "minimal", "partial", "true", "yes", "1"].includes(key)) {
     return "on";
   }
   return undefined;

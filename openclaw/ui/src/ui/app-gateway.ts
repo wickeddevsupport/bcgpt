@@ -591,14 +591,6 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
     }
     recordAgentTraceEvent(host, payload);
     handleAgentEvent(host as unknown as Parameters<typeof handleAgentEvent>[0], payload);
-    if (
-      payload?.stream === "compaction" &&
-      payload.data?.phase === "end" &&
-      !host.chatRunId &&
-      !host.chatStream
-    ) {
-      clearLocalSessionActiveRun(host, payload);
-    }
     if (payload?.stream === "tool" || payload?.stream === "compaction") {
       scheduleChatScroll(host as unknown as Parameters<typeof scheduleChatScroll>[0]);
     }

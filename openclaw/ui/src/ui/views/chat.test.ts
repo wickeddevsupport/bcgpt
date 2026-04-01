@@ -263,7 +263,7 @@ describe("chat view", () => {
     expect(indicator?.textContent).toContain("Compacting context...");
   });
 
-  it("keeps the composer ready during background compaction-only activity", () => {
+  it("shows working status with compaction detail during background compaction-only activity", () => {
     const container = document.createElement("div");
     render(
       renderChat(
@@ -293,12 +293,9 @@ describe("chat view", () => {
       container,
     );
 
-    const badge = container.querySelector(".chat-compose .chat-status-badge--ready");
-    expect(badge?.textContent).toContain("Ready");
-    const sendButton = Array.from(container.querySelectorAll("button")).find(
-      (btn) => btn.textContent?.includes("Send"),
-    );
-    expect(sendButton?.textContent).toContain("Send");
+    const badge = container.querySelector(".chat-compose .chat-status-badge--busy");
+    expect(badge?.textContent).toContain("Working");
+    expect(container.textContent).toContain("Compacting context to continue the conversation.");
     expect(container.textContent).not.toContain("Restoring the active run after refresh.");
   });
 
