@@ -1,5 +1,56 @@
 {
   "id": "pmos-smart-memory",
   "name": "PMOS Smart Memory",
-  "description": "Workspace-scoped auto-recall and durable fact capture for PMOS chats"
+  "description": "Workspace-scoped auto-recall and durable fact capture for PMOS chats",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "recall": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "maxResults": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8
+          },
+          "minScore": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "maxChars": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12000
+          },
+          "minQueryChars": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4000
+          }
+        }
+      },
+      "capture": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "directory": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
 }
