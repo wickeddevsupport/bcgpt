@@ -211,9 +211,10 @@ function buildSessionIndexText(params: {
   durableFacts: string[];
   compactions: string[];
 }): string {
+  const refLabel = looksLikeFilePath(params.sessionPath) ? "Transcript" : "Session reference";
   const lines = [
     `Session: ${params.sessionId}`,
-    `Transcript: ${params.sessionPath}`,
+    `${refLabel}: ${params.sessionPath}`,
   ];
   if (params.compactions.length > 0) {
     lines.push("Compaction summaries:");
@@ -242,10 +243,13 @@ function buildDurableMemoryText(params: {
   durableFacts: string[];
   compactions: string[];
 }): string {
+  const refLabel = looksLikeFilePath(params.sessionPath)
+    ? "Source transcript"
+    : "Session reference";
   const lines = [
     `# Durable Session Memory: ${params.sessionId}`,
     "",
-    `Source transcript: ${params.sessionPath}`,
+    `${refLabel}: ${params.sessionPath}`,
   ];
   if (params.durableFacts.length > 0) {
     lines.push("", "## Decisions, Requirements, And Preferences");
@@ -260,4 +264,9 @@ function buildDurableMemoryText(params: {
     }
   }
   return lines.join("\n");
+}
+
+/** Returns true if the value looks like a file path rather than a bare session key. */
+function looksLikeFilePath(value: string): boolean {
+  return /[/\\]/.test(value) || /\.[a-z]{1,6}$/i.test(value);
 }

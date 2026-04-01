@@ -409,8 +409,8 @@ describe("pmos smart memory runtime", () => {
     // Must not contain a fabricated .jsonl path
     expect(content).not.toContain(".jsonl");
     expect(content).not.toContain("sessions/");
-    // Must not contain misleading 'Source transcript:' label
+    // Must not contain misleading 'Source transcript:' label (should say 'Session reference:')
     expect(content).not.toContain("Source transcript:");
-    expect(content).not.toContain("Transcript:");
+    expect(content).toContain("Session reference:");
   });
 });

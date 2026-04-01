@@ -307,7 +307,7 @@ export function createAgentEndHandler(params: {
         workspaceId: runtime.workspaceId,
         sessionKey: ctx.sessionKey,
         generatedAt: new Date(deps.now()).toISOString(),
-        durableMemoryText: cleanDurableMemoryText(extraction.durableMemoryText),
+        durableMemoryText: extraction.durableMemoryText,
       });
       await deps.writeFile(capturePath, content, "utf-8");
       await syncMemoryIndex(runtime, deps, params.logger);
@@ -478,18 +478,6 @@ function filterRecallResults(results: MemorySearchResult[]): MemorySearchResult[
         ?.split(/[\\/]/)
         .some((seg) => seg === PMOS_MEMORY_PATH_SEGMENT),
   );
-}
-
-/**
- * Remove the misleading "Source transcript:" line that the shared extractor adds,
- * since we pass a session key rather than a real file path.
- */
-function cleanDurableMemoryText(text: string): string {
-  return text
-    .replace(/^Source transcript:.*$/gm, "")
-    .replace(/^Transcript:.*$/gm, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
 }
 
 /** Strip injected/synthetic blocks from text before durable memory extraction. */
