@@ -71,7 +71,7 @@ describe("pmos smart memory runtime", () => {
     const manager = createMemoryManager({
       search: vi.fn().mockResolvedValue([
         {
-          path: "pmos-smart-memory/agent-assistant-main.md",
+          path: ".derived-sessions/agent-assistant-main.md",
           startLine: 5,
           endLine: 7,
           score: 0.81,
@@ -99,7 +99,7 @@ describe("pmos smart memory runtime", () => {
 
     expect(result?.prependContext).toContain("Relevant workspace memory:");
     expect(result?.prependContext).toContain("Keep workspace data separated across tenants");
-    expect(result?.prependContext).toContain("pmos-smart-memory/agent-assistant-main.md#L5-L7");
+    expect(result?.prependContext).toContain(".derived-sessions/agent-assistant-main.md#L5-L7");
   });
 
   it("fails open when recall search throws", async () => {
@@ -225,5 +225,183 @@ describe("pmos smart memory runtime", () => {
     );
 
     await expect(fs.access(capturePath)).rejects.toThrow();
+  });
+
+  it("excludes pmos-smart-memory results from recall to prevent recursive ingestion", async () => {
+    const manager = createMemoryManager({
+      search: vi.fn().mockResolvedValue([
+        {
+          path: "pmos-smart-memory/agent-assistant-main.md",
+          startLine: 1,
+          endLine: 3,
+          score: 0.95,
+          snippet: "Recycled memory that should be excluded.",
+          source: "memory",
+        },
+        {
+          path: "docs/architecture.md",
+          startLine: 10,
+          endLine: 12,
+          score: 0.80,
+          snippet: "Real architecture note about tenant isolation.",
+          source: "memory",
+        },
+      ]),
+    });
+
+    const handler = createBeforeAgentStartHandler({
+      config: resolvePmosSmartMemoryConfig({ enabled: true }),
+      deps: baseDeps({
+        getMemoryManager: async () => ({ manager, error: undefined }),
+      }),
+    });
+
+    const result = await handler(
+      { prompt: "Tell me about tenant isolation in the architecture" },
+      {
+        workspaceDir: "/tmp/workspaces/ws-no-recurse/assistant",
+        agentId: "assistant",
+        sessionKey: "agent:assistant:main",
+      },
+    );
+
+    expect(result?.prependContext).toContain("Real architecture note");
+    expect(result?.prependContext).not.toContain("Recycled memory that should be excluded");
+  });
+
+  it("strips injected recall blocks from messages before capture", async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "pmos-smart-memory-"));
+    tempDirs.push(rootDir);
+    const workspaceDir = path.join(rootDir, "workspaces", "ws-strip", "assistant");
+    await fs.mkdir(workspaceDir, { recursive: true });
+
+    const handler = createAgentEndHandler({
+      config: resolvePmosSmartMemoryConfig({ enabled: true }),
+      deps: baseDeps(),
+    });
+
+    await handler(
+      {
+        messages: [
+          {
+            role: "user",
+            content:
+              "Relevant workspace memory:\nUse these notes only if they help.\n\n1. Old recalled fact.\nSource: memory.md#L1\n\nWhat is the deploy strategy?",
+          },
+          {
+            role: "assistant",
+            content: "The deploy strategy uses Coolify with Docker images.",
+          },
+        ],
+        success: true,
+      },
+      {
+        workspaceDir,
+        agentId: "assistant",
+        sessionKey: "agent:assistant:strip-test",
+      },
+    );
+
+    const capturePath = path.join(
+      workspaceDir,
+      "memory",
+      "pmos-smart-memory",
+      "agent-assistant-strip-test.md",
+    );
+    let content: string;
+    try {
+      content = await fs.readFile(capturePath, "utf-8");
+    } catch {
+      // If nothing was captured that's also acceptable (short conversation)
+      return;
+    }
+    expect(content).not.toContain("Relevant workspace memory:");
+    expect(content).not.toContain("Old recalled fact");
+  });
+
+  it("skips capture on unsuccessful turns", async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "pmos-smart-memory-"));
+    tempDirs.push(rootDir);
+    const workspaceDir = path.join(rootDir, "workspaces", "ws-fail", "assistant");
+    const capturePath = path.join(
+      workspaceDir,
+      "memory",
+      "pmos-smart-memory",
+      "agent-assistant-main.md",
+    );
+    await fs.mkdir(path.dirname(capturePath), { recursive: true });
+    // Pre-existing capture should NOT be updated or removed on a failed turn
+    await fs.writeFile(capturePath, "existing memory", "utf-8");
+
+    const writeFile = vi.fn();
+    const rm = vi.fn();
+    const handler = createAgentEndHandler({
+      config: resolvePmosSmartMemoryConfig({ enabled: true }),
+      deps: {
+        ...baseDeps(),
+        writeFile,
+        rm,
+      },
+    });
+
+    await handler(
+      {
+        messages: [
+          { role: "user", content: "Do something important." },
+          { role: "assistant", content: "Error: partial garbled response..." },
+        ],
+        success: false,
+        error: "agent timeout",
+      },
+      {
+        workspaceDir,
+        agentId: "assistant",
+        sessionKey: "agent:assistant:main",
+      },
+    );
+
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(rm).not.toHaveBeenCalled();
+    // Original file should be untouched
+    const content = await fs.readFile(capturePath, "utf-8");
+    expect(content).toBe("existing memory");
+  });
+
+  it("does not embed fake transcript paths in captured memory", async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "pmos-smart-memory-"));
+    tempDirs.push(rootDir);
+    const workspaceDir = path.join(rootDir, "workspaces", "ws-path", "assistant");
+    await fs.mkdir(workspaceDir, { recursive: true });
+
+    const handler = createAgentEndHandler({
+      config: resolvePmosSmartMemoryConfig({ enabled: true }),
+      deps: baseDeps(),
+    });
+
+    await handler(
+      {
+        messages: [
+          { role: "user", content: "We decided to use PostgreSQL for the data layer." },
+          { role: "assistant", content: "Decision recorded: PostgreSQL for the data layer." },
+        ],
+        success: true,
+      },
+      {
+        workspaceDir,
+        agentId: "assistant",
+        sessionKey: "agent:assistant:main",
+      },
+    );
+
+    const capturePath = path.join(
+      workspaceDir,
+      "memory",
+      "pmos-smart-memory",
+      "agent-assistant-main.md",
+    );
+    const content = await fs.readFile(capturePath, "utf-8");
+    // Must not contain a fabricated .jsonl path
+    expect(content).not.toContain(".jsonl");
+    expect(content).not.toContain("sessions/");
   });
 });

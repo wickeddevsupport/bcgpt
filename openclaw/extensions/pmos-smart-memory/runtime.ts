@@ -34,6 +34,23 @@ const DEFAULT_RECALL_MAX_CHARS = 1600;
 const DEFAULT_RECALL_MIN_QUERY_CHARS = 20;
 const MAX_SESSION_KEY_CHARS = 96;
 
+/** Paths containing this segment are PMOS smart-memory output and must not be recalled. */
+const PMOS_MEMORY_PATH_SEGMENT = "pmos-smart-memory";
+
+/**
+ * Patterns that indicate injected/synthetic text which must be stripped before
+ * durable fact extraction to prevent memory-on-memory contamination.
+ */
+const INJECTED_BLOCK_PATTERNS: RegExp[] = [
+  // Recall blocks injected by this plugin or similar recall systems
+  /Relevant workspace memory:[\s\S]*?(?=\n{2,}|$)/gi,
+  // Untrusted content wrappers
+  /<<<EXTERNAL_UNTRUSTED_CONTENT>>>[\s\S]*?<<<\/EXTERNAL_UNTRUSTED_CONTENT>>>/gi,
+  /\[UNTRUSTED\][\s\S]*?\[\/UNTRUSTED\]/gi,
+  // Standalone UNTRUSTED markers and surrounding block
+  /^\s*UNTRUSTED\b[^\n]*$/gim,
+];
+
 const rawPluginConfigSchema = z.object({
   enabled: z.boolean().optional(),
   recall: z
@@ -207,11 +224,13 @@ export function createBeforeAgentStartHandler(params: {
         return;
       }
 
-      const results = await manager.search(query, {
+      const rawResults = await manager.search(query, {
         maxResults: params.config.recall.maxResults,
         minScore: params.config.recall.minScore,
         sessionKey: ctx.sessionKey,
       });
+      // Exclude PMOS smart-memory output to prevent recursive memory ingestion
+      const results = filterRecallResults(rawResults);
       const prependContext = renderRecallContext(results, params.config.recall.maxChars);
       if (!prependContext) {
         return;
@@ -237,6 +256,11 @@ export function createAgentEndHandler(params: {
       return;
     }
 
+    // Skip capture on failed/aborted/partial turns to avoid junk facts
+    if (!event.success) {
+      return;
+    }
+
     try {
       const runtime = await resolveWorkspaceRuntimeContext(ctx, deps);
       if (!runtime) {
@@ -248,7 +272,7 @@ export function createAgentEndHandler(params: {
         return;
       }
 
-      const raw = serializeAgentMessages(event.messages);
+      const raw = serializeAgentMessages(event.messages, { stripInjected: true });
       const captureDir = resolveCaptureDirectory(
         runtime.workspaceDir,
         params.config.capture.directory,
@@ -263,7 +287,7 @@ export function createAgentEndHandler(params: {
 
       const extraction = extractSessionDurableMemory({
         raw,
-        sessionPath: buildSyntheticSessionPath(runtime.workspaceDir, ctx.sessionKey),
+        sessionPath: sanitizeSessionKey(ctx.sessionKey),
         config: buildSessionMemoryConfig(memorySearchConfig),
       });
 
@@ -404,10 +428,6 @@ function buildCapturedMemoryDocument(params: {
   ].join("\n");
 }
 
-function buildSyntheticSessionPath(workspaceDir: string, sessionKey?: string): string {
-  return path.join(workspaceDir, "sessions", `${sanitizeSessionKey(sessionKey)}.jsonl`);
-}
-
 function resolveCaptureDirectory(workspaceDir: string, rawDirectory: string): string {
   const trimmed = rawDirectory.trim();
   if (!trimmed) {
@@ -444,7 +464,33 @@ function normalizeRecallQuery(prompt: string, minChars: number): string | null {
   return normalized.length >= minChars ? normalized : null;
 }
 
-function serializeAgentMessages(messages: unknown[]): string {
+/** Filter out PMOS smart-memory results to prevent recursive memory ingestion. */
+function filterRecallResults(results: MemorySearchResult[]): MemorySearchResult[] {
+  if (!Array.isArray(results)) return [];
+  return results.filter(
+    (r) =>
+      !r.path
+        ?.split(/[\\/]/)
+        .some((seg) => seg === PMOS_MEMORY_PATH_SEGMENT),
+  );
+}
+
+/** Strip injected/synthetic blocks from text before durable memory extraction. */
+function stripInjectedBlocks(text: string): string {
+  let cleaned = text;
+  for (const pattern of INJECTED_BLOCK_PATTERNS) {
+    // Reset lastIndex for global regexes
+    pattern.lastIndex = 0;
+    cleaned = cleaned.replace(pattern, "");
+  }
+  // Collapse excessive blank lines left by stripping
+  return cleaned.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function serializeAgentMessages(
+  messages: unknown[],
+  opts?: { stripInjected?: boolean },
+): string {
   if (!Array.isArray(messages) || messages.length === 0) {
     return "";
   }
@@ -458,9 +504,13 @@ function serializeAgentMessages(messages: unknown[]): string {
     if (message.role !== "user" && message.role !== "assistant") {
       continue;
     }
-    const text = extractMessageText(message.content);
+    let text = extractMessageText(message.content);
     if (!text) {
       continue;
+    }
+    if (opts?.stripInjected) {
+      text = stripInjectedBlocks(text);
+      if (!text) continue;
     }
     lines.push(
       JSON.stringify({
