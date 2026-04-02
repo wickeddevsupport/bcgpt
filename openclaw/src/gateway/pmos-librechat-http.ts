@@ -624,11 +624,27 @@ function normalizeMessageContent(message: JsonRecord): Array<Record<string, unkn
   return [];
 }
 
+function extractTextFromContent(content: Array<Record<string, unknown>>): string {
+  const parts = content
+    .map((entry) => {
+      if (toStringValue(entry.type) !== "text") {
+        return null;
+      }
+      return toStringValue(entry.text);
+    })
+    .filter((entry): entry is string => Boolean(entry));
+  return parts.join("\n\n").trim();
+}
+
 function normalizeMessage(message: JsonRecord): NormalizedLibreChatMessage | null {
   const role = message.isCreatedByUser === true ? "user" : "assistant";
   const rawText = toStringValue(message.text) || "";
-  const displayText = role === "user" ? unwrapPromptText(rawText) : rawText;
   const content = sanitizeMessageContent(normalizeMessageContent(message), role);
+  const contentText = extractTextFromContent(content);
+  const displayText =
+    role === "user"
+      ? unwrapPromptText(rawText || contentText)
+      : rawText || contentText;
   return {
     messageId: toStringValue(message.messageId),
     conversationId: toStringValue(message.conversationId),
