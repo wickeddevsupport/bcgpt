@@ -50,7 +50,7 @@ services:
       CREDS_KEY: "${LIBRECHAT_CREDS_KEY}"
       CREDS_IV: "${LIBRECHAT_CREDS_IV}"
     volumes:
-      - ./deploy/librechat/librechat.yaml:/app/librechat.yaml:ro
+      - ./librechat.yaml:/app/librechat.yaml:ro
       - librechat_uploads:/app/uploads
       - librechat_images:/app/client/public/images
       - librechat_logs:/app/api/logs
