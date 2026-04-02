@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   librechat:
     image: registry.librechat.ai/danny-avila/librechat-dev-api:latest
@@ -29,6 +27,8 @@ services:
       MEILI_NO_ANALYTICS: "true"
       NO_INDEX: "true"
       ENDPOINTS: "custom"
+      RAG_PORT: "8000"
+      RAG_API_URL: "http://rag_api:8000"
       ALLOW_EMAIL_LOGIN: "true"
       ALLOW_REGISTRATION: "${LIBRECHAT_ALLOW_REGISTRATION:-true}"
       ALLOW_SOCIAL_LOGIN: "false"
@@ -61,6 +61,8 @@ services:
         condition: service_started
       meilisearch:
         condition: service_started
+      rag_api:
+        condition: service_started
 
   mongodb:
     image: mongo:8.0.20
@@ -84,12 +86,43 @@ services:
     networks:
       - librechat_internal
 
+  vectordb:
+    image: pgvector/pgvector:0.8.0-pg15-trixie
+    container_name: "${LIBRECHAT_CONTAINER_NAME:-wicked-librechat}-vectordb"
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "librechat"
+      POSTGRES_USER: "librechat"
+      POSTGRES_PASSWORD: "${LIBRECHAT_VECTOR_DB_PASSWORD:-librechat}"
+    volumes:
+      - librechat_pgdata:/var/lib/postgresql/data
+    networks:
+      - librechat_internal
+
+  rag_api:
+    image: registry.librechat.ai/danny-avila/librechat-rag-api-dev-lite:latest
+    container_name: "${LIBRECHAT_CONTAINER_NAME:-wicked-librechat}-rag"
+    restart: unless-stopped
+    environment:
+      DB_HOST: "vectordb"
+      DB_PORT: "5432"
+      POSTGRES_DB: "librechat"
+      POSTGRES_USER: "librechat"
+      POSTGRES_PASSWORD: "${LIBRECHAT_VECTOR_DB_PASSWORD:-librechat}"
+      RAG_PORT: "8000"
+    depends_on:
+      vectordb:
+        condition: service_started
+    networks:
+      - librechat_internal
+
 volumes:
   librechat_uploads:
   librechat_images:
   librechat_logs:
   librechat_mongodb:
   librechat_meili:
+  librechat_pgdata:
 
 networks:
   coolify:
