@@ -73,6 +73,11 @@ import type {
   PmosFlowGraphNode,
   PmosFlowGraphOp,
 } from "./controllers/pmos-flow-builder.ts";
+import type {
+  PmosLibreChatAgent,
+  PmosLibreChatConversation,
+  PmosLibreChatMessage,
+} from "./controllers/pmos-librechat.ts";
 
 export type AppViewState = {
   settings: UiSettings;
@@ -323,6 +328,21 @@ export type AppViewState = {
   flowConnectionsEmbedVersion: number;
   pmosFigmaEmbedVersion: number;
   libreChatEmbedVersion: number;
+  libreChatLoading: boolean;
+  libreChatError: string | null;
+  libreChatUrl: string | null;
+  libreChatAutologinConfigured: boolean;
+  libreChatAgents: PmosLibreChatAgent[];
+  libreChatConversations: PmosLibreChatConversation[];
+  libreChatMessages: PmosLibreChatMessage[];
+  libreChatSelectedAgentId: string | null;
+  libreChatSelectedConversationId: string | null;
+  libreChatDraft: string;
+  libreChatSending: boolean;
+  libreChatParentMessageId: string | null;
+  libreChatStreamingMessage: PmosLibreChatMessage | null;
+  libreChatOpenAgentIds: string[];
+  libreChatStatusPollTimer: number | null;
   apFlowDetailsLoading: boolean;
   apFlowDetailsError: string | null;
   apFlowDetails: unknown | null;
@@ -609,6 +629,13 @@ export type AppViewState = {
   handlePmosApRunsLoad: () => Promise<void>;
   handlePmosApRunSelect: (runId: string) => Promise<void>;
   handlePmosApRunRetry: (strategy: "FROM_FAILED_STEP" | "ON_LATEST_VERSION") => Promise<void>;
+  handleLibreChatLoad: () => Promise<void>;
+  handleLibreChatSelectAgent: (agentId: string) => void;
+  handleLibreChatToggleAgent: (agentId: string) => void;
+  handleLibreChatStartConversation: (agentId: string) => void;
+  handleLibreChatSelectConversation: (conversationId: string) => Promise<void>;
+  handleLibreChatSend: () => Promise<void>;
+  handleLibreChatAbort: () => Promise<void>;
   handlePmosProjectsLoad: () => Promise<void>;
   handleSelectProject: (project: PmosProjectCard | null) => void;
   handleProjectDetailTabChange: (tab: PmosProjectDetailTab) => void;

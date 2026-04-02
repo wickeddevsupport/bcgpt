@@ -312,7 +312,17 @@ import {
 } from "./controllers/pmos-flow-builder.ts";
 import { loadConfig } from "./controllers/config.ts";
 import { isPmosFigmaPanelEnabled } from "./controllers/pmos-figma.ts";
-import { isPmosLibreChatEnabled } from "./controllers/pmos-librechat.ts";
+import {
+  abortPmosLibreChatMessage,
+  clearPmosLibreChatStatusPolling,
+  isPmosLibreChatEnabled,
+  loadPmosLibreChatBootstrap,
+  selectPmosLibreChatAgent,
+  selectPmosLibreChatConversation,
+  sendPmosLibreChatMessage,
+  startPmosLibreChatConversation,
+  togglePmosLibreChatAgentAccordion,
+} from "./controllers/pmos-librechat.ts";
 
 declare global {
   interface Window {
@@ -619,6 +629,21 @@ export class OpenClawApp extends LitElement {
   @state() flowConnectionsEmbedVersion = 0;
   @state() pmosFigmaEmbedVersion = 0;
   @state() libreChatEmbedVersion = 0;
+  @state() libreChatLoading = false;
+  @state() libreChatError: string | null = null;
+  @state() libreChatUrl: string | null = null;
+  @state() libreChatAutologinConfigured = false;
+  @state() libreChatAgents: import("./controllers/pmos-librechat.ts").PmosLibreChatAgent[] = [];
+  @state() libreChatConversations: import("./controllers/pmos-librechat.ts").PmosLibreChatConversation[] = [];
+  @state() libreChatMessages: import("./controllers/pmos-librechat.ts").PmosLibreChatMessage[] = [];
+  @state() libreChatSelectedAgentId: string | null = null;
+  @state() libreChatSelectedConversationId: string | null = null;
+  @state() libreChatDraft = "";
+  @state() libreChatSending = false;
+  @state() libreChatParentMessageId: string | null = null;
+  @state() libreChatStreamingMessage: import("./controllers/pmos-librechat.ts").PmosLibreChatMessage | null = null;
+  @state() libreChatOpenAgentIds: string[] = [];
+  libreChatStatusPollTimer: number | null = null;
   @state() apFlowDetailsLoading = false;
   @state() apFlowDetailsError: string | null = null;
   @state() apFlowDetails: unknown | null = null;
@@ -1115,6 +1140,7 @@ export class OpenClawApp extends LitElement {
       window.clearTimeout(this.pmosFigmaAutoSyncTimer);
       this.pmosFigmaAutoSyncTimer = null;
     }
+    clearPmosLibreChatStatusPolling(this);
     this.clearPmosFigmaAuthPopupMonitor();
     handleDisconnected(this as unknown as Parameters<typeof handleDisconnected>[0]);
     super.disconnectedCallback();
@@ -1133,6 +1159,9 @@ export class OpenClawApp extends LitElement {
     if (this.pmosAuthAuthenticated) {
       this.onboarding = false;
       this.connect();
+      if (isPmosLibreChatEnabled()) {
+        await this.handleLibreChatLoad();
+      }
     }
   }
 
@@ -1150,10 +1179,25 @@ export class OpenClawApp extends LitElement {
     this.onboarding = false;
     this.setTab("dashboard");
     this.connect();
+    if (isPmosLibreChatEnabled()) {
+      await this.handleLibreChatLoad();
+    }
   }
 
   async handlePmosAuthLogout() {
+    clearPmosLibreChatStatusPolling(this);
     await logoutPmosAuth(this);
+    this.libreChatError = null;
+    this.libreChatAgents = [];
+    this.libreChatConversations = [];
+    this.libreChatMessages = [];
+    this.libreChatSelectedAgentId = null;
+    this.libreChatSelectedConversationId = null;
+    this.libreChatDraft = "";
+    this.libreChatSending = false;
+    this.libreChatParentMessageId = null;
+    this.libreChatStreamingMessage = null;
+    this.libreChatOpenAgentIds = [];
     this.client?.stop();
     this.client = null;
     this.connected = false;
@@ -1161,6 +1205,46 @@ export class OpenClawApp extends LitElement {
     this.lastError = null;
     this.execApprovalQueue = [];
     this.execApprovalError = null;
+  }
+
+  async handleLibreChatLoad() {
+    await loadPmosLibreChatBootstrap(this, { preserveSelection: true });
+    const conversationId = this.libreChatSelectedConversationId?.trim() ?? "";
+    const loadedConversationId =
+      typeof this.libreChatMessages[0]?.conversationId === "string"
+        ? this.libreChatMessages[0].conversationId
+        : "";
+    if (
+      conversationId &&
+      (!loadedConversationId || loadedConversationId !== conversationId) &&
+      !this.libreChatSending
+    ) {
+      await selectPmosLibreChatConversation(this, conversationId);
+    }
+  }
+
+  handleLibreChatSelectAgent(agentId: string) {
+    selectPmosLibreChatAgent(this, agentId);
+  }
+
+  handleLibreChatToggleAgent(agentId: string) {
+    togglePmosLibreChatAgentAccordion(this, agentId);
+  }
+
+  handleLibreChatStartConversation(agentId: string) {
+    startPmosLibreChatConversation(this, agentId);
+  }
+
+  async handleLibreChatSelectConversation(conversationId: string) {
+    await selectPmosLibreChatConversation(this, conversationId);
+  }
+
+  async handleLibreChatSend() {
+    await sendPmosLibreChatMessage(this);
+  }
+
+  async handleLibreChatAbort() {
+    await abortPmosLibreChatMessage(this);
   }
 
   handleChatScroll(event: Event) {

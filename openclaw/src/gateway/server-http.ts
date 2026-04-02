@@ -49,6 +49,7 @@ import { handleToolsInvokeHttpRequest } from "./tools-invoke-http.js";
 import { handleFigmaMcpHttpRequest } from "./figma-mcp-http.js";
 import { handleFigmaPluginBridgeHttpRequest } from "./figma-plugin-bridge-http.js";
 import { handlePmosAuthHttp } from "./pmos-auth-http.js";
+import { handlePmosLibreChatHttp } from "./pmos-librechat-http.js";
 
 type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
 
@@ -323,6 +324,9 @@ export function createGatewayHttpServer(opts: {
       const configSnapshot = loadConfig();
       const trustedProxies = configSnapshot.gateway?.trustedProxies ?? [];
       if (await handlePmosAuthHttp(req, res)) {
+        return;
+      }
+      if (await handlePmosLibreChatHttp(req, res)) {
         return;
       }
       if (await handleByokHttp(req, res)) {

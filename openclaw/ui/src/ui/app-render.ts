@@ -535,11 +535,6 @@ export function renderApp(state: AppViewState) {
   const figmaAuthUrl = `${figmaBaseUrl}/auth/figma?pmosEmbed=1&pmosParentOrigin=${encodeURIComponent(
     typeof window !== "undefined" ? window.location.origin : "",
   )}`;
-  const libreChatEmbedBaseUrl = libreChatBaseUrl
-    ? `${libreChatBaseUrl}/?embedded=1&source=pmos&parentOrigin=${encodeURIComponent(
-        typeof window !== "undefined" ? window.location.origin : "",
-      )}`
-    : null;
   const showGlobalContentHeader = shouldRenderGlobalContentHeader(state.tab);
   const showContentHeader = showGlobalContentHeader || Boolean(state.lastError) || isChat;
   const sessionDefaults =
@@ -1140,20 +1135,30 @@ onAbort: () => void state.handleAbortChat(),
         ${
           isPmosLibreChatEnabled() && state.tab === "librechat"
             ? renderLibreChat({
-                url: libreChatBaseUrl,
-                embedUrl:
-                  libreChatEmbedBaseUrl
-                    ? libreChatEmbedBaseUrl +
-                      (state.libreChatEmbedVersion
-                        ? `${libreChatEmbedBaseUrl.includes("?") ? "&" : "?"}v=${state.libreChatEmbedVersion}`
-                        : "")
-                    : null,
+                url: state.libreChatUrl ?? libreChatBaseUrl,
+                loading: state.libreChatLoading,
+                error: state.libreChatError,
                 connected: state.connected,
-                reloading: false,
-                onReload: () => {
-                  state.libreChatEmbedVersion = (state.libreChatEmbedVersion ?? 0) + 1;
-                },
+                autologinConfigured: state.libreChatAutologinConfigured,
+                agents: state.libreChatAgents,
+                conversations: state.libreChatConversations,
+                messages: state.libreChatMessages,
+                streamingMessage: state.libreChatStreamingMessage,
+                selectedAgentId: state.libreChatSelectedAgentId,
+                selectedConversationId: state.libreChatSelectedConversationId,
+                draft: state.libreChatDraft,
+                sending: state.libreChatSending,
+                openAgentIds: state.libreChatOpenAgentIds,
+                onRefresh: () => void state.handleLibreChatLoad(),
                 onOpenChat: () => state.setTab("chat"),
+                onDraftChange: (next) => (state.libreChatDraft = next),
+                onSelectAgent: (agentId) => state.handleLibreChatSelectAgent(agentId),
+                onToggleAgent: (agentId) => state.handleLibreChatToggleAgent(agentId),
+                onNewConversation: (agentId) => state.handleLibreChatStartConversation(agentId),
+                onSelectConversation: (conversationId) =>
+                  void state.handleLibreChatSelectConversation(conversationId),
+                onSend: () => void state.handleLibreChatSend(),
+                onAbort: () => void state.handleLibreChatAbort(),
               })
             : nothing
         }

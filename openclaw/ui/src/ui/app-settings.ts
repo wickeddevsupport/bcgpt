@@ -234,6 +234,9 @@ export async function refreshActiveTab(host: SettingsHost) {
       (host as unknown as OpenClawApp).handlePmosProjectsLoad(),
     ]);
   }
+  if (host.tab === "librechat") {
+    await (host as unknown as OpenClawApp).handleLibreChatLoad();
+  }
   if (host.tab === "automations") {
     // Ensure connector config is hydrated before trying to load flows.
     await (host as unknown as OpenClawApp).handlePmosIntegrationsLoad();
