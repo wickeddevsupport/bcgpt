@@ -23,6 +23,7 @@ export type IntegrationsProps = {
   onRefreshConnectors: () => void;
   onOpenModels: () => void;
   onOpenAutomations: () => void;
+  figmaPanelEnabled: boolean;
   onOpenFigma: () => void;
 
   // Workflow engine provisioning status
@@ -208,8 +209,18 @@ export function renderIntegrations(props: IntegrationsProps) {
       <div class="card">
         <div class="card-title">Figma File Manager</div>
         <div class="card-sub">
-          Embed your Figma workspace, sync active team/file context into PMOS, and use design audit prompts.
+          ${props.figmaPanelEnabled
+            ? "Embed your Figma workspace, sync active team/file context into PMOS, and use design audit prompts."
+            : "The Figma panel is temporarily disabled for this deployment."}
         </div>
+
+        ${!props.figmaPanelEnabled
+          ? html`
+              <div class="callout" style="margin-top: 12px; font-size: 12px;">
+                Figma settings are still preserved, but the embedded panel is hidden until we re-enable it.
+              </div>
+            `
+          : nothing}
 
         <div class="form-grid" style="margin-top: 16px;">
           <label class="field">
@@ -219,7 +230,7 @@ export function renderIntegrations(props: IntegrationsProps) {
               .value=${props.figmaUrl}
               @input=${(e: Event) => props.onFigmaUrlChange((e.target as HTMLInputElement).value)}
               placeholder="https://fm.wickedlab.io"
-              ?disabled=${!props.connected}
+              ?disabled=${!props.connected || !props.figmaPanelEnabled}
             />
           </label>
         </div>
@@ -256,12 +267,20 @@ export function renderIntegrations(props: IntegrationsProps) {
           : nothing}
 
         <div class="row" style="margin-top: 14px; gap: 8px; flex-wrap: wrap;">
-          <button class="btn btn--primary" ?disabled=${props.saving || !props.connected} @click=${() => props.onSave()}>
+          <button
+            class="btn btn--primary"
+            ?disabled=${props.saving || !props.connected || !props.figmaPanelEnabled}
+            @click=${() => props.onSave()}
+          >
             ${props.saving ? "Saving..." : "Save"}
           </button>
-          <button class="btn btn--secondary" ?disabled=${!props.connected} @click=${() => props.onOpenFigma()}>
-            Open Figma Panel
-          </button>
+          ${props.figmaPanelEnabled
+            ? html`
+                <button class="btn btn--secondary" ?disabled=${!props.connected} @click=${() => props.onOpenFigma()}>
+                  Open Figma Panel
+                </button>
+              `
+            : nothing}
         </div>
 
         ${figma?.error
@@ -431,4 +450,3 @@ export function renderIntegrations(props: IntegrationsProps) {
     </section>
   `;
 }
-

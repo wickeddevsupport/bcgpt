@@ -19,6 +19,7 @@ import {
   syncTabWithLocation,
   syncThemeWithSettings,
 } from "./app-settings.ts";
+import { isPmosFigmaPanelEnabled } from "./controllers/pmos-figma.ts";
 
 type LifecycleHost = {
   basePath: string;
@@ -41,8 +42,8 @@ const CHAT_PANEL_TABS = new Set<Tab>([
   "chat",
   "dashboard",
   "command-center",
-  "figma",
   "automations",
+  ...(isPmosFigmaPanelEnabled() ? (["figma"] as Tab[]) : []),
 ]);
 
 export function handleConnected(host: LifecycleHost) {

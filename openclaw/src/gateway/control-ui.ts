@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { OpenClawConfig } from "../config/config.js";
 import { resolveControlUiRootSync } from "../infra/control-ui-assets.js";
+import { isTruthyEnvValue } from "../infra/env.js";
 import { DEFAULT_ASSISTANT_IDENTITY, resolveAssistantIdentity } from "./assistant-identity.js";
 import {
   buildControlUiAvatarUrl,
@@ -170,12 +171,21 @@ function isPmosSignupEnabled(): boolean {
   return String(process.env.PMOS_SIGNUP_ENABLED ?? "false").trim().toLowerCase() === "true";
 }
 
+function isPmosFigmaPanelEnabled(): boolean {
+  const raw = process.env.PMOS_FIGMA_PANEL_ENABLED;
+  if (typeof raw !== "string" || !raw.trim()) {
+    return true;
+  }
+  return isTruthyEnvValue(raw);
+}
+
 function injectControlUiConfig(html: string, opts: ControlUiInjectionOpts): string {
   const { basePath, assistantName, assistantAvatar } = opts;
   const script =
     `<script>` +
     `window.__OPENCLAW_CONTROL_UI_BASE_PATH__=${JSON.stringify(basePath)};` +
     `window.__OPENCLAW_PMOS_SIGNUP_ENABLED__=${JSON.stringify(isPmosSignupEnabled())};` +
+    `window.__OPENCLAW_PMOS_FIGMA_PANEL_ENABLED__=${JSON.stringify(isPmosFigmaPanelEnabled())};` +
     `window.__OPENCLAW_ASSISTANT_NAME__=${JSON.stringify(
       assistantName ?? DEFAULT_ASSISTANT_IDENTITY.name,
     )};` +

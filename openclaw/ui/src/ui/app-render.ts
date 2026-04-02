@@ -72,6 +72,7 @@ import {
   type Tab,
 } from "./navigation.ts";
 import { buildOpsUiConnectionsUrl, buildOpsUiEmbedUrl } from "./controllers/pmos-embed.ts";
+import { isPmosFigmaPanelEnabled } from "./controllers/pmos-figma.ts";
 
 // Module-scope debounce for usage date changes (avoids type-unsafe hacks on state object)
 let usageDateDebounceTimeout: number | null = null;
@@ -119,7 +120,12 @@ import { renderUsage } from "./views/usage.ts";
 
 const AVATAR_DATA_RE = /^data:/i;
 const AVATAR_HTTP_RE = /^https?:\/\//i;
-const LOCAL_PAGE_HEADER_TABS = new Set<Tab>(["connections", "figma", "command-center", "usage"]);
+const LOCAL_PAGE_HEADER_TABS = new Set<Tab>([
+  "connections",
+  "command-center",
+  "usage",
+  ...(isPmosFigmaPanelEnabled() ? (["figma"] as Tab[]) : []),
+]);
 
 function shouldRenderGlobalContentHeader(tab: Tab): boolean {
   return !LOCAL_PAGE_HEADER_TABS.has(tab);
@@ -1070,6 +1076,7 @@ onAbort: () => void state.handleAbortChat(),
                 onRefreshConnectors: () => state.handlePmosRefreshConnectors(),
                 onOpenModels: () => state.setTab("models"),
                 onOpenAutomations: () => state.setTab("automations"),
+                figmaPanelEnabled: isPmosFigmaPanelEnabled(),
                 onOpenFigma: () => state.setTab("figma"),
                 bcgptSavedOk: state.pmosBcgptSavedOk,
                 opsProvisioned: Boolean(state.pmosOpsProvisioningResult?.apiKey) || state.pmosConnectorsStatus?.ops?.reachable === true,
@@ -1088,7 +1095,7 @@ onAbort: () => void state.handleAbortChat(),
         }
 
         ${
-          state.tab === "figma"
+          isPmosFigmaPanelEnabled() && state.tab === "figma"
             ? renderFigma({
                 connected: state.connected,
                 figmaUrl: state.pmosFigmaUrl,

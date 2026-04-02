@@ -35,6 +35,7 @@ import {
 import { saveSettings, type UiSettings } from "./storage.ts";
 import { startThemeTransition, type ThemeTransitionContext } from "./theme-transition.ts";
 import { resolveTheme, type ResolvedTheme, type ThemeMode } from "./theme.ts";
+import { isPmosFigmaPanelEnabled } from "./controllers/pmos-figma.ts";
 
 type SettingsHost = {
   settings: UiSettings;
@@ -63,8 +64,8 @@ const CHAT_PANEL_TABS = new Set<Tab>([
   "chat",
   "dashboard",
   "command-center",
-  "figma",
   "automations",
+  ...(isPmosFigmaPanelEnabled() ? (["figma"] as Tab[]) : []),
 ]);
 
 export function applySettings(host: SettingsHost, next: UiSettings) {
@@ -423,6 +424,9 @@ export function setTabFromRoute(host: SettingsHost, next: Tab) {
   const pmosUser = (host as any).pmosAuthUser;
   const role = pmosUser?.role ?? null;
   const isSuperAdmin = role === "super_admin";
+  if (next === "figma" && !isPmosFigmaPanelEnabled()) {
+    next = "dashboard";
+  }
   if (!isSuperAdmin && (next === "debug" || next === "logs" || next === "nodes")) {
     next = "dashboard";
   }

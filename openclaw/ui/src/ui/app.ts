@@ -311,11 +311,13 @@ import {
   type PmosFlowGraphOp,
 } from "./controllers/pmos-flow-builder.ts";
 import { loadConfig } from "./controllers/config.ts";
+import { isPmosFigmaPanelEnabled } from "./controllers/pmos-figma.ts";
 
 declare global {
   interface Window {
     __OPENCLAW_CONTROL_UI_BASE_PATH__?: string;
     __OPENCLAW_PMOS_SIGNUP_ENABLED__?: boolean;
+    __OPENCLAW_PMOS_FIGMA_PANEL_ENABLED__?: boolean;
   }
 }
 
@@ -1202,6 +1204,9 @@ export class OpenClawApp extends LitElement {
   }
 
   setTab(next: Tab) {
+    if (next === "figma" && !isPmosFigmaPanelEnabled()) {
+      next = "dashboard";
+    }
     setTabInternal(this as unknown as Parameters<typeof setTabInternal>[0], next);
     // Auto-load workspaces list when super_admin opens admin tab
     if (next === "admin" && this.pmosAuthUser?.role === "super_admin" && this.pmosWorkspacesList.length === 0 && !this.pmosWorkspacesLoading) {

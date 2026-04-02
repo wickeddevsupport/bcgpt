@@ -1,36 +1,5 @@
 import type { IconName } from "./icons.js";
-
-export const TAB_GROUPS = [
-  // Dedicated chat section at the top.
-  {
-    label: "Chat",
-    tabs: ["chat"],
-  },
-  // Core Wicked OS workspace surface.
-  {
-    label: "Wicked OS",
-    tabs: ["dashboard", "integrations", "figma", "command-center"],
-  },
-  // Agent management.
-  {
-    label: "Agents",
-    tabs: ["models", "agents", "skills", "nodes"],
-  },
-  // Runtime control surfaces.
-  {
-    label: "Control",
-    tabs: ["overview", "channels", "instances", "sessions", "usage", "cron"],
-  },
-  // Low-level operational settings.
-  {
-    label: "Settings",
-    tabs: [
-      "config",
-      "debug",
-      "logs",
-    ],
-  },
-] as const;
+import { isPmosFigmaPanelEnabled } from "./controllers/pmos-figma.ts";
 
 export type Tab =
   | "dashboard"
@@ -55,6 +24,40 @@ export type Tab =
   | "config"
   | "debug"
   | "logs";
+
+export const TAB_GROUPS = [
+  // Dedicated chat section at the top.
+  {
+    label: "Chat",
+    tabs: ["chat"],
+  },
+  // Core Wicked OS workspace surface.
+  {
+    label: "Wicked OS",
+    tabs: (isPmosFigmaPanelEnabled()
+      ? ["dashboard", "integrations", "figma", "command-center"]
+      : ["dashboard", "integrations", "command-center"]) as Tab[],
+  },
+  // Agent management.
+  {
+    label: "Agents",
+    tabs: ["models", "agents", "skills", "nodes"],
+  },
+  // Runtime control surfaces.
+  {
+    label: "Control",
+    tabs: ["overview", "channels", "instances", "sessions", "usage", "cron"],
+  },
+  // Low-level operational settings.
+  {
+    label: "Settings",
+    tabs: [
+      "config",
+      "debug",
+      "logs",
+    ],
+  },
+] as const;
 
 const TAB_PATHS: Record<Tab, string> = {
   dashboard: "/",
@@ -312,4 +315,3 @@ export function subtitleForTab(tab: Tab) {
       return "";
   }
 }
-
