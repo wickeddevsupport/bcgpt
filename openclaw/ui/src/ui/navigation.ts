@@ -313,7 +313,7 @@ export function subtitleForTab(tab: Tab) {
     case "chat":
       return "Direct gateway chat session for quick interventions.";
     case "librechat":
-      return "Embedded LibreChat workspace for richer multimodal and file-heavy conversations.";
+      return "PMOS bot chat powered by LibreChat, with sessions grouped by bot and richer file support.";
     case "config":
       return "Edit ~/.openclaw/openclaw.json safely.";
     case "debug":

@@ -1,10 +1,23 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { CONFIG_DIR, ensureDir } from "../utils.js";
 import { readJsonBody } from "./hooks.js";
 import { resolvePmosSessionFromRequest } from "./pmos-auth.js";
+import { readWorkspaceConfig } from "./workspace-config.js";
 
 const PMOS_LIBRECHAT_PREFIX = "/api/pmos/librechat";
+const LIBRECHAT_ENDPOINT = "wickedops";
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const TOKEN_TTL_MS = 25 * 60 * 1000;
+const DEFAULT_MAX_CONTEXT_TOKENS = 17_100;
+const BOT_STATE_FILENAME = "librechat-bot-state.json";
+const HIDDEN_CONTEXT_OPEN = "<pmos-bot-context>";
+const HIDDEN_CONTEXT_CLOSE = "</pmos-bot-context>";
+const HIDDEN_USER_OPEN = "<pmos-user-message>";
+const HIDDEN_USER_CLOSE = "</pmos-user-message>";
+const LIBRECHAT_BROWSER_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
 
 type CachedLibreChatToken = {
   token: string;
@@ -18,6 +31,56 @@ type LibreChatSessionUser = {
 };
 
 type JsonRecord = Record<string, unknown>;
+
+type WorkspaceBot = {
+  id: string;
+  name: string;
+  description: string | null;
+  avatarUrl: string | null;
+  systemPrompt: string | null;
+  configuredModel: string | null;
+  contextTokens: number | null;
+};
+
+type WorkspaceBotState = {
+  version: 1;
+  bots: Record<string, { model?: string }>;
+  conversations: Record<string, { botId?: string; model?: string }>;
+};
+
+type NormalizedLibreChatAgent = {
+  id: string;
+  name: string;
+  description: string | null;
+  provider: string | null;
+  model: string | null;
+  avatarUrl: string | null;
+  category: string | null;
+};
+
+type NormalizedLibreChatConversation = {
+  conversationId: string;
+  title: string;
+  endpoint: string | null;
+  agentId: string | null;
+  model: string | null;
+  createdAtMs: number | null;
+  updatedAtMs: number | null;
+};
+
+type NormalizedLibreChatMessage = {
+  messageId: string | null;
+  conversationId: string | null;
+  parentMessageId: string | null;
+  role: "user" | "assistant";
+  sender: string | null;
+  model: string | null;
+  timestamp: number;
+  unfinished: boolean;
+  error: boolean;
+  text: string;
+  content: Array<Record<string, unknown>>;
+};
 
 const libreChatTokenCache = new Map<string, CachedLibreChatToken>();
 
@@ -79,6 +142,10 @@ function toNumberValue(value: unknown): number | null {
   return null;
 }
 
+function safeWorkspaceId(workspaceId: string): string {
+  return String(workspaceId).trim() || "default";
+}
+
 function cacheKeyForUser(user: LibreChatSessionUser): string {
   return `${user.workspaceId}:${user.email}`.toLowerCase();
 }
@@ -106,6 +173,315 @@ function clearCachedToken(user: LibreChatSessionUser): void {
   libreChatTokenCache.delete(cacheKeyForUser(user));
 }
 
+function defaultWorkspaceBotState(): WorkspaceBotState {
+  return {
+    version: 1,
+    bots: {},
+    conversations: {},
+  };
+}
+
+function workspaceBotStatePath(workspaceId: string): string {
+  return path.join(CONFIG_DIR, "workspaces", safeWorkspaceId(workspaceId), BOT_STATE_FILENAME);
+}
+
+async function readWorkspaceBotState(workspaceId: string): Promise<WorkspaceBotState> {
+  const filePath = workspaceBotStatePath(workspaceId);
+  try {
+    const raw = await fs.readFile(filePath, "utf-8");
+    const parsed = toRecord(JSON.parse(raw));
+    const next = defaultWorkspaceBotState();
+    const bots = toRecord(parsed?.bots);
+    const conversations = toRecord(parsed?.conversations);
+    if (bots) {
+      for (const [botId, value] of Object.entries(bots)) {
+        const entry = toRecord(value);
+        next.bots[botId] = {
+          model: toStringValue(entry?.model) ?? undefined,
+        };
+      }
+    }
+    if (conversations) {
+      for (const [conversationId, value] of Object.entries(conversations)) {
+        const entry = toRecord(value);
+        next.conversations[conversationId] = {
+          botId: toStringValue(entry?.botId) ?? undefined,
+          model: toStringValue(entry?.model) ?? undefined,
+        };
+      }
+    }
+    return next;
+  } catch {
+    return defaultWorkspaceBotState();
+  }
+}
+
+async function writeWorkspaceBotState(
+  workspaceId: string,
+  next: WorkspaceBotState,
+): Promise<void> {
+  const filePath = workspaceBotStatePath(workspaceId);
+  await ensureDir(path.dirname(filePath));
+  await fs.writeFile(filePath, JSON.stringify(next, null, 2).trimEnd().concat("\n"), "utf-8");
+}
+
+async function updateWorkspaceBotState(
+  workspaceId: string,
+  mutator: (current: WorkspaceBotState) => WorkspaceBotState,
+): Promise<WorkspaceBotState> {
+  const current = await readWorkspaceBotState(workspaceId);
+  const next = mutator(current);
+  await writeWorkspaceBotState(workspaceId, next);
+  return next;
+}
+
+async function rememberWorkspaceBotModel(
+  workspaceId: string,
+  botId: string,
+  model: string,
+): Promise<void> {
+  const trimmedBotId = botId.trim();
+  const trimmedModel = model.trim();
+  if (!trimmedBotId || !trimmedModel) {
+    return;
+  }
+  await updateWorkspaceBotState(workspaceId, (current) => ({
+    ...current,
+    bots: {
+      ...current.bots,
+      [trimmedBotId]: {
+        ...current.bots[trimmedBotId],
+        model: trimmedModel,
+      },
+    },
+  }));
+}
+
+async function rememberConversationBotAssignment(params: {
+  workspaceId: string;
+  conversationId: string;
+  botId: string;
+  model: string;
+}): Promise<void> {
+  const conversationId = params.conversationId.trim();
+  const botId = params.botId.trim();
+  const model = params.model.trim();
+  if (!conversationId || !botId || !model) {
+    return;
+  }
+  await updateWorkspaceBotState(params.workspaceId, (current) => ({
+    ...current,
+    conversations: {
+      ...current.conversations,
+      [conversationId]: {
+        botId,
+        model,
+      },
+    },
+  }));
+}
+
+function resolveFirstString(values: unknown[]): string | null {
+  for (const value of values) {
+    const next = toStringValue(value);
+    if (next) {
+      return next;
+    }
+  }
+  return null;
+}
+
+function extractWorkspaceContextTokens(config: JsonRecord | null): number | null {
+  const agents = toRecord(config?.agents);
+  const defaults = toRecord(agents?.defaults);
+  const sessions = toRecord(config?.sessions);
+  return (
+    toNumberValue(defaults?.contextTokens) ??
+    toNumberValue(sessions?.contextTokens) ??
+    DEFAULT_MAX_CONTEXT_TOKENS
+  );
+}
+
+function extractWorkspaceBots(config: JsonRecord | null): WorkspaceBot[] {
+  const agents = toRecord(config?.agents);
+  const list = Array.isArray(agents?.list) ? agents?.list : [];
+  const defaultContextTokens = extractWorkspaceContextTokens(config);
+  const bots: WorkspaceBot[] = [];
+
+  for (const entry of list) {
+    const record = toRecord(entry);
+    const id = toStringValue(record?.id);
+    if (!id) {
+      continue;
+    }
+    const identity = toRecord(record?.identity);
+    const name =
+      resolveFirstString([identity?.name, record?.name, id]) ??
+      id;
+    const description = resolveFirstString([identity?.theme, record?.purpose, record?.description]);
+    const avatarUrl = resolveFirstString([identity?.avatarUrl, identity?.avatar]);
+    const systemPrompt = resolveFirstString([record?.system, record?.prompt, record?.instructions]);
+    const configuredModel =
+      resolveFirstString([
+        record?.model,
+        toRecord(record?.model)?.primary,
+        toRecord(toRecord(record?.model)?.primary)?.model,
+      ]) ??
+      resolveFirstString([
+        toRecord(toRecord(agents?.defaults)?.model)?.primary,
+        toRecord(agents?.defaults)?.model,
+      ]);
+    bots.push({
+      id,
+      name,
+      description,
+      avatarUrl,
+      systemPrompt,
+      configuredModel,
+      contextTokens: defaultContextTokens,
+    });
+  }
+
+  return bots;
+}
+
+function resolveBotPreferredModel(params: {
+  bot: WorkspaceBot;
+  store: WorkspaceBotState;
+  availableModels: string[];
+}): string | null {
+  const configured = params.bot.configuredModel?.trim() ?? "";
+  const stored = params.store.bots[params.bot.id]?.model?.trim() ?? "";
+  if (stored && params.availableModels.includes(stored)) {
+    return stored;
+  }
+  if (configured && params.availableModels.includes(configured)) {
+    return configured;
+  }
+  return params.availableModels[0] ?? null;
+}
+
+async function loadWorkspaceBotsForLibreChat(
+  workspaceId: string,
+  availableModels: string[],
+): Promise<{ bots: WorkspaceBot[]; store: WorkspaceBotState; agents: NormalizedLibreChatAgent[] }> {
+  const config = toRecord(await readWorkspaceConfig(workspaceId));
+  const bots = extractWorkspaceBots(config);
+  const store = await readWorkspaceBotState(workspaceId);
+  const agents = bots.map((bot) => ({
+    id: bot.id,
+    name: bot.name,
+    description: bot.description,
+    provider: LIBRECHAT_ENDPOINT,
+    model: resolveBotPreferredModel({ bot, store, availableModels }),
+    avatarUrl: bot.avatarUrl,
+    category: "PMOS Bot",
+  }));
+  return { bots, store, agents };
+}
+
+function unwrapPromptText(text: string): string {
+  const trimmed = text.trim();
+  const start = trimmed.indexOf(HIDDEN_USER_OPEN);
+  const end = trimmed.indexOf(HIDDEN_USER_CLOSE);
+  if (start < 0 || end < 0 || end <= start) {
+    return text;
+  }
+  const content = trimmed.slice(start + HIDDEN_USER_OPEN.length, end).trim();
+  return content || text;
+}
+
+function sanitizeMessageContent(
+  content: Array<Record<string, unknown>>,
+  role: "user" | "assistant",
+): Array<Record<string, unknown>> {
+  return content.map((entry) => {
+    if (role !== "user") {
+      return entry;
+    }
+    if (toStringValue(entry.type) !== "text") {
+      return entry;
+    }
+    const text = toStringValue(entry.text);
+    if (!text) {
+      return entry;
+    }
+    return {
+      ...entry,
+      text: unwrapPromptText(text),
+    };
+  });
+}
+
+function buildWrappedBotPrompt(params: {
+  bot: WorkspaceBot;
+  model: string;
+  text: string;
+}): string {
+  const context: JsonRecord = {
+    botId: params.bot.id,
+    botName: params.bot.name,
+    model: params.model,
+  };
+  if (params.bot.description) {
+    context.theme = params.bot.description;
+  }
+  if (params.bot.systemPrompt) {
+    context.instructions = params.bot.systemPrompt;
+  }
+  return [
+    HIDDEN_CONTEXT_OPEN,
+    JSON.stringify(context),
+    HIDDEN_CONTEXT_CLOSE,
+    HIDDEN_USER_OPEN,
+    params.text,
+    HIDDEN_USER_CLOSE,
+  ].join("\n");
+}
+
+function resolveWorkspaceBotById(workspaceBots: WorkspaceBot[], botId: string): WorkspaceBot | null {
+  const trimmed = botId.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return workspaceBots.find((entry) => entry.id === trimmed) ?? null;
+}
+
+function resolveConversationBotId(params: {
+  conversationId: string;
+  store: WorkspaceBotState;
+  fallbackBotId: string | null;
+  knownBotIds: Set<string>;
+}): string | null {
+  const storedBotId = params.store.conversations[params.conversationId]?.botId?.trim() ?? "";
+  if (storedBotId && params.knownBotIds.has(storedBotId)) {
+    return storedBotId;
+  }
+  return params.fallbackBotId;
+}
+
+function resolveConversationModel(params: {
+  conversation: NormalizedLibreChatConversation;
+  botId: string | null;
+  agentsById: Map<string, NormalizedLibreChatAgent>;
+  store: WorkspaceBotState;
+  availableModels: string[];
+}): string | null {
+  const stored = params.store.conversations[params.conversation.conversationId]?.model?.trim() ?? "";
+  if (stored && params.availableModels.includes(stored)) {
+    return stored;
+  }
+  const conversationModel = params.conversation.model?.trim() ?? "";
+  if (conversationModel && params.availableModels.includes(conversationModel)) {
+    return conversationModel;
+  }
+  const agentModel = params.botId ? params.agentsById.get(params.botId)?.model?.trim() ?? "" : "";
+  if (agentModel && params.availableModels.includes(agentModel)) {
+    return agentModel;
+  }
+  return params.availableModels[0] ?? null;
+}
+
 async function loginToLibreChat(user: LibreChatSessionUser): Promise<string> {
   const baseUrl = resolveLibreChatBaseUrl();
   const password = resolveLibreChatAutologinPassword();
@@ -119,8 +495,10 @@ async function loginToLibreChat(user: LibreChatSessionUser): Promise<string> {
   const response = await fetch(`${baseUrl}/api/auth/login`, {
     method: "POST",
     headers: {
-      "content-type": "application/json",
       accept: "application/json",
+      "content-type": "application/json",
+      "user-agent": LIBRECHAT_BROWSER_USER_AGENT,
+      "accept-language": "en-US,en;q=0.9",
     },
     body: JSON.stringify({
       email: user.email,
@@ -157,7 +535,7 @@ async function getLibreChatToken(
 
 async function libreChatRequest(
   user: LibreChatSessionUser,
-  path: string,
+  pathName: string,
   init: RequestInit = {},
   opts?: { retryOnUnauthorized?: boolean },
 ): Promise<Response> {
@@ -167,10 +545,12 @@ async function libreChatRequest(
   }
   const retryOnUnauthorized = opts?.retryOnUnauthorized !== false;
   const token = await getLibreChatToken(user);
-  const response = await fetch(`${baseUrl}${path}`, {
+  const response = await fetch(`${baseUrl}${pathName}`, {
     ...init,
     headers: {
       accept: "application/json",
+      "accept-language": "en-US,en;q=0.9",
+      "user-agent": LIBRECHAT_BROWSER_USER_AGENT,
       ...(init.body ? { "content-type": "application/json" } : {}),
       ...(init.headers ?? {}),
       authorization: `Bearer ${token}`,
@@ -179,10 +559,12 @@ async function libreChatRequest(
   if (response.status === 401 && retryOnUnauthorized) {
     clearCachedToken(user);
     const freshToken = await getLibreChatToken(user, { forceRefresh: true });
-    return fetch(`${baseUrl}${path}`, {
+    return fetch(`${baseUrl}${pathName}`, {
       ...init,
       headers: {
         accept: "application/json",
+        "accept-language": "en-US,en;q=0.9",
+        "user-agent": LIBRECHAT_BROWSER_USER_AGENT,
         ...(init.body ? { "content-type": "application/json" } : {}),
         ...(init.headers ?? {}),
         authorization: `Bearer ${freshToken}`,
@@ -196,58 +578,18 @@ async function readJsonResponse(response: Response): Promise<JsonRecord | null> 
   return toRecord(await response.json().catch(() => null));
 }
 
-type NormalizedLibreChatAgent = {
-  id: string;
-  name: string;
-  description: string | null;
-  provider: string | null;
-  model: string | null;
-  avatarUrl: string | null;
-  category: string | null;
-};
-
-type NormalizedLibreChatConversation = {
-  conversationId: string;
-  title: string;
-  endpoint: string | null;
-  agentId: string | null;
-  model: string | null;
-  createdAtMs: number | null;
-  updatedAtMs: number | null;
-};
-
-type NormalizedLibreChatMessage = {
-  messageId: string | null;
-  conversationId: string | null;
-  parentMessageId: string | null;
-  role: "user" | "assistant";
-  sender: string | null;
-  model: string | null;
-  timestamp: number;
-  unfinished: boolean;
-  error: boolean;
-  text: string;
-  content: Array<Record<string, unknown>>;
-};
-
-function normalizeAgent(agent: JsonRecord): NormalizedLibreChatAgent | null {
-  const id = toStringValue(agent.id);
-  if (!id) {
-    return null;
+async function fetchLibreChatAvailableModels(user: LibreChatSessionUser): Promise<string[]> {
+  const response = await libreChatRequest(user, "/api/models");
+  if (!response.ok) {
+    throw new Error(`LibreChat models request failed (${response.status})`);
   }
-  const avatar = toRecord(agent.avatar);
-  return {
-    id,
-    name: toStringValue(agent.name) || id,
-    description: toStringValue(agent.description),
-    provider: toStringValue(agent.provider),
-    model:
-      toStringValue(agent.model) ||
-      toStringValue(toRecord(agent.model_parameters)?.model) ||
-      null,
-    avatarUrl: toStringValue(avatar?.filepath),
-    category: toStringValue(agent.category),
-  };
+  const payload = toRecord(await response.json().catch(() => null));
+  const models = Array.isArray(payload?.[LIBRECHAT_ENDPOINT])
+    ? payload?.[LIBRECHAT_ENDPOINT]
+    : [];
+  return models
+    .map((entry) => toStringValue(entry))
+    .filter((entry): entry is string => Boolean(entry));
 }
 
 function normalizeConversation(conversation: JsonRecord): NormalizedLibreChatConversation | null {
@@ -268,7 +610,9 @@ function normalizeConversation(conversation: JsonRecord): NormalizedLibreChatCon
 
 function normalizeMessageContent(message: JsonRecord): Array<Record<string, unknown>> {
   const content = Array.isArray(message.content)
-    ? message.content.filter((entry) => toRecord(entry) !== null).map((entry) => entry as Record<string, unknown>)
+    ? message.content
+        .filter((entry) => toRecord(entry) !== null)
+        .map((entry) => entry as Record<string, unknown>)
     : [];
   if (content.length > 0) {
     return content;
@@ -282,6 +626,9 @@ function normalizeMessageContent(message: JsonRecord): Array<Record<string, unkn
 
 function normalizeMessage(message: JsonRecord): NormalizedLibreChatMessage | null {
   const role = message.isCreatedByUser === true ? "user" : "assistant";
+  const rawText = toStringValue(message.text) || "";
+  const displayText = role === "user" ? unwrapPromptText(rawText) : rawText;
+  const content = sanitizeMessageContent(normalizeMessageContent(message), role);
   return {
     messageId: toStringValue(message.messageId),
     conversationId: toStringValue(message.conversationId),
@@ -292,35 +639,21 @@ function normalizeMessage(message: JsonRecord): NormalizedLibreChatMessage | nul
     timestamp: toNumberValue(message.createdAt) ?? Date.now(),
     unfinished: message.unfinished === true,
     error: message.error === true,
-    text: toStringValue(message.text) || "",
-    content: normalizeMessageContent(message),
+    text: displayText,
+    content: content.length > 0 ? content : displayText ? [{ type: "text", text: displayText }] : [],
   };
 }
 
 async function fetchLibreChatBootstrap(user: LibreChatSessionUser) {
-  const [agentsResponse, convosResponse] = await Promise.all([
-    libreChatRequest(user, "/api/agents?limit=200"),
+  const [availableModels, convosResponse] = await Promise.all([
+    fetchLibreChatAvailableModels(user),
     libreChatRequest(user, "/api/convos?limit=200&sortBy=updatedAt&sortDirection=desc"),
   ]);
-  if (!agentsResponse.ok) {
-    throw new Error(`LibreChat agents request failed (${agentsResponse.status})`);
-  }
   if (!convosResponse.ok) {
     throw new Error(`LibreChat conversations request failed (${convosResponse.status})`);
   }
 
-  const agentsJson = await readJsonResponse(agentsResponse);
   const convosJson = await readJsonResponse(convosResponse);
-
-  const rawAgents = Array.isArray(agentsJson?.data)
-    ? agentsJson?.data
-    : Array.isArray(agentsJson)
-      ? agentsJson
-      : [];
-  const agents = rawAgents
-    .map((entry) => normalizeAgent(toRecord(entry) ?? {}))
-    .filter((entry): entry is NormalizedLibreChatAgent => entry !== null);
-
   const minimalConversations = Array.isArray(convosJson?.conversations)
     ? convosJson.conversations
     : [];
@@ -346,29 +679,54 @@ async function fetchLibreChatBootstrap(user: LibreChatSessionUser) {
     }),
   );
 
+  const { store, agents } = await loadWorkspaceBotsForLibreChat(user.workspaceId, availableModels);
+  const fallbackBotId = agents.find((entry) => entry.id === "assistant")?.id ?? agents[0]?.id ?? null;
+  const knownBotIds = new Set(agents.map((entry) => entry.id));
+  const agentsById = new Map(agents.map((entry) => [entry.id, entry]));
+
+  const conversations = detailedConversations
+    .filter((entry): entry is NormalizedLibreChatConversation => entry !== null)
+    .map((conversation) => {
+      const botId = resolveConversationBotId({
+        conversationId: conversation.conversationId,
+        store,
+        fallbackBotId,
+        knownBotIds,
+      });
+      return {
+        ...conversation,
+        agentId: botId,
+        model: resolveConversationModel({
+          conversation,
+          botId,
+          agentsById,
+          store,
+          availableModels,
+        }),
+      };
+    });
+
   return {
+    availableModels,
     agents,
-    conversations: detailedConversations.filter(
-      (entry): entry is NormalizedLibreChatConversation => entry !== null,
-    ),
+    conversations,
   };
 }
 
 async function fetchLibreChatMessages(user: LibreChatSessionUser, conversationId: string) {
   const response = await libreChatRequest(
     user,
-    `/api/messages/${encodeURIComponent(conversationId)}`,
+    `/api/messages?conversationId=${encodeURIComponent(conversationId)}`,
   );
   if (!response.ok) {
     throw new Error(`LibreChat messages request failed (${response.status})`);
   }
-  const payload = await response.json().catch(() => []);
-  const messages = Array.isArray(payload) ? payload : [];
+  const payload = await readJsonResponse(response);
+  const messages = Array.isArray(payload?.messages) ? payload.messages : [];
   const normalized = messages
     .map((entry) => normalizeMessage(toRecord(entry) ?? {}))
     .filter((entry): entry is NormalizedLibreChatMessage => entry !== null);
-  const lastMessage =
-    normalized.length > 0 ? normalized[normalized.length - 1] : null;
+  const lastMessage = normalized.length > 0 ? normalized[normalized.length - 1] : null;
   return {
     messages: normalized,
     parentMessageId: lastMessage?.messageId ?? null,
@@ -379,7 +737,7 @@ async function sendLibreChatMessage(
   user: LibreChatSessionUser,
   body: JsonRecord,
 ) {
-  const response = await libreChatRequest(user, "/api/agents/chat", {
+  const response = await libreChatRequest(user, `/api/agents/chat/${LIBRECHAT_ENDPOINT}`, {
     method: "POST",
     body: JSON.stringify(body),
   });
@@ -517,11 +875,12 @@ export async function handlePmosLibreChatHttp(
         return true;
       }
       const body = toRecord(bodyResult.value) ?? {};
-      const agentId = toStringValue(body.agentId);
+      const botId = toStringValue(body.agentId);
       const text = toStringValue(body.text) || "";
+      const requestedModel = toStringValue(body.model);
       const conversationId = toStringValue(body.conversationId);
       const parentMessageId = toStringValue(body.parentMessageId);
-      if (!agentId) {
+      if (!botId) {
         sendJson(res, 400, { ok: false, error: "agentId is required" });
         return true;
       }
@@ -529,14 +888,54 @@ export async function handlePmosLibreChatHttp(
         sendJson(res, 400, { ok: false, error: "text is required" });
         return true;
       }
+
+      const availableModels = await fetchLibreChatAvailableModels(user);
+      const { bots, store } = await loadWorkspaceBotsForLibreChat(user.workspaceId, availableModels);
+      const bot = resolveWorkspaceBotById(bots, botId);
+      if (!bot) {
+        sendJson(res, 404, { ok: false, error: `Unknown PMOS bot "${botId}".` });
+        return true;
+      }
+      const preferredModel =
+        (requestedModel && availableModels.includes(requestedModel) ? requestedModel : null) ??
+        store.conversations[conversationId ?? ""]?.model ??
+        resolveBotPreferredModel({ bot, store, availableModels });
+      if (!preferredModel) {
+        sendJson(res, 503, { ok: false, error: "No LibreChat models are available for Wicked Ops." });
+        return true;
+      }
+
       const result = await sendLibreChatMessage(user, {
-        endpoint: "agents",
-        agent_id: agentId,
-        text,
+        endpoint: LIBRECHAT_ENDPOINT,
+        endpointType: "custom",
+        model: preferredModel,
+        title: "New Chat",
+        resendFiles: true,
+        maxContextTokens: bot.contextTokens ?? DEFAULT_MAX_CONTEXT_TOKENS,
+        text: buildWrappedBotPrompt({
+          bot,
+          model: preferredModel,
+          text,
+        }),
         ...(conversationId ? { conversationId } : {}),
         ...(parentMessageId ? { parentMessageId } : {}),
       });
-      sendJson(res, 200, { ok: true, ...result });
+      const resolvedConversationId = toStringValue(result.conversationId);
+      await rememberWorkspaceBotModel(user.workspaceId, bot.id, preferredModel);
+      if (resolvedConversationId) {
+        await rememberConversationBotAssignment({
+          workspaceId: user.workspaceId,
+          conversationId: resolvedConversationId,
+          botId: bot.id,
+          model: preferredModel,
+        });
+      }
+      sendJson(res, 200, {
+        ok: true,
+        botId: bot.id,
+        model: preferredModel,
+        ...result,
+      });
       return true;
     }
 

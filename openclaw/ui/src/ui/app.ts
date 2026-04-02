@@ -318,6 +318,7 @@ import {
   isPmosLibreChatEnabled,
   loadPmosLibreChatBootstrap,
   selectPmosLibreChatAgent,
+  selectPmosLibreChatAgentModel,
   selectPmosLibreChatConversation,
   sendPmosLibreChatMessage,
   startPmosLibreChatConversation,
@@ -633,6 +634,7 @@ export class OpenClawApp extends LitElement {
   @state() libreChatError: string | null = null;
   @state() libreChatUrl: string | null = null;
   @state() libreChatAutologinConfigured = false;
+  @state() libreChatAvailableModels: string[] = [];
   @state() libreChatAgents: import("./controllers/pmos-librechat.ts").PmosLibreChatAgent[] = [];
   @state() libreChatConversations: import("./controllers/pmos-librechat.ts").PmosLibreChatConversation[] = [];
   @state() libreChatMessages: import("./controllers/pmos-librechat.ts").PmosLibreChatMessage[] = [];
@@ -1188,6 +1190,7 @@ export class OpenClawApp extends LitElement {
     clearPmosLibreChatStatusPolling(this);
     await logoutPmosAuth(this);
     this.libreChatError = null;
+    this.libreChatAvailableModels = [];
     this.libreChatAgents = [];
     this.libreChatConversations = [];
     this.libreChatMessages = [];
@@ -1225,6 +1228,10 @@ export class OpenClawApp extends LitElement {
 
   handleLibreChatSelectAgent(agentId: string) {
     selectPmosLibreChatAgent(this, agentId);
+  }
+
+  handleLibreChatSelectModel(agentId: string, model: string) {
+    selectPmosLibreChatAgentModel(this, agentId, model);
   }
 
   handleLibreChatToggleAgent(agentId: string) {

@@ -1,16 +1,15 @@
 import { html, nothing } from "lit";
 import { ref } from "lit/directives/ref.js";
 import { repeat } from "lit/directives/repeat.js";
-import {
-  renderMessageGroup,
-} from "../chat/grouped-render.ts";
+import { renderMessageGroup } from "../chat/grouped-render.ts";
 import { normalizeMessage, normalizeRoleForGrouping } from "../chat/message-normalizer.ts";
 import type { ChatItem, MessageGroup } from "../types/chat-types.ts";
-import type {
-  PmosLibreChatAgent,
-  PmosLibreChatConversation,
-  PmosLibreChatMessage,
+import {
+  type PmosLibreChatAgent,
+  type PmosLibreChatConversation,
+  type PmosLibreChatMessage,
 } from "../controllers/pmos-librechat.ts";
+import { icons } from "../icons.ts";
 
 export type LibreChatProps = {
   url: string | null;
@@ -18,6 +17,7 @@ export type LibreChatProps = {
   error: string | null;
   connected: boolean;
   autologinConfigured: boolean;
+  availableModels: string[];
   agents: PmosLibreChatAgent[];
   conversations: PmosLibreChatConversation[];
   messages: PmosLibreChatMessage[];
@@ -31,6 +31,7 @@ export type LibreChatProps = {
   onOpenChat: () => void;
   onDraftChange: (next: string) => void;
   onSelectAgent: (agentId: string) => void;
+  onSelectModel: (agentId: string, model: string) => void;
   onToggleAgent: (agentId: string) => void;
   onNewConversation: (agentId: string) => void;
   onSelectConversation: (conversationId: string) => void;
@@ -102,25 +103,38 @@ function resolveMessages(props: LibreChatProps): MessageLike[] {
   return props.streamingMessage ? [...history, props.streamingMessage] : history;
 }
 
+function selectedConversationForProps(props: LibreChatProps): PmosLibreChatConversation | null {
+  const selectedConversationId = props.selectedConversationId?.trim() ?? "";
+  if (!selectedConversationId) {
+    return null;
+  }
+  return (
+    props.conversations.find(
+      (conversation) => conversation.conversationId === selectedConversationId,
+    ) ?? null
+  );
+}
+
+function modelLabel(value: string): string {
+  return value
+    .split("/")
+    .filter(Boolean)
+    .slice(-2)
+    .join(" / ");
+}
+
 function renderEmptyState(props: LibreChatProps) {
   return html`
-    <section class="card" style="padding: 32px 24px; text-align: center;">
-      <div style="font-weight: 700; font-size: 24px; letter-spacing: -0.03em; margin-bottom: 8px;">
-        LibreChat bots are not ready yet.
+    <section class="card" style="padding:32px 24px; text-align:center;">
+      <div style="font-weight:700; font-size:24px; letter-spacing:-0.03em; margin-bottom:8px;">
+        PMOS bots are not ready yet.
       </div>
-      <div class="muted" style="max-width: 640px; margin: 0 auto 18px;">
+      <div class="muted" style="max-width:680px; margin:0 auto 18px;">
         ${props.autologinConfigured
-          ? "No bots were returned for this account yet. Create or share agents in LibreChat, then refresh this tab."
-          : "PMOS can see the LibreChat URL, but auto-login is not configured yet. Set PMOS_LIBRECHAT_AUTOLOGIN_PASSWORD on the deployment so this tab can sign users in automatically."}
+          ? "This workspace does not have any PMOS bots exposed to the LibreChat bridge yet. Refresh once the workspace config is present."
+          : "The LibreChat bridge is up, but PMOS auto-login is not configured yet. Add PMOS_LIBRECHAT_AUTOLOGIN_PASSWORD so users land in chat without a second sign-in."}
       </div>
       <div style="display:flex; align-items:center; justify-content:center; gap:8px; flex-wrap:wrap;">
-        ${props.url
-          ? html`
-              <a class="btn btn--secondary" href=${props.url} target="_blank" rel="noreferrer">
-                Open LibreChat
-              </a>
-            `
-          : nothing}
         <button class="btn btn--secondary" @click=${() => props.onOpenChat()}>
           Open PMOS Chat
         </button>
@@ -132,8 +146,47 @@ function renderEmptyState(props: LibreChatProps) {
   `;
 }
 
+function renderModelSelect(
+  props: LibreChatProps,
+  selectedAgent: PmosLibreChatAgent | null,
+  selectedConversation: PmosLibreChatConversation | null,
+) {
+  const activeModel = selectedConversation?.model ?? selectedAgent?.model ?? props.availableModels[0] ?? "";
+  const disabled = !selectedAgent || props.availableModels.length === 0 || Boolean(selectedConversation);
+  return html`
+    <label style="display:flex; flex-direction:column; gap:6px; min-width:220px;">
+      <span class="muted" style="font-size:11px; text-transform:uppercase; letter-spacing:0.12em;">
+        Model
+      </span>
+      <select
+        .value=${activeModel}
+        ?disabled=${disabled}
+        title=${selectedConversation
+          ? "Start a new session to switch models for this bot."
+          : "Choose the model used for the next session under this bot."}
+        style="min-height:40px; padding:0 12px; border-radius:12px; border:1px solid var(--border); background:var(--panel); color:var(--text);"
+        @change=${(event: Event) => {
+          const next = (event.target as HTMLSelectElement).value;
+          if (selectedAgent && next) {
+            props.onSelectModel(selectedAgent.id, next);
+          }
+        }}
+      >
+        ${props.availableModels.length === 0
+          ? html`<option value="">No models available</option>`
+          : repeat(
+              props.availableModels,
+              (model) => model,
+              (model) => html`<option value=${model}>${model}</option>`,
+            )}
+      </select>
+    </label>
+  `;
+}
+
 export function renderLibreChat(props: LibreChatProps) {
   const selectedAgent = props.agents.find((agent) => agent.id === props.selectedAgentId) ?? null;
+  const selectedConversation = selectedConversationForProps(props);
   const messages = resolveMessages(props);
   const groupedMessages = groupMessages(messages);
   const conversationsByAgent = new Map<string, PmosLibreChatConversation[]>();
@@ -145,34 +198,34 @@ export function renderLibreChat(props: LibreChatProps) {
     );
   }
 
+  const canCompose = Boolean(selectedAgent) && props.availableModels.length > 0;
+
   return html`
     <div style="display:flex; flex-direction:column; gap:12px; min-height:calc(100dvh - var(--shell-topbar-height, 56px) - 28px);">
-      <section class="card" style="padding:12px 14px; flex-shrink:0;">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; min-width:0; flex:1 1 420px;">
-            <div style="font-size:22px; font-weight:700; letter-spacing:-0.03em; line-height:1;">
-              LibreChat
+      <section class="card" style="padding:14px 16px; flex-shrink:0;">
+        <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+          <div style="display:flex; flex-direction:column; gap:8px; min-width:0; flex:1 1 540px;">
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <div style="font-size:22px; font-weight:700; letter-spacing:-0.03em; line-height:1;">
+                PMOS Bots
+              </div>
+              <span class="chip chip-ok">LibreChat Runtime</span>
+              ${props.connected
+                ? html`<span class="chip">Gateway Connected</span>`
+                : html`<span class="chip chip-warn">Gateway Offline</span>`}
+              ${selectedAgent ? html`<span class="chip">${selectedAgent.name}</span>` : nothing}
+              ${selectedConversation?.model
+                ? html`<span class="chip">${modelLabel(selectedConversation.model)}</span>`
+                : selectedAgent?.model
+                  ? html`<span class="chip">${modelLabel(selectedAgent.model)}</span>`
+                  : nothing}
             </div>
-            <span class="chip chip-ok">Native Bot Mode</span>
-            ${props.connected ? html`<span class="chip">Gateway Connected</span>` : html`<span class="chip chip-warn">Gateway Offline</span>`}
-            ${selectedAgent
-              ? html`<span class="chip">${selectedAgent.name}</span>`
-              : html`<span class="chip chip-warn">No Bot Selected</span>`}
-            ${selectedAgent?.model ? html`<span class="chip">${selectedAgent.model}</span>` : nothing}
+            <div class="muted" style="font-size:13px; max-width:840px;">
+              This tab now uses Diwakar's PMOS bots and stores sessions under each bot on the left.
+              Model choice happens per bot for new sessions, while active sessions stay pinned to the model they started with.
+            </div>
           </div>
-          <div style="display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap;">
-            ${props.url
-              ? html`
-                  <a
-                    class="btn btn--secondary"
-                    href=${props.url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Open Full LibreChat
-                  </a>
-                `
-              : nothing}
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
             <button class="btn btn--secondary" @click=${() => props.onOpenChat()}>
               Open PMOS Chat
             </button>
@@ -181,14 +234,16 @@ export function renderLibreChat(props: LibreChatProps) {
             </button>
           </div>
         </div>
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:10px;">
-          <div class="muted" style="font-size:12px; flex:1 1 540px;">
-            This tab uses LibreChat agents as the backend, but keeps a PMOS-style shell with bot-grouped sessions and no separate login step.
-          </div>
-          <div class="mono" style="font-size:11px; opacity:0.75; max-width:420px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title=${props.url ?? ""}>
-            ${props.url ?? "LibreChat URL unavailable"}
-          </div>
-        </div>
+        ${!props.autologinConfigured
+          ? html`
+              <div
+                class="muted"
+                style="margin-top:10px; padding:10px 12px; border-radius:12px; border:1px solid rgba(220, 170, 60, 0.25); background:rgba(220, 170, 60, 0.08);"
+              >
+                Auto-login is not configured yet, so this workspace may still fall back to a second LibreChat sign-in.
+              </div>
+            `
+          : nothing}
       </section>
 
       ${props.error
@@ -203,14 +258,14 @@ export function renderLibreChat(props: LibreChatProps) {
       ${props.agents.length === 0
         ? renderEmptyState(props)
         : html`
-            <div style="display:grid; grid-template-columns:minmax(260px, 320px) minmax(0, 1fr); gap:12px; min-height:0; flex:1 1 auto;">
+            <div style="display:grid; grid-template-columns:minmax(280px, 340px) minmax(0, 1fr); gap:12px; min-height:0; flex:1 1 auto;">
               <section class="card" style="display:flex; flex-direction:column; min-height:0; overflow:hidden;">
                 <div style="padding:14px 14px 10px; border-bottom:1px solid var(--border);">
                   <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.12em; opacity:0.72;">
                     Bots
                   </div>
                   <div class="muted" style="font-size:12px; margin-top:6px;">
-                    Sessions are grouped by the LibreChat bot that owns them.
+                    Threads stay grouped under each PMOS bot so parallel work is easier to manage.
                   </div>
                 </div>
                 <div style="padding:10px; overflow:auto; display:flex; flex-direction:column; gap:10px;">
@@ -222,27 +277,53 @@ export function renderLibreChat(props: LibreChatProps) {
                       const isOpen = props.openAgentIds.includes(agent.id);
                       const isSelected = props.selectedAgentId === agent.id;
                       return html`
-                        <div class="card" style="padding:10px; background:rgba(255,255,255,0.02); border-color:${isSelected ? "rgba(94,164,255,0.35)" : "var(--border)"};">
+                        <article
+                          class="card"
+                          style="padding:12px; border-color:${isSelected ? "rgba(94,164,255,0.35)" : "var(--border)"}; background:${isSelected ? "rgba(94,164,255,0.05)" : "rgba(255,255,255,0.02)"};"
+                        >
                           <button
                             class="btn btn--ghost"
-                            style="width:100%; justify-content:space-between; padding:0; background:none; border:none;"
+                            style="width:100%; justify-content:space-between; padding:0; background:none; border:none; gap:12px;"
                             @click=${() => {
                               props.onSelectAgent(agent.id);
                               props.onToggleAgent(agent.id);
                             }}
                           >
-                            <span style="display:flex; flex-direction:column; align-items:flex-start; gap:2px; text-align:left;">
-                              <span style="font-weight:700;">${agent.name}</span>
-                              <span class="muted" style="font-size:12px;">
-                                ${agent.model || agent.provider || "LibreChat agent"}
+                            <span style="display:flex; flex-direction:column; align-items:flex-start; gap:4px; min-width:0; text-align:left;">
+                              <span style="font-weight:700; display:flex; align-items:center; gap:8px; min-width:0;">
+                                <span
+                                  style="display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:999px; background:rgba(94,164,255,0.14); color:var(--accent, currentColor);"
+                                >
+                                  ${icons.brain}
+                                </span>
+                                <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                                  ${agent.name}
+                                </span>
+                              </span>
+                              <span class="muted" style="font-size:12px; line-height:1.35;">
+                                ${agent.description ?? "PMOS workspace bot"}
+                              </span>
+                              <span class="muted" style="font-size:11px;">
+                                ${(agent.model && modelLabel(agent.model)) || "Choose a model for the next session"}
                               </span>
                             </span>
-                            <span class="chip">${conversations.length}</span>
+                            <span style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+                              <span class="chip">${conversations.length}</span>
+                              <span
+                                style="display:inline-flex; width:18px; height:18px; transform:${isOpen ? "rotate(180deg)" : "rotate(0deg)"}; transition:transform 0.18s ease;"
+                              >
+                                ${icons.arrowDown}
+                              </span>
+                            </span>
                           </button>
 
-                          <div style="display:flex; align-items:center; gap:8px; margin-top:10px;">
-                            <button class="btn btn--secondary" style="flex:1 1 auto;" @click=${() => props.onNewConversation(agent.id)}>
-                              New Chat
+                          <div style="display:flex; gap:8px; margin-top:10px;">
+                            <button
+                              class="btn btn--secondary"
+                              style="flex:1 1 auto;"
+                              @click=${() => props.onNewConversation(agent.id)}
+                            >
+                              New Session
                             </button>
                           </div>
 
@@ -251,7 +332,7 @@ export function renderLibreChat(props: LibreChatProps) {
                                 <div style="display:flex; flex-direction:column; gap:6px; margin-top:10px;">
                                   ${conversations.length === 0
                                     ? html`
-                                        <div class="muted" style="font-size:12px; padding:6px 2px;">
+                                        <div class="muted" style="font-size:12px; padding:8px 2px;">
                                           No sessions yet for this bot.
                                         </div>
                                       `
@@ -265,9 +346,9 @@ export function renderLibreChat(props: LibreChatProps) {
                                           return html`
                                             <button
                                               class="btn btn--ghost"
-                                              style="width:100%; justify-content:flex-start; text-align:left; padding:10px 10px; border:1px solid ${active ? "rgba(94,164,255,0.35)" : "var(--border)"}; background:${active ? "rgba(94,164,255,0.08)" : "transparent"};"
+                                              style="width:100%; justify-content:flex-start; text-align:left; padding:10px; border:1px solid ${active ? "rgba(94,164,255,0.35)" : "var(--border)"}; background:${active ? "rgba(94,164,255,0.08)" : "transparent"};"
                                               @click=${() =>
-                                                void props.onSelectConversation(
+                                                props.onSelectConversation(
                                                   conversation.conversationId,
                                                 )}
                                             >
@@ -275,8 +356,10 @@ export function renderLibreChat(props: LibreChatProps) {
                                                 <span style="font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%;">
                                                   ${conversation.title || "New Chat"}
                                                 </span>
-                                                  <span class="muted" style="font-size:11px;">
-                                                  ${formatRelativeTime(
+                                                <span class="muted" style="font-size:11px;">
+                                                  ${conversation.model
+                                                    ? `${modelLabel(conversation.model)} • `
+                                                    : ""}${formatRelativeTime(
                                                     conversation.updatedAtMs ??
                                                       conversation.createdAtMs ??
                                                       Date.now(),
@@ -290,7 +373,7 @@ export function renderLibreChat(props: LibreChatProps) {
                                 </div>
                               `
                             : nothing}
-                        </div>
+                        </article>
                       `;
                     },
                   )}
@@ -298,39 +381,54 @@ export function renderLibreChat(props: LibreChatProps) {
               </section>
 
               <section class="card" style="display:flex; flex-direction:column; min-height:0; overflow:hidden;">
-                <div style="padding:14px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-                  <div style="display:flex; flex-direction:column; gap:4px;">
+                <div style="padding:16px; border-bottom:1px solid var(--border); display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+                  <div style="display:flex; flex-direction:column; gap:6px; min-width:0; flex:1 1 320px;">
                     <div style="font-weight:700; font-size:18px;">
                       ${selectedAgent?.name ?? "Select a Bot"}
                     </div>
                     <div class="muted" style="font-size:12px;">
-                      ${props.selectedConversationId
-                        ? props.conversations.find(
-                            (conversation) =>
-                              conversation.conversationId === props.selectedConversationId,
-                          )?.title ?? "Active conversation"
-                        : "Start a new conversation or pick a session from the left rail."}
+                      ${selectedConversation
+                        ? selectedConversation.title || "Active session"
+                        : selectedAgent
+                          ? "Choose the model for the next session, or start chatting right away."
+                          : "Pick a bot from the left panel to start a session."}
                     </div>
+                    ${selectedConversation
+                      ? html`
+                          <div class="muted" style="font-size:12px;">
+                            This session is pinned to
+                            <strong>${modelLabel(selectedConversation.model ?? selectedAgent?.model ?? "") || "its original model"}</strong>.
+                            Start a new session to switch models.
+                          </div>
+                        `
+                      : nothing}
                   </div>
-                  ${selectedAgent?.description
-                    ? html`
-                        <div class="muted" style="font-size:12px; max-width:420px;">
-                          ${selectedAgent.description}
-                        </div>
-                      `
-                    : nothing}
+
+                  <div style="display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap;">
+                    ${renderModelSelect(props, selectedAgent, selectedConversation)}
+                    ${selectedAgent
+                      ? html`
+                          <button
+                            class="btn btn--secondary"
+                            @click=${() => props.onNewConversation(selectedAgent.id)}
+                          >
+                            New Session
+                          </button>
+                        `
+                      : nothing}
+                  </div>
                 </div>
 
                 <div style="flex:1 1 auto; min-height:0; overflow:auto; padding:18px 18px 12px; display:flex; flex-direction:column; gap:12px;">
                   ${groupedMessages.length === 0
                     ? html`
-                        <div style="margin:auto; max-width:520px; text-align:center;">
-                          <div style="font-size:22px; font-weight:700; letter-spacing:-0.03em; margin-bottom:8px;">
+                        <div style="margin:auto; max-width:560px; text-align:center;">
+                          <div style="font-size:24px; font-weight:700; letter-spacing:-0.03em; margin-bottom:8px;">
                             ${selectedAgent ? `Start with ${selectedAgent.name}` : "Choose a bot"}
                           </div>
                           <div class="muted">
                             ${selectedAgent
-                              ? "New sessions stay grouped under this bot on the left, so you can keep parallel threads without losing the PMOS shell."
+                              ? "This chat keeps PMOS bot grouping on the left while using LibreChat for stronger file and multimodal handling behind the scenes."
                               : "Pick a bot from the left panel to begin."}
                           </div>
                         </div>
@@ -342,7 +440,7 @@ export function renderLibreChat(props: LibreChatProps) {
                           renderMessageGroup(group, {
                             onOpenSidebar: undefined,
                             showReasoning: true,
-                            assistantName: selectedAgent?.name ?? "LibreChat",
+                            assistantName: selectedAgent?.name ?? "PMOS Bot",
                             assistantAvatar: selectedAgent?.avatarUrl ?? null,
                             contextWindow: null,
                           }),
@@ -358,7 +456,7 @@ export function renderLibreChat(props: LibreChatProps) {
                         }
                       })}
                       .value=${props.draft}
-                      ?disabled=${!selectedAgent || props.loading}
+                      ?disabled=${!canCompose || props.loading}
                       rows="1"
                       placeholder=${selectedAgent
                         ? `Message ${selectedAgent.name}...`
@@ -373,10 +471,10 @@ export function renderLibreChat(props: LibreChatProps) {
                         if (event.key === "Enter" && !event.shiftKey) {
                           event.preventDefault();
                           if (props.sending) {
-                            void props.onAbort();
+                            props.onAbort();
                             return;
                           }
-                          void props.onSend();
+                          props.onSend();
                         }
                       }}
                     ></textarea>
@@ -385,22 +483,26 @@ export function renderLibreChat(props: LibreChatProps) {
                       <div class="muted" style="font-size:12px;">
                         ${props.sending
                           ? "LibreChat is responding. Press Stop to cancel the current run."
-                          : selectedAgent
-                            ? "Sessions are persisted in LibreChat and grouped by this bot."
-                            : "Select a bot to unlock the composer."}
+                          : !selectedAgent
+                            ? "Select a bot to unlock the composer."
+                            : props.availableModels.length === 0
+                              ? "No LibreChat models are available for this workspace yet."
+                              : selectedConversation
+                                ? "You are continuing an existing bot session."
+                                : "Your next message will start a new session for this bot using the selected model."}
                       </div>
                       <div style="display:flex; align-items:center; gap:8px;">
                         ${props.sending
                           ? html`
-                              <button class="btn btn--secondary" @click=${() => void props.onAbort()}>
+                              <button class="btn btn--secondary" @click=${() => props.onAbort()}>
                                 Stop
                               </button>
                             `
                           : nothing}
                         <button
                           class="btn btn--primary"
-                          ?disabled=${!selectedAgent || !props.draft.trim() || props.loading}
-                          @click=${() => void props.onSend()}
+                          ?disabled=${!canCompose || !props.draft.trim() || props.loading}
+                          @click=${() => props.onSend()}
                         >
                           ${props.sending ? "Sending..." : "Send"}
                         </button>

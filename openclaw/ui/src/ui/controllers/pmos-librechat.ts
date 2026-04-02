@@ -44,6 +44,7 @@ type PmosLibreChatBootstrapResponse = {
   ok: boolean;
   url?: string | null;
   autologinConfigured?: boolean;
+  availableModels?: string[];
   agents?: PmosLibreChatAgent[];
   conversations?: PmosLibreChatConversation[];
   error?: string;
@@ -71,6 +72,8 @@ type PmosLibreChatSendResponse = {
   streamId?: string | null;
   conversationId?: string | null;
   status?: string | null;
+  botId?: string | null;
+  model?: string | null;
   error?: string;
 };
 
@@ -80,6 +83,7 @@ export type PmosLibreChatState = {
   libreChatError: string | null;
   libreChatUrl: string | null;
   libreChatAutologinConfigured: boolean;
+  libreChatAvailableModels: string[];
   libreChatAgents: PmosLibreChatAgent[];
   libreChatConversations: PmosLibreChatConversation[];
   libreChatMessages: PmosLibreChatMessage[];
@@ -202,6 +206,30 @@ function buildAssistantErrorMessage(error: string): PmosLibreChatMessage {
   };
 }
 
+function updateAgentModel(
+  state: PmosLibreChatState,
+  agentId: string,
+  model: string | null,
+): void {
+  state.libreChatAgents = state.libreChatAgents.map((agent) =>
+    agent.id === agentId ? { ...agent, model } : agent,
+  );
+}
+
+function activeConversationForState(
+  state: Pick<PmosLibreChatState, "libreChatConversations" | "libreChatSelectedConversationId">,
+): PmosLibreChatConversation | null {
+  const selectedConversationId = state.libreChatSelectedConversationId?.trim() ?? "";
+  if (!selectedConversationId) {
+    return null;
+  }
+  return (
+    state.libreChatConversations.find(
+      (conversation) => conversation.conversationId === selectedConversationId,
+    ) ?? null
+  );
+}
+
 function ensureSelectedAgent(state: PmosLibreChatState): void {
   const current = state.libreChatSelectedAgentId?.trim() ?? "";
   if (current && state.libreChatAgents.some((agent) => agent.id === current)) {
@@ -228,13 +256,7 @@ function ensureSelectedConversation(state: PmosLibreChatState): void {
 }
 
 function syncSelectedAgentFromConversation(state: PmosLibreChatState): void {
-  const selectedConversationId = state.libreChatSelectedConversationId?.trim() ?? "";
-  if (!selectedConversationId) {
-    return;
-  }
-  const conversation = state.libreChatConversations.find(
-    (entry) => entry.conversationId === selectedConversationId,
-  );
+  const conversation = activeConversationForState(state);
   const agentId = conversation?.agentId?.trim() ?? "";
   if (!agentId) {
     return;
@@ -244,6 +266,9 @@ function syncSelectedAgentFromConversation(state: PmosLibreChatState): void {
     ...state.libreChatOpenAgentIds,
     agentId,
   ]);
+  if (conversation?.model) {
+    updateAgentModel(state, agentId, conversation.model);
+  }
 }
 
 export function getPmosLibreChatUrl(): string | null {
@@ -282,6 +307,9 @@ export async function loadPmosLibreChatBootstrap(
     );
     state.libreChatUrl = normalizeUrl(result.url || getPmosLibreChatUrl() || "") ?? null;
     state.libreChatAutologinConfigured = result.autologinConfigured === true;
+    state.libreChatAvailableModels = Array.isArray(result.availableModels)
+      ? result.availableModels.filter((entry): entry is string => typeof entry === "string")
+      : [];
     state.libreChatAgents = Array.isArray(result.agents) ? result.agents : [];
     state.libreChatConversations = sortConversationsByRecent(
       Array.isArray(result.conversations) ? result.conversations : [],
@@ -350,15 +378,29 @@ export function selectPmosLibreChatAgent(state: PmosLibreChatState, agentId: str
   }
   state.libreChatSelectedAgentId = trimmed;
   state.libreChatOpenAgentIds = uniqueOpenAgentIds([...state.libreChatOpenAgentIds, trimmed]);
-  const selectedConversation = state.libreChatConversations.find(
-    (conversation) => conversation.conversationId === state.libreChatSelectedConversationId,
-  );
+  const selectedConversation = activeConversationForState(state);
   if ((selectedConversation?.agentId?.trim() ?? "") !== trimmed) {
     state.libreChatSelectedConversationId = null;
     state.libreChatMessages = [];
     state.libreChatParentMessageId = null;
     state.libreChatStreamingMessage = null;
   }
+}
+
+export function selectPmosLibreChatAgentModel(
+  state: PmosLibreChatState,
+  agentId: string,
+  model: string,
+): void {
+  const trimmedAgentId = agentId.trim();
+  const trimmedModel = model.trim();
+  if (!trimmedAgentId || !trimmedModel) {
+    return;
+  }
+  if (!state.libreChatAvailableModels.includes(trimmedModel)) {
+    return;
+  }
+  updateAgentModel(state, trimmedAgentId, trimmedModel);
 }
 
 export function togglePmosLibreChatAgentAccordion(
@@ -445,7 +487,10 @@ function upsertConversationSummary(
 export async function sendPmosLibreChatMessage(state: PmosLibreChatState): Promise<void> {
   const agentId = state.libreChatSelectedAgentId?.trim() ?? "";
   const text = state.libreChatDraft.trim();
-  if (!agentId || !text || state.libreChatSending) {
+  const selectedConversation = activeConversationForState(state);
+  const selectedAgent = state.libreChatAgents.find((agent) => agent.id === agentId) ?? null;
+  const model = selectedConversation?.model ?? selectedAgent?.model ?? null;
+  if (!agentId || !text || !model || state.libreChatSending) {
     return;
   }
 
@@ -464,6 +509,7 @@ export async function sendPmosLibreChatMessage(state: PmosLibreChatState): Promi
         method: "POST",
         body: JSON.stringify({
           agentId,
+          model,
           text,
           conversationId: state.libreChatSelectedConversationId,
           parentMessageId: state.libreChatParentMessageId,
@@ -474,15 +520,14 @@ export async function sendPmosLibreChatMessage(state: PmosLibreChatState): Promi
     if (!conversationId) {
       throw new Error("LibreChat did not return a conversation ID.");
     }
+    updateAgentModel(state, agentId, typeof result.model === "string" ? result.model : model);
     state.libreChatSelectedConversationId = conversationId;
     upsertConversationSummary(state, {
       conversationId,
       title: "New Chat",
-      endpoint: "agents",
+      endpoint: "wickedops",
       agentId,
-      model:
-        state.libreChatAgents.find((agent) => agent.id === agentId)?.model ??
-        null,
+      model: typeof result.model === "string" ? result.model : model,
       createdAtMs: Date.now(),
       updatedAtMs: Date.now(),
     });

@@ -332,6 +332,7 @@ export type AppViewState = {
   libreChatError: string | null;
   libreChatUrl: string | null;
   libreChatAutologinConfigured: boolean;
+  libreChatAvailableModels: string[];
   libreChatAgents: PmosLibreChatAgent[];
   libreChatConversations: PmosLibreChatConversation[];
   libreChatMessages: PmosLibreChatMessage[];
@@ -631,6 +632,7 @@ export type AppViewState = {
   handlePmosApRunRetry: (strategy: "FROM_FAILED_STEP" | "ON_LATEST_VERSION") => Promise<void>;
   handleLibreChatLoad: () => Promise<void>;
   handleLibreChatSelectAgent: (agentId: string) => void;
+  handleLibreChatSelectModel: (agentId: string, model: string) => void;
   handleLibreChatToggleAgent: (agentId: string) => void;
   handleLibreChatStartConversation: (agentId: string) => void;
   handleLibreChatSelectConversation: (conversationId: string) => Promise<void>;
