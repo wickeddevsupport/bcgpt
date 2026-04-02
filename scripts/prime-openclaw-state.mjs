@@ -107,6 +107,22 @@ function ensureGlobalDefaults(config) {
   if (typeof next.gateway.controlUi.enabled !== "boolean") {
     next.gateway.controlUi.enabled = true;
   }
+  next.gateway.http = isRecord(next.gateway.http) ? next.gateway.http : {};
+  next.gateway.http.endpoints = isRecord(next.gateway.http.endpoints)
+    ? next.gateway.http.endpoints
+    : {};
+  next.gateway.http.endpoints.chatCompletions = isRecord(next.gateway.http.endpoints.chatCompletions)
+    ? next.gateway.http.endpoints.chatCompletions
+    : {};
+  if (typeof next.gateway.http.endpoints.chatCompletions.enabled !== "boolean") {
+    next.gateway.http.endpoints.chatCompletions.enabled = true;
+  }
+  next.gateway.http.endpoints.responses = isRecord(next.gateway.http.endpoints.responses)
+    ? next.gateway.http.endpoints.responses
+    : {};
+  if (typeof next.gateway.http.endpoints.responses.enabled !== "boolean") {
+    next.gateway.http.endpoints.responses.enabled = true;
+  }
 
   next.browser = isRecord(next.browser) ? next.browser : {};
   if (typeof next.browser.enabled !== "boolean") {

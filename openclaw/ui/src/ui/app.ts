@@ -312,12 +312,14 @@ import {
 } from "./controllers/pmos-flow-builder.ts";
 import { loadConfig } from "./controllers/config.ts";
 import { isPmosFigmaPanelEnabled } from "./controllers/pmos-figma.ts";
+import { isPmosLibreChatEnabled } from "./controllers/pmos-librechat.ts";
 
 declare global {
   interface Window {
     __OPENCLAW_CONTROL_UI_BASE_PATH__?: string;
     __OPENCLAW_PMOS_SIGNUP_ENABLED__?: boolean;
     __OPENCLAW_PMOS_FIGMA_PANEL_ENABLED__?: boolean;
+    __OPENCLAW_PMOS_LIBRECHAT_URL__?: string | null;
   }
 }
 
@@ -616,6 +618,7 @@ export class OpenClawApp extends LitElement {
   @state() workflowEmbedVersion = 0;
   @state() flowConnectionsEmbedVersion = 0;
   @state() pmosFigmaEmbedVersion = 0;
+  @state() libreChatEmbedVersion = 0;
   @state() apFlowDetailsLoading = false;
   @state() apFlowDetailsError: string | null = null;
   @state() apFlowDetails: unknown | null = null;
@@ -1205,6 +1208,9 @@ export class OpenClawApp extends LitElement {
 
   setTab(next: Tab) {
     if (next === "figma" && !isPmosFigmaPanelEnabled()) {
+      next = "dashboard";
+    }
+    if (next === "librechat" && !isPmosLibreChatEnabled()) {
       next = "dashboard";
     }
     setTabInternal(this as unknown as Parameters<typeof setTabInternal>[0], next);

@@ -23,6 +23,7 @@ services:
 
       # Embedded-first behavior. Only allow remote ops provisioning if explicitly enabled.
       PMOS_ALLOW_REMOTE_OPS_FALLBACK: "${PMOS_ALLOW_REMOTE_OPS_FALLBACK:-0}"
+      PMOS_LIBRECHAT_URL: "${PMOS_LIBRECHAT_URL:-}"
 
       # Shared Kilo API key — covers free-tier models for all workspaces (no per-user key needed).
       KILO_API_KEY: "${KILO_API_KEY:-}"

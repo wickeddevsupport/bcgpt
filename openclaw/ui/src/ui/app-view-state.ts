@@ -322,6 +322,7 @@ export type AppViewState = {
   workflowEmbedVersion: number;
   flowConnectionsEmbedVersion: number;
   pmosFigmaEmbedVersion: number;
+  libreChatEmbedVersion: number;
   apFlowDetailsLoading: boolean;
   apFlowDetailsError: string | null;
   apFlowDetails: unknown | null;

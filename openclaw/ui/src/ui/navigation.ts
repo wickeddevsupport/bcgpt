@@ -1,5 +1,6 @@
 import type { IconName } from "./icons.js";
 import { isPmosFigmaPanelEnabled } from "./controllers/pmos-figma.ts";
+import { isPmosLibreChatEnabled } from "./controllers/pmos-librechat.ts";
 
 export type Tab =
   | "dashboard"
@@ -21,6 +22,7 @@ export type Tab =
   | "skills"
   | "nodes"
   | "chat"
+  | "librechat"
   | "config"
   | "debug"
   | "logs";
@@ -29,7 +31,7 @@ export const TAB_GROUPS = [
   // Dedicated chat section at the top.
   {
     label: "Chat",
-    tabs: ["chat"],
+    tabs: (isPmosLibreChatEnabled() ? ["chat", "librechat"] : ["chat"]) as Tab[],
   },
   // Core Wicked OS workspace surface.
   {
@@ -79,6 +81,7 @@ const TAB_PATHS: Record<Tab, string> = {
   skills: "/skills",
   nodes: "/nodes",
   chat: "/chat",
+  librechat: "/librechat",
   config: "/config",
   debug: "/debug",
   logs: "/logs",
@@ -187,6 +190,8 @@ export function iconForTab(tab: Tab): IconName {
       return "folder";
     case "chat":
       return "messageSquare";
+    case "librechat":
+      return "globe";
     case "overview":
       return "barChart";
     case "channels":
@@ -254,6 +259,8 @@ export function titleForTab(tab: Tab) {
       return "Nodes";
     case "chat":
       return "Chat";
+    case "librechat":
+      return "LibreChat";
     case "config":
       return "Config";
     case "debug":
@@ -305,6 +312,8 @@ export function subtitleForTab(tab: Tab) {
       return "Paired devices, capabilities, and command exposure.";
     case "chat":
       return "Direct gateway chat session for quick interventions.";
+    case "librechat":
+      return "Embedded LibreChat workspace for richer multimodal and file-heavy conversations.";
     case "config":
       return "Edit ~/.openclaw/openclaw.json safely.";
     case "debug":

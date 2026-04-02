@@ -1,0 +1,98 @@
+version: "3.9"
+
+services:
+  librechat:
+    image: registry.librechat.ai/danny-avila/librechat-dev-api:latest
+    container_name: "${LIBRECHAT_CONTAINER_NAME:-wicked-librechat}"
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=coolify"
+      - "traefik.http.middlewares.${LIBRECHAT_ROUTER_NAME:-librechat}-redirect-to-https.redirectscheme.scheme=https"
+      - "traefik.http.routers.${LIBRECHAT_ROUTER_NAME:-librechat}-http.entrypoints=http"
+      - "traefik.http.routers.${LIBRECHAT_ROUTER_NAME:-librechat}-http.rule=Host(`${LIBRECHAT_HOST}`)"
+      - "traefik.http.routers.${LIBRECHAT_ROUTER_NAME:-librechat}-http.middlewares=${LIBRECHAT_ROUTER_NAME:-librechat}-redirect-to-https"
+      - "traefik.http.routers.${LIBRECHAT_ROUTER_NAME:-librechat}.rule=Host(`${LIBRECHAT_HOST}`)"
+      - "traefik.http.routers.${LIBRECHAT_ROUTER_NAME:-librechat}.entrypoints=http,https"
+      - "traefik.http.routers.${LIBRECHAT_ROUTER_NAME:-librechat}.tls=true"
+      - "traefik.http.routers.${LIBRECHAT_ROUTER_NAME:-librechat}.tls.certresolver=letsencrypt"
+      - "traefik.http.services.${LIBRECHAT_ROUTER_NAME:-librechat}.loadbalancer.server.port=3080"
+    networks:
+      - coolify
+      - librechat_internal
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "3080"
+      NODE_ENV: "production"
+      TRUST_PROXY: "1"
+      SEARCH: "true"
+      MEILI_NO_ANALYTICS: "true"
+      NO_INDEX: "true"
+      ENDPOINTS: "custom"
+      ALLOW_EMAIL_LOGIN: "true"
+      ALLOW_REGISTRATION: "${LIBRECHAT_ALLOW_REGISTRATION:-true}"
+      ALLOW_SOCIAL_LOGIN: "false"
+      ALLOW_SOCIAL_REGISTRATION: "false"
+      ALLOW_PASSWORD_RESET: "false"
+      ALLOW_UNVERIFIED_EMAIL_LOGIN: "true"
+      DEBUG_LOGGING: "true"
+      DEBUG_CONSOLE: "false"
+      CONFIG_PATH: "/app/librechat.yaml"
+      DOMAIN_CLIENT: "${LIBRECHAT_URL}"
+      DOMAIN_SERVER: "${LIBRECHAT_URL}"
+      MONGO_URI: "mongodb://mongodb:27017/LibreChat"
+      MEILI_HOST: "http://meilisearch:7700"
+      MEILI_MASTER_KEY: "${MEILI_MASTER_KEY}"
+      OPENCLAW_API_BASE_URL: "${OPENCLAW_API_BASE_URL}"
+      OPENCLAW_GATEWAY_TOKEN: "${OPENCLAW_GATEWAY_TOKEN}"
+      JWT_SECRET: "${LIBRECHAT_JWT_SECRET}"
+      JWT_REFRESH_SECRET: "${LIBRECHAT_JWT_REFRESH_SECRET}"
+      CREDS_KEY: "${LIBRECHAT_CREDS_KEY}"
+      CREDS_IV: "${LIBRECHAT_CREDS_IV}"
+    volumes:
+      - ./deploy/librechat/librechat.yaml:/app/librechat.yaml:ro
+      - librechat_uploads:/app/uploads
+      - librechat_images:/app/client/public/images
+      - librechat_logs:/app/api/logs
+    expose:
+      - "3080"
+    depends_on:
+      mongodb:
+        condition: service_started
+      meilisearch:
+        condition: service_started
+
+  mongodb:
+    image: mongo:8.0.20
+    container_name: "${LIBRECHAT_CONTAINER_NAME:-wicked-librechat}-mongodb"
+    restart: unless-stopped
+    command: mongod --noauth
+    volumes:
+      - librechat_mongodb:/data/db
+    networks:
+      - librechat_internal
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.35.1
+    container_name: "${LIBRECHAT_CONTAINER_NAME:-wicked-librechat}-meilisearch"
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: "${MEILI_MASTER_KEY}"
+      MEILI_NO_ANALYTICS: "true"
+    volumes:
+      - librechat_meili:/meili_data
+    networks:
+      - librechat_internal
+
+volumes:
+  librechat_uploads:
+  librechat_images:
+  librechat_logs:
+  librechat_mongodb:
+  librechat_meili:
+
+networks:
+  coolify:
+    external: true
+  librechat_internal:
+    driver: bridge

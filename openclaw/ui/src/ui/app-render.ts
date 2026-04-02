@@ -73,6 +73,7 @@ import {
 } from "./navigation.ts";
 import { buildOpsUiConnectionsUrl, buildOpsUiEmbedUrl } from "./controllers/pmos-embed.ts";
 import { isPmosFigmaPanelEnabled } from "./controllers/pmos-figma.ts";
+import { getPmosLibreChatUrl, isPmosLibreChatEnabled } from "./controllers/pmos-librechat.ts";
 
 // Module-scope debounce for usage date changes (avoids type-unsafe hacks on state object)
 let usageDateDebounceTimeout: number | null = null;
@@ -111,6 +112,7 @@ import { renderGatewayUrlConfirmation } from "./views/gateway-url-confirmation.t
 import { renderIntegrations } from "./views/integrations.ts";
 import { renderInstances } from "./views/instances.ts";
 import { renderLogs } from "./views/logs.ts";
+import { renderLibreChat } from "./views/librechat.ts";
 import { renderModels } from "./views/models.ts";
 import { renderNodes } from "./views/nodes.ts";
 import { renderOverview } from "./views/overview.ts";
@@ -125,6 +127,7 @@ const LOCAL_PAGE_HEADER_TABS = new Set<Tab>([
   "command-center",
   "usage",
   ...(isPmosFigmaPanelEnabled() ? (["figma"] as Tab[]) : []),
+  ...(isPmosLibreChatEnabled() ? (["librechat"] as Tab[]) : []),
 ]);
 
 function shouldRenderGlobalContentHeader(tab: Tab): boolean {
@@ -523,14 +526,20 @@ export function renderApp(state: AppViewState) {
     opsProjectId,
   );
   const flowConnectionsEmbedBaseUrl = buildOpsUiConnectionsUrl(basePath, opsProjectId);
-    const figmaBaseUrl = (state.pmosFigmaUrl || state.pmosConnectorsStatus?.figma?.url || "https://fm.wickedlab.io")
+  const figmaBaseUrl = (state.pmosFigmaUrl || state.pmosConnectorsStatus?.figma?.url || "https://fm.wickedlab.io")
     .replace(/\/+$/, "");
+  const libreChatBaseUrl = getPmosLibreChatUrl();
   const figmaEmbedBaseUrl = `${figmaBaseUrl}/?pmosEmbed=1&pmosParentOrigin=${encodeURIComponent(
     typeof window !== "undefined" ? window.location.origin : "",
   )}`;
   const figmaAuthUrl = `${figmaBaseUrl}/auth/figma?pmosEmbed=1&pmosParentOrigin=${encodeURIComponent(
     typeof window !== "undefined" ? window.location.origin : "",
   )}`;
+  const libreChatEmbedBaseUrl = libreChatBaseUrl
+    ? `${libreChatBaseUrl}/?embedded=1&source=pmos&parentOrigin=${encodeURIComponent(
+        typeof window !== "undefined" ? window.location.origin : "",
+      )}`
+    : null;
   const showGlobalContentHeader = shouldRenderGlobalContentHeader(state.tab);
   const showContentHeader = showGlobalContentHeader || Boolean(state.lastError) || isChat;
   const sessionDefaults =
@@ -1124,6 +1133,27 @@ onAbort: () => void state.handleAbortChat(),
                 onPrefillPrompt: (prompt) => {
                   chatProps.onDraftChange(prompt);
                 },
+              })
+            : nothing
+        }
+
+        ${
+          isPmosLibreChatEnabled() && state.tab === "librechat"
+            ? renderLibreChat({
+                url: libreChatBaseUrl,
+                embedUrl:
+                  libreChatEmbedBaseUrl
+                    ? libreChatEmbedBaseUrl +
+                      (state.libreChatEmbedVersion
+                        ? `${libreChatEmbedBaseUrl.includes("?") ? "&" : "?"}v=${state.libreChatEmbedVersion}`
+                        : "")
+                    : null,
+                connected: state.connected,
+                reloading: false,
+                onReload: () => {
+                  state.libreChatEmbedVersion = (state.libreChatEmbedVersion ?? 0) + 1;
+                },
+                onOpenChat: () => state.setTab("chat"),
               })
             : nothing
         }

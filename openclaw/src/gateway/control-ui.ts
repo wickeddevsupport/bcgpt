@@ -179,6 +179,18 @@ function isPmosFigmaPanelEnabled(): boolean {
   return isTruthyEnvValue(raw);
 }
 
+function resolvePmosLibreChatUrl(): string | null {
+  const raw = process.env.PMOS_LIBRECHAT_URL;
+  if (typeof raw !== "string") {
+    return null;
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return trimmed.replace(/\/+$/, "");
+}
+
 function injectControlUiConfig(html: string, opts: ControlUiInjectionOpts): string {
   const { basePath, assistantName, assistantAvatar } = opts;
   const script =
@@ -186,6 +198,7 @@ function injectControlUiConfig(html: string, opts: ControlUiInjectionOpts): stri
     `window.__OPENCLAW_CONTROL_UI_BASE_PATH__=${JSON.stringify(basePath)};` +
     `window.__OPENCLAW_PMOS_SIGNUP_ENABLED__=${JSON.stringify(isPmosSignupEnabled())};` +
     `window.__OPENCLAW_PMOS_FIGMA_PANEL_ENABLED__=${JSON.stringify(isPmosFigmaPanelEnabled())};` +
+    `window.__OPENCLAW_PMOS_LIBRECHAT_URL__=${JSON.stringify(resolvePmosLibreChatUrl())};` +
     `window.__OPENCLAW_ASSISTANT_NAME__=${JSON.stringify(
       assistantName ?? DEFAULT_ASSISTANT_IDENTITY.name,
     )};` +

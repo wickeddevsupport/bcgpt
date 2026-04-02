@@ -1,0 +1,50 @@
+version: 1.3.6
+cache: true
+
+interface:
+  customWelcome: "Wicked Ops LibreChat is ready."
+  endpointsMenu: true
+  modelSelect: true
+  parameters: true
+  sidePanel: true
+  presets: true
+  prompts:
+    use: true
+    create: true
+    share: false
+    public: false
+  bookmarks: true
+  multiConvo: true
+  agents:
+    use: true
+    create: false
+    share: false
+    public: false
+  marketplace:
+    use: false
+  fileCitations: true
+
+registration:
+  socialLogins: []
+
+endpoints:
+  custom:
+    - name: "wickedops"
+      apiKey: "${OPENCLAW_GATEWAY_TOKEN}"
+      baseURL: "${OPENCLAW_API_BASE_URL}"
+      models:
+        default:
+          - "kilo/minimax/minimax-m2.5:free"
+          - "local-ollama/qwen3:1.7b"
+        fetch: false
+      titleConvo: false
+      summarize: false
+      modelDisplayLabel: "Wicked Ops"
+
+fileConfig:
+  serverFileSizeLimit: 20
+  endpoints:
+    wickedops:
+      fileLimit: 10
+      fileSizeLimit: 20
+      totalSizeLimit: 20

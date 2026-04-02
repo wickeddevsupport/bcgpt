@@ -27,6 +27,7 @@ describe("iconForTab", () => {
 
   it("returns stable icons for known tabs", () => {
     expect(iconForTab("chat")).toBe("messageSquare");
+    expect(iconForTab("librechat")).toBe("globe");
     expect(iconForTab("overview")).toBe("barChart");
     expect(iconForTab("channels")).toBe("link");
     expect(iconForTab("instances")).toBe("radio");
@@ -57,6 +58,7 @@ describe("titleForTab", () => {
 
   it("returns expected titles", () => {
     expect(titleForTab("chat")).toBe("Chat");
+    expect(titleForTab("librechat")).toBe("LibreChat");
     expect(titleForTab("overview")).toBe("Overview");
     expect(titleForTab("cron")).toBe("Cron Jobs");
   });
@@ -72,6 +74,7 @@ describe("subtitleForTab", () => {
 
   it("returns descriptive subtitles", () => {
     expect(subtitleForTab("chat")).toContain("chat session");
+    expect(subtitleForTab("librechat")).toContain("LibreChat");
     expect(subtitleForTab("config")).toContain("openclaw.json");
   });
 });
@@ -116,6 +119,7 @@ describe("normalizePath", () => {
 describe("pathForTab", () => {
   it("returns correct path without base", () => {
     expect(pathForTab("chat")).toBe("/chat");
+    expect(pathForTab("librechat")).toBe("/librechat");
     expect(pathForTab("overview")).toBe("/overview");
   });
 
@@ -128,6 +132,7 @@ describe("pathForTab", () => {
 describe("tabFromPath", () => {
   it("returns tab for valid path", () => {
     expect(tabFromPath("/chat")).toBe("chat");
+    expect(tabFromPath("/librechat")).toBe("librechat");
     expect(tabFromPath("/overview")).toBe("overview");
     expect(tabFromPath("/sessions")).toBe("sessions");
   });
