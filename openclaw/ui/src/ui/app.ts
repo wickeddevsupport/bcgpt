@@ -853,6 +853,9 @@ export class OpenClawApp extends LitElement {
   private themeMediaHandler: ((event: MediaQueryListEvent) => void) | null = null;
   private topbarObserver: ResizeObserver | null = null;
   private pmosFigmaAutoSyncTimer: number | null = null;
+  private pmosFigmaAuthPopup: Window | null = null;
+  private pmosFigmaAuthPopupPollTimer: number | null = null;
+  private pmosFigmaAuthPopupStartedAt: number | null = null;
   private async persistPmosFigmaContext(
     figmaBaseUrl: string,
     payload: {
@@ -954,8 +957,96 @@ export class OpenClawApp extends LitElement {
     }, PMOS_FIGMA_AUTO_SYNC_DEBOUNCE_MS);
   }
 
+  private clearPmosFigmaAuthPopupMonitor() {
+    if (this.pmosFigmaAuthPopupPollTimer !== null) {
+      window.clearInterval(this.pmosFigmaAuthPopupPollTimer);
+      this.pmosFigmaAuthPopupPollTimer = null;
+    }
+    this.pmosFigmaAuthPopup = null;
+    this.pmosFigmaAuthPopupStartedAt = null;
+  }
+
+  private beginPmosFigmaAuthPopupMonitor(popup: Window | null) {
+    this.clearPmosFigmaAuthPopupMonitor();
+    if (!popup) {
+      return;
+    }
+    this.pmosFigmaAuthPopup = popup;
+    this.pmosFigmaAuthPopupStartedAt = Date.now();
+    let closedChecks = 0;
+
+    const tick = async () => {
+      const activePopup = this.pmosFigmaAuthPopup;
+      const popupClosed = !activePopup || activePopup.closed;
+      const startedAt = this.pmosFigmaAuthPopupStartedAt ?? Date.now();
+      try {
+        await this.verifyFigmaLiveAuth({ autoSync: true });
+      } catch {
+        // Best-effort polling only.
+      }
+      if (this.pmosFigmaLiveAuthVerified) {
+        this.clearPmosFigmaAuthPopupMonitor();
+        return;
+      }
+      if (popupClosed) {
+        closedChecks += 1;
+        if (closedChecks >= 3) {
+          this.clearPmosFigmaAuthPopupMonitor();
+          if (!this.pmosFigmaLiveAuthVerified) {
+            this.pmosFigmaContextError =
+              "Figma sign-in finished, but PMOS did not detect a synced FM session yet. Try Sync Now once, or reopen the popup.";
+          }
+        }
+        return;
+      }
+      if (Date.now() - startedAt > 120_000) {
+        this.clearPmosFigmaAuthPopupMonitor();
+        if (!this.pmosFigmaLiveAuthVerified) {
+          this.pmosFigmaContextError =
+            "Figma sign-in timed out before PMOS could verify the FM session. Reopen the popup and try again.";
+        }
+      }
+    };
+
+    this.pmosFigmaAuthPopupPollTimer = window.setInterval(() => {
+      void tick();
+    }, 1500);
+    void tick();
+  }
+
+  handlePmosOpenFigmaAuthPopup() {
+    const figmaBaseUrl =
+      String(this.pmosFigmaUrl || this.pmosConnectorsStatus?.figma?.url || "https://fm.wickedlab.io")
+        .trim()
+        .replace(/\/+$/, "") || "https://fm.wickedlab.io";
+    const authUrl = `${figmaBaseUrl}/auth/figma?pmosEmbed=1&pmosParentOrigin=${encodeURIComponent(
+      typeof window !== "undefined" ? window.location.origin : "",
+    )}`;
+    this.pmosFigmaContextError = null;
+    this.pmosFigmaContextSyncedOk = false;
+    const popup = window.open(
+      authUrl,
+      "pmos-figma-auth",
+      "popup=yes,width=720,height=900,resizable=yes,scrollbars=yes",
+    );
+    if (popup) {
+      popup.focus();
+      this.beginPmosFigmaAuthPopupMonitor(popup);
+      return;
+    }
+    this.clearPmosFigmaAuthPopupMonitor();
+    window.location.href = authUrl;
+  }
+
   private readonly pmosFigmaAuthMessageHandler = (event: MessageEvent) => {
-    const data = event.data;
+    let data: unknown = event.data;
+    if (typeof data === "string") {
+      try {
+        data = JSON.parse(data);
+      } catch {
+        return;
+      }
+    }
     if (!data || typeof data !== "object" || Array.isArray(data)) {
       return;
     }
@@ -989,6 +1080,7 @@ export class OpenClawApp extends LitElement {
       this.pmosFigmaEmbedVersion = (this.pmosFigmaEmbedVersion ?? 0) + 1;
       // Auth just completed — verify live auth and auto-sync immediately
       void this.verifyFigmaLiveAuth();
+      this.beginPmosFigmaAuthPopupMonitor(this.pmosFigmaAuthPopup);
     }
     if (messageType === "pmos:figma-mcp-auth-complete") {
       void loadPmosConnectorsStatus(this);
@@ -1018,6 +1110,7 @@ export class OpenClawApp extends LitElement {
       window.clearTimeout(this.pmosFigmaAutoSyncTimer);
       this.pmosFigmaAutoSyncTimer = null;
     }
+    this.clearPmosFigmaAuthPopupMonitor();
     handleDisconnected(this as unknown as Parameters<typeof handleDisconnected>[0]);
     super.disconnectedCallback();
   }

@@ -1107,18 +1107,7 @@ onAbort: () => void state.handleAbortChat(),
                 authUrl: figmaAuthUrl,
                 chatProps,
                 onSyncContext: () => void state.handlePmosFigmaSyncContext(),
-                onOpenAuth: () => {
-                  const popup = window.open(
-                    figmaAuthUrl,
-                    "pmos-figma-auth",
-                    "popup=yes,width=720,height=900,resizable=yes,scrollbars=yes",
-                  );
-                  if (popup) {
-                    popup.focus();
-                    return;
-                  }
-                  window.location.href = figmaAuthUrl;
-                },
+                onOpenAuth: () => state.handlePmosOpenFigmaAuthPopup(),
                 onRefresh: () => {
                   state.pmosFigmaEmbedVersion = (state.pmosFigmaEmbedVersion ?? 0) + 1;
                   void state.handlePmosRefreshConnectors();

@@ -571,6 +571,7 @@ export type AppViewState = {
   handlePmosSetupBasecampInWorkflowEngine: () => Promise<void>;
   handlePmosIntegrationsClearBcgptKey: () => Promise<void>;
   handlePmosFigmaSyncContext: () => Promise<void>;
+  handlePmosOpenFigmaAuthPopup: () => void;
   handlePmosModelProviderChange: (next: PmosModelProvider) => void;
   handlePmosModelRefDraftChange: (next: string) => void;
   handlePmosModelApiKeyEditToggle: (enabled: boolean) => void;
