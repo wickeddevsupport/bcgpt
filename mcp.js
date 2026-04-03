@@ -69,6 +69,10 @@ import {
   getBasecampResourceCounts,
 } from "./db.js";
 import { normalizeBasecampRequestPath } from "./mcp/basecamp-request.js";
+import {
+  buildCommentContentWithAttachments,
+  normalizeCommentAttachmentSpecs,
+} from "./mcp/comment-attachments.js";
 import { getTools } from "./mcp/tools.js";
 import { ENDPOINT_TOOL_MAP } from "./mcp/endpoint-tools.js";
 import { handleFlowTool } from "./index.js";
@@ -4291,6 +4295,44 @@ async function createAttachment(ctx, name, contentType, contentBase64) {
       "Content-Length": String(buffer.length)
     }
   });
+}
+
+async function resolveCommentAttachmentPayload(ctx, args = {}) {
+  const specs = normalizeCommentAttachmentSpecs(args);
+  if (!specs.length) {
+    return { content: extractContent(args), attachments: [] };
+  }
+
+  const attachments = [];
+  for (const spec of specs) {
+    if (spec.attachable_sgid) {
+      attachments.push({
+        attachable_sgid: spec.attachable_sgid,
+        name: spec.name || null,
+        content_type: spec.content_type || null,
+        uploaded: false,
+      });
+      continue;
+    }
+
+    const created = await createAttachment(ctx, spec.name, spec.content_type, spec.content_base64);
+    attachments.push({
+      id: created?.id ?? null,
+      attachable_sgid: created?.attachable_sgid || created?.sgid,
+      sgid: created?.sgid || created?.attachable_sgid || null,
+      name: created?.filename || spec.name || null,
+      content_type: created?.content_type || spec.content_type || null,
+      byte_size: created?.byte_size ?? null,
+      preview_url: created?.preview_url || null,
+      download_url: created?.download_url || null,
+      uploaded: true,
+    });
+  }
+
+  return {
+    content: buildCommentContentWithAttachments(extractContent(args), attachments),
+    attachments,
+  };
 }
 
 // ========== RECORDINGS ENDPOINTS ==========
@@ -9737,7 +9779,7 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "create_comment") {
       try {
         const p = await projectByName(ctx, args.project);
-        const content = extractContent(args);
+        const { content, attachments } = await resolveCommentAttachmentPayload(ctx, args);
         const recordingId = firstDefined(
           args.recording_id,
           args.card_id,
@@ -9758,7 +9800,8 @@ export async function handleMCP(reqBody, ctx) {
           cardId: args.cardId ?? null,
           url: args.url || args.card_url || args.recording_url || null,
           resolved_recording_id: recordingId ?? null,
-          content_len: String(content || "").length
+          content_len: String(content || "").length,
+          attachments: attachments.length
         });
         const comment = await createComment(ctx, p.id, recordingId, content, {
           recordingQuery: args.recording_query || args.recording_title || args.query || null,
@@ -9773,13 +9816,19 @@ export async function handleMCP(reqBody, ctx) {
           getProject: (id) => ctx_intel.getProject(id)
         });
 
-        return ok(id, { message: "Comment created", project: { id: p.id, name: p.name }, comment: enrichedComment, metrics: ctx_intel.getMetrics() });
+        return ok(id, {
+          message: "Comment created",
+          project: { id: p.id, name: p.name },
+          comment: enrichedComment,
+          attachments,
+          metrics: ctx_intel.getMetrics()
+        });
       } catch (e) {
         console.error(`[create_comment] Error:`, e.message);
         // Fallback to non-enriched comment
         try {
           const p = await projectByName(ctx, args.project);
-          const content = extractContent(args);
+          const { content, attachments } = await resolveCommentAttachmentPayload(ctx, args);
           const recordingId = firstDefined(
             args.recording_id,
             args.card_id,
@@ -9800,13 +9849,20 @@ export async function handleMCP(reqBody, ctx) {
             cardId: args.cardId ?? null,
             url: args.url || args.card_url || args.recording_url || null,
             resolved_recording_id: recordingId ?? null,
-            content_len: String(content || "").length
+            content_len: String(content || "").length,
+            attachments: attachments.length
           });
           const comment = await createComment(ctx, p.id, recordingId, content, {
             recordingQuery: args.recording_query || args.recording_title || args.query || null,
             idempotency_key: args.idempotency_key
           });
-          return ok(id, { message: "Comment created", project: { id: p.id, name: p.name }, comment, fallback: true });
+          return ok(id, {
+            message: "Comment created",
+            project: { id: p.id, name: p.name },
+            comment,
+            attachments,
+            fallback: true
+          });
         } catch (fbErr) {
           return fail(id, { code: "CREATE_COMMENT_ERROR", message: fbErr.message });
         }
@@ -9816,9 +9872,9 @@ export async function handleMCP(reqBody, ctx) {
     if (name === "update_comment") {
       try {
         const p = await projectByName(ctx, args.project);
-        const content = extractContent(args);
+        const { content, attachments } = await resolveCommentAttachmentPayload(ctx, args);
         const comment = await updateComment(ctx, p.id, args.comment_id, content, { idempotency_key: args.idempotency_key });
-        return ok(id, { message: "Comment updated", project: { id: p.id, name: p.name }, comment });
+        return ok(id, { message: "Comment updated", project: { id: p.id, name: p.name }, comment, attachments });
       } catch (e) {
         return fail(id, { code: "UPDATE_COMMENT_ERROR", message: e.message });
       }

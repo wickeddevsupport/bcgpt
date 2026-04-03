@@ -41,6 +41,20 @@ function shouldExposeEndpointTools() {
   return String(process.env.BCGPT_EXPOSE_ENDPOINT_TOOLS || "false").toLowerCase() === "true";
 }
 
+function commentAttachmentInputSchema() {
+  return {
+    type: "object",
+    properties: {
+      attachable_sgid: { type: "string", nullable: true, description: "Existing Basecamp attachable_sgid to embed directly." },
+      name: { type: "string", nullable: true, description: "File name for uploads created from base64 payloads." },
+      content_type: { type: "string", nullable: true, description: "MIME type such as image/png." },
+      content_base64: { type: "string", nullable: true, description: "Raw base64 file payload." },
+      data_url: { type: "string", nullable: true, description: "Optional data URL alternative to content_type + content_base64." }
+    },
+    additionalProperties: true
+  };
+}
+
 const FOCUSED_TOOL_NAMES = new Set([
   "startbcgpt",
   "whoami",
@@ -107,6 +121,8 @@ const FOCUSED_TOOL_NAMES = new Set([
   "list_all_people",
   "list_documents",
   "get_document",
+  "create_attachment",
+  "create_upload",
   "list_uploads",
   "get_upload",
   "list_schedule_entries",
@@ -980,6 +996,26 @@ export function getTools() {
         recording_query: { type: "string", nullable: true, description: "Title or search query to resolve the recording when ID is unknown." },
         recording_title: { type: "string", nullable: true },
         content: { type: "string", nullable: true },
+        html: { type: "string", nullable: true, description: "Optional HTML/rich text content. Use with attachments for inline images/files." },
+        attachments: {
+          type: "array",
+          nullable: true,
+          items: commentAttachmentInputSchema(),
+          description: "Optional inline attachments. Each item may provide attachable_sgid or name/content_type/content_base64."
+        },
+        images: {
+          type: "array",
+          nullable: true,
+          items: commentAttachmentInputSchema(),
+          description: "Alias of attachments for image payloads."
+        },
+        files: {
+          type: "array",
+          nullable: true,
+          items: commentAttachmentInputSchema(),
+          description: "Alias of attachments for file payloads."
+        },
+        idempotency_key: { type: "string", nullable: true },
         body: { type: "object", additionalProperties: true }
       },
       required: ["project", "recording_id"],

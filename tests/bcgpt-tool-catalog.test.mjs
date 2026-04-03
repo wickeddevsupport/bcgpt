@@ -35,6 +35,8 @@ test("default tool catalog stays focused on common Basecamp operations", () => {
       assert.ok(names.has("list_todos_due"));
       assert.ok(names.has("list_people"));
       assert.ok(names.has("list_project_people"));
+      assert.ok(names.has("create_attachment"));
+      assert.ok(names.has("create_upload"));
       assert.ok(names.has("pmos_workspace_sync"));
       assert.ok(names.has("pmos_project_sync"));
       assert.ok(names.has("pmos_entity_detail"));
@@ -59,6 +61,13 @@ test("default tool catalog stays focused on common Basecamp operations", () => {
       assert.equal(pmosProjectSync?.inputSchema?.properties?.include_cards?.type, "boolean");
       assert.equal(pmosEntityDetail?.inputSchema?.properties?.include_comments?.type, "boolean");
       assert.equal(pmosEntityDetail?.inputSchema?.properties?.url?.type, "string");
+
+      const createComment = tools.find((tool) => tool.name === "create_comment");
+      assert.equal(createComment?.inputSchema?.properties?.attachments?.type, "array");
+      assert.equal(createComment?.inputSchema?.properties?.images?.type, "array");
+      assert.equal(createComment?.inputSchema?.properties?.files?.type, "array");
+      assert.equal(createComment?.inputSchema?.properties?.attachments?.items?.properties?.content_base64?.type, "string");
+      assert.equal(createComment?.inputSchema?.properties?.attachments?.items?.properties?.attachable_sgid?.type, "string");
     });
   });
 });
